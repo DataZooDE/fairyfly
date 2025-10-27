@@ -1,0 +1,135 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+bin/
+lib/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# vcpkg
+vcpkg_installed/
+.vcpkg-root
+
+# IDE specific
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.opensdf
+*.sdf
+
+# Compiled Object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.lib
+*.la
+
+# Windows debug symbols
+*.pdb
+*.ilk
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Logs
+*.log
+logs/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Session state and config
+.fairyfly/
+*.session.json
+.claude/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Package files
+*.zip
+*.tar.gz
+*.7z
+
+# CPack generated
+_CPack_Packages/
+*.deb
+*.rpm
+
+# Visual Studio Code
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+
+# CLion
+cmake-build-*/
+
+# Windows credential store (if implemented locally)
+credentials.db
+
+# Test outputs
+test_results/
+coverage/
+
+# Integration test outputs (real SAP GUI test artifacts)
+tests/integration/integration-test-*.log
+tests/integration/test_*.json
+tests/integration/test_*.md
+tests/integration/test_diagnostics_summary.json
+
+# Test output files (generated during testing)
+test_screen_*.json
+test_screen_*.md
+
+# SAP connection files (user-specific)
+*.con
+
+# Environment files (may contain secrets)
+*.env
+.env
+
+# VBScript test artifacts
+ai/full_log.txt
+ai/*.obj
+
+# CMake configure logs
+CMakeConfigureLog.yaml
+
+# vcpkg build logs
+*.manifest-install.log
+
+# Documentation build
+docs/html/
+docs/latex/
+
+# Markdown documentation exports (if generated)
+docs/*.txt
