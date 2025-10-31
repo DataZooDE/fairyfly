@@ -5,6 +5,11 @@
 
 namespace fairyfly {
 
+// Forward declarations
+namespace cli {
+    struct ScreenshotOptions;
+}
+
 class AutomationEngine {
 public:
     virtual ~AutomationEngine() = default;
@@ -36,7 +41,7 @@ public:
     // Screen operations
     virtual Result read_screen(bool include_structure = true) = 0;
     virtual Result read_screen_with_tabs() = 0;
-    virtual Result capture_screenshot() = 0;
+    virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
 
     // Enumeration and diagnostics
     virtual nlohmann::json get_application_info() const = 0;

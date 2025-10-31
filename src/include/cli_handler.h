@@ -17,6 +17,18 @@ enum class OutputFormat {
     PlainText
 };
 
+/// Screenshot capture options
+struct ScreenshotOptions {
+    std::string output_file;       ///< Output file path (empty = auto-generate, "-" = stdout)
+    std::string format = "png";    ///< Output format: png, base64
+    std::string scale;             ///< Scale factor (0.0-1.0 float or width in pixels as int)
+    std::optional<int> crop_x;     ///< X position for subsection capture
+    std::optional<int> crop_y;     ///< Y position for subsection capture
+    std::optional<int> crop_width; ///< Width for subsection capture
+    std::optional<int> crop_height;///< Height for subsection capture
+    bool show = false;             ///< Display screenshot in window after capture
+};
+
 /// CLI command handler with integration to automation engine
 class CommandHandler {
 private:
@@ -50,7 +62,7 @@ public:
 
     // Screen operations
     Result handle_screen_read(bool include_children, std::optional<int> connection_id, bool expand_tabs = false);
-    Result handle_screenshot(std::optional<int> connection_id);
+    Result handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options);
 
     // Diagnostic and enumeration
     Result handle_list_all();

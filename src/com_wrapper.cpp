@@ -534,6 +534,409 @@ bool ComGuiElement::get_property_bool(const std::wstring& property_name) const {
     }
 }
 
+std::string ComGuiElement::get_property_string(const std::wstring& property_name) const {
+    try {
+        return get_string_property(property_name.c_str());
+    } catch (...) {
+        return "";
+    }
+}
+
+std::string ComGuiElement::get_subtype() const {
+    try {
+        // SubType property is available on GuiShell elements
+        return get_string_property(L"SubType");
+    } catch (...) {
+        return "";
+    }
+}
+
+std::vector<std::string> ComGuiElement::get_all_node_keys() const {
+    std::vector<std::string> keys;
+
+    try {
+        // Call GetAllNodeKeys() method on the tree control
+        // This returns a collection object
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetAllNodeKeys", &dispid);
+        if (FAILED(hr)) {
+            spdlog::debug("Could not get DISPID for GetAllNodeKeys");
+            return keys;
+        }
+
+        DISPPARAMS params = {0};
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(
+            dispid,
+            IID_NULL,
+            LOCALE_USER_DEFAULT,
+            DISPATCH_METHOD,
+            &params,
+            &result,
+            nullptr,
+            nullptr
+        );
+
+        if (SUCCEEDED(hr) && result.vt == VT_DISPATCH && result.pdispVal) {
+            // Result is a collection - enumerate it
+            IDispatch* coll = result.pdispVal;
+
+            // Get Count property
+            DISPID count_dispid;
+            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
+            if (FAILED(hr)) {
+                VariantClear(&result);
+                return keys;
+            }
+
+            DISPPARAMS count_params = {0};
+            VARIANT count_result;
+            VariantInit(&count_result);
+
+            hr = coll->Invoke(
+                count_dispid,
+                IID_NULL,
+                LOCALE_USER_DEFAULT,
+                DISPATCH_PROPERTYGET,
+                &count_params,
+                &count_result,
+                nullptr,
+                nullptr
+            );
+
+            if (SUCCEEDED(hr) && count_result.vt == VT_I4) {
+                int count = count_result.lVal;
+
+                // Get Item method dispid
+                DISPID item_dispid;
+                hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
+                if (FAILED(hr)) {
+                    VariantClear(&count_result);
+                    VariantClear(&result);
+                    return keys;
+                }
+
+                // Enumerate items (0-based indexing)
+                for (int i = 0; i < count; ++i) {
+                    VARIANT index_var;
+                    VariantInit(&index_var);
+                    index_var.vt = VT_I4;
+                    index_var.lVal = i;
+
+                    DISPPARAMS item_params;
+                    item_params.cArgs = 1;
+                    item_params.rgvarg = &index_var;
+                    item_params.cNamedArgs = 0;
+                    item_params.rgdispidNamedArgs = nullptr;
+
+                    VARIANT item_result;
+                    VariantInit(&item_result);
+
+                    hr = coll->Invoke(
+                        item_dispid,
+                        IID_NULL,
+                        LOCALE_USER_DEFAULT,
+                        DISPATCH_METHOD,
+                        &item_params,
+                        &item_result,
+                        nullptr,
+                        nullptr
+                    );
+
+                    if (SUCCEEDED(hr)) {
+                        // Convert to string
+                        if (item_result.vt == VT_BSTR) {
+                            keys.push_back((const char*)_bstr_t(item_result.bstrVal));
+                        } else if (item_result.vt == VT_I4) {
+                            keys.push_back(std::to_string(item_result.lVal));
+                        }
+                        VariantClear(&item_result);
+                    }
+                }
+            }
+
+            VariantClear(&count_result);
+        }
+
+        VariantClear(&result);
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_all_node_keys failed: {}", e.what());
+    }
+
+    return keys;
+}
+
+std::string ComGuiElement::get_node_text_by_key(const std::string& key) const {
+    try {
+        // Call GetNodeTextByKey(key) method
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodeTextByKey", &dispid);
+        if (FAILED(hr)) {
+            spdlog::debug("Could not get DISPID for GetNodeTextByKey");
+            return "";
+        }
+
+        // Convert key to BSTR
+        _bstr_t key_bstr(key.c_str());
+
+        VARIANT arg;
+        VariantInit(&arg);
+        arg.vt = VT_BSTR;
+        arg.bstrVal = key_bstr;
+
+        DISPPARAMS params;
+        params.cArgs = 1;
+        params.rgvarg = &arg;
+        params.cNamedArgs = 0;
+        params.rgdispidNamedArgs = nullptr;
+
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(
+            dispid,
+            IID_NULL,
+            LOCALE_USER_DEFAULT,
+            DISPATCH_METHOD,
+            &params,
+            &result,
+            nullptr,
+            nullptr
+        );
+
+        std::string text;
+        if (SUCCEEDED(hr) && result.vt == VT_BSTR) {
+            text = (const char*)_bstr_t(result.bstrVal);
+        }
+
+        VariantClear(&result);
+        return text;
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_node_text_by_key failed for key '{}': {}", key, e.what());
+        return "";
+    }
+}
+
+std::string ComGuiElement::get_node_path_by_key(const std::string& key) const {
+    try {
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodePathByKey", &dispid);
+        if (FAILED(hr)) {
+            return "";
+        }
+
+        _bstr_t key_bstr(key.c_str());
+        VARIANT arg;
+        VariantInit(&arg);
+        arg.vt = VT_BSTR;
+        arg.bstrVal = key_bstr;
+
+        DISPPARAMS params;
+        params.cArgs = 1;
+        params.rgvarg = &arg;
+        params.cNamedArgs = 0;
+        params.rgdispidNamedArgs = nullptr;
+
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                              &params, &result, nullptr, nullptr);
+
+        std::string path;
+        if (SUCCEEDED(hr) && result.vt == VT_BSTR) {
+            path = (const char*)_bstr_t(result.bstrVal);
+        }
+
+        VariantClear(&result);
+        return path;
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_node_path_by_key failed for key '{}': {}", key, e.what());
+        return "";
+    }
+}
+
+std::vector<std::string> ComGuiElement::get_column_order() const {
+    std::vector<std::string> columns;
+
+    try {
+        // Get ColumnOrder property (returns a collection)
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"ColumnOrder", &dispid);
+        if (FAILED(hr)) {
+            return columns;
+        }
+
+        DISPPARAMS params = {0};
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                              &params, &result, nullptr, nullptr);
+
+        if (SUCCEEDED(hr) && result.vt == VT_DISPATCH && result.pdispVal) {
+            IDispatch* coll = result.pdispVal;
+
+            // Get Count property
+            DISPID count_dispid;
+            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
+            if (SUCCEEDED(hr)) {
+                DISPPARAMS count_params = {0};
+                VARIANT count_result;
+                VariantInit(&count_result);
+
+                hr = coll->Invoke(count_dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                DISPATCH_PROPERTYGET, &count_params, &count_result, nullptr, nullptr);
+
+                if (SUCCEEDED(hr) && count_result.vt == VT_I4) {
+                    int count = count_result.lVal;
+
+                    // Get Item method dispid
+                    DISPID item_dispid;
+                    hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
+                    if (SUCCEEDED(hr)) {
+                        for (int i = 0; i < count; ++i) {
+                            VARIANT index_var;
+                            VariantInit(&index_var);
+                            index_var.vt = VT_I4;
+                            index_var.lVal = i;
+
+                            DISPPARAMS item_params;
+                            item_params.cArgs = 1;
+                            item_params.rgvarg = &index_var;
+                            item_params.cNamedArgs = 0;
+                            item_params.rgdispidNamedArgs = nullptr;
+
+                            VARIANT item_result;
+                            VariantInit(&item_result);
+
+                            hr = coll->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                            DISPATCH_METHOD, &item_params, &item_result, nullptr, nullptr);
+
+                            if (SUCCEEDED(hr) && item_result.vt == VT_BSTR) {
+                                columns.push_back((const char*)_bstr_t(item_result.bstrVal));
+                            }
+                            VariantClear(&item_result);
+                        }
+                    }
+                }
+                VariantClear(&count_result);
+            }
+        }
+
+        VariantClear(&result);
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_column_order failed: {}", e.what());
+    }
+
+    return columns;
+}
+
+std::string ComGuiElement::get_cell_value(int row, const std::string& column_name) const {
+    try {
+        // Call GetCellValue(row As Long, column As String) As String
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetCellValue", &dispid);
+        if (FAILED(hr)) {
+            return "";
+        }
+
+        // Prepare parameters: row (int) and column_name (string)
+        // Parameters are passed in REVERSE order in DISPPARAMS
+        VARIANT params[2];
+        VariantInit(&params[0]);  // column_name (second parameter, first in array)
+        VariantInit(&params[1]);  // row (first parameter, second in array)
+
+        params[0].vt = VT_BSTR;
+        params[0].bstrVal = SysAllocString(std::wstring(column_name.begin(), column_name.end()).c_str());
+
+        params[1].vt = VT_I4;
+        params[1].lVal = row;
+
+        DISPPARAMS disp_params;
+        disp_params.cArgs = 2;
+        disp_params.rgvarg = params;
+        disp_params.cNamedArgs = 0;
+        disp_params.rgdispidNamedArgs = nullptr;
+
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                              DISPATCH_METHOD, &disp_params, &result, nullptr, nullptr);
+
+        std::string cell_value;
+        if (SUCCEEDED(hr) && result.vt == VT_BSTR) {
+            cell_value = (const char*)_bstr_t(result.bstrVal);
+        }
+
+        // Cleanup
+        VariantClear(&result);
+        VariantClear(&params[0]);
+        VariantClear(&params[1]);
+
+        return cell_value;
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_cell_value failed: {}", e.what());
+        return "";
+    }
+}
+
+std::string ComGuiElement::get_item_text(const std::string& node_key, const std::string& column_name) const {
+    try {
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetItemText", &dispid);
+        if (FAILED(hr)) {
+            return "";
+        }
+
+        // Two arguments: node_key and column_name (in reverse order for DISPPARAMS)
+        _bstr_t key_bstr(node_key.c_str());
+        _bstr_t col_bstr(column_name.c_str());
+
+        VARIANT args[2];
+        VariantInit(&args[0]);
+        VariantInit(&args[1]);
+
+        args[1].vt = VT_BSTR;  // First argument (node_key)
+        args[1].bstrVal = key_bstr;
+
+        args[0].vt = VT_BSTR;  // Second argument (column_name)
+        args[0].bstrVal = col_bstr;
+
+        DISPPARAMS params;
+        params.cArgs = 2;
+        params.rgvarg = args;
+        params.cNamedArgs = 0;
+        params.rgdispidNamedArgs = nullptr;
+
+        VARIANT result;
+        VariantInit(&result);
+
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                              &params, &result, nullptr, nullptr);
+
+        std::string text;
+        if (SUCCEEDED(hr) && result.vt == VT_BSTR) {
+            text = (const char*)_bstr_t(result.bstrVal);
+        }
+
+        VariantClear(&result);
+        return text;
+
+    } catch (const std::exception& e) {
+        spdlog::debug("get_item_text failed for key '{}', column '{}': {}", node_key, column_name, e.what());
+        return "";
+    }
+}
+
 // ============================================================================
 // ComGuiWindow Implementation
 // ============================================================================
@@ -793,19 +1196,34 @@ std::string ComGuiConnection::get_connection_string() const {
 }
 
 int ComGuiConnection::get_session_count() const {
+    // Check if scripting is disabled server-side
+    try {
+        bool disabled_by_server = get_bool_property(L"DisabledByServer");
+        if (disabled_by_server) {
+            spdlog::error("SAP GUI Scripting is disabled on the server");
+            spdlog::error("Connection: {} ({})", get_description(), get_id());
+            spdlog::error("Administrator must set: sapgui/user_scripting = TRUE");
+            return 0;
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("Could not check DisabledByServer property: {}", e.what());
+    }
+
+    // Get sessions collection (try Children first, then Sessions)
     auto sessions = get_dispatch_property(L"Children");
     if (!sessions) {
-        spdlog::debug("GuiConnection.Children not available, falling back to Sessions");
+        spdlog::debug("GuiConnection.Children not available, trying Sessions");
         sessions = get_dispatch_property(L"Sessions");
     }
 
     if (!sessions) {
-        spdlog::warn("GuiConnection has no Children/Sessions collection - no active sessions visible");
+        spdlog::warn("GuiConnection has no Children/Sessions collection");
         return 0;
     }
 
+    // Get count
     int count = ::fairyfly::sap::get_int_property(sessions, "Count");
-    spdlog::debug("GuiConnection session collection count: {}", count);
+    spdlog::debug("GuiConnection session count: {}", count);
     return count;
 }
 
@@ -837,7 +1255,7 @@ ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app) : SapGuiObject(sa
     if (!sap_gui_app) {
         throw ComException("Invalid SAP GUI application pointer");
     }
-    spdlog::info("ComGuiApplication initialized");
+    spdlog::debug("ComGuiApplication initialized");
 }
 
 ComGuiApplicationPtr ComGuiApplication::create() {
@@ -862,7 +1280,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
         hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
 
         if (SUCCEEDED(hr) && sap_gui) {
-            spdlog::info("CoGetObject('SAPGUI') succeeded - SAP Logon is running");
+            spdlog::debug("CoGetObject('SAPGUI') succeeded - SAP Logon is running");
 
             // CoGetObject("SAPGUI") returns SapGuiAuto (ROT entry). It exposes GetScriptingEngine.
             // Some builds expose it as a PROPERTYGET, others as a METHOD. Try both, PROPERTYGET first.
@@ -878,7 +1296,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 HRESULT hr_prop = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
                                                   DISPATCH_PROPERTYGET, &noargs, &vr, nullptr, nullptr);
                 if (SUCCEEDED(hr_prop) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                    spdlog::info("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
+                    spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
                     sap_gui->Release();
                     return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal));
                 }
@@ -888,7 +1306,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 HRESULT hr_meth = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
                                                   DISPATCH_METHOD, &noargs, &vr, nullptr, nullptr);
                 if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                    spdlog::info("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
+                    spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
                     sap_gui->Release();
                     return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal));
                 }
@@ -956,7 +1374,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                     type_info->Release();
 
                     if (SUCCEEDED(test_hr)) {
-                        spdlog::info("SUCCESS: OpenConnection found via ITypeInfo! GuiApplication is ready");
+                        spdlog::debug("SUCCESS: OpenConnection found via ITypeInfo! GuiApplication is ready");
                         return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui));
                     }
                 }
@@ -968,7 +1386,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                     spdlog::debug("IDispatch::GetIDsOfNames for 'OpenConnection': hr=0x{:08X}, dispid={}", test_hr, test_dispid);
 
                     if (SUCCEEDED(test_hr)) {
-                        spdlog::info("SUCCESS: OpenConnection found! GuiApplication is ready");
+                        spdlog::debug("SUCCESS: OpenConnection found! GuiApplication is ready");
                         return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui));
                     }
                 }
@@ -1001,7 +1419,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
 }
 
 int ComGuiApplication::get_connection_count() const {
-    spdlog::info("Enumerating GuiApplication.Connections for connections");
+    spdlog::debug("Enumerating GuiApplication.Connections for connections");
 
     // Try Connections first (matches VBScript behavior app.Connections)
     IDispatchPtr connections = get_dispatch_property(L"Connections");
@@ -1023,7 +1441,7 @@ int ComGuiApplication::get_connection_count() const {
     
     // Get count from Connections
     int count = ::fairyfly::sap::get_int_property(connections, "Count");
-    spdlog::info("GuiApplication.Connections reports {} connection(s)", count);
+    spdlog::debug("GuiApplication.Connections reports {} connection(s)", count);
 
     // Log detailed diagnostics
     if (count > 0) {
@@ -1044,7 +1462,7 @@ ComGuiConnectionPtr ComGuiApplication::get_connection(int index) const {
 SapGuiCollection<ComGuiConnection> ComGuiApplication::connections() const {
     auto connections_dispatch = get_dispatch_property(L"Connections");
     if (!connections_dispatch) {
-        spdlog::info("GuiApplication.Connections not available, trying Children");
+        spdlog::debug("GuiApplication.Connections not available, trying Children");
         connections_dispatch = get_dispatch_property(L"Children");
     }
 
@@ -1265,11 +1683,14 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
     
     int conn_count = get_connection_count();
     spdlog::info("Found {} SAP connections to check", conn_count);
-    
+
     if (conn_count == 0) {
         spdlog::warn("No SAP connections available");
         return SAPGuiWindow();
     }
+
+    // Track if we found connections but no sessions for better error reporting
+    int total_sessions = 0;
 
     // Since SAP COM doesn't expose native HWND directly, we match by window title
     // This is the best we can do without direct HWND access from SAP COM
@@ -1280,12 +1701,13 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
                 spdlog::warn("Connection {} returned null", c);
                 continue;
             }
-            
+
             int sess_count = connection->get_session_count();
             spdlog::info("Connection {} has {} sessions", c, sess_count);
-            
+            total_sessions += sess_count;
+
             if (sess_count == 0) {
-                spdlog::debug("Connection {} has no sessions", c);
+                spdlog::debug("Connection {} has no sessions - login may not be complete", c);
                 continue;
             }
 
@@ -1322,8 +1744,19 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
         }
     }
 
-    spdlog::warn("No matching SAP session found for clicked window");
-    
+    if (total_sessions == 0) {
+        spdlog::error("No active SAP sessions found");
+        spdlog::error("Found {} SAP connections, but none have active sessions", conn_count);
+        spdlog::error("Possible causes:");
+        spdlog::error("  1. You haven't logged into SAP yet");
+        spdlog::error("  2. Server-side scripting is disabled (sapgui/user_scripting = FALSE)");
+        spdlog::error("  3. No transaction is currently open");
+    } else {
+        spdlog::warn("No matching SAP session found for clicked window");
+        spdlog::warn("Found {} active sessions across {} connections", total_sessions, conn_count);
+        spdlog::warn("Make sure you clicked on an active SAP transaction window");
+    }
+
     // Not found - return invalid window
     return SAPGuiWindow();
 }

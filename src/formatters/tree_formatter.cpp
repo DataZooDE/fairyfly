@@ -13,7 +13,7 @@ void TreeFormatter::format_to_markdown(const json& element_json, std::ostringstr
     std::string id = element_json.value("id", "");
 
     // Header
-    oss << "### 🌳 " << (name.empty() ? "Tree" : escape_markdown(name)) << "\n\n";
+    oss << "### " << (name.empty() ? "Tree" : escape_markdown(name)) << "\n\n";
 
     // Check if we have tree_data
     if (!element_json.contains("tree_data")) {
@@ -30,7 +30,27 @@ void TreeFormatter::format_to_markdown(const json& element_json, std::ostringstr
     if (!columns.empty() && columns.size() > 1) {
         oss << "| Structure |";
         for (const auto& col : columns) {
-            oss << " " << escape_markdown(col.get<std::string>()) << " |";
+            std::string col_name = col.get<std::string>();
+
+            // Map SAP internal column names to friendly names
+            std::string display_name;
+            if (col_name.find("C") == 0) {
+                // Column format is "C          1", "C          3", etc.
+                std::string trimmed = col_name;
+                // Remove extra spaces
+                trimmed.erase(std::unique(trimmed.begin(), trimmed.end(),
+                    [](char a, char b) { return a == ' ' && b == ' '; }), trimmed.end());
+
+                // Map common column positions to names
+                if (trimmed == "C 1") display_name = "Type";
+                else if (trimmed == "C 3") display_name = "PL";
+                else if (trimmed == "C 4") display_name = "Comment";
+                else display_name = trimmed;
+            } else {
+                display_name = col_name;
+            }
+
+            oss << " " << escape_markdown(display_name) << " |";
         }
         oss << "\n|-----------|";
         for (size_t i = 0; i < columns.size(); ++i) {
@@ -72,14 +92,13 @@ void TreeFormatter::format_tree_node(
 
     // Build the tree structure prefix
     std::string branch = get_branch_char(is_last);
-    std::string icon = expanded ? "📁" : "📄";
 
     // Check if we're in table format (has column values)
     bool is_table_format = !column_values.empty();
 
     if (is_table_format) {
         // Table row format
-        oss << "| " << prefix << branch << " " << icon << " **"
+        oss << "| " << prefix << branch << " **"
             << escape_markdown(text) << "** |";
 
         for (const auto& val : column_values) {
@@ -89,12 +108,12 @@ void TreeFormatter::format_tree_node(
         oss << "\n";
     } else {
         // Simple tree format
-        oss << prefix << branch << " " << icon << " " << escape_markdown(text) << "\n";
+        oss << prefix << branch << " " << escape_markdown(text) << "\n";
     }
 
     // Recursively format children
     if (!children.empty()) {
-        std::string child_prefix = prefix + (is_last ? "    " : "│   ");
+        std::string child_prefix = prefix + (is_last ? "    " : "|   ");
 
         for (size_t i = 0; i < children.size(); ++i) {
             bool child_is_last = (i == children.size() - 1);
@@ -104,7 +123,7 @@ void TreeFormatter::format_tree_node(
 }
 
 std::string TreeFormatter::get_branch_char(bool is_last) const {
-    return is_last ? "└──" : "├──";
+    return is_last ? "+--" : "|--";
 }
 
 } // namespace formatters

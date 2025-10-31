@@ -65,7 +65,7 @@ public:
     // Screen operations
     Result read_screen(bool include_structure = true) override;
     Result read_screen_with_tabs() override;
-    Result capture_screenshot() override;
+    Result capture_screenshot(const cli::ScreenshotOptions& options) override;
 
     // Getters for testing/debugging
     ComGuiApplicationPtr get_app() const { return app_; }

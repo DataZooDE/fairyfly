@@ -3,6 +3,9 @@
 #include "include/element_type_registry.h"
 #include "include/screen_element_collector.h"
 #include "include/table_data_extractor.h"
+#include "include/cli_handler.h"
+#include "include/string_utils.h"
+#include "include/base64.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <thread>
@@ -10,7 +13,26 @@
 #include <algorithm>
 #include <fstream>
 #include <regex>
+#include <map>
+#include <unordered_set>
 #include <fmt/format.h>
+#ifdef _WIN32
+#include <cstdio>
+#include <errno.h>
+#endif
+
+// CImg for image processing
+// Force Windows GDI display (not X11)
+#ifdef _WIN32
+    #ifndef cimg_display
+        #define cimg_display 2  // 2 = Windows GDI display
+    #endif
+#else
+    #ifndef cimg_display
+        #define cimg_display 0  // Disable display on non-Windows
+    #endif
+#endif
+#include <CImg.h>
 
 namespace fairyfly {
 namespace sap {
@@ -21,14 +43,14 @@ ComAutomationEngine::ComAutomationEngine() {
     try {
         // Initialize COM and get SAP GUI application
         app_ = ComGuiApplication::create();
-        spdlog::info("ComAutomationEngine initialized successfully");
+        spdlog::debug("ComAutomationEngine initialized successfully");
 
         // Check if any connections exist
         if (app_->get_connection_count() > 0) {
             current_connection_ = app_->get_connection(0);
             if (current_connection_ && current_connection_->get_session_count() > 0) {
                 current_session_ = current_connection_->get_session(0);
-                spdlog::info("Found existing connection and session");
+                spdlog::debug("Found existing connection and session");
             }
         }
     } catch (const ComException& e) {
@@ -730,13 +752,23 @@ static json derive_capabilities(const std::string& type, bool enabled, bool chan
     return capabilities;
 }
 
+// Cache for tree/grid extraction results to avoid duplicate extractions
+// Key: element ID, Value: extracted table/tree data JSON
+static std::map<std::string, json> tree_grid_cache;
+
+// Helper: Clear the tree/grid extraction cache
+static void clear_extraction_cache() {
+    tree_grid_cache.clear();
+}
+
 // Helper: Extract rich metadata from element
 static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
     if (!elem) return nullptr;
 
     try {
         json metadata;
-        metadata["id"] = elem->get_id();
+        std::string elem_id = elem->get_id();
+        metadata["id"] = elem_id;
         std::string type = elem->get_type();
         metadata["type"] = type;
         metadata["name"] = elem->get_name();
@@ -775,6 +807,16 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
             metadata["container_type"] = container_type;
         }
 
+        // SubType for GuiShell elements (GridView, Tree, Toolbar, etc.)
+        if (type == "GuiShell") {
+            std::string subtype = elem->get_subtype();
+            if (!subtype.empty()) {
+                metadata["subtype"] = subtype;
+            } else {
+                metadata["subtype"] = "N/A";
+            }
+        }
+
         // Special handling for GuiBox (grouping container)
         if (type == "GuiBox") {
             metadata["is_group"] = true;
@@ -784,88 +826,124 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         metadata["capabilities"] = derive_capabilities(type, enabled, changeable);
 
         // Extract table/tree data for specialized controls
-        if (type == "GuiGridView" || type == "GuiTableControl" || type == "GuiTree") {
-            try {
-                TableExtractionOptions options;
-                options.max_rows = 20;  // Limit to first 20 rows
-                options.max_tree_depth = 10;
-                options.include_headers = true;
+        // Also check if GuiShell contains a tree control based on text (ActiveX ProgID)
+        bool is_tree_control = (type == "GuiTree" ||
+                               (type == "GuiShell" && text.find("TableTreeControl") != std::string::npos) ||
+                               (type == "GuiShell" && text.find("TreeControl") != std::string::npos));
 
-                TableDataExtractor extractor(options);
+        // Check if GuiShell has SubType=GridView
+        std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
+        bool is_gridview = (type == "GuiGridView" || (type == "GuiShell" && subtype == "GridView"));
 
-                if (type == "GuiGridView") {
-                    auto grid_data = extractor.extract_grid_data(elem);
-                    if (!grid_data.rows.empty() || !grid_data.columns.empty()) {
-                        json table_json;
-                        table_json["columns"] = grid_data.columns;
-                        table_json["rows"] = grid_data.rows;
-                        table_json["total_row_count"] = grid_data.total_row_count;
-                        table_json["visible_row_count"] = grid_data.visible_row_count;
-                        metadata["table_data"] = table_json;
-                        spdlog::debug("Extracted grid data: {} rows × {} columns",
-                                     grid_data.rows.size(), grid_data.columns.size());
-                    }
-                } else if (type == "GuiTableControl") {
-                    auto table_data = extractor.extract_table_data(elem);
-                    if (table_data.total_row_count > 0) {
-                        json table_json;
-                        table_json["total_row_count"] = table_data.total_row_count;
-                        metadata["table_data"] = table_json;
-                    }
-                } else if (type == "GuiTree") {
-                    auto tree_data = extractor.extract_tree_data(elem);
-                    if (!tree_data.nodes.empty()) {
-                        json tree_json;
-                        tree_json["columns"] = tree_data.columns;
-
-                        // Convert tree nodes to JSON
-                        json nodes_array = json::array();
-                        std::function<void(const TreeNode&, json&)> convert_node;
-                        convert_node = [&](const TreeNode& node, json& node_json) {
-                            node_json["text"] = node.text;
-                            node_json["key"] = node.key;
-                            node_json["level"] = node.level;
-                            node_json["expanded"] = node.expanded;
-                            if (!node.column_values.empty()) {
-                                node_json["column_values"] = node.column_values;
-                            }
-                            if (!node.children.empty()) {
-                                json children_array = json::array();
-                                for (const auto& child : node.children) {
-                                    json child_json;
-                                    convert_node(child, child_json);
-                                    children_array.push_back(child_json);
-                                }
-                                node_json["children"] = children_array;
-                            }
-                        };
-
-                        for (const auto& node : tree_data.nodes) {
-                            json node_json;
-                            convert_node(node, node_json);
-                            nodes_array.push_back(node_json);
-                        }
-
-                        tree_json["nodes"] = nodes_array;
-                        metadata["tree_data"] = tree_json;
-                        spdlog::info("Extracted tree data: {} top-level nodes, {} columns",
-                                    tree_data.nodes.size(), tree_data.columns.size());
-                    }
+        if (is_gridview || type == "GuiTableControl" || is_tree_control) {
+            // Check cache first to avoid duplicate expensive extractions
+            auto cache_it = tree_grid_cache.find(elem_id);
+            if (cache_it != tree_grid_cache.end()) {
+                // Reuse cached extraction results
+                if (cache_it->second.contains("table_data")) {
+                    metadata["table_data"] = cache_it->second["table_data"];
                 }
-            } catch (const std::exception& e) {
-                spdlog::warn("Failed to extract table/tree data for {}: {}", type, e.what());
+                if (cache_it->second.contains("tree_data")) {
+                    metadata["tree_data"] = cache_it->second["tree_data"];
+                }
+                spdlog::debug("Reused cached extraction data for element: {}", elem_id);
+            } else {
+                // Extract and cache the results
+                try {
+                    TableExtractionOptions options;
+                    options.max_rows = 20;  // Limit to first 20 rows
+                    options.max_tree_depth = 10;
+                    options.include_headers = true;
+
+                    TableDataExtractor extractor(options);
+                    json cached_data;
+
+                    if (is_gridview) {
+                        auto grid_data = extractor.extract_grid_data(elem);
+                        if (!grid_data.rows.empty() || !grid_data.columns.empty()) {
+                            json table_json;
+                            table_json["columns"] = grid_data.columns;
+                            table_json["rows"] = grid_data.rows;
+                            table_json["total_row_count"] = grid_data.total_row_count;
+                            table_json["visible_row_count"] = grid_data.visible_row_count;
+                            metadata["table_data"] = table_json;
+                            cached_data["table_data"] = table_json;
+                            spdlog::debug("Extracted grid data: {} rows × {} columns",
+                                         grid_data.rows.size(), grid_data.columns.size());
+                        }
+                    } else if (type == "GuiTableControl") {
+                        auto table_data = extractor.extract_table_data(elem);
+                        if (table_data.total_row_count > 0) {
+                            json table_json;
+                            table_json["total_row_count"] = table_data.total_row_count;
+                            metadata["table_data"] = table_json;
+                            cached_data["table_data"] = table_json;
+                        }
+                    } else if (is_tree_control) {
+                        auto tree_data = extractor.extract_tree_data(elem);
+                        if (!tree_data.nodes.empty()) {
+                            json tree_json;
+                            tree_json["columns"] = tree_data.columns;
+
+                            // Convert tree nodes to JSON
+                            json nodes_array = json::array();
+                            std::function<void(const TreeNode&, json&)> convert_node;
+                            convert_node = [&](const TreeNode& node, json& node_json) {
+                                node_json["text"] = node.text;
+                                node_json["key"] = node.key;
+                                node_json["level"] = node.level;
+                                node_json["expanded"] = node.expanded;
+                                if (!node.column_values.empty()) {
+                                    node_json["column_values"] = node.column_values;
+                                }
+                                if (!node.children.empty()) {
+                                    json children_array = json::array();
+                                    for (const auto& child : node.children) {
+                                        json child_json;
+                                        convert_node(child, child_json);
+                                        children_array.push_back(child_json);
+                                    }
+                                    node_json["children"] = children_array;
+                                }
+                            };
+
+                            for (const auto& node : tree_data.nodes) {
+                                json node_json;
+                                convert_node(node, node_json);
+                                nodes_array.push_back(node_json);
+                            }
+
+                            tree_json["nodes"] = nodes_array;
+                            metadata["tree_data"] = tree_json;
+                            cached_data["tree_data"] = tree_json;
+                            spdlog::info("Extracted tree data: {} top-level nodes, {} columns",
+                                        tree_data.nodes.size(), tree_data.columns.size());
+                        }
+                    }
+
+                    // Cache the extraction results
+                    if (!cached_data.empty()) {
+                        tree_grid_cache[elem_id] = cached_data;
+                    }
+                } catch (const std::exception& e) {
+                    spdlog::warn("Failed to extract table/tree data for {}: {}", type, e.what());
+                }
             }
         }
 
-        // Recursively process children (limit depth to 4 levels to capture tree controls in shells)
-        if (depth < 4) {
+        // Recursively process children (limit depth to 15 levels to capture deeply nested tree controls)
+        // SM59 tree structure: Window -> UserArea -> CustomControl -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
+        // SEGW tree structure: Window -> UserArea -> ContainerShell -> SplitterShell -> ContainerShell -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
+        // SEGW GridView is at depth 12: usr -> shellcont -> shell -> shellcont[1] -> shell -> shellcont[0] -> shell -> shellcont[0] -> shellcont -> shellcont -> shell -> shellcont[1] -> shell (GridView)
+        if (depth < 15) {
             int child_count = elem->get_child_count();
 
             // Special handling for GuiContainerShell - always try to enumerate children
             // even if get_child_count() returns 0, because SAP GUI sometimes reports 0
             // for containers that actually have shell controls
             bool force_enumerate = (type == "GuiContainerShell" || type == "GuiCustomControl" ||
-                                   type == "GuiSplitterContainer" || type == "GuiContainerCtrl");
+                                   type == "GuiSplitterContainer" || type == "GuiContainerCtrl" ||
+                                   type == "GuiSplitterShell" || type == "GuiDockShell");
 
             if (child_count > 0 || force_enumerate) {
                 spdlog::debug("extract_element_metadata: Processing {} children of {} at depth {} (force={})",
@@ -956,7 +1034,8 @@ static void flatten_and_group_elements(const json& elements, json& grouped) {
             // Labels go to form_fields if they're next to input fields
             grouped["form_fields"].push_back(elem);
         } else if (container == "table" || container == "grid" ||
-                   type == "GuiTableControl" || type == "GuiGridView") {
+                   type == "GuiTableControl" || type == "GuiGridView" ||
+                   (type == "GuiShell" && elem.value("subtype", "") == "GridView")) {
             grouped["tables"].push_back(elem);
         } else if (container == "tabs" || type == "GuiTabStrip" || type == "GuiTab") {
             grouped["tabs"].push_back(elem);
@@ -982,6 +1061,26 @@ static json group_elements_by_container(const json& elements) {
 
     flatten_and_group_elements(elements, grouped);
 
+    // Deduplicate all groups by element ID
+    auto deduplicate = [](json& arr) {
+        std::unordered_set<std::string> seen_ids;
+        json deduped = json::array();
+        for (const auto& elem : arr) {
+            std::string id = elem.value("id", "");
+            if (!id.empty() && seen_ids.insert(id).second) {
+                deduped.push_back(elem);
+            }
+        }
+        arr = deduped;
+    };
+
+    deduplicate(grouped["toolbar"]);
+    deduplicate(grouped["buttons"]);
+    deduplicate(grouped["form_fields"]);
+    deduplicate(grouped["tables"]);
+    deduplicate(grouped["tabs"]);
+    deduplicate(grouped["other"]);
+
     // Remove empty groups
     if (grouped["toolbar"].empty()) grouped.erase("toolbar");
     if (grouped["buttons"].empty()) grouped.erase("buttons");
@@ -993,7 +1092,111 @@ static json group_elements_by_container(const json& elements) {
     return grouped;
 }
 
-/// Discover all UI elements from a window using O(1) deduplication
+/// Recursively traverse element tree and collect all elements
+/// Handles containers that don't expose Children collection by trying ID patterns
+/// @param element The element to traverse
+/// @param collector The collector to add elements to
+/// @param session Session for FindById lookups
+/// @param depth Current recursion depth (for safety limits)
+static void traverse_element_tree(
+    ComGuiElementPtr element,
+    ScreenElementCollector& collector,
+    const std::shared_ptr<ComGuiSession>& session,
+    int depth = 0
+) {
+    const int MAX_DEPTH = 15;  // Limit depth (SEGW needs depth 10+)
+
+    if (!element || depth >= MAX_DEPTH) {
+        return;
+    }
+
+    try {
+        std::string type = element->get_type();
+        std::string elem_id = element->get_id();
+
+        // Add current element to collector (with O(1) deduplication)
+        // If already seen, skip processing to avoid duplicate work
+        if (!collector.add(element)) {
+            return;  // Already processed this element
+        }
+
+        spdlog::debug("{}[depth={}] {} ({})",
+                     std::string(depth * 2, ' '), depth, elem_id, type);
+
+        // Container types that have nested structure
+        bool is_container = (type == "GuiContainerShell" ||
+                           type == "GuiSplitterShell" ||
+                           type == "GuiUserArea" ||
+                           type == "GuiCustomControl");
+
+        if (!is_container) {
+            return;  // Leaf element, no children to traverse
+        }
+
+        // Try Children collection first, but track if it actually works
+        bool children_collection_worked = false;
+        try {
+            int child_count = element->get_child_count();
+            if (child_count > 0) {
+                for (int i = 0; i < child_count; ++i) {
+                    try {
+                        auto child = element->get_child(i);
+                        if (child) {
+                            traverse_element_tree(child, collector, session, depth + 1);
+                            children_collection_worked = true;
+                        }
+                    } catch (...) {
+                        // Child access failed, will fall back to ID-based
+                    }
+                }
+                // Don't return here - continue with ID-based discovery
+                // SAP GUI can have elements accessible via FindById but not Children collection
+            }
+        } catch (...) {
+            // Children collection not available
+        }
+
+        spdlog::debug("{}[depth={}] Trying ID-based discovery for {}",
+                      std::string(depth * 2, ' '), depth, elem_id);
+
+        // For ALL container types (GuiUserArea, GuiContainerShell, GuiSplitterShell),
+        // try common child patterns via FindById
+        if (is_container) {
+            // Try /shell child
+            try {
+                auto shell_child = session->find_element_by_id(elem_id + "/shell");
+                if (shell_child) {
+                    traverse_element_tree(shell_child, collector, session, depth + 1);
+                }
+            } catch (...) { }
+
+            // Try /shellcont[N] children (up to 4)
+            for (int i = 0; i < 4; ++i) {
+                try {
+                    std::string child_id = elem_id + "/shellcont[" + std::to_string(i) + "]";
+                    auto child = session->find_element_by_id(child_id);
+                    if (child) {
+                        traverse_element_tree(child, collector, session, depth + 1);
+                    }
+                } catch (...) {
+                    break;  // No more shellcont children
+                }
+            }
+
+            // Try /shellcont child (no index)
+            try {
+                auto shellcont_child = session->find_element_by_id(elem_id + "/shellcont");
+                if (shellcont_child) {
+                    traverse_element_tree(shellcont_child, collector, session, depth + 1);
+                }
+            } catch (...) { }
+        }
+    } catch (...) {
+        // Skip elements that throw exceptions during processing
+    }
+}
+
+/// Discover all UI elements from a window using O(1) deduplication with recursive traversal
 /// @param window The SAP GUI window to scan
 /// @param session The session for element discovery by ID
 /// @return Vector of unique ComGuiElementPtr objects
@@ -1002,53 +1205,28 @@ static std::vector<ComGuiElementPtr> discover_elements(
     const std::shared_ptr<ComGuiSession>& session
 ) {
     ScreenElementCollector collector;
-    collector.reserve(200);  // Reserve space for typical screen
+    collector.reserve(200);  // Reserve space for typical complex screens
 
-    int child_count = window->get_child_count();
-
-    // Process all top-level children
-    for (int i = 0; i < child_count; ++i) {
-        try {
-            auto child = window->get_child(i);
-            if (child) {
-                collector.add(child);
-            }
-        } catch (...) {
-            // Skip problematic children
-        }
-    }
-
-    // Additionally, use session to find all descendant elements
-    // This catches elements that might be in containers with broken Children collection
     try {
-        std::string window_id = window->get_id();
-        // Try to enumerate common element patterns in the user area
-        std::vector<std::string> patterns = {
-            window_id + "/usr/txt", window_id + "/usr/ctxt", window_id + "/usr/cbo",
-            window_id + "/usr/chk", window_id + "/usr/rad", window_id + "/usr/btn",
-            window_id + "/usr/lbl", window_id + "/usr/sub", window_id + "/usr/tab"
-        };
+        int child_count = window->get_child_count();
+        spdlog::debug("Window has {} top-level children, starting recursive traversal", child_count);
 
-        // Try to find elements by iterating indices for common prefixes
-        for (const auto& prefix : patterns) {
-            for (int idx = 0; idx < 100; ++idx) {  // Try up to 100 elements per type
-                try {
-                    std::string elem_id = prefix + "[" + std::to_string(idx) + "]";
-                    auto elem = session->find_element_by_id(elem_id);
-                    if (elem) {
-                        collector.add(elem);  // O(1) deduplication
-                    } else {
-                        break;  // No more elements of this type
-                    }
-                } catch (...) {
-                    break;  // Stop trying this pattern
+        // Recursively traverse all top-level children
+        for (int i = 0; i < child_count; ++i) {
+            try {
+                auto child = window->get_child(i);
+                if (child) {
+                    traverse_element_tree(child, collector, session, 0);
                 }
+            } catch (...) {
+                // Skip problematic children
             }
         }
     } catch (...) {
-        // Continue with whatever elements we collected from the window
+        spdlog::warn("Exception during element tree traversal");
     }
 
+    spdlog::info("Discovered {} unique elements via recursive traversal", collector.elements().size());
     return collector.elements();
 }
 
@@ -1074,6 +1252,9 @@ Result ComAutomationEngine::read_screen(bool include_structure) {
         result.data["child_count"] = window->get_child_count();
 
         if (include_structure) {
+            // Clear extraction cache at start of each screen read
+            clear_extraction_cache();
+
             // Discover all unique elements (O(1) deduplication)
             auto element_objects = discover_elements(window, session);
 
@@ -1248,11 +1429,359 @@ Result ComAutomationEngine::read_screen_with_tabs() {
     return result;
 }
 
-Result ComAutomationEngine::capture_screenshot() {
+// Helper: Extract SAFEARRAY bytes from VARIANT
+static std::vector<uint8_t> extract_safearray_bytes(VARIANT& var) {
+    if (var.vt != (VT_ARRAY | VT_UI1)) {
+        throw std::runtime_error("Expected byte array (VT_ARRAY | VT_UI1) from HardCopyToMemory");
+    }
+
+    SAFEARRAY* psa = var.parray;
+    if (!psa) {
+        throw std::runtime_error("SAFEARRAY pointer is null");
+    }
+
+    BYTE* data = nullptr;
+    HRESULT hr = SafeArrayAccessData(psa, reinterpret_cast<void**>(&data));
+    if (FAILED(hr)) {
+        throw std::runtime_error(fmt::format("SafeArrayAccessData failed: 0x{:08X}", hr));
+    }
+
+    long size = psa->rgsabound[0].cElements;
+    std::vector<uint8_t> result(data, data + size);
+
+    SafeArrayUnaccessData(psa);
+    return result;
+}
+
+// Helper: Parse scale parameter (float for relative, int for absolute width)
+static void parse_scale_parameter(const std::string& scale, int orig_width, int orig_height,
+                                  int& new_width, int& new_height) {
+    if (scale.find('.') != std::string::npos) {
+        // Float: relative scale (0.5 = 50%)
+        float factor = std::stof(scale);
+        if (factor <= 0.0f || factor > 10.0f) {
+            throw std::invalid_argument("Scale factor must be between 0.0 and 10.0");
+        }
+        new_width = static_cast<int>(orig_width * factor);
+        new_height = static_cast<int>(orig_height * factor);
+    } else {
+        // Integer: target width (maintain aspect ratio)
+        new_width = std::stoi(scale);
+        if (new_width <= 0) {
+            throw std::invalid_argument("Width must be positive");
+        }
+        new_height = static_cast<int>(orig_height * (new_width / static_cast<float>(orig_width)));
+    }
+}
+
+// Helper: Validate subsection parameters (all-or-nothing)
+static void validate_subsection_complete(const cli::ScreenshotOptions& opts) {
+    bool has_any = opts.crop_x.has_value() || opts.crop_y.has_value() ||
+                   opts.crop_width.has_value() || opts.crop_height.has_value();
+    bool has_all = opts.crop_x.has_value() && opts.crop_y.has_value() &&
+                   opts.crop_width.has_value() && opts.crop_height.has_value();
+
+    if (has_any && !has_all) {
+        throw std::invalid_argument(
+            "All subsection parameters (--x, --y, --width, --height) must be provided together");
+    }
+
+    if (has_all) {
+        if (opts.crop_x.value() < 0 || opts.crop_y.value() < 0) {
+            throw std::invalid_argument("Subsection x and y must be non-negative");
+        }
+        if (opts.crop_width.value() <= 0 || opts.crop_height.value() <= 0) {
+            throw std::invalid_argument("Subsection width and height must be positive");
+        }
+    }
+}
+
+Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& options) {
+    TraceGuard trace("ComAutomationEngine::capture_screenshot");
+    auto start = std::chrono::high_resolution_clock::now();
+
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "NOT_IMPLEMENTED";
-    result.error["message"] = "Screenshot capture requires additional implementation";
+
+    try {
+        if (!current_session_) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "NO_SESSION";
+            result.error["message"] = "No active SAP session";
+            return result;
+        }
+
+        // Validate subsection parameters
+        validate_subsection_complete(options);
+
+        // Get active window
+        auto window = current_session_->get_active_window();
+        if (!window) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "NO_WINDOW";
+            result.error["message"] = "No active window found";
+            return result;
+        }
+
+        // Get window title for filename generation
+        std::string window_title = window->get_title();
+
+        // Determine if we need CImg processing
+        bool needs_processing = options.show ||
+                               !options.scale.empty() ||
+                               options.format == "base64" ||
+                               options.output_file == "-" ||
+                               (options.crop_x.has_value() && (options.format == "base64" || options.output_file == "-"));
+
+        if (!needs_processing && !options.output_file.empty() && options.output_file != "-") {
+            // Fast path: Direct HardCopy to file with subsection support
+            std::string filename = options.output_file;
+
+            // Call HardCopy COM method
+            VARIANT filename_var;
+            VariantInit(&filename_var);
+            filename_var.vt = VT_BSTR;
+            filename_var.bstrVal = SysAllocString(std::wstring(filename.begin(), filename.end()).c_str());
+
+            VARIANT image_type;
+            VariantInit(&image_type);
+            image_type.vt = VT_I4;
+            image_type.lVal = 2; // PNG
+
+            VARIANT result_path;
+            VariantInit(&result_path);
+
+            IDispatch* window_dispatch = window->get_dispatch();
+
+            if (options.crop_x.has_value()) {
+                // HardCopy with subsection
+                DISPID dispid;
+                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
+                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+
+                if (SUCCEEDED(hr)) {
+                    VARIANT args[6];
+                    args[5] = filename_var;
+                    args[4] = image_type;
+                    args[3].vt = VT_I4; args[3].lVal = options.crop_x.value();
+                    args[2].vt = VT_I4; args[2].lVal = options.crop_y.value();
+                    args[1].vt = VT_I4; args[1].lVal = options.crop_width.value();
+                    args[0].vt = VT_I4; args[0].lVal = options.crop_height.value();
+
+                    DISPPARAMS params;
+                    params.rgvarg = args;
+                    params.cArgs = 6;
+                    params.rgdispidNamedArgs = nullptr;
+                    params.cNamedArgs = 0;
+
+                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
+
+                    if (FAILED(hr)) {
+                        VariantClear(&filename_var);
+                        VariantClear(&image_type);
+                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
+                    }
+                }
+            } else {
+                // HardCopy without subsection
+                DISPID dispid;
+                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
+                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+
+                if (SUCCEEDED(hr)) {
+                    VARIANT args[2];
+                    args[1] = filename_var;
+                    args[0] = image_type;
+
+                    DISPPARAMS params;
+                    params.rgvarg = args;
+                    params.cArgs = 2;
+                    params.rgdispidNamedArgs = nullptr;
+                    params.cNamedArgs = 0;
+
+                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
+
+                    if (FAILED(hr)) {
+                        VariantClear(&filename_var);
+                        VariantClear(&image_type);
+                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
+                    }
+                }
+            }
+
+            VariantClear(&filename_var);
+            VariantClear(&image_type);
+
+            result.status = Result::Status::Success;
+            result.data["filepath"] = filename;
+            spdlog::info("Screenshot saved to: {}", filename);
+
+            VariantClear(&result_path);
+        } else {
+            // Processing path: Use HardCopyToMemory + CImg
+            VARIANT image_type;
+            VariantInit(&image_type);
+            image_type.vt = VT_I4;
+            image_type.lVal = 2; // PNG
+
+            VARIANT png_bytes_var;
+            VariantInit(&png_bytes_var);
+
+            IDispatch* window_dispatch = window->get_dispatch();
+
+            DISPID dispid;
+            LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopyToMemory");
+            HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+
+            if (SUCCEEDED(hr)) {
+                VARIANT args[1];
+                args[0] = image_type;
+
+                DISPPARAMS params;
+                params.rgvarg = args;
+                params.cArgs = 1;
+                params.rgdispidNamedArgs = nullptr;
+                params.cNamedArgs = 0;
+
+                hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                             DISPATCH_METHOD, &params, &png_bytes_var, nullptr, nullptr);
+
+                if (FAILED(hr)) {
+                    VariantClear(&image_type);
+                    throw std::runtime_error(fmt::format("HardCopyToMemory failed: 0x{:08X}", hr));
+                }
+            }
+
+            VariantClear(&image_type);
+
+            // Extract PNG bytes
+            std::vector<uint8_t> png_bytes = extract_safearray_bytes(png_bytes_var);
+            VariantClear(&png_bytes_var);
+
+            spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
+
+            // Load into CImg
+            cimg_library::CImg<unsigned char> img;
+#ifdef _WIN32
+            std::FILE* tmpfile = nullptr;
+            errno_t err_code = tmpfile_s(&tmpfile);
+            if (err_code != 0 || !tmpfile) {
+                throw std::runtime_error("Failed to create temporary file for PNG loading");
+            }
+#else
+            std::FILE* tmpfile = std::tmpfile();
+            if (!tmpfile) {
+                throw std::runtime_error("Failed to create temporary file for PNG loading");
+            }
+#endif
+            std::fwrite(png_bytes.data(), 1, png_bytes.size(), tmpfile);
+            std::rewind(tmpfile);
+            img.load_png(tmpfile);
+            std::fclose(tmpfile);
+
+            spdlog::debug("Loaded PNG into CImg: {}x{} pixels", img.width(), img.height());
+
+            // Apply cropping if requested
+            if (options.crop_x.has_value()) {
+                int x1 = options.crop_x.value();
+                int y1 = options.crop_y.value();
+                int x2 = x1 + options.crop_width.value() - 1;
+                int y2 = y1 + options.crop_height.value() - 1;
+
+                img.crop(x1, y1, x2, y2);
+                spdlog::debug("Cropped to: {}x{} pixels", img.width(), img.height());
+            }
+
+            // Apply scaling if requested
+            if (!options.scale.empty()) {
+                int new_width, new_height;
+                parse_scale_parameter(options.scale, img.width(), img.height(), new_width, new_height);
+                img.resize(new_width, new_height, -100, -100, 5); // 5 = Lanczos interpolation
+                spdlog::debug("Scaled to: {}x{} pixels", new_width, new_height);
+            }
+
+            // Display if requested
+            if (options.show) {
+                std::string window_display_title = "fairyfly - Screenshot Preview";
+                cimg_library::CImgDisplay display(img, window_display_title.c_str());
+
+                spdlog::info("Displaying screenshot. Close window to continue...");
+
+                // Wait for user to close the window
+                while (!display.is_closed()) {
+                    display.wait();
+                }
+
+                spdlog::info("Preview window closed");
+                result.data["displayed"] = true;
+            }
+
+            // Output
+            if (options.format == "base64") {
+                // Save to temporary memory buffer
+#ifdef _WIN32
+                std::FILE* mem_tmpfile = nullptr;
+                errno_t err_code2 = tmpfile_s(&mem_tmpfile);
+                if (err_code2 != 0 || !mem_tmpfile) {
+                    throw std::runtime_error("Failed to create temporary file for PNG encoding");
+                }
+#else
+                std::FILE* mem_tmpfile = std::tmpfile();
+                if (!mem_tmpfile) {
+                    throw std::runtime_error("Failed to create temporary file for PNG encoding");
+                }
+#endif
+                img.save_png(mem_tmpfile);
+                std::rewind(mem_tmpfile);
+
+                // Read back bytes
+                std::fseek(mem_tmpfile, 0, SEEK_END);
+                long file_size = std::ftell(mem_tmpfile);
+                std::rewind(mem_tmpfile);
+
+                std::vector<uint8_t> output_bytes(file_size);
+                std::fread(output_bytes.data(), 1, file_size, mem_tmpfile);
+                std::fclose(mem_tmpfile);
+
+                std::string base64_data = utils::base64_encode(output_bytes);
+                result.data["screenshot"] = "data:image/png;base64," + base64_data;
+                result.data["format"] = "base64";
+                spdlog::info("Screenshot encoded as base64 ({} bytes)", base64_data.size());
+            } else if (options.output_file == "-") {
+                // Write to stdout
+                img.save_png(stdout);
+                result.data["output"] = "stdout";
+                spdlog::info("Screenshot written to stdout");
+            } else {
+                // Save to file
+                std::string filename = options.output_file.empty()
+                    ? utils::generate_screenshot_filename(window_title)
+                    : options.output_file;
+
+                img.save_png(filename.c_str());
+                result.data["filepath"] = filename;
+                spdlog::info("Screenshot saved to: {}", filename);
+            }
+
+            result.status = Result::Status::Success;
+        }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+    } catch (const std::invalid_argument& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "INVALID_ARGUMENT";
+        result.error["message"] = e.what();
+        spdlog::error("Invalid argument in capture_screenshot: {}", e.what());
+    } catch (const std::exception& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "EXCEPTION";
+        result.error["message"] = e.what();
+        spdlog::error("Exception in capture_screenshot: {}", e.what());
+    }
+
     return result;
 }
 

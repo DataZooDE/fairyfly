@@ -143,6 +143,40 @@ public:
     /// Returns false if property doesn't exist or element doesn't support it
     bool get_property_bool(const std::wstring& property_name) const;
 
+    /// Get string property value from element
+    /// Returns empty string if property doesn't exist or element doesn't support it
+    std::string get_property_string(const std::wstring& property_name) const;
+
+    /// Get SubType property for GuiShell elements
+    /// Returns SubType string (e.g., "GridView", "Tree", "Toolbar") or empty string if not a GuiShell
+    std::string get_subtype() const;
+
+    /// Get all node keys from a tree control (GuiShell with SubType="Tree")
+    /// Returns empty vector if element is not a tree or operation fails
+    std::vector<std::string> get_all_node_keys() const;
+
+    /// Get node text by key from a tree control
+    /// Returns empty string if node not found or operation fails
+    std::string get_node_text_by_key(const std::string& key) const;
+
+    /// Get node path by key (e.g., "1\2\3" for hierarchical position)
+    /// Returns empty string if node not found or operation fails
+    std::string get_node_path_by_key(const std::string& key) const;
+
+    /// Get column names from ColumnOrder collection
+    /// Returns empty vector if no columns available
+    std::vector<std::string> get_column_order() const;
+
+    /// Get cell value from GridView
+    /// @param row Row index (0-based)
+    /// @param column_name Column identifier from ColumnOrder
+    /// @return Cell value as string, empty if not available
+    std::string get_cell_value(int row, const std::string& column_name) const;
+
+    /// Get item text from tree node by column name
+    /// Returns empty string if not found or operation fails
+    std::string get_item_text(const std::string& node_key, const std::string& column_name) const;
+
     /// Get raw COM object (for advanced use) - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }
 };

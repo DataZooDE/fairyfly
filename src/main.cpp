@@ -9,6 +9,7 @@
 #include <iomanip>
 #include "include/core.h"
 #include "include/cli_handler.h"
+#include "include/element_renderers.h"
 
 using json = nlohmann::json;
 using namespace fairyfly;
@@ -89,8 +90,7 @@ int main(int argc, char** argv) {
     std::optional<int> screen_conn_id;
     auto* screen_read = screen_cmd->add_subcommand("read", "Read screen structure");
     bool screen_read_children = true;
-    bool expand_tabs = true;  // Default: expand tabs for complete information
-    bool no_tabs = false;     // Flag to disable tab expansion
+    bool no_tabs = false;     // Flag to disable tab expansion (default: tabs are expanded)
     std::string screen_output_format = "json";
     screen_read->add_flag("--no-children", screen_read_children, "Don't include child elements");
     screen_read->add_flag("--no-tabs", no_tabs, "Skip tab expansion (faster, less complete)");
@@ -98,6 +98,24 @@ int main(int argc, char** argv) {
     screen_read->add_option("--output", screen_output_format, "Output format: json, markdown")
         ->check(CLI::IsMember({"json", "markdown"}));
     auto* screen_capture = screen_cmd->add_subcommand("capture", "Capture screenshot");
+    std::string screenshot_file;
+    std::string screenshot_format = "png";
+    std::string screenshot_scale;
+    std::optional<int> screenshot_x;
+    std::optional<int> screenshot_y;
+    std::optional<int> screenshot_width;
+    std::optional<int> screenshot_height;
+    bool screenshot_show = false;
+
+    screen_capture->add_option("--file,-f", screenshot_file, "Output file path or '-' for stdout");
+    screen_capture->add_option("--format", screenshot_format, "Output format: png, base64")
+        ->check(CLI::IsMember({"png", "base64"}));
+    screen_capture->add_option("--scale", screenshot_scale, "Scale factor (0.0-1.0) or width in pixels");
+    screen_capture->add_option("--x", screenshot_x, "X position for subsection capture (pixels)");
+    screen_capture->add_option("--y", screenshot_y, "Y position for subsection capture (pixels)");
+    screen_capture->add_option("--width", screenshot_width, "Width for subsection capture (pixels)");
+    screen_capture->add_option("--height", screenshot_height, "Height for subsection capture (pixels)");
+    screen_capture->add_flag("--show", screenshot_show, "Display screenshot in window after capture");
     screen_capture->add_option("--connection", screen_conn_id, "Connection ID to use");
 
     // List command - enumerate all SAP connections, sessions, windows
@@ -124,6 +142,10 @@ int main(int argc, char** argv) {
     } else {
         spdlog::set_level(spdlog::level::info);
     }
+
+    // Initialize element renderers (registry pattern for type-based dispatch)
+    sap::renderers::register_all_renderers();
+    spdlog::debug("Element renderers initialized");
 
     // Create command handler
     auto handler = std::make_unique<CommandHandler>();
@@ -158,11 +180,21 @@ int main(int argc, char** argv) {
         }
         else if (*screen_read) {
             // Apply --no-tabs flag: if set, disable tab expansion
-            bool should_expand_tabs = expand_tabs && !no_tabs;
+            // Clearer logic: expand_tabs defaults to true, --no-tabs flag disables it
+            bool should_expand_tabs = !no_tabs;
             command_result = handler->handle_screen_read(screen_read_children, screen_conn_id, should_expand_tabs);
         }
         else if (*screen_capture) {
-            command_result = handler->handle_screenshot(screen_conn_id);
+            ScreenshotOptions screenshot_opts;
+            screenshot_opts.output_file = screenshot_file;
+            screenshot_opts.format = screenshot_format;
+            screenshot_opts.scale = screenshot_scale;
+            screenshot_opts.crop_x = screenshot_x;
+            screenshot_opts.crop_y = screenshot_y;
+            screenshot_opts.crop_width = screenshot_width;
+            screenshot_opts.crop_height = screenshot_height;
+            screenshot_opts.show = screenshot_show;
+            command_result = handler->handle_screenshot(screen_conn_id, screenshot_opts);
         }
         else if (*list_cmd) {
             command_result = handler->handle_list_all();

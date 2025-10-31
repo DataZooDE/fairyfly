@@ -41,6 +41,9 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # Find packages via vcpkg
 find_package(CLI11 CONFIG REQUIRED)
+find_package(CImg CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(PNG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
@@ -50,6 +53,9 @@ if(WIN32)
     # Windows-specific settings for COM support
     add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
 endif()
+
+# Enable PNG support in CImg
+add_compile_definitions(cimg_use_png)
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/src)
@@ -69,6 +75,11 @@ set(FAIRYFLY_SOURCES
     src/table_data_extractor.cpp
     src/formatters/tree_formatter.cpp
     src/formatters/table_formatter.cpp
+    src/string_utils.cpp
+    src/base64.cpp
+    src/semantic_classifier.cpp
+    src/element_renderer_registry.cpp
+    src/element_renderers.cpp
 )
 
 # Create executable
@@ -77,16 +88,20 @@ add_executable(fairyfly ${FAIRYFLY_SOURCES})
 # Link libraries
 target_link_libraries(fairyfly PRIVATE
     CLI11::CLI11
+    CImg::CImg
+    ZLIB::ZLIB
+    PNG::PNG
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     fmt::fmt
 )
 
-# Windows-specific COM libraries
+# Windows-specific COM libraries and GDI for CImg display
 if(WIN32)
     target_link_libraries(fairyfly PRIVATE
         ole32
         oleaut32
+        gdi32
     )
 endif()
 

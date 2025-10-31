@@ -2,11 +2,14 @@
 #include "include/com_automation_engine.h"
 #include "include/formatters/tree_formatter.h"
 #include "include/formatters/table_formatter.h"
+#include "include/element_renderer_registry.h"
+#include "include/semantic_classifier.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <set>
 
 namespace fairyfly {
 namespace cli {
@@ -375,7 +378,7 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
     return result;
 }
 
-Result CommandHandler::handle_screenshot(std::optional<int> connection_id)
+Result CommandHandler::handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -384,7 +387,7 @@ Result CommandHandler::handle_screenshot(std::optional<int> connection_id)
     }
 
     spdlog::info("Capturing screenshot on connection {}", conn_result.value.id);
-    auto result = engine_->capture_screenshot();
+    auto result = engine_->capture_screenshot(options);
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
@@ -475,22 +478,22 @@ static std::map<std::string, std::string> build_label_field_map(const json& hier
 }
 
 // Helper: Get state icon for an element
-static std::string get_state_icon(bool enabled, bool changeable, const std::string& type) {
+static std::string get_state_icon(bool enabled, bool changeable, const std::string& /* type */) {
     if (!enabled) {
-        return "⭕";  // Disabled
+        return "Disabled";
     } else if (!changeable) {
-        return "🔒";  // Read-only
+        return "Read-only";
     } else {
-        return "✏️";  // Editable
+        return "Editable";
     }
 }
 
 // Helper: Format checkbox/radio button state
 static std::string format_boolean_state(const std::string& type, bool selected) {
     if (type.find("CheckBox") != std::string::npos) {
-        return selected ? "☑️" : "☐";
+        return selected ? "[X]" : "[ ]";
     } else if (type.find("RadioButton") != std::string::npos) {
-        return selected ? "🔘" : "⭕";
+        return selected ? "(•)" : "( )";
     }
     return "";
 }
@@ -505,6 +508,43 @@ static std::string escape_markdown(const std::string& text) {
         pos += 2;
     }
     return result;
+}
+
+// Helper: Format menu structure recursively (compact mode)
+static void format_menu(const json& menu, std::ostringstream& oss, const std::string& prefix = "", int level = 0) {
+    std::string text = menu.value("text", menu.value("name", ""));
+    if (text.empty()) return;  // Skip empty menu items (separators)
+
+    auto children = menu.value("children", json::array());
+
+    // Skip System and Help menus at top level (always the same)
+    if (level == 0 && (text == "System" || text == "Help")) {
+        return;
+    }
+
+    // Format this menu item
+    if (level == 0) {
+        // Top-level menu: show items inline
+        if (!children.empty()) {
+            oss << "- **" << escape_markdown(text) << "**: ";
+            // Show first-level children inline
+            std::vector<std::string> items;
+            for (const auto& child : children) {
+                std::string child_text = child.value("text", child.value("name", ""));
+                if (!child_text.empty()) {
+                    items.push_back(child_text);
+                }
+            }
+            for (size_t i = 0; i < items.size(); ++i) {
+                oss << items[i];
+                if (i < items.size() - 1) oss << ", ";
+            }
+            oss << "\n";
+        } else {
+            oss << "- **" << escape_markdown(text) << "**\n";
+        }
+    }
+    // Skip deeper levels in compact mode
 }
 
 // Helper: Format table/grid element with detailed information
@@ -556,7 +596,8 @@ static void format_table_element(std::ostringstream& oss, const json& elem) {
 }
 
 // Helper: Format tree element with navigation hints
-static void format_tree_element(std::ostringstream& oss, const json& elem) {
+// Note: Currently unused (kept for reference in commented code below)
+[[maybe_unused]] static void format_tree_element(std::ostringstream& oss, const json& elem) {
     std::string type = elem.value("type", "");
     std::string name = elem.value("name", "");
     std::string id = elem.value("id", "");
@@ -618,16 +659,43 @@ static std::string format_screen_markdown(const json& data) {
     // Build label-to-field mapping
     auto label_map = build_label_field_map(hierarchy);
 
+    // Menu bar section - extract from "other" category
+    if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
+        // Find the menu bar (GuiMenubar) and extract top-level menus
+        std::vector<json> menu_items;
+        for (const auto& elem : hierarchy["other"]) {
+            std::string type = elem.value("type", "");
+            std::string id = elem.value("id", "");
+            // Top-level menus have pattern: /wnd[0]/mbar/menu[N]
+            if (type == "GuiMenu" && id.find("/mbar/menu[") != std::string::npos) {
+                // Check if this is a direct child of mbar (top-level menu)
+                size_t mbar_pos = id.find("/mbar/menu[");
+                size_t after_menu = id.find("]", mbar_pos + 11);
+                if (after_menu != std::string::npos && after_menu + 1 == id.length()) {
+                    menu_items.push_back(elem);
+                }
+            }
+        }
+
+        if (!menu_items.empty()) {
+            oss << "## Menu Bar\n\n";
+            for (const auto& menu : menu_items) {
+                format_menu(menu, oss);
+            }
+            oss << "\n";
+        }
+    }
+
     // Toolbar section (compact format)
     if (hierarchy.contains("toolbar") && !hierarchy["toolbar"].empty()) {
-        oss << "## 🔧 Toolbar\n\n";
-        int toolbar_count = hierarchy["toolbar"].size();
+        oss << "## Toolbar\n\n";
+        int toolbar_count = static_cast<int>(hierarchy["toolbar"].size());
         oss << "**System & Application Toolbars:** " << toolbar_count << " items\n\n";
     }
 
     // Form fields section with table format
     if (hierarchy.contains("form_fields") && !hierarchy["form_fields"].empty()) {
-        oss << "## 📝 Form Fields\n\n";
+        oss << "## Form Fields\n\n";
         oss << "| Field | Value | State | Technical ID |\n";
         oss << "|-------|-------|-------|-------------|\n";
 
@@ -690,7 +758,7 @@ static std::string format_screen_markdown(const json& data) {
 
     // Buttons section with table format
     if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) {
-        oss << "## 🔘 Action Buttons\n\n";
+        oss << "## Action Buttons\n\n";
         oss << "| Button | Shortcut | State | Technical ID |\n";
         oss << "|--------|----------|-------|-------------|\n";
 
@@ -715,7 +783,7 @@ static std::string format_screen_markdown(const json& data) {
 
             oss << "| **" << escape_markdown(label) << "** | ";
             oss << escape_markdown(shortcut) << " | ";
-            oss << (enabled ? "✓ Enabled" : "⭕ Disabled") << " | ";
+            oss << (enabled ? "Enabled" : "Disabled") << " | ";
             oss << "`" << id << "` |\n";
         }
         oss << "\n";
@@ -733,13 +801,13 @@ static std::string format_screen_markdown(const json& data) {
             std::string tab_id = tab_data.value("tab_id", "");
             int elem_count = tab_data.value("element_count", 0);
 
-            oss << "### 📄 " << escape_markdown(tab_name) << "\n";
+            oss << "### " << escape_markdown(tab_name) << "\n";
             oss << "**Technical ID:** `" << tab_id << "` | **Elements:** " << elem_count << "\n\n";
 
             // Extract and display tab-specific fields
             if (tab_data.contains("hierarchy") && tab_data["hierarchy"].contains("form_fields")) {
                 const auto& fields = tab_data["hierarchy"]["form_fields"];
-                auto label_map = build_label_field_map(tab_data["hierarchy"]);
+                auto tab_label_map = build_label_field_map(tab_data["hierarchy"]);
 
                 if (!fields.empty()) {
                     oss << "| Field | Value | State | Technical ID |\n";
@@ -756,8 +824,8 @@ static std::string format_screen_markdown(const json& data) {
 
                         // Get label text for this field
                         std::string label_text = "";
-                        if (label_map.count(id)) {
-                            label_text = label_map[id];
+                        if (tab_label_map.count(id)) {
+                            label_text = tab_label_map[id];
                         } else if (!name.empty()) {
                             label_text = name;
                         }
@@ -853,12 +921,17 @@ static std::string format_screen_markdown(const json& data) {
 
     // Tables and Grids section - use new formatters
     if (hierarchy.contains("tables") && !hierarchy["tables"].empty()) {
-        oss << "## 📊 Tables and Grids\n\n";
+        oss << "## Tables and Grids\n\n";
 
         formatters::TableFormatter table_formatter;
         for (const auto& elem : hierarchy["tables"]) {
             std::string type = elem.value("type", "");
-            if (table_formatter.can_format(type)) {
+            std::string subtype = elem.value("subtype", "");
+
+            // Use TableFormatter for GuiGridView, GuiTableControl, or GuiShell with GridView subtype
+            if (table_formatter.can_format(type) ||
+                (type == "GuiShell" && subtype == "GridView") ||
+                elem.contains("table_data")) {
                 // Use new formatter with table_data support
                 table_formatter.format_to_markdown(elem, oss);
             } else {
@@ -868,20 +941,25 @@ static std::string format_screen_markdown(const json& data) {
         }
     }
 
-    // Trees section (often found in "other" category) - use new formatter
+    // Trees section - DISABLED: Trees now shown in Screen Structure section below
+    // (Keeping this code commented for reference, can be removed later)
+    /*
     bool has_trees = false;
     if (hierarchy.contains("other")) {
         formatters::TreeFormatter tree_formatter;
 
         for (const auto& elem : hierarchy["other"]) {
             std::string type = elem.value("type", "");
-            if (type.find("Tree") != std::string::npos) {
+            bool is_tree = (type.find("Tree") != std::string::npos) ||
+                          (type == "GuiShell" && elem.contains("tree_data"));
+
+            if (is_tree) {
                 if (!has_trees) {
-                    oss << "## 🌳 Tree Controls\n\n";
+                    oss << "## Tree Controls\n\n";
                     has_trees = true;
                 }
 
-                if (tree_formatter.can_format(type)) {
+                if (tree_formatter.can_format(type) || elem.contains("tree_data")) {
                     // Use new formatter with tree_data support
                     tree_formatter.format_to_markdown(elem, oss);
                 } else {
@@ -891,12 +969,74 @@ static std::string format_screen_markdown(const json& data) {
             }
         }
     }
+    */
 
-    // Other elements summary
+    // Semantic Screen Structure - walk full hierarchy recursively, show only semantic elements
     if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
-        size_t other_count = hierarchy["other"].size();
-        oss << "## 📦 Other Elements\n\n";
-        oss << "_" << other_count << " additional elements (containers, labels, etc.)_\n\n";
+        oss << "## Screen Structure\n\n";
+        oss << "_Showing semantic elements only (layout containers hidden):_\n\n";
+
+        auto& registry = sap::ElementRendererRegistry::instance();
+
+        // Build set of all element IDs to identify parent-child relationships
+        std::set<std::string> all_ids;
+        std::set<std::string> child_ids;
+
+        for (const auto& elem : hierarchy["other"]) {
+            std::string id = elem.value("id", "");
+            if (!id.empty()) {
+                all_ids.insert(id);
+            }
+        }
+
+        // Collect all IDs that appear as children of other elements
+        for (const auto& elem : hierarchy["other"]) {
+            if (elem.contains("children") && elem["children"].is_array()) {
+                for (const auto& child : elem["children"]) {
+                    std::string child_id = child.value("id", "");
+                    if (!child_id.empty()) {
+                        child_ids.insert(child_id);
+                    }
+                }
+            }
+        }
+
+        // Only render elements that are NOT children of other elements (i.e., true top-level)
+        for (const auto& elem : hierarchy["other"]) {
+            std::string id = elem.value("id", "");
+            bool is_top_level = (id.empty() || child_ids.find(id) == child_ids.end());
+
+            if (is_top_level && sap::SemanticClassifier::should_display(elem)) {
+                std::string rendered = registry.render_to_markdown(elem, 0);
+                if (!rendered.empty()) {
+                    oss << rendered;
+                }
+            }
+        }
+    }
+
+    // Other elements summary (excluding menus which are shown in menu bar section)
+    if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
+        // Count element types (excluding menus which are already shown)
+        std::map<std::string, int> type_counts;
+        for (const auto& elem : hierarchy["other"]) {
+            std::string type = elem.value("type", "Unknown");
+            // Skip menus as they're shown in the menu bar section
+            if (type != "GuiMenu") {
+                type_counts[type]++;
+            }
+        }
+
+        if (!type_counts.empty()) {
+            oss << "## Other Elements\n\n";
+            oss << "| Element Type | Count |\n";
+            oss << "|--------------|-------|\n";
+            for (const auto& [type, count] : type_counts) {
+                oss << "| " << type << " | " << count << " |\n";
+            }
+            oss << "\n";
+            oss << "_These elements include containers, shells, status bars, and other UI components._\n\n";
+        }
     }
 
     // Summary stats

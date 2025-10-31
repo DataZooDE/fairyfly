@@ -14,7 +14,7 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
     std::string id = element_json.value("id", "");
 
     // Header
-    oss << "### 📊 " << (name.empty() ? "Table" : escape_markdown(name)) << "\n\n";
+    oss << "### " << (name.empty() ? "Table" : escape_markdown(name)) << "\n\n";
 
     // Check if we have table_data
     if (!element_json.contains("table_data")) {

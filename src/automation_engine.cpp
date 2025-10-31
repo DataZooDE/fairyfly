@@ -1,5 +1,6 @@
 #include "include/automation_engine.h"
 #include "include/com_automation_engine.h"
+#include "include/cli_handler.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 
@@ -57,8 +58,8 @@ public:
         return impl_->read_screen_with_tabs();
     }
 
-    Result capture_screenshot() override {
-        return impl_->capture_screenshot();
+    Result capture_screenshot(const cli::ScreenshotOptions& options) override {
+        return impl_->capture_screenshot(options);
     }
 
     nlohmann::json get_application_info() const override {
@@ -263,16 +264,27 @@ public:
         return result;
     }
 
-    Result capture_screenshot() override {
+    Result capture_screenshot(const cli::ScreenshotOptions& options) override {
         auto start = std::chrono::high_resolution_clock::now();
 
         auto end = std::chrono::high_resolution_clock::now();
         Result result;
         result.status = Result::Status::Success;
-        result.data["screenshot"] = "data:image/png;base64,[stub]";
+
+        if (options.format == "base64") {
+            result.data["screenshot"] = "data:image/png;base64,[stub]";
+            result.data["format"] = "base64";
+        } else {
+            result.data["filepath"] = options.output_file.empty() ? "screenshot_stub.png" : options.output_file;
+        }
+
+        if (options.show) {
+            result.data["displayed"] = true;
+        }
+
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-        spdlog::info("Captured screenshot");
+        spdlog::info("Captured screenshot (stub)");
         return result;
     }
 

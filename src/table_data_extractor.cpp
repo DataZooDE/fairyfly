@@ -1,5 +1,7 @@
 #include "include/table_data_extractor.h"
 #include <spdlog/spdlog.h>
+#include <map>
+#include <functional>
 
 namespace fairyfly {
 namespace sap {
@@ -100,16 +102,30 @@ TreeData TableDataExtractor::extract_tree_data(ComGuiElementPtr element) const {
     }
 
     try {
-        // Extract column headers if tree is a column tree
+        // Extract column headers
         if (options_.include_headers) {
-            try {
-                int col_count = element->get_property_int(L"ColumnCount");
-                if (col_count > 0) {
-                    data.columns = get_column_names(element);
-                    spdlog::debug("Tree has {} columns", col_count);
+            std::string type = element->get_type();
+            std::string subtype = element->get_property_string(L"SubType");
+
+            // For GuiShell trees, use ColumnOrder
+            if (type == "GuiShell" && subtype == "Tree") {
+                auto all_columns = element->get_column_order();
+                if (all_columns.size() > 1) {
+                    // Skip first column (HierarchyHeader) - it's the text column
+                    data.columns = std::vector<std::string>(all_columns.begin() + 1, all_columns.end());
+                    spdlog::debug("GuiShell tree has {} data columns", data.columns.size());
                 }
-            } catch (...) {
-                // Not a column tree, single column (node text only)
+            } else {
+                // For other tree types, try ColumnCount
+                try {
+                    int col_count = element->get_property_int(L"ColumnCount");
+                    if (col_count > 0) {
+                        data.columns = get_column_names(element);
+                        spdlog::debug("Tree has {} columns", col_count);
+                    }
+                } catch (...) {
+                    // Not a column tree, single column (node text only)
+                }
             }
         }
 
@@ -140,12 +156,8 @@ std::string TableDataExtractor::get_grid_cell_value(
         if (col >= 0 && col < static_cast<int>(column_names.size())) {
             std::string col_name = column_names[col];
 
-            // Call GetCellValue using COM method invocation
-            // This requires invoking a method with parameters
-            // For now, return empty until we implement full COM method invocation
-
-            spdlog::debug("Would call GetCellValue({}, '{}')", row, col_name);
-            return "";  // TODO: Implement COM method call
+            // Call GetCellValue using the ComGuiElement method
+            return grid->get_cell_value(row, col_name);
         }
 
     } catch (const std::exception& e) {
@@ -160,14 +172,14 @@ std::vector<std::string> TableDataExtractor::get_column_names(ComGuiElementPtr e
 
     try {
         // Try to get ColumnOrder collection (for grids/trees)
-        // This is a COM collection object containing column identifiers
+        columns = element->get_column_order();
 
-        // For now, return generic column names
-        // Full implementation would enumerate the ColumnOrder collection
-
-        int col_count = element->get_property_int(L"ColumnCount");
-        for (int i = 0; i < col_count; ++i) {
-            columns.push_back("Column" + std::to_string(i));
+        // If ColumnOrder failed or returned empty, fall back to generic names
+        if (columns.empty()) {
+            int col_count = element->get_property_int(L"ColumnCount");
+            for (int i = 0; i < col_count; ++i) {
+                columns.push_back("Column" + std::to_string(i));
+            }
         }
 
     } catch (const std::exception& e) {
@@ -188,6 +200,110 @@ void TableDataExtractor::traverse_tree_nodes(
     }
 
     try {
+        std::string type = tree_element->get_type();
+        std::string subtype = tree_element->get_property_string(L"SubType");
+
+        // Special handling for GuiShell containing TableTreeControl
+        if (type == "GuiShell" && subtype == "Tree") {
+            spdlog::debug("Detected GuiShell tree control, using GetAllNodeKeys()");
+
+            // Get all node keys from the tree
+            auto node_keys = tree_element->get_all_node_keys();
+            spdlog::info("Retrieved {} nodes from GuiShell tree", node_keys.size());
+
+            // Get column names (skip first column which is the hierarchy/text column)
+            auto all_columns = tree_element->get_column_order();
+            std::vector<std::string> data_columns;
+            if (all_columns.size() > 1) {
+                data_columns = std::vector<std::string>(all_columns.begin() + 1, all_columns.end());
+                spdlog::debug("Tree has {} data columns", data_columns.size());
+            }
+
+            // Build flat list with hierarchy information
+            std::map<std::string, TreeNode> node_map;  // key -> node
+
+            for (const auto& key : node_keys) {
+                TreeNode node;
+                node.key = key;
+                node.text = tree_element->get_node_text_by_key(key);
+
+                // Get path to determine hierarchy level
+                std::string path = tree_element->get_node_path_by_key(key);
+
+                // Parse path to determine level (count backslashes)
+                int level = 0;
+                for (char c : path) {
+                    if (c == '\\') level++;
+                }
+                node.level = level;
+
+                // Get column values for this node
+                for (const auto& col_name : data_columns) {
+                    std::string col_value = tree_element->get_item_text(key, col_name);
+                    node.column_values.push_back(col_value);
+                }
+
+                node.expanded = false;
+
+                // Determine parent from path
+                // Path format: "1" (top-level), "1\1" (child of node 1), "1\2\3" (grandchild)
+                std::string parent_key;
+                if (level > 0) {
+                    // Extract parent path by removing last segment
+                    size_t last_backslash = path.find_last_of('\\');
+                    if (last_backslash != std::string::npos) {
+                        std::string parent_path = path.substr(0, last_backslash);
+
+                        // Find node with this path
+                        for (const auto& [k, n] : node_map) {
+                            if (tree_element->get_node_path_by_key(k) == parent_path) {
+                                parent_key = k;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                node_map[key] = std::move(node);
+            }
+
+            // Build hierarchical structure
+            for (auto& [key, node] : node_map) {
+                if (node.level == 0) {
+                    // Top-level node
+                    nodes.push_back(std::move(node));
+                } else {
+                    // Find parent and add as child
+                    std::string path = tree_element->get_node_path_by_key(key);
+                    size_t last_backslash = path.find_last_of('\\');
+                    if (last_backslash != std::string::npos) {
+                        std::string parent_path = path.substr(0, last_backslash);
+
+                        // Find parent node in our tree
+                        std::function<bool(std::vector<TreeNode>&, const std::string&, TreeNode&&)> add_to_parent;
+                        add_to_parent = [&](std::vector<TreeNode>& tree_nodes, const std::string& target_path, TreeNode&& child) -> bool {
+                            for (auto& n : tree_nodes) {
+                                std::string n_path = tree_element->get_node_path_by_key(n.key);
+                                if (n_path == target_path) {
+                                    n.children.push_back(std::move(child));
+                                    return true;
+                                }
+                                if (add_to_parent(n.children, target_path, std::move(child))) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
+
+                        add_to_parent(nodes, parent_path, std::move(node));
+                    }
+                }
+            }
+
+            return;
+        }
+
+        // Original implementation for GuiTree and other tree types
         // Get tree children (nodes)
         int child_count = tree_element->get_child_count();
 
@@ -234,7 +350,7 @@ void TableDataExtractor::traverse_tree_nodes(
 
 std::string TableDataExtractor::get_tree_node_text(
     ComGuiElementPtr tree,
-    const std::string& node_key
+    const std::string& /* node_key */
 ) const {
     try {
         // Would call GetNodeTextByKey(key) method
