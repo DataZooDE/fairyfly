@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Allow manual triggering
 
+env:
+  VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -19,18 +22,21 @@ jobs:
       run: |
         git clone https://github.com/microsoft/vcpkg.git
         cd vcpkg
-        git checkout 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
+        git checkout ${{ env.VCPKG_COMMIT }}
         .\bootstrap-vcpkg.bat
       shell: pwsh
 
-    - name: Cache vcpkg packages
+    - name: Cache vcpkg (comprehensive)
       uses: actions/cache@v4
       with:
         path: |
           ${{ github.workspace }}/vcpkg_installed
           ${{ github.workspace }}/vcpkg/packages
-        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          ${{ github.workspace }}/vcpkg/buildtrees
+          ${{ github.workspace }}/vcpkg/downloads
+        key: vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
         restore-keys: |
+          vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
           vcpkg-${{ runner.os }}-
 
     - name: Setup MSVC
@@ -38,16 +44,28 @@ jobs:
       with:
         arch: x64
 
-    - name: Configure CMake
+    - name: Set VCPKG_ROOT environment variable
       run: |
-        cmake -B build `
-          -DCMAKE_BUILD_TYPE=Release `
-          -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $env:GITHUB_ENV
+        echo "VCPKG_ROOT set to: ${{ github.workspace }}/vcpkg"
       shell: pwsh
 
-    - name: Build
-      run: cmake --build build --config Release --parallel
+    - name: Build using Makefile
+      run: |
+        Write-Host "Building fairyfly using Makefile..."
+        make release
+      shell: pwsh
+
+    - name: Run unit tests (SAP-free tests only)
+      run: |
+        Write-Host "Running unit tests (excluding SAP GUI-dependent tests)..."
+        # Run tests excluding [!mayfail] tagged tests
+        & "build/Release/unit_tests.exe" "~[!mayfail]" --reporter junit --out build/test-results.xml
+
+        # Also run with console output for CI logs
+        & "build/Release/unit_tests.exe" "~[!mayfail]"
+      shell: pwsh
+      continue-on-error: false
 
     - name: Verify executable
       run: |
@@ -57,7 +75,9 @@ jobs:
           Write-Host "  Size: $([math]::Round($size, 2)) MB"
 
           # Test executable runs
+          Write-Host "`nTesting executable..."
           & "build/Release/fairyfly.exe" --version
+          & "build/Release/fairyfly.exe" --help
         } else {
           Write-Error "fairyfly.exe not found!"
           exit 1
@@ -71,3 +91,11 @@ jobs:
         path: build/Release/fairyfly.exe
         retention-days: 90
         if-no-files-found: error
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: build/test-results.xml
+        retention-days: 30
