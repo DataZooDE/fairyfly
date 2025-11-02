@@ -1310,61 +1310,49 @@ static std::string format_screen_markdown(const json& data) {
             oss << "\n";
         }
 
-        // IMPORTANT: Also render non-grid semantic elements (GuiTextedit, TextEdit shells, etc.)
-        // Grid detection doesn't mean EVERYTHING is grid-based - reports may have both
+        // IMPORTANT: Also render non-grid elements for report content
+        // Report logs use individual GuiLabel elements, not GuiTextedit
+        // Collect all non-whitespace labels and render them as log output
         if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
-            auto& registry = sap::ElementRendererRegistry::instance();
+            std::vector<std::string> log_lines;
 
-            // Build set of child IDs to identify top-level elements
-            std::set<std::string> child_ids;
-            for (const auto& elem : hierarchy["other"]) {
-                if (elem.contains("children") && elem["children"].is_array()) {
-                    for (const auto& child : elem["children"]) {
-                        std::string child_id = child.value("id", "");
-                        if (!child_id.empty()) {
-                            child_ids.insert(child_id);
-                        }
-                    }
-                }
-            }
-
-            // Find and render semantic text-based elements (GuiTextedit, GuiShell with TextEdit subtype)
-            std::function<void(const json&, int)> render_text_elements = [&](const json& elem, int depth) {
+            std::function<void(const json&)> collect_log_lines = [&](const json& elem) {
                 std::string type = elem.value("type", "");
-                std::string subtype = elem.value("subtype", "");
 
-                // Check if this is a text-based element (report output, log display, etc.)
-                bool is_text_element = (type == "GuiTextedit") ||
-                                      (type == "GuiShell" && subtype == "TextEdit");
-
-                if (is_text_element && sap::SemanticClassifier::should_display(elem)) {
+                // Collect text from GuiLabel elements (report output)
+                if (type == "GuiLabel") {
                     std::string text = elem.value("text", "");
-                    // Only render if it has substantial content
-                    if (text.length() > 50) {
-                        std::string rendered = registry.render_to_markdown(elem, 0);
-                        if (!rendered.empty()) {
-                            oss << rendered;
-                        }
+                    // Skip whitespace-only labels
+                    std::string trimmed = text;
+                    trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
+                    trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
+
+                    if (!trimmed.empty() && trimmed.length() > 5) {
+                        log_lines.push_back(trimmed);
                     }
-                    return; // Don't recurse into children if we rendered this element
                 }
 
-                // Recurse into children to find text elements
+                // Recurse into children
                 if (elem.contains("children") && elem["children"].is_array()) {
                     for (const auto& child : elem["children"]) {
-                        render_text_elements(child, depth + 1);
+                        collect_log_lines(child);
                     }
                 }
             };
 
-            // Start from top-level elements in "other" category
+            // Collect log lines from all elements
             for (const auto& elem : hierarchy["other"]) {
-                std::string id = elem.value("id", "");
-                bool is_top_level = (id.empty() || child_ids.find(id) == child_ids.end());
+                collect_log_lines(elem);
+            }
 
-                if (is_top_level) {
-                    render_text_elements(elem, 0);
+            // Render log output if we found content
+            if (!log_lines.empty()) {
+                oss << "## Report Output\n\n";
+                oss << "```\n";
+                for (const auto& line : log_lines) {
+                    oss << line << "\n";
                 }
+                oss << "```\n\n";
             }
         }
 
