@@ -730,9 +730,10 @@ static std::string render_status_section(const std::vector<GridCell>& cells) {
             label_cols.insert(cell.col);
         }
 
-        // Find row with best column overlap, prioritizing below label row
+        // Find row with best column overlap, prioritizing closest row below label row
         int best_value_row = -1;
         int best_match_count = 0;
+        int best_distance = INT_MAX;
 
         for (const auto& [row, row_cells] : rows_map) {
             // Skip label row itself
@@ -767,12 +768,33 @@ static std::string render_status_section(const std::vector<GridCell>& cells) {
                 }
             }
 
-            // Accept if we have significant column overlap (more than 0)
-            // Prefer rows below the label row when there are multiple matches
-            if (match_count > best_match_count ||
-                (match_count == best_match_count && row > label_row && best_value_row != -1 && best_value_row <= label_row)) {
+            // Prefer rows below the label row and closer to it
+            // Selection criteria (in order of priority):
+            // 1. More matching columns is better
+            // 2. If same match count, prefer rows below (row > label_row)
+            // 3. If same match count and both below, prefer closer row
+            if (match_count > best_match_count) {
+                // Strictly better match count
                 best_match_count = match_count;
                 best_value_row = row;
+                best_distance = std::abs(row - label_row);
+            } else if (match_count == best_match_count && match_count > 0) {
+                // Same match count - apply tiebreaker
+                bool new_is_below = (row > label_row);
+                bool best_is_below = (best_value_row > label_row);
+
+                if (new_is_below && !best_is_below) {
+                    // New row is below, old is above/same - prefer new
+                    best_value_row = row;
+                    best_distance = std::abs(row - label_row);
+                } else if (new_is_below && best_is_below) {
+                    // Both below - prefer closer one
+                    int new_distance = row - label_row;
+                    if (new_distance < best_distance) {
+                        best_value_row = row;
+                        best_distance = new_distance;
+                    }
+                }
             }
         }
 
