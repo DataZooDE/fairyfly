@@ -16,16 +16,19 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Setup vcpkg
-      uses: microsoft/setup-vcpkg@v1
-      with:
-        vcpkgGitCommitId: '29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c'
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        git checkout 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
+        .\bootstrap-vcpkg.bat
+      shell: pwsh
 
     - name: Cache vcpkg packages
       uses: actions/cache@v4
       with:
         path: |
           ${{ github.workspace }}/vcpkg_installed
-          ${{ env.VCPKG_ROOT }}/packages
+          ${{ github.workspace }}/vcpkg/packages
         key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
         restore-keys: |
           vcpkg-${{ runner.os }}-
@@ -40,7 +43,7 @@ jobs:
         cmake -B build `
           -DCMAKE_BUILD_TYPE=Release `
           -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
       shell: pwsh
 
     - name: Build
