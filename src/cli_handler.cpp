@@ -1311,15 +1311,20 @@ static std::string format_screen_markdown(const json& data) {
         }
 
         // IMPORTANT: Also render non-grid elements for report content
-        // Report logs use individual GuiLabel elements, not GuiTextedit
-        // Collect all non-whitespace labels and render them as log output
+        // Report logs use individual GuiLabel elements with grid positions
+        // Collect labels by row and format them together
         if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
-            std::vector<std::string> log_lines;
+            struct LabelInfo {
+                std::string text;
+                int row;
+                int col;
+            };
+            std::vector<LabelInfo> labels;
 
-            std::function<void(const json&)> collect_log_lines = [&](const json& elem) {
+            std::function<void(const json&)> collect_labels = [&](const json& elem) {
                 std::string type = elem.value("type", "");
 
-                // Collect text from GuiLabel elements (report output)
+                // Collect text from GuiLabel elements with grid positions
                 if (type == "GuiLabel") {
                     std::string text = elem.value("text", "");
                     // Skip whitespace-only labels
@@ -1327,30 +1332,56 @@ static std::string format_screen_markdown(const json& data) {
                     trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
                     trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
 
-                    if (!trimmed.empty() && trimmed.length() > 5) {
-                        log_lines.push_back(trimmed);
+                    if (!trimmed.empty() && trimmed.length() > 2) {
+                        LabelInfo info;
+                        info.text = trimmed;
+                        info.row = elem.value("grid_row", -1);
+                        info.col = elem.value("grid_col", -1);
+                        labels.push_back(info);
                     }
                 }
 
                 // Recurse into children
                 if (elem.contains("children") && elem["children"].is_array()) {
                     for (const auto& child : elem["children"]) {
-                        collect_log_lines(child);
+                        collect_labels(child);
                     }
                 }
             };
 
-            // Collect log lines from all elements
+            // Collect all labels
             for (const auto& elem : hierarchy["other"]) {
-                collect_log_lines(elem);
+                collect_labels(elem);
             }
 
-            // Render log output if we found content
-            if (!log_lines.empty()) {
+            // Group labels by row and format them
+            if (!labels.empty()) {
+                std::map<int, std::vector<LabelInfo>> rows;
+                for (const auto& label : labels) {
+                    if (label.row >= 0) {
+                        rows[label.row].push_back(label);
+                    }
+                }
+
+                // Sort each row by column
+                for (auto& [row, row_labels] : rows) {
+                    std::sort(row_labels.begin(), row_labels.end(),
+                             [](const LabelInfo& a, const LabelInfo& b) { return a.col < b.col; });
+                }
+
+                // Render row by row
                 oss << "## Report Output\n\n";
                 oss << "```\n";
-                for (const auto& line : log_lines) {
-                    oss << line << "\n";
+                for (const auto& [row, row_labels] : rows) {
+                    // Combine labels in the same row
+                    std::string line;
+                    for (size_t i = 0; i < row_labels.size(); ++i) {
+                        if (i > 0) line += " ";
+                        line += row_labels[i].text;
+                    }
+                    if (!line.empty()) {
+                        oss << line << "\n";
+                    }
                 }
                 oss << "```\n\n";
             }
