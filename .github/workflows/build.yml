@@ -1,0 +1,70 @@
+name: Build fairyfly
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup vcpkg
+      uses: microsoft/setup-vcpkg@v1
+      with:
+        vcpkgGitCommitId: '29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c'
+
+    - name: Cache vcpkg packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/vcpkg_installed
+          ${{ env.VCPKG_ROOT }}/packages
+        key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Configure CMake
+      run: |
+        cmake -B build `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+      shell: pwsh
+
+    - name: Build
+      run: cmake --build build --config Release --parallel
+
+    - name: Verify executable
+      run: |
+        if (Test-Path "build/Release/fairyfly.exe") {
+          Write-Host "✓ fairyfly.exe built successfully"
+          $size = (Get-Item "build/Release/fairyfly.exe").Length / 1MB
+          Write-Host "  Size: $([math]::Round($size, 2)) MB"
+
+          # Test executable runs
+          & "build/Release/fairyfly.exe" --version
+        } else {
+          Write-Error "fairyfly.exe not found!"
+          exit 1
+        }
+      shell: pwsh
+
+    - name: Upload fairyfly.exe artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-windows-x64
+        path: build/Release/fairyfly.exe
+        retention-days: 90
+        if-no-files-found: error
