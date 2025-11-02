@@ -123,7 +123,7 @@ TreeData TableDataExtractor::extract_tree_data(ComGuiElementPtr element) const {
                         data.columns = get_column_names(element);
                         spdlog::debug("Tree has {} columns", col_count);
                     }
-                } catch (...) {
+                } catch (const std::exception&) {
                     // Not a column tree, single column (node text only)
                 }
             }
@@ -323,7 +323,7 @@ void TableDataExtractor::traverse_tree_nodes(
                 // Check if node is expanded
                 try {
                     node.expanded = child->get_property_bool(L"Expanded");
-                } catch (...) {
+                } catch (const std::exception&) {
                     node.expanded = false;
                 }
 
@@ -356,7 +356,8 @@ std::string TableDataExtractor::get_tree_node_text(
         // Would call GetNodeTextByKey(key) method
         // For now, return empty
         return "";
-    } catch (...) {
+    } catch (const std::exception& e) {
+        spdlog::debug("get_tree_node_text failed: {}", e.what());
         return "";
     }
 }

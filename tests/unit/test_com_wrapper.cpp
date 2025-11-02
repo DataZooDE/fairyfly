@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
-#include "include/com_wrapper.h"
+#include "include/com/wrapper.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;

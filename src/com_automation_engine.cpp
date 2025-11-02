@@ -1,4 +1,6 @@
 #include "include/com_automation_engine.h"
+#include "include/com/raii_helpers.h"
+#include "include/constants.h"
 #include "include/trace.h"
 #include "include/element_type_registry.h"
 #include "include/screen_element_collector.h"
@@ -25,7 +27,7 @@
 // Force Windows GDI display (not X11)
 #ifdef _WIN32
     #ifndef cimg_display
-        #define cimg_display 2  // 2 = Windows GDI display
+        #define cimg_display 2  // CIMG_DISPLAY_GDI value
     #endif
 #else
     #ifndef cimg_display
@@ -45,17 +47,29 @@ ComAutomationEngine::ComAutomationEngine() {
         app_ = ComGuiApplication::create();
         spdlog::debug("ComAutomationEngine initialized successfully");
 
+        // Initialize connection launcher
+        connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
+
         // Check if any connections exist
         if (app_->get_connection_count() > 0) {
             current_connection_ = app_->get_connection(0);
             if (current_connection_ && current_connection_->get_session_count() > 0) {
                 current_session_ = current_connection_->get_session(0);
                 spdlog::debug("Found existing connection and session");
+                initialize_services();
             }
         }
     } catch (const ComException& e) {
         spdlog::warn("SAP GUI not available: {}", e.what());
         // Non-fatal - can still be initialized, just not connected
+    }
+}
+
+void ComAutomationEngine::initialize_services() {
+    if (current_session_) {
+        screenshot_handler_ = std::make_unique<ScreenshotHandler>(current_session_);
+        screen_reader_ = std::make_unique<ScreenReader>(current_session_);
+        spdlog::debug("Service classes initialized");
     }
 }
 
@@ -76,196 +90,17 @@ ComGuiSessionPtr ComAutomationEngine::ensure_session() {
             throw ComException("No sessions available in connection");
         }
         current_session_ = conn->get_session(0);
+        initialize_services();
     }
     return current_session_;
 }
 
-// Helper: Read credentials from trial.env file
-std::optional<ComAutomationEngine::Credentials> ComAutomationEngine::read_credentials_from_env(const std::string& connection_name) {
-    (void)connection_name;  // Unused for now - will be used when we support multiple profiles
-    std::string env_path = "trial.env";
-    std::ifstream file(env_path);
-
-    if (!file.is_open()) {
-        spdlog::warn("trial.env not found, credentials unavailable");
-        return std::nullopt;
-    }
-
-    Credentials creds;
-    std::string line;
-
-    while (std::getline(file, line)) {
-        // Skip empty lines and comments
-        if (line.empty() || line[0] == '#') continue;
-
-        // Parse "Key: Value" format
-        auto colon_pos = line.find(':');
-        if (colon_pos == std::string::npos) continue;
-
-        std::string key = line.substr(0, colon_pos);
-        std::string value = line.substr(colon_pos + 1);
-
-        // Trim whitespace
-        key.erase(0, key.find_first_not_of(" \t"));
-        key.erase(key.find_last_not_of(" \t") + 1);
-        value.erase(0, value.find_first_not_of(" \t"));
-        value.erase(value.find_last_not_of(" \t") + 1);
-
-        if (key == "Connection") creds.system_id = value;
-        else if (key == "Username") creds.username = value;
-        else if (key == "Password") creds.password = value;
-        else if (key == "System ID") creds.client = value;
-        else if (key == "Instance Number") creds.instance = value;
-    }
-
-    // Validate required fields
-    if (creds.username.empty() || creds.password.empty()) {
-        spdlog::error("trial.env missing required credentials (Username/Password)");
-        return std::nullopt;
-    }
-
-    spdlog::debug("Loaded credentials from trial.env for user: {}", creds.username);
-    return creds;
-}
-
-// Helper: Launch sapshcut.exe with credentials
-bool ComAutomationEngine::launch_sapshcut(const std::string& connection_name, const Credentials& creds) {
-    // Find sapshcut.exe
-    std::vector<std::string> possible_paths = {
-        "C:\\Program Files\\SAP\\FrontEnd\\SAPgui\\sapshcut.exe",
-        "C:\\Program Files (x86)\\SAP\\FrontEnd\\SAPgui\\sapshcut.exe"
-    };
-
-    std::string sapshcut_path;
-    for (const auto& path : possible_paths) {
-        std::ifstream test(path);
-        if (test.good()) {
-            sapshcut_path = path;
-            break;
-        }
-    }
-
-    if (sapshcut_path.empty()) {
-        spdlog::error("sapshcut.exe not found in standard SAP GUI installation paths");
-        return false;
-    }
-
-    // Build command: sapshcut.exe -sysname=X -client=X -user=X -pw=X -language=EN
-    // Use -sysname for SAP Logon connection names (not -system which is for system IDs)
-    std::string cmd = fmt::format(
-        "\"{}\" -sysname=\"{}\" -client={} -user={} -pw=\"{}\" -language=EN -maxgui",
-        sapshcut_path,
-        connection_name,
-        creds.client,
-        creds.username,
-        creds.password
-    );
-
-    spdlog::info("Launching sapshcut for connection: {}", connection_name);
-    spdlog::debug("sapshcut command (password redacted)");
-
-    // Launch process using CreateProcess
-    STARTUPINFOA si = {};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {};
-
-    // Create command buffer (CreateProcess may modify the string)
-    std::vector<char> cmd_buffer(cmd.begin(), cmd.end());
-    cmd_buffer.push_back('\0');
-
-    BOOL success = CreateProcessA(
-        NULL,                   // Application name
-        cmd_buffer.data(),      // Command line
-        NULL,                   // Process security attributes
-        NULL,                   // Thread security attributes
-        FALSE,                  // Inherit handles
-        0,                      // Creation flags
-        NULL,                   // Environment
-        NULL,                   // Current directory
-        &si,                    // Startup info
-        &pi                     // Process information
-    );
-
-    if (!success) {
-        spdlog::error("Failed to launch sapshcut.exe: {}", GetLastError());
-        return false;
-    }
-
-    // Close process/thread handles (we don't need to wait for sapshcut to exit)
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    spdlog::info("sapshcut.exe launched successfully");
-    return true;
-}
-
-// Helper: Wait for session to be created after sapshcut launch
-bool ComAutomationEngine::wait_for_session(const std::string& connection_name, int timeout_seconds) {
-    (void)connection_name;  // Unused for now - will be used when we need to match specific connections
-    spdlog::info("Waiting for SAP session creation (timeout: {}s)...", timeout_seconds);
-
-    auto start = std::chrono::steady_clock::now();
-    auto timeout = std::chrono::seconds(timeout_seconds);
-    int poll_attempt = 0;
-
-    while (std::chrono::steady_clock::now() - start < timeout) {
-        poll_attempt++;
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - start).count();
-
-        try {
-            // Recreate app object to get fresh connection list
-            if (!app_) {
-                app_ = ComGuiApplication::create();
-            }
-
-            int conn_count = app_->get_connection_count();
-            spdlog::info("[Poll #{}] {}s elapsed - Connections: {}", poll_attempt, elapsed, conn_count);
-
-            // Check each connection for sessions
-            for (int i = 0; i < conn_count; ++i) {
-                auto conn = app_->get_connection(i);
-                std::string conn_desc = conn->get_description();
-                int sess_count = conn->get_session_count();
-
-                spdlog::info("  Connection[{}]: '{}' - {} sessions", i, conn_desc, sess_count);
-
-                if (sess_count > 0) {
-                    // Found a session!
-                    current_connection_ = conn;
-                    current_session_ = conn->get_session(0);
-
-                    spdlog::info("✓ Session found after {}s: {}",
-                        elapsed, current_session_->get_id());
-
-                    return true;
-                }
-            }
-
-            // No session yet, wait and retry
-            if (conn_count == 0) {
-                spdlog::warn("  No connections found - sapshcut may have failed or is still starting");
-            }
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-        } catch (const ComException& e) {
-            spdlog::warn("[Poll #{}] Error while polling: {}", poll_attempt, e.what());
-            // Continue polling despite errors
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        }
-    }
-
-    spdlog::error("✗ Timeout waiting for session creation after {}s ({} poll attempts)",
-        timeout_seconds, poll_attempt);
-    spdlog::error("  Possible causes:");
-    spdlog::error("    1. Incorrect credentials in trial.env");
-    spdlog::error("    2. SAP system not accessible/responding");
-    spdlog::error("    3. sapshcut command parameters incorrect");
-    spdlog::error("    4. SAP GUI showing error dialog that needs manual dismissal");
-
-    return false;
-}
+// Helper functions removed - moved to ConnectionLauncher, ScreenshotHandler, ScreenReader, ElementMetadataExtractor
+// Removed: read_credentials_from_env, launch_sapshcut, wait_for_session (moved to ConnectionLauncher)
+// Removed: extract_element_metadata, clear_extraction_cache (moved to ElementMetadataExtractor)
+// Removed: discover_elements, traverse_element_tree, group_elements_by_container (moved to ScreenReader)
+// Removed: extract_safearray_bytes, parse_scale_parameter, validate_subsection_complete (moved to ScreenshotHandler)
+// Removed: read_credentials_from_env_DELETE_ME, launch_sapshcut, wait_for_session (moved to ConnectionLauncher)
 
 Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
     auto start = std::chrono::high_resolution_clock::now();
@@ -333,12 +168,12 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         trace.push_back({{"step", "launch_start"}, {"connection_name", connection_name}});
 
         // Step 1: Read credentials from trial.env
-        auto creds_opt = read_credentials_from_env(connection_name);
+        auto creds_opt = ConnectionLauncher::read_credentials_from_env(connection_name);
         if (!creds_opt.has_value()) {
             throw std::runtime_error("Failed to read credentials from trial.env");
         }
 
-        Credentials creds = creds_opt.value();
+        ConnectionLauncher::Credentials creds = creds_opt.value();
         trace.push_back({
             {"step", "read_credentials"},
             {"username", creds.username},
@@ -347,7 +182,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         });
 
         // Step 2: Launch sapshcut.exe with credentials
-        bool launch_success = launch_sapshcut(connection_name, creds);
+        bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name, creds);
         trace.push_back({
             {"step", "launch_sapshcut"},
             {"success", launch_success}
@@ -357,12 +192,19 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             throw std::runtime_error("Failed to launch sapshcut.exe");
         }
 
-        // Step 3: Wait for session to be created (polls every 500ms, timeout 10s)
-        bool session_created = wait_for_session(connection_name, 10);
+        // Step 3: Wait for session to be created (polls every CONNECTION_POLL_INTERVAL_MS, timeout SESSION_CREATION_TIMEOUT_SEC)
+        auto [connection, session] = connection_launcher_->wait_for_session(connection_name, constants::SESSION_CREATION_TIMEOUT_SEC);
+        bool session_created = (connection != nullptr && session != nullptr);
+        
+        if (session_created) {
+            current_connection_ = connection;
+            current_session_ = session;
+            initialize_services();
+        }
         trace.push_back({
             {"step", "wait_for_session"},
             {"success", session_created},
-            {"timeout_seconds", 10}
+            {"timeout_seconds", constants::SESSION_CREATION_TIMEOUT_SEC}
         });
 
         if (!session_created) {
@@ -731,27 +573,7 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
 }
 
 // Note: Element type checking logic moved to ElementTypeRegistry
-// These functions remain for now as thin wrappers during migration
-static bool is_visual_component(const std::string& type) {
-    return ElementTypeRegistry::instance().supports_visual_properties(type);
-}
-
-static bool is_non_visual_container(const std::string& type) {
-    return !ElementTypeRegistry::instance().supports_accessibility(type);
-}
-
-// Helper: Derive element capabilities from type
-static json derive_capabilities(const std::string& type, bool enabled, bool changeable) {
-    auto caps = ElementTypeRegistry::instance().derive_capabilities(type, enabled, changeable);
-
-    json capabilities = json::array();
-    for (const auto& cap : caps) {
-        capabilities.push_back(cap);
-    }
-
-    return capabilities;
-}
-
+// This function remains as a thin wrapper during migration
 // Cache for tree/grid extraction results to avoid duplicate extractions
 // Key: element ID, Value: extracted table/tree data JSON
 static std::map<std::string, json> tree_grid_cache;
@@ -814,8 +636,10 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
 
                     metadata["grid_row"] = std::stoi(row_str);
                     metadata["grid_col"] = std::stoi(col_str);
-                } catch (...) {
+                } catch (const std::invalid_argument&) {
                     // Failed to parse coordinates, skip
+                } catch (const std::out_of_range&) {
+                    // Number out of range, skip
                 }
             }
         }
@@ -864,8 +688,8 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
                 // Extract and cache the results
                 try {
                     TableExtractionOptions options;
-                    options.max_rows = 20;  // Limit to first 20 rows
-                    options.max_tree_depth = 10;
+                    options.max_rows = constants::MAX_TABLE_ROWS;
+                    options.max_tree_depth = constants::MAX_TREE_DEPTH;
                     options.include_headers = true;
 
                     TableDataExtractor extractor(options);
@@ -961,11 +785,11 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
             }
         }
 
-        // Recursively process children (limit depth to 15 levels to capture deeply nested tree controls)
+        // Recursively process children (limit depth to MAX_ELEMENT_DEPTH levels to capture deeply nested tree controls)
         // SM59 tree structure: Window -> UserArea -> CustomControl -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
         // SEGW tree structure: Window -> UserArea -> ContainerShell -> SplitterShell -> ContainerShell -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
         // SEGW GridView is at depth 12: usr -> shellcont -> shell -> shellcont[1] -> shell -> shellcont[0] -> shell -> shellcont[0] -> shellcont -> shellcont -> shell -> shellcont[1] -> shell (GridView)
-        if (depth < 15) {
+        if (depth < constants::MAX_ELEMENT_DEPTH) {
             int child_count = elem->get_child_count();
 
             // Special handling for GuiContainerShell - always try to enumerate children
@@ -984,10 +808,10 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
                     // Use the .item(index) method which works with SAP GUI collections
                     auto children_collection = elem->children();
 
-                    // For forced enumeration, try up to 10 items even if child_count is 0
+                    // For forced enumeration, try up to MAX_CHILDREN_TO_PROCESS items even if child_count is 0
                     int max_children = force_enumerate ?
-                        (child_count > 0 ? (std::min)(child_count, 50) : 10) :
-                        (std::min)(child_count, 50);
+                        (child_count > 0 ? (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS) : constants::MAX_CHILDREN_TO_PROCESS) :
+                        (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS);
 
                     for (int i = 0; i < max_children; ++i) {
                         try {
@@ -1006,19 +830,27 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
                             if (!child_data.is_null()) {
                                 children.push_back(child_data);
                             }
+                        } catch (const SapGuiException& e) {
+                            // Catch most specific exception first
+                            if (force_enumerate && child_count == 0) {
+                                spdlog::debug("Force enumerate: SapGuiException at index {}, stopping: {}", i, e.what());
+                                break;
+                            }
+                            spdlog::debug("extract_element_metadata: SapGuiException processing child {}: {}", i, e.what());
+                        } catch (const ComException& e) {
+                            // Catch COM-specific exception second
+                            if (force_enumerate && child_count == 0) {
+                                spdlog::debug("Force enumerate: ComException at index {}, stopping: {}", i, e.what());
+                                break;
+                            }
+                            spdlog::debug("extract_element_metadata: ComException processing child {}: {}", i, e.what());
                         } catch (const std::exception& e) {
-                            // If we're force-enumerating and hit exception, stop trying
+                            // Catch general exception last (base class)
                             if (force_enumerate && child_count == 0) {
                                 spdlog::debug("Force enumerate: Exception at index {}, stopping: {}", i, e.what());
                                 break;
                             }
                             spdlog::debug("extract_element_metadata: Exception processing child {}: {}", i, e.what());
-                        } catch (...) {
-                            if (force_enumerate && child_count == 0) {
-                                spdlog::debug("Force enumerate: Unknown exception at index {}, stopping", i);
-                                break;
-                            }
-                            spdlog::debug("extract_element_metadata: Unknown exception processing child {}", i);
                         }
                     }
                 } catch (const std::exception& e) {
@@ -1036,11 +868,14 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         }
 
         return metadata;
-    } catch (const std::exception& e) {
-        spdlog::debug("extract_element_metadata: Exception extracting metadata: {}", e.what());
+    } catch (const SapGuiException& e) {
+        spdlog::debug("extract_element_metadata: SapGuiException extracting metadata: {}", e.what());
         return nullptr;
-    } catch (...) {
-        spdlog::debug("extract_element_metadata: Unknown exception extracting metadata");
+    } catch (const ComException& e) {
+        spdlog::debug("extract_element_metadata: ComException extracting metadata: {}", e.what());
+        return nullptr;
+    } catch (const std::exception& e) {
+        spdlog::debug("extract_element_metadata: std::exception extracting metadata: {}", e.what());
         return nullptr;
     }
 }
@@ -1184,14 +1019,18 @@ static void traverse_element_tree(
                             traverse_element_tree(child, collector, session, depth + 1);
                             children_collection_worked = true;
                         }
-                    } catch (...) {
+                    } catch (const SapGuiException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const ComException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const std::exception&) {
                         // Child access failed, will fall back to ID-based
                     }
                 }
                 // Don't return here - continue with ID-based discovery
                 // SAP GUI can have elements accessible via FindById but not Children collection
             }
-        } catch (...) {
+        } catch (const std::exception&) {
             // Children collection not available
         }
 
@@ -1207,17 +1046,19 @@ static void traverse_element_tree(
                 if (shell_child) {
                     traverse_element_tree(shell_child, collector, session, depth + 1);
                 }
-            } catch (...) { }
+            } catch (const std::exception&) {
+                // Shell child not found, continue
+            }
 
-            // Try /shellcont[N] children (up to 4)
-            for (int i = 0; i < 4; ++i) {
+            // Try /shellcont[N] children (up to MAX_SHELLCONT_CHILDREN)
+            for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i) {
                 try {
                     std::string child_id = elem_id + "/shellcont[" + std::to_string(i) + "]";
                     auto child = session->find_element_by_id(child_id);
                     if (child) {
                         traverse_element_tree(child, collector, session, depth + 1);
                     }
-                } catch (...) {
+                } catch (const std::exception&) {
                     break;  // No more shellcont children
                 }
             }
@@ -1228,25 +1069,25 @@ static void traverse_element_tree(
                 if (shellcont_child) {
                     traverse_element_tree(shellcont_child, collector, session, depth + 1);
                 }
-            } catch (...) { }
+            } catch (const std::exception&) {
+                // Shellcont child not found, continue
+            }
 
             // Special handling for GuiUserArea: probe for grid-positioned labels
             // Pattern: /usr/lbl[row,col]
             if (type == "GuiUserArea") {
                 spdlog::debug("{}Probing GuiUserArea for grid labels", std::string(depth * 2, ' '));
 
-                // Probe grid bounds (up to 50x50, stop early if consecutive misses)
-                const int MAX_ROW = 50;
-                const int MAX_COL = 50;
-                const int MAX_CONSECUTIVE_MISSES = 30;  // Allow for very sparse grids (SMICM has 26 empty rows)
+                // Probe grid bounds (up to MAX_GRID_ROW x MAX_GRID_COL, stop early if consecutive misses)
+                // Allow for very sparse grids (SMICM has 26 empty rows)
 
                 int consecutive_row_misses = 0;
 
-                for (int row = 0; row < MAX_ROW && consecutive_row_misses < MAX_CONSECUTIVE_MISSES; ++row) {
+                for (int row = 0; row < constants::MAX_GRID_ROW && consecutive_row_misses < constants::MAX_CONSECUTIVE_MISSES; ++row) {
                     int consecutive_col_misses = 0;
                     bool found_any_in_row = false;
 
-                    for (int col = 0; col < MAX_COL && consecutive_col_misses < MAX_CONSECUTIVE_MISSES; ++col) {
+                    for (int col = 0; col < constants::MAX_GRID_COL && consecutive_col_misses < constants::MAX_CONSECUTIVE_MISSES; ++col) {
                         try {
                             std::string label_id = elem_id + "/lbl[" + std::to_string(row) + "," + std::to_string(col) + "]";
                             auto label = session->find_element_by_id(label_id);
@@ -1258,7 +1099,7 @@ static void traverse_element_tree(
                             } else {
                                 consecutive_col_misses++;
                             }
-                        } catch (...) {
+                        } catch (const std::exception&) {
                             consecutive_col_misses++;
                         }
                     }
@@ -1273,7 +1114,14 @@ static void traverse_element_tree(
                 spdlog::debug("{}Grid probing complete for {}", std::string(depth * 2, ' '), elem_id);
             }
         }
-    } catch (...) {
+    } catch (const SapGuiException& e) {
+        spdlog::debug("traverse_element_tree: SapGuiException: {}", e.what());
+        // Skip elements that throw exceptions during processing
+    } catch (const ComException& e) {
+        spdlog::debug("traverse_element_tree: ComException: {}", e.what());
+        // Skip elements that throw exceptions during processing
+    } catch (const std::exception& e) {
+        spdlog::debug("traverse_element_tree: std::exception: {}", e.what());
         // Skip elements that throw exceptions during processing
     }
 }
@@ -1300,12 +1148,16 @@ static std::vector<ComGuiElementPtr> discover_elements(
                 if (child) {
                     traverse_element_tree(child, collector, session, 0);
                 }
-            } catch (...) {
+            } catch (const std::exception&) {
                 // Skip problematic children
             }
         }
-    } catch (...) {
-        spdlog::warn("Exception during element tree traversal");
+    } catch (const SapGuiException& e) {
+        spdlog::warn("SapGuiException during element tree traversal: {}", e.what());
+    } catch (const ComException& e) {
+        spdlog::warn("ComException during element tree traversal: {}", e.what());
+    } catch (const std::exception& e) {
+        spdlog::warn("std::exception during element tree traversal: {}", e.what());
     }
 
     spdlog::info("Discovered {} unique elements via recursive traversal", collector.elements().size());
@@ -1313,558 +1165,48 @@ static std::vector<ComGuiElementPtr> discover_elements(
 }
 
 Result ComAutomationEngine::read_screen(bool include_structure) {
-    auto start = std::chrono::high_resolution_clock::now();
-    Result result;
-
-    try {
         auto session = ensure_session();
-        auto window = session->get_active_window();
-
-        if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
-            return result;
-        }
-
-        result.status = Result::Status::Success;
-        result.data["screen_id"] = window->get_id();
-        result.data["title"] = window->get_title();
-        result.data["transaction"] = session->get_transaction_code();
-        result.data["child_count"] = window->get_child_count();
-
-        if (include_structure) {
-            // Clear extraction cache at start of each screen read
-            clear_extraction_cache();
-
-            // Discover all unique elements (O(1) deduplication)
-            auto element_objects = discover_elements(window, session);
-
-            // Extract metadata for each element
-            json elements = json::array();
-            for (const auto& elem : element_objects) {
-                try {
-                    json elem_data = extract_element_metadata(elem);
-                    if (!elem_data.is_null()) {
-                        elements.push_back(elem_data);
-                    }
-                } catch (...) {
-                    // Skip elements with metadata extraction errors
-                }
-            }
-
-            result.data["elements"] = elements;
-            result.data["element_count"] = elements.size();
-
-            // Group elements by type for better LLM understanding
-            result.data["hierarchy"] = group_elements_by_container(elements);
-        }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        spdlog::info("Read screen with {} elements (duration: {}ms)",
-                     result.data.value("element_count", 0), result.duration.count());
-
-    } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
-        spdlog::error("Screen read failed: {}", e.what());
-    } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+    if (!screen_reader_) {
+        initialize_services();
     }
-
+    if (!screen_reader_) {
+        Result result;
+        result.status = Result::Status::Error;
+        result.error["code"] = "NO_SESSION";
+        result.error["message"] = "Unable to initialize screen reader - no session";
     return result;
 }
+    return screen_reader_->read(include_structure);
+        }
 
 Result ComAutomationEngine::read_screen_with_tabs() {
-    TraceGuard trace("ComAutomationEngine::read_screen_with_tabs");
-    auto start = std::chrono::high_resolution_clock::now();
-    Result result;
-
-    try {
-        // Get initial screen structure
-        Result initial_result = read_screen(true);
-        if (initial_result.status != Result::Status::Success) {
-            return initial_result;
-        }
-
-        json screen_data = initial_result.data;
-        json tabs_content = json::array();
-
-        // Find all GuiTab elements in the hierarchy
-        std::vector<json> tab_elements;
-        if (screen_data.contains("hierarchy") && screen_data["hierarchy"].contains("tabs")) {
-            for (const auto& tab : screen_data["hierarchy"]["tabs"]) {
-                std::string type = tab.value("type", "");
-                if (type == "GuiTab") {
-                    tab_elements.push_back(tab);
-                }
-            }
-        }
-
-        if (tab_elements.empty()) {
-            spdlog::info("No tabs found in screen, returning normal screen read");
-            return initial_result;
-        }
-
-        spdlog::info("Found {} tabs to expand", tab_elements.size());
-
+    if (!screen_reader_) {
         auto session = ensure_session();
-
-        // For each tab, select it and capture content
-        for (size_t i = 0; i < tab_elements.size(); ++i) {
-            const auto& tab = tab_elements[i];
-            std::string tab_id = tab.value("id", "");
-            std::string tab_name = tab.value("text", "Unnamed Tab");
-
-            try {
-                spdlog::debug("Selecting tab {}/{}: {} [{}]", i + 1, tab_elements.size(), tab_name, tab_id);
-
-                // Find and select the tab
-                auto tab_elem = session->find_element_by_id(tab_id);
-                if (!tab_elem) {
-                    spdlog::warn("Tab element not found: {}", tab_id);
-                    continue;
-                }
-
-                // Select the tab (triggers server communication)
-                tab_elem->select();
-
-                // Wait for session to be ready (server response)
-                int wait_attempts = 0;
-                const int max_wait_ms = 5000;
-                const int poll_interval_ms = 100;
-                while (session->is_busy() && wait_attempts < (max_wait_ms / poll_interval_ms)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
-                    wait_attempts++;
-                }
-
-                if (session->is_busy()) {
-                    spdlog::warn("Timeout waiting for tab {} to load", tab_name);
-                    continue;
-                }
-
-                // Small additional delay to ensure content is loaded
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-                // Re-read screen to get tab content
-                Result tab_result = read_screen(true);
-                if (tab_result.status != Result::Status::Success) {
-                    spdlog::warn("Failed to read content for tab {}: {}",
-                                   tab_name, tab_result.error.value("message", "unknown error"));
-                    continue;
-                }
-
-                // Store tab data
-                json tab_data;
-                tab_data["tab_id"] = tab_id;
-                tab_data["tab_name"] = tab_name;
-                tab_data["tab_type"] = tab["type"];
-                tab_data["tab_index"] = i;
-                tab_data["elements"] = tab_result.data["elements"];
-                tab_data["hierarchy"] = tab_result.data["hierarchy"];
-                tab_data["element_count"] = tab_result.data.value("element_count", 0);
-
-                tabs_content.push_back(tab_data);
-
-                int elem_count = tab_data["element_count"].get<int>();
-                spdlog::info("Captured tab {} with {} elements", tab_name, elem_count);
-
-            } catch (const ComException& e) {
-                spdlog::warn("Failed to expand tab {}: {}", tab_name, e.what());
-                continue;
-            } catch (const std::exception& e) {
-                spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
-                continue;
-            }
-        }
-
-        // Add tabs content to result
-        screen_data["tabs_content"] = tabs_content;
-        screen_data["tabs_expanded"] = true;
-        screen_data["expanded_tab_count"] = tabs_content.size();
-
-        result.status = Result::Status::Success;
-        result.data = screen_data;
-
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-        spdlog::info("Read screen with {} tabs expanded (duration: {}ms)",
-                    tabs_content.size(), result.duration.count());
-
-    } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
-        spdlog::error("Screen read with tabs failed: {}", e.what());
-    } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
-        spdlog::error("Exception in read_screen_with_tabs: {}", e.what());
+        initialize_services();
     }
-
+    if (!screen_reader_) {
+        Result result;
+        result.status = Result::Status::Error;
+        result.error["code"] = "NO_SESSION";
+        result.error["message"] = "Unable to initialize screen reader - no session";
     return result;
 }
-
-// Helper: Extract SAFEARRAY bytes from VARIANT
-static std::vector<uint8_t> extract_safearray_bytes(VARIANT& var) {
-    if (var.vt != (VT_ARRAY | VT_UI1)) {
-        throw std::runtime_error("Expected byte array (VT_ARRAY | VT_UI1) from HardCopyToMemory");
-    }
-
-    SAFEARRAY* psa = var.parray;
-    if (!psa) {
-        throw std::runtime_error("SAFEARRAY pointer is null");
-    }
-
-    BYTE* data = nullptr;
-    HRESULT hr = SafeArrayAccessData(psa, reinterpret_cast<void**>(&data));
-    if (FAILED(hr)) {
-        throw std::runtime_error(fmt::format("SafeArrayAccessData failed: 0x{:08X}", hr));
-    }
-
-    long size = psa->rgsabound[0].cElements;
-    std::vector<uint8_t> result(data, data + size);
-
-    SafeArrayUnaccessData(psa);
-    return result;
-}
-
-// Helper: Parse scale parameter (float for relative, int for absolute width)
-static void parse_scale_parameter(const std::string& scale, int orig_width, int orig_height,
-                                  int& new_width, int& new_height) {
-    if (scale.find('.') != std::string::npos) {
-        // Float: relative scale (0.5 = 50%)
-        float factor = std::stof(scale);
-        if (factor <= 0.0f || factor > 10.0f) {
-            throw std::invalid_argument("Scale factor must be between 0.0 and 10.0");
-        }
-        new_width = static_cast<int>(orig_width * factor);
-        new_height = static_cast<int>(orig_height * factor);
-    } else {
-        // Integer: target width (maintain aspect ratio)
-        new_width = std::stoi(scale);
-        if (new_width <= 0) {
-            throw std::invalid_argument("Width must be positive");
-        }
-        new_height = static_cast<int>(orig_height * (new_width / static_cast<float>(orig_width)));
-    }
-}
-
-// Helper: Validate subsection parameters (all-or-nothing)
-static void validate_subsection_complete(const cli::ScreenshotOptions& opts) {
-    bool has_any = opts.crop_x.has_value() || opts.crop_y.has_value() ||
-                   opts.crop_width.has_value() || opts.crop_height.has_value();
-    bool has_all = opts.crop_x.has_value() && opts.crop_y.has_value() &&
-                   opts.crop_width.has_value() && opts.crop_height.has_value();
-
-    if (has_any && !has_all) {
-        throw std::invalid_argument(
-            "All subsection parameters (--x, --y, --width, --height) must be provided together");
-    }
-
-    if (has_all) {
-        if (opts.crop_x.value() < 0 || opts.crop_y.value() < 0) {
-            throw std::invalid_argument("Subsection x and y must be non-negative");
-        }
-        if (opts.crop_width.value() <= 0 || opts.crop_height.value() <= 0) {
-            throw std::invalid_argument("Subsection width and height must be positive");
-        }
-    }
+    return screen_reader_->read_with_tabs();
 }
 
 Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& options) {
-    TraceGuard trace("ComAutomationEngine::capture_screenshot");
-    auto start = std::chrono::high_resolution_clock::now();
-
+    if (!screenshot_handler_) {
+        auto session = ensure_session();
+        initialize_services();
+    }
+    if (!screenshot_handler_) {
     Result result;
-
-    try {
-        if (!current_session_) {
             result.status = Result::Status::Error;
             result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+        result.error["message"] = "Unable to initialize screenshot handler - no session";
             return result;
         }
-
-        // Validate subsection parameters
-        validate_subsection_complete(options);
-
-        // Get active window
-        auto window = current_session_->get_active_window();
-        if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
-            return result;
-        }
-
-        // Get window title for filename generation
-        std::string window_title = window->get_title();
-
-        // Determine if we need CImg processing
-        bool needs_processing = options.show ||
-                               !options.scale.empty() ||
-                               options.format == "base64" ||
-                               options.output_file == "-" ||
-                               (options.crop_x.has_value() && (options.format == "base64" || options.output_file == "-"));
-
-        if (!needs_processing && !options.output_file.empty() && options.output_file != "-") {
-            // Fast path: Direct HardCopy to file with subsection support
-            std::string filename = options.output_file;
-
-            // Call HardCopy COM method
-            VARIANT filename_var;
-            VariantInit(&filename_var);
-            filename_var.vt = VT_BSTR;
-            filename_var.bstrVal = SysAllocString(std::wstring(filename.begin(), filename.end()).c_str());
-
-            VARIANT image_type;
-            VariantInit(&image_type);
-            image_type.vt = VT_I4;
-            image_type.lVal = 2; // PNG
-
-            VARIANT result_path;
-            VariantInit(&result_path);
-
-            IDispatch* window_dispatch = window->get_dispatch();
-
-            if (options.crop_x.has_value()) {
-                // HardCopy with subsection
-                DISPID dispid;
-                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
-                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-                if (SUCCEEDED(hr)) {
-                    VARIANT args[6];
-                    args[5] = filename_var;
-                    args[4] = image_type;
-                    args[3].vt = VT_I4; args[3].lVal = options.crop_x.value();
-                    args[2].vt = VT_I4; args[2].lVal = options.crop_y.value();
-                    args[1].vt = VT_I4; args[1].lVal = options.crop_width.value();
-                    args[0].vt = VT_I4; args[0].lVal = options.crop_height.value();
-
-                    DISPPARAMS params;
-                    params.rgvarg = args;
-                    params.cArgs = 6;
-                    params.rgdispidNamedArgs = nullptr;
-                    params.cNamedArgs = 0;
-
-                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
-
-                    if (FAILED(hr)) {
-                        VariantClear(&filename_var);
-                        VariantClear(&image_type);
-                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
-                    }
-                }
-            } else {
-                // HardCopy without subsection
-                DISPID dispid;
-                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
-                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-                if (SUCCEEDED(hr)) {
-                    VARIANT args[2];
-                    args[1] = filename_var;
-                    args[0] = image_type;
-
-                    DISPPARAMS params;
-                    params.rgvarg = args;
-                    params.cArgs = 2;
-                    params.rgdispidNamedArgs = nullptr;
-                    params.cNamedArgs = 0;
-
-                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
-
-                    if (FAILED(hr)) {
-                        VariantClear(&filename_var);
-                        VariantClear(&image_type);
-                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
-                    }
-                }
-            }
-
-            VariantClear(&filename_var);
-            VariantClear(&image_type);
-
-            result.status = Result::Status::Success;
-            result.data["filepath"] = filename;
-            spdlog::info("Screenshot saved to: {}", filename);
-
-            VariantClear(&result_path);
-        } else {
-            // Processing path: Use HardCopyToMemory + CImg
-            VARIANT image_type;
-            VariantInit(&image_type);
-            image_type.vt = VT_I4;
-            image_type.lVal = 2; // PNG
-
-            VARIANT png_bytes_var;
-            VariantInit(&png_bytes_var);
-
-            IDispatch* window_dispatch = window->get_dispatch();
-
-            DISPID dispid;
-            LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopyToMemory");
-            HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-            if (SUCCEEDED(hr)) {
-                VARIANT args[1];
-                args[0] = image_type;
-
-                DISPPARAMS params;
-                params.rgvarg = args;
-                params.cArgs = 1;
-                params.rgdispidNamedArgs = nullptr;
-                params.cNamedArgs = 0;
-
-                hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_METHOD, &params, &png_bytes_var, nullptr, nullptr);
-
-                if (FAILED(hr)) {
-                    VariantClear(&image_type);
-                    throw std::runtime_error(fmt::format("HardCopyToMemory failed: 0x{:08X}", hr));
-                }
-            }
-
-            VariantClear(&image_type);
-
-            // Extract PNG bytes
-            std::vector<uint8_t> png_bytes = extract_safearray_bytes(png_bytes_var);
-            VariantClear(&png_bytes_var);
-
-            spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
-
-            // Load into CImg
-            cimg_library::CImg<unsigned char> img;
-#ifdef _WIN32
-            std::FILE* tmpfile = nullptr;
-            errno_t err_code = tmpfile_s(&tmpfile);
-            if (err_code != 0 || !tmpfile) {
-                throw std::runtime_error("Failed to create temporary file for PNG loading");
-            }
-#else
-            std::FILE* tmpfile = std::tmpfile();
-            if (!tmpfile) {
-                throw std::runtime_error("Failed to create temporary file for PNG loading");
-            }
-#endif
-            std::fwrite(png_bytes.data(), 1, png_bytes.size(), tmpfile);
-            std::rewind(tmpfile);
-            img.load_png(tmpfile);
-            std::fclose(tmpfile);
-
-            spdlog::debug("Loaded PNG into CImg: {}x{} pixels", img.width(), img.height());
-
-            // Apply cropping if requested
-            if (options.crop_x.has_value()) {
-                int x1 = options.crop_x.value();
-                int y1 = options.crop_y.value();
-                int x2 = x1 + options.crop_width.value() - 1;
-                int y2 = y1 + options.crop_height.value() - 1;
-
-                img.crop(x1, y1, x2, y2);
-                spdlog::debug("Cropped to: {}x{} pixels", img.width(), img.height());
-            }
-
-            // Apply scaling if requested
-            if (!options.scale.empty()) {
-                int new_width, new_height;
-                parse_scale_parameter(options.scale, img.width(), img.height(), new_width, new_height);
-                img.resize(new_width, new_height, -100, -100, 5); // 5 = Lanczos interpolation
-                spdlog::debug("Scaled to: {}x{} pixels", new_width, new_height);
-            }
-
-            // Display if requested
-            if (options.show) {
-                std::string window_display_title = "fairyfly - Screenshot Preview";
-                cimg_library::CImgDisplay display(img, window_display_title.c_str());
-
-                spdlog::info("Displaying screenshot. Close window to continue...");
-
-                // Wait for user to close the window
-                while (!display.is_closed()) {
-                    display.wait();
-                }
-
-                spdlog::info("Preview window closed");
-                result.data["displayed"] = true;
-            }
-
-            // Output
-            if (options.format == "base64") {
-                // Save to temporary memory buffer
-#ifdef _WIN32
-                std::FILE* mem_tmpfile = nullptr;
-                errno_t err_code2 = tmpfile_s(&mem_tmpfile);
-                if (err_code2 != 0 || !mem_tmpfile) {
-                    throw std::runtime_error("Failed to create temporary file for PNG encoding");
-                }
-#else
-                std::FILE* mem_tmpfile = std::tmpfile();
-                if (!mem_tmpfile) {
-                    throw std::runtime_error("Failed to create temporary file for PNG encoding");
-                }
-#endif
-                img.save_png(mem_tmpfile);
-                std::rewind(mem_tmpfile);
-
-                // Read back bytes
-                std::fseek(mem_tmpfile, 0, SEEK_END);
-                long file_size = std::ftell(mem_tmpfile);
-                std::rewind(mem_tmpfile);
-
-                std::vector<uint8_t> output_bytes(file_size);
-                std::fread(output_bytes.data(), 1, file_size, mem_tmpfile);
-                std::fclose(mem_tmpfile);
-
-                std::string base64_data = utils::base64_encode(output_bytes);
-                result.data["screenshot"] = "data:image/png;base64," + base64_data;
-                result.data["format"] = "base64";
-                spdlog::info("Screenshot encoded as base64 ({} bytes)", base64_data.size());
-            } else if (options.output_file == "-") {
-                // Write to stdout
-                img.save_png(stdout);
-                result.data["output"] = "stdout";
-                spdlog::info("Screenshot written to stdout");
-            } else {
-                // Save to file
-                std::string filename = options.output_file.empty()
-                    ? utils::generate_screenshot_filename(window_title)
-                    : options.output_file;
-
-                img.save_png(filename.c_str());
-                result.data["filepath"] = filename;
-                spdlog::info("Screenshot saved to: {}", filename);
-            }
-
-            result.status = Result::Status::Success;
-        }
-
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    } catch (const std::invalid_argument& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ARGUMENT";
-        result.error["message"] = e.what();
-        spdlog::error("Invalid argument in capture_screenshot: {}", e.what());
-    } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
-        spdlog::error("Exception in capture_screenshot: {}", e.what());
-    }
-
-    return result;
+    return screenshot_handler_->capture(options);
 }
 
 nlohmann::json ComAutomationEngine::get_application_info() const

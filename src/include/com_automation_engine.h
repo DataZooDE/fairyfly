@@ -1,7 +1,11 @@
 #pragma once
 
 #include "automation_engine.h"
-#include "com_wrapper.h"
+#include "com/wrapper.h"
+#include "connection_launcher.h"
+#include "screenshot_handler.h"
+#include "screen_reader.h"
+#include "element_metadata_extractor.h"
 #include <memory>
 #include <optional>
 
@@ -17,14 +21,10 @@ private:
     ComGuiConnectionPtr current_connection_;
     ComGuiSessionPtr current_session_;
 
-    // Credential structure for sapshcut launch
-    struct Credentials {
-        std::string system_id;
-        std::string client;
-        std::string username;
-        std::string password;
-        std::string instance;
-    };
+    // Extracted service classes
+    std::unique_ptr<ConnectionLauncher> connection_launcher_;
+    std::unique_ptr<ScreenshotHandler> screenshot_handler_;
+    std::unique_ptr<ScreenReader> screen_reader_;
 
     // Helper to ensure connection exists
     ComGuiConnectionPtr ensure_connection();
@@ -32,14 +32,8 @@ private:
     // Helper to ensure session exists
     ComGuiSessionPtr ensure_session();
 
-    // Read credentials from trial.env (temporary solution for Phase 1)
-    std::optional<Credentials> read_credentials_from_env(const std::string& connection_name);
-
-    // Launch SAP using sapshcut.exe with credentials
-    bool launch_sapshcut(const std::string& connection_name, const Credentials& creds);
-
-    // Poll for session creation after sapshcut launch
-    bool wait_for_session(const std::string& connection_name, int timeout_seconds = 10);
+    // Initialize service classes (called after session is available)
+    void initialize_services();
 
 public:
     /// Constructor - initializes COM but doesn't connect to SAP

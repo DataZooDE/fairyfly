@@ -3,7 +3,13 @@
 add_executable(test_base_objects_cpp
     test_base_objects_cpp.cpp
     ../../src/sap_gui_base.cpp
-    ../../src/com_wrapper.cpp
+    ../../src/com/wrapper.cpp
+    ../../src/com/wrapper_helpers.cpp
+    ../../src/com/element.cpp
+    ../../src/com/window.cpp
+    ../../src/com/session.cpp
+    ../../src/com/connection.cpp
+    ../../src/com/application.cpp
     ../../src/trace.cpp
 )
 

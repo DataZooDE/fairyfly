@@ -26,9 +26,10 @@ void MarkdownTableFormatter::add_section_header(const std::string& title) {
 }
 
 std::string MarkdownTableFormatter::render() const {
-    if (column_headers_.empty() || rows_.empty()) {
+    if (column_headers_.empty()) {
         return "";
     }
+    // Allow rendering headers even without rows (for testing and empty tables)
 
     std::ostringstream oss;
     size_t num_cols = column_headers_.size();
@@ -118,6 +119,10 @@ std::string MarkdownTableFormatter::render() const {
                     cell_content = apply_style(normalized, style);
                 }
 
+                // For empty cells, output two spaces; otherwise output content with padding
+                if (cell_content.empty()) {
+                    oss << "  |";
+                } else {
                 oss << " " << cell_content;
 
                 // Calculate padding (account for markdown formatting)
@@ -137,6 +142,7 @@ std::string MarkdownTableFormatter::render() const {
 
                 size_t padding = col_widths[i] - std::min(plain.length(), col_widths[i]);
                 oss << std::string(padding, ' ') << " |";
+                }
             }
             oss << "\n";
         }
@@ -177,6 +183,7 @@ std::string MarkdownTableFormatter::normalize_cell(const std::string& content) c
     pos = 0;
     while ((pos = result.find("  ", pos)) != std::string::npos) {
         result.replace(pos, 2, " ");
+        // Don't increment pos - check same position again in case there are more spaces
     }
 
     return escape_pipes(result);
@@ -209,7 +216,10 @@ std::string MarkdownTableFormatter::apply_style(const std::string& content, cons
 }
 
 std::string MarkdownTableFormatter::get_alignment_separator(size_t width, Alignment align) const {
-    std::string sep(width + 2, '-');  // +2 for spaces on each side
+    // Separator should match the rendered cell width: " " + content + " " = width + 2
+    // But ensure minimum of 3 dashes for valid markdown
+    size_t sep_width = std::max(width + 2, size_t(3));
+    std::string sep(sep_width, '-');
 
     switch (align) {
         case Alignment::Left:

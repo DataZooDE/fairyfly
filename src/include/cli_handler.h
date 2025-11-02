@@ -14,7 +14,8 @@ namespace cli {
 enum class OutputFormat {
     Json,
     Markdown,
-    PlainText
+    PlainText,
+    Toon
 };
 
 /// Screenshot capture options

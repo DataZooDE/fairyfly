@@ -1,7 +1,7 @@
 // C++ test to match VBScript ground truth test
 // Outputs same JSON format as test_base_objects.vbs for comparison
 
-#include "include/com_wrapper.h"
+#include "include/com/wrapper.h"
 #include "include/sap_gui_base.h"
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>

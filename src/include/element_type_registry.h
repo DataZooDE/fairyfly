@@ -4,9 +4,12 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <nlohmann/json.hpp>
 
 namespace fairyfly {
 namespace sap {
+
+using json = nlohmann::json;
 
 /// Describes behavioral properties and capabilities of SAP GUI element types
 class ElementTypeDescriptor {
@@ -76,6 +79,26 @@ private:
     /// Initialize default SAP GUI element types
     void register_default_types();
 };
+
+// Helper functions for element metadata extraction
+
+/// Check if element type is a non-visual container
+/// (containers that don't support accessibility properties)
+inline bool is_non_visual_container(const std::string& type) {
+    return !ElementTypeRegistry::instance().supports_accessibility(type);
+}
+
+/// Derive element capabilities and return as JSON array
+inline json derive_capabilities(const std::string& type, bool enabled, bool changeable) {
+    auto caps = ElementTypeRegistry::instance().derive_capabilities(type, enabled, changeable);
+
+    json capabilities = json::array();
+    for (const auto& cap : caps) {
+        capabilities.push_back(cap);
+    }
+
+    return capabilities;
+}
 
 } // namespace sap
 } // namespace fairyfly

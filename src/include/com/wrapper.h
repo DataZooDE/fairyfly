@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core.h"
-#include "sap_gui_base.h"
+#include "include/core.h"
+#include "include/sap_gui_base.h"
 #include <string>
 #include <memory>
 #include <vector>

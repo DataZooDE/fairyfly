@@ -64,7 +64,13 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(FAIRYFLY_SOURCES
     src/main.cpp
     src/automation_engine.cpp
-    src/com_wrapper.cpp
+    src/com/wrapper.cpp
+    src/com/wrapper_helpers.cpp
+    src/com/element.cpp
+    src/com/window.cpp
+    src/com/session.cpp
+    src/com/connection.cpp
+    src/com/application.cpp
     src/com_automation_engine.cpp
     src/trace.cpp
     src/cli_handler.cpp
@@ -76,11 +82,31 @@ set(FAIRYFLY_SOURCES
     src/formatters/tree_formatter.cpp
     src/formatters/table_formatter.cpp
     src/formatters/markdown_table_formatter.cpp
+    src/formatters/toon_encoder.cpp
     src/string_utils.cpp
     src/base64.cpp
     src/semantic_classifier.cpp
     src/element_renderer_registry.cpp
     src/element_renderers.cpp
+    src/grid_analyzer.cpp
+    src/formatters/grid_renderer.cpp
+    src/formatters/screen_markdown_formatter.cpp
+    src/connection_launcher.cpp
+    src/screenshot_handler.cpp
+    src/screen_reader.cpp
+    src/element_metadata_extractor.cpp
+    src/commands/command_registry.cpp
+    src/commands/attach_command.cpp
+    src/commands/launch_command.cpp
+    src/commands/disconnect_command.cpp
+    src/commands/connections_command.cpp
+    src/commands/tcode_command.cpp
+    src/commands/click_command.cpp
+    src/commands/fill_command.cpp
+    src/commands/get_command.cpp
+    src/commands/list_command.cpp
+    src/commands/screen_command.cpp
+    src/commands/serve_command.cpp
 )
 
 # Create executable

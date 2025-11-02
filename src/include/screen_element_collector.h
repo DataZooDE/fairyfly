@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
-#include "com_wrapper.h"
+#include "com/wrapper.h"
 
 namespace fairyfly {
 namespace sap {

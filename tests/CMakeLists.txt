@@ -8,8 +8,19 @@ add_executable(unit_tests
     unit/test_com_wrapper.cpp
     unit/test_config_session.cpp
     unit/test_markdown_table_formatter.cpp
+    unit/test_toon_encoder.cpp
+    unit/test_connection_launcher.cpp
+    unit/test_screenshot_handler.cpp
+    unit/test_screen_reader.cpp
+    unit/test_element_metadata_extractor.cpp
     ../src/sap_gui_base.cpp
-    ../src/com_wrapper.cpp
+    ../src/com/wrapper.cpp
+    ../src/com/wrapper_helpers.cpp
+    ../src/com/element.cpp
+    ../src/com/window.cpp
+    ../src/com/session.cpp
+    ../src/com/connection.cpp
+    ../src/com/application.cpp
     ../src/com_automation_engine.cpp
     ../src/automation_engine.cpp
     ../src/trace.cpp
@@ -23,11 +34,19 @@ add_executable(unit_tests
     ../src/formatters/tree_formatter.cpp
     ../src/formatters/table_formatter.cpp
     ../src/formatters/markdown_table_formatter.cpp
+    ../src/formatters/toon_encoder.cpp
     ../src/string_utils.cpp
     ../src/base64.cpp
     ../src/semantic_classifier.cpp
     ../src/element_renderer_registry.cpp
     ../src/element_renderers.cpp
+    ../src/grid_analyzer.cpp
+    ../src/formatters/grid_renderer.cpp
+    ../src/formatters/screen_markdown_formatter.cpp
+    ../src/connection_launcher.cpp
+    ../src/screenshot_handler.cpp
+    ../src/screen_reader.cpp
+    ../src/element_metadata_extractor.cpp
 )
 
 # Include directories for tests
