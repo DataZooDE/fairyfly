@@ -1310,6 +1310,64 @@ static std::string format_screen_markdown(const json& data) {
             oss << "\n";
         }
 
+        // IMPORTANT: Also render non-grid semantic elements (GuiTextedit, TextEdit shells, etc.)
+        // Grid detection doesn't mean EVERYTHING is grid-based - reports may have both
+        if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
+            auto& registry = sap::ElementRendererRegistry::instance();
+
+            // Build set of child IDs to identify top-level elements
+            std::set<std::string> child_ids;
+            for (const auto& elem : hierarchy["other"]) {
+                if (elem.contains("children") && elem["children"].is_array()) {
+                    for (const auto& child : elem["children"]) {
+                        std::string child_id = child.value("id", "");
+                        if (!child_id.empty()) {
+                            child_ids.insert(child_id);
+                        }
+                    }
+                }
+            }
+
+            // Find and render semantic text-based elements (GuiTextedit, GuiShell with TextEdit subtype)
+            std::function<void(const json&, int)> render_text_elements = [&](const json& elem, int depth) {
+                std::string type = elem.value("type", "");
+                std::string subtype = elem.value("subtype", "");
+
+                // Check if this is a text-based element (report output, log display, etc.)
+                bool is_text_element = (type == "GuiTextedit") ||
+                                      (type == "GuiShell" && subtype == "TextEdit");
+
+                if (is_text_element && sap::SemanticClassifier::should_display(elem)) {
+                    std::string text = elem.value("text", "");
+                    // Only render if it has substantial content
+                    if (text.length() > 50) {
+                        std::string rendered = registry.render_to_markdown(elem, 0);
+                        if (!rendered.empty()) {
+                            oss << rendered;
+                        }
+                    }
+                    return; // Don't recurse into children if we rendered this element
+                }
+
+                // Recurse into children to find text elements
+                if (elem.contains("children") && elem["children"].is_array()) {
+                    for (const auto& child : elem["children"]) {
+                        render_text_elements(child, depth + 1);
+                    }
+                }
+            };
+
+            // Start from top-level elements in "other" category
+            for (const auto& elem : hierarchy["other"]) {
+                std::string id = elem.value("id", "");
+                bool is_top_level = (id.empty() || child_ids.find(id) == child_ids.end());
+
+                if (is_top_level) {
+                    render_text_elements(elem, 0);
+                }
+            }
+        }
+
         // Summary stats
         int total_elements = data.value("element_count", 0);
         oss << "---\n";
