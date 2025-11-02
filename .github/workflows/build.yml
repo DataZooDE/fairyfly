@@ -50,10 +50,19 @@ jobs:
         echo "VCPKG_ROOT set to: ${{ github.workspace }}/vcpkg"
       shell: pwsh
 
-    - name: Build using Makefile
+    - name: Configure and Build (Makefile-style)
       run: |
-        Write-Host "Building fairyfly using Makefile..."
-        make release
+        Write-Host "Configuring CMake for Release build..."
+        cmake -B build `
+          -G "Visual Studio 17 2022" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+
+        Write-Host "`nBuilding project in Release mode..."
+        cmake --build build --config Release --parallel
+
+        Write-Host "`n✓ Build complete. Executable at: build/Release/fairyfly.exe"
       shell: pwsh
 
     - name: Run unit tests (SAP-free tests only)
