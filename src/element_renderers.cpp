@@ -313,6 +313,66 @@ std::string TextFieldRenderer::to_markdown(const json& element_metadata, int ind
     return oss.str();
 }
 
+// TextEditRenderer implementation
+json TextEditRenderer::to_json(const json& element_metadata) {
+    json result = element_metadata;
+
+    std::string text = element_metadata.value("text", "");
+    std::string id = element_metadata.value("id", "");
+
+    result["semantic_type"] = "TextEdit";
+
+    // Count lines for semantic description
+    int line_count = 1;
+    for (char c : text) {
+        if (c == '\n') line_count++;
+    }
+
+    if (line_count > 1) {
+        result["semantic_description"] = "Text Editor (" + std::to_string(line_count) + " lines)";
+    } else {
+        result["semantic_description"] = "Text Editor";
+    }
+
+    return result;
+}
+
+std::string TextEditRenderer::to_markdown(const json& element_metadata, int indent_level) {
+    std::ostringstream oss;
+    std::string indent = helpers::make_indent(indent_level);
+
+    std::string text = element_metadata.value("text", "");
+    std::string id = element_metadata.value("id", "");
+    std::string name = element_metadata.value("name", "");
+
+    // Get semantic description with line count
+    std::string description = SemanticClassifier::get_semantic_description("GuiTextedit", element_metadata);
+
+    oss << indent << "## " << description << "\n\n";
+
+    // Show content in code block
+    if (!text.empty()) {
+        oss << indent << "```\n";
+        oss << text << "\n";
+        oss << indent << "```\n\n";
+    } else {
+        oss << indent << "_Empty_\n\n";
+    }
+
+    // Show technical ID and name if present
+    if (!id.empty()) {
+        oss << indent << "**Technical ID:** `" << id << "`\n";
+    }
+    if (!name.empty()) {
+        oss << indent << "**Name:** `" << name << "`\n";
+    }
+    if (!id.empty() || !name.empty()) {
+        oss << "\n";
+    }
+
+    return oss.str();
+}
+
 // Register all renderers with the registry
 void register_all_renderers() {
     auto& registry = ElementRendererRegistry::instance();
@@ -330,6 +390,7 @@ void register_all_renderers() {
     registry.register_json_renderer("GuiButton", ButtonRenderer::to_json);
     registry.register_json_renderer("GuiTextField", TextFieldRenderer::to_json);
     registry.register_json_renderer("GuiCTextField", TextFieldRenderer::to_json);
+    registry.register_json_renderer("GuiTextedit", TextEditRenderer::to_json);
 
     // Register Markdown renderers
     registry.register_markdown_renderer("GuiSplitterShell", SplitterRenderer::to_markdown);
@@ -344,6 +405,7 @@ void register_all_renderers() {
     registry.register_markdown_renderer("GuiButton", ButtonRenderer::to_markdown);
     registry.register_markdown_renderer("GuiTextField", TextFieldRenderer::to_markdown);
     registry.register_markdown_renderer("GuiCTextField", TextFieldRenderer::to_markdown);
+    registry.register_markdown_renderer("GuiTextedit", TextEditRenderer::to_markdown);
 
     // Handle GuiShell specially - it can be tree, toolbar, grid, or textedit depending on SubType
     registry.register_json_renderer("GuiShell", [](const json& metadata) -> json {

@@ -20,7 +20,8 @@ SemanticClassifier::ElementCategory SemanticClassifier::classify(
         type == "GuiRadioButton" ||
         type == "GuiLabel" ||
         type == "GuiTab" ||
-        type == "GuiTabStrip") {
+        type == "GuiTabStrip" ||
+        type == "GuiTextedit") {  // Multi-line text editor for reports and logs
         return ElementCategory::SEMANTIC;
     }
 
@@ -229,6 +230,22 @@ std::string SemanticClassifier::get_semantic_description(
     // Text fields
     if (type == "GuiTextField" || type == "GuiCTextField") {
         return "Text Field";
+    }
+
+    // Multi-line text editor (for reports, logs, etc.)
+    if (type == "GuiTextedit") {
+        std::string text = metadata.value("text", "");
+        int line_count = 1;
+        for (char c : text) {
+            if (c == '\n') line_count++;
+        }
+        if (line_count > 1) {
+            return "Text Editor (" + std::to_string(line_count) + " lines)";
+        }
+        if (!text.empty()) {
+            return "Text Editor";
+        }
+        return "Text Editor (empty)";
     }
 
     // Generic description

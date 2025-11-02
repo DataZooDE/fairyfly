@@ -64,6 +64,13 @@ public:
     static std::string to_markdown(const json& element_metadata, int indent_level);
 };
 
+/// TextEdit renderer - displays multi-line text content for reports and logs
+class TextEditRenderer {
+public:
+    static json to_json(const json& element_metadata);
+    static std::string to_markdown(const json& element_metadata, int indent_level);
+};
+
 // Helper functions used by multiple renderers
 namespace helpers {
     /// Recursively render children using registry
