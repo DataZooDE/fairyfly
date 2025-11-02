@@ -777,20 +777,14 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         std::string text = elem->get_text();
         metadata["text"] = text;
 
-        // Interactive states - only query for visual components
-        bool enabled = false;
-        bool visible = true;
-        bool changeable = false;
+        // Interactive states - query for all elements (is_enabled handles missing property gracefully)
+        bool enabled = elem->is_enabled();
+        bool visible = elem->is_visible();
+        bool changeable = elem->is_changeable();
 
-        if (is_visual_component(type)) {
-            enabled = elem->is_enabled();
-            visible = elem->is_visible();
-            changeable = elem->is_changeable();
-
-            metadata["enabled"] = enabled;
-            metadata["visible"] = visible;
-            metadata["changeable"] = changeable;
-        }
+        metadata["enabled"] = enabled;
+        metadata["visible"] = visible;
+        metadata["changeable"] = changeable;
 
         // Accessibility labels and tooltips - not available on non-visual containers
         if (!is_non_visual_container(type)) {
@@ -805,6 +799,25 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         std::string container_type = elem->get_container_type();
         if (!container_type.empty()) {
             metadata["container_type"] = container_type;
+        }
+
+        // Parse grid coordinates for grid-positioned labels (pattern: lbl[row,col])
+        if (type == "GuiLabel" && elem_id.find("/lbl[") != std::string::npos) {
+            size_t bracket_pos = elem_id.find("/lbl[");
+            size_t comma_pos = elem_id.find(",", bracket_pos);
+            size_t close_bracket = elem_id.find("]", comma_pos);
+
+            if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
+                try {
+                    std::string row_str = elem_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5);
+                    std::string col_str = elem_id.substr(comma_pos + 1, close_bracket - comma_pos - 1);
+
+                    metadata["grid_row"] = std::stoi(row_str);
+                    metadata["grid_col"] = std::stoi(col_str);
+                } catch (...) {
+                    // Failed to parse coordinates, skip
+                }
+            }
         }
 
         // SubType for GuiShell elements (GridView, Tree, Toolbar, etc.)
@@ -931,6 +944,23 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
             }
         }
 
+        // Extract text content from GuiShell with AbapEditor subtype (ABAP source code editor)
+        if (type == "GuiShell" && subtype == "AbapEditor") {
+            try {
+                std::string editor_text = elem->get_property_string(L"Text");
+                if (!editor_text.empty()) {
+                    metadata["text_content"] = editor_text;
+                    spdlog::debug("Extracted AbapEditor text content ({} chars)", editor_text.length());
+                } else {
+                    metadata["text_content"] = nullptr;  // Empty editor
+                    spdlog::debug("AbapEditor is empty");
+                }
+            } catch (const std::exception& e) {
+                spdlog::warn("Failed to extract AbapEditor text: {}", e.what());
+                metadata["text_content"] = nullptr;
+            }
+        }
+
         // Recursively process children (limit depth to 15 levels to capture deeply nested tree controls)
         // SM59 tree structure: Window -> UserArea -> CustomControl -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
         // SEGW tree structure: Window -> UserArea -> ContainerShell -> SplitterShell -> ContainerShell -> ContainerShell -> SplitterShell -> ContainerShell[n] -> Tree
@@ -1025,7 +1055,13 @@ static void flatten_and_group_elements(const json& elements, json& grouped) {
         if (container == "toolbar" || type == "GuiToolbar" || type == "GuiMenubar") {
             grouped["toolbar"].push_back(elem);
         } else if (type == "GuiButton") {
-            grouped["buttons"].push_back(elem);
+            // Split buttons: toolbar buttons vs inline buttons (in /usr/)
+            std::string id = elem.value("id", "");
+            if (id.find("/tbar/") != std::string::npos) {
+                grouped["buttons"].push_back(elem);  // Toolbar buttons
+            } else {
+                grouped["inline_buttons"].push_back(elem);  // Inline buttons
+            }
         } else if (type == "GuiTextField" || type == "GuiCTextField" ||
                    type == "GuiPasswordField" || type == "GuiComboBox" ||
                    type == "GuiCheckBox" || type == "GuiRadioButton") {
@@ -1054,6 +1090,7 @@ static json group_elements_by_container(const json& elements) {
     json grouped;
     grouped["toolbar"] = json::array();
     grouped["buttons"] = json::array();
+    grouped["inline_buttons"] = json::array();
     grouped["form_fields"] = json::array();
     grouped["tables"] = json::array();
     grouped["tabs"] = json::array();
@@ -1076,6 +1113,7 @@ static json group_elements_by_container(const json& elements) {
 
     deduplicate(grouped["toolbar"]);
     deduplicate(grouped["buttons"]);
+    deduplicate(grouped["inline_buttons"]);
     deduplicate(grouped["form_fields"]);
     deduplicate(grouped["tables"]);
     deduplicate(grouped["tabs"]);
@@ -1084,6 +1122,7 @@ static json group_elements_by_container(const json& elements) {
     // Remove empty groups
     if (grouped["toolbar"].empty()) grouped.erase("toolbar");
     if (grouped["buttons"].empty()) grouped.erase("buttons");
+    if (grouped["inline_buttons"].empty()) grouped.erase("inline_buttons");
     if (grouped["form_fields"].empty()) grouped.erase("form_fields");
     if (grouped["tables"].empty()) grouped.erase("tables");
     if (grouped["tabs"].empty()) grouped.erase("tabs");
@@ -1190,6 +1229,49 @@ static void traverse_element_tree(
                     traverse_element_tree(shellcont_child, collector, session, depth + 1);
                 }
             } catch (...) { }
+
+            // Special handling for GuiUserArea: probe for grid-positioned labels
+            // Pattern: /usr/lbl[row,col]
+            if (type == "GuiUserArea") {
+                spdlog::debug("{}Probing GuiUserArea for grid labels", std::string(depth * 2, ' '));
+
+                // Probe grid bounds (up to 50x50, stop early if consecutive misses)
+                const int MAX_ROW = 50;
+                const int MAX_COL = 50;
+                const int MAX_CONSECUTIVE_MISSES = 30;  // Allow for very sparse grids (SMICM has 26 empty rows)
+
+                int consecutive_row_misses = 0;
+
+                for (int row = 0; row < MAX_ROW && consecutive_row_misses < MAX_CONSECUTIVE_MISSES; ++row) {
+                    int consecutive_col_misses = 0;
+                    bool found_any_in_row = false;
+
+                    for (int col = 0; col < MAX_COL && consecutive_col_misses < MAX_CONSECUTIVE_MISSES; ++col) {
+                        try {
+                            std::string label_id = elem_id + "/lbl[" + std::to_string(row) + "," + std::to_string(col) + "]";
+                            auto label = session->find_element_by_id(label_id);
+
+                            if (label) {
+                                collector.add(label);
+                                found_any_in_row = true;
+                                consecutive_col_misses = 0;
+                            } else {
+                                consecutive_col_misses++;
+                            }
+                        } catch (...) {
+                            consecutive_col_misses++;
+                        }
+                    }
+
+                    if (!found_any_in_row) {
+                        consecutive_row_misses++;
+                    } else {
+                        consecutive_row_misses = 0;
+                    }
+                }
+
+                spdlog::debug("{}Grid probing complete for {}", std::string(depth * 2, ' '), elem_id);
+            }
         }
     } catch (...) {
         // Skip elements that throw exceptions during processing

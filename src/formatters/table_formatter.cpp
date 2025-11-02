@@ -72,33 +72,79 @@ void TableFormatter::format_table_data(
         return;
     }
 
-    // Display data as markdown table
+    // Calculate column widths based on max content width
+    std::vector<size_t> col_widths;
+    std::vector<std::string> col_names;
+
     if (!columns.empty()) {
-        // Header row
-        oss << "|";
+        // Initialize with column header widths
         for (const auto& col : columns) {
-            oss << " " << escape_markdown(col.get<std::string>()) << " |";
+            std::string col_name = escape_markdown(col.get<std::string>());
+            col_names.push_back(col_name);
+            col_widths.push_back(col_name.length());
+        }
+
+        // Update widths based on cell content
+        for (const auto& row : rows) {
+            if (row.is_array()) {
+                for (size_t i = 0; i < row.size() && i < col_widths.size(); ++i) {
+                    std::string cell_value = row[i].is_string() ? row[i].get<std::string>() : "";
+                    if (cell_value.empty()) {
+                        cell_value = "_empty_";
+                    }
+                    std::string escaped = escape_markdown(cell_value);
+                    col_widths[i] = std::max(col_widths[i], escaped.length());
+                }
+            }
+        }
+
+        // Cap maximum width at 50 characters per column
+        for (auto& width : col_widths) {
+            width = std::min(width, size_t(50));
+        }
+
+        // Header row with padding
+        oss << "|";
+        for (size_t i = 0; i < col_names.size(); ++i) {
+            oss << " " << col_names[i];
+            // Pad to column width
+            if (col_names[i].length() < col_widths[i]) {
+                oss << std::string(col_widths[i] - col_names[i].length(), ' ');
+            }
+            oss << " |";
         }
         oss << "\n|";
 
-        // Separator row
-        for (size_t i = 0; i < columns.size(); ++i) {
-            oss << "----------|";
+        // Separator row matching column widths
+        for (size_t i = 0; i < col_widths.size(); ++i) {
+            oss << "-" << std::string(col_widths[i], '-') << "-|";
         }
         oss << "\n";
     }
 
-    // Data rows
+    // Data rows with padding
     int row_count = 0;
     for (const auto& row : rows) {
         if (row.is_array()) {
             oss << "|";
-            for (const auto& cell : row) {
-                std::string cell_value = cell.is_string() ? cell.get<std::string>() : "";
+            for (size_t i = 0; i < row.size() && i < col_widths.size(); ++i) {
+                std::string cell_value = row[i].is_string() ? row[i].get<std::string>() : "";
                 if (cell_value.empty()) {
                     cell_value = "_empty_";
                 }
-                oss << " " << escape_markdown(cell_value) << " |";
+                std::string escaped = escape_markdown(cell_value);
+
+                // Truncate if necessary
+                if (escaped.length() > 50) {
+                    escaped = escaped.substr(0, 47) + "...";
+                }
+
+                oss << " " << escaped;
+                // Pad to column width
+                if (escaped.length() < col_widths[i]) {
+                    oss << std::string(col_widths[i] - escaped.length(), ' ');
+                }
+                oss << " |";
             }
             oss << "\n";
             row_count++;

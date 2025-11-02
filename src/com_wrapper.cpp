@@ -89,7 +89,13 @@ inline bool get_bool_property(IDispatch* obj, const char* prop_name) {
                         &params, &result, nullptr, nullptr);
         if (FAILED(hr)) return false;
 
-        return result.boolVal != VARIANT_FALSE;
+        // Verify variant type before accessing boolVal to avoid undefined behavior
+        if (result.vt == VT_BOOL) {
+            return result.boolVal != VARIANT_FALSE;
+        }
+
+        spdlog::debug("get_bool_property|unexpected type|prop={}|vt={}", prop_name, (int)result.vt);
+        return false;
     } catch (...) {
         return false;
     }
@@ -220,6 +226,19 @@ ComGuiElementPtr ComGuiElement::create(IDispatchPtr elem) {
 // get_id() and get_type() now inherited from SapGuiObject
 
 std::string ComGuiElement::get_text() const {
+    // For text fields (GuiTextField, GuiCTextField), DisplayedText contains the actual value
+    // For other elements (GuiLabel, etc.), Text contains the displayed text
+    // Try DisplayedText first (preferred for input fields), then fall back to Text
+    try {
+        std::string displayed_text = get_string_property(L"DisplayedText");
+        if (!displayed_text.empty()) {
+            return displayed_text;
+        }
+    } catch (const ComException&) {
+        // DisplayedText property not available on this element type
+    }
+
+    // Fall back to Text property
     return get_string_property(L"Text");
 }
 
@@ -229,7 +248,34 @@ void ComGuiElement::set_text(const std::string& text) {
 }
 
 bool ComGuiElement::is_enabled() const {
-    return get_bool_property(L"Enabled");
+    if (!dispatch_) return false;
+
+    // Try to get Enabled property via DISPID
+    _bstr_t prop(L"Enabled");
+    DISPID dispid;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, prop.GetBSTR(), &dispid);
+
+    if (FAILED(hr)) {
+        // Property doesn't exist - most SAP GUI elements don't have "Enabled"
+        // If the property doesn't exist, assume the element is enabled
+        // (the Changeable property is the real indicator of editability)
+        return true;
+    }
+
+    // Property exists, get its value
+    _variant_t result;
+    DISPPARAMS params = {nullptr, nullptr, 0, 0};
+    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                           &params, &result, nullptr, nullptr);
+    if (FAILED(hr)) return true;  // If we can't read it, assume enabled
+
+    // Verify variant type before accessing boolVal to avoid undefined behavior
+    if (result.vt == VT_BOOL) {
+        return result.boolVal != VARIANT_FALSE;
+    }
+
+    spdlog::debug("is_enabled|unexpected type|vt={}", (int)result.vt);
+    return true;  // If unexpected type, assume enabled
 }
 
 bool ComGuiElement::is_visible() const {

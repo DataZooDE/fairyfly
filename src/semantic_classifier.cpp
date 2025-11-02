@@ -24,10 +24,10 @@ SemanticClassifier::ElementCategory SemanticClassifier::classify(
         return ElementCategory::SEMANTIC;
     }
 
-    // GuiShell can be semantic (toolbar, tree, grid) or layout depending on SubType/content
+    // GuiShell can be semantic (toolbar, tree, grid, textedit) or layout depending on SubType/content
     if (type == "GuiShell") {
         std::string subtype = metadata.value("subtype", "");
-        if (subtype == "Tree" || subtype == "Toolbar" || subtype == "GridView") {
+        if (subtype == "Tree" || subtype == "Toolbar" || subtype == "GridView" || subtype == "TextEdit") {
             return ElementCategory::SEMANTIC;
         }
         // Check if it has tree_data or table_data
@@ -173,6 +173,19 @@ std::string SemanticClassifier::get_semantic_description(
         // Toolbar subtype
         if (subtype == "Toolbar") {
             return "Toolbar";
+        }
+
+        // TextEdit subtype
+        if (subtype == "TextEdit") {
+            std::string text = metadata.value("text", "");
+            int line_count = 1;
+            for (char c : text) {
+                if (c == '\n') line_count++;
+            }
+            if (line_count > 1) {
+                return "Text Editor (" + std::to_string(line_count) + " lines)";
+            }
+            return "Text Editor";
         }
 
         // Fallback: check text content

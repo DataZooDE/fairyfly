@@ -112,6 +112,7 @@ test_screen_*.md
 
 # SAP connection files (user-specific)
 *.con
+trial.env
 
 # Environment files (may contain secrets)
 *.env

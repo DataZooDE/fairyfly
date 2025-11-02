@@ -84,9 +84,13 @@ std::string SplitterRenderer::to_markdown(const json& element_metadata, int inde
         int panel_idx = 1;
         for (const auto& child : element_metadata["children"]) {
             if (SemanticClassifier::should_display(child)) {
-                oss << indent << "**Panel " << panel_idx++ << ":**\n";
-                oss << helpers::render_children_markdown(child, indent_level);
-                oss << "\n";
+                std::string panel_content = helpers::render_children_markdown(child, indent_level);
+                // Only output if panel has content
+                if (!panel_content.empty()) {
+                    oss << indent << "**Panel " << panel_idx++ << ":**\n";
+                    oss << panel_content;
+                    oss << "\n";
+                }
             }
         }
     }
@@ -341,7 +345,7 @@ void register_all_renderers() {
     registry.register_markdown_renderer("GuiTextField", TextFieldRenderer::to_markdown);
     registry.register_markdown_renderer("GuiCTextField", TextFieldRenderer::to_markdown);
 
-    // Handle GuiShell specially - it can be tree or toolbar depending on SubType
+    // Handle GuiShell specially - it can be tree, toolbar, grid, or textedit depending on SubType
     registry.register_json_renderer("GuiShell", [](const json& metadata) -> json {
         std::string subtype = metadata.value("subtype", "");
         if (subtype == "Tree" || metadata.contains("tree_data")) {
@@ -352,6 +356,13 @@ void register_all_renderers() {
         }
         if (subtype == "Toolbar") {
             return ToolbarRenderer::to_json(metadata);
+        }
+        if (subtype == "TextEdit") {
+            json result = metadata;
+            result["semantic_type"] = "TextEdit";
+            std::string text = metadata.value("text", "");
+            result["semantic_description"] = "Text Editor (" + std::to_string(text.length()) + " chars)";
+            return result;
         }
         return ContainerRenderer::to_json(metadata);
     });
@@ -366,6 +377,31 @@ void register_all_renderers() {
         }
         if (subtype == "Toolbar") {
             return ToolbarRenderer::to_markdown(metadata, level);
+        }
+        if (subtype == "TextEdit") {
+            std::ostringstream oss;
+            std::string indent = helpers::make_indent(level);
+
+            std::string text = metadata.value("text", "");
+            std::string id = metadata.value("id", "");
+
+            oss << indent << "### Text Editor\n\n";
+
+            // Show content in code block
+            if (!text.empty()) {
+                oss << indent << "```\n";
+                oss << text << "\n";
+                oss << indent << "```\n\n";
+            } else {
+                oss << indent << "_Empty_\n\n";
+            }
+
+            // Show technical ID
+            if (!id.empty()) {
+                oss << indent << "**Technical ID:** `" << id << "`\n\n";
+            }
+
+            return oss.str();
         }
         return ContainerRenderer::to_markdown(metadata, level);
     });

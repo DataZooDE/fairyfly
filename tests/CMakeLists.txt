@@ -7,6 +7,7 @@ add_executable(unit_tests
     unit/test_main.cpp
     unit/test_com_wrapper.cpp
     unit/test_config_session.cpp
+    unit/test_markdown_table_formatter.cpp
     ../src/sap_gui_base.cpp
     ../src/com_wrapper.cpp
     ../src/com_automation_engine.cpp
@@ -21,6 +22,12 @@ add_executable(unit_tests
     ../src/table_data_extractor.cpp
     ../src/formatters/tree_formatter.cpp
     ../src/formatters/table_formatter.cpp
+    ../src/formatters/markdown_table_formatter.cpp
+    ../src/string_utils.cpp
+    ../src/base64.cpp
+    ../src/semantic_classifier.cpp
+    ../src/element_renderer_registry.cpp
+    ../src/element_renderers.cpp
 )
 
 # Include directories for tests
@@ -28,11 +35,15 @@ target_include_directories(unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 target_link_libraries(unit_tests PRIVATE
     Catch2::Catch2WithMain
+    CImg::CImg
+    ZLIB::ZLIB
+    PNG::PNG
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     fmt::fmt
     ole32
     oleaut32
+    gdi32
 )
 
 # Add test discovery

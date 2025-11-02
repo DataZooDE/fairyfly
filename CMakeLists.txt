@@ -75,6 +75,7 @@ set(FAIRYFLY_SOURCES
     src/table_data_extractor.cpp
     src/formatters/tree_formatter.cpp
     src/formatters/table_formatter.cpp
+    src/formatters/markdown_table_formatter.cpp
     src/string_utils.cpp
     src/base64.cpp
     src/semantic_classifier.cpp
