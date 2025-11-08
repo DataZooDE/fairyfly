@@ -20,16 +20,44 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
     for (const auto& elem : elements) {
         std::string type = elem.value("type", "");
         std::string container = elem.value("container_type", "");
+        std::string elem_id = elem.value("id", "unknown");
+        spdlog::debug("flatten_and_group_elements: Processing element type={} id={}", type, elem_id);
 
         // Group by container type or element type
         if (container == "toolbar" || type == "GuiToolbar" || type == "GuiMenubar") {
             grouped["toolbar"].push_back(elem);
+        } else if (type == "GuiShell") {
+            // GuiShell with Toolbar subtype should be in toolbar section
+            std::string subtype = elem.value("subtype", "");
+            if (subtype == "Toolbar") {
+                grouped["toolbar"].push_back(elem);
+            } else {
+                grouped["other"].push_back(elem);
+            }
         } else if (type == "GuiButton") {
-            // Split buttons: toolbar buttons vs inline buttons (in /usr/)
+            // Split buttons: toolbar buttons vs inline buttons
             std::string id = elem.value("id", "");
-            if (id.find("/tbar/") != std::string::npos) {
+
+            // Classify as toolbar button if:
+            // 1. In /tbar/ path (standard toolbar)
+            // 2. In /titl/ path (title bar buttons)
+            // 3. In shell container (shell/btn[X] pattern)
+            // 4. NOT in /usr/ (those are inline form buttons)
+
+            bool is_toolbar_button = false;
+            if (id.find("/usr/") == std::string::npos) {  // Not in user area
+                if (id.find("/tbar[") != std::string::npos ||   // Standard toolbar (e.g., /tbar[0]/btn[1])
+                    id.find("/titl") != std::string::npos ||    // Title bar
+                    id.find("/shell/btn") != std::string::npos) { // Shell container
+                    is_toolbar_button = true;
+                }
+            }
+
+            if (is_toolbar_button) {
+                spdlog::debug("Classifying as toolbar button: {}", id);
                 grouped["buttons"].push_back(elem);  // Toolbar buttons
             } else {
+                spdlog::debug("Classifying as inline button: {}", id);
                 grouped["inline_buttons"].push_back(elem);  // Inline buttons
             }
         } else if (type == "GuiTextField" || type == "GuiCTextField" ||
@@ -51,6 +79,8 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
 
         // Recursively process children
         if (elem.contains("children") && elem["children"].is_array()) {
+            int child_count = elem["children"].size();
+            spdlog::debug("Processing {} children of element type={}", child_count, type);
             flatten_and_group_elements(elem["children"], grouped);
         }
     }
@@ -128,7 +158,10 @@ void ScreenReader::traverse_element_tree(
         bool is_container = (type == "GuiContainerShell" ||
                            type == "GuiSplitterShell" ||
                            type == "GuiUserArea" ||
-                           type == "GuiCustomControl");
+                           type == "GuiCustomControl" ||
+                           type == "GuiToolbar" ||           // Toolbar contains buttons
+                           type == "GuiToolbarControl" ||    // Toolbar control
+                           type == "GuiTitlebar");           // Title bar may contain buttons
 
         if (!is_container) {
             return;  // Leaf element, no children to traverse
@@ -254,10 +287,43 @@ std::vector<ComGuiElementPtr> ScreenReader::discover_elements(ComGuiWindowPtr wi
     collector.reserve(200);  // Reserve space for typical complex screens
 
     try {
+        std::string window_id = window->get_id();
         int child_count = window->get_child_count();
-        spdlog::debug("Window has {} top-level children, starting recursive traversal", child_count);
+        spdlog::debug("Window {} has {} top-level children, starting recursive traversal", window_id, child_count);
 
-        // Recursively traverse all top-level children
+        // FIRST: Explicitly probe for toolbar and title bar (often missed by Children collection)
+        // These are critical for button discovery
+        try {
+            // Try toolbar: wnd[N]/tbar[0], wnd[N]/tbar[1], etc.
+            for (int i = 0; i < 3; ++i) {  // Most windows have 0-2 toolbars
+                try {
+                    std::string tbar_id = window_id + "/tbar[" + std::to_string(i) + "]";
+                    auto tbar = session_->find_element_by_id(tbar_id);
+                    if (tbar) {
+                        spdlog::debug("Found toolbar via ID: {}", tbar_id);
+                        traverse_element_tree(tbar, collector, 0);
+                    }
+                } catch (const std::exception&) {
+                    break;  // No more toolbars
+                }
+            }
+        } catch (const std::exception&) {
+            // Toolbar probing failed
+        }
+
+        try {
+            // Try title bar: wnd[N]/titl
+            std::string titl_id = window_id + "/titl";
+            auto titl = session_->find_element_by_id(titl_id);
+            if (titl) {
+                spdlog::debug("Found title bar via ID: {}", titl_id);
+                traverse_element_tree(titl, collector, 0);
+            }
+        } catch (const std::exception&) {
+            // Title bar not found
+        }
+
+        // SECOND: Recursively traverse all top-level children (covers usr, mbar, etc.)
         for (int i = 0; i < child_count; ++i) {
             try {
                 auto child = window->get_child(i);

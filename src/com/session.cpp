@@ -53,18 +53,44 @@ ComGuiElementPtr ComGuiSession::find_element_by_id(const std::string& id) const 
 }
 
 void ComGuiSession::start_transaction(const std::string& tcode) {
-    try {
-        auto window = get_active_window();
-        if (!window) throw ComException("No active window");
+    utils::TraceGuard trace("ComGuiSession::start_transaction");
+    if (!dispatch_) throw ComException("Null session");
 
-        auto tcode_elem = find_element_by_id("wnd[0]/tbar[0]/okcd");
-        if (tcode_elem) {
-            tcode_elem->set_text(tcode);
-            spdlog::info("Started transaction: {}", tcode);
+    try {
+        // Use SAP's native StartTransaction method instead of filling field + Enter
+        // This is equivalent to SendCommand("/n" + tcode) per SAP GUI Scripting API docs
+        _bstr_t method("StartTransaction");
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
+        if (FAILED(hr)) {
+            trace.mark_error(fmt::format("StartTransaction method not found: 0x{:08X}", hr));
+            throw ComException("StartTransaction method not found", hr);
         }
-    } catch (const ComException& e) {
-        spdlog::error("Failed to start transaction '{}': {}", tcode, e.what());
+
+        _bstr_t tcode_bstr(tcode.c_str());
+        _variant_t tcode_var(tcode_bstr);
+        DISPPARAMS params = {(VARIANT*)&tcode_var, nullptr, 1, 0};
+        _variant_t result;
+
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                             &params, &result, nullptr, nullptr);
+        if (FAILED(hr)) {
+            trace.mark_error(fmt::format("StartTransaction invoke failed: 0x{:08X}", hr));
+            throw ComException("Failed to start transaction", hr);
+        }
+
+        trace.mark_success();
+        spdlog::info("Started transaction: {}", tcode);
+
+        // Brief wait for transaction to load
+        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
+    } catch (const ComException&) {
+        spdlog::error("Failed to start transaction '{}'", tcode);
         throw;
+    } catch (const std::exception& e) {
+        trace.mark_error(e.what());
+        spdlog::error("Exception in start_transaction '{}': {}", tcode, e.what());
+        throw ComException(std::string("Exception in start_transaction: ") + e.what());
     }
 }
 

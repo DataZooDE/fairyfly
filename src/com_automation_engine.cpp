@@ -602,26 +602,32 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
             return result;
         }
 
+        // Resolve @active to actual window ID
+        ElementId resolved_element = resolve_element_path(element);
         auto session = ensure_session();
-        auto elem = session->find_element_by_id(element.path);
+        auto elem = session->find_element_by_id(resolved_element.path);
 
         if (!elem) {
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_NOT_FOUND";
             result.error["message"] = "Element not found";
-            result.error["element"] = element.path;
+            result.error["element"] = resolved_element.path;
             return result;
         }
 
         std::string text = elem->get_text();
         result.status = Result::Status::Success;
-        result.data["element"] = element.path;
+        result.data["element"] = resolved_element.path;
+        if (element.get_window().is_active_selector()) {
+            result.data["element_requested"] = element.path;  // Show original @active path
+        }
         result.data["value"] = text;
         result.data["element_type"] = elem->get_type();
+        result.data["window"] = resolved_element.get_window().id;
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        spdlog::info("Read field {} (duration: {}ms)", element.path, result.duration.count());
+        spdlog::info("Read field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
         result.status = Result::Status::Error;
@@ -716,6 +722,52 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
                 metadata["subtype"] = subtype;
             } else {
                 metadata["subtype"] = "N/A";
+            }
+
+            // Special handling for GuiShell Toolbar - enumerate buttons via ButtonCount API
+            if (subtype == "Toolbar") {
+                try {
+                    int button_count = elem->get_button_count();
+                    spdlog::debug("GuiShell toolbar has {} buttons", button_count);
+
+                    json button_children = json::array();
+                    for (int i = 0; i < button_count; ++i) {
+                        try {
+                            std::string btn_id = elem->get_button_id(i);
+                            std::string btn_text = elem->get_button_text(i);
+                            std::string btn_tooltip = elem->get_button_tooltip(i);
+                            std::string btn_type = elem->get_button_type(i);
+                            bool btn_enabled = elem->get_button_enabled(i);
+
+                            // Skip separators
+                            if (btn_type == "Separator") continue;
+
+                            // Create synthetic button element
+                            json btn_metadata;
+                            btn_metadata["id"] = btn_id;
+                            btn_metadata["type"] = "GuiButton";
+                            btn_metadata["name"] = btn_id;
+                            btn_metadata["text"] = btn_text;
+                            btn_metadata["tooltip"] = btn_tooltip;
+                            btn_metadata["enabled"] = btn_enabled;
+                            btn_metadata["button_type"] = btn_type;
+                            btn_metadata["changeable"] = true;
+                            btn_metadata["visible"] = true;
+                            btn_metadata["capabilities"] = json::array({"clickable"});
+
+                            button_children.push_back(btn_metadata);
+                        } catch (const std::exception& e) {
+                            spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
+                        }
+                    }
+
+                    if (!button_children.empty()) {
+                        metadata["children"] = button_children;
+                        metadata["child_count"] = button_children.size();
+                    }
+                } catch (const std::exception& e) {
+                    spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
+                }
             }
         }
 
@@ -954,10 +1006,34 @@ static void flatten_and_group_elements(const json& elements, json& grouped) {
         // Group by container type or element type
         if (container == "toolbar" || type == "GuiToolbar" || type == "GuiMenubar") {
             grouped["toolbar"].push_back(elem);
+        } else if (type == "GuiShell") {
+            // GuiShell with Toolbar subtype should be in toolbar section
+            std::string subtype = elem.value("subtype", "");
+            if (subtype == "Toolbar") {
+                grouped["toolbar"].push_back(elem);
+            } else {
+                grouped["other"].push_back(elem);
+            }
         } else if (type == "GuiButton") {
-            // Split buttons: toolbar buttons vs inline buttons (in /usr/)
+            // Split buttons: toolbar buttons vs inline buttons
             std::string id = elem.value("id", "");
-            if (id.find("/tbar/") != std::string::npos) {
+
+            // Classify as toolbar button if:
+            // 1. In /tbar/ path (standard toolbar)
+            // 2. In /titl/ path (title bar buttons)
+            // 3. In shell container (shell/btn[X] pattern)
+            // 4. NOT in /usr/ (those are inline form buttons)
+
+            bool is_toolbar_button = false;
+            if (id.find("/usr/") == std::string::npos) {  // Not in user area
+                if (id.find("/tbar[") != std::string::npos ||   // Standard toolbar (e.g., /tbar[0]/btn[1])
+                    id.find("/titl") != std::string::npos ||    // Title bar
+                    id.find("/shell/btn") != std::string::npos) { // Shell container
+                    is_toolbar_button = true;
+                }
+            }
+
+            if (is_toolbar_button) {
                 grouped["buttons"].push_back(elem);  // Toolbar buttons
             } else {
                 grouped["inline_buttons"].push_back(elem);  // Inline buttons

@@ -167,6 +167,35 @@ public:
     /// Returns empty vector if no columns available
     std::vector<std::string> get_column_order() const;
 
+    // ============================================================================
+    // GuiShell Toolbar Button Methods (for GuiShell with SubType="Toolbar")
+    // ============================================================================
+
+    /// Get number of toolbar buttons in GuiShell Toolbar
+    /// Returns 0 if not a toolbar or property not available
+    int get_button_count() const;
+
+    /// Get button ID at specified position (0-based)
+    /// Returns empty string if position invalid or method fails
+    std::string get_button_id(int position) const;
+
+    /// Get button text at specified position
+    /// Returns empty string if position invalid or method fails
+    std::string get_button_text(int position) const;
+
+    /// Get button tooltip at specified position
+    /// Returns empty string if position invalid or method fails
+    std::string get_button_tooltip(int position) const;
+
+    /// Get button type at specified position
+    /// Returns type string: "Button", "ButtonAndMenu", "Menu", "Separator", "Group", "CheckBox"
+    /// Returns empty string if position invalid or method fails
+    std::string get_button_type(int position) const;
+
+    /// Get button enabled state at specified position
+    /// Returns false if position invalid or method fails
+    bool get_button_enabled(int position) const;
+
     /// Get cell value from GridView
     /// @param row Row index (0-based)
     /// @param column_name Column identifier from ColumnOrder

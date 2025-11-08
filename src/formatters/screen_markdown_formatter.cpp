@@ -22,6 +22,8 @@ namespace cli {
 
 // Forward declarations for helper functions
 namespace {
+    constexpr int MAX_RECURSION_DEPTH = 50;  // Prevent stack overflow in tree traversal
+
     std::map<std::string, std::string> build_label_field_map(const json& hierarchy);
     void format_menu(const json& menu, std::ostringstream& oss, const std::string& prefix = "", int level = 0);
     std::string escape_markdown(const std::string& text);
@@ -33,7 +35,7 @@ namespace {
     void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table);
     void add_form_elements_recursive(const json& element, formatters::MarkdownTableFormatter& table,
                                     const std::map<std::string, std::string>& label_map,
-                                    std::set<std::string>& rendered_ids);
+                                    std::set<std::string>& rendered_ids, int depth = 0);
     void format_table_element(std::ostringstream& oss, const json& elem);
 }
 
@@ -148,7 +150,12 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             };
             std::vector<LabelInfo> labels;
 
-            std::function<void(const json&)> collect_labels = [&](const json& elem) {
+            std::function<void(const json&, int)> collect_labels = [&](const json& elem, int depth) {
+                if (depth > MAX_RECURSION_DEPTH) {
+                    spdlog::warn("Max recursion depth reached in collect_labels");
+                    return;
+                }
+
                 std::string type = elem.value("type", "");
 
                 // Collect text from GuiLabel elements with grid positions
@@ -171,14 +178,14 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
                 // Recurse into children
                 if (elem.contains("children") && elem["children"].is_array()) {
                     for (const auto& child : elem["children"]) {
-                        collect_labels(child);
+                        collect_labels(child, depth + 1);
                     }
                 }
             };
 
             // Collect all labels
             for (const auto& elem : hierarchy["other"]) {
-                collect_labels(elem);
+                collect_labels(elem, 0);
             }
 
             // Group labels by row and format them
@@ -253,10 +260,43 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
     }
 
     // Buttons section (toolbar and action buttons combined)
-    if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) {
-        oss << "## Buttons\n\n";
+    // Collect buttons from both hierarchy["buttons"] AND GuiShell toolbar children
+    std::vector<json> all_buttons;
 
+    // Add buttons from hierarchy["buttons"] (traditional SAP GUI toolbar)
+    if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) {
         for (const auto& elem : hierarchy["buttons"]) {
+            all_buttons.push_back(elem);
+        }
+    }
+
+    // Add buttons from GuiShell toolbars (hierarchy["toolbar"] with SubType="Toolbar")
+    if (hierarchy.contains("toolbar") && !hierarchy["toolbar"].empty()) {
+        for (const auto& toolbar_elem : hierarchy["toolbar"]) {
+            std::string type = toolbar_elem.value("type", "");
+            std::string subtype = toolbar_elem.value("subtype", "");
+
+            // Check if this is a GuiShell Toolbar with button children
+            if (type == "GuiShell" && subtype == "Toolbar" &&
+                toolbar_elem.contains("children") && toolbar_elem["children"].is_array()) {
+                for (const auto& button : toolbar_elem["children"]) {
+                    all_buttons.push_back(button);
+                }
+            }
+        }
+    }
+
+    // Render buttons table if we have any buttons
+    if (!all_buttons.empty()) {
+        oss << "## Toolbar Buttons\n\n";
+
+        formatters::MarkdownTableFormatter table;
+        table.add_column("Button", formatters::MarkdownTableFormatter::Alignment::Left);
+        table.add_column("Tooltip", formatters::MarkdownTableFormatter::Alignment::Left);
+        table.add_column("State", formatters::MarkdownTableFormatter::Alignment::Left);
+        table.add_column("Technical ID", formatters::MarkdownTableFormatter::Alignment::Left);
+
+        for (const auto& elem : all_buttons) {
             std::string label = elem.value("text", "");
             if (label.empty()) {
                 label = elem.value("name", "Button");
@@ -264,27 +304,18 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             std::string tooltip = elem.value("tooltip", "");
             std::string id = elem.value("id", "");
             bool enabled = elem.value("enabled", true);
+            std::string state = enabled ? "Enabled" : "Disabled";
 
-            // Extract shortcut from tooltip (usually in parentheses)
-            std::string shortcut = "";
-            if (!tooltip.empty()) {
-                size_t start = tooltip.find("(");
-                size_t end = tooltip.find(")");
-                if (start != std::string::npos && end != std::string::npos && end > start) {
-                    shortcut = tooltip.substr(start + 1, end - start - 1);
-                }
-            }
+            std::vector<std::string> cells = {label, tooltip, state, id};
+            std::vector<formatters::MarkdownTableFormatter::CellStyle> styles(4);
+            styles[0].bold = true;  // Button name bold
+            styles[3].code = true;  // ID in code style
 
-            oss << "- **" << escape_markdown(label) << "**";
-            if (!shortcut.empty()) {
-                oss << " `" << shortcut << "`";
-            }
-            if (!enabled) {
-                oss << " _(disabled)_";
-            }
-            oss << " — `" << id << "`\n";
+            table.add_row(cells, styles);
         }
-        oss << "\n";
+
+        oss << table.render() << "\n";
+        oss << "_Click with_: `fairyfly click '@active/<button_path>'`\n\n";
     }
 
     // Form fields and content section - walk DOM tree to maintain spatial layout
@@ -527,6 +558,11 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
 
         // Recursively find and render semantic elements
         std::function<void(const json&, int)> render_semantic_descendants = [&](const json& elem, int depth) {
+            if (depth > MAX_RECURSION_DEPTH) {
+                spdlog::warn("Max recursion depth reached in render_semantic_descendants");
+                return;
+            }
+
             std::string type = elem.value("type", "");
             std::string subtype = elem.value("subtype", "");
 
@@ -625,6 +661,11 @@ std::map<std::string, std::string> build_label_field_map(const json& hierarchy) 
 }
 
 void format_menu(const json& menu, std::ostringstream& oss, const std::string& /* prefix */, int level) {
+    if (level > MAX_RECURSION_DEPTH) {
+        spdlog::warn("Max recursion depth reached in format_menu");
+        return;
+    }
+
     std::string text = menu.value("text", menu.value("name", ""));
     if (text.empty()) return;  // Skip empty menu items (separators)
 
@@ -788,7 +829,12 @@ void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table)
 
 void add_form_elements_recursive(const json& element, formatters::MarkdownTableFormatter& table,
                                 const std::map<std::string, std::string>& label_map,
-                                std::set<std::string>& rendered_ids) {
+                                std::set<std::string>& rendered_ids, int depth) {
+    if (depth > MAX_RECURSION_DEPTH) {
+        spdlog::warn("Max recursion depth reached in add_form_elements_recursive");
+        return;
+    }
+
     if (!element.is_object()) {
         return;
     }
@@ -822,7 +868,7 @@ void add_form_elements_recursive(const json& element, formatters::MarkdownTableF
     // Recurse into children
     if (element.contains("children") && element["children"].is_array()) {
         for (const auto& child : element["children"]) {
-            add_form_elements_recursive(child, table, label_map, rendered_ids);
+            add_form_elements_recursive(child, table, label_map, rendered_ids, depth + 1);
         }
     }
 }

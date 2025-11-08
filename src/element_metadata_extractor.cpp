@@ -83,6 +83,52 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
             } else {
                 metadata["subtype"] = "N/A";
             }
+
+            // Special handling for GuiShell Toolbar - enumerate buttons via ButtonCount API
+            if (subtype == "Toolbar") {
+                try {
+                    int button_count = elem->get_button_count();
+                    spdlog::debug("GuiShell toolbar has {} buttons", button_count);
+
+                    json button_children = json::array();
+                    for (int i = 0; i < button_count; ++i) {
+                        try {
+                            std::string btn_id = elem->get_button_id(i);
+                            std::string btn_text = elem->get_button_text(i);
+                            std::string btn_tooltip = elem->get_button_tooltip(i);
+                            std::string btn_type = elem->get_button_type(i);
+                            bool btn_enabled = elem->get_button_enabled(i);
+
+                            // Skip separators
+                            if (btn_type == "Separator") continue;
+
+                            // Create synthetic button element
+                            json btn_metadata;
+                            btn_metadata["id"] = btn_id;
+                            btn_metadata["type"] = "GuiButton";
+                            btn_metadata["name"] = btn_id;
+                            btn_metadata["text"] = btn_text;
+                            btn_metadata["tooltip"] = btn_tooltip;
+                            btn_metadata["enabled"] = btn_enabled;
+                            btn_metadata["button_type"] = btn_type;
+                            btn_metadata["changeable"] = true;
+                            btn_metadata["visible"] = true;
+                            btn_metadata["capabilities"] = json::array({"clickable"});
+
+                            button_children.push_back(btn_metadata);
+                        } catch (const std::exception& e) {
+                            spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
+                        }
+                    }
+
+                    if (!button_children.empty()) {
+                        metadata["children"] = button_children;
+                        metadata["child_count"] = button_children.size();
+                    }
+                } catch (const std::exception& e) {
+                    spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
+                }
+            }
         }
 
         // Special handling for GuiBox (grouping container)
