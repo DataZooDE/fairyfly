@@ -57,7 +57,8 @@ public:
     Result handle_transaction(const std::string& tcode, std::optional<int> connection_id);
 
     // Element interactions
-    Result handle_click(const std::string& element_id, std::optional<int> connection_id);
+    Result handle_click(const std::string& element_id, std::optional<int> connection_id,
+                        bool wait_for_window = false, int timeout_ms = 5000);
     Result handle_fill(const std::string& element_id, const std::string& value, std::optional<int> connection_id);
     Result handle_read_field(const std::string& element_id, std::optional<int> connection_id);
 

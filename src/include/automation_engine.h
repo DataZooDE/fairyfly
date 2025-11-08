@@ -46,6 +46,10 @@ public:
     // Enumeration and diagnostics
     virtual nlohmann::json get_application_info() const = 0;
 
+    // Window management
+    virtual WindowId get_active_window_id() const = 0;
+    virtual ElementId resolve_element_path(const ElementId& element) const = 0;
+
     // Static factory
     static std::unique_ptr<AutomationEngine> create();
 };

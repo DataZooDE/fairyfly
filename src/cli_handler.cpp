@@ -278,7 +278,8 @@ Result CommandHandler::handle_transaction(const std::string& tcode, std::optiona
     return result;
 }
 
-Result CommandHandler::handle_click(const std::string& element_id, std::optional<int> connection_id)
+Result CommandHandler::handle_click(const std::string& element_id, std::optional<int> connection_id,
+                                     bool wait_for_window, int timeout_ms)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -293,16 +294,62 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         result.error["code"] = "INVALID_ELEMENT";
         result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
         result.error["suggestions"] = json::array({
-            "Element IDs should start with 'wnd' (e.g., wnd[0]/usr/btn[3])"
+            "Element IDs should start with 'wnd' or '@active' (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3])"
         });
         return result;
     }
 
-    spdlog::info("Clicking element: {} on connection {}", element_id, conn_result.value.id);
+    // Get current active window before click (if monitoring for new windows)
+    WindowId window_before;
+    if (wait_for_window) {
+        window_before = engine_->get_active_window_id();
+        spdlog::info("Clicking element: {} on connection {} (monitoring for new window, current={})",
+                     element_id, conn_result.value.id, window_before.id);
+    } else {
+        spdlog::info("Clicking element: {} on connection {}", element_id, conn_result.value.id);
+    }
+
     auto result = engine_->click_element(elem);
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
+
+        // If requested, wait for new window to appear
+        if (wait_for_window) {
+            auto start = std::chrono::high_resolution_clock::now();
+            bool window_changed = false;
+            WindowId new_window = window_before;
+
+            // Poll for window change with 100ms interval
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                new_window = engine_->get_active_window_id();
+                if (new_window.id != window_before.id) {
+                    window_changed = true;
+                    break;
+                }
+
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - start
+                );
+                if (elapsed.count() > timeout_ms) {
+                    break;
+                }
+            }
+
+            if (window_changed) {
+                result.data["window_changed"] = true;
+                result.data["window_before"] = window_before.id;
+                result.data["window_after"] = new_window.id;
+                result.data["new_window"] = new_window.id;  // For easy access
+                spdlog::info("New window detected after click: {} -> {}", window_before.id, new_window.id);
+            } else {
+                result.data["window_changed"] = false;
+                result.data["waited_ms"] = timeout_ms;
+                spdlog::debug("No new window detected after click (waited {}ms)", timeout_ms);
+            }
+        }
     }
 
     return result;

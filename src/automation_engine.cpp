@@ -65,6 +65,14 @@ public:
     nlohmann::json get_application_info() const override {
         return impl_->get_application_info();
     }
+
+    WindowId get_active_window_id() const override {
+        return impl_->get_active_window_id();
+    }
+
+    ElementId resolve_element_path(const ElementId& element) const override {
+        return impl_->resolve_element_path(element);
+    }
 };
 
 // Legacy stub for fallback
@@ -295,6 +303,14 @@ public:
         info["total_sessions"] = connected_ ? 1 : 0;
         info["note"] = "Stub implementation - no real SAP GUI data available";
         return info;
+    }
+
+    WindowId get_active_window_id() const override {
+        return WindowId("wnd[0]");  // Stub always returns main window
+    }
+
+    ElementId resolve_element_path(const ElementId& element) const override {
+        return element;  // Stub doesn't resolve @active, returns as-is
     }
 };
 

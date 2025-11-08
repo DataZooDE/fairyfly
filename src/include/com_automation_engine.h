@@ -69,6 +69,10 @@ public:
     // Enumerate all connections, sessions, and windows
     nlohmann::json get_application_info() const;
 
+    // Window management helpers
+    WindowId get_active_window_id() const;
+    ElementId resolve_element_path(const ElementId& element) const;
+
 private:
     /// Normalize SAP GUI path from 1-indexed to 0-indexed
     /// SAP GUI returns paths like "/app/con[1]/ses[0]" but we use 0-indexed "/app/con[0]/ses[0]"

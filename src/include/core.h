@@ -89,15 +89,74 @@ inline Result result_from_error(const ResultT<T>& error_result) {
     return r;
 }
 
+// Window identifier
+struct WindowId {
+    std::string id;  // e.g., "wnd[0]", "wnd[1]", or "@active"
+
+    WindowId() = default;
+    explicit WindowId(const std::string& wnd_id) : id(wnd_id) {}
+
+    bool is_valid() const {
+        return !id.empty() && (id[0] == 'w' || id[0] == '@');
+    }
+
+    bool is_active_selector() const {
+        return id == "@active";
+    }
+
+    // Extract window index from wnd[N] format, returns -1 for @active or invalid
+    int get_index() const {
+        if (is_active_selector()) return -1;
+        if (id.size() < 6) return -1;  // Minimum: "wnd[0]"
+
+        auto start = id.find('[');
+        auto end = id.find(']');
+        if (start == std::string::npos || end == std::string::npos) return -1;
+
+        try {
+            return std::stoi(id.substr(start + 1, end - start - 1));
+        } catch (...) {
+            return -1;
+        }
+    }
+};
+
 // Element identifier
 struct ElementId {
-    std::string path;  // e.g., "wnd[0]/usr/btn[3]"
+    std::string path;  // e.g., "wnd[0]/usr/btn[3]" or "@active/usr/btn[3]"
 
     ElementId() = default;
     explicit ElementId(const std::string& p) : path(p) {}
 
     bool is_valid() const {
-        return !path.empty() && path[0] == 'w';  // Must start with window
+        return !path.empty() && (path[0] == 'w' || path[0] == '@');  // Must start with window or @active
+    }
+
+    // Extract window ID from element path
+    WindowId get_window() const {
+        auto slash_pos = path.find('/');
+        if (slash_pos == std::string::npos) {
+            return WindowId(path);  // Just window ID, no element path
+        }
+        return WindowId(path.substr(0, slash_pos));
+    }
+
+    // Get element path without window prefix (e.g., "usr/btn[3]" from "wnd[0]/usr/btn[3]")
+    std::string get_element_path() const {
+        auto slash_pos = path.find('/');
+        if (slash_pos == std::string::npos) {
+            return "";  // Just window ID, no element path
+        }
+        return path.substr(slash_pos + 1);
+    }
+
+    // Replace window part with actual window ID (resolves @active to wnd[N])
+    ElementId with_window(const WindowId& window) const {
+        auto elem_path = get_element_path();
+        if (elem_path.empty()) {
+            return ElementId(window.id);
+        }
+        return ElementId(window.id + "/" + elem_path);
     }
 };
 
