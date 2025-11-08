@@ -276,10 +276,10 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             std::string type = toolbar_elem.value("type", "");
             std::string subtype = toolbar_elem.value("subtype", "");
 
-            // Check if this is a GuiShell Toolbar with button children
+            // Check if this is a GuiShell Toolbar with synthetic button metadata
             if (type == "GuiShell" && subtype == "Toolbar" &&
-                toolbar_elem.contains("children") && toolbar_elem["children"].is_array()) {
-                for (const auto& button : toolbar_elem["children"]) {
+                toolbar_elem.contains("toolbar_buttons") && toolbar_elem["toolbar_buttons"].is_array()) {
+                for (const auto& button : toolbar_elem["toolbar_buttons"]) {
                     all_buttons.push_back(button);
                 }
             }

@@ -102,9 +102,10 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                             // Skip separators
                             if (btn_type == "Separator") continue;
 
-                            // Create synthetic button element
+                            // Create synthetic button element with full path
+                            std::string full_btn_path = elem_id + "/btn_" + btn_id;
                             json btn_metadata;
-                            btn_metadata["id"] = btn_id;
+                            btn_metadata["id"] = full_btn_path;
                             btn_metadata["type"] = "GuiButton";
                             btn_metadata["name"] = btn_id;
                             btn_metadata["text"] = btn_text;
@@ -121,9 +122,11 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                         }
                     }
 
+                    // Store synthetic buttons in separate field to avoid recursive processing
+                    // These are metadata-only constructs, not real COM elements that can be traversed
                     if (!button_children.empty()) {
-                        metadata["children"] = button_children;
-                        metadata["child_count"] = button_children.size();
+                        metadata["toolbar_buttons"] = button_children;
+                        metadata["button_count"] = button_children.size();
                     }
                 } catch (const std::exception& e) {
                     spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
