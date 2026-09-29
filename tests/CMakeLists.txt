@@ -20,6 +20,7 @@ add_executable(unit_tests
     unit/test_connection_manager.cpp
     unit/test_grid_analyzer.cpp
     unit/test_batch_command.cpp
+    unit/test_audit_log.cpp
     ../src/config.cpp
     ../src/session.cpp
 )

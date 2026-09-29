@@ -372,6 +372,12 @@ public:
     /// Authenticated SAP user from GuiSessionInfo, or empty before logon.
     std::string get_user() const;
 
+    /// SAP system name (GuiSessionInfo.SystemName), empty when unavailable.
+    std::string get_system_name() const;
+
+    /// SAP client (GuiSessionInfo.Client), empty when unavailable.
+    std::string get_client() const;
+
     /// Backend session identity when SAP exposes GuiSessionInfo.
     /// Combines SystemSessionId and SessionNumber; empty when unavailable.
     std::string get_server_session_key() const;

@@ -7,6 +7,10 @@
 
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
+    // Keep unit-test CLI runs out of the real audit trail (audit tests set their own env).
+    _putenv_s("FAIRYFLY_AUDIT", "0");
+#endif
+#ifdef _WIN32
     HDESK hDesk = OpenDesktopA("Default", 0, FALSE, GENERIC_ALL);
     if (hDesk) {
         SetThreadDesktop(hDesk);

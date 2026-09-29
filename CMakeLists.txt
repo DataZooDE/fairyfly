@@ -85,6 +85,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
     src/read_only_guard.cpp
     src/cli_entry.cpp
+    src/audit_log.cpp
+    src/cli_handler_audit.cpp
     src/automation_engine.cpp
     src/com/wrapper.cpp
     src/com/wrapper_helpers.cpp
