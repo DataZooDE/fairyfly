@@ -59,7 +59,7 @@ bool option_name_is_sensitive(const std::string& raw_name) {
     return sap::is_sensitive_data_name(name) || sap::contains_sensitive_data_name(name);
 }
 
-/// Options of `fill` that consume the next token.
+/// Options of `element fill` that consume the next token.
 bool fill_option_takes_value(const std::string& name) {
     return name == "--connection" || name == "--row" || name == "--column";
 }
@@ -226,7 +226,7 @@ std::vector<std::string> redact_argv(const std::vector<std::string>& argv) {
             }
             continue;
         }
-        if (!in_fill && tok == "fill") {
+        if (!in_fill && tok == "fill" && i > 0 && argv[i - 1] == "element") {
             in_fill = true;
             out.push_back(tok);
             continue;

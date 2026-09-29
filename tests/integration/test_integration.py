@@ -24,7 +24,7 @@ def login_from_trial_env(connection_file_id):
     """Log in through Fairyfly's native GUI logon using the Windows Credential Manager entry
     named like the connection (see `fairyfly credentials set` / `import-env`). This script
     never reads a credential file and passes no password."""
-    result = run_fairyfly(["login", "--connection", str(connection_file_id)])
+    result = run_fairyfly(["session", "login", "--connection", str(connection_file_id)])
     if not result["success"]:
         return False
     try:
@@ -35,7 +35,7 @@ def login_from_trial_env(connection_file_id):
 
 
 def close_owned_connection(connection_file_id):
-    result = run_fairyfly(["disconnect", "--connection",
+    result = run_fairyfly(["session", "disconnect", "--connection",
                            str(connection_file_id), "--close-session"])
     if not result["success"]:
         return False
@@ -123,7 +123,7 @@ def main(argv=()):
     print()
 
     # A server-side scripting block makes all later SAP actions impossible.
-    preflight = run_fairyfly(['list'])
+    preflight = run_fairyfly(['session', 'list'])
     if not preflight['success']:
         print(f"Preflight failed: {preflight['error'] or preflight['output']}")
         return 2
@@ -140,7 +140,7 @@ def main(argv=()):
                 and connection.get('backend_scripting_disabled')):
             print(f"Backend GUI scripting is disabled for {CONNECTION_NAME}; integration tests cannot run")
             return 2
-    saved = run_fairyfly(['connections'])
+    saved = run_fairyfly(['connection', 'list'])
     if not saved['success']:
         print(f"Could not inspect saved connections: {saved['error'] or saved['output']}")
         return 2
@@ -169,7 +169,7 @@ def main(argv=()):
     if connection_file_id is not None:
         test_result("Use existing connection", True, f"Connection file ID: {connection_file_id}")
     else:
-        result = run_fairyfly(["launch", CONNECTION_NAME])
+        result = run_fairyfly(["session", "launch", CONNECTION_NAME])
 
         if result['success']:
             try:
@@ -213,7 +213,7 @@ def main(argv=()):
     print("Test Suite 2: Transaction Execution")
     print()
 
-    result = run_fairyfly(["tcode", "SM59", "--connection", str(connection_file_id)])
+    result = run_fairyfly(["transaction", "start", "SM59", "--connection", str(connection_file_id)])
     transaction_ready = False
 
     if result['success']:
@@ -310,7 +310,7 @@ def main(argv=()):
         print("  SKIP: Close session (saved connection existed before this run)")
         result = None
     else:
-        result = run_fairyfly(["disconnect", "--connection", str(connection_file_id), "--close-session"])
+        result = run_fairyfly(["session", "disconnect", "--connection", str(connection_file_id), "--close-session"])
 
     if result is None:
         pass

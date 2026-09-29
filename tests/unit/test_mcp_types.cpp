@@ -80,14 +80,14 @@ TEST_CASE("Dispatcher lists tools per policy", "[mcp]") {
 
     CommandDispatcher dispatcher(invoker, Policy{});
     bool found = false;
-    for (const auto& def : dispatcher.list_tools()) found = found || def.name == "sap_doctor";
+    for (const auto& def : dispatcher.list_tools()) found = found || def.name == "gui_doctor";
     CHECK(found);
 
     ToolSpec write;
-    write.def.name = "sap_fake_write";
+    write.def.name = "gui_fake_write";
     write.write_tool = true;
     ToolSpec read;
-    read.def.name = "sap_fake_read";
+    read.def.name = "gui_fake_read";
 
     Policy read_only;
     CHECK(tool_visible(read, read_only));
@@ -98,9 +98,9 @@ TEST_CASE("Dispatcher lists tools per policy", "[mcp]") {
     CHECK(tool_visible(write, rw));
 }
 
-TEST_CASE("Catalog contains sap_doctor placeholder", "[mcp]") {
+TEST_CASE("Catalog contains gui_doctor placeholder", "[mcp]") {
     auto specs = all_tool_specs();
     REQUIRE_FALSE(specs.empty());
-    CHECK(specs.front().def.name == "sap_doctor");
+    CHECK(specs.front().def.name == "gui_doctor");
     CHECK(specs.front().build_argv(json::object(), Policy{}) == std::vector<std::string>{"doctor"});
 }

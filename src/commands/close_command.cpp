@@ -7,14 +7,14 @@ namespace commands {
 
 class CloseCommand : public CommandBase {
 public:
-    std::string name() const override { return "close"; }
+    std::string name() const override { return "popup close"; }
 
     std::string description() const override {
         return "Close the active popup (sends F12 to wnd[N>0]) and verify it closed";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"popup","close"});
         cmd_->add_option("--vkey", vkey_, "SAP VKey to send to the popup (default 12 = F12/Cancel)")
             ->default_val(12)
             ->check(CLI::Range(0, 99));

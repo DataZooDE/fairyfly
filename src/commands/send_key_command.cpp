@@ -7,14 +7,14 @@ namespace commands {
 
 class SendKeyCommand : public CommandBase {
 public:
-    std::string name() const override { return "send-key"; }
+    std::string name() const override { return "key send"; }
 
     std::string description() const override {
         return "Send a key (enter, f1..f12, shift+f1..shift+f12 or a raw VKey number) to a window";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"key","send"});
         cmd_->add_option("key", key_, "Key name (enter, f3, f8, shift+f4, ...) or raw SAP VKey number")
             ->required();
         cmd_->add_option("--window", window_, "Target window: @active (default) or wnd[N]")

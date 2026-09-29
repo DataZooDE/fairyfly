@@ -61,9 +61,9 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
         oss << "**Usage Examples:**\n";
         oss << "```bash\n";
         oss << "# Select a row\n";
-        oss << "fairyfly click '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
+        oss << "fairyfly element click '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
         oss << "# Set cell value\n";
-        oss << "fairyfly fill '" << id << "' 'value' --row 0 --column 'COLUMN_NAME'\n";
+        oss << "fairyfly element fill '" << id << "' 'value' --row 0 --column 'COLUMN_NAME'\n";
         oss << "```\n\n";
     }
 }

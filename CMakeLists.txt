@@ -24,7 +24,7 @@ if(WIN32)
 endif()
 
 # Set the project name and version
-project(fairyfly VERSION 0.1.0 LANGUAGES CXX)
+project(fairyfly VERSION 0.2.0 LANGUAGES CXX)
 
 # Require C++20
 set(CMAKE_CXX_STANDARD 20)
@@ -135,7 +135,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/get_command.cpp
     src/commands/list_command.cpp
     src/commands/screen_command.cpp
-    src/commands/serve_command.cpp
+    src/commands/mcp_command.cpp
+    src/commands/menu_command.cpp
+    src/commands/command_groups.cpp
+    src/commands/cli_app.cpp
+    src/command_table.cpp
     src/commands/press_f4_command.cpp
     src/commands/doctor_command.cpp
     src/commands/send_key_command.cpp
@@ -158,7 +162,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/result_shaper.cpp
     src/mcp/dispatcher.cpp
     src/mcp/mcp_audit.cpp
-    src/mcp/run_serve.cpp
+    src/mcp/run_mcp.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)

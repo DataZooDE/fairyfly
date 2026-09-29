@@ -6,14 +6,14 @@ namespace commands {
 
 class ConnectionsCommand : public CommandBase {
 public:
-    std::string name() const override { return "connections"; }
+    std::string name() const override { return "connection list"; }
 
     std::string description() const override {
         return "List and manage SAP connections";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"connection","list"});
         cmd_->add_flag("--cleanup", cleanup_, "Remove invalid connection files");
         add_output_option(cmd_, output_format_);
         return cmd_;

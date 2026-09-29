@@ -13,7 +13,7 @@ namespace fairyfly::mcp {
 /// ToolProvider that maps tool calls onto CLI argv via the catalog, checks policy, invokes the
 /// command registry through `Invoker`, shapes the Result and emits an audit record.
 ///
-/// Every call (including each item of sap_batch) runs the same pipeline: find spec -> check_call ->
+/// Every call (including each item of gui_batch) runs the same pipeline: find spec -> check_call ->
 /// rate limit -> build_argv -> invoke -> shape -> audit hook (exactly once) -> sticky connection.
 class CommandDispatcher : public ToolProvider {
 public:
@@ -29,7 +29,7 @@ public:
     /// Replaces the rate-limit decision (default: RateLimiter(policy.max_calls_per_minute)).
     /// Test seam; the gate returns false to refuse the call with RATE_LIMITED.
     void set_rate_gate(std::function<bool(std::chrono::steady_clock::time_point)> gate);
-    /// Connection remembered from the last successful sap_attach / sap_launch.
+    /// Connection remembered from the last successful gui_session_attach / gui_session_launch.
     std::optional<int> sticky_connection() const { return sticky_connection_; }
 
 private:

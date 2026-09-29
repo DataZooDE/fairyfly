@@ -5,14 +5,14 @@ namespace commands {
 
 class AttachCommand : public CommandBase {
 public:
-    std::string name() const override { return "attach"; }
+    std::string name() const override { return "session attach"; }
 
     std::string description() const override {
         return "Attach to a running SAP GUI window or exact session ID";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"session","attach"});
         cmd_->add_option("--timeout", timeout_, "Timeout in seconds for window selection")
             ->check(CLI::PositiveNumber);
         session_option_ = cmd_->add_option("--session-id", session_id_, "Exact SAP GUI session ID from list");

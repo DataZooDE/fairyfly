@@ -15,18 +15,18 @@ Both retained runners use Fairyfly's default JSON output and error-level logging
 Check the visible SAP GUI connections from the repository root before choosing a live script:
 
 ~~~powershell
-.\build\bin\Release\fairyfly.exe list
+.\build\bin\Release\fairyfly.exe session list
 ~~~
 
 The old one-off VBScript screen probes were removed after their findings were recorded in the issue log. There is no Invoke-IntegrationTests.ps1 or Test-Integration.ps1 runner in the current tree. Use each retained script's prerequisites and arguments against a test system.
 
-`test_integration.py` checks for server-side scripting before attempting its SM59 workflow. It targets the numeric connection-file ID returned by `launch` and closes only the SAP GUI session it created. If SM59 navigation fails, it skips the screen checks and proceeds to targeted cleanup. It reads JSON and Markdown screen output in memory and verifies a relative screenshot path in a temporary directory, which it removes after checking the PNG signature. It does not create persistent `test_screen_sm59.json`, `.md`, or PNG captures. The failure and authenticated paths have offline regressions in `test_integration_runner.py` and were verified on live Bigfox.
+`test_integration.py` checks for server-side scripting before attempting its SM59 workflow. It targets the numeric connection-file ID returned by `session launch` and closes only the SAP GUI session it created. If SM59 navigation fails, it skips the screen checks and proceeds to targeted cleanup. It reads JSON and Markdown screen output in memory and verifies a relative screenshot path in a temporary directory, which it removes after checking the PNG signature. It does not create persistent `test_screen_sm59.json`, `.md`, or PNG captures. The failure and authenticated paths have offline regressions in `test_integration_runner.py` and were verified on live Bigfox.
 
-Prerequisite for every authenticated run: store the credentials once with `fairyfly credentials set Bigfox --user <USER> --client 001` (password prompted) or migrate a legacy file with `fairyfly credentials import-env trial.env --connection Bigfox --delete-file`. For the authenticated launch path, run `python tests/integration/test_integration.py --login-stored` (alias `--login-from-trial-env`) from the repository root. The option calls `fairyfly login --connection <id>` for the newly launched GUI session, which reads the Credential Manager entry named like the connection; the runner never reads a credential file and no password appears on a command line or in output. A failed login still closes the runner-owned session.
+Prerequisite for every authenticated run: store the credentials once with `fairyfly credentials set Bigfox --user <USER> --client 001` (password prompted) or migrate a legacy file with `fairyfly credentials import-env trial.env --connection Bigfox --delete-file`. For the authenticated launch path, run `python tests/integration/test_integration.py --login-stored` (alias `--login-from-trial-env`) from the repository root. The option calls `fairyfly session login --connection <id>` for the newly launched GUI session, which reads the Credential Manager entry named like the connection; the runner never reads a credential file and no password appears on a command line or in output. A failed login still closes the runner-owned session.
 
 When a suitable SAP GUI session is already open, run `python tests/integration/test_integration.py --existing-connection-id 0` with its actual Fairyfly connection-file ID. This mode checks that the ID exists, uses it for SM59 navigation and screen reads, and leaves the session connected. It never launches another connection.
 
-For the disposable SU01 create, readback, password-change, and delete workflow, run `powershell -NoProfile -File tests/integration/test_su01_create_user.ps1 -LoginFromTrialEnv` (the switch name is historical: it logs in with the Credential Manager entry, not a file). Add `-VerifyChangedPasswordLogin` to authenticate the disposable user in a second session and complete SAP's first-login password change before deletion. Only the disposable user's changed password is piped to `login --credentials-stdin`; nothing is passed as a command argument. Both test-owned sessions are closed after cleanup. See [the SU01 workflow guide](README_SU01_TEST.md) for details.
+For the disposable SU01 create, readback, password-change, and delete workflow, run `powershell -NoProfile -File tests/integration/test_su01_create_user.ps1 -LoginFromTrialEnv` (the switch name is historical: it logs in with the Credential Manager entry, not a file). Add `-VerifyChangedPasswordLogin` to authenticate the disposable user in a second session and complete SAP's first-login password change before deletion. Only the disposable user's changed password is piped to `session login --credentials-stdin`; nothing is passed as a command argument. Both test-owned sessions are closed after cleanup. See [the SU01 workflow guide](README_SU01_TEST.md) for details.
 
 For SAP-independent checks, build unit_tests and run ctest --test-dir build -C Release --output-on-failure.
 
@@ -46,7 +46,7 @@ Prerequisites
 
 Transactions used: RZ11, ST22, SM37, SU01 (display), SM59, SE80 (bigfox_regression.ps1); additionally SM50, RZ04, SE16 (TADIR), SE11 (TADIR), SEGW, /IWFND/MAINT_SERVICE, SE38, SICF (compare_builds.ps1).
 
-They are read-only apart from selection-screen fills (RZ11 parameter name, SM37 user `*` and from-date, SU01 user `DEVELOPER`, SE16/SE11 table `TADIR`). Buttons that are deliberately never pressed: SM37 btn[46] Release, btn[25] Stop, btn[14] Delete; SU01 btn[8] Create and btn[20] Change Password; any Save. The `--read-only` guard checks only send refused actions and change no state. Every script ends with `tcode /n` and closes leftover popups even on failure.
+They are read-only apart from selection-screen fills (RZ11 parameter name, SM37 user `*` and from-date, SU01 user `DEVELOPER`, SE16/SE11 table `TADIR`). Buttons that are deliberately never pressed: SM37 btn[46] Release, btn[25] Stop, btn[14] Delete; SU01 btn[8] Create and btn[20] Change Password; any Save. The `--read-only` guard checks only send refused actions and change no state. Every script ends with `transaction start /n` and closes leftover popups even on failure.
 
 ### bigfox_regression.ps1
 
@@ -76,7 +76,7 @@ For each of 18 read-only screens the script navigates once with `-NewExe`, then 
 
 ## MCP smoke test (mcp_smoke.ps1)
 
-`tests\integration\mcp_smoke.ps1` is a PowerShell 5.1 script that spawns `fairyfly serve`, speaks newline-delimited JSON-RPC to it and checks the MCP server end to end. It is not registered with CTest and not part of the Bigfox regression suite.
+`tests\integration\mcp_smoke.ps1` is a PowerShell 5.1 script that spawns `fairyfly mcp`, speaks newline-delimited JSON-RPC to it and checks the MCP server end to end. It is not registered with CTest and not part of the Bigfox regression suite.
 
 Prerequisites
 
@@ -84,7 +84,7 @@ Prerequisites
 - A logged-in SAP GUI session on the SAP Easy Access screen with no popup; display authorizations are enough (the SM37 selection screen is used). Without a session the script exits with code 2.
 - No credentials are read or sent.
 
-What it presses: it navigates with `/nSM37` and `/n`, reads and captures the screen, and (write mode) fills the SM37 job name field with the marker `ZMCPSMOKE`, then restores it to `*`. It never presses Save, Delete, Release, Stop, Create or Change: the Save button, `send-key f11`, `multiple_logon=end` and the hidden `sap_fill` are only sent to a read-only server, which refuses them before SAP is touched. It always ends with `tcode /n` and closes the servers, also on failure.
+What it presses: it navigates with `/nSM37` and `/n`, reads and captures the screen, and (write mode) fills the SM37 job name field with the marker `ZMCPSMOKE`, then restores it to `*`. It never presses Save, Delete, Release, Stop, Create or Change: the Save button, `key send f11`, `multiple_logon=end` and the hidden `gui_element_fill` are only sent to a read-only server, which refuses them before SAP is touched. It always ends with `transaction start /n` and closes the servers, also on failure.
 
 ~~~powershell
 # plan only, spawns nothing

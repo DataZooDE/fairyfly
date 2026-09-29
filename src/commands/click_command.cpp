@@ -7,14 +7,14 @@ namespace commands {
 
 class ClickCommand : public CommandBase {
 public:
-    std::string name() const override { return "click"; }
+    std::string name() const override { return "element click"; }
 
     std::string description() const override {
         return "Click UI element";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"element","click"});
         cmd_->add_option("element", element_, "Element ID (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3])")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
@@ -26,7 +26,7 @@ public:
             "Timeout in milliseconds for window detection (default: 5000)")
             ->default_val(5000);
         cmd_->add_option("--node-key", node_key_,
-            "Tree node key (required for tree elements, see 'get --list-nodes')");
+            "Tree node key (required for tree elements, see 'element get --list-nodes')");
         cmd_->add_option("--tree-action", tree_action_,
             "Tree action: select, expand, collapse, doubleclick, contextmenu (default: doubleclick)")
             ->default_val("doubleclick")

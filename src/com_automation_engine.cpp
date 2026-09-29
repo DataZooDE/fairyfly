@@ -790,10 +790,10 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
                     "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
                 );
                 suggestions.push_back(
-                    "Try: fairyfly click " + active_window.id + "/" + resolved_element.get_element_path()
+                    "Try: fairyfly element click " + active_window.id + "/" + resolved_element.get_element_path()
                 );
                 suggestions.push_back(
-                    "Or use: fairyfly click @active/" + resolved_element.get_element_path()
+                    "Or use: fairyfly element click @active/" + resolved_element.get_element_path()
                 );
             }
 
@@ -1165,10 +1165,10 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
                     "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
                 );
                 suggestions.push_back(
-                    "Try: fairyfly fill " + active_window.id + "/" + resolved_element.get_element_path() + " \"<value>\""
+                    "Try: fairyfly element fill " + active_window.id + "/" + resolved_element.get_element_path() + " \"<value>\""
                 );
                 suggestions.push_back(
-                    "Or use: fairyfly fill @active/" + resolved_element.get_element_path() + " \"<value>\""
+                    "Or use: fairyfly element fill @active/" + resolved_element.get_element_path() + " \"<value>\""
                 );
             }
 

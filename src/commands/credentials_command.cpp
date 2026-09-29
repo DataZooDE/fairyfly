@@ -15,23 +15,22 @@ public:
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
-        cmd_->require_subcommand(1);
+        cmd_ = noun_app(app, "credentials");
 
-        set_cmd_ = cmd_->add_subcommand("set", "Store a credential (the password is prompted for or read from stdin)");
+        set_cmd_ = add_leaf(app, {"credentials", "set"});
         set_cmd_->add_option("connection", set_connection_, "Connection name, e.g. Bigfox")->required();
         set_cmd_->add_option("--user", set_user_, "SAP user name")->required();
         set_cmd_->add_option("--client", set_client_, "Three-digit SAP client, e.g. 001")->required();
         set_cmd_->add_option("--language", set_language_, "Logon language (default EN)");
         set_cmd_->add_flag("--password-stdin", password_stdin_, "Read the password from the first line of standard input");
 
-        list_cmd_ = cmd_->add_subcommand("list", "List stored credentials (never shows passwords)");
+        list_cmd_ = add_leaf(app, {"credentials", "list"});
         add_output_option(list_cmd_, list_output_);
 
-        delete_cmd_ = cmd_->add_subcommand("delete", "Delete a stored credential");
+        delete_cmd_ = add_leaf(app, {"credentials", "delete"});
         delete_cmd_->add_option("connection", delete_connection_, "Connection name")->required();
 
-        import_cmd_ = cmd_->add_subcommand("import-env", "Import a colon-separated credential file into the store");
+        import_cmd_ = add_leaf(app, {"credentials", "import-env"});
         import_cmd_->add_option("path", import_path_, "Colon-separated credential file to import")->required();
         import_cmd_->add_option("--connection", import_connection_, "Connection name when the file has no Connection: line");
         import_cmd_->add_flag("--delete-file", delete_file_, "Delete the file after a successful import");

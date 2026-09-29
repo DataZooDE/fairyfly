@@ -29,8 +29,12 @@ def capture_response(args):
     return response(data={"filepath": str(image_path)})
 
 
+NOUNS = {"session", "connection", "screen", "menu", "element", "key", "popup", "transaction", "credentials"}
+
+
 def command_of(args):
-    return args[2] if args[:2] == ["--output", "markdown"] else args[0]
+    rest = args[2:] if args[:2] == ["--output", "markdown"] else args
+    return " ".join(rest[:2]) if len(rest) > 1 and rest[0] in NOUNS else rest[0]
 
 
 class Sm59RunnerSafetyTests(unittest.TestCase):
@@ -38,17 +42,17 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         completed = runner.subprocess.CompletedProcess(
             args=[], returncode=0, stdout='{"status":"success"}', stderr="")
         with patch.object(runner.subprocess, "run", return_value=completed) as run:
-            self.assertTrue(runner.run_fairyfly(["list"])["success"])
-        self.assertEqual(run.call_args.args[0], [str(runner.FAIRYFLY_EXE), "list"])
+            self.assertTrue(runner.run_fairyfly(["session", "list"])["success"])
+        self.assertEqual(run.call_args.args[0], [str(runner.FAIRYFLY_EXE), "session", "list"])
 
     def test_unknown_existing_connection_id_stops_without_launch(self):
         calls = []
 
         def fake_cli(args):
             calls.append(args)
-            if command_of(args) == "list":
+            if command_of(args) == "session list":
                 return response(data={"connections": []})
-            if command_of(args) == "connections":
+            if command_of(args) == "connection list":
                 return response(data={"connections": [{"id": 1}]})
             self.fail(f"Unexpected CLI command: {args}")
 
@@ -58,7 +62,7 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
             exit_code = runner.main(["--existing-connection-id", "0"])
 
         self.assertEqual(exit_code, 2)
-        self.assertEqual([command_of(args) for args in calls], ["list", "connections"])
+        self.assertEqual([command_of(args) for args in calls], ["session list", "connection list"])
 
     def test_existing_connection_runs_sm59_without_launch_or_disconnect(self):
         calls = []
@@ -66,13 +70,13 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         def fake_cli(args):
             calls.append(args)
             command = command_of(args)
-            if command == "list":
+            if command == "session list":
                 return response(data={"connections": [{"description": "Bigfox", "backend_scripting_disabled": False}]})
-            if command == "connections":
+            if command == "connection list":
                 return response(data={"connections": [{"id": 0}]})
-            if command == "tcode":
+            if command == "transaction start":
                 return response(data={"transaction": "SM59"})
-            if command == "screen":
+            if command == "screen read":
                 if "capture" in args:
                     return capture_response(args)
                 if args[:2] == ["--output", "markdown"]:
@@ -88,8 +92,8 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual([args for args in calls if "launch" in args or "disconnect" in args], [])
         self.assertEqual(
-            [args for args in calls if "tcode" in args],
-            [["tcode", "SM59", "--connection", "0"]],
+            [args for args in calls if "transaction" in args],
+            [["transaction", "start", "SM59", "--connection", "0"]],
         )
 
     def test_failed_transaction_skips_screen_reads_and_cleans_own_connection(self):
@@ -98,15 +102,15 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         def fake_cli(args):
             calls.append(args)
             command = command_of(args)
-            if command == "list":
+            if command == "session list":
                 return response(data={"connections": []})
-            if command == "connections":
+            if command == "connection list":
                 return response(data={"connections": []})
-            if command == "launch":
+            if command == "session launch":
                 return response(data={"connection_name": "Bigfox", "connection_file_id": 42})
-            if command == "tcode":
+            if command == "transaction start":
                 return response(status="error", exit_code=1)
-            if command == "disconnect":
+            if command == "session disconnect":
                 return response(data={"session_closed": True, "file_deleted": True})
             return response(status="error", exit_code=1)
 
@@ -119,7 +123,7 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         self.assertEqual([args for args in calls if "screen" in args], [])
         self.assertEqual(
             [args for args in calls if "disconnect" in args],
-            [["disconnect", "--connection", "42", "--close-session"]],
+            [["session", "disconnect", "--connection", "42", "--close-session"]],
         )
 
     def test_authenticated_launch_logs_in_before_sm59(self):
@@ -128,21 +132,21 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         def fake_cli(args):
             calls.append(args)
             command = command_of(args)
-            if command in ("list", "connections"):
+            if command in ("session list", "connection list"):
                 return response(data={"connections": []})
-            if command == "launch":
+            if command == "session launch":
                 return response(data={"connection_name": "Bigfox", "connection_file_id": 42,
                                       "session_id": "/app/con[0]/ses[0]"})
-            if command == "login":
+            if command == "session login":
                 return response(data={"transaction": "SESSION_MANAGER"})
-            if command == "tcode":
+            if command == "transaction start":
                 return response(data={"transaction": "SM59"})
-            if command == "screen":
+            if command == "screen read":
                 if "capture" in args:
                     return capture_response(args)
                 return ({"output": "# SM59", "error": "", "exit_code": 0, "success": True}
                         if args[:2] == ["--output", "markdown"] else response(data={"screen_id": "wnd[0]"}))
-            if command == "disconnect":
+            if command == "session disconnect":
                 return response(data={"session_closed": True, "file_deleted": True})
             self.fail(f"Unexpected CLI command: {args}")
 
@@ -157,7 +161,7 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         self.assertLess(next(i for i, args in enumerate(calls) if "launch" in args),
                         next(i for i, args in enumerate(calls) if "login" in args))
         self.assertLess(next(i for i, args in enumerate(calls) if "login" in args),
-                        next(i for i, args in enumerate(calls) if "tcode" in args))
+                        next(i for i, args in enumerate(calls) if "transaction" in args))
 
     def test_failed_authenticated_login_closes_owned_session(self):
         calls = []
@@ -165,14 +169,14 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
         def fake_cli(args):
             calls.append(args)
             command = command_of(args)
-            if command in ("list", "connections"):
+            if command in ("session list", "connection list"):
                 return response(data={"connections": []})
-            if command == "launch":
+            if command == "session launch":
                 return response(data={"connection_name": "Bigfox", "connection_file_id": 42,
                                       "session_id": "/app/con[0]/ses[0]"})
-            if command == "login":
+            if command == "session login":
                 return response(status="error")
-            if command == "disconnect":
+            if command == "session disconnect":
                 return response(data={"session_closed": True, "file_deleted": True})
             self.fail(f"Unexpected CLI command after login failure: {args}")
 
@@ -183,9 +187,9 @@ class Sm59RunnerSafetyTests(unittest.TestCase):
             exit_code = runner.main(["--login-from-trial-env"])
 
         self.assertEqual(exit_code, 1)
-        self.assertFalse(any("tcode" in args or "screen" in args for args in calls))
+        self.assertFalse(any("transaction" in args or "screen" in args for args in calls))
         self.assertEqual([args for args in calls if "disconnect" in args],
-                         [["disconnect", "--connection", "42", "--close-session"]])
+                         [["session", "disconnect", "--connection", "42", "--close-session"]])
 
 
 if __name__ == "__main__":

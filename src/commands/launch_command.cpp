@@ -5,14 +5,14 @@ namespace commands {
 
 class LaunchCommand : public CommandBase {
 public:
-    std::string name() const override { return "launch"; }
+    std::string name() const override { return "session launch"; }
 
     std::string description() const override {
         return "Launch SAP Logon connection";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"session","launch"});
         cmd_->add_option("connection", connection_name_, "Connection name (e.g., PRD, DEV)")
             ->required();
         cmd_->add_flag("--allow-sapshcut", allow_sapshcut_,

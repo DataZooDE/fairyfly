@@ -355,7 +355,7 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         }
 
         oss << table.render() << "\n";
-        oss << "_Click with_: `fairyfly click '@active/<button_path>'`\n\n";
+        oss << "_Click with_: `fairyfly element click '@active/<button_path>'`\n\n";
     }
 
     // Status Bar section - extract from "other" category
@@ -1101,19 +1101,19 @@ void format_table_element(std::ostringstream& oss, const json& elem) {
         oss << "**Usage Examples:**\n";
         oss << "```python\n";
         oss << "# Read cell value\n";
-        oss << "fairyfly get '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
+        oss << "fairyfly element get '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
         oss << "# Set cell value\n";
-        oss << "fairyfly fill '" << id << "' 'new_value' --row 0 --column 'COLUMN_NAME'\n\n";
+        oss << "fairyfly element fill '" << id << "' 'new_value' --row 0 --column 'COLUMN_NAME'\n\n";
         oss << "# Click cell to select row\n";
-        oss << "fairyfly click '" << id << "' --row 0 --column 'COLUMN_NAME'\n";
+        oss << "fairyfly element click '" << id << "' --row 0 --column 'COLUMN_NAME'\n";
         oss << "```\n\n";
     } else if (type == "GuiTableControl") {
         oss << "**Usage Examples:**\n";
         oss << "```python\n";
         oss << "# Access cell via element path\n";
-        oss << "fairyfly get '" << id << "/txt[row,col]'\n\n";
+        oss << "fairyfly element get '" << id << "/txt[row,col]'\n\n";
         oss << "# Navigate to row\n";
-        oss << "fairyfly click '" << id << "' --row 0\n";
+        oss << "fairyfly element click '" << id << "' --row 0\n";
         oss << "```\n\n";
     }
 }

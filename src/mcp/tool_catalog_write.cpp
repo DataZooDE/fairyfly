@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include "include/command_table.h"
+
 namespace fairyfly::mcp {
 
 namespace {
@@ -80,7 +82,7 @@ std::vector<std::string> build_fill_argv(const json& args, const Policy& policy)
         options.push_back(std::to_string(*connection));
     }
 
-    std::vector<std::string> argv{"fill"};
+    std::vector<std::string> argv{"element", "fill"};
     if (value && !value->get<std::string>().empty() && value->get<std::string>()[0] == '-') {
         // A value that looks like an option must come after "--".
         argv.insert(argv.end(), options.begin(), options.end());
@@ -97,18 +99,19 @@ std::vector<std::string> build_fill_argv(const json& args, const Policy& policy)
 
 ToolSpec make_fill_spec() {
     ToolSpec spec;
-    spec.def.name = "sap_fill";
+    spec.def.name = "gui_element_fill";
+    spec.family = command_table::find_by_tool(spec.def.name)->family;
     spec.def.title = "Fill SAP field";
     spec.def.description =
         "Changes a value in the live SAP GUI: enters text into an input field, clears it, or edits a "
         "GridView cell (row + column; checkbox toggles a checkbox cell, commit notifies SAP after the change). "
         "Confirm with the user before changing values. Never put passwords or other secrets into fill values "
-        "(use sap_login for authentication). Filled values are echoed nowhere: results and audit logs do not "
+        "(use gui_session_login for authentication). Filled values are echoed nowhere: results and audit logs do not "
         "contain them, so read the screen afterwards to verify. Give exactly one of value or clear.";
     spec.def.input_schema = json{
         {"type", "object"},
         {"properties",
-         {{"element", {{"type", "string"}, {"description", "SAP element id from sap_screen_read, e.g. wnd[0]/usr/txtFIELD"}}},
+         {{"element", {{"type", "string"}, {"description", "SAP element id from gui_screen_read, e.g. wnd[0]/usr/txtFIELD"}}},
           {"value", {{"type", "string"}, {"description", "Text to enter (omit when clear is true). For checkbox cells: X/1/true or 0/false"}}},
           {"clear", {{"type", "boolean"}, {"description", "Empty the field instead of entering a value"}}},
           {"row", {{"type", "integer"}, {"minimum", 0}, {"description", "Zero-based GridView row (requires column)"}}},

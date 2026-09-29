@@ -539,7 +539,7 @@ std::wstring find_fairyfly_exe() {
 
 } // namespace
 
-TEST_CASE("fairyfly serve speaks clean MCP over a real pipe", "[!mayfail][mcp-spawn]") {
+TEST_CASE("fairyfly mcp speaks clean MCP over a real pipe", "[!mayfail][mcp-spawn]") {
     const std::wstring exe = find_fairyfly_exe();
     if (exe.empty()) { WARN("fairyfly.exe not built; skipping spawn test"); return; }
 
@@ -559,7 +559,7 @@ TEST_CASE("fairyfly serve speaks clean MCP over a real pipe", "[!mayfail][mcp-sp
     si.hStdOutput = out_w;
     si.hStdError = nul;
     PROCESS_INFORMATION pi{};
-    std::wstring cmd = L"\"" + exe + L"\" serve";
+    std::wstring cmd = L"\"" + exe + L"\" mcp";
     BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
     CloseHandle(in_r);
     CloseHandle(out_w);
@@ -616,7 +616,7 @@ TEST_CASE("fairyfly serve speaks clean MCP over a real pipe", "[!mayfail][mcp-sp
         CHECK(j["jsonrpc"] == "2.0");
         if (j.contains("id") && j["id"] == 2)
             for (const auto& t : j["result"]["tools"])
-                if (t["name"] == "sap_doctor") saw_doctor = true;
+                if (t["name"] == "gui_doctor") saw_doctor = true;
     }
     CHECK(lines == 2);
     CHECK(saw_doctor);

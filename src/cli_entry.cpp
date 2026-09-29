@@ -22,8 +22,10 @@
 #include "include/commands/command_registry.h"
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
-#include "include/commands/serve_command.h"
-#include "include/mcp/run_serve.h"
+#include "include/commands/mcp_command.h"
+#include "include/commands/cli_app.h"
+#include "include/mcp/run_mcp.h"
+#include "include/mcp/tool_catalog.h"
 #include "include/exceptions.h"
 #include "include/version.h"
 #include "include/audit_log.h"
@@ -121,7 +123,7 @@ namespace {
         std::function<const CommandHandler*()> peek_handler;
     };
     AuditContext g_audit;
-    /// Set by the `serve` path: the per-invocation audit record of run_one is skipped for it.
+    /// Set by the `mcp` server path: the per-invocation audit record of run_one is skipped for it.
     bool g_skip_invocation_audit = false;
 
     void note_result(audit::AuditRecord& out, const Result& result) {
@@ -140,10 +142,9 @@ namespace {
         }
     }
 
-    void note_command(audit::AuditRecord& out) {
-        for (const auto& command : CommandRegistry::instance().all_commands()) {
-            if (command->was_invoked()) { out.command = command->name(); return; }
-        }
+    /// The audit command is the parsed CLI path ("element click"); it comes from the command table paths.
+    void note_command(audit::AuditRecord& out, const CLI::App& app) {
+        out.command = invoked_command_path(app);
     }
 
     /// Fallback for `--connection N` when the result carried no connection id.
@@ -188,28 +189,8 @@ namespace {
     CLI::App app{"fairyfly - LLM-powered SAP GUI automation CLI"};
     app.set_version_flag("--version", fairyfly::FAIRYFLY_VERSION);
 
-    // Disable Windows-style options (/opt) to allow SAP element IDs starting with /
-    // SAP element paths like /app/con[0]/ses[0]/wnd[0]/usr/txtField would otherwise
-    // be interpreted as option flags on Windows, causing argument parsing failures
-    app.allow_windows_style_options(false);
-
-    // Global options
-    app.add_option("--log-level", global_opts.log_level, "Set logging level: trace, debug, info, warn, error (default), critical, off")
-        ->check(CLI::IsMember({"trace", "debug", "info", "warn", "warning", "error", "err", "critical", "crit", "off"}));
-    app.add_flag("-v,--verbose", [&global_opts](std::int64_t) { global_opts.log_level = "debug"; }, "Shorthand for --log-level debug");
-    app.add_option("--output", global_opts.output_format, "Output format: json (default), markdown, toon")
-        ->check(CLI::IsMember({"json", "markdown", "toon"}));
-    app.add_flag("--verbose-errors", global_opts.verbose_errors, "Include detailed error suggestions (default: compact errors)");
-    app.add_flag("--read-only", global_opts.read_only,
-                 "Refuse state-changing actions (save, delete, release, ...); also FAIRYFLY_READ_ONLY=1");
-    app.add_flag("--no-audit", global_opts.no_audit,
-                 "Do not write the audit trail for this run; also FAIRYFLY_AUDIT=0");
-    app.add_flag("--audit-required", global_opts.audit_required,
-                 "Fail with AUDIT_UNAVAILABLE when the audit trail cannot be written; also FAIRYFLY_AUDIT=required");
-
-    // Register all commands explicitly
-    register_all_commands();
-    CommandRegistry::instance().setup_all_commands(app);
+    add_global_options(app, global_opts);
+    build_command_tree(app);
 
     // Parse arguments
     std::vector<const char*> arg_ptrs;
@@ -218,7 +199,7 @@ namespace {
     try {
         app.parse(static_cast<int>(arg_ptrs.size()), arg_ptrs.data());
     } catch (const CLI::ParseError& e) {
-        note_command(audit_out);
+        note_command(audit_out, app);
         if (!batch_mode) {
             const int exit_code = app.exit(e);
             if (exit_code != 0) audit_out.error_code = "PARSE_ERROR";
@@ -244,7 +225,7 @@ namespace {
 
     if (env_read_only()) global_opts.read_only = true;
     audit_out.read_only = global_opts.read_only;
-    note_command(audit_out);
+    note_command(audit_out, app);
     note_connection_from_argv(audit_out, argv);
 
     // Setup logging
@@ -296,27 +277,30 @@ namespace {
             return run_batch(batch_command->file(), batch_command->stop_on_error(), get_handler, global_opts);
         }
 
-        // `serve` (MCP over stdio) is special-cased like `batch`: it owns stdout for the protocol.
+        // `mcp` is special-cased like `batch`: the server owns stdout for the protocol.
         for (const auto& command : CommandRegistry::instance().all_commands()) {
-            auto* serve_command = dynamic_cast<ServeCommand*>(command.get());
-            if (!serve_command || !serve_command->was_invoked()) continue;
+            auto* mcp_command = dynamic_cast<McpCommand*>(command.get());
+            if (!mcp_command || !mcp_command->was_invoked()) continue;
             if (batch_mode) {
                 command_result.status = Result::Status::Error;
-                command_result.error["code"] = "SERVE_UNAVAILABLE";
-                command_result.error["message"] = "serve cannot run inside a batch";
+                command_result.error["code"] = "MCP_UNAVAILABLE";
+                command_result.error["message"] = "mcp cannot run inside a batch";
                 note_result(audit_out, command_result);
                 print_result();
                 return 1;
             }
+            if (mcp_command->tools_invoked()) {
+                // Pure table output (no SAP access): plain text or Markdown, never JSON-wrapped.
+                std::cout << mcp::tool_table_text(mcp_command->tools_markdown()) << std::flush;
+                return 0;
+            }
             // Copy the options first: nothing may rebuild the registry (and destroy this command) later.
-            const mcp::ServeOptions serve_options = serve_command->options();
-            // TODO(phase 3): write one serve start/stop audit record pair here (mcp_audit hook);
-            // the per-invocation record of run_one is skipped for serve.
+            const mcp::ServeOptions serve_options = mcp_command->options();
             g_skip_invocation_audit = true;
             std::function<CommandHandler*()> peek = [] {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
             };
-            return mcp::run_serve(serve_options, get_handler, global_opts, g_audit.sink, peek);
+            return mcp::run_mcp(serve_options, get_handler, global_opts, g_audit.sink, peek);
         }
 
         CommandHandler& handler = get_handler();

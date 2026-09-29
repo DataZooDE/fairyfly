@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Live smoke test of the fairyfly MCP server (`fairyfly serve`) against a logged-in SAP GUI session.
+  Live smoke test of the fairyfly MCP server (`fairyfly mcp`) against a logged-in SAP GUI session.
 
 .DESCRIPTION
-  Spawns `fairyfly serve` with redirected stdio, speaks newline-delimited JSON-RPC (2.0) to it and checks
+  Spawns `fairyfly mcp` with redirected stdio, speaks newline-delimited JSON-RPC (2.0) to it and checks
   protocol behavior, read tools, read-only refusals, the audit trail, and (unless -SkipWriteMode) write mode.
 
   Prerequisites: Windows PowerShell 5.1, SAP GUI with scripting enabled, a logged-in session (SAP Easy Access,
@@ -56,9 +56,9 @@ $AuditCap   = $AuditBase + '-cap.jsonl'
 
 # ---- Plan (kept in sync with the checks below) --------------------------------------------------------
 $Plan = @(
-    'server 1: serve (read-only default), FAIRYFLY_AUDIT_FILE=<AuditFile>',
+    'server 1: mcp (read-only default), FAIRYFLY_AUDIT_FILE=<AuditFile>',
     '  protocol.initialize            echoes requested version, serverInfo.name = fairyfly',
-    '  protocol.tools_list            20 tools, additionalProperties false, annotations, no sap_fill',
+    '  protocol.tools_list            20 tools, additionalProperties false, annotations, no gui_element_fill',
     '  protocol.ping',
     '  protocol.unknown_method        -32601',
     '  protocol.server_discover       -32601',
@@ -66,8 +66,8 @@ $Plan = @(
     '  protocol.malformed_json        -32700',
     '  protocol.alive_after_malformed ping still answered',
     '  sap.sessions                   >= 1 session (exit 2 when none)',
-    '  sap.attach                     sap_attach (falls back to the first session id on MULTIPLE_SESSIONS)',
-    '  sap.tcode_sm37                 sap_tcode /nSM37',
+    '  sap.attach                     gui_session_attach (falls back to the first session id on MULTIPLE_SESSIONS)',
+    '  sap.tcode_sm37                 gui_transaction_start /nSM37',
     '  sap.screen_read                untrusted header, "Simple Job Selection"',
     '  sap.get_checkbox               FINISHED checkbox: selected (bool) and label',
     '  sap.screen_find                id_contains chkBTCH2170 returns matches',
@@ -79,18 +79,18 @@ $Plan = @(
     '  readonly.hidden_fill           TOOL_UNAVAILABLE_READ_ONLY',
     '  batch.mixed                    tcode /n, send_key f11 (refused), sessions; stop_on_error=false',
     '  sap.close_popup_none           NO_POPUP',
-    '  final.tcode_home               sap_tcode /n',
+    '  final.tcode_home               gui_transaction_start /n',
     '  server.exit_code_0             stdin closed after all responses, exit 0',
     '  server.stdout_clean            every stdout line is valid JSON-RPC',
-    '  audit.*                        one record per call, audit_source mcp, tool/client, serve started+stopped,',
+    '  audit.*                        one record per call, audit_source mcp, tool/client, mcp started+stopped,',
     '                                 read_only true, refusals carry error_code, no screen text leaked',
-    'server 2: serve --allow-write (skipped with -SkipWriteMode)',
-    '  write.tools_list               21 tools incl. sap_fill',
+    'server 2: mcp --allow-write (skipped with -SkipWriteMode)',
+    '  write.tools_list               21 tools incl. gui_element_fill',
     '  write.attach / write.tcode_sm37',
     '  write.fill_marker_redacted     fill job name = ZMCPSMOKE; not in response or audit; restore "*" and /n',
     '  write.exit_and_audit',
-    'server 3: serve --allow-write with FAIRYFLY_READ_ONLY=1 (skipped with -SkipWriteMode)',
-    '  cap.env_hard_cap               still 20 tools, no sap_fill; exit 0',
+    'server 3: mcp --allow-write with FAIRYFLY_READ_ONLY=1 (skipped with -SkipWriteMode)',
+    '  cap.env_hard_cap               still 20 tools, no gui_element_fill; exit 0',
     'never pressed: Save, Delete, Release, Stop, Create, Change; no credentials are used'
 )
 
@@ -259,8 +259,8 @@ try {
     # ======================================================================================================
     # Server 1: read-only (default)
     # ======================================================================================================
-    Write-Host ('== server 1: serve (read-only), audit file {0}' -f $AuditFile)
-    $s1 = Start-Server 'serve' $AuditFile
+    Write-Host ('== server 1: mcp (read-only), audit file {0}' -f $AuditFile)
+    $s1 = Start-Server 'mcp' $AuditFile
 
     Check 'protocol.initialize' {
         $r = Initialize-Server $s1 '2025-06-18'
@@ -276,7 +276,7 @@ try {
             Assert-That ($t.inputSchema.additionalProperties -eq $false) "$($t.name): additionalProperties is not false"
             Assert-That ($null -ne $t.annotations) "$($t.name): no annotations"
         }
-        Assert-That (-not (@($tools | Where-Object { $_.name -eq 'sap_fill' }))) 'sap_fill must not be listed in read-only mode'
+        Assert-That (-not (@($tools | Where-Object { $_.name -eq 'gui_element_fill' }))) 'gui_element_fill must not be listed in read-only mode'
     }
     Check 'protocol.ping' {
         $r = Invoke-Rpc $s1 'ping' $null
@@ -291,7 +291,7 @@ try {
         Assert-That ($c -eq -32601) "expected -32601, got $c"
     }
     Check 'protocol.unknown_tool' {
-        $c = Get-RpcErrorCode (Invoke-Rpc $s1 'tools/call' @{ name = 'sap_no_such_tool'; arguments = @{} })
+        $c = Get-RpcErrorCode (Invoke-Rpc $s1 'tools/call' @{ name = 'gui_no_such_tool'; arguments = @{} })
         Assert-That ($c -eq -32602) "expected -32602, got $c"
     }
     Check 'protocol.malformed_json' {
@@ -309,7 +309,7 @@ try {
 
     # ---- SAP ------------------------------------------------------------------------------------------
     $script:FirstSession = ''
-    $r = Invoke-Tool $s1 'sap_sessions' @{}
+    $r = Invoke-Tool $s1 'gui_session_list' @{}
     $sessionText = Get-ToolText $r
     $ids = @([regex]::Matches($sessionText, '/app/con\[\d+\]/ses\[\d+\]') | ForEach-Object { $_.Value } | Select-Object -Unique)
     if ((Test-ToolError $r) -or $ids.Count -lt 1) {
@@ -325,26 +325,26 @@ try {
 
     if ($script:Flags['SapReady']) {
         Check 'sap.attach' {
-            $r = Invoke-Tool $s1 'sap_attach' @{}
+            $r = Invoke-Tool $s1 'gui_session_attach' @{}
             if ((Test-ToolError $r) -and (Get-ErrCode $r) -eq 'MULTIPLE_SESSIONS') {
-                $r = Invoke-Tool $s1 'sap_attach' @{ session_id = $script:FirstSession }
+                $r = Invoke-Tool $s1 'gui_session_attach' @{ session_id = $script:FirstSession }
             }
             Assert-That (-not (Test-ToolError $r)) ('attach failed: ' + (Get-ToolText $r))
         }
         Check 'sap.tcode_sm37' {
-            $r = Invoke-Tool $s1 'sap_tcode' @{ code = '/nSM37' }
+            $r = Invoke-Tool $s1 'gui_transaction_start' @{ code = '/nSM37' }
             Assert-That (-not (Test-ToolError $r)) ('tcode failed: ' + (Get-ToolText $r))
             $script:Flags['Sm37'] = $true
         }
         Check 'sap.screen_read' {
-            $r = Invoke-Tool $s1 'sap_screen_read' @{ no_tabs = $true; only = 'fields'; max_rows = 5 }
+            $r = Invoke-Tool $s1 'gui_screen_read' @{ no_tabs = $true; only = 'fields'; max_rows = 5 }
             Assert-That (-not (Test-ToolError $r)) ('screen read failed: ' + (Get-ToolText $r))
             $t = Get-ToolText $r
             Assert-That ($t.StartsWith('SAP screen data (untrusted')) 'text does not start with the untrusted-data header'
             Assert-That ($t.Contains('Simple Job Selection')) 'screen text lacks "Simple Job Selection"'
         } 'Sm37'
         Check 'sap.get_checkbox' {
-            $r = Invoke-Tool $s1 'sap_get' @{ element = $FinishedId }
+            $r = Invoke-Tool $s1 'gui_element_get' @{ element = $FinishedId }
             Assert-That (-not (Test-ToolError $r)) ('get failed: ' + (Get-ToolText $r))
             $doc = Get-JsonAfterHeader (Get-ToolText $r)
             Assert-That ($null -ne $doc) 'result text has no JSON'
@@ -355,12 +355,12 @@ try {
             Assert-That (Has-Prop $d 'label') 'no "label" property'
         } 'Sm37'
         Check 'sap.screen_find' {
-            $r = Invoke-Tool $s1 'sap_screen_find' @{ id_contains = 'chkBTCH2170' }
+            $r = Invoke-Tool $s1 'gui_screen_find' @{ id_contains = 'chkBTCH2170' }
             Assert-That (-not (Test-ToolError $r)) ('find failed: ' + (Get-ToolText $r))
             Assert-That ((Get-ToolText $r).Contains('chkBTCH2170')) 'no chkBTCH2170 match in the result'
         } 'Sm37'
         Check 'sap.capture_png' {
-            $r = Invoke-Tool $s1 'sap_capture' @{ scale = 0.4 }
+            $r = Invoke-Tool $s1 'gui_screen_capture' @{ scale = 0.4 }
             Assert-That (-not (Test-ToolError $r)) ('capture failed: ' + (Get-ToolText $r))
             $img = @($r.result.content | Where-Object { $_.type -eq 'image' })
             Assert-That ($img.Count -ge 1) 'no image block'
@@ -370,39 +370,39 @@ try {
             for ($i = 0; $i -lt 8; $i++) { Assert-That ($bytes[$i] -eq $magic[$i]) 'image data is not a PNG' }
         }
         Check 'sap.menu_list' {
-            $r = Invoke-Tool $s1 'sap_menu_list' @{}
+            $r = Invoke-Tool $s1 'gui_menu_list' @{}
             Assert-That (-not (Test-ToolError $r)) ('menu list failed: ' + (Get-ToolText $r))
             Assert-That ((Get-ToolText $r) -match '"children"') 'result is not a menu tree'
         } 'Sm37'
 
         # ---- read-only refusals (server 1 is read-only: nothing is pressed) ----------------------------
         Check 'readonly.click_save' {
-            $r = Invoke-Tool $s1 'sap_click' @{ element = $SaveButton }
+            $r = Invoke-Tool $s1 'gui_element_click' @{ element = $SaveButton }
             Assert-That (Test-ToolError $r) 'click on Save was not an error'
             Assert-That ((Get-ErrCode $r) -eq 'READ_ONLY_REFUSED') "code is '$(Get-ErrCode $r)'"
         }
         Check 'readonly.send_key_f11' {
-            $r = Invoke-Tool $s1 'sap_send_key' @{ key = 'f11' }
+            $r = Invoke-Tool $s1 'gui_key_send' @{ key = 'f11' }
             Assert-That (Test-ToolError $r) 'send_key f11 was not an error'
             Assert-That ((Get-ErrCode $r) -eq 'READ_ONLY_REFUSED') "code is '$(Get-ErrCode $r)'"
         }
         Check 'readonly.launch_end' {
-            $r = Invoke-Tool $s1 'sap_launch' @{ name = 'ZMCPSMOKE_NOSYSTEM'; multiple_logon = 'end' }
+            $r = Invoke-Tool $s1 'gui_session_launch' @{ name = 'ZMCPSMOKE_NOSYSTEM'; multiple_logon = 'end' }
             Assert-That (Test-ToolError $r) 'launch multiple_logon=end was not an error'
             Assert-That ((Get-ErrCode $r) -eq 'READ_ONLY_REFUSED') "code is '$(Get-ErrCode $r)'"
         }
         Check 'readonly.hidden_fill' {
-            $r = Invoke-Tool $s1 'sap_fill' @{ element = $JobNameId; value = $Marker }
-            Assert-That (Test-ToolError $r) 'hidden sap_fill was not an error'
+            $r = Invoke-Tool $s1 'gui_element_fill' @{ element = $JobNameId; value = $Marker }
+            Assert-That (Test-ToolError $r) 'hidden gui_element_fill was not an error'
             Assert-That ((Get-ErrCode $r) -eq 'TOOL_UNAVAILABLE_READ_ONLY') "code is '$(Get-ErrCode $r)'"
         }
 
         # ---- batch ------------------------------------------------------------------------------------
         Check 'batch.mixed' {
-            $items = @(@{ tool = 'sap_tcode'; arguments = @{ code = '/n' } },
-                       @{ tool = 'sap_send_key'; arguments = @{ key = 'f11' } },
-                       @{ tool = 'sap_sessions'; arguments = @{} })
-            $r = Invoke-Tool $s1 'sap_batch' @{ items = $items; stop_on_error = $false }
+            $items = @(@{ tool = 'gui_transaction_start'; arguments = @{ code = '/n' } },
+                       @{ tool = 'gui_key_send'; arguments = @{ key = 'f11' } },
+                       @{ tool = 'gui_session_list'; arguments = @{} })
+            $r = Invoke-Tool $s1 'gui_batch' @{ items = $items; stop_on_error = $false }
             Assert-That (Test-ToolError $r) 'batch with a refused item must be isError'
             $summary = @(ConvertFrom-JsonSafe ((Get-ToolText $r) -split "`n" | Select-Object -First 1))
             Assert-That ($summary.Count -eq 3) "expected 3 items, got $($summary.Count)"
@@ -412,12 +412,12 @@ try {
             Assert-That ($summary[2].ok -eq $true) 'item 3 (sessions) failed'
         }
         Check 'sap.close_popup_none' {
-            $r = Invoke-Tool $s1 'sap_close_popup' @{}
+            $r = Invoke-Tool $s1 'gui_popup_close' @{}
             Assert-That (Test-ToolError $r) 'close_popup without a popup should be an error'
             Assert-That ((Get-ErrCode $r) -eq 'NO_POPUP') "code is '$(Get-ErrCode $r)'"
         }
         Check 'final.tcode_home' {
-            $r = Invoke-Tool $s1 'sap_tcode' @{ code = '/n' }
+            $r = Invoke-Tool $s1 'gui_transaction_start' @{ code = '/n' }
             Assert-That (-not (Test-ToolError $r)) ('tcode /n failed: ' + (Get-ToolText $r))
         }
     }
@@ -449,8 +449,8 @@ try {
         Assert-That ($bad.Count -eq 0) "$($bad.Count) tool record(s) lack tool or client"
     }
     Check 'audit.serve_started_stopped' {
-        Assert-That (@($records | Where-Object { $_.cmd -eq 'serve' -and $_.status -eq 'started' }).Count -eq 1) 'no single serve/started record'
-        Assert-That (@($records | Where-Object { $_.cmd -eq 'serve' -and $_.status -eq 'stopped' }).Count -eq 1) 'no single serve/stopped record'
+        Assert-That (@($records | Where-Object { $_.cmd -eq 'mcp' -and $_.status -eq 'started' }).Count -eq 1) 'no single mcp/started record'
+        Assert-That (@($records | Where-Object { $_.cmd -eq 'mcp' -and $_.status -eq 'stopped' }).Count -eq 1) 'no single mcp/stopped record'
     }
     Check 'audit.read_only_true' {
         Assert-That ($toolRecords.Count -gt 0) 'no tool records'
@@ -476,31 +476,31 @@ try {
     # Server 2: --allow-write
     # ======================================================================================================
     if (-not $SkipWriteMode -and $script:Flags['SapReady']) {
-        Write-Host ('== server 2: serve --allow-write, audit file {0}' -f $AuditWrite)
-        $s2 = Start-Server 'serve --allow-write' $AuditWrite
+        Write-Host ('== server 2: mcp --allow-write, audit file {0}' -f $AuditWrite)
+        $s2 = Start-Server 'mcp --allow-write' $AuditWrite
         $script:Flags['Sm37'] = $false
         Check 'write.tools_list' {
             $r = Initialize-Server $s2
             Assert-That ($null -ne $r) 'no initialize response'
             $tools = @((Invoke-Rpc $s2 'tools/list' @{}).result.tools)
             Assert-That ($tools.Count -eq 21) "expected 21 tools, got $($tools.Count)"
-            Assert-That (@($tools | Where-Object { $_.name -eq 'sap_fill' }).Count -eq 1) 'sap_fill is not listed'
+            Assert-That (@($tools | Where-Object { $_.name -eq 'gui_element_fill' }).Count -eq 1) 'gui_element_fill is not listed'
         }
         Check 'write.attach' {
-            $r = Invoke-Tool $s2 'sap_attach' @{}
+            $r = Invoke-Tool $s2 'gui_session_attach' @{}
             if ((Test-ToolError $r) -and (Get-ErrCode $r) -eq 'MULTIPLE_SESSIONS') {
-                $r = Invoke-Tool $s2 'sap_attach' @{ session_id = $script:FirstSession }
+                $r = Invoke-Tool $s2 'gui_session_attach' @{ session_id = $script:FirstSession }
             }
             Assert-That (-not (Test-ToolError $r)) ('attach failed: ' + (Get-ToolText $r))
         }
         Check 'write.tcode_sm37' {
-            $r = Invoke-Tool $s2 'sap_tcode' @{ code = '/nSM37' }
+            $r = Invoke-Tool $s2 'gui_transaction_start' @{ code = '/nSM37' }
             Assert-That (-not (Test-ToolError $r)) ('tcode failed: ' + (Get-ToolText $r))
             $script:Flags['Sm37'] = $true
         }
         try {
             Check 'write.fill_marker_redacted' {
-                $r = Invoke-Tool $s2 'sap_fill' @{ element = $JobNameId; value = $Marker }
+                $r = Invoke-Tool $s2 'gui_element_fill' @{ element = $JobNameId; value = $Marker }
                 Assert-That (-not (Test-ToolError $r)) ('fill failed: ' + (Get-ToolText $r))
                 $raw = $r | ConvertTo-Json -Depth 20 -Compress
                 Assert-That (-not $raw.Contains($Marker)) 'the fill value was echoed in the response'
@@ -508,8 +508,8 @@ try {
         } finally {
             if ($script:Flags['Sm37']) {
                 # restore the field to its default and go home, whatever happened above
-                try { [void](Invoke-Tool $s2 'sap_fill' @{ element = $JobNameId; value = '*' }) } catch { }
-                try { [void](Invoke-Tool $s2 'sap_tcode' @{ code = '/n' }) } catch { }
+                try { [void](Invoke-Tool $s2 'gui_element_fill' @{ element = $JobNameId; value = '*' }) } catch { }
+                try { [void](Invoke-Tool $s2 'gui_transaction_start' @{ code = '/n' }) } catch { }
             }
         }
         $code2 = Stop-Server $s2
@@ -518,9 +518,9 @@ try {
             Assert-That (Test-Path -LiteralPath $s2.Audit) 'no audit file'
             $raw = Get-Content -LiteralPath $s2.Audit -Raw -Encoding UTF8
             Assert-That (-not $raw.Contains($Marker)) 'the fill value appears in the audit file'
-            $fillRecords = @(Get-AuditRecords $s2.Audit | Where-Object { (Has-Prop $_ 'tool') -and $_.tool -eq 'sap_fill' })
-            Assert-That ($fillRecords.Count -ge 1) 'no sap_fill audit record'
-            Assert-That ($fillRecords[0].read_only -eq $false) 'sap_fill record has read_only != false'
+            $fillRecords = @(Get-AuditRecords $s2.Audit | Where-Object { (Has-Prop $_ 'tool') -and $_.tool -eq 'gui_element_fill' })
+            Assert-That ($fillRecords.Count -ge 1) 'no gui_element_fill audit record'
+            Assert-That ($fillRecords[0].read_only -eq $false) 'gui_element_fill record has read_only != false'
             foreach ($line in $s2.Lines) {
                 $obj = ConvertFrom-JsonSafe $line
                 Assert-That ($null -ne $obj -and $obj.jsonrpc -eq '2.0') 'non JSON-RPC stdout line on the write server'
@@ -530,14 +530,14 @@ try {
         # ==================================================================================================
         # Server 3: FAIRYFLY_READ_ONLY=1 caps --allow-write
         # ==================================================================================================
-        Write-Host ('== server 3: serve --allow-write with FAIRYFLY_READ_ONLY=1, audit file {0}' -f $AuditCap)
-        $s3 = Start-Server 'serve --allow-write' $AuditCap @{ FAIRYFLY_READ_ONLY = '1' }
+        Write-Host ('== server 3: mcp --allow-write with FAIRYFLY_READ_ONLY=1, audit file {0}' -f $AuditCap)
+        $s3 = Start-Server 'mcp --allow-write' $AuditCap @{ FAIRYFLY_READ_ONLY = '1' }
         Check 'cap.env_hard_cap' {
             $r = Initialize-Server $s3
             Assert-That ($null -ne $r) 'no initialize response'
             $tools = @((Invoke-Rpc $s3 'tools/list' @{}).result.tools)
             Assert-That ($tools.Count -eq 20) "expected 20 tools with FAIRYFLY_READ_ONLY=1, got $($tools.Count)"
-            Assert-That (@($tools | Where-Object { $_.name -eq 'sap_fill' }).Count -eq 0) 'sap_fill is listed despite FAIRYFLY_READ_ONLY=1'
+            Assert-That (@($tools | Where-Object { $_.name -eq 'gui_element_fill' }).Count -eq 0) 'gui_element_fill is listed despite FAIRYFLY_READ_ONLY=1'
             $code3 = Stop-Server $s3
             Assert-That ($code3 -eq 0) "exit code is $code3"
         }
@@ -547,7 +547,7 @@ try {
     foreach ($srv in @($s1, $s2)) {
         if ($null -ne $srv -and -not $srv.Stopped -and $script:Flags['SapReady']) {
             try {
-                if (-not $srv.Proc.HasExited) { [void](Invoke-Tool $srv 'sap_tcode' @{ code = '/n' } 30000) }
+                if (-not $srv.Proc.HasExited) { [void](Invoke-Tool $srv 'gui_transaction_start' @{ code = '/n' } 30000) }
             } catch { }
         }
     }

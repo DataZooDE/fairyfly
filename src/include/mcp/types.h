@@ -41,7 +41,7 @@ public:
 // ---- Tool model -----------------------------------------------------------------------------
 /// What tools/list advertises for one tool.
 struct ToolDef {
-    std::string name;         ///< e.g. "sap_screen_read" (all tools are prefixed sap_)
+    std::string name;         ///< e.g. "gui_screen_read" (all tools are prefixed gui_)
     std::string title;        ///< human readable title
     std::string description;  ///< model-facing description
     json input_schema;        ///< JSON Schema object for the arguments
@@ -108,7 +108,7 @@ struct Policy {
     bool audit_required = false;
 };
 
-/// Parsed options of `fairyfly serve` (raw CLI values, before the env cap is applied).
+/// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).
 struct ServeOptions {
     bool read_only = false;
     bool allow_write = false;
@@ -120,6 +120,8 @@ struct ServeOptions {
     int call_timeout_ms = 120000;
     std::string transport = "stdio"; ///< only "stdio" is implemented
     int port = 0;                    ///< reserved for a future http transport
+    /// `--tools` (added in 0.2.0, additive): expose only tools of these families; empty = all.
+    std::vector<std::string> families;
 };
 
 /// How a tool renders its result.
@@ -128,6 +130,7 @@ enum class ToolOutput { Text, Markdown, Json, Image };
 /// Catalog entry: tool definition + how to turn arguments into a CLI invocation.
 struct ToolSpec {
     ToolDef def;
+    std::string family;                 ///< tool family = the CLI noun ("element", "session", ...; added in 0.2.0)
     bool write_tool = false;            ///< state-changing: hidden and refused in read-only mode
     ToolOutput output = ToolOutput::Json;
     /// Returns the FULL CLI argv WITHOUT the leading program name, e.g. {"screen","read","--tab","t"}.

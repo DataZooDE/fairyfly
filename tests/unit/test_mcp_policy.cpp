@@ -68,9 +68,9 @@ struct TempFile {
 
 McpCallRecord fill_call_record() {
     McpCallRecord r;
-    r.tool = "sap_fill";
-    r.command = "fill";
-    r.argv = {"fill", "wnd[0]/usr/txtX", "hunter2-secret", "--connection", "0"};
+    r.tool = "gui_element_fill";
+    r.command = "element fill";
+    r.argv = {"element", "fill", "wnd[0]/usr/txtX", "hunter2-secret", "--connection", "0"};
     r.connection = 0;
     r.status = "success";
     r.client = "test-client/1.0";
@@ -83,8 +83,8 @@ McpCallRecord fill_call_record() {
 } // namespace
 
 TEST_CASE("tool_visible hides write tools in read-only mode", "[mcp][policy]") {
-    const auto read = spec_named("sap_screen_read", false);
-    const auto fill = spec_named("sap_fill", true);
+    const auto read = spec_named("gui_screen_read", false);
+    const auto fill = spec_named("gui_element_fill", true);
     REQUIRE(tool_visible(read, read_only_policy()));
     REQUIRE_FALSE(tool_visible(fill, read_only_policy()));
     REQUIRE(tool_visible(read, write_policy()));
@@ -95,11 +95,11 @@ TEST_CASE("check_call refuses write tools in read-only mode", "[mcp][policy]") {
     const auto d = check_call(fill_spec(), json{{"element", "x"}, {"value", "y"}}, read_only_policy(), no_env);
     REQUIRE_FALSE(d.allowed);
     REQUIRE(d.code == "TOOL_UNAVAILABLE_READ_ONLY");
-    REQUIRE(d.message == "The fairyfly server runs read-only; ask the user to restart it with `serve --allow-write`");
+    REQUIRE(d.message == "The fairyfly server runs read-only; ask the user to restart it with `mcp --allow-write`");
 }
 
 TEST_CASE("check_call refuses destructive launch/login/disconnect options in read-only mode", "[mcp][policy]") {
-    for (const char* tool : {"sap_launch", "sap_login"}) {
+    for (const char* tool : {"gui_session_launch", "gui_session_login"}) {
         const auto spec = spec_named(tool, false);
         REQUIRE_FALSE(check_call(spec, json{{"multiple_logon", "end"}}, read_only_policy(), no_env).allowed);
         REQUIRE_FALSE(check_call(spec, json{{"multiple_logon", "END"}}, read_only_policy(), no_env).allowed);
@@ -110,7 +110,7 @@ TEST_CASE("check_call refuses destructive launch/login/disconnect options in rea
         REQUIRE(d.code == "READ_ONLY_REFUSED");
         REQUIRE(check_call(spec, json{{"multiple_logon", "end"}}, write_policy(), no_env).allowed);
     }
-    const auto disc = spec_named("sap_disconnect", false);
+    const auto disc = spec_named("gui_session_disconnect", false);
     REQUIRE_FALSE(check_call(disc, json{{"close_session", true}}, read_only_policy(), no_env).allowed);
     REQUIRE(check_call(disc, json{{"close_session", false}}, read_only_policy(), no_env).allowed);
     REQUIRE(check_call(disc, json::object(), read_only_policy(), no_env).allowed);
@@ -119,10 +119,10 @@ TEST_CASE("check_call refuses destructive launch/login/disconnect options in rea
 
 TEST_CASE("check_call allows everything in write mode and plain reads in read-only mode", "[mcp][policy]") {
     REQUIRE(check_call(fill_spec(), json{{"element", "x"}, {"value", "y"}}, write_policy(), no_env).allowed);
-    REQUIRE(check_call(spec_named("sap_screen_read", false), json::object(), read_only_policy(), no_env).allowed);
-    REQUIRE(check_call(spec_named("sap_tcode", false), json{{"tcode", "SU01"}}, read_only_policy(), no_env).allowed);
+    REQUIRE(check_call(spec_named("gui_screen_read", false), json::object(), read_only_policy(), no_env).allowed);
+    REQUIRE(check_call(spec_named("gui_transaction_start", false), json{{"transaction", "start", "SU01"}}, read_only_policy(), no_env).allowed);
     // Non-object arguments are not this layer's business.
-    REQUIRE(check_call(spec_named("sap_launch", false), json("x"), read_only_policy(), no_env).allowed);
+    REQUIRE(check_call(spec_named("gui_session_launch", false), json("x"), read_only_policy(), no_env).allowed);
 }
 
 TEST_CASE("FAIRYFLY_READ_ONLY is a hard cap in check_call", "[mcp][policy]") {
@@ -133,7 +133,7 @@ TEST_CASE("FAIRYFLY_READ_ONLY is a hard cap in check_call", "[mcp][policy]") {
     REQUIRE_FALSE(d.allowed);
     REQUIRE(d.code == "TOOL_UNAVAILABLE_READ_ONLY");
     REQUIRE_FALSE(check_call(fill_spec(), json::object(), write_policy(), on_word).allowed);
-    REQUIRE_FALSE(check_call(spec_named("sap_disconnect", false), json{{"close_session", true}}, write_policy(), on).allowed);
+    REQUIRE_FALSE(check_call(spec_named("gui_session_disconnect", false), json{{"close_session", true}}, write_policy(), on).allowed);
     REQUIRE(check_call(fill_spec(), json::object(), write_policy(), off).allowed);
     REQUIRE(check_call(fill_spec(), json::object(), write_policy(), no_env).allowed);
 }
@@ -181,16 +181,16 @@ TEST_CASE("RateLimiter is thread safe", "[mcp][policy]") {
     REQUIRE(allowed == 100);
 }
 
-TEST_CASE("write catalog exposes sap_fill with correct annotations", "[mcp][policy][catalog]") {
+TEST_CASE("write catalog exposes gui_element_fill with correct annotations", "[mcp][policy][catalog]") {
     const auto fill = fill_spec();
-    REQUIRE(fill.def.name == "sap_fill");
+    REQUIRE(fill.def.name == "gui_element_fill");
     REQUIRE(fill.write_tool);
     REQUIRE(fill.output == ToolOutput::Json);
     REQUIRE(fill.def.annotations["destructiveHint"] == true);
     REQUIRE(fill.def.annotations["readOnlyHint"] == false);
     REQUIRE(fill.def.annotations["idempotentHint"] == true);
     REQUIRE(fill.def.description.find("Confirm with the user") != std::string::npos);
-    REQUIRE(fill.def.description.find("sap_login") != std::string::npos);
+    REQUIRE(fill.def.description.find("gui_session_login") != std::string::npos);
     REQUIRE(fill.def.input_schema["required"] == json::array({"element"}));
     for (auto it = fill.def.input_schema["properties"].begin(); it != fill.def.input_schema["properties"].end(); ++it) {
         const std::string key = it.key();
@@ -199,44 +199,44 @@ TEST_CASE("write catalog exposes sap_fill with correct annotations", "[mcp][poli
         REQUIRE(key.find("credential") == std::string::npos);
     }
     for (const auto& s : all_tool_specs())
-        if (s.def.name == "sap_fill") REQUIRE(s.write_tool);
+        if (s.def.name == "gui_element_fill") REQUIRE(s.write_tool);
 }
 
-TEST_CASE("sap_fill builds exact argv", "[mcp][policy][catalog]") {
+TEST_CASE("gui_element_fill builds exact argv", "[mcp][policy][catalog]") {
     using V = std::vector<std::string>;
-    REQUIRE(fill_argv({{"element", "wnd[0]/usr/txtA"}, {"value", "abc"}}) == V{"fill", "wnd[0]/usr/txtA", "abc"});
-    REQUIRE(fill_argv({{"element", "e"}, {"value", ""}}) == V{"fill", "e", ""});
-    REQUIRE(fill_argv({{"element", "e"}, {"clear", true}}) == V{"fill", "e", "--clear"});
-    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"clear", false}}) == V{"fill", "e", "v"});
+    REQUIRE(fill_argv({{"element", "wnd[0]/usr/txtA"}, {"value", "abc"}}) == V{"element", "fill", "wnd[0]/usr/txtA", "abc"});
+    REQUIRE(fill_argv({{"element", "e"}, {"value", ""}}) == V{"element", "fill", "e", ""});
+    REQUIRE(fill_argv({{"element", "e"}, {"clear", true}}) == V{"element", "fill", "e", "--clear"});
+    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"clear", false}}) == V{"element", "fill", "e", "v"});
     REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"connection", 2}}) ==
-            V{"fill", "e", "v", "--connection", "2"});
+            V{"element", "fill", "e", "v", "--connection", "2"});
     REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"row", 3}, {"column", "MATNR"}}) ==
-            V{"fill", "e", "v", "--row", "3", "--column", "MATNR"});
+            V{"element", "fill", "e", "v", "--row", "3", "--column", "MATNR"});
     REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"row", 0}, {"column", "C"}, {"commit", true}}) ==
-            V{"fill", "e", "v", "--row", "0", "--column", "C", "--commit"});
+            V{"element", "fill", "e", "v", "--row", "0", "--column", "C", "--commit"});
     REQUIRE(fill_argv({{"element", "e"}, {"value", "X"}, {"row", 1}, {"column", "SEL"}, {"checkbox", true},
                        {"commit", true}, {"connection", 0}}) ==
-            V{"fill", "e", "X", "--row", "1", "--column", "SEL", "--checkbox", "--commit", "--connection", "0"});
+            V{"element", "fill", "e", "X", "--row", "1", "--column", "SEL", "--checkbox", "--commit", "--connection", "0"});
     REQUIRE(fill_argv({{"element", "e"}, {"clear", true}, {"row", 1}, {"column", "SEL"}, {"checkbox", true}}) ==
-            V{"fill", "e", "--clear", "--row", "1", "--column", "SEL", "--checkbox"});
+            V{"element", "fill", "e", "--clear", "--row", "1", "--column", "SEL", "--checkbox"});
 }
 
-TEST_CASE("sap_fill uses the policy default connection only when absent", "[mcp][policy][catalog]") {
+TEST_CASE("gui_element_fill uses the policy default connection only when absent", "[mcp][policy][catalog]") {
     Policy p;
     p.default_connection = 4;
     using V = std::vector<std::string>;
-    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}}, p) == V{"fill", "e", "v", "--connection", "4"});
-    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"connection", 1}}, p) == V{"fill", "e", "v", "--connection", "1"});
+    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}}, p) == V{"element", "fill", "e", "v", "--connection", "4"});
+    REQUIRE(fill_argv({{"element", "e"}, {"value", "v"}, {"connection", 1}}, p) == V{"element", "fill", "e", "v", "--connection", "1"});
 }
 
-TEST_CASE("sap_fill protects values that look like options", "[mcp][policy][catalog]") {
+TEST_CASE("gui_element_fill protects values that look like options", "[mcp][policy][catalog]") {
     using V = std::vector<std::string>;
     REQUIRE(fill_argv({{"element", "e"}, {"value", "-5"}, {"connection", 0}}) ==
-            V{"fill", "--connection", "0", "--", "e", "-5"});
-    REQUIRE(fill_argv({{"element", "e"}, {"value", "--clear"}}) == V{"fill", "--", "e", "--clear"});
+            V{"element", "fill", "--connection", "0", "--", "e", "-5"});
+    REQUIRE(fill_argv({{"element", "e"}, {"value", "--clear"}}) == V{"element", "fill", "--", "e", "--clear"});
 }
 
-TEST_CASE("sap_fill rejects invalid combinations", "[mcp][policy][catalog]") {
+TEST_CASE("gui_element_fill rejects invalid combinations", "[mcp][policy][catalog]") {
     const std::vector<json> bad = {
         json::object(),
         json{{"value", "v"}},
@@ -273,7 +273,7 @@ TEST_CASE("MCP audit hook writes redacted source=mcp records without content", "
     hook(fill_call_record());
 
     McpCallRecord refused;
-    refused.tool = "sap_fill";
+    refused.tool = "gui_element_fill";
     refused.status = "refused";
     refused.error_code = "TOOL_UNAVAILABLE_READ_ONLY";
     refused.read_only = true;
@@ -283,9 +283,9 @@ TEST_CASE("MCP audit hook writes redacted source=mcp records without content", "
     REQUIRE(recs.size() == 2);
     const auto& r = recs[0];
     REQUIRE(r["audit_source"] == "mcp");
-    REQUIRE(r["tool"] == "sap_fill");
-    REQUIRE(r["cmd"] == "fill");
-    REQUIRE(r["argv"][2] == "<redacted>");
+    REQUIRE(r["tool"] == "gui_element_fill");
+    REQUIRE(r["cmd"] == "element fill");
+    REQUIRE(r["argv"][3] == "<redacted>");
     REQUIRE(r["client"] == "test-client/1.0");
     REQUIRE(r["request_id"] == "17");
     REQUIRE(r["status"] == "success");
@@ -339,7 +339,7 @@ TEST_CASE("MCP audit hook is a no-op for null or disabled sinks", "[mcp][audit]"
     REQUIRE_FALSE(fs::exists(file.path));
 }
 
-TEST_CASE("serve start/stop records", "[mcp][audit]") {
+TEST_CASE("mcp start/stop records", "[mcp][audit]") {
     TempFile file;
     fairyfly::audit::AuditSink sink(fairyfly::audit::AuditConfig{fairyfly::audit::Mode::Enabled, file.path});
     REQUIRE(append_serve_event(&sink, "started", true));
@@ -347,7 +347,7 @@ TEST_CASE("serve start/stop records", "[mcp][audit]") {
     const auto recs = file.records();
     REQUIRE(recs.size() == 2);
     for (const auto& r : recs) {
-        REQUIRE(r["cmd"] == "serve");
+        REQUIRE(r["cmd"] == "mcp");
         REQUIRE(r["audit_source"] == "mcp");
         REQUIRE(r["read_only"] == true);
     }

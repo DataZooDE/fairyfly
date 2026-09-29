@@ -61,7 +61,7 @@ TEST_CASE("resolver reads the deprecated file before the store and warns", "[cre
     REQUIRE(result.value.source == "file");
     REQUIRE(result.value.credentials.username == "FILEUSER");
     REQUIRE(result.value.warnings.size() == 1);
-    REQUIRE(result.value.warnings[0] == "deprecated: use `fairyfly credentials import-env` then `login`");
+    REQUIRE(result.value.warnings[0] == "deprecated: use `fairyfly credentials import-env` then `session login`");
 }
 
 TEST_CASE("resolver uses the store by default connection name and credential_name overrides", "[cred][resolver]") {
