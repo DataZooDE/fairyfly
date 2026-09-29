@@ -31,6 +31,10 @@ add_executable(unit_tests
     unit/test_mcp_dispatcher.cpp
     unit/test_command_table.cpp
     unit/test_mcp_config.cpp
+    unit/test_mcp_client_config.cpp
+    unit/test_mcp_doctor.cpp
+    unit/test_tray.cpp
+    unit/test_tray_win32_manual.cpp
     ../src/config.cpp
     ../src/session.cpp
 )

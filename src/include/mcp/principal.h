@@ -77,6 +77,9 @@ public:
     virtual void set_read_only(bool read_only) = 0;
     virtual void request_stop() = 0;      ///< graceful: finish the running call, stop accepting
     virtual void request_restart() = 0;   ///< stop, re-read config, start again in the same process
+    /// Start again after a user Stop (tray "Start"). Additive in phase 4; default = request_restart(), which must
+    /// also work while stopped.
+    virtual void request_start() { request_restart(); }
 };
 
 } // namespace fairyfly::mcp

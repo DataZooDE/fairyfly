@@ -1,0 +1,7 @@
+#include "tray_resource.h"
+
+// The first icon resource (lowest id) is also the executable icon.
+IDI_TRAY_RUNNING ICON "../../assets/icons/tray_green.ico"
+IDI_TRAY_WARNING ICON "../../assets/icons/tray_yellow.ico"
+IDI_TRAY_STOPPED ICON "../../assets/icons/tray_grey.ico"
+IDI_TRAY_ERROR   ICON "../../assets/icons/tray_red.ico"

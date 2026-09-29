@@ -165,6 +165,14 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
     src/config/mcp_config.cpp
+    src/config/client_config.cpp
+    src/config/mcp_doctor.cpp
+    src/tray/tray_model.cpp
+    src/tray/tray_controller.cpp
+    src/tray/tray_win32.cpp
+    src/commands/mcp_config_command.cpp
+    src/commands/mcp_client_config_command.cpp
+    src/commands/mcp_doctor_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
@@ -202,6 +210,9 @@ if(WIN32)
         user32
         uiautomationcore
         advapi32
+        shell32
+        ws2_32
+        wtsapi32
     )
 endif()
 
@@ -213,7 +224,13 @@ else()
 endif()
 
 # Create executable (only main.cpp, links against library)
-add_executable(fairyfly src/main.cpp)
+if(WIN32)
+    # Tray icon resources (assets/icons via src/tray/fairyfly.rc)
+    enable_language(RC)
+    add_executable(fairyfly src/main.cpp src/tray/fairyfly.rc)
+else()
+    add_executable(fairyfly src/main.cpp)
+endif()
 
 # Link executable against core library (all dependencies inherited)
 target_link_libraries(fairyfly PRIVATE fairyfly_core)
