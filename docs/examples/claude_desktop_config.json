@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fairyfly": {
+      "command": "C:\\path\\to\\fairyfly\\build\\Release\\fairyfly.exe",
+      "args": ["serve"]
+    }
+  }
+}

@@ -73,3 +73,26 @@ powershell -NoProfile -File tests\integration\compare_builds.ps1 -OldExe old.exe
 ~~~
 
 For each of 18 read-only screens the script navigates once with `-NewExe`, then reads `screen read --no-tabs --max-rows 100 --output json` with both builds (best of 2 runs each), and prints Screen / OldMs / NewMs / OldEl / NewEl / OnlyOld / OnlyNew / OldKB / NewKB. The first 8 ids that differ are printed per screen. Exit code 1 if any element id differs, 2 if no SAP session. A screen whose navigation or read fails is reported as SKIP.
+
+## MCP smoke test (mcp_smoke.ps1)
+
+`tests\integration\mcp_smoke.ps1` is a PowerShell 5.1 script that spawns `fairyfly serve`, speaks newline-delimited JSON-RPC to it and checks the MCP server end to end. It is not registered with CTest and not part of the Bigfox regression suite.
+
+Prerequisites
+
+- A built `fairyfly.exe` (`build\Release\fairyfly.exe`, fallback `build\bin\Release\fairyfly.exe`).
+- A logged-in SAP GUI session on the SAP Easy Access screen with no popup; display authorizations are enough (the SM37 selection screen is used). Without a session the script exits with code 2.
+- No credentials are read or sent.
+
+What it presses: it navigates with `/nSM37` and `/n`, reads and captures the screen, and (write mode) fills the SM37 job name field with the marker `ZMCPSMOKE`, then restores it to `*`. It never presses Save, Delete, Release, Stop, Create or Change: the Save button, `send-key f11`, `multiple_logon=end` and the hidden `sap_fill` are only sent to a read-only server, which refuses them before SAP is touched. It always ends with `tcode /n` and closes the servers, also on failure.
+
+~~~powershell
+# plan only, spawns nothing
+powershell -NoProfile -File tests\integration\mcp_smoke.ps1 -DryRun
+# full run (read-only server, write-mode server, env hard-cap server)
+powershell -NoProfile -File tests\integration\mcp_smoke.ps1
+# without the --allow-write and FAIRYFLY_READ_ONLY servers
+powershell -NoProfile -File tests\integration\mcp_smoke.ps1 -SkipWriteMode -AuditFile scratch\mcp-audit.jsonl
+~~~
+
+Parameters: `-Exe`, `-AuditFile` (default a temp file; the write and cap servers use `<name>-write.jsonl` and `<name>-cap.jsonl`), `-DryRun`, `-SkipWriteMode`. Output: `PASS|FAIL|SKIP <name> [<ms>ms]`, then a summary. Exit code: 0 all passed, 1 at least one FAIL, 2 no SAP session. Expected runtime: about a minute on a responsive system. See [docs/MCP.md](../../docs/MCP.md) for the server itself.
