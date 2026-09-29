@@ -1782,6 +1782,24 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 
 ---
 
+### [ERR-142] Tab Reads Used a Stale Element and Skipped Grids
+
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
+- **Severity**: Medium / wrong and bloated output, slow
+- **Symptom**: Found by a profiling pass on SU01. After `tab.select()` the pre-select COM pointer yielded nothing in `traverse_element_tree`, so the fallback re-read the whole `/usr` area: every expanded tab's `elements` held all tab headers, the base fields and the tab's own controls (25-74 elements per tab, 549 KB JSON for 12 tabs). Tab sub-reads also never ran the grid/tree extraction phase, so grids inside tabs (for example the SU01 Roles list) were absent from `tabs_content`. A grid found both through `Children` and a `/shell` probe was extracted twice (`add_grid_id` had no dedupe).
+- **Fix and verification**: `ScreenReader::read_tab` and `read_tab_content` re-fetch the tab after the select, extract only its subtree including grids, skip `select()` for the current tab, poll `is_busy` at 20 ms, and dedupe collector ids. `screen read --tab` reads only the requested tab. Live SU01: `--tab tabpACTG` 2.2 s to 0.55 s with the Roles grid (3 rows), full read 11.3 s to 3.9 s, 12 tabs now hold 3-51 elements each and six include grids. Documented behavior change: a tab's `elements` are its own controls only. The selected tab is restored (ERR-113).
+
+---
+
+### [IMP-007] Fewer COM Round Trips per Screen Read
+
+- **Status**: DONE AND VERIFIED LIVE 2026-09-29 (SM37 list still 1.7 s)
+- **Analysis**: About 0.45 ms per cross-process COM call. A plain `screen read` costs about 190 ms fixed plus discovery and extraction: ST22 selection about 2,300 calls, the 34-row SM37 list about 4,200 calls (8 per label cell), the full SU01 tab read about 9,000 wasted probe round trips. Main causes: blind `FindById` probing of every container (about 13 misses each, 3 round trips per miss), uncached failed DISPID lookups (`Visible` misses on every element, `AccLabel` on every field), no Children caching, 4-5 round trips per child through `_NewEnum`/`Skip`/`Next`, and Type/Id read again in extraction.
+- **Fix**: `id_probe_candidates` gates probing by control type and skips known ids; `resolve_dispid` caches failures; `FindById` and `is_enabled` use the cached DISPID; the Children collection and count are cached per element; positioned label cells are read with one `Text` call; Phase 1 passes id and type to Phase 3 (`prime_identity`); `SapGuiCollection::for_each` walks one enumerator (used in metadata extraction only).
+- **Verification**: element-ID sets are identical to a build of the pre-change code on 20 live screens; timings old to new: ST22 selection 1237 to 808 ms, SM37 list 2371 to 1700 ms, SU01 display 1383 to 711 ms, SM50 1265 to 759 ms, SE80 1375 to 658 ms. Known limits: `visible` is still `false` for every element (`Visible` is not a scripting property); `for_each` is not yet used in `screen_reader.cpp`.
+
+---
+
 ### [OPS-030] SEPM_REF_APPS_DG 8-Phase Report Structure Verified
 
 - **Status**: VERIFIED WITH ADT SOURCE AUDIT AND UNIT TESTS
