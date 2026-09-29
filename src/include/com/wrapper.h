@@ -312,6 +312,10 @@ public:
     /// Throws ComException if operation fails
     void send_vkey(int vkey);
 
+    /// Close the window via its own Close method (GuiModalWindow.Close).
+    /// Only meant for popups (wnd[N>0]); callers must not use it on wnd[0].
+    void close();
+
     /// Get raw COM object - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }
 };

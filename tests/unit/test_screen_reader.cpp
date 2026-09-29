@@ -1079,3 +1079,113 @@ TEST_CASE("Screen Markdown shows the status bar message", "[screen][markdown][st
     data.erase("status_bar");
     REQUIRE(fairyfly::cli::ScreenMarkdownFormatter::format(data).find("**Status") == std::string::npos);
 }
+
+namespace {
+
+nlohmann::json selection_fixture() {
+    using nlohmann::json;
+    const std::string usr = "/app/con[0]/ses[0]/wnd[0]/usr/";
+    auto carrier = [&](const std::string& name, const std::string& text, const std::string& label = "") {
+        json e = {{"id", usr + "txt" + name}, {"name", name}, {"text", text},
+                  {"type", "GuiTextField"}, {"changeable", false}, {"visible", false},
+                  {"capabilities", {"readable"}}};
+        if (!label.empty()) e["label"] = label;
+        return e;
+    };
+    auto field = [&](const std::string& prefix, const std::string& name, const std::string& type,
+                     const std::string& label, const std::string& text, const std::string& tip) {
+        return json{{"id", usr + prefix + name}, {"name", name}, {"type", type}, {"label", label},
+                    {"text", text}, {"tooltip", tip}, {"changeable", true}, {"visible", false},
+                    {"capabilities", {"fillable", "readable"}}};
+    };
+    return json::array({
+        carrier("%_P_DTMODE_%_APP_%-TEXT", "Time Restriction Mode         "),
+        field("cmb", "P_DTMODE", "GuiComboBox", "Time Restriction Mode", "Selection options", "Mode"),
+        carrier("%_S_DATUM_%_APP_%-TEXT", "Date                          "),
+        field("ctxt", "S_DATUM-LOW", "GuiCTextField", "Date", "29.09.2026", "System Date"),
+        carrier("%_S_DATUM_%_APP_%-TO_TEXT", "to   ", "Date"),
+        field("ctxt", "S_DATUM-HIGH", "GuiCTextField", "to", "", "System Date"),
+        carrier("%_S_UZEIT_%_APP_%-TEXT", "Time                          "),
+        field("ctxt", "S_UZEIT-LOW", "GuiCTextField", "Time", "00:00:00", "System Time"),
+        carrier("%_S_UZEIT_%_APP_%-TO_TEXT", "to   ", "Time"),
+        field("ctxt", "S_UZEIT-HIGH", "GuiCTextField", "to", "00:00:00", "System Time"),
+        carrier("%_S_ORPHAN_%_APP_%-TEXT", "Orphan caption            "),
+        carrier("%_S_EMPTY_%_APP_%-TEXT", "      "),
+        carrier("TOD_NUM", "6       Runtime Errors        "),
+        {{"id", usr + "btn%_S_DATUM_%_APP_%-VALU_PUSH"}, {"name", "%_S_DATUM_%_APP_%-VALU_PUSH"},
+         {"type", "GuiButton"}, {"text", ""}}
+    });
+}
+
+bool has_selection_name(const nlohmann::json& elements, const std::string& name) {
+    for (const auto& e : elements) if (e.value("name", "") == name) return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("collapse_label_duplicates removes GuiTextField selection label carriers", "[screen][size][err142]") {
+    using nlohmann::json;
+    json elements = selection_fixture();
+    ScreenReader::collapse_label_duplicates(elements);
+
+    REQUIRE_FALSE(has_selection_name(elements, "%_P_DTMODE_%_APP_%-TEXT"));
+    REQUIRE_FALSE(has_selection_name(elements, "%_S_DATUM_%_APP_%-TEXT"));
+    REQUIRE_FALSE(has_selection_name(elements, "%_S_DATUM_%_APP_%-TO_TEXT"));
+    REQUIRE_FALSE(has_selection_name(elements, "%_S_UZEIT_%_APP_%-TEXT"));
+    REQUIRE_FALSE(has_selection_name(elements, "%_S_UZEIT_%_APP_%-TO_TEXT"));
+    REQUIRE_FALSE(has_selection_name(elements, "%_S_EMPTY_%_APP_%-TEXT"));
+
+    // Uncovered caption and non-carrier elements survive.
+    REQUIRE(has_selection_name(elements, "%_S_ORPHAN_%_APP_%-TEXT"));
+    REQUIRE(has_selection_name(elements, "TOD_NUM"));
+    REQUIRE(has_selection_name(elements, "%_S_DATUM_%_APP_%-VALU_PUSH"));
+
+    // Paired fields keep their label.
+    for (const auto& e : elements) {
+        const std::string name = e.value("name", "");
+        if (name == "S_DATUM-LOW") REQUIRE(e.at("label") == "Date");
+        if (name == "S_DATUM-HIGH") REQUIRE(e.at("label") == "to");
+        if (name == "S_UZEIT-LOW") REQUIRE(e.at("label") == "Time");
+        if (name == "P_DTMODE") REQUIRE(e.at("label") == "Time Restriction Mode");
+    }
+    REQUIRE(elements.size() == 8);
+}
+
+TEST_CASE("collapse_label_duplicates only trusts labels of sibling fields", "[screen][size][err142]") {
+    using nlohmann::json;
+    json elements = json::array({
+        {{"id", "a"}, {"name", "P_OTHER"}, {"type", "GuiTextField"}, {"label", "Date"}},
+        {{"id", "b"}, {"name", "%_S_DATUM_%_APP_%-TEXT"}, {"type", "GuiTextField"}, {"text", "Date   "}},
+        {{"id", "c"}, {"name", "S_DATUMX-LOW"}, {"type", "GuiCTextField"}, {"label", "Date"}}
+    });
+    ScreenReader::collapse_label_duplicates(elements);
+    // base S_DATUM has no sibling field labelled Date (P_OTHER / S_DATUMX are other bases).
+    REQUIRE(elements.size() == 3);
+}
+
+TEST_CASE("Selection screen markdown keeps captions after label collapse", "[screen][markdown][err142]") {
+    renderers::register_all_renderers();
+    using nlohmann::json;
+    auto build = [](const json& elements) {
+        json data = {{"title", "ABAP Runtime Errors"}, {"transaction", "ST22"},
+                     {"elements", elements}, {"element_count", elements.size()},
+                     {"hierarchy", {{"form_fields", elements}}}};
+        return fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    };
+    json collapsed = selection_fixture();
+    ScreenReader::collapse_label_duplicates(collapsed);
+    const std::string before = build(selection_fixture());
+    const std::string after = build(collapsed);
+    INFO(after);
+    // Captions are rendered from the field label, so collapsing the carrier rows loses none.
+    for (const char* label : {"Time Restriction Mode", "Date", "Time"}) {
+        REQUIRE(before.find(label) != std::string::npos);
+        REQUIRE(after.find(label) != std::string::npos);
+    }
+    REQUIRE(after.find("**Time Restriction Mode<br>Mode**") != std::string::npos);
+    REQUIRE(after.find("**Date<br>System Date**") != std::string::npos);
+    REQUIRE(after.find("Orphan caption") != std::string::npos);
+    REQUIRE(after.find("%_S_DATUM_%_APP_%-TEXT") == std::string::npos);
+    REQUIRE(after.size() < before.size());
+}
