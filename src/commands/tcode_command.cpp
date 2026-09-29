@@ -7,14 +7,14 @@ namespace commands {
 
 class TcodeCommand : public CommandBase {
 public:
-    std::string name() const override { return "tcode"; }
+    std::string name() const override { return "transaction start"; }
 
     std::string description() const override {
         return "Execute SAP transaction";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"transaction","start"});
         cmd_->add_option("code", tcode_, "Transaction code (e.g., SE38, VA01)")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

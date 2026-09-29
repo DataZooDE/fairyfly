@@ -165,7 +165,7 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
         result.error["session_id"] = conn.session_id;
         result.error["suggestions"] = json::array({
             "The SAP session was closed or connection lost",
-            "Run 'fairyfly attach' to create a new connection"
+            "Run 'fairyfly session attach' to create a new connection"
         });
         return result;
     }
@@ -240,7 +240,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
     } else {
         result.error["suggestions"] = session_id
-            ? json::array({"Run 'fairyfly list' to find an accessible exact session ID"})
+            ? json::array({"Run 'fairyfly session list' to find an accessible exact session ID"})
             : json::array({
                 "Ensure you clicked on an active SAP transaction window (not just SAP Logon)",
                 "The window must contain an active SAP session with a transaction loaded",
@@ -548,7 +548,7 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
             result.error["message"] = fmt::format("Found {} connections, specify which one to disconnect", connections.size());
             result.error["suggestions"] = json::array({
                 "Use --connection <id> to specify which connection to disconnect",
-                "Run 'fairyfly connections' to see all connections"
+                "Run 'fairyfly connection list' to see all connections"
             });
             return result;
         }
@@ -870,7 +870,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             result.error["node_key"] = node_key;
             result.error["tree_action"] = tree_action;
             result.error["suggestions"] = json::array({
-                fmt::format("List nodes: fairyfly get {} --list-nodes", element_id),
+                fmt::format("List nodes: fairyfly element get {} --list-nodes", element_id),
                 "Ensure element is a tree control (GuiShell or GuiTree)",
                 "Verify node key exists in tree"
             });
@@ -1075,8 +1075,8 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
                 result.error["message"] = "Cannot access element - modal dialog is active";
                 result.error["dialog"] = dialog_info;
                 result.error["suggestions"] = json::array({
-                    fmt::format("Close the dialog first: fairyfly click '@active/tbar[0]/btn[0]'"),
-                    fmt::format("Or use main window explicitly: fairyfly get '@main{}' --list-nodes", elem.path.substr(7))
+                    fmt::format("Close the dialog first: fairyfly element click '@active/tbar[0]/btn[0]'"),
+                    fmt::format("Or use main window explicitly: fairyfly element get '@main{}' --list-nodes", elem.path.substr(7))
                 });
                 result.error["requested_element"] = element_id;
                 result.error["active_window"] = dialog_info["window_id"];
@@ -1760,19 +1760,19 @@ Result CommandHandler::handle_doctor()
                 add_check("active_sessions", "warn",
                           "No active SAP connections found",
                           "SAP GUI scripting engine is active, but no connections are currently open.",
-                          "Connect to an SAP system in SAP Logon (e.g. Bigfox / A4H) or run 'fairyfly launch <connection>'.");
+                          "Connect to an SAP system in SAP Logon (e.g. Bigfox / A4H) or run 'fairyfly session launch <connection>'.");
             } else if (info.value("connection_enumeration_errors", 0) > 0) {
                 add_check("active_sessions", "warn",
                           "Some SAP connections could not be inspected",
                           fmt::format("{} accessible session(s), {} connection error(s)",
                                       total_sess, info.value("connection_enumeration_errors", 0)),
-                          "Inspect the connection error entries from 'fairyfly list'.");
+                          "Inspect the connection error entries from 'fairyfly session list'.");
             } else if (info.value("session_enumeration_errors", 0) > 0) {
                 add_check("active_sessions", "warn",
                           "Some SAP sessions could not be inspected",
                           fmt::format("{} accessible session(s), {} enumeration error(s)",
                                       total_sess, info.value("session_enumeration_errors", 0)),
-                          "Inspect the session_errors entries from 'fairyfly list'.");
+                          "Inspect the session_errors entries from 'fairyfly session list'.");
             } else if (info.value("backend_scripting_disabled", false)) {
                 add_check("active_sessions", "warn",
                           "An older SAP connection still has backend scripting disabled",

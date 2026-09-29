@@ -7,14 +7,14 @@ namespace commands {
 
 class DisconnectCommand : public CommandBase {
 public:
-    std::string name() const override { return "disconnect"; }
+    std::string name() const override { return "session disconnect"; }
 
     std::string description() const override {
         return "Remove a saved connection; optionally close its SAP GUI session";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"session","disconnect"});
         cmd_->add_option("--connection", conn_id_, "Connection ID to disconnect");
         cmd_->add_flag("--close-session", close_session_, "Close the SAP GUI session before removing its saved connection");
         return cmd_;

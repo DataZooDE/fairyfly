@@ -6,6 +6,7 @@
 #include <optional>
 #include "include/core.h"
 #include "include/cli_handler.h"
+#include "include/commands/command_groups.h"
 
 namespace fairyfly {
 namespace commands {
@@ -17,7 +18,7 @@ class CommandBase {
 public:
     virtual ~CommandBase() = default;
 
-    /// Get the command name (e.g., "attach", "launch", "tcode")
+    /// Get the command name (e.g., "session attach", "transaction start")
     virtual std::string name() const = 0;
 
     /// Get command description for help text

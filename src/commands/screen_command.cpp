@@ -18,10 +18,10 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         // Create parent "screen" subcommand once
-        screen_cmd_ = app.add_subcommand(name(), description());
+        screen_cmd_ = noun_app(app, "screen");
 
         // Add "read" subcommand
-        read_cmd_ = screen_cmd_->add_subcommand("read", "Read screen structure (max 500 elements)");
+        read_cmd_ = add_leaf(app, {"screen", "read"});
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
         read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
@@ -46,7 +46,7 @@ public:
         read_cmd_->add_option("--type", filter_type_, "Filter by exact element type");
         read_cmd_->add_flag("--first", filters_.first_match_only, "Return only first matching element");
 
-        find_cmd_ = screen_cmd_->add_subcommand("find", "Find visible controls without reading unrelated values");
+        find_cmd_ = add_leaf(app, {"screen", "find"});
         find_cmd_->add_option("--id-contains", find_id_contains_, "Element ID substring (case-sensitive)");
         find_cmd_->add_option("--name-contains", find_name_contains_, "Control name substring (ASCII case-insensitive)");
         find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
@@ -58,16 +58,8 @@ public:
         find_cmd_->add_option("--output", find_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
 
-        menu_cmd_ = screen_cmd_->add_subcommand("menu",
-            "List the menu bar tree; select an item only with --select");
-        menu_cmd_->add_option("--select", menu_select_,
-            "Menu text path to select, e.g. 'Runtime Errors/Display' (case-insensitive, '&' ignored)");
-        menu_cmd_->add_option("--window", menu_window_, "Window whose menu bar is used (default wnd[0], or @active)")
-            ->default_val("wnd[0]");
-        menu_cmd_->add_option("--connection", menu_conn_id_, "Connection ID to use");
-
         // Add "capture" subcommand
-        capture_cmd_ = screen_cmd_->add_subcommand("capture", "Capture screenshot");
+        capture_cmd_ = add_leaf(app, {"screen", "capture"});
         capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout");
         capture_cmd_->add_option("--format", screenshot_format_, "Output format: png, base64")
             ->check(CLI::IsMember({"png", "base64"}));
@@ -109,9 +101,6 @@ public:
             query.probe_all = find_probe_all_;
             return handler.handle_screen_find(query, find_conn_id_);
         }
-        else if (*menu_cmd_) {
-            return handler.handle_screen_menu(menu_select_, menu_window_, menu_conn_id_);
-        }
         else if (*capture_cmd_) {
             cli::ScreenshotOptions opts;
             opts.output_file = screenshot_file_;
@@ -130,7 +119,7 @@ public:
         Result result;
         result.status = Result::Status::Error;
         result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No screen subcommand specified (read, find, menu, or capture)";
+        result.error["message"] = "No screen subcommand specified (read, find, or capture)";
         return result;
     }
 
@@ -174,12 +163,6 @@ private:
     bool find_probe_all_ = false;
     std::optional<int> find_conn_id_;
     std::string find_output_format_;
-
-    // Menu subcommand
-    CLI::App* menu_cmd_ = nullptr;
-    std::string menu_select_;
-    std::string menu_window_ = "wnd[0]";
-    std::optional<int> menu_conn_id_;
 
     // Filter options
     cli::ScreenFilterOptions filters_;

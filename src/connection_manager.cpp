@@ -470,8 +470,8 @@ ResultT<Connection> ConnectionManager::resolve_connection(std::optional<int> exp
             result.error["code"] = "CONNECTION_NOT_FOUND";
             result.error["message"] = fmt::format("Connection file fairyfly.{}.con not found", explicit_id.value());
             result.error["suggestions"] = json::array({
-                "Run 'fairyfly connections' to see available connections",
-                "Run 'fairyfly attach' to create a new connection"
+                "Run 'fairyfly connection list' to see available connections",
+                "Run 'fairyfly session attach' to create a new connection"
             });
             return result;
         }
@@ -490,8 +490,8 @@ ResultT<Connection> ConnectionManager::resolve_connection(std::optional<int> exp
         result.error["code"] = "NO_CONNECTIONS";
         result.error["message"] = "No connection files found in current directory";
         result.error["suggestions"] = json::array({
-            "Run 'fairyfly attach' to attach to a running SAP window",
-            "Run 'fairyfly launch <connection>' to launch a new SAP connection"
+            "Run 'fairyfly session attach' to attach to a running SAP window",
+            "Run 'fairyfly session launch <connection>' to launch a new SAP connection"
         });
         return result;
     }
@@ -519,7 +519,7 @@ ResultT<Connection> ConnectionManager::resolve_connection(std::optional<int> exp
     result.error["connections"] = conn_list;
     result.error["suggestions"] = json::array({
         "Add --connection <id> flag to specify which connection to use",
-        "Run 'fairyfly connections' to see all available connections"
+        "Run 'fairyfly connection list' to see all available connections"
     });
 
     return result;

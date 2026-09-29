@@ -4,11 +4,11 @@ namespace fairyfly::commands {
 
 class LoginCommand : public CommandBase {
 public:
-    std::string name() const override { return "login"; }
+    std::string name() const override { return "session login"; }
     std::string description() const override { return "Log into a launched SAP GUI session"; }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"session","login"});
         cmd_->add_option("--credentials-file", credentials_file_, "Colon-separated credential file (deprecated: use `credentials import-env`)");
         cmd_->add_flag("--credentials-stdin", from_stdin_, "Read the same credential lines from standard input");
         cmd_->add_option("--credential", credential_name_,
