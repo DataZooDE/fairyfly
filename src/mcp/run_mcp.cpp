@@ -15,6 +15,8 @@
 #endif
 
 #include "include/command_table.h"
+#include "include/auth/authenticator.h"
+#include "include/mcp/authenticators.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/http_server.h"
 #include "include/mcp/mcp_audit.h"
@@ -133,10 +135,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         return handler;
     };
 
+    std::function<cli::CommandHandler*()> peek = peek_handler ? peek_handler
+                                                               : std::function<cli::CommandHandler*()>([] { return nullptr; });
     AuditHook hook;
     if (sink && sink->enabled()) {
-        std::function<cli::CommandHandler*()> peek = peek_handler ? peek_handler
-                                                                   : std::function<cli::CommandHandler*()>([] { return nullptr; });
         hook = make_mcp_audit_hook(sink, peek, read_only);
     }
 
@@ -150,18 +152,36 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
         if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
             return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        // Bearer-token authentication (Credential Manager). The IIS setup stores the proxy secret as
+        // "fairyfly:fairyfly-mcp-proxy"; --insecure-no-auth bypasses the factory in make_http_authenticator.
+        g_make_authenticator = [] {
+            auth::AuthConfig config;
+            config.proxy_prefix = "fairyfly:";
+            config.proxy_name = "fairyfly-mcp-proxy";
+            return auth::make_default_authenticator(config);
+        };
         HttpRunArgs http_args;
         http_args.options = options;
         http_args.server_options = server_options;
         http_args.read_only = read_only;
         http_args.read_only_cap = env_flag_read_only();
         const auto families = options.families;
-        http_args.make_provider = [policy, hook, lazy_handler, families](bool ro) mutable -> std::unique_ptr<ToolProvider> {
+        http_args.make_provider = [policy, hook, lazy_handler, families, peek](bool ro) mutable -> std::unique_ptr<ToolProvider> {
             Policy p = policy;
             p.read_only = ro;
             p.allow_write = !ro;
-            return std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
-                                                       retain_families(all_tool_specs(), families));
+            auto dispatcher = std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
+                                                                  retain_families(all_tool_specs(), families));
+            // Token authorization needs the target SAP system and a per-call read-only override.
+            dispatcher->set_sap_facts_provider([peek](std::optional<int>) -> std::optional<audit::SapFacts> {
+                cli::CommandHandler* handler = peek();
+                if (!handler) return std::nullopt;
+                audit::SapFacts facts = handler->audit_facts();
+                if (!facts.any()) return std::nullopt;
+                return facts;
+            });
+            dispatcher->set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
+            return dispatcher;
         };
         http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };
         append_serve_event(sink, "started", read_only);
