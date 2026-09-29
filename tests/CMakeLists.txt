@@ -24,6 +24,8 @@ add_executable(unit_tests
     unit/test_credential_resolver.cpp
     unit/test_audit_log.cpp
     unit/test_mcp_types.cpp
+    unit/test_mcp_tools.cpp
+    unit/test_mcp_dispatcher.cpp
     ../src/config.cpp
     ../src/session.cpp
 )
