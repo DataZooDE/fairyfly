@@ -52,6 +52,7 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
     tools_cmd_ = add_leaf(app, {"mcp", "tools"});
     tools_cmd_->add_flag("--markdown", tools_markdown_, "Print the tool table as Markdown");
     register_mcp_iis_cli(*cmd_);
+    setup_mcp_extras(*cmd_, extras_);
     return cmd_;
 }
 

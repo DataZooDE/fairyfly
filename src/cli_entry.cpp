@@ -297,7 +297,9 @@ namespace {
                 return 0;
             }
             // Copy the options first: nothing may rebuild the registry (and destroy this command) later.
-            const mcp::ServeOptions serve_options = mcp_command->options();
+            mcp::ServeOptions serve_options = mcp_command->options();
+            if (const auto handled = run_mcp_extras(mcp_command->extras(), serve_options, get_handler, global_opts))
+                return *handled;
             g_skip_invocation_audit = true;
             std::function<CommandHandler*()> peek = [] {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;

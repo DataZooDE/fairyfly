@@ -68,6 +68,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 
 # Platform-specific settings
 if(WIN32)
@@ -182,6 +183,15 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/http_endpoint.cpp
     src/mcp/http_server.cpp
     src/mcp/http_auth.cpp
+    src/config/mcp_config.cpp
+    src/config/client_config.cpp
+    src/config/mcp_doctor.cpp
+    src/tray/tray_model.cpp
+    src/tray/tray_controller.cpp
+    src/tray/tray_win32.cpp
+    src/commands/mcp_config_command.cpp
+    src/commands/mcp_client_config_command.cpp
+    src/commands/mcp_doctor_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
@@ -208,6 +218,7 @@ target_link_libraries(fairyfly_core PUBLIC
     spdlog::spdlog
     fmt::fmt
     httplib::httplib
+    yaml-cpp::yaml-cpp
 )
 
 # Windows-specific COM libraries
@@ -221,6 +232,9 @@ if(WIN32)
         advapi32
         bcrypt
         ws2_32
+        shell32
+        ws2_32
+        wtsapi32
     )
 endif()
 
@@ -232,7 +246,13 @@ else()
 endif()
 
 # Create executable (only main.cpp, links against library)
-add_executable(fairyfly src/main.cpp)
+if(WIN32)
+    # Tray icon resources (assets/icons via src/tray/fairyfly.rc)
+    enable_language(RC)
+    add_executable(fairyfly src/main.cpp src/tray/fairyfly.rc)
+else()
+    add_executable(fairyfly src/main.cpp)
+endif()
 
 # Link executable against core library (all dependencies inherited)
 target_link_libraries(fairyfly PRIVATE fairyfly_core)

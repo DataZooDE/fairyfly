@@ -1,6 +1,7 @@
 #pragma once
 
 #include "include/commands/command_base.h"
+#include "include/commands/mcp_extras.h"
 #include "include/mcp/types.h"
 
 namespace fairyfly {
@@ -31,6 +32,9 @@ public:
     /// Parsed options (valid after parsing); --default-connection and --tools are folded in.
     mcp::ServeOptions options() const;
 
+    /// Phase-4 state: -c/--config, --tray, config/client-config/doctor subcommands (mcp_extras.h).
+    McpExtras& extras() { return extras_; }
+
 private:
     CLI::App* cmd_ = nullptr;
     CLI::App* tools_cmd_ = nullptr;
@@ -39,6 +43,7 @@ private:
     bool http_flag_ = false;
     std::string tools_filter_;
     bool tools_markdown_ = false;
+    McpExtras extras_;
 };
 
 } // namespace commands
