@@ -4,6 +4,7 @@
 #include "automation_engine.h"
 #include "connection_manager.h"
 #include "credential_store.h"
+#include "audit_log.h"
 #include <string>
 #include <memory>
 #include <optional>
@@ -84,6 +85,9 @@ public:
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }
     bool read_only() const { return read_only_; }
+
+    /// Non-secret facts about the current SAP session for the audit trail (empty when none).
+    audit::SapFacts audit_facts() const noexcept;
 
     // Connection management - two modes
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);

@@ -23,6 +23,8 @@
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
 #include "include/exceptions.h"
+#include "include/version.h"
+#include "include/audit_log.h"
 #ifdef _WIN32
 #include <windows.h>
 #include <comdef.h>
@@ -51,7 +53,7 @@ namespace {
             response["metadata"] = json::object();
         }
         response["metadata"]["timestamp"] = ss.str();
-        response["metadata"]["version"] = "0.1.0";
+        response["metadata"]["version"] = fairyfly::FAIRYFLY_VERSION;
     }
 
     /// Convert log level string to spdlog::level::level_enum
@@ -110,6 +112,47 @@ namespace {
     int run_batch(std::string file, bool stop_on_error, const HandlerProvider& get_handler,
                   const GlobalOptions& batch_opts);
 
+    /// Per-process audit context (set by run_cli). peek_handler never creates the handler,
+    /// so --help and parse errors do not initialise COM just to be audited.
+    struct AuditContext {
+        audit::AuditSink* sink = nullptr;
+        std::function<const CommandHandler*()> peek_handler;
+    };
+    AuditContext g_audit;
+
+    void note_result(audit::AuditRecord& out, const Result& result) {
+        if (result.status != Result::Status::Success) {
+            if (result.error.is_object() && result.error.contains("code") && result.error["code"].is_string())
+                out.error_code = result.error["code"].get<std::string>();
+            else if (result.status == Result::Status::NotImplemented)
+                out.error_code = "NOT_IMPLEMENTED";
+        }
+        if (result.data.is_object() && result.data.contains("connection_id")) {
+            const auto& id = result.data["connection_id"];
+            try {
+                if (id.is_number_integer()) out.connection = id.get<int>();
+                else if (id.is_string() && !id.get<std::string>().empty()) out.connection = std::stoi(id.get<std::string>());
+            } catch (const std::exception&) {}
+        }
+    }
+
+    void note_command(audit::AuditRecord& out) {
+        for (const auto& command : CommandRegistry::instance().all_commands()) {
+            if (command->was_invoked()) { out.command = command->name(); return; }
+        }
+    }
+
+    /// Fallback for `--connection N` when the result carried no connection id.
+    void note_connection_from_argv(audit::AuditRecord& out, const std::vector<std::string>& argv) {
+        if (out.connection) return;
+        for (size_t i = 1; i + 1 < argv.size(); ++i) {
+            if (argv[i] == "--connection") {
+                try { out.connection = std::stoi(argv[i + 1]); } catch (const std::exception&) {}
+                return;
+            }
+        }
+    }
+
     /// True when FAIRYFLY_READ_ONLY is set to 1/true/yes/on.
     bool env_read_only() {
         std::string value;
@@ -136,10 +179,10 @@ namespace {
     /// The handler is injected lazily so parse-only invocations (--help, usage errors)
     /// never initialise COM. All CLI11/registry state is rebuilt on every call.
     /// batch_mode: one compact JSON object per call, never prints help, rejects nested batch.
-    int run_one(const std::vector<std::string>& argv, const HandlerProvider& get_handler,
-                GlobalOptions& global_opts, bool batch_mode) {
+    int run_one_impl(const std::vector<std::string>& argv, const HandlerProvider& get_handler,
+                     GlobalOptions& global_opts, bool batch_mode, audit::AuditRecord& audit_out) {
     CLI::App app{"fairyfly - LLM-powered SAP GUI automation CLI"};
-    app.set_version_flag("--version", "0.1.0");
+    app.set_version_flag("--version", fairyfly::FAIRYFLY_VERSION);
 
     // Disable Windows-style options (/opt) to allow SAP element IDs starting with /
     // SAP element paths like /app/con[0]/ses[0]/wnd[0]/usr/txtField would otherwise
@@ -155,6 +198,10 @@ namespace {
     app.add_flag("--verbose-errors", global_opts.verbose_errors, "Include detailed error suggestions (default: compact errors)");
     app.add_flag("--read-only", global_opts.read_only,
                  "Refuse state-changing actions (save, delete, release, ...); also FAIRYFLY_READ_ONLY=1");
+    app.add_flag("--no-audit", global_opts.no_audit,
+                 "Do not write the audit trail for this run; also FAIRYFLY_AUDIT=0");
+    app.add_flag("--audit-required", global_opts.audit_required,
+                 "Fail with AUDIT_UNAVAILABLE when the audit trail cannot be written; also FAIRYFLY_AUDIT=required");
 
     // Register all commands explicitly
     register_all_commands();
@@ -167,7 +214,12 @@ namespace {
     try {
         app.parse(static_cast<int>(arg_ptrs.size()), arg_ptrs.data());
     } catch (const CLI::ParseError& e) {
-        if (!batch_mode) return app.exit(e);
+        note_command(audit_out);
+        if (!batch_mode) {
+            const int exit_code = app.exit(e);
+            if (exit_code != 0) audit_out.error_code = "PARSE_ERROR";
+            return exit_code;
+        }
         std::ostringstream out, err;
         const int code = app.exit(e, out, err);
         Result parse_result;
@@ -180,12 +232,16 @@ namespace {
             parse_result.status = Result::Status::Error;
             parse_result.error["code"] = "PARSE_ERROR";
             parse_result.error["message"] = message;
+            audit_out.error_code = "PARSE_ERROR";
         }
         print_compact_json(parse_result.to_json());
         return code == 0 ? 0 : 1;
     }
 
     if (env_read_only()) global_opts.read_only = true;
+    audit_out.read_only = global_opts.read_only;
+    note_command(audit_out);
+    note_connection_from_argv(audit_out, argv);
 
     // Setup logging
     setup_logging(global_opts.log_level);
@@ -228,6 +284,7 @@ namespace {
                 command_result.status = Result::Status::Error;
                 command_result.error["code"] = "BATCH_NESTED";
                 command_result.error["message"] = "batch cannot be nested inside a batch";
+                note_result(audit_out, command_result);
                 print_result();
                 return 1;
             }
@@ -238,6 +295,7 @@ namespace {
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
         command_result = CommandRegistry::instance().execute_active_command(handler);
+        note_result(audit_out, command_result);
 
         // Check if no command was invoked
         if (command_result.status == Result::Status::Error &&
@@ -247,6 +305,7 @@ namespace {
                 print_result();
                 return 1;
             }
+            audit_out.error_code.clear();
             std::cout << app.help() << std::endl;
             return 0;
         }
@@ -262,6 +321,7 @@ namespace {
         command_result.status = Result::Status::Error;
         command_result.error["code"] = "USER_ERROR";
         command_result.error["message"] = e.what();
+        note_result(audit_out, command_result);
         print_result();
         return 1;
     } catch (const SystemError& e) {
@@ -269,6 +329,7 @@ namespace {
         command_result.status = Result::Status::Error;
         command_result.error["code"] = "SYSTEM_ERROR";
         command_result.error["message"] = e.what();
+        note_result(audit_out, command_result);
         print_result();
         return 1;
 #ifdef _WIN32
@@ -279,6 +340,7 @@ namespace {
         message << "COM operation failed (HRESULT 0x" << std::hex << std::uppercase
                 << static_cast<unsigned long>(e.Error()) << ')';
         command_result.error["message"] = message.str();
+        note_result(audit_out, command_result);
         print_result();
         return 1;
 #endif
@@ -287,17 +349,50 @@ namespace {
         command_result.status = Result::Status::Error;
         command_result.error["code"] = "INTERNAL_ERROR";
         command_result.error["message"] = e.what();
+        note_result(audit_out, command_result);
         print_result();
         return 1;
     } catch (...) {
         command_result.status = Result::Status::Error;
         command_result.error["code"] = "INTERNAL_ERROR";
         command_result.error["message"] = "Unknown failure while executing command";
+        note_result(audit_out, command_result);
         print_result();
         return 1;
     }
 
     return command_result.status == Result::Status::Success ? 0 : 1;
+    }
+
+    /// Audited entry point: runs the command, then appends one audit record (never throws,
+    /// never changes the exit code unless the opt-in --audit-required mode cannot write).
+    int run_one(const std::vector<std::string>& argv, const HandlerProvider& get_handler,
+                GlobalOptions& global_opts, bool batch_mode) {
+        const auto started = std::chrono::steady_clock::now();
+        audit::AuditRecord record;
+        record.ts = std::chrono::system_clock::now();
+        if (argv.size() > 1) record.argv.assign(argv.begin() + 1, argv.end());
+        record.batch_line = global_opts.batch_line;
+
+        int exit_code = run_one_impl(argv, get_handler, global_opts, batch_mode, record);
+
+        if (g_audit.sink && g_audit.sink->enabled()) {
+            record.status = exit_code == 0 ? "success" : "error";
+            record.exit_code = exit_code;
+            record.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            if (g_audit.peek_handler) {
+                if (const CommandHandler* handler = g_audit.peek_handler()) {
+                    auto facts = handler->audit_facts();
+                    if (facts.any()) record.sap = std::move(facts);
+                }
+            }
+            if (!g_audit.sink->append(record) && g_audit.sink->mode() == audit::Mode::Required && exit_code == 0) {
+                spdlog::error("AUDIT_UNAVAILABLE: command ran but its audit record could not be written");
+                exit_code = 1;
+            }
+        }
+        return exit_code;
     }
 
     /// Batch loop: one line -> one command -> one compact JSON line, all on the shared handler.
@@ -341,6 +436,7 @@ namespace {
                 line_opts.read_only = batch_opts.read_only;
                 line_opts.verbose_errors = batch_opts.verbose_errors;
                 line_opts.log_level = batch_opts.log_level;
+                line_opts.batch_line = line_number;
                 std::vector<std::string> argv{"fairyfly"};
                 argv.insert(argv.end(), parsed.argv.begin(), parsed.argv.end());
                 exit_code = run_one(argv, get_handler, line_opts, true);
@@ -360,6 +456,38 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
         if (!handler) handler = std::make_unique<CommandHandler>();
         return *handler;
     };
+
+    // Audit trail: flags are pre-scanned so the sink exists before parsing (parse errors are audited too).
+    bool cli_no_audit = false, cli_required = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] ? argv[i] : "";
+        if (arg == "--no-audit") cli_no_audit = true;
+        else if (arg == "--audit-required") cli_required = true;
+    }
+    auto env_lookup = [](const char* name) -> std::string {
+        char* buffer = nullptr;
+        size_t size = 0;
+        std::string value;
+        if (_dupenv_s(&buffer, &size, name) == 0 && buffer != nullptr) { value = buffer; free(buffer); }
+        return value;
+    };
+    audit::AuditSink sink(audit::resolve_config(env_lookup, cli_no_audit, cli_required,
+                                                std::chrono::system_clock::now()));
+    struct ContextGuard {
+        ~ContextGuard() { g_audit = AuditContext{}; }
+    } context_guard;
+    g_audit.sink = &sink;
+    g_audit.peek_handler = [&handler]() -> const CommandHandler* { return handler.get(); };
+
+    if (const auto refusal = audit::preflight_error(sink.mode(), sink.mode() != audit::Mode::Required || sink.probe())) {
+        Result failure;
+        failure.status = Result::Status::Error;
+        failure.error["code"] = *refusal;
+        failure.error["message"] = "Audit trail is required but cannot be written: " + sink.file().string();
+        print_compact_json(failure.to_json());
+        return 1;
+    }
+
     GlobalOptions global_opts;
     return run_one(std::vector<std::string>(argv, argv + argc), get_handler, global_opts, false);
 }
