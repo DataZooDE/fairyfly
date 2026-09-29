@@ -2,6 +2,8 @@
 
 `fairyfly mcp` is a Model Context Protocol (MCP) server that lets an AI client (Claude Code, Claude Desktop, MCP Inspector, any stdio MCP client) drive a live SAP GUI session through 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path. Breaking change in 0.2.0: the old `sap_*` tool names and the `serve` command are gone (see [MIGRATION_0.2.md](MIGRATION_0.2.md)). It is a thin layer over the normal CLI: every tool call is mapped to a fairyfly command and run through the same command registry, read-only guard, redaction and audit trail. For the module layout see [MCP_DESIGN.md](MCP_DESIGN.md).
 
+Remote use (HTTP behind IIS, bearer tokens, tray, Linux clients, threat model): [MCP_REMOTE.md](MCP_REMOTE.md).
+
 ## Requirements
 
 - Windows with SAP GUI for Windows running and client and server scripting enabled (`fairyfly doctor` checks this).
@@ -151,7 +153,7 @@ All tools take an optional `connection` (saved connection id) except the ones th
 | `--max-image-bytes N` | 2097152 | Larger screenshots are retried once at half scale, then IMAGE_TOO_LARGE |
 | `--max-calls-per-minute N` | 120 | Rate limit (RATE_LIMITED) |
 | `--call-timeout-ms N` | 120000 | Soft per-call timeout |
-| `--transport stdio` | stdio | Only stdio exists; `http` returns NOT_IMPLEMENTED |
+| `--transport stdio\|http`, `--http` | stdio | `http` serves plain HTTP on `POST /mcp` (see [MCP_REMOTE.md](MCP_REMOTE.md)); adds `--mcp-host`, `--mcp-port`, `--allowed-hosts`, `--cors-origin`, `--sse/--no-sse`, `--insecure-no-auth`, `-c`, `--tray` |
 | `--tools FAMILIES` | all | Expose only the tools of these families (comma or space separated nouns, e.g. `session,screen,element`; `system` is `gui_doctor`, `batch` is `gui_batch`). The set is fixed per process; other tools disappear from `tools/list` and `tools/call` (TOOL_NOT_FOUND). An unknown family exits with code 99 and `UNKNOWN_FAMILY` on stderr |
 
 | Variable | Effect |
@@ -187,7 +189,7 @@ fairyfly mcp token list | revoke NAME | rotate NAME
 - `--system` limits calls to SAP systems `SID/CLIENT` (globs; `A4H` alone means any client). When the target system is not known yet the call is refused with `SYSTEM_UNKNOWN`; `session`/`connection`/`system`/`credentials` tools are exempt because they run before a session is attached (residual risk: grant the `session` scope only to trusted tokens).
 - `--tcode` limits `gui_transaction_start` (case-insensitive globs, `/n` and `/o` prefixes ignored, refusal `TCODE_DENIED`) and, while set, blocks `gui_element_fill` into the command field (`.../okcd`). Residual risk: `gui_key_send` and menu selection can still reach other transactions.
 - Authentication errors: 401 `AUTH_REQUIRED` (with `WWW-Authenticate: Bearer realm="fairyfly"`; also the answer to every request while no token exists), 401 `TOKEN_INVALID` (malformed, unknown or wrong secret, deliberately indistinguishable), 401 `TOKEN_EXPIRED`, 401 `TOKEN_REVOKED`, 403 `IP_NOT_ALLOWED`. Authorization refusals are tool errors: `SCOPE_DENIED`, `READ_ONLY`, `SYSTEM_DENIED`, `SYSTEM_UNKNOWN`, `TCODE_DENIED`, `RATE_LIMITED` (per token, `--rate`; 0 = server default).
-- Behind a reverse proxy the proxy secret (Credential Manager entry `fairyfly-mcp-proxy`) must accompany `X-Fairyfly-Proxy-Secret`; only then are `X-Forwarded-For`/`-Proto` honoured (the last forwarded address is used). Otherwise the socket peer address is used and forwarded headers are ignored. Anyone who can read the proxy secret can impersonate the proxy.
+- Behind a reverse proxy the proxy secret (Credential Manager entry `fairyfly:fairyfly-mcp-proxy`, created by `mcp iis setup`) must accompany `X-Fairyfly-Proxy-Secret`; only then are `X-Forwarded-For`/`-Proto` honoured (the last forwarded address is used). Otherwise the socket peer address is used and forwarded headers are ignored. Anyone who can read the proxy secret can impersonate the proxy.
 - Revocation is instant for the process that revokes; a running server notices a revocation made by another process within 5 seconds.
 - Every audit record of an MCP call carries `principal`, `transport` and (for HTTP) `remote_addr` and `era`; token secrets never appear in the audit trail, logs or listings.
 
@@ -225,8 +227,8 @@ The file is append-only by convention, not tamper-proof.
 ## Known limits
 
 - One SAP session is used per call; calls are serialized, one at a time (queue of 16).
-- stdio transport only; there is no HTTP transport.
-- Legacy handshake only (protocol versions 2024-11-05 to 2025-11-25). `server/discover` answers -32601; the `2026-07-28` dual-era protocol is not implemented.
+- Two transports: stdio (this page) and plain HTTP `POST /mcp` (`mcp --http`, tokens, IIS, tray: see [MCP_REMOTE.md](MCP_REMOTE.md)). The stdio server speaks the legacy handshake only (2024-11-05 to 2025-11-25) and answers `server/discover` with -32601; the HTTP server serves 2026-07-28 (stateless), 2025-11-25 and 2025-06-18.
+- HTTP `tools/list` is not filtered by the token's scopes: every tool visible in the server mode is listed, calls outside the token's scope are refused with `SCOPE_DENIED`.
 - Results are text or a PNG image; there are no MCP resources or prompts.
 - Verify against the source when in doubt: `src/mcp/`, `src/commands/mcp_command.cpp`, and `fairyfly mcp --help`.
 

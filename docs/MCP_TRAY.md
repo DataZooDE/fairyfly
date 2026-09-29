@@ -107,9 +107,10 @@ Keys (every active line of the generated template equals the default):
 No secrets belong in this file. Unknown keys and keys named password/secret/token* produce a warning; a
 secret-like key with a value, or a value that looks like a token or `Bearer ...`, is refused with
 `CONFIG_CONTAINS_SECRET` (the value is never echoed). An invalid file stops `mcp` with exit code 2.
-Only the fields ServeOptions already has are applied by `apply_config` (mode, limits, tools, format,
-default connection, transport, port); the HTTP-only keys (`server.host`, `server.sse`,
-`server.allowed_hosts`, `server.cors_origins`) are read from the same `McpConfig` layer by the HTTP layer.
+Only these keys are applied to the server by `apply_config`: mode, limits, tools, format, default
+connection, transport, port. The HTTP-only keys (`server.host`, `server.sse`, `server.allowed_hosts`,
+`server.cors_origins`) are validated and shown by `mcp config show` but are not applied yet; pass the flags
+`--mcp-host`, `--no-sse`, `--allowed-hosts`, `--cors-origin` instead (see MCP_REMOTE.md).
 
 ## Client configs
 

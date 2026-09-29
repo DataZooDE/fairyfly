@@ -96,3 +96,17 @@ powershell -NoProfile -File tests\integration\mcp_smoke.ps1 -SkipWriteMode -Audi
 ~~~
 
 Parameters: `-Exe`, `-AuditFile` (default a temp file; the write and cap servers use `<name>-write.jsonl` and `<name>-cap.jsonl`), `-DryRun`, `-SkipWriteMode`. Output: `PASS|FAIL|SKIP <name> [<ms>ms]`, then a summary. Exit code: 0 all passed, 1 at least one FAIL, 2 no SAP session. Expected runtime: about a minute on a responsive system. See [docs/MCP.md](../../docs/MCP.md) for the server itself.
+
+## HTTP MCP smoke test (mcp_http_smoke.ps1)
+
+`tests\integration\mcp_http_smoke.ps1` starts `fairyfly mcp --http` on a free loopback port (a read-only server, then an `--allow-write` server), creates temporary bearer tokens with `mcp token create` and checks the HTTP surface over `Invoke-WebRequest`: 401/405/415/404, both protocol eras, `tools/list` order, a real `gui_screen_read`, `SCOPE_DENIED`, `TCODE_DENIED` (SM50 allowed, SE16 refused), `RATE_LIMITED`, revocation within 6 s, SSE framing, the audit fields (`principal`, `transport: http`, `remote_addr`, no token string) and a clean Ctrl+C shutdown. Deployment guide: [docs/MCP_REMOTE.md](../../docs/MCP_REMOTE.md).
+
+Prerequisites: as for `mcp_smoke.ps1` (logged-in SAP Easy Access session, Windows PowerShell 5.1, built exe) plus the Windows Credential Manager of the current user, where the tokens live. It presses and fills nothing; it starts SM50 (display) with the T-code-restricted token and returns to `/n`. Tokens are named `ffsmoke-<random>-<role>`, are never printed, and are revoked and deleted (`cmdkey /delete:fairyfly-mcp:<name>`) in a `finally` block. A temporary yaml config and audit file keep the user's real ones out of the run. The expired-token check is reported as SKIP (a past `--expires` is rejected at creation; that rejection is checked instead).
+
+~~~powershell
+powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1 -DryRun
+powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1
+powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1 -SkipWriteMode -Port 18383 -AllowedTcode SM50 -DeniedTcode SE16
+~~~
+
+Parameters: `-Exe`, `-Port` (0 = free port), `-AuditFile` (write server uses `<name>-write.jsonl`), `-AllowedTcode`, `-DeniedTcode`, `-DryRun`, `-SkipWriteMode`. Output and exit codes as for `mcp_smoke.ps1` (0 passed, 1 a FAIL, 2 no SAP session).
