@@ -22,6 +22,8 @@
 #include "include/commands/command_registry.h"
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
+#include "include/commands/serve_command.h"
+#include "include/mcp/run_serve.h"
 #include "include/exceptions.h"
 #include "include/version.h"
 #include "include/audit_log.h"
@@ -119,6 +121,8 @@ namespace {
         std::function<const CommandHandler*()> peek_handler;
     };
     AuditContext g_audit;
+    /// Set by the `serve` path: the per-invocation audit record of run_one is skipped for it.
+    bool g_skip_invocation_audit = false;
 
     void note_result(audit::AuditRecord& out, const Result& result) {
         if (result.status != Result::Status::Success) {
@@ -292,10 +296,28 @@ namespace {
             return run_batch(batch_command->file(), batch_command->stop_on_error(), get_handler, global_opts);
         }
 
-        // PHASE 1: hook. `serve` must be special-cased here exactly like `batch` above: dynamic_cast
-        // to ServeCommand, copy options() BEFORE anything rebuilds the registry (register_all_commands
-        // destroys the command objects), then call mcp::run_serve(options, get_handler, global_opts,
-        // g_audit.sink, <peek handler>) and return its exit code. Not implemented in Phase 0.
+        // `serve` (MCP over stdio) is special-cased like `batch`: it owns stdout for the protocol.
+        for (const auto& command : CommandRegistry::instance().all_commands()) {
+            auto* serve_command = dynamic_cast<ServeCommand*>(command.get());
+            if (!serve_command || !serve_command->was_invoked()) continue;
+            if (batch_mode) {
+                command_result.status = Result::Status::Error;
+                command_result.error["code"] = "SERVE_UNAVAILABLE";
+                command_result.error["message"] = "serve cannot run inside a batch";
+                note_result(audit_out, command_result);
+                print_result();
+                return 1;
+            }
+            // Copy the options first: nothing may rebuild the registry (and destroy this command) later.
+            const mcp::ServeOptions serve_options = serve_command->options();
+            // TODO(phase 3): write one serve start/stop audit record pair here (mcp_audit hook);
+            // the per-invocation record of run_one is skipped for serve.
+            g_skip_invocation_audit = true;
+            std::function<CommandHandler*()> peek = [] {
+                return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
+            };
+            return mcp::run_serve(serve_options, get_handler, global_opts, g_audit.sink, peek);
+        }
 
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
@@ -382,7 +404,7 @@ namespace {
 
         int exit_code = run_one_impl(argv, get_handler, global_opts, batch_mode, record);
 
-        if (g_audit.sink && g_audit.sink->enabled()) {
+        if (g_audit.sink && g_audit.sink->enabled() && !g_skip_invocation_audit) {
             record.status = exit_code == 0 ? "success" : "error";
             record.exit_code = exit_code;
             record.duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

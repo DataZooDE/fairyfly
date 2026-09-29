@@ -31,11 +31,11 @@ CLI::App* ServeCommand::setup_cli(CLI::App& app) {
 
 Result ServeCommand::execute(cli::CommandHandler& handler) {
     (void)handler;
-    // PHASE 1: cli_entry.cpp calls mcp::run_serve() for this command; reaching here means the
-    // registry was executed directly (e.g. inside `batch`).
+    // cli_entry.cpp calls mcp::run_serve() for this command; reaching here means the registry
+    // was executed directly, which is not a supported entry point.
     Result result;
     result.status = Result::Status::Error;
-    result.error["code"] = "NOT_IMPLEMENTED";
+    result.error["code"] = "SERVE_UNAVAILABLE";
     result.error["message"] = "MCP server is not available through this entry point";
     return result;
 }

@@ -1,11 +1,23 @@
 #include "include/mcp/transport.h"
 
+#include <cstdio>
 #include <iostream>
+#include <string>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 
 namespace fairyfly::mcp {
 
-// PHASE 1: real binary-mode stdio (owner: phase 1 worker). Stub uses std::cin/std::cout.
-StdioTransport::StdioTransport() {}
+StdioTransport::StdioTransport() {
+#ifdef _WIN32
+    // No CRLF translation and no Ctrl-Z EOF handling: the protocol is byte-exact.
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+}
 
 bool StdioTransport::read_line(std::string& line) {
     if (!std::getline(std::cin, line)) return false;
@@ -14,10 +26,14 @@ bool StdioTransport::read_line(std::string& line) {
 }
 
 void StdioTransport::write_line(std::string_view text) {
+    // One buffer, one fwrite: a message is never split or interleaved.
+    std::string buffer;
+    buffer.reserve(text.size() + 1);
+    buffer.append(text.data(), text.size());
+    buffer.push_back('\n');
     std::lock_guard<std::mutex> lock(write_mutex_);
-    std::cout.write(text.data(), static_cast<std::streamsize>(text.size()));
-    std::cout.put('\n');
-    std::cout.flush();
+    std::fwrite(buffer.data(), 1, buffer.size(), stdout);
+    std::fflush(stdout);
 }
 
 bool StringTransport::read_line(std::string& line) {
