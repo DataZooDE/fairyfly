@@ -4,7 +4,7 @@
 #include "include/auth/token_cli.h"
 #include "include/auth/token_store.h"
 
-// `fairyfly mcp token create|list|revoke|rotate`: bearer tokens of the remote MCP endpoint, stored in
+// `fairyfly mcp token create|list|revoke|rotate|delete`: bearer tokens of the remote MCP endpoint, stored in
 // the Windows Credential Manager ("fairyfly-mcp:<name>"). Allowed under --read-only (like credentials set):
 // managing access tokens is not a change of SAP state; the invocation is audited as usual.
 // A newly created token is printed exactly once and never appears in the audit trail (argv holds no secret).
@@ -47,6 +47,12 @@ public:
         revoke_->add_option("name", args_.name, "Token name")->required();
         add_output_option(revoke_, output_);
 
+        delete_ = token_->add_subcommand("delete", "Remove a token record for good (also a revoked one); needs --yes");
+        delete_->fallthrough();
+        delete_->add_option("name", args_.name, "Token name")->required();
+        delete_->add_flag("--yes", args_.yes, "Confirm the deletion");
+        add_output_option(delete_, output_);
+
         rotate_ = token_->add_subcommand("rotate", "Issue a new secret for a token; the old one stops working at once");
         rotate_->fallthrough();
         rotate_->add_option("name", args_.name, "Token name")->required();
@@ -60,6 +66,7 @@ public:
         else if (*list_) args_.action = "list";
         else if (*revoke_) args_.action = "revoke";
         else if (*rotate_) args_.action = "rotate";
+        else if (*delete_) args_.action = "delete";
         try {
             auth::TokenStore store(auth::make_credential_manager_backend(auth::kTokenTargetPrefix));
             return auth::run_token_action(args_, store);
@@ -81,6 +88,7 @@ private:
     CLI::App* list_ = nullptr;
     CLI::App* revoke_ = nullptr;
     CLI::App* rotate_ = nullptr;
+    CLI::App* delete_ = nullptr;
     auth::TokenCliArgs args_;
     std::string output_;
 };

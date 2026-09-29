@@ -38,7 +38,7 @@ public:
     using ReadOnlyOverride = std::function<void(bool read_only)>;
     void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
     /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
-    std::vector<ToolDef> list_tools_for(const Principal& principal) const;
+    std::vector<ToolDef> list_tools_for(const Principal& principal) const override;
     /// Connection remembered from the last successful gui_session_attach / gui_session_launch.
     std::optional<int> sticky_connection() const { return sticky_connection_; }
 

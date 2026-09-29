@@ -331,6 +331,13 @@ bool TokenStore::revoke(const std::string& name) {
     return true;
 }
 
+bool TokenStore::remove(const std::string& name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const bool removed = backend_->remove(name);
+    snapshot_.valid = false;
+    return removed;
+}
+
 CreatedToken TokenStore::rotate(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto value = backend_->get(name);

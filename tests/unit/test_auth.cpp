@@ -245,6 +245,46 @@ TEST_CASE("auth: expiry syntax", "[auth][token]") {
     CHECK_FALSE(parse_expiry("", now));
 }
 
+TEST_CASE("auth: token delete removes revoked and active tokens for good", "[auth][token]") {
+    Env env;
+    const auto keep = env.create("keep");
+    const auto old = env.create("old");
+    auto store = env.store();
+    REQUIRE(store.revoke("old"));
+    CHECK(store.find_by_id(old.meta.id)->revoked);
+
+    TokenCliArgs args;
+    args.action = "delete";
+    args.name = "old";
+    // needs --yes
+    auto r = run_token_action(args, store);
+    CHECK(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "CONFIRMATION_REQUIRED");
+    CHECK(store.list().size() == 2);
+
+    args.yes = true;
+    r = run_token_action(args, store);  // a REVOKED token can be deleted
+    CHECK(r.status == Result::Status::Success);
+    CHECK(r.data["deleted"] == true);
+    const auto left = store.list();
+    REQUIRE(left.size() == 1);
+    CHECK(left[0].name == "keep");
+    CHECK_FALSE(store.find_by_id(old.meta.id).has_value());
+    CHECK(store.find_by_id(keep.meta.id).has_value());
+    // the name is free again
+    CHECK_NOTHROW(env.create("old"));
+
+    // unknown name
+    args.name = "missing";
+    r = run_token_action(args, store);
+    CHECK(r.error["code"] == "TOKEN_NOT_FOUND");
+
+    // an active token can be deleted too
+    args.name = "keep";
+    CHECK(run_token_action(args, store).status == Result::Status::Success);
+    CHECK_FALSE(store.find_by_id(keep.meta.id).has_value());
+}
+
 TEST_CASE("auth: revoke is visible to a second store after the cache TTL or an explicit invalidate", "[auth][token]") {
     Env env;
     const auto created = env.create("ci-bot");

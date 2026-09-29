@@ -455,6 +455,78 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
     }
 }
 
+TEST_CASE("HTTP tools/list follows the caller's principal", "[mcp][http][era]") {
+    // A provider that filters by scope: tools whose name is gui_<scope>_... belong to that scope.
+    class ScopedProvider : public FakeProvider {
+    public:
+        std::vector<ToolDef> list_tools_for(const Principal& principal) const override {
+            std::vector<ToolDef> out;
+            for (const auto& d : list_tools())
+                if (principal.all_scopes || principal.scopes.count(d.name.substr(4, d.name.find('_', 4) - 4)) > 0) out.push_back(d);
+            return out;
+        }
+    };
+    ScopedProvider scoped;
+    TokenAuth auth;  // "Bearer good" -> principal alice with scopes {"screen"}
+    CallExecutor exec(16, 5000);
+    HttpEndpointOptions opts;
+    opts.server.name = "fairyfly";
+    opts.server.version = "1";
+    opts.poll_ms = 10;
+    HttpEndpoint endpoint(opts, exec, scoped, &auth);
+    std::thread loop([&] { exec.run(); });
+
+    HttpRequest req;
+    req.method = "POST";
+    req.path = "/mcp";
+    req.headers["Host"] = "127.0.0.1:8383";
+    req.headers["Content-Type"] = "application/json";
+    req.headers["Authorization"] = "Bearer good";
+    req.peer_addr = "127.0.0.1";
+    req.body = json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/list"}}.dump();
+    const auto res = endpoint.handle(req);
+    exec.request_stop();
+    loop.join();
+
+    REQUIRE(res.status == 200);
+    std::vector<std::string> names;
+    const json parsed = json::parse(res.body);
+    for (const auto& t : parsed["result"]["tools"]) names.push_back(t["name"]);
+    // alice has the scope "screen": only gui_screen_read is visible, the rest of the fake catalog is hidden
+    CHECK(names == std::vector<std::string>{"gui_screen_read"});
+}
+
+TEST_CASE("HTTP tools/list without a principal-aware provider stays complete and sorted", "[mcp][http][era]") {
+    Fixture f;  // FakeProvider keeps the default list_tools_for() (= list_tools())
+    const auto res = f.endpoint.handle(f.post(Fixture::rpc("tools/list")));
+    REQUIRE(res.status == 200);
+    std::vector<std::string> names;
+    const json parsed = body_of(res);
+    for (const auto& t : parsed["result"]["tools"]) names.push_back(t["name"]);
+    CHECK(names.size() == 5);
+    CHECK(std::is_sorted(names.begin(), names.end()));
+}
+
+TEST_CASE("initialize negotiates against all served versions; the era follows", "[mcp][http][era]") {
+    Fixture f;
+    // stateless version: negotiated as such and answered in the stateless era
+    auto res = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2026-07-28"},
+                                                                           {"clientInfo", json{{"name", "c"}}}})));
+    REQUIRE(res.status == 200);
+    json result = body_of(res)["result"];
+    CHECK(result["protocolVersion"] == "2026-07-28");
+    CHECK(result["resultType"] == "complete");
+    CHECK(result["serverInfo"]["name"] == "fairyfly");
+    CHECK(res.header("Mcp-Session-Id").empty());
+    // the two legacy versions keep working and are answered in the legacy shape
+    for (const char* version : {"2025-11-25", "2025-06-18"}) {
+        res = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", version}})));
+        result = body_of(res)["result"];
+        CHECK(result["protocolVersion"] == version);
+        CHECK_FALSE(result.contains("resultType"));
+    }
+}
+
 TEST_CASE("Legacy era: initialize, no session id, no prior initialize needed", "[mcp][http][era]") {
     Fixture f;
     SECTION("initialize negotiates and mints no session") {
@@ -470,8 +542,10 @@ TEST_CASE("Legacy era: initialize, no session id, no prior initialize needed", "
             CHECK(result["capabilities"]["tools"]["listChanged"] == false);
             CHECK_FALSE(result.contains("resultType"));
         }
-        auto newer = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2026-07-28"}})));
-        CHECK(body_of(newer)["result"]["protocolVersion"] == "2025-11-25");
+        // an unknown version falls back to the newest legacy version, still a legacy answer
+        auto unknown = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2031-01-01"}})));
+        CHECK(body_of(unknown)["result"]["protocolVersion"] == "2025-11-25");
+        CHECK_FALSE(body_of(unknown)["result"].contains("resultType"));
         auto bad = f.endpoint.handle(f.post(Fixture::rpc("initialize", json::object())));
         CHECK(body_of(bad)["error"]["code"] == kInvalidParams);
     }
@@ -770,6 +844,117 @@ TEST_CASE("IServerControl: read-only cap, restart flag, posture banner", "[mcp][
     CHECK(server.restart_requested());
     CHECK_FALSE(server.status().running);
 }
+
+#ifdef _WIN32
+namespace {
+/// Opens a raw TCP connection to 127.0.0.1:port and sends `data` (no further bytes, no close).
+SOCKET raw_connect_send(int port, const std::string& data) {
+    SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) return s;
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<u_short>(port));
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        ::closesocket(s);
+        return INVALID_SOCKET;
+    }
+    ::send(s, data.data(), static_cast<int>(data.size()), 0);
+    return s;
+}
+} // namespace
+
+TEST_CASE("Loopback: unauthenticated slow bodies cannot exhaust the worker pool", "[mcp][http][loopback][loris]") {
+    FakeProvider provider;
+    HttpServerConfig config;
+    config.host = "127.0.0.1";
+    config.port = 0;
+    config.worker_threads = 4;  // the adapter keeps at least half of them out of reach of body-draining clients
+    config.endpoint.server.name = "fairyfly";
+    config.endpoint.server.version = "1";
+    McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+    std::string error;
+    REQUIRE(server.bind(&error));
+    const int port = server.port();
+
+    struct Outcome {
+        int loris_open = 0;
+        int legit_status = 0;
+        long long legit_ms = -1;
+        int bad_auth_ok = 0, bad_auth_total = 0;
+        int drained_401 = 0;
+        int good_after = 0;
+    } out;
+
+    std::atomic<bool> finished{false};
+    std::thread guard([&] {
+        for (int i = 0; i < 300 && !finished; ++i) std::this_thread::sleep_for(100ms);
+        if (!finished) server.request_stop();
+    });
+    std::thread client([&] {
+        for (int i = 0; i < 100 && !server.status().running; ++i) std::this_thread::sleep_for(20ms);
+
+        // slow-loris: more sockets than workers, each announces a body but never sends it, none is authenticated
+        const std::string headers = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                                    "Content-Length: 1000\r\n\r\n";
+        std::vector<SOCKET> loris;
+        for (int i = 0; i < 12; ++i) {
+            SOCKET s = raw_connect_send(port, headers);
+            if (s != INVALID_SOCKET) loris.push_back(s);
+        }
+        out.loris_open = static_cast<int>(loris.size());
+        std::this_thread::sleep_for(300ms);
+
+        // a legitimate authenticated request is still answered promptly
+        {
+            httplib::Client cli("127.0.0.1", port);
+            cli.set_connection_timeout(3, 0);
+            cli.set_read_timeout(8, 0);
+            const auto start = std::chrono::steady_clock::now();
+            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer good"}},
+                                  R"({"jsonrpc":"2.0","id":1,"method":"ping"})", "application/json"))
+                out.legit_status = r->status;
+            out.legit_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        }
+        // loris with a valid Content-Length but a wrong token is refused as well
+        for (SOCKET s : loris) ::closesocket(s);
+
+        // rejected requests that DO send their body must still receive the 401 (no connection reset)
+        const std::string big(2048, 'x');
+        for (int i = 0; i < 20; ++i) {
+            httplib::Client cli("127.0.0.1", port);
+            cli.set_connection_timeout(3, 0);
+            cli.set_read_timeout(5, 0);
+            ++out.bad_auth_total;
+            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer wrong"}}, big, "application/json")) {
+                if (r->status == 403) ++out.bad_auth_ok;  // the test authenticator answers 403 TOKEN_INVALID
+                if (r->body.find("TOKEN_INVALID") != std::string::npos) ++out.drained_401;
+            }
+        }
+        {
+            httplib::Client cli("127.0.0.1", port);
+            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer good"}},
+                                  R"({"jsonrpc":"2.0","id":2,"method":"ping"})", "application/json"))
+                out.good_after = r->status;
+        }
+        server.request_stop();
+    });
+
+    const int exit_code = server.run();
+    finished = true;
+    client.join();
+    guard.join();
+
+    CHECK(exit_code == 0);
+    CHECK(out.loris_open == 12);
+    CHECK(out.legit_status == 200);
+    CHECK(out.legit_ms >= 0);
+    CHECK(out.legit_ms < 3000);
+    CHECK(out.bad_auth_ok == out.bad_auth_total);
+    CHECK(out.drained_401 == out.bad_auth_total);
+    CHECK(out.good_after == 200);
+}
+#endif
 
 TEST_CASE("Session core: initialize/notifications state machine is unchanged", "[mcp][http][session]") {
     FakeProvider provider;

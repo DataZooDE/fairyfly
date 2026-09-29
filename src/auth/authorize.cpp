@@ -38,6 +38,11 @@ bool system_exempt(const std::string& family, const std::string& tool) {
            tool == "gui_batch";
 }
 
+/// Tools that act on whatever transaction is currently open (not on the choice of a new one).
+bool acts_on_screen(const std::string& family) {
+    return family == "screen" || family == "element" || family == "key" || family == "popup" || family == "menu";
+}
+
 bool matches_any(const std::vector<std::string>& patterns, const std::string& text) {
     return std::any_of(patterns.begin(), patterns.end(), [&](const std::string& p) { return glob_match(p, text); });
 }
@@ -54,8 +59,9 @@ bool system_allowed(const std::vector<std::string>& patterns, const std::string&
 
 PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                               const json& args, const mcp::Policy& server_policy,
-                              const std::optional<std::string>& current_system, bool check_system, const SpecLookup& lookup,
-                              int depth) {
+                              const std::optional<std::string>& current_system,
+                              const std::optional<std::string>& current_tcode, bool check_system,
+                              const SpecLookup& lookup, int depth) {
     const std::string& tool = spec.def.name;
 
     if (!has_scope(principal, family))
@@ -80,6 +86,16 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
     }
 
     if (!principal.tcodes.empty()) {
+        // Screen-acting tools run inside the transaction that is open NOW: it must be allowlisted too.
+        // Fails closed when it is unknown (residual race: it can change during the call, see docs/MCP.md).
+        if (check_system && acts_on_screen(family)) {
+            const std::string open = current_tcode ? normalize_tcode(*current_tcode) : std::string();
+            if (open.empty())
+                return refuse("TCODE_DENIED", "the open SAP transaction is not known and the token is limited to specific "
+                                              "transactions; start an allowed one with gui_transaction_start");
+            if (!matches_any(principal.tcodes, open))
+                return refuse("TCODE_DENIED", "token '" + principal.name + "' is not allowed to act in transaction " + open);
+        }
         if (tool == "gui_transaction_start") {
             const std::string raw = args.is_object() && args.contains("code") && args["code"].is_string()
                                         ? args["code"].get<std::string>() : std::string();
@@ -113,7 +129,7 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
             if (!item_spec || name == "gui_batch") continue;  // unknown / nested: rejected by the dispatcher
             const json item_args = item.contains("arguments") ? item["arguments"] : json::object();
             auto decision = authorize_impl(principal, *item_spec, item_spec->family, item_args, server_policy, current_system,
-                                           false, lookup, depth + 1);
+                                           current_tcode, false, lookup, depth + 1);
             if (!decision.allowed) {
                 decision.message = "batch item " + std::to_string(index) + " (" + name + "): " + decision.message;
                 return decision;
@@ -169,8 +185,7 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
                                    const mcp::json& args, const mcp::Policy& server_policy,
                                    std::optional<std::string> current_system, std::optional<std::string> current_tcode,
                                    const SpecLookup& lookup) {
-    (void)current_tcode;
-    return authorize_impl(principal, spec, family, args, server_policy, current_system, true, lookup, 0);
+    return authorize_impl(principal, spec, family, args, server_policy, current_system, current_tcode, true, lookup, 0);
 }
 
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec) {

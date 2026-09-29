@@ -77,6 +77,12 @@ class ToolProvider {
 public:
     virtual ~ToolProvider() = default;
     virtual std::vector<ToolDef> list_tools() const = 0;
+    /// tools/list as seen by one caller (remote HTTP: hides tools outside the token's scopes). Additive; the
+    /// default is the unfiltered list (stdio has no tokens).
+    virtual std::vector<ToolDef> list_tools_for(const Principal& principal) const {
+        (void)principal;
+        return list_tools();
+    }
     /// True when `name` is a tool this provider can answer for, even if it is currently hidden from
     /// list_tools() (for example write tools in read-only mode). The server answers unknown names
     /// with the protocol error -32602; known-but-hidden names reach call_tool(), which returns a

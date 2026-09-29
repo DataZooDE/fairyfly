@@ -175,6 +175,72 @@ TEST_CASE("config: precedence flag > env > yaml > default with sources", "[confi
     CHECK(options.call_timeout_ms == 120000);
 }
 
+TEST_CASE("config: HTTP keys are applied with precedence flag > env > yaml > default", "[config][precedence]") {
+    // defaults agree between the CLI options and the config key table
+    mcp::ServeOptions defaults;
+    const auto eff = resolve(McpConfig{}, McpConfig{}, fake_env({}));
+    CHECK(std::get<bool>(eff.at("server.sse").value) == defaults.sse);
+    CHECK(std::get<bool>(eff.at("server.sse").value));
+    CHECK(std::get<std::string>(eff.at("server.host").value) == defaults.host);
+
+    const auto parsed = parse_yaml(
+        "server:\n"
+        "  host: 127.0.0.2\n"
+        "  sse: false\n"
+        "  allowed_hosts: [vm, vm.corp]\n"
+        "  cors_origins: [\"https://a.example\"]\n");
+    REQUIRE(parsed.ok());
+
+    // yaml alone
+    mcp::ServeOptions o;
+    apply_config(merged_layers(parsed.config, McpConfig{}, fake_env({})), o);
+    CHECK(o.host == "127.0.0.2");
+    CHECK_FALSE(o.sse);
+    CHECK(o.allowed_hosts == std::vector<std::string>{"vm", "vm.corp"});
+    CHECK(o.cors_origins == std::vector<std::string>{"https://a.example"});
+
+    // env beats yaml
+    mcp::ServeOptions e;
+    apply_config(merged_layers(parsed.config, McpConfig{},
+                               fake_env({{"FAIRYFLY_MCP_SERVER_HOST", "127.0.0.3"}, {"FAIRYFLY_MCP_SERVER_SSE", "true"},
+                                         {"FAIRYFLY_MCP_SERVER_ALLOWED_HOSTS", "envhost"}})),
+                 e);
+    CHECK(e.host == "127.0.0.3");
+    CHECK(e.sse);
+    CHECK(e.allowed_hosts == std::vector<std::string>{"envhost"});
+    CHECK(e.cors_origins == std::vector<std::string>{"https://a.example"});  // still from yaml
+
+    // flag beats env and yaml
+    McpConfig flags;
+    flags.set("server.host", std::string("10.0.0.5"));
+    flags.set("server.sse", false);
+    flags.set("server.cors_origins", std::vector<std::string>{"https://flag.example"});
+    mcp::ServeOptions f;
+    apply_config(merged_layers(parsed.config, flags, fake_env({{"FAIRYFLY_MCP_SERVER_SSE", "true"}})), f);
+    CHECK(f.host == "10.0.0.5");
+    CHECK_FALSE(f.sse);
+    CHECK(f.cors_origins == std::vector<std::string>{"https://flag.example"});
+
+    // nothing set anywhere: the ServeOptions defaults stay
+    mcp::ServeOptions untouched;
+    apply_config(McpConfig{}, untouched);
+    CHECK(untouched.sse);
+    CHECK(untouched.host == "127.0.0.1");
+}
+
+TEST_CASE("config: insecure_no_auth can never come from YAML or the environment", "[config][secret]") {
+    const auto parsed = parse_yaml(
+        "server:\n"
+        "  insecure_no_auth: true\n"
+        "insecure_no_auth: true\n");
+    CHECK(find_issue(parsed, "CONFIG_UNKNOWN_KEY") != nullptr);  // unknown keys only warn
+    mcp::ServeOptions o;
+    apply_config(merged_layers(parsed.config, McpConfig{}, fake_env({{"FAIRYFLY_MCP_SERVER_INSECURE_NO_AUTH", "true"},
+                                                                     {"FAIRYFLY_MCP_INSECURE_NO_AUTH", "1"}})), o);
+    CHECK_FALSE(o.insecure_no_auth);
+    CHECK(config::find_key("server.insecure_no_auth") == nullptr);
+}
+
 TEST_CASE("config: invalid environment values are ignored with a warning", "[config][precedence]") {
     std::vector<ConfigIssue> issues;
     McpConfig yaml;

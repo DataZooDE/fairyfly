@@ -53,11 +53,11 @@ Principal token(const std::string& name, std::set<std::string> scopes) {
 }
 
 PolicyDecision decide(const Principal& p, const std::string& tool, const json& args = json::object(), bool server_ro = false,
-                      std::optional<std::string> system = std::nullopt) {
+                      std::optional<std::string> system = std::nullopt, std::optional<std::string> tcode = std::nullopt) {
     Policy policy;
     policy.read_only = server_ro;
     const ToolSpec& spec = spec_of(tool);
-    return authorize_call(p, spec, spec.family, args, policy, system, std::nullopt);
+    return authorize_call(p, spec, spec.family, args, policy, system, tcode);
 }
 
 /// Tool -> args that pass schema validation, for the scope matrix.
@@ -218,11 +218,14 @@ TEST_CASE("authorize: T-code allowlist", "[auth][authz]") {
     d = decide(p, "gui_element_fill", {{"element", "wnd[1]/tbar[0]/OKCD"}, {"value", "x"}});
     CHECK(d.code == "TCODE_DENIED");
     // ordinary fields are fine
-    CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}).allowed);
+    CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}, false, std::nullopt, "SE16").allowed);
+    // ... but only inside an allowlisted (known) transaction
+    CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}, false, std::nullopt, "SE38").code == "TCODE_DENIED");
+    CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}).code == "TCODE_DENIED");
 
-    // documented residual risk: key send and menus are not blocked
-    CHECK(decide(p, "gui_key_send", {{"key", "enter"}}).allowed);
-    CHECK(decide(p, "gui_menu_select", {{"path", "System > Services"}}).allowed);
+    // key send and menus act on the open transaction: allowed when it is allowlisted
+    CHECK(decide(p, "gui_key_send", {{"key", "enter"}}, false, std::nullopt, "SE16").allowed);
+    CHECK(decide(p, "gui_menu_select", {{"path", "System > Services"}}, false, std::nullopt, "SM50").allowed);
 
     // without an allowlist the command field is fillable
     Principal open = token("open", {"element"});
@@ -265,12 +268,13 @@ struct Fixture {
     std::vector<McpCallRecord> records;
     std::vector<bool> read_only_events;
     std::optional<audit::SapFacts> facts;
+    std::function<std::optional<audit::SapFacts>(std::optional<int>)> facts_for;  // per-connection facts (wins over `facts`)
     std::function<Result(const Argv&)> handler = [](const Argv&) { return ok_result(); };
 
     std::unique_ptr<CommandDispatcher> make(Policy policy = Policy{}) {
         auto d = std::make_unique<CommandDispatcher>([this](const Argv& argv) { calls.push_back(argv); return handler(argv); },
                                                      policy, [this](const McpCallRecord& r) { records.push_back(r); });
-        d->set_sap_facts_provider([this](std::optional<int>) { return facts; });
+        d->set_sap_facts_provider([this](std::optional<int> c) { return facts_for ? facts_for(c) : facts; });
         d->set_read_only_override([this](bool ro) { read_only_events.push_back(ro); });
         return d;
     }
@@ -420,6 +424,7 @@ TEST_CASE("dispatcher: batch items are authorized one by one", "[auth][dispatch]
     CHECK(f.records[0].principal == "b");
 
     // allowed batch: each item audited with the principal
+    f.facts = audit::SapFacts{"A4H", "001", "U", "SE16"};
     r = d.call_tool("gui_batch",
                     {{"items", json::array({{{"tool", "gui_transaction_start"}, {"arguments", {{"code", "SE16"}}}},
                                             {{"tool", "gui_screen_read"}}})}},
@@ -441,6 +446,119 @@ TEST_CASE("dispatcher: batch items are authorized one by one", "[auth][dispatch]
     CHECK(r.is_error);
     CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
     CHECK(g.calls.empty());
+}
+
+TEST_CASE("dispatcher: system allowlist checks the connection the call targets", "[auth][dispatch]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    std::vector<std::optional<int>> asked;
+    // connection 1 = allowed system A4H/001 (the "active" session), connection 2 = PRD/100, others unknown
+    f.facts_for = [&](std::optional<int> c) -> std::optional<audit::SapFacts> {
+        asked.push_back(c);
+        if (c && *c == 1) return audit::SapFacts{"A4H", "001", "U", "SE16"};
+        if (c && *c == 2) return audit::SapFacts{"PRD", "100", "U", "SE16"};
+        return std::nullopt;
+    };
+    Principal p = token("sys", {"screen", "batch"});
+    p.sap_systems = {"A4H/001"};
+
+    CHECK_FALSE(d.call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p)).is_error);
+    auto r = d.call_tool("gui_screen_read", {{"connection", 2}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    CHECK(f.calls.size() == 1);  // the disallowed call never reached SAP
+    r = d.call_tool("gui_screen_read", {{"connection", 3}}, ctx_for(p));  // facts cannot be established: fail closed
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+    REQUIRE(asked.size() == 3);
+    CHECK(*asked[0] == 1);
+    CHECK(*asked[1] == 2);
+    CHECK(*asked[2] == 3);
+
+    // policy default connection is what the facts are resolved for when the argument is omitted
+    Policy with_default = write_mode();
+    with_default.default_connection = 2;
+    Fixture g;
+    auto dg_ptr = g.make(with_default);
+    g.facts_for = f.facts_for;
+    r = dg_ptr->call_tool("gui_screen_read", json::object(), ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+
+    // batch: every item is checked against ITS connection; stop_on_error false shows both verdicts
+    f.calls.clear();
+    r = d.call_tool("gui_batch",
+                    {{"stop_on_error", false},
+                     {"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"connection", 1}}}},
+                                            {{"tool", "gui_screen_read"}, {"arguments", {{"connection", 2}}}}})}},
+                    ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    CHECK(f.calls.size() == 1);  // only the connection-1 item ran
+}
+
+TEST_CASE("dispatcher: T-code allowlist follows the open transaction", "[auth][dispatch]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("va03", {"screen", "element", "key", "popup", "menu", "session", "batch"});
+    p.tcodes = {"VA03"};
+
+    // allowed transaction open: every screen-acting family passes
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_popup_close", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_menu_list", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_element_get", {{"element", "wnd[0]/usr/txtA"}}, ctx_for(p)).is_error);
+    const auto ran = f.calls.size();
+
+    // another transaction open: denied and nothing reaches SAP
+    f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
+    for (const char* tool : {"gui_screen_read", "gui_key_send", "gui_popup_close", "gui_menu_list"}) {
+        INFO(tool);
+        const json args = std::string(tool) == "gui_key_send" ? json{{"key", "enter"}} : json::object();
+        const auto r = d.call_tool(tool, args, ctx_for(p));
+        CHECK(r.is_error);
+        CHECK(text_of(r).find("TCODE_DENIED") != std::string::npos);
+    }
+    CHECK(f.calls.size() == ran);
+
+    // easy access screens are not allowlisted; an unknown transaction fails closed
+    for (const char* open : {"S000", "SESSION_MANAGER", ""}) {
+        f.facts = audit::SapFacts{"A4H", "001", "U", open};
+        INFO(open);
+        CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(p))).find("TCODE_DENIED") != std::string::npos);
+    }
+    f.facts = std::nullopt;
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(p))).find("TCODE_DENIED") != std::string::npos);
+
+    // session tools keep their rules; gui_transaction_start is judged by its code, not the open transaction
+    f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
+    CHECK_FALSE(d.call_tool("gui_session_list", json::object(), ctx_for(p)).is_error);
+    Principal starter = token("st", {"transaction"});
+    starter.tcodes = {"VA03"};
+    CHECK_FALSE(d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(starter)).is_error);
+
+    // no allowlist: unchanged
+    Principal open_token = token("free", {"screen"});
+    f.facts = std::nullopt;
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(open_token)).is_error);
+
+    // batch items see the transaction that is open when THEY run
+    f.calls.clear();
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    auto r = d.call_tool("gui_batch",
+                         {{"items", json::array({{{"tool", "gui_screen_read"}},
+                                                 {{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}}})}},
+                         ctx_for(p));
+    CHECK_FALSE(r.is_error);
+    CHECK(f.calls.size() == 2);
+    f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
+    f.calls.clear();
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}}})}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("TCODE_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());
 }
 
 TEST_CASE("dispatcher: per-principal rate limiting", "[auth][dispatch]") {
@@ -621,6 +739,8 @@ TEST_CASE("cli: mcp token subcommands parse and do not start the server", "[auth
     CHECK(dry({"mcp", "token", "list", "--output", "toon"}).path == "mcp token list");
     CHECK(dry({"mcp", "token", "revoke", "ci"}).path == "mcp token revoke");
     CHECK(dry({"mcp", "token", "rotate", "ci", "--output", "markdown"}).path == "mcp token rotate");
+    CHECK(dry({"mcp", "token", "delete", "ci", "--yes"}).path == "mcp token delete");
+    CHECK_FALSE(dry({"mcp", "token", "delete"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token", "create"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token"}).ok);             // a verb is required
     // the server command and its tools listing are unaffected

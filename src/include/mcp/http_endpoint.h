@@ -85,8 +85,21 @@ public:
     /// again by handle().
     std::optional<HttpResponse> precheck(const HttpRequest& request) const;
 
+    /// Header-only phase of handle(): precheck plus authentication, no body needed. The adapter runs this BEFORE
+    /// it reads the request body so unauthenticated clients cannot make workers wait for bodies.
+    struct PreAuth {
+        std::optional<HttpResponse> rejection;  ///< set: send this, nothing else
+        Principal principal;                    ///< valid when there is no rejection
+    };
+    PreAuth preauthenticate(const HttpRequest& request);
+
+    /// Body phase: `request` now carries the body; `principal` comes from preauthenticate().
+    HttpResponse handle_authenticated(const HttpRequest& request, const Principal& principal);
+
+    /// precheck + authenticate + handle_authenticated (the pure request -> response mapping).
     HttpResponse handle(const HttpRequest& request);
 
+    std::size_t max_body_bytes() const { return options_.max_body_bytes; }
     long long calls_total() const { return calls_total_.load(); }
     long long calls_denied() const { return calls_denied_.load(); }
 

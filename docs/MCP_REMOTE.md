@@ -79,11 +79,10 @@ Relevant options (see `fairyfly mcp --help`):
 | `--insecure-no-auth` | disables authentication; never use on a reachable port |
 | `-c/--config PATH`, `--tray` | YAML config, tray mode (MCP_TRAY.md) |
 
-Note on the YAML file: at present only `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format`,
-`server.transport` and `server.port` are applied to the running server. `server.host`, `server.sse`,
-`server.allowed_hosts` and `server.cors_origins` are validated and shown by `mcp config show` but are **not**
-applied yet: pass `--mcp-host`, `--no-sse`, `--allowed-hosts`, `--cors-origin` as flags (and in the autostart
-command line) if you need them.
+Note on the YAML file: `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format` and `server.transport`,
+`server.port`, `server.host`, `server.sse` (default on, like `--sse`), `server.allowed_hosts` and
+`server.cors_origins` are applied to the running server, with precedence flag > `FAIRYFLY_MCP_*` environment >
+YAML > default. `--insecure-no-auth` is flag-only on purpose: it cannot be set from YAML or the environment.
 
 ### 3. Create tokens
 
@@ -96,7 +95,7 @@ fairyfly mcp token list
 The token (`ffy_<id>_<secret>`) is printed once. See [Tokens and scopes](MCP.md#tokens-and-scopes). A token
 without `--scope` gets `session,connection,screen` and is read-only; an explicit `--scope` grants what it names
 (still capped by the server mode) unless `--read-only` is added. Prefer named tokens per client and an expiry.
-There is no `token delete`: `revoke` keeps the (revoked) Credential Manager entry `fairyfly-mcp:<name>`.
+`revoke` keeps the (revoked) Credential Manager entry `fairyfly-mcp:<name>`; `fairyfly mcp token delete NAME --yes` removes it for good.
 
 ### 4. IIS in front (TLS)
 
@@ -132,7 +131,7 @@ fairyfly serves both generations of the MCP HTTP transport on the same URL:
 | | Legacy (2025-06-18, 2025-11-25) | Stateless (2026-07-28) |
 |---|---|---|
 | Handshake | `initialize` (echoes the negotiated version), then `notifications/initialized` (answered 202) | none; `server/discover` lists `supportedVersions`, capabilities, serverInfo, instructions |
-| Version selection | `params.protocolVersion` in `initialize`; optional `MCP-Protocol-Version` header | `MCP-Protocol-Version` header or `params._meta.protocolVersion` |
+| Version selection | `params.protocolVersion` in `initialize` (negotiated against all three versions: asking for `2026-07-28` yields a stateless answer with `resultType`, an unknown version falls back to `2025-11-25`); optional `MCP-Protocol-Version` header | `MCP-Protocol-Version` header or `params._meta.protocolVersion` |
 | Client info | from `initialize` | `params._meta.clientInfo` per request |
 | Session | none: no `Mcp-Session-Id` is ever minted, each request is served on its own | none |
 | Result extras | none | `resultType: "complete"`; `tools/list` adds `ttlMs: 30000` and `cacheScope: "private"` |
@@ -220,9 +219,10 @@ the VM; (e) an operator with an over-privileged token.
 | Access from unexpected networks | IIS IP allow-list; per-token `--ip` (needs a working proxy secret) | anyone who can read the proxy secret (local admin, Credential Manager reader) can spoof `X-Forwarded-For` and defeat token IP binding |
 | Browser-based attacks (DNS rebinding, CSRF) | Host check (loopback or `--allowed-hosts`); any `Origin` refused unless in `--cors-origin`; POST + JSON only | none known beyond misconfigured `--allowed-hosts`/`--cors-origin` |
 | Client does more than intended | scopes per tool family; token read-only flag; server mode ceiling; `FAIRYFLY_READ_ONLY` hard cap; per-item checks in `gui_batch` | token scopes are coarse (a whole family); a write-mode server with a write token can change any data the SAP user may |
-| Access to unintended SAP systems | `--system SID/CLIENT` allowlist (`SYSTEM_DENIED`, `SYSTEM_UNKNOWN` before a session is known) | `session`, `connection`, `system` and `credentials` tools are exempt: a token with the `session` scope can attach or launch any saved connection |
-| Access to unintended transactions | `--tcode` allowlist on `gui_transaction_start`; typing into the command field is blocked | bypasses through `gui_key_send`, menu selection (`gui_menu_select`), clicking links or buttons that navigate, and SAP's own follow-up transactions; treat T-code lists as a guard rail, not isolation |
+| Access to unintended SAP systems | `--system SID/CLIENT` allowlist, checked against the connection the call targets (explicit, default or sticky; read-only lookup, no attach); `SYSTEM_DENIED`, `SYSTEM_UNKNOWN` when it cannot be established | `session`, `connection`, `system` and `credentials` tools are exempt: a token with the `session` scope can attach or launch any saved connection |
+| Access to unintended transactions | `--tcode` allowlist on `gui_transaction_start`, on the transaction already open for every screen, element, key, popup and menu tool (unknown = denied), and on `gui_batch` items; typing into the command field is blocked | the open transaction is read just before a call and can change during it (race); clicks, key presses and menu entries inside an allowed transaction can navigate to a follow-up transaction, which only the next call notices; treat T-code lists as a guard rail, not isolation |
 | Runaway or abusive clients | per-token rate limit (`--rate`, `RATE_LIMITED`); one call at a time; queue of 16; 1 MiB request limit; result size caps | a busy client can still delay others (single shared SAP session, calls are serialized) |
+| Slow-body / slow-loris clients exhausting the HTTP worker pool | authentication and the header checks (Host, Origin, Content-Type, path, method) run on the request headers BEFORE the body is read; a rejected request gets its answer and the connection is closed; small rejected bodies (up to 64 KiB) are read and discarded so the close does not reset the connection, but at most half of the workers do that at a time; 5 s read timeout; bounded connection queue | headers that never complete, or a slow body sent with a VALID token, still occupy a worker for up to the 5 s read timeout each: keep the IIS reverse proxy (it buffers requests) and the IP allowlist in front |
 | Prompt injection via SAP content | screen results are labelled untrusted; server instructions tell the model not to follow them; read-only default | the model may still be persuaded to use write tools it has been granted; keep write tokens rare and confirm destructive actions client-side |
 | Credential theft | no tool accepts a password; SAP logon uses the Credential Manager; tokens only stored as hashes; secrets never in logs, audit, YAML or listings | Credential Manager entries are readable by any process of the same Windows user |
 | Repudiation, forensics | audit record per call with principal, remote address and era; start/stop records | append-only by convention, not tamper-proof |
@@ -294,7 +294,8 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 - **Rotate**: `fairyfly mcp token rotate NAME` prints a new secret and the old one stops working at once.
   A running server sees changes made by another process within 5 seconds.
 - **Revoke**: `fairyfly mcp token revoke NAME`. The record stays (marked revoked) in the Credential Manager entry
-  `fairyfly-mcp:<name>`; remove it with `cmdkey /delete:fairyfly-mcp:NAME` if you want it gone.
+  `fairyfly-mcp:<name>`; **delete** it with `fairyfly mcp token delete NAME --yes` (works for revoked tokens too, is
+  audited, needs `--yes`; `cmdkey /delete:fairyfly-mcp:NAME` also works).
 - **List**: `fairyfly mcp token list` (id prefix, scopes, systems, T-codes, rate, IPs, expiry, revoked; never
   hashes or secrets).
 - **Proxy secret**: `fairyfly mcp iis setup --rotate-secret --yes` issues a new one; restart is not needed (the

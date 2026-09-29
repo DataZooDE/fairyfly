@@ -94,7 +94,7 @@ Keys (every active line of the generated template equals the default):
 |---|---|---|
 | `server.host` / `server.port` | 127.0.0.1 / 8383 | HTTP listen address (keep loopback; IIS terminates TLS) |
 | `server.transport` | stdio | `stdio` or `http` |
-| `server.sse` | false | allow SSE streaming on tools/call |
+| `server.sse` | true | allow SSE streaming on tools/call |
 | `server.allowed_hosts[]` / `server.cors_origins[]` | empty | extra Host values / browser origins |
 | `mode.read_only` / `mode.allow_write` | false / false | guard mode (both true is an error) |
 | `limits.max_result_chars` / `max_image_bytes` / `max_calls_per_minute` / `call_timeout_ms` | 60000 / 2097152 / 120 / 120000 | limits |
@@ -107,10 +107,9 @@ Keys (every active line of the generated template equals the default):
 No secrets belong in this file. Unknown keys and keys named password/secret/token* produce a warning; a
 secret-like key with a value, or a value that looks like a token or `Bearer ...`, is refused with
 `CONFIG_CONTAINS_SECRET` (the value is never echoed). An invalid file stops `mcp` with exit code 2.
-Only these keys are applied to the server by `apply_config`: mode, limits, tools, format, default
-connection, transport, port. The HTTP-only keys (`server.host`, `server.sse`, `server.allowed_hosts`,
-`server.cors_origins`) are validated and shown by `mcp config show` but are not applied yet; pass the flags
-`--mcp-host`, `--no-sse`, `--allowed-hosts`, `--cors-origin` instead (see MCP_REMOTE.md).
+`apply_config` applies mode, limits, tools, format, default connection, transport, port and the HTTP keys
+`server.host`, `server.sse`, `server.allowed_hosts`, `server.cors_origins` (flag > env > YAML > default; see
+MCP_REMOTE.md). `insecure_no_auth` is not a config key: it stays a command-line flag.
 
 ## Client configs
 

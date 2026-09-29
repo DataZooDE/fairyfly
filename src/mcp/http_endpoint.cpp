@@ -90,6 +90,13 @@ json supported_json() {
     return a;
 }
 
+/// Negotiates against ALL served versions; an unsupported request falls back to the newest legacy version.
+std::string negotiate_http_version(const std::string& requested) {
+    const auto& all = HttpEndpoint::supported_versions();
+    if (std::find(all.begin(), all.end(), requested) != all.end()) return requested;
+    return all.size() > 1 ? all[1] : all.front();
+}
+
 json http_capabilities() { return json{{"tools", json{{"listChanged", false}}}}; }
 
 json decorate_stateless(json message, const std::string& method) {
@@ -268,10 +275,14 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
     return std::nullopt;
 }
 
-HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
-    if (auto rejected = precheck(request)) return std::move(*rejected);
+HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) {
+    PreAuth out;
+    if (auto rejected = precheck(request)) {
+        out.rejection = std::move(*rejected);
+        return out;
+    }
 
-    // Authenticate BEFORE the body is parsed.
+    // Authenticate BEFORE the body is read or parsed.
     DenyAllAuthenticator fallback;
     IAuthenticator& auth = authenticator_ ? *authenticator_ : static_cast<IAuthenticator&>(fallback);
     AuthRequest auth_request;
@@ -301,11 +312,25 @@ HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
                          outcome.www_authenticate.empty() ? "Bearer realm=\"fairyfly\"" : outcome.www_authenticate);
         else if (!outcome.www_authenticate.empty())
             r.set_header("WWW-Authenticate", outcome.www_authenticate);
-        return finish(request, std::move(r));
+        out.rejection = finish(request, std::move(r));
+        return out;
     }
-    Principal principal = outcome.principal;
-    if (principal.remote_addr.empty()) principal.remote_addr = request.peer_addr;
+    out.principal = outcome.principal;
+    if (out.principal.remote_addr.empty()) out.principal.remote_addr = request.peer_addr;
+    return out;
+}
+
+HttpResponse HttpEndpoint::handle_authenticated(const HttpRequest& request, const Principal& principal) {
+    if (request.body.size() > options_.max_body_bytes)
+        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+                                           "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return finish(request, dispatch(request, principal));
+}
+
+HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
+    PreAuth pre = preauthenticate(request);
+    if (pre.rejection) return std::move(*pre.rejection);
+    return handle_authenticated(request, pre.principal);
 }
 
 HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
@@ -349,7 +374,11 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const std::string hv = trim(request.header("MCP-Protocol-Version"));
     ProtocolEra era = ProtocolEra::Legacy;
     if (method == "initialize") {
-        era = ProtocolEra::Legacy;  // negotiated below; unsupported versions fall back to our newest legacy one
+        // The era follows the negotiated version: a client asking for the stateless version gets a stateless
+        // answer, everything else (including versions we do not know) the legacy one.
+        const std::string requested = params.is_object() && params.contains("protocolVersion") && params["protocolVersion"].is_string()
+                                          ? params["protocolVersion"].get<std::string>() : std::string();
+        era = negotiate_http_version(requested) == kStatelessVersion ? ProtocolEra::Stateless : ProtocolEra::Legacy;
     } else {
         const std::string version = !pv.empty() ? pv : hv;
         if (!version.empty()) {
@@ -384,8 +413,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
         if (!params.is_object() || !params.contains("protocolVersion") || !params["protocolVersion"].is_string())
             return reply(make_error(message.id, kInvalidParams, "initialize requires params.protocolVersion"));
         // No Mcp-Session-Id is minted: HTTP is stateless, every later request is served on its own.
-        const std::vector<std::string> legacy(supported_versions().begin() + 1, supported_versions().end());
-        json result = make_initialize_result(options_.server, negotiate_version(legacy, params["protocolVersion"].get<std::string>()));
+        json result = make_initialize_result(options_.server, negotiate_http_version(params["protocolVersion"].get<std::string>()));
         result["capabilities"] = http_capabilities();
         return reply(make_result(message.id, result));
     }
@@ -420,7 +448,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                waiter](CallState& state) -> json {
         json out;
         if (pending.method == "tools/list") {
-            out = tools_list_message(provider_, pending, true);
+            out = tools_list_message(provider_, pending, true, &principal);
         } else {
             try {
                 provider_.set_client_info(client_info.is_object() ? client_info : json::object());

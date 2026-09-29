@@ -23,6 +23,7 @@ public:
     explicit ReloadableProvider(std::unique_ptr<ToolProvider> delegate) : delegate_(std::move(delegate)) {}
     void reset(std::unique_ptr<ToolProvider> delegate) { delegate_ = std::move(delegate); }
     std::vector<ToolDef> list_tools() const override { return delegate_->list_tools(); }
+    std::vector<ToolDef> list_tools_for(const Principal& principal) const override { return delegate_->list_tools_for(principal); }
     bool has_tool(const std::string& name) const override { return delegate_->has_tool(name); }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
         return delegate_->call_tool(name, args, ctx);

@@ -32,7 +32,7 @@ json make_initialize_result(const ServerOptions& options, const std::string& ver
 std::string negotiate_version(const std::vector<std::string>& supported, const std::string& requested);
 
 /// Shared method handlers (return a full JSON-RPC message). Main thread.
-json tools_list_message(ToolProvider& provider, const Pending& p, bool sort_by_name);
+json tools_list_message(ToolProvider& provider, const Pending& p, bool sort_by_name, const Principal* principal = nullptr);
 json set_level_message(const Pending& p);
 /// Validates params, checks has_tool (unknown => -32602), runs the tool and maps the ToolResult
 /// (exceptions become an isError result). `ctx.request_id` is filled from p.id when null.

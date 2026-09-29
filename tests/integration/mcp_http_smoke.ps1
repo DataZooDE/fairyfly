@@ -19,9 +19,9 @@
   fills a field: the write-mode server is only used to prove that a read-only token is refused (READ_ONLY)
   before SAP is reached.
 
-  Tokens: named <prefix>-main, -screen, -tcode, -rate, -revoke, -ro with a random prefix. They are printed
+  Tokens: named <prefix>-main, -screen, -tcode, -rate, -revoke, -ro, -all, -allw with a random prefix. They are printed
   nowhere (only held in variables). The finally block revokes every token that was created and deletes its
-  Credential Manager entry (cmdkey /delete:fairyfly-mcp:<name>), also after a failure or Ctrl+C.
+  Credential Manager entry (mcp token delete NAME --yes, cmdkey /delete:fairyfly-mcp:<name> as fallback), also after a failure or Ctrl+C.
 
   A temporary yaml config (server.transport/port only) and a temporary audit file (FAIRYFLY_AUDIT_FILE) are used
   so the user's real mcp.yaml and audit trail are not involved. The token-expiry check that would need an already
@@ -83,7 +83,8 @@ $Plan = @(
     '  proto.server_discover          stateless: supportedVersions incl. 2026-07-28, resultType complete',
     '  proto.unsupported_version_400  JSON-RPC -32022 with data.supported',
     '  proto.header_mismatch_400      JSON-RPC -32020',
-    '  proto.tools_list_sorted        20 tools sorted by name, stable across calls, no gui_element_fill; stateless ttlMs',
+    '  proto.tools_list_sorted        all-scope token: 20 tools sorted by name, stable across calls, no gui_element_fill; stateless ttlMs',
+    '  proto.tools_list_scope_filtered screen-only token lists only the 3 screen tools; read-only token lists no write tool',
     '  token.expiry_past_rejected     token create --expires <past> fails (INVALID_ARGUMENT); server-side expiry: SKIP',
     '  sap.sessions / sap.attach      needs a SAP session (exit 2 when none)',
     '  sap.read_call                  gui_screen_read with the main token succeeds, untrusted-data header',
@@ -96,7 +97,7 @@ $Plan = @(
     '  server.clean_stop              Ctrl+C: exit code 0 within 15 s',
     '  audit.*                        transport http, principal, remote_addr, era, denials recorded, no token string',
     'server 2: mcp --http --allow-write (skipped with -SkipWriteMode), audit <name>-write.jsonl',
-    '  write.tools_list               21 tools incl. gui_element_fill',
+    '  write.tools_list               21 tools incl. gui_element_fill (all-scope, non-read-only token)',
     '  write.ro_token_refused         read-only token: gui_element_fill -> READ_ONLY (nothing reaches SAP)',
     '  write.clean_stop / write.audit_no_token',
     'never pressed/filled: Save, Delete, Release, Stop, any field; no SAP credentials are used'
@@ -174,7 +175,14 @@ function New-SmokeToken([string]$Short, [string[]]$ExtraArgs) {
 function Remove-SmokeTokens {
     foreach ($name in @($script:CreatedNames)) {
         try { [void](& $Exe mcp token revoke $name --output json --no-audit 2>$null | Out-String) } catch { }
-        try { [void](& cmdkey.exe "/delete:fairyfly-mcp:$name" 2>$null) } catch { }
+        # Prefer the product command; fall back to cmdkey when it is unavailable (older build) or fails.
+        $deleted = $false
+        try {
+            $out = (& $Exe mcp token delete $name --yes --output json --no-audit 2>$null | Out-String)
+            $j = ConvertFrom-JsonSafe $out
+            $deleted = ($null -ne $j -and $j.status -eq 'success')
+        } catch { }
+        if (-not $deleted) { try { [void](& cmdkey.exe "/delete:fairyfly-mcp:$name" 2>$null) } catch { } }
     }
 }
 function Get-TokenHeader([string]$Short) { return @{ Authorization = ('Bearer ' + $script:Tokens[$Short].Secret) } }
@@ -380,6 +388,11 @@ try {
     New-SmokeToken 'rate'   @('--scope', 'session', '--rate', '3', '--read-only', '--expires', '1d')
     New-SmokeToken 'revoke' @('--scope', 'screen', '--read-only', '--expires', '1d')
     New-SmokeToken 'ro'     @('--scope', 'session,screen,element', '--read-only', '--expires', '1d')
+    # All-scope tokens: tools/list is filtered per token, so the full tool counts (20 read-only, 21 with write mode)
+    # are only visible to a token that has every scope. 'allw' is not read-only (needed to see gui_element_fill in
+    # the listing); the smoke never calls a write tool with it.
+    New-SmokeToken 'all'    @('--scope', '*', '--yes', '--read-only', '--expires', '1d')
+    New-SmokeToken 'allw'   @('--scope', '*', '--yes', '--expires', '1d')
 
     # ======================================================================================================
     # Server 1: read-only
@@ -456,8 +469,8 @@ try {
         Assert-That ((Get-RpcErrorCode $r) -eq -32020) "JSON-RPC code is $(Get-RpcErrorCode $r)"
     }
     Check 'proto.tools_list_sorted' {
-        $a = Invoke-Mcp 'main' 'tools/list' @{}
-        $b = Invoke-Mcp 'main' 'tools/list' @{}
+        $a = Invoke-Mcp 'all' 'tools/list' @{}
+        $b = Invoke-Mcp 'all' 'tools/list' @{}
         $namesA = @($a.Json.result.tools | ForEach-Object { $_.name })
         $namesB = @($b.Json.result.tools | ForEach-Object { $_.name })
         Assert-That ($namesA.Count -eq 20) "expected 20 tools in read-only mode, got $($namesA.Count)"
@@ -467,11 +480,26 @@ try {
         Assert-That (($sorted -join ',') -eq ($namesA -join ',')) 'tools/list is not sorted by name'
         Assert-That (-not ($namesA -contains 'gui_element_fill')) 'gui_element_fill is listed on a read-only server'
         foreach ($n in $namesA) { Assert-That ($n.StartsWith('gui_')) "tool '$n' does not start with gui_" }
-        # NOTE: tools/list is currently NOT filtered by the token's scopes (the screen-only token sees the same
-        # 20 tools); scope enforcement happens at tools/call. Only the server-mode visibility is asserted here.
-        $st = Invoke-Mcp 'main' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28' }
+        $st = Invoke-Mcp 'all' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28' }
         Assert-That ($st.Json.result.ttlMs -eq 30000) 'stateless tools/list has no ttlMs 30000'
         Assert-That ($st.Json.result.cacheScope -eq 'private') 'stateless tools/list has no cacheScope private'
+    }
+    Check 'proto.tools_list_scope_filtered' {
+        # tools/list follows the token: a screen-only token sees only the screen family, a read-only token no write tool.
+        $s = Invoke-Mcp 'screen' 'tools/list' @{}
+        $names = @($s.Json.result.tools | ForEach-Object { $_.name })
+        Assert-That ($names.Count -eq 3) "screen-only token lists $($names.Count) tools, expected 3"
+        foreach ($n in $names) { Assert-That ($n.StartsWith('gui_screen_')) "screen-only token lists '$n'" }
+        $m = Invoke-Mcp 'main' 'tools/list' @{}
+        $mainNames = @($m.Json.result.tools | ForEach-Object { $_.name })
+        foreach ($n in $mainNames) {
+            Assert-That ($n -match '^gui_(session|connection|screen|transaction)_') "main token (session,connection,screen,transaction) lists out-of-scope tool '$n'"
+        }
+        Assert-That ($mainNames -contains 'gui_screen_read') 'main token does not list gui_screen_read'
+        $ro = Invoke-Mcp 'ro' 'tools/list' @{}
+        $roNames = @($ro.Json.result.tools | ForEach-Object { $_.name })
+        Assert-That (-not ($roNames -contains 'gui_element_fill')) 'read-only token lists gui_element_fill'
+        Assert-That ($roNames -contains 'gui_element_get') 'token with element scope does not list gui_element_get'
     }
     Check 'token.expiry_past_rejected' {
         $text = (& $Exe mcp token create "$Prefix-past" --scope screen --expires 2000-01-01 --output json --no-audit 2>$null | Out-String)
@@ -628,7 +656,7 @@ try {
             Assert-That ($banner -match 'WRITE MODE') 'banner does not announce write mode'
         }
         Check 'write.tools_list' {
-            $r = Invoke-Mcp 'main' 'tools/list' @{}
+            $r = Invoke-Mcp 'allw' 'tools/list' @{}
             $names = @($r.Json.result.tools | ForEach-Object { $_.name })
             Assert-That ($names.Count -eq 21) "expected 21 tools, got $($names.Count)"
             Assert-That ($names -contains 'gui_element_fill') 'gui_element_fill is not listed'
