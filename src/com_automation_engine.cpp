@@ -586,20 +586,30 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
 
     try {
         auto session = ensure_session();
-        // 1. Snapshot previous statusbar state to guard against stale messages
-        std::string prev_sbar_text;
-        std::string prev_sbar_type;
-        try {
-            auto sbar = session->find_element_by_id("wnd[0]/sbar");
-            if (sbar) {
-                prev_sbar_text = sbar->get_text();
-                prev_sbar_type = sbar->get_property_string(L"MessageType");
-            }
-        } catch (...) {
-            // Statusbar not present or not accessible
+        const auto request = normalize_transaction_request(tcode);
+        if (!request.valid) {
+            result.status = Result::Status::Error;
+            result.error["code"] = request.error_code;
+            result.error["message"] = request.error_message;
+            result.error["tcode"] = tcode;
+            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - start);
+            return result;
         }
+        const std::string& expected_tcode = request.expected_tcode;
 
-        session->start_transaction(tcode);
+        // 1. Snapshot previous statusbar state to guard against stale messages
+        const ActionStatus prev_status = read_action_status(session);
+        const std::string prev_sbar_text = prev_status.text;
+        const std::string prev_sbar_type = prev_status.type;
+
+        if (request.use_send_command) {
+            // StartTransaction prepends "/n" itself, so "/nXYZ" must go via SendCommand.
+            session->invoke_method_with_string(L"SendCommand", request.command);
+            std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
+        } else {
+            session->start_transaction(request.command);
+        }
 
         // Wait briefly for transaction to start
         session->wait_for_completion(500);
@@ -612,7 +622,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 auto message = session->find_element_by_id("wnd[1]/usr/txtMESSTXT1");
                 if (message) {
                     if (auto rejection = classify_transaction_modal(window->get_id(),
-                                                                     message->get_text(), tcode)) {
+                                                                     message->get_text(), expected_tcode)) {
                         rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::high_resolution_clock::now() - start);
                         return *rejection;
@@ -624,39 +634,30 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         }
 
         // 2. Check for error or abort messages on statusbar
-        std::string post_sbar_type;
-        std::string post_sbar_text;
-        try {
-            auto sbar = session->find_element_by_id("wnd[0]/sbar");
-            if (sbar) {
-                post_sbar_type = sbar->get_property_string(L"MessageType");
-                post_sbar_text = sbar->get_text();
+        const ActionStatus post_status = read_action_status(session);
+        const std::string post_sbar_type = post_status.type;
+        const std::string post_sbar_text = post_status.text;
+        if (!post_sbar_text.empty()) {
+            const bool is_new_message = (post_sbar_text != prev_sbar_text || post_sbar_type != prev_sbar_type);
+            if (post_sbar_type == "E" || post_sbar_type == "A") {
+                if (is_new_message) {
+                    result.status = Result::Status::Error;
+                    result.error["code"] = (post_sbar_type == "A") ? "TRANSACTION_ABORTED" : "TRANSACTION_FAILED";
+                    result.error["message"] = post_sbar_text;
+                    result.error["tcode"] = tcode;
+                    result.error["message_type"] = post_sbar_type;
+                    attach_status_bar(result, prev_status, post_status);
 
-                if (!post_sbar_text.empty()) {
-                    bool is_new_message = (post_sbar_text != prev_sbar_text || post_sbar_type != prev_sbar_type);
-
-                    if (post_sbar_type == "E" || post_sbar_type == "A") {
-                        if (is_new_message) {
-                            result.status = Result::Status::Error;
-                            result.error["code"] = (post_sbar_type == "A") ? "TRANSACTION_ABORTED" : "TRANSACTION_FAILED";
-                            result.error["message"] = post_sbar_text;
-                            result.error["tcode"] = tcode;
-                            result.error["message_type"] = post_sbar_type;
-
-                            auto end = std::chrono::high_resolution_clock::now();
-                            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                            spdlog::warn("Transaction {} failed with statusbar error [{}]: {}", tcode, post_sbar_type, post_sbar_text);
-                            return result;
-                        }
-                    } else if (is_new_message && post_sbar_type == "W") {
-                        result.data["warning"] = post_sbar_text;
-                    } else if (is_new_message) {
-                        result.data["statusbar"] = post_sbar_text;
-                    }
+                    result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::high_resolution_clock::now() - start);
+                    spdlog::warn("Transaction {} failed with statusbar error [{}]: {}", tcode, post_sbar_type, post_sbar_text);
+                    return result;
                 }
+            } else if (is_new_message && post_sbar_type == "W") {
+                result.data["warning"] = post_sbar_text;
+            } else if (is_new_message) {
+                result.data["statusbar"] = post_sbar_text;
             }
-        } catch (...) {
-            // Statusbar check is non-fatal
         }
 
         // 3. Record actual active transaction code
@@ -668,18 +669,21 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                            [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
             return left == right;
         };
-        if (!same_tcode(actual_tcode, tcode)) {
+        // Bare "/n" returns to the Easy Access menu; the reported code varies.
+        const bool bare_n = request.use_send_command && request.command == "/n";
+        if (!bare_n && !same_tcode(actual_tcode, expected_tcode)) {
             // A slow screen can briefly report the old or an empty transaction
             // after COM returns. Wait for the requested transaction itself.
             for (int attempt = 0; attempt < 10; ++attempt) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 actual_tcode = session->get_transaction_code();
-                if (same_tcode(actual_tcode, tcode)) break;
+                if (same_tcode(actual_tcode, expected_tcode)) break;
             }
-            if (!same_tcode(actual_tcode, tcode)) {
+            if (!same_tcode(actual_tcode, expected_tcode)) {
                 result.status = Result::Status::Error;
                 result.error["code"] = "TRANSACTION_NOT_STARTED";
                 result.error["message"] = "Requested transaction did not become active";
+                attach_status_bar(result, prev_status, post_status);
                 if (!post_sbar_text.empty() && (post_sbar_type == "E" || post_sbar_type == "A")) {
                     // The same message may be a repeated rejection or a stale
                     // rejection from an earlier command. Preserve it without
@@ -701,6 +705,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         result.status = Result::Status::Success;
         result.data["tcode"] = tcode;
         result.data["message"] = "Transaction started";
+        attach_status_bar(result, prev_status, post_status);
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -723,6 +728,23 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
     }
 
     return result;
+}
+
+ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
+    ScreenSnapshot snapshot;
+    try {
+        auto session = current_session_;
+        if (!session) return snapshot;
+        if (auto window = session->get_active_window()) {
+            snapshot.window_id = window->get_id();
+            try { snapshot.title = window->get_title(); } catch (const std::exception&) {}
+        }
+        try { snapshot.transaction = session->get_transaction_code(); } catch (const std::exception&) {}
+        snapshot.statusbar_text = read_action_status(session).text;
+    } catch (const std::exception&) {
+        // A partially readable snapshot is still useful for change detection.
+    }
+    return snapshot;
 }
 
 Result ComAutomationEngine::click_element(const ElementId& element) {
@@ -832,6 +854,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         const auto after_status = read_action_status(session);
         if (auto rejection = classify_action_status(before_status, after_status, resolved_element.path,
                 elem_type == "GuiButton" || activate_list_label)) {
+            attach_status_bar(*rejection, before_status, after_status);
             rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::high_resolution_clock::now() - start);
             return *rejection;
@@ -856,6 +879,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
             if (auto unchanged = classify_list_label_outcome(
                     same_label, same_window, same_title, before_status, after_status,
                     resolved_element.path)) {
+                attach_status_bar(*unchanged, before_status, after_status);
                 unchanged->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::high_resolution_clock::now() - start);
                 return *unchanged;
@@ -874,6 +898,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         result.data["action"] = "click";
         result.data["element_type"] = elem->get_type();
         result.data["window"] = resolved_element.get_window().id;
+        attach_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -1059,8 +1084,10 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         // Press the toolbar button
         elem->press_button(button_id);
         session->wait_for_completion(500);
-        if (auto rejection = classify_action_status(before_status, read_action_status(session),
+        const auto after_status = read_action_status(session);
+        if (auto rejection = classify_action_status(before_status, after_status,
                                              resolved_element.path + "/btn_" + button_id, true)) {
+            attach_status_bar(*rejection, before_status, after_status);
             rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::high_resolution_clock::now() - start);
             return *rejection;
@@ -1073,6 +1100,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         if (toolbar_element.path != resolved_element.path) {
             result.data["toolbar_requested"] = toolbar_element.path;  // Show original @active path
         }
+        attach_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -1158,11 +1186,15 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         }
 
         // Set the text
-        if (!elem->set_text(value)) {
+        const auto before_status = read_action_status(session);
+        const bool text_set = elem->set_text(value);
+        const auto after_status = read_action_status(session);
+        if (!text_set) {
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_READ_ONLY";
             result.error["message"] = "Element is not changeable on the current SAP screen";
             result.error["element"] = resolved_element.path;
+            attach_status_bar(result, before_status, after_status);
             return result;
         }
 
@@ -1174,6 +1206,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         result.data["value"] = "[REDACTED]";
         result.data["action"] = "fill";
         result.data["window"] = resolved_element.get_window().id;
+        attach_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -1214,7 +1247,9 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
             result.error["message"] = "Element is not a GridView";
             return result;
         }
+        const auto before_status = read_action_status(session);
         grid->modify_grid_cell(row, column, value, checkbox, commit);
+        const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "modify_grid_cell";
         result.data["element"] = resolved.path;
@@ -1223,6 +1258,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         result.data["value"] = "[REDACTED]";
         result.data["checkbox"] = checkbox;
         result.data["committed"] = commit;
+        attach_status_bar(result, before_status, after_status);
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     } catch (const ComException& e) {
@@ -1243,7 +1279,8 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
     Result result;
     try {
         ElementId resolved = resolve_element_path(element);
-        auto grid = ensure_session()->find_element_by_id(resolved.path);
+        auto session = ensure_session();
+        auto grid = session->find_element_by_id(resolved.path);
         if (!grid) {
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_NOT_FOUND";
@@ -1258,12 +1295,15 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
             result.error["message"] = "Element is not a GridView";
             return result;
         }
+        const auto before_status = read_action_status(session);
         grid->select_grid_row(row, column);
+        const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "select_grid_row";
         result.data["element"] = resolved.path;
         result.data["row"] = row;
         result.data["column"] = column;
+        attach_status_bar(result, before_status, after_status);
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     } catch (const ComException& e) {
@@ -1334,6 +1374,7 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
         }
         result.data["element_type"] = element_type;
         result.data["window"] = resolved_element.get_window().id;
+        attach_status_bar(result, read_action_status(session));
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);

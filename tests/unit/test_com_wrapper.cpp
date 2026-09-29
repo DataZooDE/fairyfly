@@ -14,6 +14,8 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
+#include <map>
+#include <string>
 #include <vector>
 #include <cwchar>
 
@@ -276,6 +278,60 @@ private:
     const wchar_t* label_;
     const wchar_t* subtype_;
     const wchar_t* value_;
+};
+
+// Minimal read-only dispatch that serves string properties by name.
+class StringPropertyDispatch final : public IDispatch {
+public:
+    explicit StringPropertyDispatch(std::map<std::wstring, std::wstring> values)
+        : values_(std::move(values)) {
+        for (const auto& entry : values_) names_.push_back(entry.first);
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+        if (!object) return E_POINTER;
+        *object = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IDispatch) return E_NOINTERFACE;
+        *object = static_cast<IDispatch*>(this);
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG remaining = --references_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* count) override {
+        if (!count) return E_POINTER;
+        *count = 0;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, ITypeInfo**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count,
+                                            LCID, DISPID* ids) override {
+        if (!names || !ids || count != 1) return E_INVALIDARG;
+        for (size_t i = 0; i < names_.size(); ++i) {
+            if (names_[i] == names[0]) {
+                *ids = static_cast<DISPID>(7000 + i);
+                return S_OK;
+            }
+        }
+        return DISP_E_UNKNOWNNAME;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags,
+                                     DISPPARAMS*, VARIANT* result, EXCEPINFO*, UINT*) override {
+        if (!result || !(flags & DISPATCH_PROPERTYGET)) return DISP_E_MEMBERNOTFOUND;
+        const auto index = static_cast<size_t>(id - 7000);
+        if (index >= names_.size()) return DISP_E_MEMBERNOTFOUND;
+        VariantInit(result);
+        result->vt = VT_BSTR;
+        result->bstrVal = SysAllocString(values_.at(names_[index]).c_str());
+        return result->bstrVal ? S_OK : E_OUTOFMEMORY;
+    }
+private:
+    ULONG references_ = 1;
+    std::map<std::wstring, std::wstring> values_;
+    std::vector<std::wstring> names_;
 };
 
 class ReadOnlyFieldDispatch final : public IDispatch {
@@ -1688,4 +1744,25 @@ TEST_CASE("COM wrapper exception safety", "[com][exceptions]") {
             SUCCEED("ComException thrown as expected");
         }
     }
+}
+
+
+TEST_CASE("read_action_status returns status bar text and message type", "[com][status]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* bar = new StringPropertyDispatch({
+        {L"Type", L"GuiStatusbar"}, {L"Text", L"Job log displayed"},
+        {L"DisplayedText", L"Job log displayed"},
+        {L"MessageType", L"S"}, {L"MessageId", L"BL"}, {L"MessageNumber", L"001"}});
+    auto* session_dispatch = new TextFieldDispatch(L"GuiSession", 9600);
+    session_dispatch->named_sibling_dispatch = bar;
+    session_dispatch->named_sibling_id = L"wnd[0]/sbar";
+    auto session = ComGuiSession::create(session_dispatch);
+    session_dispatch->Release();
+
+    const auto status = read_action_status(session);
+    REQUIRE(status.text == "Job log displayed");
+    REQUIRE(status.type == "S");
+    REQUIRE(status.message_id == "BL");
+    REQUIRE(status.message_number == "001");
+    bar->Release();
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "action_status.h"
 #include "automation_engine.h"
 #include "com/wrapper.h"
 #include "connection_launcher.h"
@@ -100,6 +101,9 @@ public:
 
     // Window management helpers
     WindowId get_active_window_id() const;
+
+    /// Cheap snapshot (window, title, transaction, status text) for change detection
+    ScreenSnapshot capture_screen_snapshot() const;
     ElementId resolve_element_path(const ElementId& element) const;
 
     /// Detect if a modal dialog is currently active

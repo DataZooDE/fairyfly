@@ -63,6 +63,16 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         oss << "**Screen ID:** `" << screen_id << "`\n\n";
     }
 
+    if (data.contains("status_bar") && data["status_bar"].is_object()) {
+        const auto& bar = data["status_bar"];
+        const std::string bar_text = bar.value("text", "");
+        if (!bar_text.empty()) {
+            const std::string bar_type = bar.value("message_type", "");
+            oss << "**Status" << (bar_type.empty() ? "" : " [" + bar_type + "]")
+                << ":** " << bar_text << "\n\n";
+        }
+    }
+
     // Check if we have hierarchy data
     if (!data.contains("hierarchy")) {
         oss << "_No screen structure available_\n";

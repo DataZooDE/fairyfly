@@ -90,14 +90,117 @@ std::string f4_dialog_path(int active_window_index) {
     return "wnd[" + std::to_string(active_window_index + 1) + "]";
 }
 
-ActionStatus read_action_status(const ComGuiSessionPtr& session) {
+namespace {
+
+bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStatus& out) {
     try {
-        auto bar = session->find_element_by_id("wnd[0]/sbar");
-        if (bar) return {bar->get_text(), bar->get_property_string(L"MessageType")};
+        auto bar = session->find_element_by_id(id);
+        if (!bar) return false;
+        out.text = bar->get_text();
+        out.type = bar->get_property_string(L"MessageType");
+        try { out.message_id = bar->get_property_string(L"MessageId"); } catch (const std::exception&) {}
+        try { out.message_number = bar->get_property_string(L"MessageNumber"); } catch (const std::exception&) {}
+        return true;
     } catch (const std::exception&) {
-        // Some screens and modal dialogs do not expose the main status bar.
+        // Some screens and modal dialogs do not expose a status bar.
+        return false;
     }
-    return {};
+}
+
+} // namespace
+
+ActionStatus read_action_status(const ComGuiSessionPtr& session) {
+    // Prefer the active window's status bar (dialogs can have their own), then
+    // fall back to the main window's.
+    try {
+        auto window = session->get_active_window();
+        if (window) {
+            const int index = WindowId(window->get_id()).get_index();
+            if (index > 0) {
+                ActionStatus dialog;
+                if (read_bar(session, "wnd[" + std::to_string(index) + "]/sbar", dialog) &&
+                    !dialog.text.empty())
+                    return dialog;
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    ActionStatus main;
+    read_bar(session, "wnd[0]/sbar", main);
+    return main;
+}
+
+json status_bar_json(const ActionStatus& status, const ActionStatus* before) {
+    if (status.text.empty()) return nullptr;
+    json out;
+    out["text"] = status.text;
+    out["message_type"] = status.type;
+    if (!status.message_id.empty()) out["message_id"] = status.message_id;
+    if (!status.message_number.empty()) out["message_number"] = status.message_number;
+    if (before) out["changed"] = status.text != before->text || status.type != before->type;
+    return out;
+}
+
+void attach_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after) {
+    if (after.text.empty()) return;
+    json bar = status_bar_json(after, &before);
+    if (result.status == Result::Status::Success) {
+        if (!result.data.is_object()) result.data = json::object();
+        result.data["status_bar"] = bar;
+    } else if (result.status == Result::Status::Error) {
+        if (!result.error.is_object()) result.error = json::object();
+        result.error["status_bar"] = bar;
+    }
+}
+
+void attach_status_bar(Result& result, const ActionStatus& current) {
+    if (current.text.empty()) return;
+    json bar = status_bar_json(current);
+    if (result.status == Result::Status::Success) {
+        if (!result.data.is_object()) result.data = json::object();
+        result.data["status_bar"] = bar;
+    } else if (result.status == Result::Status::Error) {
+        if (!result.error.is_object()) result.error = json::object();
+        result.error["status_bar"] = bar;
+    }
+}
+
+TransactionRequest normalize_transaction_request(const std::string& input) {
+    TransactionRequest req;
+    std::string s = input;
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    req.command = s;
+    req.expected_tcode = s;
+
+    auto upper = [](std::string v) {
+        std::transform(v.begin(), v.end(), v.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        return v;
+    };
+    const std::string up = upper(s);
+    auto reject = [&](const char* why) {
+        req.valid = false;
+        req.error_code = "UNSUPPORTED_OK_CODE";
+        req.error_message = std::string("OK-code '") + input + "' is not supported: " + why;
+        return req;
+    };
+    if (up == "/NEX" || up == "/NEND") return reject("it closes the SAP GUI session");
+    if (up.rfind("/O", 0) == 0) return reject("it opens a new session");
+    if (up.rfind("/I", 0) == 0) return reject("it closes the current session");
+    if (up.rfind("/N", 0) == 0) {
+        req.use_send_command = true;
+        req.command = "/n" + s.substr(2);
+        req.expected_tcode = s.substr(2);
+        if (req.expected_tcode.empty()) req.expected_tcode = "SESSION_MANAGER";
+    }
+    return req;
+}
+
+bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after) {
+    return before.window_id != after.window_id || before.title != after.title ||
+           before.transaction != after.transaction ||
+           before.statusbar_text != after.statusbar_text;
 }
 
 std::optional<Result> classify_action_status(const ActionStatus& before,
