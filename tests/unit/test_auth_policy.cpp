@@ -1583,3 +1583,27 @@ TEST_CASE("dispatcher: batch items are re-checked one by one", "[auth][dispatch]
     CHECK(f.records[0].tcode_left_allowlist);
     CHECK_FALSE(f.records[1].tcode_left_allowlist);
 }
+
+TEST_CASE("dispatcher: per-principal state is keyed by token id, not by name", "[auth][dispatch][recheck][principal-id]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal a = token("same-name", {"screen", "key"});
+    a.id = "idA";
+    a.tcodes = {"VA03"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "key") f.facts = audit::SapFacts{"A4H", "001", "U", "S000"};
+        return ok_result();
+    };
+    CHECK(text_of(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(a))).find("tcode_left_allowlist") != std::string::npos);
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);  // A is blocked
+
+    // the token is deleted and recreated under the same name: new id, clean state
+    Principal b = a;
+    b.id = "idB";
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);  // A stays blocked
+    CHECK_FALSE(d.sticky_connection("idB").has_value());
+}

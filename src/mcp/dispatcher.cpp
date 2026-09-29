@@ -201,7 +201,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (!spec) return fail("TOOL_NOT_FOUND", "unknown tool '" + name + "'", "use tools/list to see the available tools");
     json args = raw_args.is_null() ? json::object() : raw_args;
     if (args.is_object() && args.contains("connection")) record.connection = int_from_json(args["connection"]);
-    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection(ctx.principal.name);
+    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection(principal_key(ctx.principal));
 
     // 2. policy
     const PolicyDecision decision = check_call(*spec, args, policy_);
@@ -226,7 +226,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
         // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
         // until gui_transaction_start succeeds with an allowed code (nothing navigates back automatically).
-        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->family) && tcode_blocked(principal.name))
+        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->family) && tcode_blocked(principal_key(principal)))
             return fail("TCODE_DENIED", "an earlier call of token '" + principal.name + "' left its allowed transactions; screen "
                                         "tools stay blocked until gui_transaction_start opens an allowed transaction");
     }
@@ -262,7 +262,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 3. rate limit (per principal for tokens; the server-wide gate for the local stdio principal)
     const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
     const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
-    const bool rate_ok = per_principal ? keyed_limiter_.allow(principal.name, budget, std::chrono::steady_clock::now())
+    const bool rate_ok = per_principal ? keyed_limiter_.allow(principal_key(principal), budget, std::chrono::steady_clock::now())
                                        : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
     if (!rate_ok)
         return fail("RATE_LIMITED",
@@ -271,7 +271,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                     "wait a few seconds and retry, or combine steps with gui_batch");
     // Optional per-family budget of the token (--rate-family), on top of the overall one. Every gui_batch item counts.
     if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
-        if (!keyed_limiter_.allow(principal.name + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+        if (!keyed_limiter_.allow(principal_key(principal) + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
             return fail("RATE_LIMITED",
                         "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
                         "wait a few seconds and retry");
@@ -293,7 +293,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
-    if (!effective.default_connection) effective.default_connection = sticky_connection(ctx.principal.name);
+    if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
 
     // gui_session_attach without session_id: resolve through `list`.
     if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
@@ -366,10 +366,10 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                              [&](const std::string& pat) { return auth::glob_match(pat, after); });
             if (!allowed) {
                 tcode_left = true;
-                set_tcode_blocked(principal.name, true);
+                set_tcode_blocked(principal_key(principal), true);
                 record.tcode_left_allowlist = true;
             } else if (name == "gui_transaction_start" && result.status == Result::Status::Success) {
-                set_tcode_blocked(principal.name, false);
+                set_tcode_blocked(principal_key(principal), false);
             }
         }
     }
@@ -427,7 +427,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
         result.data.is_object() && result.data.contains("connection_file_id")) {
         if (auto id = int_from_json(result.data["connection_file_id"])) {
-            set_sticky_connection(ctx.principal.name, *id);
+            set_sticky_connection(principal_key(ctx.principal), *id);
             record.connection = id;
             const std::string note = "connection " + std::to_string(*id) +
                                      " is now the default for later calls that omit `connection`.";

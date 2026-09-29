@@ -162,6 +162,7 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
     AuthOutcome ok;
     ok.ok = true;
     ok.http_status = 200;
+    ok.principal.id = meta->id;
     ok.principal.name = meta->name;
     ok.principal.all_scopes = meta->has_all_scopes();
     for (const auto& scope : meta->scopes)

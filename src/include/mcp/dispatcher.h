@@ -55,7 +55,7 @@ public:
     /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
     std::vector<ToolDef> list_tools_for(const Principal& principal) const override;
     /// Connection remembered from the last successful gui_session_attach / gui_session_launch OF THIS PRINCIPAL
-    /// (HTTP tokens by name; the local stdio principal is "stdio"). One principal attaching never retargets
+    /// (HTTP tokens by id, see principal_key(); the local stdio principal is "stdio"). One principal attaching never retargets
     /// another; only the targeting is separate, the SAP GUI session and its screen state are shared.
     std::optional<int> sticky_connection(const std::string& principal_name = "stdio") const {
         std::lock_guard<std::mutex> lock(sticky_mutex_);

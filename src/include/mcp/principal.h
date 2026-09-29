@@ -14,6 +14,7 @@ namespace fairyfly::mcp {
 /// Who is calling. Stdio: one implicit local principal (name "stdio", unrestricted, expires never).
 struct Principal {
     std::string name = "stdio";          ///< token name, never the secret
+    std::string id;                      ///< token id (unique per created token, never the secret); empty for stdio/insecure
     std::set<std::string> scopes;        ///< tool families (session, screen, ...); empty + all_scopes=false => none
     bool all_scopes = true;              ///< "*": every family
     std::vector<std::string> sap_systems;///< allowed "SID/CLIENT" pairs ("A4H/001"); empty = any
@@ -26,6 +27,10 @@ struct Principal {
     std::string remote_addr;             ///< client address (from proxy header only when the proxy secret matched)
     bool authenticated = false;          ///< false for stdio and for --insecure-no-auth
 };
+
+/// Key of the per-principal in-memory state (blocked flag, sticky connection, rate budgets): the token id when known,
+/// so a deleted and recreated token with the same name starts clean; the name otherwise (stdio, insecure).
+inline const std::string& principal_key(const Principal& p) { return p.id.empty() ? p.name : p.id; }
 
 /// Protocol era of one request (HTTP) or connection (stdio).
 enum class ProtocolEra { Legacy, Stateless };

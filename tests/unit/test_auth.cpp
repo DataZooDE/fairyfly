@@ -474,6 +474,7 @@ TEST_CASE("auth: rejection matrix", "[auth][authn]") {
         const auto out = env.auth->authenticate(r);
         REQUIRE(out.ok);
         CHECK(out.principal.name == "ci-bot");
+        CHECK_FALSE(out.principal.id.empty());  // per-principal state is keyed by id
         CHECK(out.principal.authenticated);
         CHECK(out.principal.remote_addr == "127.0.0.1");
     }
