@@ -1,9 +1,12 @@
 #pragma once
 #include <chrono>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
+#include "include/auth/authorize.h"
 #include "include/cli_handler.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/types.h"
@@ -33,14 +36,31 @@ public:
     /// Without a provider every call of a token that has a system allowlist is denied SYSTEM_UNKNOWN.
     using SapFactsProvider = std::function<std::optional<audit::SapFacts>(std::optional<int> connection)>;
     void set_sap_facts_provider(SapFactsProvider provider) { facts_provider_ = std::move(provider); }
+    /// Selector of a session/connection lookup (exactly one is set): a SAP Logon entry name (launch), a session id
+    /// (attach) or a saved connection id (everything else).
+    struct TargetQuery {
+        std::string logon_name;
+        std::string session_id;
+        std::optional<int> connection;
+    };
+    /// Resolves the SAP system and connection name a call targets, without contacting SAP (token allowlists).
+    /// Without a resolver every call of a token with sap_systems/connections that needs one is denied (fail closed).
+    using SessionTargetResolver = std::function<auth::SessionTarget(const TargetQuery&)>;
+    void set_session_target_resolver(SessionTargetResolver resolver) { target_resolver_ = std::move(resolver); }
     /// Per-call read-only override: called with true before a call of a read-only token while the server
     /// is in write mode, and with the server value afterwards. Wire it to CommandHandler::set_read_only.
     using ReadOnlyOverride = std::function<void(bool read_only)>;
     void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
     /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
     std::vector<ToolDef> list_tools_for(const Principal& principal) const override;
-    /// Connection remembered from the last successful gui_session_attach / gui_session_launch.
-    std::optional<int> sticky_connection() const { return sticky_connection_; }
+    /// Connection remembered from the last successful gui_session_attach / gui_session_launch OF THIS PRINCIPAL
+    /// (HTTP tokens by name; the local stdio principal is "stdio"). One principal attaching never retargets
+    /// another; only the targeting is separate, the SAP GUI session and its screen state are shared.
+    std::optional<int> sticky_connection(const std::string& principal_name = "stdio") const {
+        std::lock_guard<std::mutex> lock(sticky_mutex_);
+        const auto it = sticky_by_principal_.find(principal_name);
+        return it == sticky_by_principal_.end() ? std::nullopt : std::optional<int>(it->second);
+    }
 
 private:
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
@@ -61,9 +81,15 @@ private:
     std::string client_;
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
-    std::optional<int> sticky_connection_;
+    void set_sticky_connection(const std::string& principal_name, int id) {
+        std::lock_guard<std::mutex> lock(sticky_mutex_);
+        sticky_by_principal_[principal_name] = id;
+    }
+    mutable std::mutex sticky_mutex_;
+    std::map<std::string, int> sticky_by_principal_;
     KeyedRateLimiter keyed_limiter_;
     SapFactsProvider facts_provider_;
+    SessionTargetResolver target_resolver_;
     ReadOnlyOverride read_only_override_;
 };
 

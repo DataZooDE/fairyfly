@@ -30,8 +30,12 @@ public:
             ->delimiter(',');
         create_->add_option("--system", args_.systems, "Allowed SAP systems SID/CLIENT, e.g. A4H/001 (globs allowed)")->delimiter(',');
         create_->add_option("--tcode", args_.tcodes, "Allowed T-codes, e.g. SE16,SM* (globs allowed)")->delimiter(',');
+        create_->add_option("--connections", args_.connections,
+                            "Allowed saved connections / SAP Logon entry names, e.g. DEV,QA* (globs allowed; no spaces)")->delimiter(',');
         create_->add_option("--ip", args_.ips, "Allowed client addresses or CIDR blocks")->delimiter(',');
         create_->add_option("--rate", args_.rate, "Calls per minute (0 = server default)")->check(CLI::NonNegativeNumber);
+        create_->add_option("--rate-family", args_.rate_families,
+                            "Calls per minute per tool family, e.g. element=10,key=10 (stricter than --rate for that family)")->delimiter(',');
         create_->add_option("--expires", args_.expires, "Expiry: 30d, 12h, 90m or a date such as 2026-12-31");
         create_->add_flag("--read-only", args_.read_only_flag,
                           "Token can never change SAP state (default when no --scope is given)");

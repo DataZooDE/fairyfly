@@ -188,6 +188,55 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
     return authorize_impl(principal, spec, family, args, server_policy, current_system, current_tcode, true, lookup, 0);
 }
 
+namespace {
+
+bool session_system_tool(const std::string& tool, const mcp::json& args) {
+    if (tool == "gui_session_launch" || tool == "gui_session_login" || tool == "gui_session_attach") return true;
+    return tool == "gui_session_disconnect" && args.is_object() && args.contains("close_session") &&
+           args["close_session"].is_boolean() && args["close_session"].get<bool>();
+}
+
+bool targetless_tool(const std::string& tool) {
+    return tool == "gui_session_list" || tool == "gui_connection_list" || tool == "gui_credentials_list" ||
+           tool == "gui_doctor" || tool == "gui_batch";
+}
+
+} // namespace
+
+bool needs_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args) {
+    if (!principal.sap_systems.empty() && session_system_tool(tool, args)) return true;
+    return !principal.connections.empty() && !targetless_tool(tool);
+}
+
+mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
+                                             const SessionTarget& target) {
+    if (!principal.sap_systems.empty() && session_system_tool(tool, args)) {
+        if (target.system.empty())
+            return refuse("SYSTEM_UNKNOWN",
+                          "token '" + principal.name + "' is limited to specific SAP systems and the system of this " +
+                              (tool == "gui_session_launch" ? "SAP Logon entry" : "connection/session") +
+                              " cannot be determined without contacting SAP; ask the operator to start it on the desktop "
+                              "and attach, or use a token without a system allowlist");
+        if (!system_allowed(principal.sap_systems, target.system))
+            return refuse("SYSTEM_DENIED", "token '" + principal.name + "' is not allowed to use SAP system " + target.system);
+    }
+    if (!principal.connections.empty() && !targetless_tool(tool)) {
+        const std::string name = tool == "gui_session_launch" && args.is_object() && args.contains("name") && args["name"].is_string()
+                                     ? args["name"].get<std::string>() : target.connection_name;
+        if (name.empty())
+            return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections and the "
+                                               "connection of this call cannot be determined");
+        if (!matches_any(principal.connections, name))
+            return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is not allowed to use connection '" + name + "'");
+    }
+    return PolicyDecision{};
+}
+
+int rate_family_limit(const mcp::Principal& principal, const std::string& family) {
+    const auto it = principal.rate_families.find(family);
+    return it == principal.rate_families.end() || it->second < 1 ? 0 : it->second;
+}
+
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec) {
     if (!has_scope(principal, spec.family)) return false;
     if (principal.read_only && spec.write_tool) return false;

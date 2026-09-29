@@ -100,6 +100,18 @@ public:
     /// connection cannot be resolved (missing, ambiguous, session gone) - callers must treat that as unknown.
     audit::SapFacts audit_facts_for_connection(std::optional<int> connection) const noexcept;
 
+    /// What a session/connection call would act on, for token allowlists: SAP system/client and the saved
+    /// connection / SAP Logon entry name. Exactly one selector is used: `logon_name` (a launch: the facts of an
+    /// already open session of that entry, if any), `session_id` (an attach: the live session, name from its
+    /// owning connection) or `connection` (a saved connection, or the single cached one). Read-only: no attach,
+    /// no session switch, no cache change, no SAP traffic. Fields stay empty when not determinable.
+    struct SessionTargetInfo {
+        audit::SapFacts facts;
+        std::string connection_name;
+    };
+    SessionTargetInfo peek_session_target(const std::string& logon_name, const std::string& session_id,
+                                          std::optional<int> connection) const noexcept;
+
     // Connection management - two modes
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded

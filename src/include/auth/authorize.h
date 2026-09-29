@@ -29,8 +29,9 @@ using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_na
 ///  - read-only: a read_only token is refused write/destructive calls with the server read-only rule set -> READ_ONLY
 ///    (effective read-only = server || token; the dispatcher runs check_call first so the server's own refusals keep their codes)
 ///  - SAP system/client allowlist against `current_system` ("SID/CLIENT"; nullopt = unknown) -> SYSTEM_DENIED /
-///    SYSTEM_UNKNOWN. Session/connection/system/credentials tools and gui_batch itself are exempt (they
-///    run before any system is attached; every later call is checked).
+///    SYSTEM_UNKNOWN. Session/connection/system/credentials tools and gui_batch itself are exempt HERE (they
+///    run before any system is attached; launch/login/attach/disconnect are checked against THEIR target by
+///    authorize_session_target; every later call is checked).
 ///  - T-code allowlist: gui_transaction_start `code` -> TCODE_DENIED; while an allowlist is set, gui_element_fill into
 ///    the command field (okcd) is refused too. gui_key_send and menus are NOT blocked (residual risk, see docs/MCP.md).
 ///  - T-code allowlist, current transaction: with an allowlist, every tool of the families screen, element, key, popup and
@@ -43,6 +44,32 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
                                    const mcp::json& args, const mcp::Policy& server_policy,
                                    std::optional<std::string> current_system, std::optional<std::string> current_tcode,
                                    const SpecLookup& lookup = {});
+
+/// What a session/connection-targeting call is about to act on, as far as it could be determined WITHOUT contacting
+/// SAP (saved connection files, the live session's own metadata). Empty fields mean "not determinable".
+struct SessionTarget {
+    std::string system;           ///< "SID/CLIENT" (or just "SID" when the client is not known yet)
+    std::string connection_name;  ///< saved connection description / SAP Logon entry name
+};
+
+/// True when `tool` must be checked against the target (see authorize_session_target) for this principal, so the
+/// dispatcher can skip the lookup for everybody else (tokens without sap_systems/connections are unchanged).
+bool needs_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args);
+
+/// Enforces the token's SAP-system allowlist and `connections` allowlist on the calls that choose or end a session:
+///  - gui_session_launch / gui_session_login / gui_session_attach, and gui_session_disconnect with close_session:
+///    with sap_systems set the target system must be determinable and allowed -> SYSTEM_UNKNOWN (fail closed,
+///    e.g. a SAP Logon entry that has no open session yet) / SYSTEM_DENIED.
+///  - with `connections` set, every tool that acts on a connection (launch, login, attach, disconnect and the
+///    screen/element/key/... tools) needs the connection name to be determinable and to match one glob
+///    -> CONNECTION_DENIED. gui_session_list, gui_connection_list, gui_credentials_list, gui_doctor and
+///    gui_batch (its items are checked one by one) have no target and are not restricted.
+/// Pure; tokens without either list are always allowed.
+mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
+                                             const SessionTarget& target);
+
+/// The token's own calls-per-minute limit for a tool family (`--rate-family element=10`); 0 = none.
+int rate_family_limit(const mcp::Principal& principal, const std::string& family);
 
 /// Whether tools/list should show `spec` to `principal` (scope + read-only). Pure.
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec);

@@ -168,7 +168,9 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
         if (scope != "*") ok.principal.scopes.insert(scope);
     ok.principal.sap_systems = meta->sap_systems;
     ok.principal.tcodes = meta->tcodes;
+    ok.principal.connections = meta->connections;
     ok.principal.rate_per_minute = meta->rate_per_minute;
+    ok.principal.rate_families = meta->rate_families;
     ok.principal.read_only = meta->read_only;
     ok.principal.remote_addr = client.address;
     ok.principal.authenticated = true;

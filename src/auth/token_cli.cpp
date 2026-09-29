@@ -1,6 +1,7 @@
 #include "include/auth/token_cli.h"
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace fairyfly::auth {
 
@@ -62,8 +63,24 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             request.read_only = args.read_only_flag || !scopes_given;
             request.sap_systems = split_list(args.systems);
             request.tcodes = split_list(args.tcodes);
+            request.connections = split_list(args.connections);
             request.allowed_ips = split_list(args.ips);
             request.rate_per_minute = args.rate;
+            for (const auto& entry : split_list(args.rate_families)) {
+                const auto eq = entry.find('=');
+                std::size_t used = 0;
+                long long limit = 0;
+                try {
+                    if (eq == std::string::npos || eq == 0) throw std::invalid_argument("shape");
+                    limit = std::stoll(entry.substr(eq + 1), &used);
+                    if (used != entry.size() - eq - 1) throw std::invalid_argument("shape");
+                } catch (const std::exception&) {
+                    return failure("INVALID_ARGUMENT", "--rate-family entries look like element=10 (family=calls per minute), got '" + entry + "'");
+                }
+                if (limit < 1 || limit > 1000000)
+                    return failure("INVALID_ARGUMENT", "--rate-family limits must be 1..1000000 calls per minute");
+                request.rate_families[entry.substr(0, eq)] = static_cast<int>(limit);
+            }
             if (std::find(request.scopes.begin(), request.scopes.end(), "*") != request.scopes.end() && !args.yes)
                 return failure("CONFIRMATION_REQUIRED",
                                "a token with scope '*' can use every tool family; repeat with --yes to confirm");

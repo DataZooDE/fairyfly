@@ -150,7 +150,7 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 
 | Status | Code | Cause |
 |---|---|---|
-| 200 | tool result / JSON-RPC error | including tool errors (`SCOPE_DENIED`, `READ_ONLY`, `TCODE_DENIED`, `SYSTEM_DENIED`, `SYSTEM_UNKNOWN`, `RATE_LIMITED`, `READ_ONLY_REFUSED`, `SERVER_BUSY`, `CALL_TIMEOUT`) |
+| 200 | tool result / JSON-RPC error | including tool errors (`SCOPE_DENIED`, `READ_ONLY`, `TCODE_DENIED`, `SYSTEM_DENIED`, `SYSTEM_UNKNOWN`, `CONNECTION_DENIED`, `RATE_LIMITED`, `READ_ONLY_REFUSED`, `SERVER_BUSY`, `CALL_TIMEOUT`) |
 | 202 | none | a notification or a response was posted |
 | 400 | JSON-RPC -32700 / -32600 | body is not valid JSON / not a valid JSON-RPC message |
 | 400 | JSON-RPC **-32020** | `Mcp-Method` or `Mcp-Name` header does not match the body |
@@ -199,7 +199,10 @@ Layers, outside in:
 2. **IIS IP allow-list** (`--allow-ip`), a 403 before fairyfly sees the request. Path restriction to `/mcp`,
    1 MiB body limit, header hygiene (client-supplied `X-Forwarded-*` and the proxy secret header are dropped).
 3. **Bearer tokens** (`ffy_<id>_<secret>`): only SHA-256 plus metadata are stored, in Windows Credential Manager
-   (`fairyfly-mcp:<name>`); constant-time comparison; optional expiry and per-token IP binding; revocation takes
+   (`fairyfly-mcp:<name>`; a compact JSON record, split over `fairyfly-mcp:<name>#1..n` chunk entries when a long
+   allowlist exceeds one Credential Manager value, up to 16 chunks, else `TOKEN_TOO_LARGE`; the head entry is written
+   last and a damaged or incomplete set never authenticates; `token delete` removes every chunk, `cmdkey` users must
+   delete the `#n` entries as well); constant-time comparison; optional expiry and per-token IP binding; revocation takes
    effect within 5 s (instantly in the revoking process).
 4. **Scopes** per tool family, the token **read-only** flag, **SAP system/client** allowlist and **T-code**
    allowlist, a per-token **rate limit**. The effective policy is the server policy intersected with the token's:
@@ -226,14 +229,14 @@ the VM; (e) an operator with an over-privileged token.
 | Access from unexpected networks | IIS IP allow-list; per-token `--ip` (needs a working proxy secret) | anyone who can read the proxy secret (local admin, Credential Manager reader) can spoof `X-Forwarded-For` and defeat token IP binding |
 | Browser-based attacks (DNS rebinding, CSRF) | Host check (loopback or `--allowed-hosts`); any `Origin` refused unless in `--cors-origin`; POST + JSON only | none known beyond misconfigured `--allowed-hosts`/`--cors-origin` |
 | Client does more than intended | scopes per tool family; token read-only flag; server mode ceiling; `FAIRYFLY_READ_ONLY` hard cap; per-item checks in `gui_batch` | token scopes are coarse (a whole family); a write-mode server with a write token can change any data the SAP user may |
-| Access to unintended SAP systems | `--system SID/CLIENT` allowlist, checked against the connection the call targets (explicit, default or sticky; read-only lookup, no attach); `SYSTEM_DENIED`, `SYSTEM_UNKNOWN` when it cannot be established | `session`, `connection`, `system` and `credentials` tools are exempt: a token with the `session` scope can attach or launch any saved connection |
+| Access to unintended SAP systems | `--system SID/CLIENT` allowlist, checked against the connection the call targets (explicit, default or sticky; read-only lookup, no attach); `SYSTEM_DENIED`, `SYSTEM_UNKNOWN` when it cannot be established | launch/login/attach/disconnect --close-session are checked against their own target (fail closed: `SYSTEM_UNKNOWN` for an entry without an open session); `--connections NAME` restricts saved connections by name (`CONNECTION_DENIED`); listings and `gui_batch` itself are not restricted, and the SAP Logon system of a not-yet-open entry cannot be known |
 | Access to unintended transactions | `--tcode` allowlist on `gui_transaction_start`, on the transaction already open for every screen, element, key, popup and menu tool (unknown = denied), and on `gui_batch` items; typing into the command field is blocked | the open transaction is read just before a call and can change during it (race); clicks, key presses and menu entries inside an allowed transaction can navigate to a follow-up transaction, which only the next call notices; treat T-code lists as a guard rail, not isolation |
-| Runaway or abusive clients | per-token rate limit (`--rate`, `RATE_LIMITED`); one call at a time; queue of 16; 1 MiB request limit; result size caps | a busy client can still delay others (single shared SAP session, calls are serialized) |
+| Runaway or abusive clients | per-token rate limit (`--rate`, optional per-family `--rate-family element=10,key=10`, `RATE_LIMITED`); one call at a time; queue of 16; 1 MiB request limit; result size caps | a busy client can still delay others (single shared SAP session, calls are serialized) |
 | Slow-body / slow-loris clients exhausting the HTTP worker pool | authentication and the header checks (Host, Origin, Content-Type, path, method) run on the request headers BEFORE the body is read; a rejected request gets its answer and the connection is closed; small rejected bodies (up to 64 KiB) are read and discarded so the close does not reset the connection, but at most half of the workers do that at a time; 5 s read timeout; bounded connection queue | headers that never complete, or a slow body sent with a VALID token, still occupy a worker for up to the 5 s read timeout each: keep the IIS reverse proxy (it buffers requests) and the IP allowlist in front |
 | Prompt injection via SAP content | screen results are labelled untrusted; server instructions tell the model not to follow them; read-only default | the model may still be persuaded to use write tools it has been granted; keep write tokens rare and confirm destructive actions client-side |
 | Credential theft | no tool accepts a password; SAP logon uses the Credential Manager; tokens only stored as hashes; secrets never in logs, audit, YAML or listings | Credential Manager entries are readable by any process of the same Windows user |
 | Repudiation, forensics | audit record per call with principal, remote address and era; start/stop records | append-only by convention, not tamper-proof |
-| Shared state between principals | none by design for auth | one shared SAP session and one sticky default connection for all tokens: one client's navigation changes what the next client sees |
+| Shared state between principals | none by design for auth | the sticky default connection and the default rate budget are per token, but the SAP GUI session and its screen state (open transaction, popups, field contents) are shared: one client's navigation still changes what the next client sees, so tokens with different purposes should use different saved connections (`--connections`) |
 | Session unavailable | `mcp doctor` and the tray warn | RDP disconnect, lock screen or log off yields black screenshots and failing calls; nothing restarts the desktop |
 
 ## Client cookbook
@@ -337,7 +340,7 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 | Tool error `SCOPE_DENIED` | the token lacks the tool's family; create a token with that `--scope` |
 | `READ_ONLY` | the token is read-only; `TOOL_UNAVAILABLE_READ_ONLY` / `READ_ONLY_REFUSED`: the server is in read-only mode, restart with `--allow-write` if intended |
 | `TCODE_DENIED` | transaction not in the token's `--tcode`; the same code blocks typing into the command field |
-| `SYSTEM_UNKNOWN` / `SYSTEM_DENIED` | a token with `--system` needs a known attached session (call `gui_session_attach` first with a `session`-scoped token); or wrong system |
+| `SYSTEM_UNKNOWN` / `SYSTEM_DENIED` | a token with `--system` needs a target whose system is known (an open session; a launch of an entry that has no open session is refused, start it on the desktop and attach); or wrong system. `CONNECTION_DENIED`: the connection name is not in the token's `--connections` |
 | `RATE_LIMITED` | over the token's `--rate` (or the server default 120/min); combine steps with `gui_batch` |
 | `NO_SESSIONS`, `MULTIPLE_SESSIONS` | no SAP session, or several open; `gui_session_list` then `gui_session_attach` with `session_id` |
 | Screenshot is black, calls fail after a while | the desktop is locked or the RDP session is disconnected; `tscon`, disable lock, see MCP_TRAY.md |

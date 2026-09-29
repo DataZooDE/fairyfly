@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <fstream>
 #include <sstream>
@@ -747,4 +749,294 @@ TEST_CASE("cli: mcp token subcommands parse and do not start the server", "[auth
     CHECK(dry({"mcp"}).path == "mcp");
     CHECK(dry({"mcp", "tools"}).path == "mcp tools");
     CHECK(dry({"mcp", "--allow-write"}).path == "mcp");
+}
+
+// ---- session/connection targets (SAP-system and saved-connection allowlists) ---------------------
+TEST_CASE("authorize: session target rules are pure and fail closed", "[auth][authz][target]") {
+    using auth::SessionTarget;
+    Principal open = token("open", {"session"});
+    Principal sys = token("sys", {"session"});
+    sys.sap_systems = {"A4H/001", "QAS"};
+    Principal conn = token("conn", {"session", "screen"});
+    conn.connections = {"DEV*", "Bigfox"};
+
+    // tokens without lists are unchanged, whatever the target says
+    CHECK(auth::authorize_session_target(open, "gui_session_launch", {{"name", "PRD"}}, SessionTarget{}).allowed);
+    CHECK_FALSE(auth::needs_session_target(open, "gui_session_launch", {{"name", "PRD"}}));
+
+    // system allowlist: launch/login/attach and disconnect --close-session; unknown target => SYSTEM_UNKNOWN
+    for (const char* tool : {"gui_session_launch", "gui_session_login", "gui_session_attach"}) {
+        CHECK(auth::needs_session_target(sys, tool, json::object()));
+        CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"A4H/001", ""}).allowed);
+        CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"QAS/300", ""}).allowed);  // "QAS" = any client
+        CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"PRD/100", ""}).code == "SYSTEM_DENIED");
+        const auto unknown = auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{});
+        CHECK_FALSE(unknown.allowed);
+        CHECK(unknown.code == "SYSTEM_UNKNOWN");
+        CHECK_FALSE(unknown.message.empty());
+    }
+    CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", json::object()));
+    CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", {{"close_session", false}}));
+    CHECK(auth::needs_session_target(sys, "gui_session_disconnect", {{"close_session", true}}));
+    CHECK(auth::authorize_session_target(sys, "gui_session_disconnect", {{"close_session", true}}, SessionTarget{"PRD/100", ""}).code ==
+          "SYSTEM_DENIED");
+    CHECK_FALSE(auth::needs_session_target(sys, "gui_session_list", json::object()));
+
+    // connection names: launch uses the requested SAP Logon entry itself
+    CHECK(auth::authorize_session_target(conn, "gui_session_launch", {{"name", "dev-1"}}, SessionTarget{}).allowed);
+    CHECK(auth::authorize_session_target(conn, "gui_session_launch", {{"name", "PRD"}}, SessionTarget{}).code == "CONNECTION_DENIED");
+    CHECK(auth::authorize_session_target(conn, "gui_session_login", json::object(), SessionTarget{"", "Bigfox"}).allowed);
+    CHECK(auth::authorize_session_target(conn, "gui_session_attach", json::object(), SessionTarget{"", "PRD"}).code == "CONNECTION_DENIED");
+    CHECK(auth::authorize_session_target(conn, "gui_session_attach", json::object(), SessionTarget{}).code == "CONNECTION_DENIED");
+    CHECK(auth::authorize_session_target(conn, "gui_screen_read", json::object(), SessionTarget{"", "DEV2"}).allowed);
+    CHECK(auth::authorize_session_target(conn, "gui_screen_read", json::object(), SessionTarget{"", "PRD"}).code == "CONNECTION_DENIED");
+    for (const char* tool : {"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch"})
+        CHECK_FALSE(auth::needs_session_target(conn, tool, json::object()));
+}
+
+TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through the target resolver", "[auth][dispatch][target]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("sys", {"session"});
+    p.sap_systems = {"A4H/001"};
+    std::vector<CommandDispatcher::TargetQuery> queries;
+    std::map<std::string, auth::SessionTarget> by_logon = {{"DEV", {"A4H/001", "DEV"}}, {"PRD", {"PRD/100", "PRD"}}};
+    std::map<std::string, auth::SessionTarget> by_session = {{"/app/con[0]/ses[0]", {"A4H/001", "DEV"}},
+                                                             {"/app/con[1]/ses[0]", {"PRD/100", "PRD"}}};
+    std::map<int, auth::SessionTarget> by_connection = {{1, {"A4H/001", "DEV"}}, {2, {"PRD/100", "PRD"}}};
+    d.set_session_target_resolver([&](const CommandDispatcher::TargetQuery& q) -> auth::SessionTarget {
+        queries.push_back(q);
+        if (!q.logon_name.empty()) return by_logon.count(q.logon_name) ? by_logon[q.logon_name] : auth::SessionTarget{};
+        if (!q.session_id.empty()) return by_session.count(q.session_id) ? by_session[q.session_id] : auth::SessionTarget{};
+        return q.connection && by_connection.count(*q.connection) ? by_connection[*q.connection] : auth::SessionTarget{};
+    });
+
+    // launch by SAP Logon name
+    auto r = d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    r = d.call_tool("gui_session_launch", {{"name", "NEW"}}, ctx_for(p));  // no open session: system unknown
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+    r = d.call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(p));
+    CHECK_FALSE(r.is_error);
+    REQUIRE(f.calls.size() == 1);
+
+    // attach by explicit session id
+    f.calls.clear();
+    r = d.call_tool("gui_session_attach", {{"session_id", "/app/con[1]/ses[0]"}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    r = d.call_tool("gui_session_attach", {{"session_id", "/app/con[9]/ses[0]"}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+    r = d.call_tool("gui_session_attach", {{"session_id", "/app/con[0]/ses[0]"}}, ctx_for(p));
+    CHECK_FALSE(r.is_error);
+
+    // login and disconnect --close-session use the saved connection
+    f.calls.clear();
+    r = d.call_tool("gui_session_login", {{"connection", 2}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    r = d.call_tool("gui_session_disconnect", {{"connection", 2}, {"close_session", true}}, ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());
+    r = d.call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+    CHECK_FALSE(r.is_error);
+    // a plain disconnect (no session ended) is not a system question
+    r = d.call_tool("gui_session_disconnect", {{"connection", 2}}, ctx_for(p));
+    CHECK_FALSE(r.is_error);
+
+    // a token without any resolver answer at all is denied, never allowed by default
+    Fixture g;
+    auto dg_ptr = g.make(write_mode());
+    CHECK(text_of(dg_ptr->call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(p))).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(g.calls.empty());
+
+    // tokens without sap_systems never trigger a lookup; stdio neither
+    queries.clear();
+    Principal open = token("open", {"session"});
+    CHECK_FALSE(d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(open)).is_error);
+    CHECK_FALSE(d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(Principal{}, false)).is_error);
+    CHECK(queries.empty());
+}
+
+TEST_CASE("dispatcher: attach without session_id checks the session it resolves to", "[auth][dispatch][target]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv.size() >= 2 && argv[0] == "session" && argv[1] == "list")
+            r.data = {{"connections", json::array({{{"description", "PRD"},
+                                                    {"sessions", json::array({{{"id", "/app/con[1]/ses[0]"}}})}}})}};
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("sys", {"session"});
+    p.sap_systems = {"A4H/001"};
+    d.set_session_target_resolver([](const CommandDispatcher::TargetQuery& q) -> auth::SessionTarget {
+        return q.session_id == "/app/con[1]/ses[0]" ? auth::SessionTarget{"PRD/100", "PRD"} : auth::SessionTarget{};
+    });
+    const auto r = d.call_tool("gui_session_attach", json::object(), ctx_for(p));
+    CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
+    for (const auto& call : f.calls) CHECK(call[1] == "list");  // only the read-only listing ran, never the attach
+}
+
+TEST_CASE("dispatcher: connections allowlist binds session and connection-targeting tools by name", "[auth][dispatch][target]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("conn", {"session", "screen", "connection", "batch"});
+    p.connections = {"DEV*"};
+    d.set_session_target_resolver([](const CommandDispatcher::TargetQuery& q) -> auth::SessionTarget {
+        if (q.connection == 1) return {"", "DEV1"};
+        if (q.connection == 2) return {"", "PRD"};
+        return {};
+    });
+    CHECK_FALSE(d.call_tool("gui_session_launch", {{"name", "DEV1"}}, ctx_for(p)).is_error);
+    CHECK(text_of(d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(p))).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK_FALSE(d.call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p)).is_error);
+    CHECK(text_of(d.call_tool("gui_session_login", {{"connection", 2}}, ctx_for(p))).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(text_of(d.call_tool("gui_session_disconnect", {{"connection", 2}}, ctx_for(p))).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK_FALSE(d.call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", {{"connection", 2}}, ctx_for(p))).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(p))).find("CONNECTION_DENIED") != std::string::npos);  // unknown
+    // listings have no target
+    CHECK_FALSE(d.call_tool("gui_connection_list", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_session_list", json::object(), ctx_for(p)).is_error);
+    // batch items are checked one by one
+    const auto r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"connection", 1}}}},
+                                                                    {{"tool", "gui_screen_read"}, {"arguments", {{"connection", 2}}}}})},
+                                              {"stop_on_error", false}}, ctx_for(p));
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+}
+
+// ---- per-principal sticky connection and budgets -------------------------------------------------
+namespace {
+bool argv_targets(const Argv& argv, const std::string& id) {
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
+        if (argv[i] == "--connection" && argv[i + 1] == id) return true;
+    return false;
+}
+bool argv_has_connection(const Argv& argv) {
+    return std::find(argv.begin(), argv.end(), "--connection") != argv.end();
+}
+} // namespace
+
+TEST_CASE("dispatcher: the sticky connection belongs to one principal", "[auth][dispatch][sticky]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv.size() >= 3 && argv[0] == "session" && argv[1] == "attach") {
+            // the attach result names the connection file; encode it from the session id (con[N] -> N)
+            const std::string& sid = argv.back();
+            const auto open = sid.find("con[");
+            r.data = {{"connection_file_id", std::stoi(sid.substr(open + 4))}};
+        }
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal a = token("token-a", {"session", "screen"});
+    Principal b = token("token-b", {"session", "screen"});
+
+    // A attaches connection 5; B has no default yet
+    CHECK_FALSE(d.call_tool("gui_session_attach", {{"session_id", "/app/con[5]/ses[0]"}}, ctx_for(a)).is_error);
+    CHECK(d.sticky_connection("token-a") == 5);
+    CHECK_FALSE(d.sticky_connection("token-b").has_value());
+    f.calls.clear();
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    REQUIRE(f.calls.size() == 1);
+    CHECK_FALSE(argv_has_connection(f.calls[0]));           // A's attach did not retarget B
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+
+    // B attaches 7: interleaved calls keep their own targets
+    CHECK_FALSE(d.call_tool("gui_session_attach", {{"session_id", "/app/con[7]/ses[0]"}}, ctx_for(b)).is_error);
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    CHECK(argv_targets(f.calls.back(), "7"));
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+    CHECK(f.records.back().connection == 5);
+
+    // an explicit connection argument still wins and does not change any default
+    CHECK_FALSE(d.call_tool("gui_screen_read", {{"connection", 9}}, ctx_for(b)).is_error);
+    CHECK(argv_targets(f.calls.back(), "9"));
+    CHECK(d.sticky_connection("token-b") == 7);
+
+    // the local stdio principal keeps the old single-default behaviour
+    Fixture g;
+    g.handler = f.handler;
+    auto dg_ptr = g.make(write_mode());
+    auto& dg = *dg_ptr;
+    CHECK_FALSE(dg.call_tool("gui_session_attach", {{"session_id", "/app/con[3]/ses[0]"}}, ctx_for(Principal{}, false)).is_error);
+    CHECK(dg.sticky_connection() == 3);
+    CHECK_FALSE(dg.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false)).is_error);
+    CHECK(argv_targets(g.calls.back(), "3"));
+}
+
+TEST_CASE("dispatcher: the server default rate budget is per principal", "[auth][dispatch][sticky]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.max_calls_per_minute = 2;
+    auto d_ptr = f.make(policy);
+    auto& d = *d_ptr;
+    Principal a = token("token-a", {"screen"});
+    Principal b = token("token-b", {"screen"});
+    Principal own = token("token-own", {"screen"});
+    own.rate_per_minute = 5;
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(a))).find("RATE_LIMITED") != std::string::npos);
+    // B and a token with its own rate are not affected by A's exhausted budget
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(b))).find("RATE_LIMITED") != std::string::npos);
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(own)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(own))).find("RATE_LIMITED") != std::string::npos);
+    // the stdio principal has its own server-wide gate
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false))).find("RATE_LIMITED") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: per-family rate limits name the family and are independent", "[auth][dispatch][ratefamily]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.max_calls_per_minute = 100;
+    auto d_ptr = f.make(policy);
+    auto& d = *d_ptr;
+    Principal p = token("fam", {"screen", "element", "key"});
+    p.rate_families = {{"element", 2}, {"key", 1}};
+    const json click = {{"element", "wnd[0]/usr/btnX"}};
+
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(p)).is_error);
+    auto r = d.call_tool("gui_element_click", click, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("RATE_LIMITED") != std::string::npos);
+    CHECK(text_of(r).find("'element'") != std::string::npos);
+    const std::size_t ran = f.calls.size();
+    CHECK(ran == 2);  // the refused call never reached the CLI
+
+    // other families are unaffected; key has its own 1 per minute
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    r = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p));
+    CHECK(text_of(r).find("'key'") != std::string::npos);
+
+    // another principal, and a token without family limits, keep their own budgets
+    Principal q = token("fam2", {"element"});
+    q.rate_families = {{"element", 1}};
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(q)).is_error);
+    CHECK(d.call_tool("gui_element_click", click, ctx_for(q)).is_error);
+    Principal free_token = token("free", {"element"});
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(free_token)).is_error);
+
+    // every gui_batch item counts against its family
+    Principal b = token("batcher", {"element", "batch"});
+    b.rate_families = {{"element", 1}};
+    const auto batch = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_element_click"}, {"arguments", click}},
+                                                                        {{"tool", "gui_element_click"}, {"arguments", click}}})},
+                                                  {"stop_on_error", false}}, ctx_for(b));
+    CHECK(text_of(batch).find("RATE_LIMITED") != std::string::npos);
+    // the stdio principal has no family limits
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(Principal{}, false)).is_error);
 }

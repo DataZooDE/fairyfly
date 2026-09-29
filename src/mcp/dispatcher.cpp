@@ -201,7 +201,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (!spec) return fail("TOOL_NOT_FOUND", "unknown tool '" + name + "'", "use tools/list to see the available tools");
     json args = raw_args.is_null() ? json::object() : raw_args;
     if (args.is_object() && args.contains("connection")) record.connection = int_from_json(args["connection"]);
-    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection_;
+    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection(ctx.principal.name);
 
     // 2. policy
     const PolicyDecision decision = check_call(*spec, args, policy_);
@@ -224,6 +224,33 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
     }
 
+    // 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch,
+    // log on, attach, disconnect (or act through an explicit `connection`). The target is resolved read-only, without
+    // contacting SAP; when it cannot be determined the call is refused (fail closed).
+    const auto check_target = [&](const json& call_args) -> std::optional<PolicyDecision> {
+        if (!auth::needs_session_target(principal, name, call_args)) return std::nullopt;
+        TargetQuery query;
+        if (name == "gui_session_launch") {
+            if (call_args.is_object() && call_args.contains("name") && call_args["name"].is_string())
+                query.logon_name = call_args["name"].get<std::string>();
+        } else if (name == "gui_session_attach") {
+            if (call_args.is_object() && call_args.contains("session_id") && call_args["session_id"].is_string())
+                query.session_id = call_args["session_id"].get<std::string>();
+        } else {
+            query.connection = record.connection;
+        }
+        auth::SessionTarget target;
+        if (target_resolver_) {
+            try { target = target_resolver_(query); } catch (...) { target = {}; }
+        }
+        auto decision = auth::authorize_session_target(principal, name, call_args, target);
+        if (decision.allowed) return std::nullopt;
+        return decision;
+    };
+    const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
+    if (!attach_needs_resolution)
+        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+
     // 3. rate limit (per principal for tokens; the server-wide gate for the local stdio principal)
     const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
     const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
@@ -234,6 +261,13 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                     "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
                         " per minute)",
                     "wait a few seconds and retry, or combine steps with gui_batch");
+    // Optional per-family budget of the token (--rate-family), on top of the overall one. Every gui_batch item counts.
+    if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
+        if (!keyed_limiter_.allow(principal.name + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+            return fail("RATE_LIMITED",
+                        "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
+                        "wait a few seconds and retry");
+    }
 
     // A read-only token narrows the server mode for this call only (restored afterwards).
     struct ReadOnlyScope {
@@ -251,7 +285,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
-    if (!effective.default_connection) effective.default_connection = sticky_connection_;
+    if (!effective.default_connection) effective.default_connection = sticky_connection(ctx.principal.name);
 
     // gui_session_attach without session_id: resolve through `list`.
     if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
@@ -278,6 +312,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                         std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
                         "Sessions: " + dump_compact(sessions));
         args["session_id"] = sessions[0]["session_id"];
+        // The session is known now: the token's system/connection allowlists apply to it like to an explicit id.
+        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
     }
 
     // 4. build argv
@@ -339,7 +375,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
         result.data.is_object() && result.data.contains("connection_file_id")) {
         if (auto id = int_from_json(result.data["connection_file_id"])) {
-            sticky_connection_ = id;
+            set_sticky_connection(ctx.principal.name, *id);
             record.connection = id;
             const std::string note = "connection " + std::to_string(*id) +
                                      " is now the default for later calls that omit `connection`.";
