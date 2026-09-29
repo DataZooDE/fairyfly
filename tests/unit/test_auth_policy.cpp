@@ -769,7 +769,8 @@ TEST_CASE("authorize: session target rules are pure and fail closed", "[auth][au
     CHECK_FALSE(auth::needs_session_target(open, "gui_session_launch", {{"name", "PRD"}}));
 
     // system allowlist: launch/login/attach and disconnect --close-session; unknown target => SYSTEM_UNKNOWN
-    for (const char* tool : {"gui_session_launch", "gui_session_login", "gui_session_attach"}) {
+    CHECK(auth::needs_session_target(sys, "gui_session_launch", json::object()));
+    for (const char* tool : {"gui_session_login", "gui_session_attach"}) {
         CHECK(auth::needs_session_target(sys, tool, json::object()));
         CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"A4H/001", ""}).allowed);
         CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"QAS/300", ""}).allowed);  // "QAS" = any client
@@ -778,6 +779,28 @@ TEST_CASE("authorize: session target rules are pure and fail closed", "[auth][au
         CHECK_FALSE(unknown.allowed);
         CHECK(unknown.code == "SYSTEM_UNKNOWN");
         CHECK_FALSE(unknown.message.empty());
+    }
+    // launch with sap_systems: only for entry names vouched for by a --connections glob; other sessions' facts are no proof
+    {
+        Principal vouched = token("vouched", {"session"});
+        vouched.sap_systems = {"A4H/001"};
+        vouched.connections = {"DEV*"};
+        const json dev = {{"name", "DEV1"}};
+        const auto no_connections = auth::authorize_session_target(sys, "gui_session_launch", dev, SessionTarget{"A4H/001", "DEV1"});
+        CHECK(no_connections.code == "SYSTEM_UNKNOWN");  // even when the entry looks like an allowed system
+        CHECK(no_connections.message.find("--connections") != std::string::npos);
+        CHECK(auth::authorize_session_target(sys, "gui_session_launch", dev, SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        // vouched entry name, no open session of that name: allowed
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{}).allowed);
+        // entry name outside the glob: the system rule says unknown, never allowed
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", {{"name", "PRD"}}, SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", json::object(), SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        // an open session of that name must be on an allowed system
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{"A4H/001", "DEV1"}).allowed);
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{"PRD/100", "DEV1"}).code == "SYSTEM_DENIED");
+        SessionTarget ambiguous;
+        ambiguous.ambiguous = true;
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, ambiguous).code == "SYSTEM_UNKNOWN");
     }
     CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", json::object()));
     CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", {{"close_session", false}}));
@@ -804,6 +827,7 @@ TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through th
     auto& d = *d_ptr;
     Principal p = token("sys", {"session"});
     p.sap_systems = {"A4H/001"};
+    p.connections = {"DEV", "PRD", "NEW"};  // launch needs the entry names vouched for by --connections
     std::vector<CommandDispatcher::TargetQuery> queries;
     std::map<std::string, auth::SessionTarget> by_logon = {{"DEV", {"A4H/001", "DEV"}}, {"PRD", {"PRD/100", "PRD"}}};
     std::map<std::string, auth::SessionTarget> by_session = {{"/app/con[0]/ses[0]", {"A4H/001", "DEV"}},
@@ -819,12 +843,29 @@ TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through th
     // launch by SAP Logon name
     auto r = d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(p));
     CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
-    r = d.call_tool("gui_session_launch", {{"name", "NEW"}}, ctx_for(p));  // no open session: system unknown
+    r = d.call_tool("gui_session_launch", {{"name", "OTHER"}}, ctx_for(p));  // not vouched for by --connections
     CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
     CHECK(f.calls.empty());
-    r = d.call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(p));
+    r = d.call_tool("gui_session_launch", {{"name", "DEV"}, {"login", true}}, ctx_for(p));
     CHECK_FALSE(r.is_error);
     REQUIRE(f.calls.size() == 1);
+    f.calls.clear();
+    r = d.call_tool("gui_session_launch", {{"name", "NEW"}}, ctx_for(p));  // vouched, no open session: allowed
+    CHECK_FALSE(r.is_error);
+    REQUIRE(f.calls.size() == 1);
+    f.calls.clear();
+    // a token WITHOUT connections cannot launch at all, even for an entry whose open session is on an allowed system
+    Principal no_conn = token("sys2", {"session", "batch"});
+    no_conn.sap_systems = {"A4H/001"};
+    r = d.call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(no_conn));
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+    // inside gui_batch too
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_session_launch"}, {"arguments", {{"name", "DEV"}, {"login", true}}}}})}},
+                    ctx_for(no_conn));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
 
     // attach by explicit session id
     f.calls.clear();
@@ -886,6 +927,12 @@ TEST_CASE("dispatcher: attach without session_id checks the session it resolves 
 
 TEST_CASE("dispatcher: connections allowlist binds session and connection-targeting tools by name", "[auth][dispatch][target]") {
     Fixture f;
+    f.handler = [](const Argv& argv) {  // the listings return well-formed (empty) data: they are filtered for this token
+        Result r = ok_result();
+        if (argv[0] == "connection") r.data = {{"connections", json::array()}, {"count", 0}};
+        else if (argv[0] == "session" && argv.size() > 1 && argv[1] == "list") r.data = {{"connections", json::array()}};
+        return r;
+    };
     auto d_ptr = f.make(write_mode());
     auto& d = *d_ptr;
     Principal p = token("conn", {"session", "screen", "connection", "batch"});
@@ -911,6 +958,258 @@ TEST_CASE("dispatcher: connections allowlist binds session and connection-target
                                                                     {{"tool", "gui_screen_read"}, {"arguments", {{"connection", 2}}}}})},
                                               {"stop_on_error", false}}, ctx_for(p));
     CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: connection list cleanup is refused for tokens limited to named connections", "[auth][dispatch][cleanup]") {
+    Fixture f;
+    f.handler = [](const Argv&) {
+        Result r = ok_result();
+        r.data = {{"connections", json::array()}, {"count", 0}};
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("conn", {"connection", "batch"});
+    p.connections = {"DEV*"};
+    p.read_only = false;
+
+    auto r = d.call_tool("gui_connection_list", {{"cleanup", true}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());  // nothing was deleted: the invoker never ran
+
+    // inside gui_batch (refused up front, no item runs)
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_connection_list"}, {"arguments", {{"cleanup", true}}}}})}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());
+
+    // a plain listing and cleanup=false are still fine
+    CHECK_FALSE(d.call_tool("gui_connection_list", {{"cleanup", false}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_connection_list", json::object(), ctx_for(p)).is_error);
+
+    // tokens without a connections restriction keep cleanup
+    f.calls.clear();
+    Principal open = token("open", {"connection"});
+    open.read_only = false;
+    CHECK_FALSE(d.call_tool("gui_connection_list", {{"cleanup", true}}, ctx_for(open)).is_error);
+    REQUIRE(f.calls.size() == 1);
+}
+
+// ---- listings are filtered to the token's connections --------------------------------------------
+namespace {
+
+std::string everything_of(const ToolResult& r) {
+    std::string all;
+    for (const auto& block : r.content) all += block.dump() + "\n";
+    if (r.structured) all += r.structured->dump();
+    return all;
+}
+
+json session_list_data() {
+    return {{"connections",
+             json::array({{{"index", 0}, {"id", "/app/con[0]"}, {"description", "DEV1"}, {"connection_string", "dev.example"},
+                           {"backend_scripting_disabled", false}, {"reported_session_count", 2}, {"session_errors", json::array()},
+                           {"sessions", json::array({{{"id", "/app/con[0]/ses[0]"}}, {{"id", "/app/con[0]/ses[1]"}}})},
+                           {"session_count", 2}},
+                          {{"index", 1}, {"id", "/app/con[1]"}, {"description", "SECRETPRD"}, {"connection_string", "prd.example"},
+                           {"backend_scripting_disabled", true}, {"reported_session_count", 3},
+                           {"session_errors", json::array({{{"index", 2}, {"message", "SECRETPRD boom"}}})},
+                           {"sessions", json::array({{{"id", "/app/con[1]/ses[0]"}}, {{"id", "/app/con[1]/ses[1]"}}})},
+                           {"session_count", 2}},
+                          {{"index", 2}, {"error", "SECRETNONAME failed"}, {"sessions", json::array()}, {"session_count", 0}},
+                          {{"index", 3}, {"id", "/app/con[3]"}, {"description", "DEV2"}, {"backend_scripting_disabled", nullptr},
+                           {"session_errors", json::array()}, {"sessions", json::array({{{"id", "/app/con[3]/ses[0]"}}})},
+                           {"session_count", 1}}})},
+            {"total_connections", 4}, {"total_sessions", 5}, {"backend_scripting_disabled", true},
+            {"connection_enumeration_errors", 1}, {"session_enumeration_errors", 1}};
+}
+
+json connection_list_data() {
+    return {{"connections", json::array({{{"id", 1}, {"file", "C:/x/1.json"}, {"description", "DEV1"}, {"valid", true}},
+                                         {{"id", 2}, {"file", "C:/x/SECRETPRD.json"}, {"description", "SECRETPRD"}, {"valid", true}},
+                                         {{"id", 3}, {"file", "C:/x/3.json"}, {"description", ""}, {"valid", false}},
+                                         {{"id", 4}, {"file", "C:/x/4.json"}, {"description", "dev-2"}, {"valid", false}}})},
+            {"count", 4}};
+}
+
+json credentials_list_data() {
+    return {{"credentials", json::array({{{"connection", "DEV1"}, {"username", "alice"}, {"client", "100"}},
+                                         {{"connection", "SECRETPRD"}, {"username", "SECRETUSER"}, {"client", "999"}},
+                                         {{"connection", "DEV2"}, {"username", "bob"}, {"client", "200"}}})},
+            {"count", 3}};
+}
+
+Principal listing_token() {
+    Principal p = token("lister", {"session", "connection", "credentials", "batch"});
+    p.connections = {"DEV*"};
+    return p;
+}
+
+} // namespace
+
+TEST_CASE("authorize: session list is filtered to the token's connections with recomputed totals", "[auth][filter]") {
+    Principal p = listing_token();
+    Result r = ok_result();
+    r.data = session_list_data();
+    REQUIRE(auth::filter_listing_for_connections(p, "gui_session_list", r));
+    REQUIRE(r.data["connections"].size() == 2);
+    CHECK(r.data["connections"][0]["description"] == "DEV1");
+    CHECK(r.data["connections"][1]["description"] == "DEV2");
+    CHECK(r.data["total_connections"] == 2);
+    CHECK(r.data["total_sessions"] == 3);
+    CHECK(r.data["connection_enumeration_errors"] == 0);  // the nameless failed entry is gone
+    CHECK(r.data["session_enumeration_errors"] == 0);     // the dropped connection's session error is gone
+    CHECK(r.data["backend_scripting_disabled"] == false);  // came only from the dropped connection
+    const std::string all = r.data.dump();
+    for (const char* leak : {"SECRETPRD", "SECRETNONAME", "prd.example", "/app/con[1]", "con[2]"})
+        CHECK(all.find(leak) == std::string::npos);
+
+    // nothing allowed: empty lists, zero totals
+    Principal none = listing_token();
+    none.connections = {"NOPE"};
+    Result empty = ok_result();
+    empty.data = session_list_data();
+    REQUIRE(auth::filter_listing_for_connections(none, "gui_session_list", empty));
+    CHECK(empty.data["connections"].empty());
+    CHECK(empty.data["total_connections"] == 0);
+    CHECK(empty.data["total_sessions"] == 0);
+}
+
+TEST_CASE("authorize: connection and credentials lists are filtered by name with recomputed counts", "[auth][filter]") {
+    Principal p = listing_token();
+    Result c = ok_result();
+    c.data = connection_list_data();
+    REQUIRE(auth::filter_listing_for_connections(p, "gui_connection_list", c));
+    REQUIRE(c.data["connections"].size() == 2);  // DEV1, dev-2 (case-insensitive glob); the unnamed row is dropped
+    CHECK(c.data["count"] == 2);
+    CHECK(c.data.dump().find("SECRETPRD") == std::string::npos);
+
+    Result k = ok_result();
+    k.data = credentials_list_data();
+    REQUIRE(auth::filter_listing_for_connections(p, "gui_credentials_list", k));
+    REQUIRE(k.data["credentials"].size() == 2);
+    CHECK(k.data["count"] == 2);
+    const std::string all = k.data.dump();
+    for (const char* leak : {"SECRETPRD", "SECRETUSER", "999"}) CHECK(all.find(leak) == std::string::npos);
+
+    // unrestricted tokens and other tools are untouched
+    Principal open = token("open", {"session"});
+    Result untouched = ok_result();
+    untouched.data = credentials_list_data();
+    CHECK(auth::filter_listing_for_connections(open, "gui_credentials_list", untouched));
+    CHECK(untouched.data == credentials_list_data());
+    CHECK_FALSE(auth::listing_needs_filter(p, "gui_screen_read"));
+}
+
+TEST_CASE("authorize: a listing of unexpected shape is never returned unfiltered", "[auth][filter]") {
+    Principal p = listing_token();
+    for (const char* tool : {"gui_session_list", "gui_connection_list", "gui_credentials_list"}) {
+        for (const json& bad : {json::array(), json("text"), json::object(), json{{"connections", "x"}, {"credentials", "x"}},
+                                json{{"connections", json::array({"not-an-object"})}, {"credentials", json::array({5})}},
+                                json{{"connections", json::array()}, {"credentials", json::array()}, {"extra", "SECRETPRD"}}}) {
+            Result r = ok_result();
+            r.data = bad;
+            INFO(tool << " " << bad.dump());
+            CHECK_FALSE(auth::filter_listing_for_connections(p, tool, r));
+            CHECK(r.data.is_null());
+        }
+    }
+    // an error keeps its code only
+    Result e;
+    e.status = Result::Status::Error;
+    e.error = {{"code", "ENUMERATION_FAILED"}, {"message", "SECRETPRD unreachable"}, {"connections", json::array({"SECRETPRD"})}};
+    e.diagnostics = {{"trace", "SECRETPRD"}};
+    REQUIRE(auth::filter_listing_for_connections(p, "gui_connection_list", e));
+    CHECK(e.error["code"] == "ENUMERATION_FAILED");
+    CHECK(e.error.dump().find("SECRETPRD") == std::string::npos);
+    CHECK(e.diagnostics.is_null());
+}
+
+TEST_CASE("dispatcher: the three listings only show the token's connections (no leak in text or structure)", "[auth][dispatch][filter]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv[0] == "session" && argv[1] == "list") r.data = session_list_data();
+        else if (argv[0] == "connection" && argv[1] == "list") r.data = connection_list_data();
+        else if (argv[0] == "credentials" && argv[1] == "list") r.data = credentials_list_data();
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    const Principal p = listing_token();
+
+    for (const char* tool : {"gui_session_list", "gui_connection_list", "gui_credentials_list"}) {
+        INFO(tool);
+        const auto r = d.call_tool(tool, json::object(), ctx_for(p));
+        CHECK_FALSE(r.is_error);
+        const std::string all = everything_of(r);
+        for (const char* leak : {"SECRETPRD", "SECRETNONAME", "SECRETUSER", "prd.example"}) CHECK(all.find(leak) == std::string::npos);
+        CHECK(all.find("DEV1") != std::string::npos);
+        CHECK(all.find(std::string(tool) == "gui_connection_list" ? "dev-2" : "DEV2") != std::string::npos);
+    }
+    // the same inside gui_batch (each item is filtered before it is rendered)
+    const auto batch = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_session_list"}}, {{"tool", "gui_connection_list"}},
+                                                                        {{"tool", "gui_credentials_list"}}})}}, ctx_for(p));
+    CHECK_FALSE(batch.is_error);
+    const std::string all = everything_of(batch);
+    for (const char* leak : {"SECRETPRD", "SECRETNONAME", "SECRETUSER", "prd.example"}) CHECK(all.find(leak) == std::string::npos);
+    CHECK(all.find("DEV1") != std::string::npos);
+
+    // an unrestricted token still sees everything
+    Principal open = token("open", {"session", "connection", "credentials"});
+    CHECK(everything_of(d.call_tool("gui_credentials_list", json::object(), ctx_for(open))).find("SECRETPRD") != std::string::npos);
+    CHECK(everything_of(d.call_tool("gui_session_list", json::object(), ctx_for(open))).find("SECRETPRD") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: an unfilterable listing is an error, and errors do not name other connections", "[auth][dispatch][filter]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv[0] == "credentials") r.data = {{"credentials", "SECRETPRD"}, {"count", 1}};      // wrong shape
+        else if (argv[0] == "connection") {
+            r.status = Result::Status::Error;
+            r.error = {{"code", "ENUMERATION_FAILED"}, {"message", "SECRETPRD exploded"}};
+        } else r.data = {{"connections", json::array()}, {"total_connections", 0}, {"surprise", "SECRETPRD"}};
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    const Principal p = listing_token();
+
+    auto r = d.call_tool("gui_credentials_list", json::object(), ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(everything_of(r).find("RESULT_FILTER_FAILED") != std::string::npos);
+    CHECK(everything_of(r).find("SECRETPRD") == std::string::npos);
+
+    r = d.call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(everything_of(r).find("SECRETPRD") == std::string::npos);
+
+    r = d.call_tool("gui_connection_list", json::object(), ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(everything_of(r).find("ENUMERATION_FAILED") != std::string::npos);
+    CHECK(everything_of(r).find("SECRETPRD") == std::string::npos);
+}
+
+TEST_CASE("dispatcher: attach without session_id neither offers nor lists other connections' sessions", "[auth][dispatch][filter]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv.size() >= 2 && argv[0] == "session" && argv[1] == "list") r.data = session_list_data();
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    d.set_session_target_resolver([](const CommandDispatcher::TargetQuery& q) -> auth::SessionTarget {
+        return q.session_id == "/app/con[0]/ses[0]" ? auth::SessionTarget{"", "DEV1"} : auth::SessionTarget{};
+    });
+    Principal p = listing_token();
+    p.read_only = false;
+    const auto r = d.call_tool("gui_session_attach", json::object(), ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(everything_of(r).find("MULTIPLE_SESSIONS") != std::string::npos);  // DEV1 has 2 sessions, DEV2 one
+    for (const char* leak : {"SECRETPRD", "con[1]", "SECRETNONAME"}) CHECK(everything_of(r).find(leak) == std::string::npos);
 }
 
 // ---- per-principal sticky connection and budgets -------------------------------------------------

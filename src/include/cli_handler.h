@@ -102,12 +102,14 @@ public:
 
     /// What a session/connection call would act on, for token allowlists: SAP system/client and the saved
     /// connection / SAP Logon entry name. Exactly one selector is used: `logon_name` (a launch: the facts of an
-    /// already open session of that entry, if any), `session_id` (an attach: the live session, name from its
-    /// owning connection) or `connection` (a saved connection, or the single cached one). Read-only: no attach,
+    /// already open session of that entry, if any), `session_id` (an attach: the live session, name = the LIVE
+    /// connection's description, never a saved record) or `connection` (a saved connection, validated against the
+    /// live session by id and server session key; the name is the live description). Read-only: no attach,
     /// no session switch, no cache change, no SAP traffic. Fields stay empty when not determinable.
     struct SessionTargetInfo {
         audit::SapFacts facts;
         std::string connection_name;
+        bool ambiguous = false;  ///< launch: open sessions of that entry name run on different systems
     };
     SessionTargetInfo peek_session_target(const std::string& logon_name, const std::string& session_id,
                                           std::optional<int> connection) const noexcept;

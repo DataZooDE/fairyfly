@@ -963,6 +963,50 @@ TEST_CASE("auth: a malformed stored rate_families makes the record unusable, not
     CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
 }
 
+TEST_CASE("auth: any malformed restriction field makes the record unusable, never unrestricted", "[auth][token][malformed]") {
+    const std::vector<std::pair<const char*, const char*>> fields = {
+        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"}};
+    const std::vector<nlohmann::json> bad_values = {
+        nlohmann::json("DEV*"),                        // wrong type: string
+        nlohmann::json(5),                             // wrong type: number
+        nlohmann::json(nullptr),                       // wrong type: null
+        nlohmann::json::object(),                      // wrong type: object
+        nlohmann::json::array({"DEV1", 7}),            // mixed-type array
+        nlohmann::json::array({"DEV1", nullptr}),      // mixed-type array
+        nlohmann::json::array({""}),                   // empty-string element
+        nlohmann::json::array({"DEV1", ""}),           // empty-string element
+    };
+    for (const auto& field : fields) {
+        for (const auto& bad : bad_values) {
+            Env env;
+            const auto created = env.create("t");
+            auto record = nlohmann::json::parse(env.tokens->get("t").value());
+            record[field.first] = bad;  // compact path
+            env.tokens->put("t", record.dump());
+            INFO("compact key " << field.first << " = " << bad.dump());
+            CHECK(env.store().list().empty());
+            CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
+
+            Env env2;  // legacy long-key path
+            const auto created2 = env2.create("t");
+            nlohmann::json stored = env2.store().list()[0].to_stored_json();
+            stored[field.second] = bad;
+            env2.tokens->put("t", stored.dump());
+            INFO("legacy key " << field.second << " = " << bad.dump());
+            CHECK(env2.store().list().empty());
+            CHECK_FALSE(env2.auth->authenticate(request_with(created2.token)).ok);
+        }
+    }
+    // well-formed restrictions still load
+    Env ok;
+    NewToken t;
+    t.scopes = {"screen"};
+    t.connections = {"DEV*"};
+    const auto good = ok.create("good", t);
+    CHECK(ok.store().list().size() == 1);
+    CHECK(ok.auth->authenticate(request_with(good.token)).ok);
+}
+
 // ---- allow_navigation (T-code allowlist hardening) ---------------------------------------------
 TEST_CASE("auth: allow_navigation round-trips, defaults to false and is listed", "[auth][token][navigation]") {
     Env env;

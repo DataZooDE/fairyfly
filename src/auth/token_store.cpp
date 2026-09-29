@@ -55,11 +55,17 @@ std::string lower(std::string s) {
     return s;
 }
 
-std::vector<std::string> string_array(const json& j, const char* key) {
+/// Reads an optional restriction list. Absent = empty (no restriction of that kind). A PRESENT value must be an array
+/// of non-empty strings: anything else (wrong type, null, mixed elements, empty strings) returns nullopt so the whole
+/// record is rejected. A malformed restriction must never degrade into "unrestricted" (empty list).
+std::optional<std::vector<std::string>> string_array(const json& j, const char* key) {
     std::vector<std::string> out;
-    if (j.contains(key) && j[key].is_array())
-        for (const auto& v : j[key])
-            if (v.is_string()) out.push_back(v.get<std::string>());
+    if (!j.contains(key)) return out;
+    if (!j[key].is_array()) return std::nullopt;
+    for (const auto& v : j[key]) {
+        if (!v.is_string() || v.get<std::string>().empty()) return std::nullopt;
+        out.push_back(v.get<std::string>());
+    }
     return out;
 }
 
@@ -203,12 +209,21 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
         if (!t) return std::nullopt;  // an unreadable expiry must not turn into "never expires"
         m.expires = *t;
     }
-    m.scopes = string_array(j, "scopes");
-    m.sap_systems = string_array(j, "sap_systems");
-    m.tcodes = string_array(j, "tcodes");
-    m.connections = string_array(j, "connections");
-    m.allowed_ips = string_array(j, "allowed_ips");
-    if (j.contains("rate_per_minute") && j["rate_per_minute"].is_number_integer()) m.rate_per_minute = j["rate_per_minute"].get<int>();
+    const auto scopes = string_array(j, "scopes");
+    const auto sap_systems = string_array(j, "sap_systems");
+    const auto tcodes = string_array(j, "tcodes");
+    const auto connections = string_array(j, "connections");
+    const auto allowed_ips = string_array(j, "allowed_ips");
+    if (!scopes || !sap_systems || !tcodes || !connections || !allowed_ips) return std::nullopt;  // unusable, never unrestricted
+    m.scopes = *scopes;
+    m.sap_systems = *sap_systems;
+    m.tcodes = *tcodes;
+    m.connections = *connections;
+    m.allowed_ips = *allowed_ips;
+    if (j.contains("rate_per_minute")) {
+        if (!j["rate_per_minute"].is_number_integer()) return std::nullopt;  // a malformed budget must not become "no limit"
+        m.rate_per_minute = j["rate_per_minute"].get<int>();
+    }
     if (j.contains("rate_families")) {
         // a malformed limit must not silently become "no limit": the record is unusable instead
         if (!j["rate_families"].is_object()) return std::nullopt;

@@ -73,6 +73,12 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                                            : "the server runs read-only: " + tool + " changes SAP state");
     }
 
+    // cleanup deletes saved connection files whatever their name: never for a token limited to named connections.
+    if (!principal.connections.empty() && tool == "gui_connection_list" && args.is_object() && args.contains("cleanup") &&
+        !(args["cleanup"].is_boolean() && !args["cleanup"].get<bool>()))
+        return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; "
+                                           "gui_connection_list with cleanup=true could delete other saved connections and is refused");
+
     if (check_system && !principal.sap_systems.empty() && !system_exempt(family, tool)) {
         if (!current_system || current_system->empty())
             return refuse("SYSTEM_UNKNOWN", "the target SAP system is not known yet and the token is limited to specific systems; "
@@ -235,7 +241,23 @@ bool needs_session_target(const mcp::Principal& principal, const std::string& to
 
 mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
                                              const SessionTarget& target) {
-    if (!principal.sap_systems.empty() && session_system_tool(tool, args)) {
+    if (!principal.sap_systems.empty() && tool == "gui_session_launch") {
+        // The system of a SAP Logon entry is unknown before it is opened. Facts of other sessions are not proof, so the
+        // operator has to vouch for the entry name with --connections (fail closed otherwise).
+        const std::string name = args.is_object() && args.contains("name") && args["name"].is_string()
+                                     ? args["name"].get<std::string>() : std::string();
+        if (name.empty() || principal.connections.empty() || !matches_any(principal.connections, name))
+            return refuse("SYSTEM_UNKNOWN",
+                          "token '" + principal.name + "' is limited to specific SAP systems and the system of SAP Logon entry '" +
+                              name + "' cannot be known before it is opened; launching is only allowed for entries named by the "
+                              "token's --connections list (create the token with --connections " +
+                              (name.empty() ? std::string("NAME") : name) + ") or start the session on the desktop and attach");
+        if (target.ambiguous)
+            return refuse("SYSTEM_UNKNOWN", "open sessions of SAP Logon entry '" + name + "' run on different SAP systems; "
+                                            "the target cannot be determined");
+        if (!target.system.empty() && !system_allowed(principal.sap_systems, target.system))
+            return refuse("SYSTEM_DENIED", "token '" + principal.name + "' is not allowed to use SAP system " + target.system);
+    } else if (!principal.sap_systems.empty() && session_system_tool(tool, args)) {
         if (target.system.empty())
             return refuse("SYSTEM_UNKNOWN",
                           "token '" + principal.name + "' is limited to specific SAP systems and the system of this " +
@@ -255,6 +277,108 @@ mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, co
             return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is not allowed to use connection '" + name + "'");
     }
     return PolicyDecision{};
+}
+
+// ---- result filtering for tokens limited to named connections ------------------------------------------
+namespace {
+
+using mcp::json;
+
+bool has_only_keys(const json& obj, std::initializer_list<const char*> allowed) {
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        bool known = false;
+        for (const char* key : allowed)
+            if (it.key() == key) { known = true; break; }
+        if (!known) return false;
+    }
+    return true;
+}
+
+std::optional<std::string> string_field(const json& obj, const char* key) {
+    if (!obj.is_object() || !obj.contains(key) || !obj[key].is_string()) return std::nullopt;
+    std::string value = obj[key].get<std::string>();
+    if (value.empty()) return std::nullopt;
+    return value;
+}
+
+std::size_t array_size(const json& obj, const char* key) {
+    return obj.contains(key) && obj[key].is_array() ? obj[key].size() : 0;
+}
+
+/// gui_session_list: keep connections whose live description is allowed; recompute every total.
+bool filter_session_list(json& data, const std::vector<std::string>& patterns) {
+    if (!data.is_object() || !data.contains("connections") || !data["connections"].is_array()) return false;
+    if (!has_only_keys(data, {"connections", "total_connections", "total_sessions", "backend_scripting_disabled",
+                              "connection_enumeration_errors", "session_enumeration_errors"}))
+        return false;
+    json kept = json::array();
+    long long total_sessions = 0, conn_errors = 0, session_errors = 0;
+    bool scripting_disabled = false;
+    for (const auto& conn : data["connections"]) {
+        if (!conn.is_object()) return false;
+        const auto name = string_field(conn, "description");
+        if (!name || !matches_any(patterns, *name)) continue;  // dropped: not allowed, or its name cannot be determined
+        if (!conn.contains("sessions") || !conn["sessions"].is_array()) return false;
+        total_sessions += static_cast<long long>(conn["sessions"].size());
+        session_errors += static_cast<long long>(array_size(conn, "session_errors"));
+        if (conn.contains("error")) ++conn_errors;
+        if (conn.contains("backend_scripting_disabled") && conn["backend_scripting_disabled"] == true) scripting_disabled = true;
+        kept.push_back(conn);
+    }
+    const auto count = static_cast<long long>(kept.size());
+    data["connections"] = std::move(kept);
+    data["total_connections"] = count;
+    data["total_sessions"] = total_sessions;
+    data["connection_enumeration_errors"] = conn_errors;
+    data["session_enumeration_errors"] = session_errors;
+    data["backend_scripting_disabled"] = scripting_disabled;
+    return true;
+}
+
+/// gui_connection_list / gui_credentials_list: keep rows whose `name_key` matches; recompute `count`.
+bool filter_named_rows(json& data, const char* rows_key, const char* name_key, const std::vector<std::string>& patterns) {
+    if (!data.is_object() || !data.contains(rows_key) || !data[rows_key].is_array()) return false;
+    if (!has_only_keys(data, {rows_key, "count"})) return false;
+    json kept = json::array();
+    for (const auto& row : data[rows_key]) {
+        if (!row.is_object()) return false;
+        const auto name = string_field(row, name_key);
+        if (!name || !matches_any(patterns, *name)) continue;
+        kept.push_back(row);
+    }
+    const auto count = static_cast<long long>(kept.size());
+    data[rows_key] = std::move(kept);
+    data["count"] = count;
+    return true;
+}
+
+} // namespace
+
+bool listing_needs_filter(const mcp::Principal& principal, const std::string& tool) {
+    return !principal.connections.empty() &&
+           (tool == "gui_session_list" || tool == "gui_connection_list" || tool == "gui_credentials_list");
+}
+
+bool filter_listing_for_connections(const mcp::Principal& principal, const std::string& tool, Result& result) {
+    if (!listing_needs_filter(principal, tool)) return true;
+    result.diagnostics = json();  // never carries anything of the dropped entries
+    if (result.status != Result::Status::Success) {
+        // Error details of these listings can name other connections/credentials: keep the code only.
+        std::string code = "ERROR";
+        if (result.error.is_object() && result.error.contains("code") && result.error["code"].is_string())
+            code = result.error["code"].get<std::string>();
+        result.error = {{"code", code}, {"message", "the listing failed (details are withheld from tokens limited to named connections)"}};
+        return true;
+    }
+    bool ok = false;
+    if (tool == "gui_session_list") ok = filter_session_list(result.data, principal.connections);
+    else if (tool == "gui_connection_list") ok = filter_named_rows(result.data, "connections", "description", principal.connections);
+    else ok = filter_named_rows(result.data, "credentials", "connection", principal.connections);
+    if (!ok) {
+        result.data = json();  // never return the unfiltered data
+        return false;
+    }
+    return true;
 }
 
 int rate_family_limit(const mcp::Principal& principal, const std::string& family) {
