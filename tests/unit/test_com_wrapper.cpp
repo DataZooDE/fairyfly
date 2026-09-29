@@ -2232,6 +2232,12 @@ public:
     std::function<void()> on_select;
     std::map<std::wstring, int> reads;
     int select_calls = 0;
+    // Collection round-trip counters: _NewEnum calls (served from items when enumerable) and
+    // indexed Item(i) calls; count_override (>= 0) replaces the reported Count.
+    bool enumerable = false;
+    int new_enum_calls = 0;
+    int item_calls = 0;
+    long count_override = -1;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2268,6 +2274,13 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags, DISPPARAMS* params,
                                      VARIANT* result, EXCEPINFO*, UINT*) override {
+        if (id == DISPID_NEWENUM && enumerable && result) {
+            ++new_enum_calls;
+            VariantInit(result);
+            result->vt = VT_UNKNOWN;
+            result->punkVal = new FakeEnumVariant(items);
+            return S_OK;
+        }
         const auto& table = name_table();
         if (id < 1000 || static_cast<size_t>(id - 1000) >= table.size()) return DISP_E_MEMBERNOTFOUND;
         const std::wstring& name = table[id - 1000];
@@ -2289,6 +2302,7 @@ public:
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
         if (name == L"Item" && (flags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET))) {
+            ++item_calls;
             if (!params || params->cArgs != 1 || params->rgvarg[0].lVal < 0 ||
                 static_cast<size_t>(params->rgvarg[0].lVal) >= items.size())
                 return DISP_E_BADINDEX;
@@ -2303,7 +2317,7 @@ public:
         VariantInit(result);
         if (name == L"Count") {
             result->vt = VT_I4;
-            result->lVal = static_cast<long>(items.size());
+            result->lVal = count_override >= 0 ? count_override : static_cast<long>(items.size());
             return S_OK;
         }
         if (auto d = dispatches.find(name); d != dispatches.end()) {
@@ -2579,4 +2593,114 @@ TEST_CASE("read_with_tabs skips select for the current tab and keeps tab content
     for (const auto& element : roles.at("elements"))
         grid_found |= element.value("id", "").find("cntlG/shellcont/shell") != std::string::npos;
     REQUIRE(grid_found);
+}
+
+namespace {
+std::vector<std::string> element_ids_of(const json& data) {
+    std::vector<std::string> ids;
+    for (const auto& element : data.at("elements")) ids.push_back(element.value("id", ""));
+    return ids;
+}
+
+// usr -> [lbl cells (2 cols x 3 rows), simple container with 4 text fields].
+struct ListScene {
+    TabScene scene;
+    FakeNode* container = nullptr;
+    FakeNode* container_children = nullptr;
+    std::vector<FakeNode*> cells;
+    explicit ListScene(bool enumerable, long container_count = -1) {
+        scene.usr_children->items.clear();
+        const std::wstring usr = TabScene::kUsr;
+        for (int row = 1; row <= 3; ++row) {
+            for (int col = 1; col <= 2; ++col) {
+                const std::wstring id = usr + L"/lbl[" + std::to_wstring(col) + L"," + std::to_wstring(row) + L"]";
+                auto* label = scene.make(L"GuiLabel", id.c_str());
+                label->strings[L"Text"] = L"c" + std::to_wstring(col) + L"r" + std::to_wstring(row);
+                scene.usr_children->items.push_back(label);
+                scene.session->find_by_id[id] = label;
+                cells.push_back(label);
+            }
+        }
+        const std::wstring cid = usr + L"/subSUB";
+        container = scene.make(L"GuiSimpleContainer", cid.c_str());
+        container_children = scene.make(L"GuiCollection", L"");
+        for (int i = 0; i < 4; ++i) {
+            const std::wstring id = cid + L"/txtF" + std::to_wstring(i);
+            auto* field = scene.make(L"GuiTextField", id.c_str());
+            field->strings[L"Text"] = L"v" + std::to_wstring(i);
+            field->strings[L"DisplayedText"] = L"v" + std::to_wstring(i);
+            container_children->items.push_back(field);
+            scene.session->find_by_id[id] = field;
+        }
+        container_children->count_override = container_count;
+        container->dispatches[L"Children"] = container_children;
+        scene.usr_children->items.push_back(container);
+        scene.session->find_by_id[cid] = container;
+        scene.usr_children->enumerable = enumerable;
+        container_children->enumerable = enumerable;
+    }
+};
+} // namespace
+
+TEST_CASE("Container and userarea traversal enumerates once and matches the item(i) fallback", "[screen][enumeration]") {
+    ScopedDispatchCacheReset cache_reset;
+    std::vector<std::string> fast_ids, slow_ids;
+    int fast_usr_enums = 0, fast_container_enums = 0, fast_usr_items = 0, fast_container_items = 0;
+    {
+        ListScene fast(true);
+        ScreenReader reader(fast.scene.session_wrapper());
+        auto result = reader.read(true);
+        REQUIRE(result.status == Result::Status::Success);
+        fast_ids = element_ids_of(result.data);
+        fast_usr_enums = fast.scene.usr_children->new_enum_calls;
+        fast_container_enums = fast.container_children->new_enum_calls;
+        fast_usr_items = fast.scene.usr_children->item_calls;
+        fast_container_items = fast.container_children->item_calls;
+        for (auto* cell : fast.cells) {
+            REQUIRE(cell->reads[L"Type"] == 0);
+            REQUIRE(cell->reads[L"Text"] >= 1);
+        }
+    }
+    {
+        ListScene slow(false);
+        ScreenReader reader(slow.scene.session_wrapper());
+        auto result = reader.read(true);
+        REQUIRE(result.status == Result::Status::Success);
+        slow_ids = element_ids_of(result.data);
+        // No enumerator: everything goes through item(i).
+        REQUIRE(slow.scene.usr_children->new_enum_calls == 0);
+        REQUIRE(slow.scene.usr_children->item_calls > 0);
+        REQUIRE(slow.container_children->item_calls > 0);
+    }
+    REQUIRE_FALSE(fast_ids.empty());
+    REQUIRE(fast_ids == slow_ids);
+    // Traversal walks each container with one _NewEnum and never calls Item(i); the metadata
+    // pass may enumerate the same collection once more, but no more than that.
+    REQUIRE(fast_usr_items == 0);
+    REQUIRE(fast_container_items == 0);
+    REQUIRE(fast_usr_enums >= 1);
+    REQUIRE(fast_usr_enums <= 2);
+    REQUIRE(fast_container_enums >= 1);
+    REQUIRE(fast_container_enums <= 2);
+}
+
+TEST_CASE("Container traversal honors the child count limit when enumerating", "[screen][enumeration]") {
+    ScopedDispatchCacheReset cache_reset;
+    std::vector<std::string> fast_ids, slow_ids;
+    for (bool enumerable : {true, false}) {
+        ListScene scene(enumerable, 2);  // reports 2 children although 4 are enumerable
+        ScreenReader reader(scene.scene.session_wrapper());
+        auto result = reader.read(true);
+        REQUIRE(result.status == Result::Status::Success);
+        (enumerable ? fast_ids : slow_ids) = element_ids_of(result.data);
+    }
+    REQUIRE(fast_ids == slow_ids);
+    const auto has = [&](const char* needle) {
+        return std::any_of(fast_ids.begin(), fast_ids.end(),
+                           [&](const std::string& id) { return id.find(needle) != std::string::npos; });
+    };
+    REQUIRE(has("/subSUB/txtF0"));
+    REQUIRE(has("/subSUB/txtF1"));
+    REQUIRE_FALSE(has("/subSUB/txtF2"));
+    REQUIRE_FALSE(has("/subSUB/txtF3"));
 }
