@@ -1,6 +1,7 @@
 #pragma once
 
 #include "action_status.h"
+#include "audit_log.h"
 #include "automation_engine.h"
 #include "com/wrapper.h"
 #include "connection_launcher.h"
@@ -106,6 +107,11 @@ public:
     ComGuiApplicationPtr get_app() const { return app_; }
     ComGuiConnectionPtr get_connection() const { return current_connection_; }
     ComGuiSessionPtr get_session() const { return current_session_; }
+
+    /// Read-only lookup of system/client/user/transaction of a NAMED session; never selects, attaches or
+    /// changes anything. Empty facts when the session is gone, the server key differs or COM fails.
+    audit::SapFacts peek_session_facts(const std::string& session_id,
+                                       const std::string& server_session_key = "") const noexcept;
 
     // Enumerate all connections, sessions, and windows
     nlohmann::json get_application_info() const;

@@ -173,10 +173,11 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             auto dispatcher = std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
                                                                   retain_families(all_tool_specs(), families));
             // Token authorization needs the target SAP system and a per-call read-only override.
-            dispatcher->set_sap_facts_provider([peek](std::optional<int>) -> std::optional<audit::SapFacts> {
+            dispatcher->set_sap_facts_provider([peek](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+                // Facts of the connection THIS call will use (never the merely attached session).
                 cli::CommandHandler* handler = peek();
                 if (!handler) return std::nullopt;
-                audit::SapFacts facts = handler->audit_facts();
+                audit::SapFacts facts = handler->audit_facts_for_connection(connection);
                 if (!facts.any()) return std::nullopt;
                 return facts;
             });

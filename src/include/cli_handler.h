@@ -95,6 +95,11 @@ public:
     /// Non-secret facts about the current SAP session for the audit trail (empty when none).
     audit::SapFacts audit_facts() const noexcept;
 
+    /// Facts of the session a call with this `connection` argument would really use (explicit id, or the single
+    /// cached connection). Side-effect free: no attach, no session switch, no cache file change. Empty when the
+    /// connection cannot be resolved (missing, ambiguous, session gone) - callers must treat that as unknown.
+    audit::SapFacts audit_facts_for_connection(std::optional<int> connection) const noexcept;
+
     // Connection management - two modes
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded

@@ -544,6 +544,23 @@ std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> ComAutomationEngine::find_sessi
     return {conn, sess};
 }
 
+audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& session_id,
+                                                        const std::string& server_session_key) const noexcept {
+    audit::SapFacts facts;
+    try {
+        auto sess = find_session_by_id(session_id).second;
+        if (!sess) return facts;
+        if (!server_session_key.empty() && sess->get_server_session_key() != server_session_key) return facts;
+        facts.system = sess->get_system_name();
+        facts.client = sess->get_client();
+        facts.user = sess->get_user();
+        facts.transaction = sess->get_transaction_code();
+    } catch (...) {
+        return audit::SapFacts{};
+    }
+    return facts;
+}
+
 bool ComAutomationEngine::validate_session(const std::string& session_id,
                                            const std::string& server_session_key) const {
     try {
