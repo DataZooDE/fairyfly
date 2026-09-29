@@ -52,6 +52,14 @@ public:
         find_cmd_->add_option("--output", find_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
 
+        menu_cmd_ = screen_cmd_->add_subcommand("menu",
+            "List the menu bar tree; select an item only with --select");
+        menu_cmd_->add_option("--select", menu_select_,
+            "Menu text path to select, e.g. 'Runtime Errors/Display' (case-insensitive, '&' ignored)");
+        menu_cmd_->add_option("--window", menu_window_, "Window whose menu bar is used (default wnd[0], or @active)")
+            ->default_val("wnd[0]");
+        menu_cmd_->add_option("--connection", menu_conn_id_, "Connection ID to use");
+
         // Add "capture" subcommand
         capture_cmd_ = screen_cmd_->add_subcommand("capture", "Capture screenshot");
         capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout");
@@ -94,6 +102,9 @@ public:
             query.limit = find_limit_;
             return handler.handle_screen_find(query, find_conn_id_);
         }
+        else if (*menu_cmd_) {
+            return handler.handle_screen_menu(menu_select_, menu_window_, menu_conn_id_);
+        }
         else if (*capture_cmd_) {
             cli::ScreenshotOptions opts;
             opts.output_file = screenshot_file_;
@@ -112,7 +123,7 @@ public:
         Result result;
         result.status = Result::Status::Error;
         result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No screen subcommand specified (read, find, or capture)";
+        result.error["message"] = "No screen subcommand specified (read, find, menu, or capture)";
         return result;
     }
 
@@ -153,6 +164,12 @@ private:
     int find_limit_ = 1;
     std::optional<int> find_conn_id_;
     std::string find_output_format_;
+
+    // Menu subcommand
+    CLI::App* menu_cmd_ = nullptr;
+    std::string menu_select_;
+    std::string menu_window_ = "wnd[0]";
+    std::optional<int> menu_conn_id_;
 
     // Filter options
     cli::ScreenFilterOptions filters_;

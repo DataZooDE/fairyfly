@@ -1,3 +1,5 @@
+#include "include/vkey.h"
+#include "include/menu_navigation.h"
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 #include "include/core.h"
@@ -407,4 +409,47 @@ TEST_CASE("ElementRendererRegistry non-object robustness", "[renderers][json]") 
         };
         REQUIRE_NOTHROW(registry.render_to_markdown(obj_with_string_children));
     }
+}
+
+TEST_CASE("Key names map to SAP virtual keys", "[vkey]") {
+    using fairyfly::sap::parse_vkey;
+    REQUIRE(parse_vkey("enter") == 0);
+    REQUIRE(parse_vkey(" Enter ") == 0);
+    REQUIRE(parse_vkey("f1") == 1);
+    REQUIRE(parse_vkey("F8") == 8);
+    REQUIRE(parse_vkey("f12") == 12);
+    REQUIRE(parse_vkey("shift+f1") == 13);
+    REQUIRE(parse_vkey("Shift+F12") == 24);
+    REQUIRE(parse_vkey("15") == 15);
+    REQUIRE(parse_vkey("0") == 0);
+    REQUIRE_FALSE(parse_vkey("").has_value());
+    REQUIRE_FALSE(parse_vkey("f13").has_value());
+    REQUIRE_FALSE(parse_vkey("f0").has_value());
+    REQUIRE_FALSE(parse_vkey("shift+enter").has_value());
+    REQUIRE_FALSE(parse_vkey("banana").has_value());
+    REQUIRE_FALSE(parse_vkey("100").has_value());
+    REQUIRE_FALSE(parse_vkey("-1").has_value());
+}
+
+TEST_CASE("Menu path matching ignores accelerators and case", "[menu]") {
+    using namespace fairyfly::sap;
+    REQUIRE(normalize_menu_label(" &Runtime Errors ") == "runtime errors");
+    REQUIRE(menu_label_matches("Runtime &Errors", "runtime errors"));
+    REQUIRE_FALSE(menu_label_matches("Runtime Errors", "Runtime"));
+    REQUIRE_FALSE(menu_label_matches("", ""));
+    const auto path = split_menu_path(" Runtime Errors / Display ");
+    REQUIRE(path == std::vector<std::string>{"Runtime Errors", "Display"});
+    REQUIRE(split_menu_path("").empty());
+    REQUIRE(split_menu_path("//A//").size() == 1);
+}
+
+TEST_CASE("Close outcome compares popup window indexes", "[close]") {
+    using fairyfly::sap::CloseOutcome;
+    using fairyfly::sap::classify_close_outcome;
+    REQUIRE(classify_close_outcome(0, 0) == CloseOutcome::NoPopup);
+    REQUIRE(classify_close_outcome(-1, -1) == CloseOutcome::NoPopup);
+    REQUIRE(classify_close_outcome(1, 0) == CloseOutcome::Closed);
+    REQUIRE(classify_close_outcome(2, 1) == CloseOutcome::Closed);
+    REQUIRE(classify_close_outcome(1, 1) == CloseOutcome::StillOpen);
+    REQUIRE(classify_close_outcome(1, 2) == CloseOutcome::StillOpen);
 }

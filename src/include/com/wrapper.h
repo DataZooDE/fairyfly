@@ -238,6 +238,9 @@ public:
     /// Select a GridView row and activate its cell (zero-based row, technical column ID).
     void select_grid_row(int row, const std::string& column_name);
 
+    /// Double-click a GridView cell (SetCurrentCell then DoubleClickCurrentCell).
+    void doubleclick_grid_cell(int row, const std::string& column_name);
+
     /// GridView built-in toolbar metadata (separate from GuiShell Toolbar buttons).
     int get_grid_toolbar_button_count() const;
     std::string get_grid_toolbar_button_id(int position) const;

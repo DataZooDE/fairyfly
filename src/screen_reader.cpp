@@ -101,6 +101,10 @@ struct ScreenSearchContext {
             try { match["text"] = element->get_text_for_direct_read(); }
             catch (const std::exception&) { match["text_available"] = false; }
         }
+        if (type == "GuiCheckBox" || type == "GuiRadioButton") {
+            try { match["selected"] = element->get_property_bool(L"Selected"); }
+            catch (const std::exception&) { /* State unavailable. */ }
+        }
         matches.push_back(std::move(match));
         if (matches.size() >= static_cast<size_t>(query.limit)) {
             stopped = true;

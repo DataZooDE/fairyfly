@@ -79,6 +79,12 @@ public:
     Result fill_grid_cell(const ElementId& element, int row, const std::string& column,
                           const std::string& value, bool checkbox, bool commit);
     Result select_grid_row(const ElementId& element, int row, const std::string& column);
+    Result doubleclick_grid_cell(const ElementId& element, int row, const std::string& column);
+    // Window-level actions (implemented in com_automation_engine_actions.cpp)
+    Result send_key(int vkey, const std::string& window = "@active");
+    Result close_popup(int vkey = 12);
+    Result read_menu(const std::string& window = "wnd[0]");
+    Result select_menu(const std::string& menu_path, const std::string& window = "wnd[0]");
     Result read_field(const ElementId& element) override;
     Result press_toolbar_button(const ElementId& toolbar_element, const std::string& button_id) override;
     Result press_f4(const ElementId& element) override;
