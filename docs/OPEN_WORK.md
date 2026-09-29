@@ -110,7 +110,7 @@ Delivered: `mcp --http` (plain HTTP `POST /mcp`, legacy and stateless 2026-07-28
 | `_meta`/header enforcement lenient | `Mcp-Method` and `Mcp-Name` are checked only when present (curl works); decide whether the stateless era should require them once the final spec is checked. | **Open** |
 | Banner and SSE polish | The insecure-auth warning is now printed once (server line dropped when the authenticator reports the same topic, exact duplicates removed). SSE negotiation honours q-values: `Accept: application/json, text/event-stream` gets plain JSON unless the request has a `progressToken`; SSE-only or higher-q SSE still streams (`accept_prefers_sse`, documented in MCP_REMOTE.md). | **Done** |
 | Token blob size cap | A token record over about 1200 characters is refused (`TOKEN_TOO_LARGE`, Credential Manager limit 1280 UTF-16 chars); many long allowlists can hit it. Consider chunking or a file-based store for metadata with only the hash in Credential Manager. | **Idea** |
-| Per-tool rate limits and metadata coverage test | Rate limits per tool family (for example stricter for `element`/`key`), and a test asserting every tool has annotations, a family, scope handling and a policy decision. | **Idea** |
+| Per-tool rate limits and metadata coverage test | Metadata coverage test done: `tests/unit/test_mcp_tool_metadata.cpp` asserts annotations consistent with `write_tool` (guarded tools listed explicitly), a known family, a docs/MCP.md row, a scope decision in `authorize_call` and hidden write tools in read-only lists. Per-tool-family rate limits remain an idea. | **Partly done** (rate limits: Idea) |
 
 ## Build and review
 
