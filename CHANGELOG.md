@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Remote MCP T-code allowlist hardening: for a token with `--tcode`, `gui_menu_select` is denied and `gui_key_send` accepts only enter, f4, f8 and the page keys unless the token was created with the new `--allow-navigation` (only valid with `--tcode`, shown by `token list`). After every screen-acting call the transaction is read again; a token that ended outside its allowlist gets `tcode_left_allowlist` in the result (and the audit record) and its next screen call is denied until an allowed `gui_transaction_start` succeeds. Tokens without `--tcode` are unchanged.
+
 ## 0.2.0
 
 Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/MIGRATION_0.2.md](docs/MIGRATION_0.2.md) for the full old-to-new tables.

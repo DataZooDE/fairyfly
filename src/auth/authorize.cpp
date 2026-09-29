@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "include/mcp/policy.h"
+#include "include/vkey.h"
 #include "include/mcp/tool_catalog.h"
 
 namespace fairyfly::auth {
@@ -36,11 +37,6 @@ bool has_scope(const mcp::Principal& p, const std::string& family) {
 bool system_exempt(const std::string& family, const std::string& tool) {
     return family == "session" || family == "connection" || family == "system" || family == "credentials" ||
            tool == "gui_batch";
-}
-
-/// Tools that act on whatever transaction is currently open (not on the choice of a new one).
-bool acts_on_screen(const std::string& family) {
-    return family == "screen" || family == "element" || family == "key" || family == "popup" || family == "menu";
 }
 
 bool matches_any(const std::vector<std::string>& patterns, const std::string& text) {
@@ -104,6 +100,17 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
             const bool bare_prefix = code.empty();
             if (!bare_prefix && !matches_any(principal.tcodes, code))
                 return refuse("TCODE_DENIED", "token '" + principal.name + "' is not allowed to run transaction " + code);
+        } else if (!principal.allow_navigation && tool == "gui_menu_select") {
+            return refuse("TCODE_DENIED", "gui_menu_select is denied for tokens with a T-code allowlist because menu paths can "
+                                          "start other transactions; use gui_transaction_start, or ask the operator to create "
+                                          "the token with --allow-navigation");
+        } else if (!principal.allow_navigation && tool == "gui_key_send") {
+            const std::string key = args.is_object() && args.contains("key") && args["key"].is_string()
+                                        ? args["key"].get<std::string>() : std::string();
+            if (!tcode_safe_key(key))
+                return refuse("TCODE_DENIED", "key '" + key + "' can leave the transaction and is denied for tokens with a T-code "
+                                              "allowlist (allowed: enter, f4, f8, page keys); ask the operator to create the "
+                                              "token with --allow-navigation");
         } else if (tool == "gui_element_fill") {
             const std::string element = args.is_object() && args.contains("element") && args["element"].is_string()
                                             ? args["element"].get<std::string>() : std::string();
@@ -174,6 +181,24 @@ std::string normalize_tcode(const std::string& raw) {
     if (end != std::string::npos) s = s.substr(0, end);
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
     return s;
+}
+
+bool acts_on_screen(const std::string& family) {
+    return family == "screen" || family == "element" || family == "key" || family == "popup" || family == "menu";
+}
+
+bool tcode_safe_key(const std::string& key) {
+    const auto vkey = sap::parse_vkey(key);
+    if (!vkey) return false;
+    switch (*vkey) {
+    case 0:   // Enter
+    case 4:   // F4 value help
+    case 8:   // F8 execute
+    case 80: case 81: case 82: case 83:  // page keys
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool is_okcd_element(const std::string& element_id) {

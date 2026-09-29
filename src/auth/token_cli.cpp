@@ -64,6 +64,9 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             request.sap_systems = split_list(args.systems);
             request.tcodes = split_list(args.tcodes);
             request.connections = split_list(args.connections);
+            if (args.allow_navigation && request.tcodes.empty())
+                return failure("INVALID_ARGUMENT", "--allow-navigation only makes sense together with --tcode");
+            request.allow_navigation = args.allow_navigation;
             request.allowed_ips = split_list(args.ips);
             request.rate_per_minute = args.rate;
             for (const auto& entry : split_list(args.rate_families)) {

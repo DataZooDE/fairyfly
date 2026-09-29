@@ -18,6 +18,16 @@ bool glob_match(const std::string& pattern, const std::string& text);
 /// match a plain allowlist entry.
 std::string normalize_tcode(const std::string& code);
 
+/// Tool families that act on whatever transaction is open now (screen, element, key, popup, menu), as opposed to
+/// choosing a new one (gui_transaction_start) or managing sessions.
+bool acts_on_screen(const std::string& family);
+
+/// Keys gui_key_send may use for a token with a T-code allowlist that was NOT created with --allow-navigation:
+/// Enter (0), F4 (4), F8 (8) and the page keys (raw 80-83). Everything else (F3 back, F12 cancel, Shift+F3 exit,
+/// F5/F6/F7, Ctrl+... and unparsable input) can leave the transaction and is refused. Accepts every spelling of
+/// the key parser (enter, f4, F8, "80", ...).
+bool tcode_safe_key(const std::string& key);
+
 /// True when `element_id` is the SAP command field (".../okcd", e.g. wnd[0]/tbar[0]/okcd).
 bool is_okcd_element(const std::string& element_id);
 
@@ -33,7 +43,9 @@ using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_na
 ///    run before any system is attached; launch/login/attach/disconnect are checked against THEIR target by
 ///    authorize_session_target; every later call is checked).
 ///  - T-code allowlist: gui_transaction_start `code` -> TCODE_DENIED; while an allowlist is set, gui_element_fill into
-///    the command field (okcd) is refused too. gui_key_send and menus are NOT blocked (residual risk, see docs/MCP.md).
+///    the command field (okcd) is refused too. Unless the token has allow_navigation, gui_menu_select is denied and
+///    gui_key_send is limited to tcode_safe_key() keys (fail closed; menu paths and F3/F12/Shift+F3 leave the
+///    transaction). With allow_navigation both stay usable and the dispatcher's post-call re-check is the only net.
 ///  - T-code allowlist, current transaction: with an allowlist, every tool of the families screen, element, key, popup and
 ///    menu also requires `current_tcode` (the transaction open now, same normalisation and glob rules) to be allowlisted;
 ///    unknown/empty (or S000/SESSION_MANAGER unless allowlisted) -> TCODE_DENIED. It can still change during a call.

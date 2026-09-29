@@ -4,6 +4,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 #include "include/auth/authorize.h"
@@ -87,6 +88,19 @@ private:
     }
     mutable std::mutex sticky_mutex_;
     std::map<std::string, int> sticky_by_principal_;
+    /// Principals whose last screen-acting call ended outside their T-code allowlist: their next screen-acting
+    /// call is denied until an allowed gui_transaction_start succeeds.
+    bool tcode_blocked(const std::string& principal_name) const {
+        std::lock_guard<std::mutex> lock(tcode_mutex_);
+        return tcode_left_.count(principal_name) > 0;
+    }
+    void set_tcode_blocked(const std::string& principal_name, bool blocked) {
+        std::lock_guard<std::mutex> lock(tcode_mutex_);
+        if (blocked) tcode_left_.insert(principal_name);
+        else tcode_left_.erase(principal_name);
+    }
+    mutable std::mutex tcode_mutex_;
+    std::set<std::string> tcode_left_;
     KeyedRateLimiter keyed_limiter_;
     SapFactsProvider facts_provider_;
     SessionTargetResolver target_resolver_;

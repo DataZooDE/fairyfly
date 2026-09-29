@@ -962,3 +962,104 @@ TEST_CASE("auth: a malformed stored rate_families makes the record unusable, not
     CHECK(env.store().list().empty());
     CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
 }
+
+// ---- allow_navigation (T-code allowlist hardening) ---------------------------------------------
+TEST_CASE("auth: allow_navigation round-trips, defaults to false and is listed", "[auth][token][navigation]") {
+    Env env;
+    NewToken t;
+    t.scopes = {"screen", "key"};
+    t.tcodes = {"SE16"};
+    t.allow_navigation = true;
+    const auto nav = env.create("nav", t);
+    t.allow_navigation = false;
+    env.create("strict", t);
+    NewToken plain_request;
+    plain_request.scopes = {"screen"};
+    const auto plain = env.create("plain", plain_request);
+
+    auto store = env.store();
+    const auto listed = store.list();
+    REQUIRE(listed.size() == 3);
+    CHECK(listed[0].name == "nav");
+    CHECK(listed[0].allow_navigation);
+    CHECK(listed[1].name == "plain");
+    CHECK_FALSE(listed[1].allow_navigation);
+    CHECK_FALSE(listed[2].allow_navigation);
+    CHECK(listed[0].to_public_json()["allow_navigation"] == true);
+    CHECK(listed[1].to_public_json()["allow_navigation"] == false);
+
+    // compact record: key "a" only when true
+    CHECK(listed[0].to_compact_json()["a"] == true);
+    CHECK_FALSE(listed[1].to_compact_json().contains("a"));
+
+    // the principal carries it; rotate keeps it
+    const auto outcome = env.auth->authenticate(request_with(nav.token));
+    REQUIRE(outcome.ok);
+    CHECK(outcome.principal.allow_navigation);
+    CHECK_FALSE(env.auth->authenticate(request_with(plain.token)).principal.allow_navigation);
+    const auto rotated = store.rotate("nav");
+    CHECK(store.list()[0].allow_navigation);
+    CHECK(env.auth->authenticate(request_with(rotated.token)).principal.allow_navigation);
+}
+
+TEST_CASE("auth: allow_navigation survives chunked storage and legacy records read as false", "[auth][token][navigation][chunks]") {
+    Env env;
+    NewToken t = huge_token(200);
+    t.tcodes = {"SE16"};
+    t.allow_navigation = true;
+    const auto created = env.create("bignav", t);
+    CHECK(env.tokens->size() > 1);
+    auto store = env.store();
+    REQUIRE(store.list().size() == 1);
+    CHECK(store.list()[0].allow_navigation);
+    CHECK(store.list()[0].sap_systems == t.sap_systems);
+    CHECK(env.auth->authenticate(request_with(created.token)).principal.allow_navigation);
+
+    // legacy long-key and compact records without the field: false
+    Env legacy;
+    const auto old = legacy.create("old");
+    auto meta = legacy.store().list()[0];
+    meta.tcodes = {"SE16"};
+    auto stored = meta.to_stored_json();
+    stored.erase("allow_navigation");
+    legacy.tokens->put("old", stored.dump());
+    REQUIRE(legacy.store().list().size() == 1);
+    CHECK_FALSE(legacy.store().list()[0].allow_navigation);
+    auto compact = meta.to_compact_json();
+    compact.erase("a");
+    legacy.tokens->put("old", compact.dump());
+    CHECK_FALSE(legacy.store().list()[0].allow_navigation);
+    CHECK(legacy.auth->authenticate(request_with(old.token)).ok);
+}
+
+TEST_CASE("auth: allow_navigation needs a T-code allowlist", "[auth][token][navigation]") {
+    Env env;
+    auto store = env.store();
+    NewToken t;
+    t.name = "nav";
+    t.scopes = {"screen"};
+    t.allow_navigation = true;
+    try {
+        store.create(t);
+        FAIL("expected INVALID_ARGUMENT");
+    } catch (const AuthError& e) {
+        CHECK(e.code() == "INVALID_ARGUMENT");
+    }
+
+    TokenCliArgs args;
+    args.action = "create";
+    args.name = "nav";
+    args.allow_navigation = true;
+    auto result = run_token_action(args, store);
+    CHECK(result.status == Result::Status::Error);
+    CHECK(result.error["code"] == "INVALID_ARGUMENT");
+    CHECK(store.list().empty());
+
+    args.tcodes = {"SE16,SM*"};
+    result = run_token_action(args, store);
+    REQUIRE(result.status == Result::Status::Success);
+    CHECK(result.data["allow_navigation"] == true);
+    args.action = "list";
+    result = run_token_action(args, store);
+    CHECK(result.data["tokens"][0]["allow_navigation"] == true);
+}

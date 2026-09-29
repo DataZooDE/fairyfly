@@ -21,6 +21,7 @@ struct TokenCliArgs {
     std::vector<std::string> rate_families; ///< --rate-family element=10,key=10
     std::string expires;                  ///< --expires 30d | 2026-12-31
     bool read_only_flag = false;          ///< --read-only
+    bool allow_navigation = false;        ///< --allow-navigation (needs --tcode)
     bool yes = false;                     ///< --yes (confirms a wildcard scope, or a token delete)
 };
 

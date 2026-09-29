@@ -49,6 +49,7 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.remote_addr = rec.remote_addr;
             out.transport = rec.transport;
             out.era = rec.era;
+            out.tcode_left_allowlist = rec.tcode_left_allowlist;
             record_result(sink->append(out));
         } catch (const std::exception& e) {
             record_result(false);
