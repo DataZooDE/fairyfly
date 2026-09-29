@@ -73,6 +73,12 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                                            : "the server runs read-only: " + tool + " changes SAP state");
     }
 
+    // cleanup deletes saved connection files whatever their name: never for a token limited to named connections.
+    if (!principal.connections.empty() && tool == "gui_connection_list" && args.is_object() && args.contains("cleanup") &&
+        !(args["cleanup"].is_boolean() && !args["cleanup"].get<bool>()))
+        return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; "
+                                           "gui_connection_list with cleanup=true could delete other saved connections and is refused");
+
     if (check_system && !principal.sap_systems.empty() && !system_exempt(family, tool)) {
         if (!current_system || current_system->empty())
             return refuse("SYSTEM_UNKNOWN", "the target SAP system is not known yet and the token is limited to specific systems; "

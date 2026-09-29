@@ -913,6 +913,37 @@ TEST_CASE("dispatcher: connections allowlist binds session and connection-target
     CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
 }
 
+TEST_CASE("dispatcher: connection list cleanup is refused for tokens limited to named connections", "[auth][dispatch][cleanup]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("conn", {"connection", "batch"});
+    p.connections = {"DEV*"};
+    p.read_only = false;
+
+    auto r = d.call_tool("gui_connection_list", {{"cleanup", true}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());  // nothing was deleted: the invoker never ran
+
+    // inside gui_batch (refused up front, no item runs)
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_connection_list"}, {"arguments", {{"cleanup", true}}}}})}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());
+
+    // a plain listing and cleanup=false are still fine
+    CHECK_FALSE(d.call_tool("gui_connection_list", {{"cleanup", false}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_connection_list", json::object(), ctx_for(p)).is_error);
+
+    // tokens without a connections restriction keep cleanup
+    f.calls.clear();
+    Principal open = token("open", {"connection"});
+    open.read_only = false;
+    CHECK_FALSE(d.call_tool("gui_connection_list", {{"cleanup", true}}, ctx_for(open)).is_error);
+    REQUIRE(f.calls.size() == 1);
+}
+
 // ---- per-principal sticky connection and budgets -------------------------------------------------
 namespace {
 bool argv_targets(const Argv& argv, const std::string& id) {
