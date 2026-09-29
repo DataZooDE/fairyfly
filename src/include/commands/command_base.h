@@ -42,6 +42,20 @@ public:
     virtual std::optional<std::string> get_preferred_output_format() const {
         return std::nullopt;  // Default: no preference, use global format
     }
+
+protected:
+    /// Add a per-command --output option (json, markdown, toon) that overrides the
+    /// global --output for this command. `fairyfly --output toon <cmd>` keeps working.
+    static CLI::Option* add_output_option(CLI::App* cmd, std::string& target) {
+        return cmd->add_option("--output", target, "Output format: json, markdown, toon")
+            ->check(CLI::IsMember({"json", "markdown", "toon"}));
+    }
+
+    /// Returns the per-command output format when one was given.
+    static std::optional<std::string> output_override(const std::string& value) {
+        if (value.empty()) return std::nullopt;
+        return value;
+    }
 };
 
 } // namespace commands

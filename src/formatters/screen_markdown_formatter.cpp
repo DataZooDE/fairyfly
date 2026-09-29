@@ -681,7 +681,9 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
             // Check if this element is truly semantic (has meaningful content)
             bool is_truly_semantic = (subtype == "TextEdit" || subtype == "HTMLViewer") ||
                                     (subtype == "Tree" || elem.contains("tree_data")) ||
-                                    (subtype == "GridView" || elem.contains("table_data"));
+                                    (subtype == "GridView" || elem.contains("table_data")) ||
+                                    (type == "GuiShell" && (elem.value("content_available", false) ||
+                                                            (!subtype.empty() && subtype != "N/A")));
 
             if (is_truly_semantic && sap::SemanticClassifier::should_display(elem)) {
                 try {

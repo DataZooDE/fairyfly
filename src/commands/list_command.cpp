@@ -14,6 +14,7 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = app.add_subcommand(name(), description());
+        add_output_option(cmd_, output_format_);
         return cmd_;
     }
 
@@ -25,8 +26,13 @@ public:
         return cmd_ && *cmd_;
     }
 
+    std::optional<std::string> get_preferred_output_format() const override {
+        return output_override(output_format_);
+    }
+
 private:
     CLI::App* cmd_ = nullptr;
+    std::string output_format_;
 };
 
 // Factory function

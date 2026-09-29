@@ -915,6 +915,40 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
     return result;
 }
 
+static std::string lowercase_ascii(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+/// True when any string value inside `value` contains the (lowercased) needle.
+static bool json_strings_contain(const json& value, const std::string& needle, int depth = 0)
+{
+    if (depth > 64) return false;
+    if (value.is_string()) {
+        return lowercase_ascii(value.get<std::string>()).find(needle) != std::string::npos;
+    }
+    if (value.is_array() || value.is_object()) {
+        for (const auto& item : value) {
+            if (json_strings_contain(item, needle, depth + 1)) return true;
+        }
+    }
+    return false;
+}
+
+/// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
+static bool element_text_matches(const json& elem, const std::string& needle)
+{
+    for (const char* key : {"text", "tooltip", "label", "text_content"}) {
+        if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
+    }
+    for (const char* key : {"table_data", "grid_data", "tree_data", "tree_nodes"}) {
+        if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
+    }
+    return false;
+}
+
 /// Helper to check if an element matches filter criteria
 static bool element_matches_filter(const json& elem, const ScreenFilterOptions& filters)
 {
@@ -946,16 +980,7 @@ static bool element_matches_filter(const json& elem, const ScreenFilterOptions& 
 
     // Text search (case-insensitive)
     if (filters.text_contains.has_value() && matches) {
-        std::string search_text = filters.text_contains.value();
-        std::transform(search_text.begin(), search_text.end(), search_text.begin(), ::tolower);
-
-        std::string elem_text = elem.value("text", "");
-        std::string elem_tooltip = elem.value("tooltip", "");
-        std::transform(elem_text.begin(), elem_text.end(), elem_text.begin(), ::tolower);
-        std::transform(elem_tooltip.begin(), elem_tooltip.end(), elem_tooltip.begin(), ::tolower);
-
-        matches = elem_text.find(search_text) != std::string::npos ||
-                 elem_tooltip.find(search_text) != std::string::npos;
+        matches = element_text_matches(elem, lowercase_ascii(filters.text_contains.value()));
     }
 
     // ID search
@@ -1108,7 +1133,8 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 
 Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id,
                                            bool expand_tabs, const ScreenFilterOptions& filters,
-                                           bool skip_trees, bool compact, int max_rows)
+                                           bool skip_trees, bool compact, int max_rows,
+                                           const std::string& only_tab)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -1121,7 +1147,7 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
 
     Result result;
     if (expand_tabs) {
-        result = engine_->read_screen_with_tabs(skip_trees, max_rows);
+        result = engine_->read_screen_with_tabs(skip_trees, max_rows, only_tab);
     } else {
         result = engine_->read_screen(include_children, skip_trees, max_rows);
     }

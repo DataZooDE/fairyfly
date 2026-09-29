@@ -10,6 +10,14 @@
 namespace fairyfly {
 namespace sap {
 
+namespace {
+// ActiveX ProgIDs such as "SAP.HTMLControl.1": contains '.', no whitespace.
+bool looks_like_prog_id(const std::string& text) {
+    return !text.empty() && text.find('.') != std::string::npos &&
+           text.find_first_of(" \t\r\n") == std::string::npos;
+}
+} // namespace
+
 // Static cache member definition
 std::map<std::string, json> ElementMetadataExtractor::tree_grid_cache_;
 bool ElementMetadataExtractor::skip_trees_ = false;
@@ -240,6 +248,44 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
             }
         }
 
+        // Generic probe for GuiShell subtypes without a dedicated reader (ERR-137):
+        // grid-like, HTML/text pattern, then accessibility text.
+        bool probe_grid = false;
+        if (type == "GuiShell") {
+            const std::string shell_subtype = metadata.value("subtype", "");
+            const bool known = shell_subtype == "GridView" || shell_subtype == "Tree" ||
+                               shell_subtype == "TableTreeControl" || shell_subtype == "Toolbar" ||
+                               shell_subtype == "HTMLViewer" || shell_subtype == "AbapEditor" ||
+                               shell_subtype == "TextEdit";
+            if (!known) {
+                try {
+                    probe_grid = elem->get_property_int(L"RowCount") > 0 &&
+                                 elem->get_property_int(L"ColumnCount") > 0;
+                } catch (const std::exception&) {}
+                if (!probe_grid) {
+                    std::string content;
+                    try {
+                        const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"), 1);
+                        content = page.text;
+                        if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
+                    } catch (const std::exception&) {}
+                    for (const wchar_t* prop : {L"AccText", L"AccDescription"}) {
+                        if (!content.empty()) break;
+                        try { content = elem->get_property_string(prop); }
+                        catch (const std::exception&) {}
+                    }
+                    if (!content.empty()) {
+                        metadata["text_content"] = redact_sensitive_response_text(content);
+                    }
+                    metadata["content_available"] = !content.empty();
+                } else {
+                    metadata["content_available"] = true;
+                }
+                // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
+                if (looks_like_prog_id(text)) metadata.erase("text");
+            }
+        }
+
         // Special handling for GuiBox (grouping container)
         if (type == "GuiBox") {
             metadata["is_group"] = true;
@@ -266,7 +312,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
 
         // Check if GuiShell has SubType=GridView
         std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
-        bool is_gridview = (type == "GuiGridView" || (type == "GuiShell" && subtype == "GridView"));
+        bool is_gridview = (type == "GuiGridView" || probe_grid || (type == "GuiShell" && subtype == "GridView"));
 
         if (is_gridview || type == "GuiTableControl" || is_tree_control) {
             spdlog::debug("extract: Element {} is gridview={} table={} tree={}", elem_id, is_gridview, type == "GuiTableControl", is_tree_control);

@@ -950,3 +950,118 @@ TEST_CASE("ABAP source suppresses an unfinished editor range", "[screen][privacy
             std::count(source.begin(), source.end(), '\n'));
 }
 
+TEST_CASE("Unknown GuiShell subtypes are read as metadata, not silently treated as trees", "[screen][shell][err137]") {
+    REQUIRE(classify_shell_extraction("Calendar") == ShellExtractionKind::Metadata);
+    REQUIRE(classify_shell_extraction("") == ShellExtractionKind::Metadata);
+    REQUIRE(classify_shell_extraction("Toolbar") == ShellExtractionKind::Metadata);
+    REQUIRE(classify_shell_extraction("TableTreeControl") == ShellExtractionKind::Tree);
+    REQUIRE(classify_shell_extraction("Tree") == ShellExtractionKind::Tree);
+    REQUIRE(classify_shell_extraction("GridView") == ShellExtractionKind::Grid);
+}
+
+TEST_CASE("Unreadable unknown GuiShell renders one explicit line", "[screen][shell][markdown][err137]") {
+    renderers::register_all_renderers();
+    const nlohmann::json shell = {
+        {"id", "wnd[0]/usr/cntlPARAM/shellcont/shell"}, {"type", "GuiShell"},
+        {"subtype", "Calendar"}, {"content_available", false}
+    };
+    const nlohmann::json data = {
+        {"title", "Profile"}, {"transaction", "RZ11"},
+        {"elements", nlohmann::json::array({shell})},
+        {"hierarchy", {{"other", nlohmann::json::array({shell})}}}
+    };
+    const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    REQUIRE(md.find("### GuiShell (Calendar) - content unavailable") != std::string::npos);
+}
+
+TEST_CASE("GuiShell with extracted content is rendered", "[screen][shell][markdown][err137]") {
+    renderers::register_all_renderers();
+    const nlohmann::json shell = {
+        {"id", "wnd[0]/usr/shell"}, {"type", "GuiShell"}, {"subtype", "Calendar"},
+        {"content_available", true}, {"text_content", "Value 42"}
+    };
+    const nlohmann::json data = {
+        {"elements", nlohmann::json::array({shell})},
+        {"hierarchy", {{"other", nlohmann::json::array({shell})}}}
+    };
+    const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    REQUIRE(md.find("Value 42") != std::string::npos);
+    REQUIRE(md.find("content unavailable") == std::string::npos);
+}
+
+TEST_CASE("Screen text filter searches grid cells and tree nodes", "[screen][filters][imp005]") {
+    using nlohmann::json;
+    json data = {
+        {"elements", json::array({
+            {{"id", "wnd[0]/usr/grid"}, {"type", "GuiShell"}, {"subtype", "GridView"},
+             {"table_data", {{"columns", json::array({"Description", "Value"})},
+                             {"rows", json::array({
+                                 json::array({"Binding", "ZFFLY_BIND_260929"})})}}}},
+            {{"id", "wnd[0]/usr/tree"}, {"type", "GuiShell"}, {"subtype", "Tree"},
+             {"tree_data", {{"nodes", json::array({
+                 {{"text", "Root"}, {"column_values", {{"Result", "zffly_tree"}}}}})}}}},
+            {{"id", "wnd[0]/usr/other"}, {"type", "GuiLabel"}, {"text", "Nothing"}}
+        })},
+        {"element_count", 3}
+    };
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "zffly";
+    cli::apply_screen_filters(data, filters);
+    REQUIRE(data.at("elements").size() == 2);
+    REQUIRE(data.at("elements").at(0).at("id") == "wnd[0]/usr/grid");
+    REQUIRE(data.at("elements").at(1).at("id") == "wnd[0]/usr/tree");
+}
+
+TEST_CASE("Screen text filter still matches object-row grids", "[screen][filters][imp005]") {
+    using nlohmann::json;
+    json data = {
+        {"elements", json::array({
+            {{"id", "g"}, {"type", "GuiGridView"},
+             {"table_data", {{"rows", json::array({{{"Value", "ZFFLY_BIND_260929"}}})}}}}
+        })},
+        {"element_count", 1}
+    };
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "ZFFLY";
+    cli::apply_screen_filters(data, filters);
+    REQUIRE(data.at("elements").size() == 1);
+}
+
+TEST_CASE("collapse_label_duplicates drops empty and duplicate selection labels", "[screen][size][imp006]") {
+    using nlohmann::json;
+    json elements = json::array({
+        {{"id", "a"}, {"type", "GuiCTextField"}, {"label", "Program"}},
+        {{"id", "b"}, {"type", "GuiLabel"}, {"name", "%_P_PROG_%_APP_%-TEXT"}, {"text", "Program"}},
+        {{"id", "c"}, {"type", "GuiLabel"}, {"name", "%_P_X_%_APP_%-TEXT"}, {"text", "  "}},
+        {{"id", "d"}, {"type", "GuiLabel"}, {"name", "%_P_Y_%_APP_%-TEXT"}, {"text", "Unique text"}},
+        {{"id", "e"}, {"type", "GuiLabel"}, {"name", "lblOther"}, {"text", "Program"}}
+    });
+    ScreenReader::collapse_label_duplicates(elements);
+    REQUIRE(elements.size() == 3);
+    REQUIRE(elements.at(0).at("id") == "a");
+    REQUIRE(elements.at(1).at("id") == "d");
+    REQUIRE(elements.at(2).at("id") == "e");
+}
+
+TEST_CASE("Tab selection matches full id or trailing part", "[screen][tabs][imp006]") {
+    using nlohmann::json;
+    const std::vector<json> tabs = {
+        {{"id", "wnd[0]/usr/tabsTS/tabpTAB1"}, {"type", "GuiTab"}},
+        {{"id", "wnd[0]/usr/tabsTS/tabpTAB2"}, {"type", "GuiTab"}},
+        {{"id", "wnd[0]/usr/tabsTS/tabpTAB22"}, {"type", "GuiTab"}}
+    };
+    REQUIRE(ScreenReader::select_tabs(tabs, "").size() == 3);
+    auto by_suffix = ScreenReader::select_tabs(tabs, "tabpTAB2");
+    REQUIRE(by_suffix.size() == 1);
+    REQUIRE(by_suffix.at(0).at("id") == "wnd[0]/usr/tabsTS/tabpTAB2");
+    REQUIRE(ScreenReader::select_tabs(tabs, "wnd[0]/usr/tabsTS/tabpTAB1").size() == 1);
+    REQUIRE(ScreenReader::select_tabs(tabs, "TAB2").empty());
+    REQUIRE(ScreenReader::select_tabs(tabs, "missing").empty());
+}
+
+TEST_CASE("screen find reports simple text for GuiTab", "[screen][find][imp006]") {
+    REQUIRE(find_type_has_simple_text("GuiTab"));
+    REQUIRE(find_type_has_simple_text("GuiButton"));
+    REQUIRE_FALSE(find_type_has_simple_text("GuiShell"));
+    REQUIRE_FALSE(find_type_has_simple_text("GuiUserArea"));
+}

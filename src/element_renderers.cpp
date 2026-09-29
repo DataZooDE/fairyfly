@@ -721,6 +721,13 @@ void register_all_renderers() {
             }
             return result;
         }
+        if (metadata.contains("text_content") || metadata.value("content_available", false) ||
+            (!subtype.empty() && subtype != "N/A")) {
+            json result = metadata;
+            result["semantic_type"] = "Shell";
+            result["content_available"] = metadata.value("content_available", false);
+            return result;
+        }
         return ContainerRenderer::to_json(metadata);
     });
 
@@ -779,6 +786,26 @@ void register_all_renderers() {
             if (!id.empty()) {
                 oss << indent << "**Technical ID:** `" << id << "`\n\n";
             }
+            return oss.str();
+        }
+        if (metadata.contains("text_content") || metadata.value("content_available", false) ||
+            (!subtype.empty() && subtype != "N/A")) {
+            std::ostringstream oss;
+            const std::string indent = helpers::make_indent(level);
+            const std::string label = subtype.empty() ? "unknown" : subtype;
+            const json* content = metadata.contains("text_content") ? &metadata["text_content"] : nullptr;
+            if (content && content->is_string() && !content->get_ref<const std::string&>().empty()) {
+                oss << indent << "### GuiShell (" << label << ")\n\n"
+                    << indent << "```text\n"
+                    << redact_sensitive_response_text(content->get<std::string>()) << "\n"
+                    << indent << "```\n\n";
+                if (metadata.value("content_truncated", false))
+                    oss << indent << "_Content truncated._\n\n";
+            } else {
+                oss << indent << "### GuiShell (" << label << ") - content unavailable\n\n";
+            }
+            const std::string id = metadata.value("id", "");
+            if (!id.empty()) oss << indent << "**Technical ID:** `" << id << "`\n\n";
             return oss.str();
         }
         return ContainerRenderer::to_markdown(metadata, level);

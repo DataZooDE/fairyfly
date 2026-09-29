@@ -1109,6 +1109,29 @@ TEST_CASE("COM apartment mismatch cannot create a synthetic automation engine", 
     REQUIRE(mismatch_propagated);
 }
 
+TEST_CASE("Unknown GuiShell subtype keeps its subtype and drops the ProgID text", "[com][metadata][err137]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiShell", 460, L"wnd[0]/usr/cntlPARAM/shellcont/shell",
+                                           L"", L"Calendar", L"SAP.HTMLControl.1");
+    auto shell = ComGuiElement::create(IDispatchPtr(dispatch, true));
+    const auto data = ElementMetadataExtractor::extract(shell);
+    REQUIRE(data.at("type") == "GuiShell");
+    REQUIRE(data.at("subtype") == "Calendar");
+    REQUIRE_FALSE(data.contains("text"));
+    REQUIRE(data.at("content_available") == false);
+}
+
+TEST_CASE("list accepts a per-command --output option", "[com][cli][imp005]") {
+    const auto result = run_cli_on_mta({"fairyfly", "list", "--output", "toon"});
+    REQUIRE(result.mta_initialized);
+    REQUIRE_FALSE(result.failure);
+    REQUIRE(result.exit_code == 1);
+    REQUIRE(result.output.find("INTERNAL_ERROR") != std::string::npos);
+    const auto global = run_cli_on_mta({"fairyfly", "--output", "toon", "list"});
+    REQUIRE(global.exit_code == 1);
+    REQUIRE(global.output.find("INTERNAL_ERROR") != std::string::npos);
+}
+
 TEST_CASE("CLI serializes COM initialization failure and exits nonzero", "[com][cli]") {
     const auto result = run_cli_on_mta({"fairyfly", "list"});
     REQUIRE(result.mta_initialized);

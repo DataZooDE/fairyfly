@@ -39,6 +39,11 @@ SemanticClassifier::ElementCategory SemanticClassifier::classify(
         if (metadata.contains("table_data") && !metadata["table_data"].is_null()) {
             return ElementCategory::SEMANTIC;
         }
+        // Other subtypes (Calendar, ...) or extracted content: never hide silently (ERR-137).
+        if (metadata.value("content_available", false) ||
+            (!subtype.empty() && subtype != "N/A")) {
+            return ElementCategory::SEMANTIC;
+        }
         return ElementCategory::LAYOUT;
     }
 

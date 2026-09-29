@@ -17,10 +17,22 @@ enum class ShellExtractionKind { Grid, Tree, Metadata };
 
 inline ShellExtractionKind classify_shell_extraction(const std::string& subtype) {
     if (subtype == "GridView") return ShellExtractionKind::Grid;
-    if (subtype == "AbapEditor" || subtype == "TextEdit" ||
-        subtype == "HTMLViewer")
-        return ShellExtractionKind::Metadata;
-    return ShellExtractionKind::Tree;
+    if (subtype == "Tree" || subtype == "TableTreeControl")
+        return ShellExtractionKind::Tree;
+    // Everything else (Toolbar, HTMLViewer, AbapEditor, TextEdit, Calendar,
+    // unknown or empty SubType) goes through the metadata probe so its
+    // content is not silently dropped (ERR-137).
+    return ShellExtractionKind::Metadata;
+}
+
+/// Whether `screen find` can report a simple text value for this element type.
+inline bool find_type_has_simple_text(const std::string& type) {
+    return type == "GuiButton" || type == "GuiTextField" ||
+           type == "GuiCTextField" || type == "GuiPasswordField" ||
+           type == "GuiLabel" || type == "GuiStatusbar" ||
+           type == "GuiCheckBox" || type == "GuiRadioButton" ||
+           type == "GuiComboBox" || type == "GuiOkCodeField" ||
+           type == "GuiTitlebar" || type == "GuiTab";
 }
 
 struct ScreenFindOptions {
@@ -56,7 +68,18 @@ public:
     Result read(bool include_structure = true, bool skip_trees = false, int max_rows = 20);
 
     /// Read screen with all tabs expanded
-    Result read_with_tabs(bool skip_trees = false, int max_rows = 20);
+    /// When only_tab is non-empty, only the tab whose id equals it (or ends with it at a
+    /// '/' boundary) is expanded; TAB_NOT_FOUND is returned when none matches.
+    Result read_with_tabs(bool skip_trees = false, int max_rows = 20,
+                          const std::string& only_tab = "");
+
+    /// Pure tab selection used by `screen read --tab`: an empty selector keeps all tabs.
+    static std::vector<json> select_tabs(const std::vector<json>& tabs,
+                                         const std::string& only_tab);
+
+    /// Remove selection-screen `%_..._%_APP_%-TEXT` GuiLabels that are empty or repeat
+    /// the `label` of a sibling field, so the text is not emitted twice.
+    static void collapse_label_duplicates(json& elements);
 
     /// Search current visible controls without extracting unrelated values or grid rows.
     Result find(const ScreenFindOptions& query);

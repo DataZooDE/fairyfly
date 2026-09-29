@@ -90,13 +90,10 @@ struct ScreenSearchContext {
             try { name = element->get_name(); } catch (const std::exception&) {}
         }
         json match = {{"id", id}, {"type", type}, {"name", name}};
-        const bool has_simple_text =
-            type == "GuiButton" || type == "GuiTextField" ||
-            type == "GuiCTextField" || type == "GuiPasswordField" ||
-            type == "GuiLabel" || type == "GuiStatusbar" ||
-            type == "GuiCheckBox" || type == "GuiRadioButton" ||
-            type == "GuiComboBox" || type == "GuiOkCodeField" ||
-            type == "GuiTitlebar";
+        if (type == "GuiShell") {
+            try { match["subtype"] = element->get_subtype(); } catch (const std::exception&) {}
+        }
+        const bool has_simple_text = find_type_has_simple_text(type);
         if (has_simple_text) {
             try { match["text"] = element->get_text_for_direct_read(); }
             catch (const std::exception&) { match["text_available"] = false; }
@@ -486,12 +483,10 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
                 table_json.update(viewport);
             }
 
-            grid_element["grid_data"] = table_json;
             grid_element["table_data"] = table_json;
             spdlog::info("Extracted {} rows × {} columns from grid {}",
                         grid_data.rows.size(), grid_data.columns.size(), elem_id);
         } else {
-            grid_element["grid_data"] = nullptr;
             spdlog::warn("Grid {} extraction returned no data (empty grid)", elem_id);
         }
 
@@ -517,7 +512,6 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
 
     } catch (const std::exception& e) {
         spdlog::error("Failed to extract grid data from {}: {}", elem_id, e.what());
-        grid_element["grid_data"] = nullptr;
         grid_element["extraction_error"] = e.what();
     }
 
@@ -550,7 +544,6 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
 
         if (cells.empty()) {
             spdlog::warn("No grid cells found for GuiUserArea {}", elem_id);
-            grid_element["grid_data"] = nullptr;
             grid_element["table_data"] = nullptr;
             return grid_element;
         }
@@ -647,14 +640,12 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
         limit_userarea_table_rows(table_json, max_rows_);
 
         grid_element["table_data"] = table_json;
-        grid_element["grid_data"] = table_json;
 
         spdlog::info("Extracted {} rows × {} columns from GuiUserArea grid {}",
                      data_rows.size(), header_array.size(), elem_id);
 
     } catch (const std::exception& e) {
         spdlog::error("Failed to extract UserArea grid data from {}: {}", elem_id, e.what());
-        grid_element["grid_data"] = nullptr;
         grid_element["table_data"] = nullptr;
         grid_element["extraction_error"] = e.what();
     }
@@ -1240,10 +1231,10 @@ void ScreenReader::discover_elements(ComGuiWindowPtr window, ScreenElementCollec
                 // Store extracted data
                 collector.add_extracted_data(grid_id, grid_data);
 
-                // Safely extract row count - grid_data["grid_data"] might be null
+                // Safely extract row count - grid_data["table_data"] might be null
                 int row_count = 0;
-                if (grid_data.contains("grid_data") && grid_data["grid_data"].is_object()) {
-                    auto rows = grid_data["grid_data"].value("rows", json::array());
+                if (grid_data.contains("table_data") && grid_data["table_data"].is_object()) {
+                    auto rows = grid_data["table_data"].value("rows", json::array());
                     row_count = static_cast<int>(rows.size());
                 }
                 spdlog::debug("Successfully extracted {} rows from grid {}", row_count, grid_id);
@@ -1367,6 +1358,7 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
         }
     }
 
+    collapse_label_duplicates(elements);
     return elements;
 }
 
@@ -1515,7 +1507,50 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
     return result;
 }
 
-Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows) {
+std::vector<json> ScreenReader::select_tabs(const std::vector<json>& tabs,
+                                            const std::string& only_tab) {
+    if (only_tab.empty()) return tabs;
+    std::vector<json> selected;
+    for (const auto& tab : tabs) {
+        const std::string id = tab.value("id", "");
+        if (id.empty()) continue;
+        const bool exact = id == only_tab;
+        const bool suffix = id.size() > only_tab.size() &&
+            id.compare(id.size() - only_tab.size(), only_tab.size(), only_tab) == 0 &&
+            id[id.size() - only_tab.size() - 1] == '/';
+        if (exact || suffix) selected.push_back(tab);
+    }
+    return selected;
+}
+
+void ScreenReader::collapse_label_duplicates(json& elements) {
+    if (!elements.is_array()) return;
+    std::unordered_set<std::string> field_labels;
+    for (const auto& elem : elements) {
+        if (!elem.is_object() || elem.value("type", "") == "GuiLabel") continue;
+        const std::string label = elem.value("label", "");
+        if (!label.empty()) field_labels.insert(label);
+    }
+    json kept = json::array();
+    for (auto& elem : elements) {
+        if (elem.is_object() && elem.value("type", "") == "GuiLabel") {
+            const std::string name = elem.value("name", "");
+            const bool selection_text = name.rfind("%_", 0) == 0 &&
+                name.find("_%_APP_%-TEXT") != std::string::npos;
+            if (selection_text) {
+                const std::string text = elem.value("text", "");
+                const auto first = text.find_first_not_of(" \t\r\n");
+                const std::string trimmed = first == std::string::npos ? std::string() :
+                    text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+                if (trimmed.empty() || field_labels.count(trimmed)) continue;
+            }
+        }
+        kept.push_back(std::move(elem));
+    }
+    elements = std::move(kept);
+}
+
+Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::string& only_tab) {
     TraceGuard trace("ScreenReader::read_with_tabs");
     auto start = std::chrono::high_resolution_clock::now();
     Result result;
@@ -1567,6 +1602,19 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows) {
                         }
                     }
                 }
+            }
+        }
+
+        if (!only_tab.empty()) {
+            json available = json::array();
+            for (const auto& tab : tab_elements) available.push_back(tab.value("id", ""));
+            tab_elements = select_tabs(tab_elements, only_tab);
+            if (tab_elements.empty()) {
+                result.status = Result::Status::Error;
+                result.error["code"] = "TAB_NOT_FOUND";
+                result.error["message"] = "No tab matches '" + only_tab + "'";
+                result.error["available_tabs"] = available;
+                return result;
             }
         }
 

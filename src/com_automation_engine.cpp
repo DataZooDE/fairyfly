@@ -1733,7 +1733,8 @@ Result ComAutomationEngine::read_screen(bool include_structure, bool skip_trees,
     return screen_reader_->read(include_structure, skip_trees, max_rows);
         }
 
-Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows) {
+Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows,
+                                                   const std::string& only_tab) {
     if (!screen_reader_) {
         auto session = ensure_session();
         initialize_services();
@@ -1745,7 +1746,7 @@ Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows)
         result.error["message"] = "Unable to initialize screen reader - no session";
     return result;
 }
-    return screen_reader_->read_with_tabs(skip_trees, max_rows);
+    return screen_reader_->read_with_tabs(skip_trees, max_rows, only_tab);
 }
 
 Result ComAutomationEngine::find_screen(const ScreenFindOptions& query) {
