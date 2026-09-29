@@ -18,7 +18,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override;
     Result execute(cli::CommandHandler& handler) override;
-    bool was_invoked() const override { return cmd_ && *cmd_; }
+    bool was_invoked() const override {
+        // `mcp token ...` belongs to McpTokenCommand (src/commands/mcp_token_command.cpp).
+        const CLI::App* token = cmd_ ? cmd_->get_subcommand_no_throw("token") : nullptr;
+        return cmd_ && *cmd_ && !(token && *token);
+    }
 
     /// True when the `tools` subcommand was selected.
     bool tools_invoked() const { return tools_cmd_ && *tools_cmd_; }

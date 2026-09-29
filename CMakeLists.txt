@@ -168,6 +168,14 @@ set(FAIRYFLY_LIB_SOURCES
     src/iis/iis_service.cpp
     src/iis/powershell_host.cpp
     src/commands/mcp_iis_command.cpp
+    src/auth/crypto.cpp
+    src/auth/ip.cpp
+    src/auth/secret_backend.cpp
+    src/auth/token_store.cpp
+    src/auth/authenticator.cpp
+    src/auth/authorize.cpp
+    src/auth/token_cli.cpp
+    src/commands/mcp_token_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)

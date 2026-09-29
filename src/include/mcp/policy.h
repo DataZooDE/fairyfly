@@ -2,6 +2,7 @@
 #include <chrono>
 #include <deque>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include "include/mcp/types.h"
@@ -30,6 +31,16 @@ private:
     int per_minute_;
     std::mutex mutex_;
     std::deque<std::chrono::steady_clock::time_point> calls_;
+};
+
+/// One sliding-window budget per principal name (remote MCP tokens). `per_minute` <= 0 = unlimited.
+/// Thread-safe. Idle principals are dropped lazily.
+class KeyedRateLimiter {
+public:
+    bool allow(const std::string& key, int per_minute, std::chrono::steady_clock::time_point now);
+private:
+    std::mutex mutex_;
+    std::map<std::string, std::deque<std::chrono::steady_clock::time_point>> calls_;
 };
 
 } // namespace fairyfly::mcp

@@ -45,6 +45,10 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.duration_ms = rec.duration_ms;
             out.client = rec.client;
             out.request_id = rec.request_id;
+            out.principal = rec.principal;
+            out.remote_addr = rec.remote_addr;
+            out.transport = rec.transport;
+            out.era = rec.era;
             record_result(sink->append(out));
         } catch (const std::exception& e) {
             record_result(false);

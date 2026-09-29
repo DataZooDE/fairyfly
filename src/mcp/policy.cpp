@@ -90,3 +90,21 @@ bool RateLimiter::allow(std::chrono::steady_clock::time_point now) {
 }
 
 } // namespace fairyfly::mcp
+
+namespace fairyfly::mcp {
+
+bool KeyedRateLimiter::allow(const std::string& key, int per_minute, std::chrono::steady_clock::time_point now) {
+    if (per_minute <= 0) return true;
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto window = std::chrono::seconds(60);
+    for (auto it = calls_.begin(); it != calls_.end();) {
+        while (!it->second.empty() && now - it->second.front() >= window) it->second.pop_front();
+        it = it->second.empty() && it->first != key ? calls_.erase(it) : std::next(it);
+    }
+    auto& calls = calls_[key];
+    if (static_cast<int>(calls.size()) >= per_minute) return false;
+    calls.push_back(now);
+    return true;
+}
+
+} // namespace fairyfly::mcp
