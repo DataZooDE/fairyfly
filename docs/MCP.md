@@ -180,7 +180,7 @@ Remote (HTTP) access is authenticated with named bearer tokens. The stdio server
 fairyfly mcp token create NAME [--scope screen,element] [--system A4H/001,QAS/*] [--tcode SE16,SM*]
                                [--rate N] [--ip 10.0.0.0/8,203.0.113.9] [--expires 30d|2026-12-31]
                                [--read-only] [--yes] [--output json|markdown|toon]
-fairyfly mcp token list | revoke NAME | rotate NAME
+fairyfly mcp token list | revoke NAME | rotate NAME | delete NAME --yes
 ~~~
 
 - A token looks like `ffy_<id>_<secret>` and is printed once by `create` and `rotate`. Only its SHA-256 and the restrictions are stored, as one Windows Credential Manager entry `fairyfly-mcp:<name>`. `list` never shows hashes or secrets. Lost token: `rotate` (the old secret stops working at once).

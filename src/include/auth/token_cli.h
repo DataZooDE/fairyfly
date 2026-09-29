@@ -1,5 +1,5 @@
 #pragma once
-// Logic of `fairyfly mcp token create|list|revoke|rotate` without any CLI11 or process state (unit-testable).
+// Logic of `fairyfly mcp token create|list|revoke|rotate|delete` without any CLI11 or process state (unit-testable).
 
 #include <string>
 #include <vector>
@@ -10,7 +10,7 @@
 namespace fairyfly::auth {
 
 struct TokenCliArgs {
-    std::string action;                   ///< create | list | revoke | rotate
+    std::string action;                   ///< create | list | revoke | rotate | delete
     std::string name;
     std::vector<std::string> scopes;      ///< --scope (already split on commas by the CLI layer; split again here to be safe)
     std::vector<std::string> systems;     ///< --system
@@ -19,7 +19,7 @@ struct TokenCliArgs {
     int rate = 0;                         ///< --rate
     std::string expires;                  ///< --expires 30d | 2026-12-31
     bool read_only_flag = false;          ///< --read-only
-    bool yes = false;                     ///< --yes (confirms a wildcard scope)
+    bool yes = false;                     ///< --yes (confirms a wildcard scope, or a token delete)
 };
 
 /// Default scopes of a token created without --scope.

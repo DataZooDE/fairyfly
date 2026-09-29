@@ -739,6 +739,8 @@ TEST_CASE("cli: mcp token subcommands parse and do not start the server", "[auth
     CHECK(dry({"mcp", "token", "list", "--output", "toon"}).path == "mcp token list");
     CHECK(dry({"mcp", "token", "revoke", "ci"}).path == "mcp token revoke");
     CHECK(dry({"mcp", "token", "rotate", "ci", "--output", "markdown"}).path == "mcp token rotate");
+    CHECK(dry({"mcp", "token", "delete", "ci", "--yes"}).path == "mcp token delete");
+    CHECK_FALSE(dry({"mcp", "token", "delete"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token", "create"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token"}).ok);             // a verb is required
     // the server command and its tools listing are unaffected

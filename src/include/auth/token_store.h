@@ -95,6 +95,9 @@ public:
     std::vector<TokenMeta> list();
     /// Marks the token revoked (kept for the record). false when the name is unknown. Effective immediately here.
     bool revoke(const std::string& name);
+    /// Removes the token record (the Credential Manager entry) whether or not it is revoked. false when the name
+    /// is unknown. Effective immediately here; other processes notice within the cache TTL.
+    bool remove(const std::string& name);
     /// New id+secret, same restrictions; the old token is invalid immediately. TOKEN_REVOKED if revoked.
     CreatedToken rotate(const std::string& name);
 

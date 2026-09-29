@@ -88,6 +88,16 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             return result;
         }
 
+        if (args.action == "delete") {
+            // Works for revoked and expired tokens too: it removes the record itself, so nothing lingers.
+            if (!args.yes)
+                return failure("CONFIRMATION_REQUIRED",
+                               "deleting a token removes its record for good (revoke keeps it); repeat with --yes to confirm");
+            if (!store.remove(args.name)) return failure("TOKEN_NOT_FOUND", "no token named '" + args.name + "'");
+            result.data = {{"name", args.name}, {"deleted", true}};
+            return result;
+        }
+
         if (args.action == "list") {
             json rows = json::array();
             for (const auto& meta : store.list()) rows.push_back(meta.to_public_json());

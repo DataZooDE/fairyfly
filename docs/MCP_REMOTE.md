@@ -95,7 +95,7 @@ fairyfly mcp token list
 The token (`ffy_<id>_<secret>`) is printed once. See [Tokens and scopes](MCP.md#tokens-and-scopes). A token
 without `--scope` gets `session,connection,screen` and is read-only; an explicit `--scope` grants what it names
 (still capped by the server mode) unless `--read-only` is added. Prefer named tokens per client and an expiry.
-There is no `token delete`: `revoke` keeps the (revoked) Credential Manager entry `fairyfly-mcp:<name>`.
+`revoke` keeps the (revoked) Credential Manager entry `fairyfly-mcp:<name>`; `fairyfly mcp token delete NAME --yes` removes it for good.
 
 ### 4. IIS in front (TLS)
 
@@ -294,7 +294,8 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 - **Rotate**: `fairyfly mcp token rotate NAME` prints a new secret and the old one stops working at once.
   A running server sees changes made by another process within 5 seconds.
 - **Revoke**: `fairyfly mcp token revoke NAME`. The record stays (marked revoked) in the Credential Manager entry
-  `fairyfly-mcp:<name>`; remove it with `cmdkey /delete:fairyfly-mcp:NAME` if you want it gone.
+  `fairyfly-mcp:<name>`; **delete** it with `fairyfly mcp token delete NAME --yes` (works for revoked tokens too, is
+  audited, needs `--yes`; `cmdkey /delete:fairyfly-mcp:NAME` also works).
 - **List**: `fairyfly mcp token list` (id prefix, scopes, systems, T-codes, rate, IPs, expiry, revoked; never
   hashes or secrets).
 - **Proxy secret**: `fairyfly mcp iis setup --rotate-secret --yes` issues a new one; restart is not needed (the

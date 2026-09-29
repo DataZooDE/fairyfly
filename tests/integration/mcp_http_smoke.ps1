@@ -19,9 +19,9 @@
   fills a field: the write-mode server is only used to prove that a read-only token is refused (READ_ONLY)
   before SAP is reached.
 
-  Tokens: named <prefix>-main, -screen, -tcode, -rate, -revoke, -ro with a random prefix. They are printed
+  Tokens: named <prefix>-main, -screen, -tcode, -rate, -revoke, -ro, -all, -allw with a random prefix. They are printed
   nowhere (only held in variables). The finally block revokes every token that was created and deletes its
-  Credential Manager entry (cmdkey /delete:fairyfly-mcp:<name>), also after a failure or Ctrl+C.
+  Credential Manager entry (mcp token delete NAME --yes, cmdkey /delete:fairyfly-mcp:<name> as fallback), also after a failure or Ctrl+C.
 
   A temporary yaml config (server.transport/port only) and a temporary audit file (FAIRYFLY_AUDIT_FILE) are used
   so the user's real mcp.yaml and audit trail are not involved. The token-expiry check that would need an already
@@ -175,7 +175,14 @@ function New-SmokeToken([string]$Short, [string[]]$ExtraArgs) {
 function Remove-SmokeTokens {
     foreach ($name in @($script:CreatedNames)) {
         try { [void](& $Exe mcp token revoke $name --output json --no-audit 2>$null | Out-String) } catch { }
-        try { [void](& cmdkey.exe "/delete:fairyfly-mcp:$name" 2>$null) } catch { }
+        # Prefer the product command; fall back to cmdkey when it is unavailable (older build) or fails.
+        $deleted = $false
+        try {
+            $out = (& $Exe mcp token delete $name --yes --output json --no-audit 2>$null | Out-String)
+            $j = ConvertFrom-JsonSafe $out
+            $deleted = ($null -ne $j -and $j.status -eq 'success')
+        } catch { }
+        if (-not $deleted) { try { [void](& cmdkey.exe "/delete:fairyfly-mcp:$name" 2>$null) } catch { } }
     }
 }
 function Get-TokenHeader([string]$Short) { return @{ Authorization = ('Bearer ' + $script:Tokens[$Short].Secret) } }
