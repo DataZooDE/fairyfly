@@ -27,7 +27,7 @@ public:
         read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
             ->excludes("--no-tabs");
         read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
-        read_cmd_->add_flag("--compact", compact_, "Compact markdown output (hide IDs, collapse empty fields)");
+        read_cmd_->add_flag("--compact", compact_, "Compact output. markdown: hide IDs, collapse empty fields. json/toon: hierarchy and per-tab elements become id arrays, empty/null/false element fields omitted");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
             ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
         read_cmd_->add_option("--connection", read_conn_id_, "Connection ID to use");
