@@ -296,6 +296,10 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // gui_session_attach without session_id: resolve through `list`.
     if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
         Result listed = invoke({"session", "list"});
+        // A token limited to named connections only ever sees (and can only be offered) its own sessions.
+        if (!auth::filter_listing_for_connections(principal, "gui_session_list", listed))
+            return fail("RESULT_FILTER_FAILED", "the session list could not be limited to the connections of token '" +
+                                                 principal.name + "'");
         if (listed.status != Result::Status::Success) {
             code = result_error_code(listed);
             return shape_result(listed, *spec, policy_, "");
@@ -338,6 +342,12 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 5. invoke
     Result result = invoke(argv);
+
+    // 5a. tokens limited to named connections only see those in the three listings: filter the structured result
+    // before anything is shaped, rendered or audited; an unexpected shape is an error, never unfiltered data.
+    if (auth::listing_needs_filter(principal, name) && !auth::filter_listing_for_connections(principal, name, result))
+        return fail("RESULT_FILTER_FAILED", "the listing could not be limited to the connections of token '" + principal.name +
+                                             "' and is withheld");
 
     // 5b. post-call re-check of the transaction (same read-only facts provider as before the call). Only for tokens
     // with a T-code allowlist and only for calls that act on the screen or start a transaction. Unknown facts do not

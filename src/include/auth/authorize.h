@@ -82,10 +82,24 @@ bool needs_session_target(const mcp::Principal& principal, const std::string& to
 ///  - with `connections` set, every tool that acts on a connection (launch, login, attach, disconnect and the
 ///    screen/element/key/... tools) needs the connection name to be determinable and to match one glob
 ///    -> CONNECTION_DENIED. gui_session_list, gui_connection_list, gui_credentials_list, gui_doctor and
-///    gui_batch (its items are checked one by one) have no target and are not restricted.
+///    gui_batch (its items are checked one by one) have no target; the three listings are limited through
+///    filter_listing_for_connections instead. gui_connection_list cleanup=true is refused by authorize_call.
 /// Pure; tokens without either list are always allowed.
 mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
                                              const SessionTarget& target);
+
+/// True for the three listing tools whose RESULT must be limited to the token's `connections` (gui_session_list,
+/// gui_connection_list, gui_credentials_list) when the token has a connections restriction.
+bool listing_needs_filter(const mcp::Principal& principal, const std::string& tool);
+
+/// Filters the structured Result of such a listing in place, before shaping and audit:
+///  - gui_session_list: connections whose LIVE description does not match (or has none) are dropped with their
+///    sessions; total_connections, total_sessions and the enumeration error counters are recomputed from what is kept.
+///  - gui_connection_list: rows are matched by `description`; gui_credentials_list by `connection`; `count` is recomputed.
+///  - an error result keeps only its code (the message may name other connections) and loses diagnostics.
+/// Returns false when the data does not have the expected shape (unknown top-level keys, wrong types): the data is
+/// cleared and the caller must return an error instead of the listing. Other tools and unrestricted tokens: no-op, true.
+bool filter_listing_for_connections(const mcp::Principal& principal, const std::string& tool, Result& result);
 
 /// The token's own calls-per-minute limit for a tool family (`--rate-family element=10`); 0 = none.
 int rate_family_limit(const mcp::Principal& principal, const std::string& family);
