@@ -56,17 +56,21 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
             return info;
         }
         if (!session_id.empty()) {
+            // The name comes from the LIVE session's own connection (SAP GUI scripting), never from a saved record:
+            // a saved record keyed by a reused session id could name another connection. Not determinable = empty.
             info.facts = engine->peek_session_facts(session_id);
-            if (const auto saved = conn_mgr_->find_by_session_id(session_id)) info.connection_name = saved->connection_description;
-            if (info.connection_name.empty()) info.connection_name = engine->peek_session_connection_description(session_id);
+            info.connection_name = engine->peek_session_connection_description(session_id);
             return info;
         }
         const auto resolved = conn_mgr_->resolve_connection(connection);
         if (resolved.status != ResultT<Connection>::Status::Success) return info;
         info.facts = engine->peek_session_facts(resolved.value.session_id, resolved.value.server_session_key);
-        info.connection_name = resolved.value.connection_description;
-        if (info.connection_name.empty())
-            info.connection_name = engine->peek_session_connection_description(resolved.value.session_id);
+        // The saved record must match the live session (session id AND server session key), otherwise a reused id could
+        // let a stale record vouch for another connection: not validated = no name (the caller denies, fail closed).
+        // The name is then the live connection's description; the saved one only fills in when the live one is empty.
+        if (!engine->validate_session(resolved.value.session_id, resolved.value.server_session_key)) return info;
+        info.connection_name = engine->peek_session_connection_description(resolved.value.session_id);
+        if (info.connection_name.empty()) info.connection_name = resolved.value.connection_description;
     } catch (...) {
     }
     return info;
