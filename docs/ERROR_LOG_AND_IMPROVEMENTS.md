@@ -1843,6 +1843,16 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 
 ---
 
+### [IMP-010] Codex Review of the First-Round Features and Live Verification of the Credential Store and Audit Trail
+
+- **Status**: DONE AND VERIFIED LIVE 2026-09-29
+- **Review**: `codex exec --sandbox read-only` reviewed the first-round patch (status bar, `tcode /n`, `batch`, `--read-only`, `close`, menu, connection pruning, redaction). Its sandbox cannot see `.git`, so the diff was supplied as `scratch/first_round.diff` after checking it for credentials. Eight findings, all confirmed and fixed with regression tests except one documented limit: `--read-only` `send-key` allowlist (Enter refused while a popup is open), double-click inspection, toolbar-button tooltip check, no echo of input-field or password text in refusals, `&` accelerator normalization plus a re-check of the resolved menu item, attach-prune race (never delete an entry holding the current live session key), NUL rejection in batch arguments, redaction of status-bar text. Not changed: `--wait-for-window` misses a click that only changes field contents (documented in the option help).
+- **Live**: 21/21 checks (send-key allowlist, Enter with and without popup, menu `Sa&ve` refused, double-click still allowed, SM37 Release/Stop/Delete refused under `--read-only` with nothing pressed, Job log allowed, batch NUL rejected and the batch continues); the regression suite on the final build passed 84/84 over 3 iterations.
+- **Credentials**: import from `trial.env` into Credential Manager and `login` from the store verified on Bigfox (see OPEN_WORK). Found: `login` does not handle SAP's "License Information for Multiple Logons" dialog and reports `LOGON_NOT_COMPLETED`.
+- **Tooling notes**: `gh workflow run` is required to start CI on a branch (the workflow triggers only on `main` pushes, pull requests and dispatch). In the harness, a PowerShell function named `Rd` (alias of `Remove-Item`) and `Remove-Item` calls next to arguments like `/nRZ11` trigger a false 'protected path' block.
+
+---
+
 ### [OPS-030] SEPM_REF_APPS_DG 8-Phase Report Structure Verified
 
 - **Status**: VERIFIED WITH ADT SOURCE AUDIT AND UNIT TESTS
