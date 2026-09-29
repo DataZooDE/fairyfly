@@ -996,6 +996,26 @@ TEST_CASE("dispatcher: connection list cleanup is refused for tokens limited to 
     REQUIRE(f.calls.size() == 1);
 }
 
+TEST_CASE("dispatcher: gui_doctor is refused for tokens limited to named connections", "[auth][dispatch][doctor]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("conn", {"system", "batch"});
+    p.connections = {"DEV*"};
+
+    auto r = d.call_tool("gui_doctor", json::object(), ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_doctor"}}})}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());  // the invoker never ran
+
+    Principal open = token("open", {"system"});
+    CHECK_FALSE(d.call_tool("gui_doctor", json::object(), ctx_for(open)).is_error);
+    CHECK(f.calls.size() == 1);
+}
+
 // ---- listings are filtered to the token's connections --------------------------------------------
 namespace {
 

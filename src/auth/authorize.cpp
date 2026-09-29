@@ -79,6 +79,11 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
         return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; "
                                            "gui_connection_list with cleanup=true could delete other saved connections and is refused");
 
+    // gui_doctor reports global connection and session counts of the desktop, which name other connections' existence.
+    if (!principal.connections.empty() && tool == "gui_doctor")
+        return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; gui_doctor "
+                                           "reports environment-wide connection and session counts and is refused");
+
     if (check_system && !principal.sap_systems.empty() && !system_exempt(family, tool)) {
         if (!current_system || current_system->empty())
             return refuse("SYSTEM_UNKNOWN", "the target SAP system is not known yet and the token is limited to specific systems; "
