@@ -33,9 +33,12 @@ using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_na
 ///    run before any system is attached; every later call is checked).
 ///  - T-code allowlist: gui_transaction_start `code` -> TCODE_DENIED; while an allowlist is set, gui_element_fill into
 ///    the command field (okcd) is refused too. gui_key_send and menus are NOT blocked (residual risk, see docs/MCP.md).
-///  - gui_batch: every item is checked with the static rules (scope, read-only, T-code); the system rule is applied
-///    per item by the dispatcher at execution time because an earlier item may attach the session.
-/// `current_tcode` is the transaction currently shown (informational; reserved for context rules).
+///  - T-code allowlist, current transaction: with an allowlist, every tool of the families screen, element, key, popup and
+///    menu also requires `current_tcode` (the transaction open now, same normalisation and glob rules) to be allowlisted;
+///    unknown/empty (or S000/SESSION_MANAGER unless allowlisted) -> TCODE_DENIED. It can still change during a call.
+///  - gui_batch: every item is checked with the static rules (scope, read-only, T-code names); the system rule and the
+///    current-transaction rule are applied per item by the dispatcher at execution time because an earlier item may
+///    attach the session or start another transaction.
 mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                                    const mcp::json& args, const mcp::Policy& server_policy,
                                    std::optional<std::string> current_system, std::optional<std::string> current_tcode,
