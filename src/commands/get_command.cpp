@@ -20,6 +20,7 @@ public:
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
         cmd_->add_flag("--list-nodes", list_nodes_,
             "List all nodes in tree (only for tree elements)");
+        add_output_option(cmd_, output_format_);
         return cmd_;
     }
 
@@ -31,11 +32,16 @@ public:
         return cmd_ && *cmd_;
     }
 
+    std::optional<std::string> get_preferred_output_format() const override {
+        return output_override(output_format_);
+    }
+
 private:
     CLI::App* cmd_ = nullptr;
     std::string element_;
     std::optional<int> conn_id_;
     bool list_nodes_ = false;  // Tree node listing flag
+    std::string output_format_;
 };
 
 // Factory function

@@ -33,7 +33,19 @@ HtmlViewerText read_once(HWND hwnd) {
 
     ComPtr<IUIAutomationElement> document;
     if (FAILED(root->FindFirst(TreeScope_Descendants, condition.Get(), &document)) ||
-        !document) return result;
+        !document) {
+        // No Document control: accept any element that exposes a text pattern.
+        VARIANT has_text;
+        VariantInit(&has_text);
+        has_text.vt = VT_BOOL;
+        has_text.boolVal = VARIANT_TRUE;
+        ComPtr<IUIAutomationCondition> text_condition;
+        if (FAILED(automation->CreatePropertyCondition(UIA_IsTextPatternAvailablePropertyId,
+                                                       has_text, &text_condition))) return result;
+        document.Reset();
+        if (FAILED(root->FindFirst(TreeScope_Subtree, text_condition.Get(), &document)) ||
+            !document) return result;
+    }
 
     ComPtr<IUnknown> pattern_unknown;
     if (FAILED(document->GetCurrentPattern(UIA_TextPatternId, &pattern_unknown)) ||
@@ -68,15 +80,16 @@ HtmlViewerText read_once(HWND hwnd) {
 
 } // namespace
 
-HtmlViewerText read_html_viewer_text(int native_handle) {
+HtmlViewerText read_html_viewer_text(int native_handle, int max_attempts) {
     if (native_handle == 0) return {};
     const auto hwnd = reinterpret_cast<HWND>(
         static_cast<uintptr_t>(static_cast<uint32_t>(native_handle)));
     if (!IsWindow(hwnd)) return {};
-    for (int attempt = 0; attempt < 8; ++attempt) {
+    if (max_attempts < 1) max_attempts = 1;
+    for (int attempt = 0; attempt < max_attempts; ++attempt) {
         auto result = read_once(hwnd);
         if (!result.text.empty()) return result;
-        if (attempt != 7) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (attempt != max_attempts - 1) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     return {};
 }

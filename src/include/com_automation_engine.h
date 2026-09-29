@@ -86,7 +86,8 @@ public:
     // Screen operations
     Result read_screen(bool include_structure = true, bool skip_trees = false,
                        int max_rows = 20) override;
-    Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20) override;
+    Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20,
+                                 const std::string& only_tab = "") override;
     Result find_screen(const ScreenFindOptions& query) override;
     Result capture_screenshot(const cli::ScreenshotOptions& options) override;
 

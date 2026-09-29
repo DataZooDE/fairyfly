@@ -59,7 +59,8 @@ public:
     // Screen operations
     virtual Result read_screen(bool include_structure = true, bool skip_trees = false,
                                int max_rows = 20) = 0;
-    virtual Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20) = 0;
+    virtual Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20,
+                                         const std::string& only_tab = "") = 0;
     virtual Result find_screen(const sap::ScreenFindOptions& query) = 0;
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
 

@@ -24,6 +24,8 @@ public:
         read_cmd_ = screen_cmd_->add_subcommand("read", "Read screen structure (max 500 elements)");
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
+        read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
+            ->excludes("--no-tabs");
         read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
         read_cmd_->add_flag("--compact", compact_, "Compact markdown output (hide IDs, collapse empty fields)");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
@@ -70,7 +72,7 @@ public:
 
     Result execute(cli::CommandHandler& handler) override {
         if (*read_cmd_) {
-            bool should_expand_tabs = !no_tabs_;
+            bool should_expand_tabs = !no_tabs_ || !only_tab_.empty();
 
             // Populate optional filter strings from CLI options
             if (!filter_text_contains_.empty()) {
@@ -84,7 +86,7 @@ public:
             }
 
             return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
-                                              filters_, skip_trees_, compact_, max_rows_);
+                                              filters_, skip_trees_, compact_, max_rows_, only_tab_);
         }
         else if (*find_cmd_) {
             sap::ScreenFindOptions query;
@@ -139,6 +141,7 @@ private:
     CLI::App* read_cmd_ = nullptr;
     bool read_children_ = true;
     bool no_tabs_ = false;
+    std::string only_tab_;
     bool skip_trees_ = false;
     bool compact_ = false;
     int max_rows_ = constants::MAX_TABLE_ROWS;
