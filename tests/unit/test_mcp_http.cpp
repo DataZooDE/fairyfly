@@ -845,6 +845,32 @@ TEST_CASE("IServerControl: read-only cap, restart flag, posture banner", "[mcp][
     CHECK_FALSE(server.status().running);
 }
 
+TEST_CASE("posture banner prints the insecure-auth warning once", "[mcp][http][banner]") {
+    const auto count_auth_warnings = [](const std::vector<std::string>& lines) {
+        int n = 0;
+        for (const auto& l : lines) {
+            if (l.find("WARNING:") == std::string::npos) continue;
+            std::string lower = l;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (lower.find("authentication") != std::string::npos && lower.find("disabled") != std::string::npos) ++n;
+        }
+        return n;
+    };
+    FakeProvider provider;
+    HttpServerConfig config;
+    config.port = 0;
+    config.insecure_no_auth = true;
+    McpHttpServer with_allow_all(config, provider, std::make_unique<AllowAllAuthenticator>(), [](bool) {});
+    CHECK(count_auth_warnings(with_allow_all.posture_lines()) == 1);
+
+    // an authenticator without its own warning still gets the server's line
+    struct Silent final : IAuthenticator {
+        AuthOutcome authenticate(const AuthRequest&) override { return {}; }
+    };
+    McpHttpServer with_silent(config, provider, std::make_unique<Silent>(), [](bool) {});
+    CHECK(count_auth_warnings(with_silent.posture_lines()) == 1);
+}
+
 #ifdef _WIN32
 namespace {
 /// Opens a raw TCP connection to 127.0.0.1:port and sends `data` (no further bytes, no close).

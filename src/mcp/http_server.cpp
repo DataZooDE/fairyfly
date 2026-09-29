@@ -4,6 +4,7 @@
 #include "include/mcp/http_server.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -289,11 +290,23 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
     if (!loopback)
         lines.push_back("  WARNING: listening on non-loopback address '" + config_.host +
                         "': the SAP session is reachable from the network; require a TLS reverse proxy, an IP allowlist and tokens");
-    if (config_.insecure_no_auth)
+    const std::vector<std::string> auth_warnings = impl_->auth->posture_warnings();
+    // The insecure-auth warning comes from the server and from AllowAllAuthenticator: print the topic once.
+    const auto mentions_disabled_auth = [](const std::string& w) {
+        std::string lower = w;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("authentication disabled") != std::string::npos || lower.find("authentication is disabled") != std::string::npos ||
+               lower.find("--insecure-no-auth") != std::string::npos;
+    };
+    const bool auth_reports_disabled = std::any_of(auth_warnings.begin(), auth_warnings.end(), mentions_disabled_auth);
+    if (config_.insecure_no_auth && !auth_reports_disabled)
         lines.push_back("  WARNING: authentication is disabled; anyone who can reach this port can drive SAP");
     if (!config_.read_only && !config_.read_only_cap)
         lines.push_back("  WARNING: write mode is on: authenticated callers can change SAP data");
-    for (const auto& w : impl_->auth->posture_warnings()) lines.push_back("  WARNING: " + w);
+    for (const auto& w : auth_warnings) {
+        const std::string line = "  WARNING: " + w;
+        if (std::find(lines.begin(), lines.end(), line) == lines.end()) lines.push_back(line);
+    }
     return lines;
 }
 
