@@ -67,6 +67,7 @@ find_package(PNG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
 
 # Platform-specific settings
 if(WIN32)
@@ -165,6 +166,9 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/run_mcp.cpp
     src/mcp/call_executor.cpp
     src/mcp/protocol_session.cpp
+    src/mcp/http_endpoint.cpp
+    src/mcp/http_server.cpp
+    src/mcp/http_auth.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
@@ -190,6 +194,7 @@ target_link_libraries(fairyfly_core PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     fmt::fmt
+    httplib::httplib
 )
 
 # Windows-specific COM libraries
@@ -201,6 +206,7 @@ if(WIN32)
         user32
         uiautomationcore
         advapi32
+        ws2_32
     )
 endif()
 

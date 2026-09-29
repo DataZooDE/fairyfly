@@ -32,6 +32,7 @@ private:
     CLI::App* tools_cmd_ = nullptr;
     mcp::ServeOptions options_;
     int default_connection_ = -1;
+    bool http_flag_ = false;
     std::string tools_filter_;
     bool tools_markdown_ = false;
 };
