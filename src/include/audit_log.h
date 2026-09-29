@@ -45,6 +45,7 @@ struct AuditRecord {
     std::string remote_addr;           ///< remote MCP: client address (emitted only when non-empty)
     std::string transport;             ///< MCP: "stdio" | "http" (emitted only when non-empty)
     std::string era;                   ///< MCP: "legacy" | "stateless" (emitted only when non-empty)
+    bool tcode_left_allowlist = false; ///< MCP: the transaction was outside the token's T-code allowlist after the call (emitted only when true)
 };
 
 enum class Mode { Enabled, Disabled, Required };

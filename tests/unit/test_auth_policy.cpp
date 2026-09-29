@@ -1137,3 +1137,132 @@ TEST_CASE("dispatcher: navigation rules reach the CLI only for allowed calls", "
     CHECK_FALSE(d.call_tool("gui_menu_select", {{"path", "System > Services"}}, ctx_for(nav)).is_error);
     CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "f3"}}, ctx_for(nav)).is_error);
 }
+
+// ---- post-call transaction re-check -------------------------------------------------------------
+TEST_CASE("dispatcher: leaving the allowlist during a call is flagged and blocks the next screen call", "[auth][dispatch][recheck]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("leaver", {"element", "screen", "transaction", "key"});
+    p.tcodes = {"VA03"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+
+    // the click navigates to SE38 while it runs
+    f.handler = [&](const Argv& argv) {
+        if (!argv.empty() && argv[0] == "element" && argv.size() > 1 && argv[1] == "click")
+            f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
+        return ok_result();
+    };
+    auto r = d.call_tool("gui_element_click", {{"element", "wnd[0]/usr/btnGo"}}, ctx_for(p));
+    CHECK_FALSE(r.is_error);  // the tool result itself stays as is
+    CHECK(text_of(r).find("tcode_left_allowlist") != std::string::npos);
+    REQUIRE(r.structured);
+    CHECK((*r.structured)["tcode_left_allowlist"] == true);
+    REQUIRE(f.records.size() == 1);
+    CHECK(f.records[0].tcode_left_allowlist);
+    CHECK(f.records[0].error_code.empty());
+
+    // the audit record carries the additive field, and nothing else new
+    audit::AuditRecord rec;
+    rec.tcode_left_allowlist = true;
+    CHECK(nlohmann::json::parse(audit::format_record(rec))["tcode_left_allowlist"] == true);
+    CHECK_FALSE(nlohmann::json::parse(audit::format_record(audit::AuditRecord{})).contains("tcode_left_allowlist"));
+
+    // next screen-acting call is denied even if the user navigated back meanwhile
+    f.calls.clear();
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    for (const char* tool : {"gui_screen_read", "gui_element_get", "gui_key_send"}) {
+        INFO(tool);
+        const json args = std::string(tool) == "gui_element_get" ? json{{"element", "wnd[0]/usr/txtA"}}
+                          : std::string(tool) == "gui_key_send"   ? json{{"key", "enter"}} : json::object();
+        r = d.call_tool(tool, args, ctx_for(p));
+        CHECK(r.is_error);
+        CHECK(text_of(r).find("TCODE_DENIED") != std::string::npos);
+    }
+    CHECK(f.calls.empty());
+
+    // another principal is unaffected
+    Principal other = token("other", {"screen"});
+    other.tcodes = {"VA03"};
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(other)).is_error);
+
+    // a start of a NOT allowed code does not unblock (and is refused up front)
+    CHECK(d.call_tool("gui_transaction_start", {{"code", "SE38"}}, ctx_for(p)).is_error);
+    CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+
+    // an allowed gui_transaction_start that ends in an allowed transaction unblocks
+    f.handler = [](const Argv&) { return ok_result(); };
+    CHECK_FALSE(d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+}
+
+TEST_CASE("dispatcher: an allowed start that still ends outside the allowlist keeps the block", "[auth][dispatch][recheck]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("stuck", {"screen", "transaction", "key"});
+    p.tcodes = {"VA03"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "key") f.facts = audit::SapFacts{"A4H", "001", "U", "S000"};
+        return ok_result();
+    };
+    auto r = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p));
+    CHECK(text_of(r).find("tcode_left_allowlist") != std::string::npos);
+    // the start "works" but SAP shows S000 afterwards (e.g. the code was rewritten): still blocked, and flagged again
+    r = d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p));
+    CHECK(r.structured);
+    CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    f.handler = [](const Argv&) { return ok_result(); };
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    CHECK_FALSE(d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+}
+
+TEST_CASE("dispatcher: tokens without a T-code allowlist never re-check", "[auth][dispatch][recheck]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal free = token("free", {"screen", "element"});
+    int asked = 0;
+    d.set_sap_facts_provider([&](std::optional<int>) { ++asked; return std::optional<audit::SapFacts>(audit::SapFacts{"A4H", "001", "U", "SE38"}); });
+    auto r = d.call_tool("gui_screen_read", json::object(), ctx_for(free));
+    CHECK_FALSE(r.is_error);
+    CHECK(text_of(r).find("tcode_left_allowlist") == std::string::npos);
+    CHECK_FALSE((r.structured.has_value() && r.structured->contains("tcode_left_allowlist")));
+    CHECK(asked == 0);
+    CHECK_FALSE(f.records.back().tcode_left_allowlist);
+
+    // the stdio principal is unrestricted as well
+    Principal stdio;
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(stdio, false)).is_error);
+    CHECK(asked == 0);
+}
+
+TEST_CASE("dispatcher: batch items are re-checked one by one", "[auth][dispatch][recheck][batch]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("batcher", {"batch", "element", "screen"});
+    p.tcodes = {"VA03"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "element" && argv[1] == "click") f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
+        return ok_result();
+    };
+    const auto r = d.call_tool("gui_batch",
+                               {{"items", json::array({{{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnGo"}}}},
+                                                       {{"tool", "gui_screen_read"}}})},
+                                {"stop_on_error", false}},
+                               ctx_for(p));
+    CHECK(r.is_error);  // the second item was denied
+    CHECK(r.structured);
+    CHECK((*r.structured)["tcode_left_allowlist"] == true);
+    const std::string text = text_of(r);
+    CHECK(text.find("\"tcode_left_allowlist\":true") != std::string::npos);
+    CHECK(text.find("TCODE_DENIED") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+    REQUIRE(f.records.size() >= 2);
+    CHECK(f.records[0].tcode_left_allowlist);
+    CHECK_FALSE(f.records[1].tcode_left_allowlist);
+}

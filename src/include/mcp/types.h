@@ -182,6 +182,7 @@ struct McpCallRecord {
     std::string remote_addr;           ///< client address for HTTP, "" for stdio
     std::string transport = "stdio";   ///< "stdio" | "http"
     std::string era;                   ///< "legacy" | "stateless" | ""
+    bool tcode_left_allowlist = false; ///< post-call re-check found the transaction outside the token's T-code allowlist
 };
 
 /// Receives one record per tools/call. Never throws.

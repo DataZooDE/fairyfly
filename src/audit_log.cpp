@@ -123,6 +123,7 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     if (!r.remote_addr.empty()) j["remote_addr"] = cap_bytes(r.remote_addr, kMaxFactBytes, false);
     if (!r.transport.empty()) j["transport"] = cap_bytes(r.transport, kMaxFactBytes, false);
     if (!r.era.empty()) j["era"] = cap_bytes(r.era, kMaxFactBytes, false);
+    if (r.tcode_left_allowlist) j["tcode_left_allowlist"] = true;
     return j;
 }
 

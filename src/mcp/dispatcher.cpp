@@ -222,6 +222,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); });
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+        // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
+        // until gui_transaction_start succeeds with an allowed code (nothing navigates back automatically).
+        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->family) && tcode_blocked(principal.name))
+            return fail("TCODE_DENIED", "an earlier call of token '" + principal.name + "' left its allowed transactions; screen "
+                                        "tools stay blocked until gui_transaction_start opens an allowed transaction");
     }
 
     // 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch,
@@ -333,6 +338,28 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 5. invoke
     Result result = invoke(argv);
 
+    // 5b. post-call re-check of the transaction (same read-only facts provider as before the call). Only for tokens
+    // with a T-code allowlist and only for calls that act on the screen or start a transaction. Unknown facts do not
+    // flag (the next call fails closed on them anyway); a known transaction outside the allowlist does.
+    bool tcode_left = false;
+    if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
+        std::string after;
+        try {
+            if (auto facts = facts_provider_(record.connection)) after = auth::normalize_tcode(facts->transaction);
+        } catch (...) {}
+        if (!after.empty()) {
+            const bool allowed = std::any_of(principal.tcodes.begin(), principal.tcodes.end(),
+                                             [&](const std::string& pat) { return auth::glob_match(pat, after); });
+            if (!allowed) {
+                tcode_left = true;
+                set_tcode_blocked(principal.name, true);
+                record.tcode_left_allowlist = true;
+            } else if (name == "gui_transaction_start" && result.status == Result::Status::Success) {
+                set_tcode_blocked(principal.name, false);
+            }
+        }
+    }
+
     // gui_screen_capture: enforce the image cap with one retry at half scale.
     if (spec->output == ToolOutput::Image && result.status == Result::Status::Success &&
         image_payload_bytes(result) > policy_.max_image_bytes) {
@@ -369,6 +396,17 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (result.status != Result::Status::Success) code = result_error_code(result);
     else if (result.data.is_object() && result.data.contains("connection_id")) {
         if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;
+    }
+
+    if (tcode_left) {
+        const std::string warning = "WARNING tcode_left_allowlist: this call ended outside the token's allowed transactions; "
+                                    "further screen calls are denied until gui_transaction_start opens an allowed transaction.";
+        if (!shaped.content.empty() && shaped.content[0].is_object() && shaped.content[0].value("type", "") == "text")
+            shaped.content[0]["text"] = shaped.content[0]["text"].get<std::string>() + "\n" + warning;
+        else
+            shaped.content.push_back(json{{"type", "text"}, {"text", warning}});
+        if (!shaped.structured || !shaped.structured->is_object()) shaped.structured = json::object();
+        (*shaped.structured)["tcode_left_allowlist"] = true;
     }
 
     // 8. sticky default connection
@@ -423,7 +461,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     json summary = json::array();
     std::string body;
     json images = json::array();
-    bool any_failed = false, stopped = false;
+    bool any_failed = false, stopped = false, left_allowlist = false;
     const std::size_t total = args["items"].size();
     std::size_t index = 0;
     for (const auto& item : args["items"]) {
@@ -438,6 +476,10 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         std::string code;
         ToolResult r = run_single(tool, item.contains("arguments") ? item["arguments"] : json::object(), ctx, &code);
         json entry = {{"tool", tool}, {"ok", !r.is_error}};
+        if (r.structured && r.structured->is_object() && r.structured->contains("tcode_left_allowlist")) {
+            entry["tcode_left_allowlist"] = true;
+            left_allowlist = true;
+        }
         if (r.is_error) {
             entry["error_code"] = code;
             any_failed = true;
@@ -453,6 +495,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     out.is_error = any_failed;
     out.content.push_back(json{{"type", "text"}, {"text", dump_compact(summary) + body}});
     for (const auto& image : images) out.content.push_back(image);
+    if (left_allowlist) out.structured = json{{"tcode_left_allowlist", true}};
     return out;
 }
 
