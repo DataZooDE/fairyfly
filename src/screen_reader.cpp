@@ -674,7 +674,8 @@ std::string read_positioned_label_text(const ComGuiElementPtr& label, const std:
 
 std::vector<std::string> id_probe_candidates(const std::string& type,
                                              const std::string& elem_id,
-                                             int children_found) {
+                                             int children_found,
+                                             bool probe_all) {
     static const std::set<std::string> shell_hosts = {
         "GuiCustomControl", "GuiContainerShell", "GuiSplitterShell",
         "GuiSplitterContainer", "GuiDockShell", "GuiContainerCtrl"};
@@ -684,14 +685,17 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
     // GuiToolbar, GuiTitlebar, GuiMenubar, GuiTabStrip, GuiBox, GuiStatusbar, GuiUserArea,
     // and every leaf/unknown type not listed above.
     std::vector<std::string> ids;
-    if (shell_hosts.count(type)) {
+    const bool want_shell = probe_all || shell_hosts.count(type);
+    const bool want_subscreen = probe_all || (subscreen_hosts.count(type) && children_found <= 0);
+    if (want_shell) {
         ids.push_back(elem_id + "/shell");
         for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i)
             ids.push_back(elem_id + "/shell[" + std::to_string(i) + "]");
         for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i)
             ids.push_back(elem_id + "/shellcont[" + std::to_string(i) + "]");
         ids.push_back(elem_id + "/shellcont");
-    } else if (subscreen_hosts.count(type) && children_found <= 0) {
+    }
+    if (want_subscreen) {
         // Subscreens whose dynamically generated fields (SE16 preselection, SEGW) are
         // reachable by FindById only.
         for (int i = 0; i < constants::MAX_SUB_CONTAINERS; ++i)
@@ -710,12 +714,24 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
 std::vector<std::string> id_probe_candidates(const std::string& type,
                                              const std::string& elem_id,
                                              int children_found,
-                                             const ScreenElementCollector& collector) {
-    auto ids = id_probe_candidates(type, elem_id, children_found);
+                                             const ScreenElementCollector& collector,
+                                             bool probe_all) {
+    auto ids = id_probe_candidates(type, elem_id, children_found, probe_all);
     ids.erase(std::remove_if(ids.begin(), ids.end(),
                              [&](const std::string& id) { return collector.contains(id); }),
               ids.end());
     return ids;
+}
+
+bool probe_all_from_environment() {
+    char* buffer = nullptr;
+    size_t size = 0;
+    bool enabled = false;
+    if (_dupenv_s(&buffer, &size, "FAIRYFLY_PROBE_ALL") == 0 && buffer != nullptr) {
+        enabled = std::string(buffer) == "1";
+        free(buffer);
+    }
+    return enabled;
 }
 
 void ScreenReader::traverse_element_tree(
@@ -964,10 +980,11 @@ void ScreenReader::traverse_element_tree(
                 spdlog::debug("{}GuiUserArea children enumeration failed: {}", std::string(depth * 2, ' '), e.what());
             }
 
-            if (search) return;
+            // --probe-all keeps going into the exhaustive FindById probing below.
+            if (search && !probe_all_ && !probe_all_from_environment()) return;
 
             // GuiUserArea does not contain /shell or /shellcont container children
-            return;
+            if (!probe_all_ && !probe_all_from_environment()) return;
         }
 
         // Try Children collection first, but track if it actually works
@@ -1023,7 +1040,8 @@ void ScreenReader::traverse_element_tree(
         // ID-based discovery is only a safety net for controls that FindById can reach but
         // Children does not list. Which paths are worth a FindById round trip depends on the
         // control type and on whether Children yielded anything (see id_probe_candidates).
-        const auto probes = id_probe_candidates(type, elem_id, child_count, collector);
+        const auto probes = id_probe_candidates(type, elem_id, child_count, collector,
+                                                probe_all_ || probe_all_from_environment());
         if (!probes.empty()) {
             spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
                           std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
@@ -1647,11 +1665,13 @@ namespace {
 
 constexpr int kTabPollMs = 20;
 constexpr int kTabWaitMs = 5000;
+int g_tab_wait_override_ms = 0;
 
 // Poll the session until it is no longer busy. False on timeout.
 bool wait_until_idle(const ComGuiSessionPtr& session) {
+    const int limit_ms = g_tab_wait_override_ms > 0 ? g_tab_wait_override_ms : kTabWaitMs;
     for (int waited = 0; session->is_busy(); waited += kTabPollMs) {
-        if (waited >= kTabWaitMs) return false;
+        if (waited >= limit_ms) return false;
         std::this_thread::sleep_for(std::chrono::milliseconds(kTabPollMs));
     }
     return true;
@@ -1691,6 +1711,16 @@ void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStri
 }
 
 } // namespace
+
+void set_tab_wait_timeout_ms_for_testing(int ms) { g_tab_wait_override_ms = ms; }
+
+const char* tab_read_failure_reason(TabReadStatus status) {
+    switch (status) {
+        case TabReadStatus::NotFound: return "not_found";
+        case TabReadStatus::BusyTimeout: return "busy_timeout";
+        default: return "error";
+    }
+}
 
 Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int max_rows) {
     TraceGuard trace("ScreenReader::read_tab");
@@ -1831,6 +1861,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         json elements = extract_metadata_for_collector(header_collector);
 
         json tabs_content = json::array();
+        json tabs_failed = json::array();
         for (size_t i = 0; i < matched.size(); ++i) {
             const auto& tab = matched[i];
             const std::string tab_id = tab.value("id", "");
@@ -1842,8 +1873,13 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
                 if (needs_select) current_selected[strip_id] = tab_id;
 
                 json tab_elements_list;
-                if (!read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list)) {
-                    spdlog::warn("Tab {} could not be read (missing or session busy)", tab_name);
+                const TabReadStatus tab_status =
+                    read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
+                if (tab_status != TabReadStatus::Ok) {
+                    spdlog::warn("Tab {} could not be read: {}", tab_name,
+                                 tab_read_failure_reason(tab_status));
+                    tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                           {"reason", tab_read_failure_reason(tab_status)}});
                     continue;
                 }
                 json tab_data;
@@ -1862,6 +1898,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
                     if (!e.contains("id") || present.insert(e.value("id", "")).second) elements.push_back(e);
             } catch (const std::exception& e) {
                 spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
+                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                       {"reason", "error"}});
             }
         }
 
@@ -1873,6 +1911,19 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             result.status = Result::Status::Error;
             result.error["code"] = "TAB_RESTORE_FAILED";
             result.error["message"] = "Screen read could not restore the original tab";
+            return result;
+        }
+
+        if (tabs_content.empty() && !tabs_failed.empty()) {
+            const auto& first = tabs_failed.at(0);
+            result.data = json::object();
+            result.status = Result::Status::Error;
+            result.error["code"] = "TAB_LOAD_FAILED";
+            result.error["message"] = "Tab '" + first.value("tab_id", "") + "' could not be read: " +
+                                      first.value("reason", "error");
+            result.error["tab_id"] = first.value("tab_id", "");
+            result.error["reason"] = first.value("reason", "error");
+            result.error["tabs_failed"] = tabs_failed;
             return result;
         }
 
@@ -1893,6 +1944,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["tabs_content"] = tabs_content;
         result.data["tabs_expanded"] = true;
         result.data["expanded_tab_count"] = tabs_content.size();
+        if (!tabs_failed.empty()) result.data["tabs_failed"] = tabs_failed;
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
@@ -1908,28 +1960,41 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
     return result;
 }
 
-bool ScreenReader::read_tab_content(const std::string& tab_id, bool needs_select,
-                                    bool skip_trees, json& elements) {
-    auto tab_elem = session_->find_element_by_id(tab_id);
-    if (!tab_elem) return false;
+TabReadStatus ScreenReader::read_tab_content(const std::string& tab_id, bool needs_select,
+                                             bool skip_trees, json& elements) {
+    // find_element_by_id throws for an id that no longer resolves; both that and a null
+    // result mean the tab is gone.
+    auto find_tab = [&]() -> ComGuiElementPtr {
+        try {
+            return session_->find_element_by_id(tab_id);
+        } catch (const std::exception& e) {
+            spdlog::debug("read_tab_content: tab {} not found: {}", tab_id, e.what());
+            return nullptr;
+        }
+    };
+    auto tab_elem = find_tab();
+    if (!tab_elem) return TabReadStatus::NotFound;
     if (needs_select) {
         tab_elem->select();
-        if (!wait_until_idle(session_)) return false;
+        if (!wait_until_idle(session_)) return TabReadStatus::BusyTimeout;
         // The pre-select pointer can be stale: traversing it yields nothing. Re-fetch.
-        tab_elem = session_->find_element_by_id(tab_id);
-        if (!tab_elem) return false;
+        tab_elem = find_tab();
+        if (!tab_elem) return TabReadStatus::NotFound;
     }
 
     ScreenElementCollector tab_collector;
     traverse_element_tree(tab_elem, tab_collector, 0, skip_trees);
-    if (tab_elem->get_child_count() > 0) {
-        extract_collected_trees_and_grids(tab_collector);
-        elements = extract_metadata_for_collector(tab_collector);
-    } else {
-        // A re-fetched tab without children is an unusual layout: fall back to the window
-        // user area, as before.
-        spdlog::debug("Tab {} has no children, probing window user area", tab_id);
-        elements = json::array();
+    extract_collected_trees_and_grids(tab_collector);
+    elements = extract_metadata_for_collector(tab_collector);
+
+    // The tab subtree is authoritative when it yields anything besides the tab container
+    // itself. A tab that reports children but exposes nothing extractable falls back to the
+    // window user area, as before (decided by the extracted result, not by child count).
+    bool only_container = elements.empty();
+    if (!only_container && elements.size() == 1)
+        only_container = elements.at(0).value("id", "") == tab_id;
+    if (only_container) {
+        spdlog::debug("Tab {} yielded no content, probing window user area", tab_id);
         auto active_wnd = session_->get_active_window();
         if (active_wnd) {
             auto usr = session_->find_element_by_id(active_wnd->get_id() + "/usr");
@@ -1937,12 +2002,13 @@ bool ScreenReader::read_tab_content(const std::string& tab_id, bool needs_select
                 ScreenElementCollector usr_collector;
                 traverse_element_tree(usr, usr_collector, 0, skip_trees);
                 extract_collected_trees_and_grids(usr_collector);
-                elements = extract_metadata_for_collector(usr_collector);
+                json fallback = extract_metadata_for_collector(usr_collector);
+                if (!fallback.empty() || elements.empty()) elements = std::move(fallback);
             }
         }
     }
     redact_sensitive_report_labels(elements);
-    return true;
+    return TabReadStatus::Ok;
 }
 
 Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::string& only_tab) {
@@ -2050,6 +2116,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             current_selected[tab_strip_id(selected_id)] = selected_id;
 
         // For each tab, select it and capture content
+        json tabs_failed = json::array();
         for (size_t i = 0; i < tab_elements.size(); ++i) {
             const auto& tab = tab_elements[i];
             std::string tab_id = tab.value("id", "");
@@ -2069,8 +2136,13 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
                 // NOTE: `elements` is the tab's own subtree (plus grids/trees inside it). It no
                 // longer repeats the whole window user area (tab headers, base fields) per tab.
                 json tab_elements_list;
-                if (!read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list)) {
-                    spdlog::warn("Tab {} could not be read (missing or session busy)", tab_name);
+                const TabReadStatus tab_status =
+                    read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
+                if (tab_status != TabReadStatus::Ok) {
+                    spdlog::warn("Tab {} could not be read: {}", tab_name,
+                                 tab_read_failure_reason(tab_status));
+                    tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                           {"reason", tab_read_failure_reason(tab_status)}});
                     continue;
                 }
 
@@ -2091,9 +2163,13 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
 
             } catch (const ComException& e) {
                 spdlog::warn("Failed to expand tab {}: {}", tab_name, e.what());
+                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                       {"reason", "error"}});
                 continue;
             } catch (const std::exception& e) {
                 spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
+                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                       {"reason", "error"}});
                 continue;
             }
         }
@@ -2110,10 +2186,23 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             return result;
         }
 
+        if (tabs_content.empty() && !tabs_failed.empty()) {
+            const auto& first = tabs_failed.at(0);
+            result.status = Result::Status::Error;
+            result.error["code"] = "TAB_LOAD_FAILED";
+            result.error["message"] = "No tab could be read (first failure: " +
+                                      first.value("tab_id", "") + ", " + first.value("reason", "error") + ")";
+            result.error["tab_id"] = first.value("tab_id", "");
+            result.error["reason"] = first.value("reason", "error");
+            result.error["tabs_failed"] = tabs_failed;
+            return result;
+        }
+
         // Add tabs content to result
         screen_data["tabs_content"] = tabs_content;
         screen_data["tabs_expanded"] = true;
         screen_data["expanded_tab_count"] = tabs_content.size();
+        if (!tabs_failed.empty()) screen_data["tabs_failed"] = tabs_failed;
 
         result.status = Result::Status::Success;
         result.data = screen_data;

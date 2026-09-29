@@ -503,6 +503,9 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                     }
 
                     if (!enumerated_ok || enumerated_children == 0) {
+                        // Discard any partial prefix from a failed enumeration so the
+                        // indexed walk neither duplicates nor drops children.
+                        children = json::array();
                         for (int i = 0; i < max_children; ++i) {
                             try {
                                 ComGuiElementPtr child_ptr = children_collection.item(i);

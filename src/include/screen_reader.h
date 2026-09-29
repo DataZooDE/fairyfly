@@ -40,6 +40,7 @@ struct ScreenFindOptions {
     std::string name_contains;
     std::string type;
     int limit = 1;
+    bool probe_all = false;  // --probe-all: exhaustive FindById probing (see id_probe_candidates)
 };
 
 bool screen_candidate_matches(const ScreenFindOptions& query,
@@ -74,15 +75,29 @@ inline TabSelectionPlan plan_tab_selection(const std::string& selected_id,
 ///  - /sub[0..3], /ssub<NAME>, /cntl<NAME>, /cntl[0..3]: subscreen-like containers
 ///    (GuiSimpleContainer, GuiScrollContainer, GuiSubScreen, GuiTab) and only when
 ///    Children enumeration yielded no children (safety net for SE16/SEGW layouts).
+///  - probe_all (`--probe-all` / FAIRYFLY_PROBE_ALL=1): the legacy exhaustive set (every
+///    shell and subscreen candidate) for every container regardless of type or children.
 std::vector<std::string> id_probe_candidates(const std::string& type,
                                              const std::string& elem_id,
-                                             int children_found);
+                                             int children_found,
+                                             bool probe_all = false);
 
 /// Same, minus candidates the collector already knows.
 std::vector<std::string> id_probe_candidates(const std::string& type,
                                              const std::string& elem_id,
                                              int children_found,
-                                             const ScreenElementCollector& collector);
+                                             const ScreenElementCollector& collector,
+                                             bool probe_all = false);
+
+/// True when FAIRYFLY_PROBE_ALL=1 requests exhaustive ID probing.
+bool probe_all_from_environment();
+
+/// Why one tab could not be read.
+enum class TabReadStatus { Ok, NotFound, BusyTimeout };
+const char* tab_read_failure_reason(TabReadStatus status);
+
+/// Test hook: override the post-select busy wait (default 5000 ms); <= 0 restores it.
+void set_tab_wait_timeout_ms_for_testing(int ms);
 
 struct ScreenSearchContext;
 
@@ -95,6 +110,9 @@ public:
 
     /// Read screen structure and elements
     Result read(bool include_structure = true, bool skip_trees = false, int max_rows = 20);
+
+    /// Opt in to exhaustive FindById probing of every container (legacy behavior).
+    void set_probe_all(bool probe_all) { probe_all_ = probe_all; }
 
     /// Read screen with all tabs expanded
     /// When only_tab is non-empty, only the tab whose id equals it (or ends with it at a
@@ -136,6 +154,7 @@ public:
 private:
     ComGuiSessionPtr session_;
     int max_rows_ = 20;
+    bool probe_all_ = false;
 
     /// Discover all UI elements from a window using recursive traversal
     /// Populates the provided collector with elements and extracted tree data
@@ -170,10 +189,10 @@ private:
     /// fresh COM pointers.
     void extract_collected_trees_and_grids(ScreenElementCollector& collector);
 
-    /// Select (when needed), wait, re-fetch and read one tab's subtree. Returns false
-    /// when the tab is missing or the session stays busy. `elements` is the tab subtree
-    /// only (not the surrounding window chrome).
-    bool read_tab_content(const std::string& tab_id, bool needs_select, bool skip_trees,
+    /// Select (when needed), wait, re-fetch and read one tab's subtree. Reports NotFound
+    /// when the tab is missing and BusyTimeout when the session stays busy after the
+    /// select. `elements` is the tab subtree only (not the surrounding window chrome).
+    TabReadStatus read_tab_content(const std::string& tab_id, bool needs_select, bool skip_trees,
                           json& elements);
 
     /// Extract metadata for all elements collected in collector

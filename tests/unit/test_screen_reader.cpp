@@ -1273,3 +1273,32 @@ TEST_CASE("plan_tab_selection selects only when the tab is not current", "[scree
     REQUIRE(plan_tab_selection("a/tabpY", "a/tabpX") == TabSelectionPlan::Select);
     REQUIRE(plan_tab_selection("", "a/tabpX") == TabSelectionPlan::Select);
 }
+
+TEST_CASE("id_probe_candidates with probe_all restores the exhaustive legacy set", "[screen][probe]") {
+    const std::string id = "wnd[0]/usr/x";
+    auto contains = [](const std::vector<std::string>& v, const std::string& e) {
+        return std::find(v.begin(), v.end(), e) != v.end();
+    };
+    for (const char* type : {"GuiUserArea", "GuiTabStrip", "GuiBox", "GuiSimpleContainer",
+                             "GuiContainerShell"}) {
+        for (int children : {0, 5}) {
+            const auto ids = id_probe_candidates(type, id, children, true);
+            REQUIRE(contains(ids, id + "/shell"));
+            REQUIRE(contains(ids, id + "/shell[0]"));
+            REQUIRE(contains(ids, id + "/shellcont[3]"));
+            REQUIRE(contains(ids, id + "/shellcont"));
+            REQUIRE(contains(ids, id + "/sub[0]"));
+            REQUIRE(contains(ids, id + "/cntlIMAGE_CONTAINER"));
+            REQUIRE(contains(ids, id + "/cntl[1]"));
+            REQUIRE(contains(ids, id + "/ssubSCR_PRESEL"));
+        }
+    }
+    // Default (gated) behavior is unchanged.
+    REQUIRE(id_probe_candidates("GuiUserArea", id, 0).empty());
+    REQUIRE(id_probe_candidates("GuiUserArea", id, 0, false).empty());
+    // The collector overload still drops already-known ids.
+    ScreenElementCollector collector;
+    collector.add_id(id + "/ssubSCR_PRESEL");
+    REQUIRE_FALSE(contains(id_probe_candidates("GuiBox", id, 3, collector, true),
+                           id + "/ssubSCR_PRESEL"));
+}
