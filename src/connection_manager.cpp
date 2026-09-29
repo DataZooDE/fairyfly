@@ -682,6 +682,31 @@ bool ConnectionManager::delete_connection_if_unchanged(const Connection& expecte
     }
 }
 
+ConnectionPartition partition_connections(
+    const std::vector<Connection>& connections,
+    const std::function<bool(const Connection&)>& is_live)
+{
+    ConnectionPartition parts;
+    for (const auto& conn : connections) {
+        (is_live(conn) ? parts.live : parts.stale).push_back(conn);
+    }
+    return parts;
+}
+
+int ConnectionManager::prune_other_entries_for_path(const Connection& keep) {
+    TraceGuard trace("ConnectionManager::prune_other_entries_for_path");
+    (void)trace;
+    int pruned = 0;
+    for (const auto& conn : list_connections()) {
+        if (conn.id == keep.id || conn.session_id != keep.session_id) continue;
+        if (delete_connection_if_unchanged(conn)) {
+            spdlog::info("Pruned stale connection {} for session {}", conn.id, conn.session_id);
+            pruned++;
+        }
+    }
+    return pruned;
+}
+
 int ConnectionManager::cleanup_invalid_connections(
     std::function<bool(const Connection&)> validate_func)
 {

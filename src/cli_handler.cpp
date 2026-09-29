@@ -44,8 +44,35 @@ CommandHandler::CommandHandler()
     spdlog::debug("CommandHandler initialized");
 }
 
+std::vector<int> CommandHandler::prune_dead_entries()
+{
+    std::vector<int> removed;
+    auto all = conn_mgr_->list_connections();
+    if (all.size() < 2) return removed;
+
+    const auto parts = partition_connections(all, [this](const Connection& conn) {
+        try {
+            return engine_->validate_session_for_cleanup(conn.session_id, conn.server_session_key);
+        } catch (const std::exception& e) {
+            spdlog::debug("Cannot confirm connection {} is gone, keeping: {}", conn.id, e.what());
+            return true;
+        }
+    });
+    for (const auto& conn : parts.stale) {
+        if (conn_mgr_->delete_connection_if_unchanged(conn)) {
+            spdlog::info("Removed stale connection {} ({})", conn.id, conn.session_id);
+            removed.push_back(conn.id);
+        }
+    }
+    return removed;
+}
+
 ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id)
 {
+    if (!explicit_conn_id.has_value()) {
+        prune_dead_entries();
+    }
+
     // Resolve connection (auto-detect or explicit)
     auto conn_result = conn_mgr_->resolve_connection(explicit_conn_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {
@@ -134,6 +161,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
+        result.data["pruned_stale"] = conn_mgr_->prune_other_entries_for_path(conn);
         result.data["message"] = fmt::format("Attached to SAP GUI session (connection: {})", conn.id);
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
@@ -322,7 +350,8 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
 
     // Resolve which connection to disconnect
     if (!connection_id.has_value()) {
-        // No explicit ID - check if single connection exists
+        // No explicit ID - drop confirmed-dead entries, then check for a single one
+        prune_dead_entries();
         auto connections = conn_mgr_->list_connections();
 
         if (connections.empty()) {
@@ -424,6 +453,8 @@ Result CommandHandler::handle_connections_list(bool cleanup)
             {"window_title", conn.window_title},
             {"created_at", conn.created_at},
             {"last_validated", conn.last_validated},
+            {"server_session_key", conn.server_session_key},
+            {"cache_generation", conn.cache_generation},
             {"valid", valid}
         });
     }

@@ -488,3 +488,71 @@ TEST_CASE("Stale connection with distinct session key is not reused for same pat
     REQUIRE(fs::remove(temp_dir));
 }
 
+
+namespace {
+fs::path make_prune_test_dir(const char* tag) {
+    fs::path dir = fs::temp_directory_path() /
+        (std::string("fairyfly_test_") + tag + "_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(dir));
+    return dir;
+}
+}  // namespace
+
+TEST_CASE("Prune removes other same-path entries and keeps other paths", "[connection_manager][prune]") {
+    const fs::path dir = make_prune_test_dir("prune_same_path");
+    ConnectionManager manager(dir.string());
+    const auto other_key = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
+    const auto no_key = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "");
+    const auto keep = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "live:0");
+    const auto elsewhere = manager.create_or_update_connection(
+        "/app/con[0]/ses[1]", "/app/con[0]", "System", "route", "SAP", "live:1");
+    REQUIRE(other_key.id != keep.id);
+    REQUIRE(no_key.id != keep.id);
+
+    REQUIRE(manager.prune_other_entries_for_path(keep) == 2);
+    REQUIRE_FALSE(manager.load_connection(other_key.id).has_value());
+    REQUIRE_FALSE(manager.load_connection(no_key.id).has_value());
+    REQUIRE(manager.load_connection(keep.id).has_value());
+    REQUIRE(manager.load_connection(elsewhere.id).has_value());
+    REQUIRE(manager.prune_other_entries_for_path(keep) == 0);
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("Conditional delete skips an entry that was replaced concurrently", "[connection_manager][prune]") {
+    const fs::path dir = make_prune_test_dir("prune_replaced");
+    ConnectionManager manager(dir.string());
+    const auto stale = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
+    const auto keep = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "live:0");
+
+    // Refreshing the entry gives it a new cache generation, so the snapshot
+    // taken before the refresh (what prune deletes from) no longer matches.
+    const auto refreshed = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
+    REQUIRE(refreshed.id == stale.id);
+    REQUIRE_FALSE(manager.delete_connection_if_unchanged(stale));
+    REQUIRE(manager.load_connection(stale.id).has_value());
+    REQUIRE(manager.load_connection(keep.id).has_value());
+
+    fs::remove_all(dir);
+}
+
+TEST_CASE("partition_connections splits live and stale entries", "[connection_manager][prune]") {
+    std::vector<Connection> all(3);
+    for (int i = 0; i < 3; ++i) {
+        all[i].id = i + 1;
+        all[i].session_id = "/app/con[0]/ses[0]";
+    }
+    const auto parts = partition_connections(all, [](const Connection& c) { return c.id == 2; });
+    REQUIRE(parts.live.size() == 1);
+    REQUIRE(parts.live[0].id == 2);
+    REQUIRE(parts.stale.size() == 2);
+    REQUIRE(parts.stale[0].id == 1);
+    REQUIRE(parts.stale[1].id == 3);
+}

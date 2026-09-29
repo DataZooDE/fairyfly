@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include <functional>
 #include <string>
 #include <vector>
 #include <optional>
@@ -33,6 +34,17 @@ struct Connection {
     /// Get file path for this connection
     std::string get_file_path() const;
 };
+
+/// Result of splitting cache entries by whether their SAP session is alive
+struct ConnectionPartition {
+    std::vector<Connection> live;
+    std::vector<Connection> stale;
+};
+
+/// Split connections using a liveness predicate (unit-testable, no SAP access).
+ConnectionPartition partition_connections(
+    const std::vector<Connection>& connections,
+    const std::function<bool(const Connection&)>& is_live);
 
 /// Manages connection files in current working directory
 class ConnectionManager {
@@ -99,6 +111,12 @@ public:
 
     /// Delete only if the cache file still represents the validated snapshot.
     bool delete_connection_if_unchanged(const Connection& expected);
+
+    /// Delete every other cache entry for the same session path as `keep`.
+    /// Only safe after `keep` was validated live: a path names one live session.
+    /// Entries replaced concurrently are skipped.
+    /// \return Number of stale entries deleted
+    int prune_other_entries_for_path(const Connection& keep);
 
     /// Delete all invalid connections (helper for cleanup)
     /// \param validate_func Function that validates the saved session identity
