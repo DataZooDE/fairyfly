@@ -18,6 +18,7 @@ std::unique_ptr<CommandBase> create_get_command();
 std::unique_ptr<CommandBase> create_list_command();
 std::unique_ptr<CommandBase> create_screen_command();
 std::unique_ptr<CommandBase> create_mcp_command();
+std::unique_ptr<CommandBase> create_mcp_token_command();
 std::unique_ptr<CommandBase> create_menu_command();
 std::unique_ptr<CommandBase> create_press_f4_command();
 std::unique_ptr<CommandBase> create_doctor_command();
@@ -48,6 +49,7 @@ void register_all_commands() {
     registry.register_command(create_tcode_command());
     registry.register_command(create_credentials_command());
     registry.register_command(create_mcp_command());
+    registry.register_command(create_mcp_token_command());
     registry.register_command(create_doctor_command());
     registry.register_command(create_batch_command());
 }
