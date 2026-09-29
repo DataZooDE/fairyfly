@@ -693,12 +693,13 @@ ConnectionPartition partition_connections(
     return parts;
 }
 
-int ConnectionManager::prune_other_entries_for_path(const Connection& keep) {
+int ConnectionManager::prune_other_entries_for_path(const Connection& keep, const std::string& live_key) {
     TraceGuard trace("ConnectionManager::prune_other_entries_for_path");
     (void)trace;
     int pruned = 0;
     for (const auto& conn : list_connections()) {
         if (conn.id == keep.id || conn.session_id != keep.session_id) continue;
+        if (!live_key.empty() && conn.server_session_key == live_key) continue;
         if (delete_connection_if_unchanged(conn)) {
             spdlog::info("Pruned stale connection {} for session {}", conn.id, conn.session_id);
             pruned++;

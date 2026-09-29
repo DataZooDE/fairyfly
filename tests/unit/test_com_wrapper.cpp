@@ -11,6 +11,7 @@
 #include "include/screen_reader.h"
 #include "include/menu_navigation.h"
 #include "include/vkey.h"
+#include "include/read_only_guard.h"
 #include "include/action_argument_checks.h"
 #include <nlohmann/json.hpp>
 #include <exception>
@@ -21,6 +22,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <array>
 #include <cwchar>
 
 using namespace fairyfly;
@@ -133,6 +135,8 @@ public:
     bool visible_value = true;
     size_t enum_fail_after = static_cast<size_t>(-1);
     bool has_row_count = false;  // grid-like GuiShell: RowCount exists (tree-like: unknown name)
+    // GuiShell toolbar buttons {id, text, tooltip}; ButtonCount/GetButton* exist only when non-empty.
+    std::vector<std::array<const wchar_t*, 3>> shell_buttons;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -210,6 +214,10 @@ public:
         else if (std::wcscmp(names[0], L"Select") == 0) *ids = type_id_ + 35;
         else if (std::wcscmp(names[0], L"Close") == 0) *ids = type_id_ + 36;
         else if (std::wcscmp(names[0], L"RowCount") == 0 && has_row_count) *ids = type_id_ + 37;
+        else if (std::wcscmp(names[0], L"ButtonCount") == 0 && !shell_buttons.empty()) *ids = type_id_ + 38;
+        else if (std::wcscmp(names[0], L"GetButtonId") == 0 && !shell_buttons.empty()) *ids = type_id_ + 39;
+        else if (std::wcscmp(names[0], L"GetButtonText") == 0 && !shell_buttons.empty()) *ids = type_id_ + 40;
+        else if (std::wcscmp(names[0], L"GetButtonTooltip") == 0 && !shell_buttons.empty()) *ids = type_id_ + 41;
         else return DISP_E_UNKNOWNNAME;
         return S_OK;
     }
@@ -268,6 +276,23 @@ public:
             return S_OK;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
+        if (id == type_id_ + 38 && (flags & DISPATCH_PROPERTYGET)) {
+            VariantInit(result);
+            result->vt = VT_I4;
+            result->lVal = static_cast<long>(shell_buttons.size());
+            return S_OK;
+        }
+        if (id >= type_id_ + 39 && id <= type_id_ + 41 && (flags & DISPATCH_METHOD)) {
+            if (!params || params->cArgs != 1 ||
+                (params->rgvarg[0].vt != VT_I4 && params->rgvarg[0].vt != VT_INT))
+                return DISP_E_BADPARAMCOUNT;
+            const long index = params->rgvarg[0].lVal;
+            if (index < 0 || static_cast<size_t>(index) >= shell_buttons.size()) return DISP_E_BADINDEX;
+            VariantInit(result);
+            result->vt = VT_BSTR;
+            result->bstrVal = SysAllocString(shell_buttons[index][id - type_id_ - 39]);
+            return result->bstrVal ? S_OK : E_OUTOFMEMORY;
+        }
         if (id == type_id_ + 37 && (flags & DISPATCH_PROPERTYGET)) {
             VariantInit(result);
             result->vt = VT_I4;
@@ -864,6 +889,25 @@ TEST_CASE("Menu path selection calls Select only on the matching leaf", "[com][m
     other->Release();
     utilities->Release();
     leaf->Release();
+}
+
+TEST_CASE("Read-only guard judges a synthetic toolbar button by its tooltip and text", "[com][readonly]") {
+    using fairyfly::sap::read_only_toolbar_button_rule;
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiShell", 15400, L"wnd[0]/usr/shell", L"", L"Toolbar");
+    dispatch->shell_buttons = {{L"REL", L"", L"Release job"}, {L"LOG", L"Log", L"Job log"},
+                               {L"XYZ", L"Delete", L""}};
+    auto shell = ComGuiElement::create(IDispatchPtr(dispatch, true));
+
+    std::string text, tooltip;
+    CHECK(read_only_toolbar_button_rule(*shell, "REL", "wnd[0]/usr/shell/btn_REL", text, tooltip) == "word:release");
+    CHECK(tooltip == "Release job");
+    CHECK(read_only_toolbar_button_rule(*shell, "LOG", "wnd[0]/usr/shell/btn_LOG", text, tooltip).empty());
+    CHECK(tooltip == "Job log");
+    CHECK(read_only_toolbar_button_rule(*shell, "XYZ", "wnd[0]/usr/shell/btn_XYZ", text, tooltip) == "word:delete");
+    // Unknown button: lookup fails, id rules alone decide (innocuous id passes, guarded id is refused).
+    CHECK(read_only_toolbar_button_rule(*shell, "NOPE", "wnd[0]/usr/shell/btn_NOPE", text, tooltip).empty());
+    CHECK(read_only_toolbar_button_rule(*shell, "NOPE", "wnd[0]/usr/shell/btn_&DELETE", text, tooltip) == "id:&delete");
 }
 
 TEST_CASE("send-key rejects an unknown key with INVALID_VKEY", "[cli][send-key]") {
@@ -2097,6 +2141,31 @@ TEST_CASE("read_action_status returns status bar text and message type", "[com][
     bar->Release();
 }
 
+
+TEST_CASE("read_action_status masks credential-shaped status text", "[com][status][privacy]") {
+    struct Case { const wchar_t* raw; const char* plain; bool masked; };
+    for (const auto& [raw, plain, expect_masked] : std::vector<Case>{
+             {L"Password: hunter2 rejected", "", true},
+             {L"The parameter name is not known", "The parameter name is not known", false},
+             {L"Job log displayed", "Job log displayed", false}}) {
+        ScopedDispatchCacheReset cache_reset;
+        auto* bar = new StringPropertyDispatch({
+            {L"Type", L"GuiStatusbar"}, {L"Text", raw}, {L"DisplayedText", raw}, {L"MessageType", L"E"}});
+        auto* session_dispatch = new TextFieldDispatch(L"GuiSession", 9700);
+        session_dispatch->named_sibling_dispatch = bar;
+        session_dispatch->named_sibling_id = L"wnd[0]/sbar";
+        auto session = ComGuiSession::create(session_dispatch);
+        session_dispatch->Release();
+
+        const auto status = read_action_status(session);
+        if (expect_masked) {
+            CHECK(status.text.find("hunter2") == std::string::npos);
+        } else {
+            CHECK(status.text == plain);
+        }
+        bar->Release();
+    }
+}
 
 TEST_CASE("Unknown member DISPID misses are cached per type", "[com][perf]") {
     ScopedDispatchCacheReset cache_reset;

@@ -115,8 +115,11 @@ public:
     /// Delete every other cache entry for the same session path as `keep`.
     /// Only safe after `keep` was validated live: a path names one live session.
     /// Entries replaced concurrently are skipped.
+    /// `live_key` is the CURRENT live server session key of that path, re-read right before
+    /// pruning: an entry whose non-empty key equals it is never deleted (another process may
+    /// have cached a newer live session on the reused path since the list). Empty = old behavior.
     /// \return Number of stale entries deleted
-    int prune_other_entries_for_path(const Connection& keep);
+    int prune_other_entries_for_path(const Connection& keep, const std::string& live_key = "");
 
     /// Delete all invalid connections (helper for cleanup)
     /// \param validate_func Function that validates the saved session identity

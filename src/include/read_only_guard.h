@@ -5,6 +5,8 @@
 
 namespace fairyfly::sap {
 
+class ComGuiElement;
+
 /// Read-only guard classifiers (--read-only / FAIRYFLY_READ_ONLY=1).
 ///
 /// Rules (case-insensitive, matched on whole words so "Step" never matches "stop"
@@ -21,6 +23,9 @@ namespace fairyfly::sap {
 /// Text and tooltip are ignored for data-holding element types (text fields, labels)
 /// because their text is content, not an action label; the id rules always apply.
 ///
+/// Residual risk: double-click and Enter on the main window are allowed and can trigger
+/// application actions the guard cannot classify; --read-only is a safety net, not a sandbox.
+///
 /// Returns the name of the first matching rule, or an empty string when allowed.
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
                                    const std::string& tooltip, const std::string& element_id);
@@ -29,8 +34,33 @@ std::string matched_read_only_rule(const std::string& element_type, const std::s
 bool is_state_changing_action(const std::string& element_type, const std::string& text,
                               const std::string& tooltip, const std::string& element_id);
 
-/// True for VKeys that save or delete (11 = F11 Save, 14 = Shift+F2 Delete).
+/// send-key under --read-only uses an ALLOWLIST. Allowed: F1 (1), F3 (3), F4 (4), F7 (7), F8 (8),
+/// F12 (12), Shift+F3 (15), page keys (raw 80-83), and Enter (0) only when the active window is
+/// the main window (index 0). Enter on a popup (index > 0) may confirm a Save/Delete dialog and
+/// is refused. Returns "" when allowed, otherwise the rule "vkey:<n>". Pure function.
+std::string read_only_vkey_rule(int vkey, int active_window_index);
+
+/// True when the key is refused even on the main window (Enter counts as allowed here).
 bool is_state_changing_vkey(int vkey);
+
+/// Double-click stays allowed under --read-only (it opens ST22 dumps) but the target is inspected:
+/// the grid/tree element and the addressed cell/node text are matched with the word rules.
+/// Residual risk: a double-click can still trigger an application action whose label the
+/// guard cannot see (for example a hotspot cell that saves).
+std::string read_only_doubleclick_rule(const std::string& element_type, const std::string& element_text,
+                                       const std::string& element_tooltip, const std::string& element_id,
+                                       const std::string& target_text);
+
+/// Synthetic toolbar button (<shell>/btn_<id>): read the button's text and tooltip through the
+/// toolbar APIs and apply the word rules to them plus the id rules. When the lookup fails the id
+/// rules alone decide (fallback). Returns the matched rule, or "". text/tooltip receive what was read.
+std::string read_only_toolbar_button_rule(const ComGuiElement& shell, const std::string& button_id,
+                                          const std::string& element_id, std::string& text,
+                                          std::string& tooltip);
+
+/// Lowercase, strip '&' accelerators and collapse whitespace of a menu path segment
+/// (the same normalization the menu matcher applies).
+std::string normalize_menu_segment(const std::string& segment);
 
 /// Structured READ_ONLY_REFUSED error result.
 Result make_read_only_refusal(const std::string& element_id, const std::string& element_type,

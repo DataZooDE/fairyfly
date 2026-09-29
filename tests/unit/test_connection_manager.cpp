@@ -523,6 +523,26 @@ TEST_CASE("Prune removes other same-path entries and keeps other paths", "[conne
     fs::remove_all(dir);
 }
 
+TEST_CASE("Prune never deletes an entry holding the current live key", "[connection_manager][prune]") {
+    const fs::path dir = make_prune_test_dir("prune_live_key_race");
+    ConnectionManager manager(dir.string());
+    const auto stale = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
+    const auto keep = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "live:0");
+    // Another process cached a NEW live session on the reused path after the attach validated `keep`.
+    const auto raced = manager.create_or_update_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "live:1");
+    REQUIRE(raced.id != keep.id);
+
+    REQUIRE(manager.prune_other_entries_for_path(keep, "live:1") == 1);
+    REQUIRE_FALSE(manager.load_connection(stale.id).has_value());
+    REQUIRE(manager.load_connection(raced.id).has_value());
+    REQUIRE(manager.load_connection(keep.id).has_value());
+
+    fs::remove_all(dir);
+}
+
 TEST_CASE("Conditional delete skips an entry that was replaced concurrently", "[connection_manager][prune]") {
     const fs::path dir = make_prune_test_dir("prune_replaced");
     ConnectionManager manager(dir.string());

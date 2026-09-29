@@ -225,6 +225,11 @@ public:
     /// Returns false if position invalid or method fails
     bool get_button_enabled(int position) const;
 
+    /// Look up a toolbar button (GuiShell toolbar, then GridView toolbar) by its ID and return its
+    /// text and tooltip. Returns false when the button cannot be found or the lookup fails.
+    bool find_toolbar_button_labels(const std::string& button_id, std::string& text,
+                                    std::string& tooltip) const;
+
     /// Press a toolbar button by ID (for GuiShell Toolbar elements)
     /// @param button_id Button identifier (e.g., "TECH", "PERF")
     /// Throws ComException if not a toolbar or button not found

@@ -1,5 +1,6 @@
 #include "include/cli_handler.h"
 #include "include/read_only_guard.h"
+#include "include/sensitive_data.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
 #include "include/action_argument_checks.h"
@@ -54,8 +55,16 @@ void CommandHandler::describe_element(const std::string& element_id, std::string
         auto element = session->find_element_by_id(full_path);
         if (!element) return;
         try { type = element->get_type(); } catch (const std::exception&) {}
-        try { text = element->get_text(); } catch (const std::exception&) {}
-        try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+        // Never read the text of input elements (a GuiPasswordField holds a secret): the guard
+        // ignores their text anyway and the refusal must not be able to echo it.
+        const bool input_type = type == "GuiPasswordField" || type == "GuiTextField" ||
+                                type == "GuiCTextField" || type == "GuiComboBox" ||
+                                type == "GuiComboBoxControl" || type == "GuiTextedit" ||
+                                sap::is_sensitive_input_field(type, element_id, "");
+        if (!input_type) {
+            try { text = element->get_text(); } catch (const std::exception&) {}
+            try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+        }
     } catch (const std::exception& e) {
         spdlog::debug("Read-only guard could not inspect {}: {}", element_id, e.what());
     }
@@ -65,10 +74,35 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
 {
     if (!read_only_) return std::nullopt;
     std::string type, text, tooltip;
-    // Synthetic toolbar buttons (.../shell/btn_XXX) are not COM elements; their id is checked as-is.
-    if (element_id.find("/shell/btn_") == std::string::npos)
+    std::string rule;
+    const auto btn_pos = element_id.rfind("/btn_");
+    if (element_id.find("/shell/btn_") != std::string::npos && btn_pos != std::string::npos) {
+        // Synthetic toolbar button (.../shell/btn_XXX): not a COM element, so read its tooltip/text
+        // through the shell's toolbar APIs before pressing. If that fails, the id rules decide.
+        type = "GuiButton";
+        try {
+            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            auto session = com_engine ? com_engine->get_session() : nullptr;
+            if (session) {
+                std::string toolbar_path = element_id.substr(0, btn_pos);
+                if (toolbar_path.rfind("@active", 0) == 0)
+                    toolbar_path = engine_->get_active_window_id().id + toolbar_path.substr(7);
+                auto shell = session->find_element_by_id(toolbar_path);
+                if (shell) {
+                    rule = sap::read_only_toolbar_button_rule(*shell, element_id.substr(btn_pos + 5),
+                                                              element_id, text, tooltip);
+                    if (rule.empty()) return std::nullopt;
+                    return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("Read-only guard could not inspect toolbar button {}: {}", element_id, e.what());
+        }
+        type.clear();
+    } else {
         describe_element(element_id, type, text, tooltip);
-    const auto rule = sap::matched_read_only_rule(type, text, tooltip, element_id);
+    }
+    rule = sap::matched_read_only_rule(type, text, tooltip, element_id);
     if (rule.empty()) return std::nullopt;
     return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
 }
@@ -199,7 +233,8 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
-        result.data["pruned_stale"] = conn_mgr_->prune_other_entries_for_path(conn);
+        result.data["pruned_stale"] = conn_mgr_->prune_other_entries_for_path(
+            conn, engine_->current_server_session_key());  // live key re-read right before pruning
         result.data["message"] = fmt::format("Attached to SAP GUI session (connection: {})", conn.id);
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
@@ -598,6 +633,32 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             if (!rule.empty())
                 return sap::make_read_only_refusal(element_id, "GuiMenu", menu_item, "", rule);
         }
+    }
+
+    // Read-only: double-click stays allowed (it opens ST22 dumps) but its target is inspected: the
+    // grid/tree element plus the addressed cell/node text go through the word rules. Residual risk:
+    // a double-click on a hotspot can still trigger an application action the guard cannot see.
+    if (read_only_ && !is_synthetic_button &&
+        ((doubleclick && row.has_value() && !column.empty()) ||
+         (!node_key.empty() && tree_action == "doubleclick"))) {
+        std::string type, text, tooltip, target_text;
+        describe_element(element_id, type, text, tooltip);
+        try {
+            if (auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get())) {
+                if (auto session = com_engine->get_session()) {
+                    std::string full_path = elem.path;
+                    if (full_path.rfind("@active", 0) == 0)
+                        full_path = engine_->get_active_window_id().id + full_path.substr(7);
+                    if (auto target = session->find_element_by_id(full_path))
+                        target_text = node_key.empty() ? target->get_cell_value(*row, column)
+                                                       : target->get_node_text_by_key(node_key);
+                }
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("Read-only guard could not read the double-click target: {}", e.what());
+        }
+        const auto rule = sap::read_only_doubleclick_rule(type, text, tooltip, element_id, target_text);
+        if (!rule.empty()) return sap::make_read_only_refusal(element_id, type, target_text, tooltip, rule);
     }
 
     // Get current active window before click (if monitoring for new windows)

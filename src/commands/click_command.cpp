@@ -19,7 +19,9 @@ public:
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
         cmd_->add_flag("--wait-for-window", wait_for_window_,
-            "Wait for new window to open after click (e.g., popup/dialog)");
+            "Wait for new window to open after click (e.g., popup/dialog). Detects only a changed window, title, "
+            "transaction or status bar text; a click that only changes field/grid contents is reported "
+            "as unchanged after the timeout");
         cmd_->add_option("--timeout", timeout_ms_,
             "Timeout in milliseconds for window detection (default: 5000)")
             ->default_val(5000);
