@@ -261,6 +261,13 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                     "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
                         " per minute)",
                     "wait a few seconds and retry, or combine steps with gui_batch");
+    // Optional per-family budget of the token (--rate-family), on top of the overall one. Every gui_batch item counts.
+    if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
+        if (!keyed_limiter_.allow(principal.name + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+            return fail("RATE_LIMITED",
+                        "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
+                        "wait a few seconds and retry");
+    }
 
     // A read-only token narrows the server mode for this call only (restored afterwards).
     struct ReadOnlyScope {

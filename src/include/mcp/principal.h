@@ -3,6 +3,7 @@
 // Phase 1 (protocol) consumes Principal/EffectivePolicy; phase 2 (auth) produces them; nobody else defines them.
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -19,6 +20,7 @@ struct Principal {
     std::vector<std::string> tcodes;     ///< allowed T-codes (glob, case-insensitive); empty = any
     std::vector<std::string> connections;///< allowed saved connection / SAP Logon entry names (glob, case-insensitive); empty = any
     int rate_per_minute = 0;             ///< 0 = server default
+    std::map<std::string, int> rate_families; ///< extra calls-per-minute budget per tool family (e.g. element=10); empty = none
     bool read_only = false;              ///< token can only narrow the server mode
     std::string remote_addr;             ///< client address (from proxy header only when the proxy secret matched)
     bool authenticated = false;          ///< false for stdio and for --insecure-no-auth

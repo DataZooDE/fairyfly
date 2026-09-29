@@ -40,6 +40,7 @@ struct TokenMeta {
     std::vector<std::string> tcodes;       ///< T-code globs
     std::vector<std::string> connections;  ///< saved connection / SAP Logon entry name globs; empty = any
     int rate_per_minute = 0;               ///< 0 = server default
+    std::map<std::string, int> rate_families; ///< calls per minute per tool family; empty = none
     std::vector<std::string> allowed_ips;  ///< addresses or CIDR blocks; empty = any
     bool read_only = true;
     bool revoked = false;
@@ -62,6 +63,7 @@ struct NewToken {
     std::vector<std::string> tcodes;
     std::vector<std::string> connections;
     int rate_per_minute = 0;
+    std::map<std::string, int> rate_families;
     std::vector<std::string> allowed_ips;
     std::optional<TimePoint> expires;
     bool read_only = true;

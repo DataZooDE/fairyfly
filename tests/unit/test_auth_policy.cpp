@@ -996,3 +996,47 @@ TEST_CASE("dispatcher: the server default rate budget is per principal", "[auth]
     for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false)).is_error);
     CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false))).find("RATE_LIMITED") != std::string::npos);
 }
+
+TEST_CASE("dispatcher: per-family rate limits name the family and are independent", "[auth][dispatch][ratefamily]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.max_calls_per_minute = 100;
+    auto d_ptr = f.make(policy);
+    auto& d = *d_ptr;
+    Principal p = token("fam", {"screen", "element", "key"});
+    p.rate_families = {{"element", 2}, {"key", 1}};
+    const json click = {{"element", "wnd[0]/usr/btnX"}};
+
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(p)).is_error);
+    auto r = d.call_tool("gui_element_click", click, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("RATE_LIMITED") != std::string::npos);
+    CHECK(text_of(r).find("'element'") != std::string::npos);
+    const std::size_t ran = f.calls.size();
+    CHECK(ran == 2);  // the refused call never reached the CLI
+
+    // other families are unaffected; key has its own 1 per minute
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    r = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p));
+    CHECK(text_of(r).find("'key'") != std::string::npos);
+
+    // another principal, and a token without family limits, keep their own budgets
+    Principal q = token("fam2", {"element"});
+    q.rate_families = {{"element", 1}};
+    CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(q)).is_error);
+    CHECK(d.call_tool("gui_element_click", click, ctx_for(q)).is_error);
+    Principal free_token = token("free", {"element"});
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(free_token)).is_error);
+
+    // every gui_batch item counts against its family
+    Principal b = token("batcher", {"element", "batch"});
+    b.rate_families = {{"element", 1}};
+    const auto batch = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_element_click"}, {"arguments", click}},
+                                                                        {{"tool", "gui_element_click"}, {"arguments", click}}})},
+                                                  {"stop_on_error", false}}, ctx_for(b));
+    CHECK(text_of(batch).find("RATE_LIMITED") != std::string::npos);
+    // the stdio principal has no family limits
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(Principal{}, false)).is_error);
+}

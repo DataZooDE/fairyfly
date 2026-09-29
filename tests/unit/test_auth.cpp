@@ -907,3 +907,58 @@ TEST_CASE("auth: --connections restriction is validated, stored, listed and reac
     REQUIRE(r.status == Result::Status::Success);
     CHECK(r.data["connections"] == nlohmann::json::array({"DEV*", "QAS"}));
 }
+
+TEST_CASE("auth: --rate-family is validated, stored, and reaches the principal", "[auth][token][ratefamily]") {
+    Env env;
+    NewToken t;
+    t.scopes = {"element", "key"};
+    t.rate_families = {{"element", 10}, {"key", 5}};
+    const auto created = env.create("limited", t);
+    CHECK(created.meta.to_public_json()["rate_families"] == nlohmann::json({{"element", 10}, {"key", 5}}));
+    REQUIRE(env.store().list().size() == 1);
+    CHECK(env.store().list()[0].rate_families == t.rate_families);
+    const auto outcome = env.auth->authenticate(request_with(created.token));
+    REQUIRE(outcome.ok);
+    CHECK(outcome.principal.rate_families == t.rate_families);
+    CHECK(fairyfly::auth::rate_family_limit(outcome.principal, "element") == 10);
+    CHECK(fairyfly::auth::rate_family_limit(outcome.principal, "screen") == 0);
+
+    auto store = env.store();
+    NewToken bad;
+    bad.name = "bad";
+    bad.scopes = {"element"};
+    bad.rate_families = {{"bogus", 3}};
+    try {
+        store.create(bad);
+        FAIL("expected UNKNOWN_FAMILY");
+    } catch (const AuthError& e) {
+        CHECK(e.code() == "UNKNOWN_FAMILY");
+    }
+    bad.rate_families = {{"element", 0}};
+    CHECK_THROWS_AS(store.create(bad), AuthError);
+
+    TokenCliArgs args;
+    args.action = "create";
+    args.name = "cli-limited";
+    args.scopes = {"element"};
+    args.rate_families = {"element=10,key=10"};
+    auto r = run_token_action(args, store);
+    REQUIRE(r.status == Result::Status::Success);
+    CHECK(r.data["rate_families"] == nlohmann::json({{"element", 10}, {"key", 10}}));
+    for (const char* wrong : {"element", "element=", "=5", "element=x", "element=5x", "element=0", "bogus=3"}) {
+        args.name = std::string("w") + std::to_string(std::string(wrong).size()) + wrong[0];
+        args.rate_families = {wrong};
+        r = run_token_action(args, store);
+        CHECK(r.status == Result::Status::Error);
+    }
+}
+
+TEST_CASE("auth: a malformed stored rate_families makes the record unusable, not unlimited", "[auth][token][ratefamily]") {
+    Env env;
+    const auto created = env.create("limited");
+    auto record = nlohmann::json::parse(env.tokens->get("limited").value());
+    record["f"] = nlohmann::json({{"element", "ten"}});
+    env.tokens->put("limited", record.dump());
+    CHECK(env.store().list().empty());
+    CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
+}

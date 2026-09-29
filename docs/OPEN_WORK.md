@@ -110,7 +110,7 @@ Delivered: `mcp --http` (plain HTTP `POST /mcp`, legacy and stateless 2026-07-28
 | `_meta`/header enforcement lenient | `Mcp-Method` and `Mcp-Name` are checked only when present (curl works); decide whether the stateless era should require them once the final spec is checked. | **Open** |
 | Banner and SSE polish | The insecure-auth warning is printed twice in the startup banner; clients sending `Accept: application/json, text/event-stream` (curl, the client-config snippets) get SSE responses because SSE defaults to on. | **Open** (cosmetic) |
 | Token blob size cap | Records are now stored as compact JSON (short keys, defaults omitted) and, above 1200 characters, split over chunk entries `fairyfly-mcp:<name>#1..n` (chunks first, head entry last with count, length and sha256; up to 16 chunks, then `TOKEN_TOO_LARGE`). Incomplete or damaged sets never authenticate; delete/rewrite remove stale chunks; old single-entry tokens still load. Unit tests use the in-memory backend only (not the real Credential Manager). | **Done** |
-| Per-tool rate limits and metadata coverage test | Rate limits per tool family (for example stricter for `element`/`key`), and a test asserting every tool has annotations, a family, scope handling and a policy decision. | **Idea** |
+| Per-tool rate limits and metadata coverage test | Per-family rate limits done: token option `--rate-family element=10,key=10` (RATE_LIMITED names the family; tested at token, CLI and dispatcher level). The metadata coverage test (every tool has annotations, a family, scope handling and a policy decision) is still open (other agent). | **Done** (rate limits) / **Idea** (coverage test) |
 
 ## Build and review
 

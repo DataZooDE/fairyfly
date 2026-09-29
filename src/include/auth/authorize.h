@@ -68,6 +68,9 @@ bool needs_session_target(const mcp::Principal& principal, const std::string& to
 mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
                                              const SessionTarget& target);
 
+/// The token's own calls-per-minute limit for a tool family (`--rate-family element=10`); 0 = none.
+int rate_family_limit(const mcp::Principal& principal, const std::string& family);
+
 /// Whether tools/list should show `spec` to `principal` (scope + read-only). Pure.
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec);
 

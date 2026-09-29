@@ -232,6 +232,11 @@ mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, co
     return PolicyDecision{};
 }
 
+int rate_family_limit(const mcp::Principal& principal, const std::string& family) {
+    const auto it = principal.rate_families.find(family);
+    return it == principal.rate_families.end() || it->second < 1 ? 0 : it->second;
+}
+
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec) {
     if (!has_scope(principal, spec.family)) return false;
     if (principal.read_only && spec.write_tool) return false;

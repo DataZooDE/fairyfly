@@ -90,6 +90,11 @@ void validate(const NewToken& request) {
     for (const auto& ip : request.allowed_ips)
         if (!parse_ip_rule(ip)) throw AuthError("INVALID_IP", "invalid IP address or CIDR block '" + ip + "'");
     if (request.rate_per_minute < 0) throw AuthError("INVALID_ARGUMENT", "rate must be >= 0");
+    for (const auto& [family, limit] : request.rate_families) {
+        if (std::find(families.begin(), families.end(), family) == families.end())
+            throw AuthError("UNKNOWN_FAMILY", "unknown family '" + family + "' in --rate-family");
+        if (limit < 1 || limit > 1000000) throw AuthError("INVALID_ARGUMENT", "--rate-family limits must be 1..1000000 calls per minute");
+    }
 }
 
 Clock default_clock() {
@@ -116,6 +121,7 @@ json TokenMeta::to_public_json() const {
               {"tcodes", tcodes},
               {"connections", connections},
               {"rate_per_minute", rate_per_minute},
+              {"rate_families", rate_families},
               {"allowed_ips", allowed_ips},
               {"read_only", read_only},
               {"revoked", revoked}};
@@ -140,6 +146,7 @@ json TokenMeta::to_compact_json() const {
     if (!tcodes.empty()) j["t"] = tcodes;
     if (!connections.empty()) j["k"] = connections;
     if (rate_per_minute != 0) j["r"] = rate_per_minute;
+    if (!rate_families.empty()) j["f"] = rate_families;
     if (!allowed_ips.empty()) j["p"] = allowed_ips;
     if (revoked) j["x"] = true;
     return j;
@@ -166,6 +173,7 @@ json expand_compact(const json& c) {
     j["connections"] = c.contains("k") ? c["k"] : json::array();
     j["allowed_ips"] = c.contains("p") ? c["p"] : json::array();
     if (c.contains("r")) j["rate_per_minute"] = c["r"];
+    if (c.contains("f")) j["rate_families"] = c["f"];
     if (c.contains("o")) j["read_only"] = c["o"];
     if (c.contains("x")) j["revoked"] = c["x"];
     return j;
@@ -196,6 +204,14 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     m.connections = string_array(j, "connections");
     m.allowed_ips = string_array(j, "allowed_ips");
     if (j.contains("rate_per_minute") && j["rate_per_minute"].is_number_integer()) m.rate_per_minute = j["rate_per_minute"].get<int>();
+    if (j.contains("rate_families")) {
+        // a malformed limit must not silently become "no limit": the record is unusable instead
+        if (!j["rate_families"].is_object()) return std::nullopt;
+        for (const auto& [family, limit] : j["rate_families"].items()) {
+            if (!limit.is_number_integer() || limit.get<long long>() < 1 || limit.get<long long>() > 1000000) return std::nullopt;
+            m.rate_families[family] = limit.get<int>();
+        }
+    }
     m.read_only = j.contains("read_only") && j["read_only"].is_boolean() ? j["read_only"].get<bool>() : true;
     m.revoked = j.contains("revoked") && j["revoked"].is_boolean() ? j["revoked"].get<bool>() : false;
     return m;
@@ -423,6 +439,7 @@ CreatedToken TokenStore::create(const NewToken& request) {
     meta.tcodes = request.tcodes;
     meta.connections = request.connections;
     meta.rate_per_minute = request.rate_per_minute;
+    meta.rate_families = request.rate_families;
     meta.allowed_ips = request.allowed_ips;
     meta.read_only = request.read_only;
     // The id must be unique among stored tokens.
