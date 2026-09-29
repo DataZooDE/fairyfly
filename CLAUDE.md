@@ -29,7 +29,7 @@ Use the existing COM wrappers and RAII helpers for new automation work. Preserve
 
 ## Current boundaries
 
-The CLI offers attach, launch, disconnect, connections, list, tcode, click, fill, get, screen (read, find, menu, capture), press_f4, send-key, close, and doctor; click also supports --doubleclick on grid cells. The serve command is registered but returns NOT_IMPLEMENTED; there is no MCP server yet. Supported output values are json, markdown, and toon. There are no registered connect, profile, session, or diagnose commands.
+The CLI offers attach, launch, disconnect, connections, list, tcode, click, fill, get, screen (read, find, menu, capture), press_f4, send-key, close, batch (many commands in one process), and doctor; the global --read-only flag (or FAIRYFLY_READ_ONLY=1) refuses state-changing actions; click also supports --doubleclick on grid cells. The serve command is registered but returns NOT_IMPLEMENTED; there is no MCP server yet. Supported output values are json, markdown, and toon. There are no registered connect, profile, session, or diagnose commands.
 
 The launch path can read plaintext credentials from trial.env and passes them to sapshcut. Keep that file private and out of version control. Credential Manager integration and an audit trail are not implemented.
 

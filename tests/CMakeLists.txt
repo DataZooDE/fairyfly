@@ -18,6 +18,7 @@ add_executable(unit_tests
     unit/test_doctor.cpp
     unit/test_connection_manager.cpp
     unit/test_grid_analyzer.cpp
+    unit/test_batch_command.cpp
     ../src/config.cpp
     ../src/session.cpp
 )
