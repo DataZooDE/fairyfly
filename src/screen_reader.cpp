@@ -877,20 +877,15 @@ void ScreenReader::traverse_element_tree(
                 };
                 std::vector<CellInfo> grid_cells;
 
-                for (int i = 0; i < total_items; ++i) {
-                    if (search && search->stopped) return;
+                // Handles one child; returns false to stop the walk (first error, like before).
+                auto handle_child = [&](const ComGuiElementPtr& child_ptr) -> bool {
                     try {
-                        ComGuiElementPtr child_ptr = children_collection.item(i);
-                        if (!child_ptr) {
-                            break; // Stop at first null
-                        }
-
                         std::string child_id = child_ptr->get_id();
 
                         if (search) {
                             traverse_element_tree(child_ptr, collector, depth + 1,
                                                   skip_trees, search);
-                            continue;
+                            return true;
                         }
 
                         // Check if child is a grid cell label: /lbl[col,row]
@@ -904,15 +899,43 @@ void ScreenReader::traverse_element_tree(
                                     int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
                                     std::string text = read_positioned_label_text(child_ptr, child_id);
                                     grid_cells.push_back({child_ptr, col, row, text});
-                                    continue; // Captured as grid cell, do not recurse or add to collector
+                                    return true; // Captured as grid cell, do not recurse or add to collector
                                 } catch (...) {}
                             }
                         }
 
                         // Non-label child: traverse recursively (e.g. buttons, subscreens, input fields)
                         traverse_element_tree(child_ptr, collector, depth + 1, skip_trees, search);
+                        return true;
                     } catch (const std::exception&) {
-                        break; // Stop on first error
+                        return false; // Stop on first error
+                    }
+                };
+
+                // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of item(i)
+                // (~4-5 round trips per child). Same order, same limit, same stop conditions.
+                int enumerated = 0;
+                bool enumerated_ok = children_collection.for_each(
+                    [&](const ComGuiElementPtr& child_ptr) {
+                        if (enumerated >= total_items) return false;
+                        if (search && search->stopped) return false;
+                        ++enumerated;
+                        return handle_child(child_ptr);
+                    });
+                if (search && search->stopped) return;
+
+                if (!enumerated_ok || enumerated == 0) {
+                    for (int i = 0; i < total_items; ++i) {
+                        if (search && search->stopped) return;
+                        try {
+                            ComGuiElementPtr child_ptr = children_collection.item(i);
+                            if (!child_ptr) {
+                                break; // Stop at first null
+                            }
+                            if (!handle_child(child_ptr)) break;
+                        } catch (const std::exception&) {
+                            break; // Stop on first error
+                        }
                     }
                 }
 
@@ -950,19 +973,42 @@ void ScreenReader::traverse_element_tree(
         // Try Children collection first, but track if it actually works
         try {
             if (child_count > 0) {
-                for (int i = 0; i < child_count; ++i) {
-                    if (search && search->stopped) return;
-                    try {
-                        auto child = element->get_child(i);
-                        if (child) {
-                            traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                // Fast path: one enumeration for all children (get_child(i) re-enumerates per index).
+                int visited = 0;
+                bool enumerated_ok = false;
+                try {
+                    enumerated_ok = element->children().for_each(
+                        [&](const ComGuiElementPtr& child) {
+                            if (visited >= child_count) return false;
+                            if (search && search->stopped) return false;
+                            ++visited;
+                            try {
+                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                            } catch (const std::exception&) {
+                                // Child access failed, will fall back to ID-based
+                            }
+                            return true;
+                        });
+                } catch (const std::exception&) {
+                    // Children collection not available
+                }
+                if (search && search->stopped) return;
+
+                if (!enumerated_ok || visited == 0) {
+                    for (int i = 0; i < child_count; ++i) {
+                        if (search && search->stopped) return;
+                        try {
+                            auto child = element->get_child(i);
+                            if (child) {
+                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                            }
+                        } catch (const SapGuiException&) {
+                            // Child access failed, will fall back to ID-based
+                        } catch (const ComException&) {
+                            // Child access failed, will fall back to ID-based
+                        } catch (const std::exception&) {
+                            // Child access failed, will fall back to ID-based
                         }
-                    } catch (const SapGuiException&) {
-                        // Child access failed, will fall back to ID-based
-                    } catch (const ComException&) {
-                        // Child access failed, will fall back to ID-based
-                    } catch (const std::exception&) {
-                        // Child access failed, will fall back to ID-based
                     }
                 }
                 // Don't return here - continue with ID-based discovery
@@ -1169,15 +1215,38 @@ void ScreenReader::discover_elements(ComGuiWindowPtr window, ScreenElementCollec
         }
 
         // SECOND: Recursively traverse all top-level children (covers usr, mbar, etc.)
-        for (int i = 0; i < child_count; ++i) {
-            if (search && search->stopped) break;
+        // Fast path: one enumeration instead of get_child(i) per index.
+        int visited = 0;
+        bool enumerated_ok = false;
+        if (child_count > 0) {
             try {
-                auto child = window->get_child(i);
-                if (child) {
-                    traverse_element_tree(child, collector, 0, skip_trees, search);
-                }
+                enumerated_ok = window->children().for_each(
+                    [&](const ComGuiElementPtr& child) {
+                        if (visited >= child_count) return false;
+                        if (search && search->stopped) return false;
+                        ++visited;
+                        try {
+                            traverse_element_tree(child, collector, 0, skip_trees, search);
+                        } catch (const std::exception&) {
+                            // Skip problematic children
+                        }
+                        return true;
+                    });
             } catch (const std::exception&) {
-                // Skip problematic children
+                // Fall through to index-based loop if nothing was visited
+            }
+        }
+        if (!enumerated_ok || visited == 0) {
+            for (int i = 0; i < child_count; ++i) {
+                if (search && search->stopped) break;
+                try {
+                    auto child = window->get_child(i);
+                    if (child) {
+                        traverse_element_tree(child, collector, 0, skip_trees, search);
+                    }
+                } catch (const std::exception&) {
+                    // Skip problematic children
+                }
             }
         }
     } catch (const SapGuiException& e) {
