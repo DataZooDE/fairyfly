@@ -106,7 +106,9 @@ nlohmann::json make_multiple_logon_fail_error(const std::string& user_text, cons
                      "Retry with --multiple-logon keep (continue without ending other logons), "
                      "--multiple-logon end (DESTRUCTIVE: ends the other logons, unsaved data is lost) "
                      "or --multiple-logon terminate (leave cleanly)."},
-            {"dialog", {{"user", user_text}, {"terminal", terminal_text}}}};
+            // SAP pads these fields with trailing blanks; the terminal line is optional (it is
+            // absent when SAP has no terminal information for the other logon).
+            {"dialog", {{"user", trim(user_text)}, {"terminal", trim(terminal_text)}}}};
 }
 
 nlohmann::json make_multiple_logon_annotation(const std::string& choice) {

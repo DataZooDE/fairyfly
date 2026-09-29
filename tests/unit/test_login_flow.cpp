@@ -115,6 +115,12 @@ TEST_CASE("multiple-logon fail error and success annotation shapes", "[login][mu
     REQUIRE(error.at("dialog").at("user") == "User DEVELOPER is already logged on in client 001");
     REQUIRE(error.at("dialog").at("terminal") == "(terminal T1, since 10:00)");
 
+    // The real dialog pads its fields with blanks and may omit the terminal line entirely.
+    auto padded = fairyfly::make_multiple_logon_fail_error(
+        "User DEVELOPER is already logged on in client 001                               ", "");
+    REQUIRE(padded.at("dialog").at("user") == "User DEVELOPER is already logged on in client 001");
+    REQUIRE(padded.at("dialog").at("terminal") == "");
+
     auto keep = fairyfly::make_multiple_logon_annotation("keep");
     REQUIRE(keep.at("detected") == true);
     REQUIRE(keep.at("choice") == "keep");
