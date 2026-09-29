@@ -14,6 +14,12 @@ public:
         cmd_->add_option("--credential", credential_name_,
                          "Stored credential name (see `credentials set`); default: the session's connection name");
         cmd_->add_option("--connection", connection_id_, "Saved Fairyfly connection ID");
+        cmd_->add_option("--multiple-logon", multiple_logon_,
+                         "If the user is already logged on: fail (default, leave the dialog open), keep "
+                         "(continue without ending other logons), terminate (end this logon, closing the session), "
+                         "end (DESTRUCTIVE: ends the user's other logons, unsaved data is lost; refused under --read-only)")
+            ->check(CLI::IsMember({"fail", "keep", "end", "terminate"}))
+            ->default_str("fail");
         return cmd_;
     }
 
@@ -25,7 +31,7 @@ public:
                             {"message", "Choose at most one of --credentials-file or --credentials-stdin"}};
             return result;
         }
-        return handler.handle_login(credentials_file_, connection_id_, from_stdin_, credential_name_);
+        return handler.handle_login(credentials_file_, connection_id_, from_stdin_, credential_name_, multiple_logon_);
     }
 
     bool was_invoked() const override { return cmd_ && *cmd_; }
@@ -34,6 +40,7 @@ private:
     CLI::App* cmd_ = nullptr;
     std::string credentials_file_;
     std::string credential_name_;
+    std::string multiple_logon_ = "fail";
     bool from_stdin_ = false;
     std::optional<int> connection_id_;
 };

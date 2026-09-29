@@ -1876,3 +1876,17 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 - **Cleanup**: Not performed. To remove, unpublish the binding, then delete SRVB, SRVD, and DDLS in that order (see OPS-002).
 - **Tooling note**: Stale `fairyfly.N.con` files caused `MULTIPLE_CONNECTIONS`; re-`attach` and pass `--connection <id>`.
 
+---
+
+### [IMP-011] `login --multiple-logon` for the "License Information for Multiple Logons" dialog
+
+- **Problem**: When the SAP user is already logged on elsewhere, SAP shows a modal dialog right after the logon Enter. `login` used to return `LOGON_NOT_COMPLETED` and leave the dialog open.
+- **Dialog (observed live, 2026-09-29, `wnd[1]` of the session)**: read-only `usr/txtMULTI_LOGON_TEXT` ("User DEVELOPER is already logged on in client 001") and `usr/txtMULTI_LOGON_TEXT2` ("(terminal ..., since ...)"); radio buttons `usr/radMULTI_LOGON_OPT1` (continue and end any other logons: destructive), `usr/radMULTI_LOGON_OPT2` (continue without ending other logons), `usr/radMULTI_LOGON_OPT3` (terminate this logon, selected by default); confirm with `wnd[1]/tbar[0]/btn[0]`. Detection is by the presence of `wnd[1]/usr/radMULTI_LOGON_OPT2` or `txtMULTI_LOGON_TEXT`, not by title, and runs before the forced-password-change check.
+- **Option**: `login --multiple-logon fail|keep|end|terminate` and `launch --login --multiple-logon ...` (case-sensitive lowercase, no abbreviations; `launch --multiple-logon` without `--login` is `INVALID_ARGUMENT`).
+  - `fail` (default): the dialog is not touched; `LOGON_NOT_COMPLETED` now carries `error.reason = "multiple_logon_dialog"`, `error.hint` (the options) and `error.dialog` (`user`, `terminal` texts, not secrets). The dialog stays open.
+  - `keep`: select OPT2, confirm, then the normal user/transaction verification; success adds `multiple_logon: {detected: true, choice: "keep"}`.
+  - `terminate`: select OPT3, confirm; SAP ends the new logon and closes the session. Reported as error `MULTIPLE_LOGON_TERMINATED` with `connection_open: false` (a clean exit, not a successful login).
+  - `end`: select OPT1, confirm; success adds `multiple_logon: {detected: true, choice: "end", warning: "other logons of this user were ended"}`.
+- **Why `end` is never the default**: it ends the user's other logons and any unsaved data in them is lost. It must be typed explicitly and is refused with `READ_ONLY_REFUSED` (rule `login:multiple-logon-end`) under `--read-only`, before SAP is touched, although login itself is allowed under `--read-only`.
+- **Implementation**: pure `plan_multiple_logon`, `make_multiple_logon_fail_error` and `make_multiple_logon_annotation` in `src/login_flow.*` (unit-tested in `tests/unit/test_login_flow.cpp`); the COM part is in `CommandHandler::handle_login`. `launch --login` passes the option through and keeps `connection_open` from the login error when it is set.
+- **Status**: implemented with unit tests; live verification pending (orchestrator).

@@ -257,18 +257,20 @@ Result compose_launch_login_result(Result launch, const Result& login)
         json info = {{"transaction", login.data.value("transaction", "")},
                      {"credential_source", login.data.value("credential_source", "")}};
         if (login.data.contains("warnings")) info["warnings"] = login.data["warnings"];
+        if (login.data.contains("multiple_logon")) info["multiple_logon"] = login.data["multiple_logon"];
         launch.data["login"] = std::move(info);
         return launch;
     }
     Result failed = login;
     if (!failed.error.is_object()) failed.error = json::object();
-    failed.error["connection_open"] = true;
+    if (!failed.error.contains("connection_open")) failed.error["connection_open"] = true;
     failed.error["launch"] = launch.data;
     return failed;
 }
 
 Result CommandHandler::handle_launch(const std::string& connection_name, bool allow_sapshcut,
-                                     bool login, const std::string& credential_name)
+                                     bool login, const std::string& credential_name,
+                                     const std::string& multiple_logon)
 {
     spdlog::info("Launching SAP connection: {}", connection_name);
     auto result = engine_->launch_connection(connection_name, allow_sapshcut);
@@ -316,7 +318,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         // logging on is authentication, not a change of business state. On failure the
         // connection stays open and the launch data is returned with the login error.
         if (login) {
-            auto login_result = handle_login("", conn.id, false, credential_name);
+            auto login_result = handle_login("", conn.id, false, credential_name, multiple_logon);
             return compose_launch_login_result(std::move(result), login_result);
         }
     }
@@ -326,9 +328,22 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 
 Result CommandHandler::handle_login(const std::string& credentials_file,
                                     std::optional<int> connection_id, bool from_stdin,
-                                    const std::string& credential_name)
+                                    const std::string& credential_name,
+                                    const std::string& multiple_logon)
 {
     Result result;
+
+    // Refuse before touching SAP: unknown values, and `end` (ends the user's other logons)
+    // under --read-only.
+    if (const auto early = plan_multiple_logon(multiple_logon, true, read_only_); early.error_code) {
+        result.status = Result::Status::Error;
+        result.error = {{"code", *early.error_code},
+                        {"message", *early.error_code == "READ_ONLY_REFUSED"
+                            ? "--multiple-logon end ends the user's other logons and is refused under --read-only"
+                            : "--multiple-logon must be one of fail, keep, end, terminate"},
+                        {"rule", "login:multiple-logon-end"}};
+        return result;
+    }
 
     auto selected = resolve_and_validate_connection(connection_id);
     if (selected.status != ResultT<Connection>::Status::Success) {
@@ -403,6 +418,62 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         return result;
     }
 
+    // Multiple-logon dialog (user already logged on): handled before the password change check.
+    const auto dialog_prefix = selected.value.session_id + "/wnd[1]/";
+    const auto dialog_element_exists = [&](const std::string& suffix) {
+        try {
+            session->find_element_by_id(dialog_prefix + suffix);
+            return true;
+        } catch (const sap::ComException& error) {
+            if (!sap::is_missing_element_error(error.what())) throw;
+            return false;
+        }
+    };
+    const bool multiple_logon_dialog = dialog_element_exists("usr/radMULTI_LOGON_OPT2") ||
+                                       dialog_element_exists("usr/txtMULTI_LOGON_TEXT");
+    json multiple_logon_info;
+    if (multiple_logon_dialog) {
+        const auto plan = plan_multiple_logon(multiple_logon, true, read_only_);
+        using Action = MultipleLogonPlan::Action;
+        if (plan.action == Action::Refuse) {
+            result.status = Result::Status::Error;
+            result.error = {{"code", plan.error_code.value_or("INVALID_ARGUMENT")},
+                            {"message", "--multiple-logon end is refused under --read-only"}};
+            return result;
+        }
+        if (plan.action == Action::Fail) {
+            const auto read_text = [&](const std::string& suffix) {
+                try {
+                    return session->find_element_by_id(dialog_prefix + suffix)->get_text();
+                } catch (const std::exception&) {
+                    return std::string();
+                }
+            };
+            result.status = Result::Status::Error;
+            result.error = make_multiple_logon_fail_error(read_text("usr/txtMULTI_LOGON_TEXT"),
+                                                          read_text("usr/txtMULTI_LOGON_TEXT2"));
+            result.error["transaction"] = session->get_transaction_code();
+            result.error["password_change_detected"] = false;
+            return result;
+        }
+        if (plan.action == Action::Select) {
+            result = engine_->click_element(ElementId("@active/" + plan.radio_suffix));
+            if (result.status != Result::Status::Success) return result;
+            result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
+            if (result.status != Result::Status::Success) return result;
+            if (plan.choice == "terminate") {
+                result = {};
+                result.status = Result::Status::Error;
+                result.error = {{"code", "MULTIPLE_LOGON_TERMINATED"},
+                                {"message", "The user is already logged on; this logon was terminated as requested "
+                                            "(--multiple-logon terminate). SAP closed the session."},
+                                {"connection_open", false}};
+                return result;
+            }
+            multiple_logon_info = make_multiple_logon_annotation(plan.choice);
+        }
+    }
+
     const auto new_password_path = selected.value.session_id + "/wnd[1]/usr/pwdRSYST-NCODE";
     bool password_change_required = false;
     try {
@@ -450,6 +521,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
                    {"message", "SAP GUI logon completed"},
                    {"credential_source", resolved.value.source}};
     if (!resolved.value.warnings.empty()) result.data["warnings"] = resolved.value.warnings;
+    if (!multiple_logon_info.is_null()) result.data["multiple_logon"] = multiple_logon_info;
     return result;
 }
 
