@@ -66,9 +66,9 @@ int refuse(const char* code, const std::string& message, int exit_code = 2) {
 
 int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
               const commands::GlobalOptions& global, audit::AuditSink* sink,
-              const std::function<cli::CommandHandler*()>& peek_handler) {
+              const std::function<cli::CommandHandler*()>& peek_handler, const HttpRunHooks* hooks) {
     // stdout belongs to the protocol: route all logging to stderr before anything else.
-    {
+    if (!(hooks && hooks->keep_logging)) {
         auto logger = spdlog::get("fairyfly_mcp_stderr");
         if (!logger) logger = spdlog::stderr_color_mt("fairyfly_mcp_stderr");
         spdlog::set_default_logger(logger);
@@ -185,7 +185,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         };
         http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };
         append_serve_event(sink, "started", read_only);
-        const int http_exit = run_mcp_http(std::move(http_args));
+        if (hooks) http_args.on_control = hooks->on_control;
+        const int http_exit = run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
         append_serve_event(sink, "stopped", read_only);
         return http_exit;
     }

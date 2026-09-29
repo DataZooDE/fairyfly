@@ -26,6 +26,7 @@
 #include "include/commands/mcp_iis_command.h"
 #include "include/commands/cli_app.h"
 #include "include/mcp/run_mcp.h"
+#include "include/mcp/http_tray_runner.h"
 #include "include/mcp/tool_catalog.h"
 #include "include/exceptions.h"
 #include "include/version.h"
@@ -298,12 +299,17 @@ namespace {
             }
             // Copy the options first: nothing may rebuild the registry (and destroy this command) later.
             mcp::ServeOptions serve_options = mcp_command->options();
-            if (const auto handled = run_mcp_extras(mcp_command->extras(), serve_options, get_handler, global_opts))
-                return *handled;
-            g_skip_invocation_audit = true;
             std::function<CommandHandler*()> peek = [] {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
             };
+            // `mcp --tray`: the tray owns the process; it runs the HTTP server through this factory.
+            tray::runner_factory() = [&get_handler, &global_opts, peek](const mcp::ServeOptions& tray_options) {
+                g_skip_invocation_audit = true;
+                return mcp::make_http_tray_runner(tray_options, get_handler, global_opts, g_audit.sink, peek);
+            };
+            if (const auto handled = run_mcp_extras(mcp_command->extras(), serve_options, get_handler, global_opts))
+                return *handled;
+            g_skip_invocation_audit = true;
             return mcp::run_mcp(serve_options, get_handler, global_opts, g_audit.sink, peek);
         }
 

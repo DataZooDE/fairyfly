@@ -165,6 +165,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/dispatcher.cpp
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
+    src/mcp/http_tray_runner.cpp
     src/iis/validators.cpp
     src/iis/web_config.cpp
     src/iis/iis_service.cpp
