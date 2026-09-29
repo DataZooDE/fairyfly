@@ -163,6 +163,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/dispatcher.cpp
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
+    src/mcp/call_executor.cpp
+    src/mcp/protocol_session.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
