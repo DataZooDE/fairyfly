@@ -21,6 +21,9 @@ try {
     @'
 $global:LASTEXITCODE = 0
 $argv = @($args)
+# The workflow now calls noun/verb commands; map them back to the short labels the checks below use.
+$legacy = @{ 'session list' = 'list'; 'connection list' = 'connections'; 'session launch' = 'launch'; 'session login' = 'login'; 'session disconnect' = 'disconnect'; 'element get' = 'get'; 'element click' = 'click'; 'element fill' = 'fill'; 'transaction start' = 'tcode' }
+if ($argv.Count -gt 1 -and $legacy.ContainsKey("$($argv[0]) $($argv[1])")) { $argv = @($legacy["$($argv[0]) $($argv[1])"]) + @($argv | Select-Object -Skip 2) }
 $command = $argv[0]
 $target = if ($argv.Count -gt 1) { $argv[1] } else { '' }
 $scopeIndex = [Array]::IndexOf($argv, '--connection')

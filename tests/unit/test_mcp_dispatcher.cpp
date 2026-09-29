@@ -127,7 +127,7 @@ TEST_CASE("Dispatcher: hidden write tools are known but refused with guidance", 
     const auto listed = d.list_tools();
     for (const auto& tool : listed) CHECK(tool.name != "gui_element_fill");
     CHECK(d.has_tool("gui_element_fill"));
-    CHECK_FALSE(d.has_tool("sap_nope"));
+    CHECK_FALSE(d.has_tool("gui_nope"));
     auto r = d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id());
     CHECK(r.is_error);
     CHECK(text_of(r).find("TOOL_UNAVAILABLE_READ_ONLY") != std::string::npos);
@@ -138,7 +138,7 @@ TEST_CASE("Dispatcher: hidden write tools are known but refused with guidance", 
 TEST_CASE("Dispatcher: unknown tool and invalid arguments are tool errors", "[mcp][dispatcher]") {
     Fixture f;
     auto d = f.make();
-    auto r = d.call_tool("sap_nope", json::object(), ctx_with_id());
+    auto r = d.call_tool("gui_nope", json::object(), ctx_with_id());
     CHECK(r.is_error);
     CHECK(text_of(r).rfind("ERROR TOOL_NOT_FOUND", 0) == 0);
 
@@ -561,7 +561,7 @@ TEST_CASE("Dispatcher: batch items are checked, limited and audited per item", "
     Fixture f;
     auto d = f.make();
     auto r = d.call_tool("gui_batch",
-                         json{{"items", json::array({{{"tool", "sap_missing"}}, {{"tool", "gui_doctor"}}})}, {"stop_on_error", false}},
+                         json{{"items", json::array({{{"tool", "gui_missing"}}, {{"tool", "gui_doctor"}}})}, {"stop_on_error", false}},
                          ctx_with_id());
     CHECK(r.is_error);
     CHECK(f.calls.size() == 1);
@@ -584,7 +584,7 @@ TEST_CASE("Dispatcher: batch items are checked, limited and audited per item", "
 
     // Custom catalog: a write tool must be refused per item once Phase 3's check_call exists.
     ToolSpec write;
-    write.def.name = "sap_fake_write";
+    write.def.name = "gui_fake_write";
     write.def.input_schema = json{{"type", "object"}, {"additionalProperties", false}};
     write.write_tool = true;
     write.build_argv = [](const json&, const Policy&) { return Argv{"element", "fill", "x"}; };
@@ -598,7 +598,7 @@ TEST_CASE("Dispatcher: batch items are checked, limited and audited per item", "
     Fixture h;
     auto d3 = h.make(read_only, specs);
     auto refused = d3.call_tool("gui_batch",
-                                json{{"items", json::array({{{"tool", "sap_fake_write"}}, {{"tool", "gui_doctor"}}})}, {"stop_on_error", false}},
+                                json{{"items", json::array({{{"tool", "gui_fake_write"}}, {{"tool", "gui_doctor"}}})}, {"stop_on_error", false}},
                                 ctx_with_id());
     CHECK(refused.is_error);
     CHECK(h.calls.size() == 1);
@@ -611,7 +611,7 @@ TEST_CASE("Dispatcher: audit hook fires exactly once per call", "[mcp][dispatche
     Fixture f;
     auto d = f.make();
     d.call_tool("gui_doctor", json::object(), ctx_with_id());                      // success
-    d.call_tool("sap_nope", json::object(), ctx_with_id());                        // unknown
+    d.call_tool("gui_nope", json::object(), ctx_with_id());                        // unknown
     d.call_tool("gui_transaction_start", json::object(), ctx_with_id());                       // invalid
     f.handler = [](const Argv&) { return err("X", "y"); };
     d.call_tool("gui_doctor", json::object(), ctx_with_id());                      // CLI error

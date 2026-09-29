@@ -84,10 +84,10 @@ TEST_CASE("Dispatcher lists tools per policy", "[mcp]") {
     CHECK(found);
 
     ToolSpec write;
-    write.def.name = "sap_fake_write";
+    write.def.name = "gui_fake_write";
     write.write_tool = true;
     ToolSpec read;
-    read.def.name = "sap_fake_read";
+    read.def.name = "gui_fake_read";
 
     Policy read_only;
     CHECK(tool_visible(read, read_only));

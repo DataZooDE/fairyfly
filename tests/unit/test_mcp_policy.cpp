@@ -339,7 +339,7 @@ TEST_CASE("MCP audit hook is a no-op for null or disabled sinks", "[mcp][audit]"
     REQUIRE_FALSE(fs::exists(file.path));
 }
 
-TEST_CASE("serve start/stop records", "[mcp][audit]") {
+TEST_CASE("mcp start/stop records", "[mcp][audit]") {
     TempFile file;
     fairyfly::audit::AuditSink sink(fairyfly::audit::AuditConfig{fairyfly::audit::Mode::Enabled, file.path});
     REQUIRE(append_serve_event(&sink, "started", true));

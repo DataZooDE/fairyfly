@@ -24,7 +24,7 @@ if(WIN32)
 endif()
 
 # Set the project name and version
-project(fairyfly VERSION 0.1.0 LANGUAGES CXX)
+project(fairyfly VERSION 0.2.0 LANGUAGES CXX)
 
 # Require C++20
 set(CMAKE_CXX_STANDARD 20)

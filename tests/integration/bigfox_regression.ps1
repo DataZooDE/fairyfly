@@ -206,15 +206,15 @@ function New-TempFile([string]$Prefix, [string[]]$Lines) {
 
 # ---------------------------------------------------------------- navigation helpers
 function Go([string]$Tcode) {
-    $r = Invoke-FF @('tcode', $Tcode)
+    $r = Invoke-FF @('transaction', 'start', $Tcode)
     Assert-Ok $r "tcode $Tcode"
     return $r
 }
 
 function Reset-Session {
     if ($DryRun) { return }
-    try { [void](Invoke-FF @('close')) } catch { }
-    try { [void](Invoke-FF @('tcode', '/n')) } catch { }
+    try { [void](Invoke-FF @('popup', 'close')) } catch { }
+    try { [void](Invoke-FF @('transaction', 'start', '/n')) } catch { }
 }
 
 function Run-Check {
@@ -251,11 +251,11 @@ function Invoke-Suite {
 
     # -- attach / connections
     Run-Check 'attach.dedupe' {
-        $r = Invoke-FF @('attach', '--session-id', $S) -NoConn
+        $r = Invoke-FF @('session', 'attach', '--session-id', $S) -NoConn
         Assert-Ok $r 'attach'
         if (-not $DryRun) { $script:Conn = [string]$r.Json.data.connection_file_id }
         Assert-That ($script:Conn -ne '') 'attach returned no connection_file_id'
-        $c = Invoke-FF @('connections') -NoConn
+        $c = Invoke-FF @('connection', 'list') -NoConn
         Assert-Ok $c 'connections'
         $n = @(@($c.Json.data.connections) | Where-Object { $_.session_id -eq $S }).Count
         Assert-That ($n -eq 1) "connections lists $n entries for $S (expected exactly 1)"
@@ -273,12 +273,12 @@ function Invoke-Suite {
     Run-Check 'RZ11.unknown_and_known_param' {
         Require-Chain @('attach')
         [void](Go '/nRZ11')
-        Assert-Ok (Invoke-FF @('fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/max_wprun_time')) 'fill param'
-        $r = Invoke-FF @('click', "$U/btnPANZEIGEN_1000")
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/max_wprun_time')) 'fill param'
+        $r = Invoke-FF @('element', 'click', "$U/btnPANZEIGEN_1000")
         $txt = if ($r.Ok) { [string]$r.Json.data.status_bar.text } else { [string]$r.Json.error.status_bar.text }
         Assert-That ($txt -match 'not known') "status bar was '$txt' (expected 'not known')"
-        Assert-Ok (Invoke-FF @('fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/wp_no_dia')) 'fill param 2'
-        Assert-Ok (Invoke-FF @('click', "$U/btnPANZEIGEN_1000")) 'click display'
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/wp_no_dia')) 'fill param 2'
+        Assert-Ok (Invoke-FF @('element', 'click', "$U/btnPANZEIGEN_1000")) 'click display'
         $m = Invoke-FF @('screen', 'read', '--no-tabs', '--output', 'markdown')
         Assert-That ($m.Raw -match 'Instance Profile') "markdown lacks 'Instance Profile'"
         Assert-That ($m.Raw -match '(?s)Instance Profile.{0,600}?\d+') 'no numeric result after Instance Profile'
@@ -289,7 +289,7 @@ function Invoke-Suite {
     Run-Check 'ST22.list_today' {
         Require-Chain @('attach')
         [void](Go '/nST22')
-        Assert-Ok (Invoke-FF @('click', "$U/btnTODAY")) 'click btnTODAY'
+        Assert-Ok (Invoke-FF @('element', 'click', "$U/btnTODAY")) 'click btnTODAY'
         $r = Invoke-FF @('screen', 'read', '--no-tabs', '--max-rows', '5', '--output', 'json')
         Assert-Ok $r 'screen read'
         $g = @(Get-Tables $r.Json) | Where-Object { $_.id -eq $grid } | Select-Object -First 1
@@ -299,40 +299,40 @@ function Invoke-Suite {
 
     Run-Check 'ST22.open_dump_doubleclick' {
         Require-Chain @('ST22L')
-        Assert-Ok (Invoke-FF @('click', $grid, '--row', '0', '--column', 'GPROGRAM', '--doubleclick')) 'doubleclick'
+        Assert-Ok (Invoke-FF @('element', 'click', $grid, '--row', '0', '--column', 'GPROGRAM', '--doubleclick')) 'doubleclick'
         $m = Invoke-FF @('screen', 'read', '--no-tabs', '--output', 'markdown')
         Assert-That ($m.Raw -match 'Error analysis|Short Text') "dump screen lacks 'Error analysis'/'Short Text'"
     } -Chain 'ST22D'
 
     Run-Check 'ST22.menu_enumerate' {
         Require-Chain @('ST22D')
-        $r = Invoke-FF @('screen', 'menu')     # enumerate only, never --select
+        $r = Invoke-FF @('menu', 'list')     # enumerate only, never --select
         Assert-Ok $r 'screen menu'
     }
 
     Run-Check 'ST22.send_key_f3_back' {
         Require-Chain @('ST22D')
-        Assert-Ok (Invoke-FF @('send-key', 'f3')) 'send-key f3'
+        Assert-Ok (Invoke-FF @('key', 'send', 'f3')) 'send-key f3'
     }
 
     Run-Check 'ST22.send_key_invalid' {
         Require-Chain @('attach')
-        $r = Invoke-FF @('send-key', 'bogus')
+        $r = Invoke-FF @('key', 'send', 'bogus')
         Assert-That ((-not $r.Ok) -and $r.Code -eq 'INVALID_VKEY') "expected INVALID_VKEY, got '$($r.Code)'"
     }
 
     Run-Check 'ST22.detail_popup_close' {
         Require-Chain @('ST22L')
         [void](Go '/nST22')
-        Assert-Ok (Invoke-FF @('click', "$U/btnTODAY")) 'click btnTODAY'
-        Assert-Ok (Invoke-FF @('click', $grid, '--row', '0', '--column', 'ERRORID')) 'select row 0'
-        Assert-Ok (Invoke-FF @('click', "$grid/btn_&DETAIL")) 'click Details'
+        Assert-Ok (Invoke-FF @('element', 'click', "$U/btnTODAY")) 'click btnTODAY'
+        Assert-Ok (Invoke-FF @('element', 'click', $grid, '--row', '0', '--column', 'ERRORID')) 'select row 0'
+        Assert-Ok (Invoke-FF @('element', 'click', "$grid/btn_&DETAIL")) 'click Details'
         $m = Invoke-FF @('screen', 'read', '--no-tabs', '--output', 'markdown')
         Assert-That ($m.Raw -match 'Details') "popup 'Details' not visible"
-        $c1 = Invoke-FF @('close')
+        $c1 = Invoke-FF @('popup', 'close')
         Assert-Ok $c1 'close'
         Assert-That (@('vkey', 'window_close') -contains [string]$c1.Json.data.method) "close method '$($c1.Json.data.method)'"
-        $c2 = Invoke-FF @('close')
+        $c2 = Invoke-FF @('popup', 'close')
         Assert-That ((-not $c2.Ok) -and $c2.Code -eq 'NO_POPUP') "second close: expected NO_POPUP, got '$($c2.Code)'"
     }
 
@@ -352,7 +352,7 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
     Run-Check 'SM37.checkbox_get_and_find' {
         Require-Chain @('attach')
         [void](Go '/nSM37')
-        $g = Invoke-FF @('get', $chkFinished)
+        $g = Invoke-FF @('element', 'get', $chkFinished)
         Assert-Ok $g 'get FINISHED'
         Assert-That ($g.Json.data.selected -is [bool]) 'data.selected is not boolean'
         Assert-That ([string]$g.Json.data.label -ne '') 'data.label is empty'
@@ -364,9 +364,9 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
 
     Run-Check 'SM37.execute_and_finished_row' {
         Require-Chain @('SM37S')
-        Assert-Ok (Invoke-FF @('fill', "$U/txtBTCH2170-USERNAME", '*')) 'fill user'
-        Assert-Ok (Invoke-FF @('fill', "$U/ctxtBTCH2170-FROM_DATE", '01.01.2026')) 'fill from date'
-        Assert-Ok (Invoke-FF @('click', "$S/wnd[0]/tbar[1]/btn[8]")) 'execute'
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/txtBTCH2170-USERNAME", '*')) 'fill user'
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/ctxtBTCH2170-FROM_DATE", '01.01.2026')) 'fill from date'
+        Assert-Ok (Invoke-FF @('element', 'click', "$S/wnd[0]/tbar[1]/btn[8]")) 'execute'
         $m = Invoke-FF @('screen', 'read', '--no-tabs', '--max-rows', '200', '--output', 'markdown')
         Assert-That ($m.Raw -match 'Finished') "no 'Finished' row in job list"
         # Heuristic: first table row containing 'Finished'; job name = first cell that looks like a name.
@@ -394,18 +394,18 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
     Run-Check 'SM37.joblog_fast' {
         Require-Chain @('SM37X')
         # btn[47] = Job log ONLY. NEVER btn[46] Release, btn[25] Stop, btn[14] Delete.
-        $r = Invoke-FF @('click', "$S/wnd[0]/tbar[1]/btn[47]", '--wait-for-window')
+        $r = Invoke-FF @('element', 'click', "$S/wnd[0]/tbar[1]/btn[47]", '--wait-for-window')
         Assert-Ok $r 'click Job log'
         Assert-That ($r.Json.data.screen_changed -eq $true) 'screen_changed is not true'
         Assert-That ($r.Ms -lt 1500) "Job log took $($r.Ms) ms (limit 1500)"
-        Assert-Ok (Invoke-FF @('send-key', 'f3')) 'send-key f3'
+        Assert-Ok (Invoke-FF @('key', 'send', 'f3')) 'send-key f3'
     } -Chain 'SM37J'
 
     Run-Check 'SM37.joblog_and_f3_under_read_only' {
         Require-Chain @('SM37J')
-        $r = Invoke-FF @('--read-only', 'click', "$S/wnd[0]/tbar[1]/btn[47]", '--wait-for-window')
+        $r = Invoke-FF @('--read-only', 'element', 'click', "$S/wnd[0]/tbar[1]/btn[47]", '--wait-for-window')
         Assert-Ok $r 'read-only Job log'
-        $b = Invoke-FF @('--read-only', 'send-key', 'f3')
+        $b = Invoke-FF @('--read-only', 'key', 'send', 'f3')
         Assert-Ok $b 'read-only F3'
     }
 
@@ -413,9 +413,9 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
     Run-Check 'SU01.display_developer' {
         Require-Chain @('attach')
         [void](Go '/nSU01')
-        Assert-Ok (Invoke-FF @('fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')) 'fill user name'
-        Assert-Ok (Invoke-FF @('click', "$S/wnd[0]/tbar[1]/btn[7]")) 'click Display (F7)'   # NEVER btn[8] Create / btn[20] Change Password
-        $t = Invoke-FF @('get', "$U/tabsTABSTRIP1")
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')) 'fill user name'
+        Assert-Ok (Invoke-FF @('element', 'click', "$S/wnd[0]/tbar[1]/btn[7]")) 'click Display (F7)'   # NEVER btn[8] Create / btn[20] Change Password
+        $t = Invoke-FF @('element', 'get', "$U/tabsTABSTRIP1")
         $script:SuTabBefore = if ($t.Ok) { [string]$t.Raw } else { '' }
     } -Chain 'SU'
 
@@ -459,7 +459,7 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
         Require-Chain @('SU')
         if (-not $DryRun -and -not $script:SuTabBefore) { Skip 'tabstrip get unavailable' }
         if (-not $DryRun -and $script:SuTabBefore -notmatch '(?i)select') { Skip 'get on tabsTABSTRIP1 does not expose the selected tab (note only)' }
-        $t = Invoke-FF @('get', "$U/tabsTABSTRIP1")
+        $t = Invoke-FF @('element', 'get', "$U/tabsTABSTRIP1")
         Assert-Ok $t 'get tabstrip'
         Assert-That ($t.Raw -eq $script:SuTabBefore) 'tabstrip state differs from before the --tab reads'
     }
@@ -483,8 +483,8 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
     Run-Check 'ids.stable.SU01_display' {
         Require-Chain @('attach')
         [void](Go '/nSU01')
-        Assert-Ok (Invoke-FF @('fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')) 'fill user name'
-        Assert-Ok (Invoke-FF @('click', "$S/wnd[0]/tbar[1]/btn[7]")) 'click Display (F7)'
+        Assert-Ok (Invoke-FF @('element', 'fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')) 'fill user name'
+        Assert-Ok (Invoke-FF @('element', 'click', "$S/wnd[0]/tbar[1]/btn[7]")) 'click Display (F7)'
         Test-IdStability 'SU01 display'
     }
     Run-Check 'ids.stable.ST22_selection' {
@@ -503,12 +503,12 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
         Require-Chain @('attach')
         $c = $script:Conn
         $lines = @(
-            "tcode /nSM59 --connection $c",
+            "transaction start /nSM59 --connection $c",
             "screen read --no-tabs --output json --connection $c",
-            "tcode /nSE80 --connection $c",
+            "transaction start /nSE80 --connection $c",
             "screen read --no-tabs --output json --connection $c",
-            "tcode /nST22 --connection $c",
-            "click $U/btnTODAY --connection $c",
+            "transaction start /nST22 --connection $c",
+            "element click $U/btnTODAY --connection $c",
             "screen read --no-tabs --max-rows 50 --output json --connection $c"
         )
         $bf = New-TempFile 'ff_shellcache_' $lines
@@ -534,7 +534,7 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
 
     # -- output / read-only guard
     Run-Check 'list.toon_starts_with_data' {
-        $r = Invoke-FF @('--output', 'toon', 'list') -NoConn
+        $r = Invoke-FF @('--output', 'toon', 'session', 'list') -NoConn
         Assert-That ($r.Raw.TrimStart().StartsWith('data:')) 'toon output does not start with data:'
     }
 
@@ -542,13 +542,13 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
         Run-Check 'read_only.refusals' {
             Require-Chain @('attach')
             [void](Go '/nSU01')     # Save button (tbar[0]/btn[11]) exists on every screen; refusals change nothing
-            $r1 = Invoke-FF @('--read-only', 'send-key', 'f11')
+            $r1 = Invoke-FF @('--read-only', 'key', 'send', 'f11')
             Assert-That ((-not $r1.Ok) -and $r1.Code -eq 'READ_ONLY_REFUSED') "send-key f11: '$($r1.Code)'"
-            $r2 = Invoke-FF @('--read-only', 'click', "$S/wnd[0]/tbar[0]/btn[11]")
+            $r2 = Invoke-FF @('--read-only', 'element', 'click', "$S/wnd[0]/tbar[0]/btn[11]")
             Assert-That ((-not $r2.Ok) -and $r2.Code -eq 'READ_ONLY_REFUSED') "click btn[11]: '$($r2.Code)'"
-            $r3 = Invoke-FF @('--read-only', 'screen', 'menu', '--select', 'System/Delete')
+            $r3 = Invoke-FF @('--read-only', 'menu', 'select', 'System/Delete')
             Assert-That ((-not $r3.Ok) -and $r3.Code -eq 'READ_ONLY_REFUSED') "menu System/Delete: '$($r3.Code)'"
-            $r4 = Invoke-FF @('--read-only', 'fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')
+            $r4 = Invoke-FF @('--read-only', 'element', 'fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER')
             Assert-That ((-not $r4.Ok) -and $r4.Code -eq 'READ_ONLY_REFUSED') "fill: '$($r4.Code)'"
             [void](Go '/n')
         }
@@ -559,14 +559,14 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
         Require-Chain @('attach')
         $c = $script:Conn
         $lines = @(
-            "tcode /nSM37 --connection $c",
-            "get $chkFinished --connection $c",
+            "transaction start /nSM37 --connection $c",
+            "element get $chkFinished --connection $c",
             "screen find --id-contains chkBTCH2170-FINISHED --connection $c",
             "screen read --no-tabs --max-rows 20 --connection $c",
-            "get $U/txtBTCH2170-USERNAME --connection $c",
-            "screen menu --connection $c",
-            "tcode /n --connection $c",
-            "list"
+            "element get $U/txtBTCH2170-USERNAME --connection $c",
+            "menu list --connection $c",
+            "transaction start /n --connection $c",
+            "session list"
         )
         $bf = New-TempFile 'ff_batch8_' $lines
         $r = Invoke-FF @('batch', '--file', $bf) -NoConn -TimeoutSec 300
@@ -581,7 +581,7 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
 
     # -- final: no modal popup left behind
     Run-Check 'final.no_popup_left' {
-        $c = Invoke-FF @('close')
+        $c = Invoke-FF @('popup', 'close')
         Assert-That ((-not $c.Ok) -and $c.Code -eq 'NO_POPUP') "a popup was still open (close returned '$($c.Code)'; it has now been closed)"
     }
 }
@@ -590,7 +590,7 @@ Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._
 Out-Line ("fairyfly Bigfox regression - exe: $Exe - iterations: $Iterations" + $(if ($DryRun) { ' - DRY RUN' } else { '' }))
 if (-not $DryRun) {
     if (-not (Test-Path -LiteralPath $Exe)) { Out-Line "ERROR: fairyfly executable not found: $Exe"; exit 2 }
-    $pre = Invoke-FF @('attach', '--session-id', $S) -NoConn
+    $pre = Invoke-FF @('session', 'attach', '--session-id', $S) -NoConn
     if (-not $pre.Ok) { Out-Line "ERROR: no SAP GUI session ($S): code=$($pre.Code) msg=$($pre.Msg)"; exit 2 }
     $script:Conn = [string]$pre.Json.data.connection_file_id
 } else {
@@ -609,7 +609,7 @@ try {
 }
 finally {
     foreach ($f in $script:TempFiles) { try { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } catch { } }
-    if (-not $DryRun) { try { [void](Invoke-FF @('tcode', '/n')) } catch { } }
+    if (-not $DryRun) { try { [void](Invoke-FF @('transaction', 'start', '/n')) } catch { } }
 }
 $overall.Stop()
 

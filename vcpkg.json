@@ -1,6 +1,6 @@
 {
   "name": "fairyfly",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LLM-powered SAP GUI automation CLI tool",
   "homepage": "https://github.com/yourusername/fairyfly",
   "license": "MIT",

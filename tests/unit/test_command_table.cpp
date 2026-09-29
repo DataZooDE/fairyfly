@@ -261,6 +261,7 @@ TEST_CASE("--tools filter removes tools from list and call", "[command_table][mc
     CHECK_FALSE(dispatcher.has_tool("gui_element_click"));
     CHECK_FALSE(dispatcher.has_tool("gui_element_fill"));  // write tools of other families are gone entirely
     CHECK_FALSE(dispatcher.has_tool("gui_batch"));
+    CHECK_FALSE(dispatcher.has_tool("sap_screen_read"));  // legacy names are not accepted
 
     mcp::CallContext ctx;
     const auto refused = dispatcher.call_tool("gui_element_click", mcp::json{{"element", "wnd[0]/usr/btn"}}, ctx);

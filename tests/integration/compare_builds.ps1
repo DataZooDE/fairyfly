@@ -77,24 +77,24 @@ function Get-Ids($Json) {
 
 # Navigation steps are argument arrays run with NewExe. Only selection-screen values are filled.
 $catalog = [ordered]@{
-    'EasyAccess'      = @(, @('tcode', '/n'))
-    'ST22-selection'  = @(, @('tcode', '/nST22'))
-    'ST22-list'       = @(@('tcode', '/nST22'), @('click', "$U/btnTODAY"))
-    'SM37-selection'  = @(, @('tcode', '/nSM37'))
-    'SM37-joblist'    = @(@('tcode', '/nSM37'), @('fill', "$U/txtBTCH2170-USERNAME", '*'), @('fill', "$U/ctxtBTCH2170-FROM_DATE", '01.01.2026'), @('click', "$S/wnd[0]/tbar[1]/btn[8]"))
-    'RZ11-detail'     = @(@('tcode', '/nRZ11'), @('fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/wp_no_dia'), @('click', "$U/btnPANZEIGEN_1000"))
-    'SU01-selection'  = @(, @('tcode', '/nSU01'))
-    'SU01-display'    = @(@('tcode', '/nSU01'), @('fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER'), @('click', "$S/wnd[0]/tbar[1]/btn[7]"))
-    'SM50'            = @(, @('tcode', '/nSM50'))
-    'RZ04'            = @(, @('tcode', '/nRZ04'))
-    'SE16-TADIR'      = @(@('tcode', '/nSE16'), @('fill', "$U/ctxtDATABROWSE-TABLENAME", 'TADIR'), @('send-key', 'f7'))
-    'SE11-TADIR'      = @(@('tcode', '/nSE11'), @('fill', "$U/ctxtRSRD1-TBMA_VAL", 'TADIR'), @('send-key', 'f7'))
-    'SEGW'            = @(, @('tcode', '/nSEGW'))
-    'IWFND-MAINT'     = @(, @('tcode', '/n/IWFND/MAINT_SERVICE'))
-    'SE38'            = @(, @('tcode', '/nSE38'))
-    'SE80'            = @(, @('tcode', '/nSE80'))
-    'SM59'            = @(, @('tcode', '/nSM59'))
-    'SICF'            = @(, @('tcode', '/nSICF'))
+    'EasyAccess'      = @(, @('transaction', 'start', '/n'))
+    'ST22-selection'  = @(, @('transaction', 'start', '/nST22'))
+    'ST22-list'       = @(@('transaction', 'start', '/nST22'), @('element', 'click', "$U/btnTODAY"))
+    'SM37-selection'  = @(, @('transaction', 'start', '/nSM37'))
+    'SM37-joblist'    = @(@('transaction', 'start', '/nSM37'), @('element', 'fill', "$U/txtBTCH2170-USERNAME", '*'), @('element', 'fill', "$U/ctxtBTCH2170-FROM_DATE", '01.01.2026'), @('element', 'click', "$S/wnd[0]/tbar[1]/btn[8]"))
+    'RZ11-detail'     = @(@('transaction', 'start', '/nRZ11'), @('element', 'fill', "$U/ctxtTPFYSTRUCT-NAME", 'rdisp/wp_no_dia'), @('element', 'click', "$U/btnPANZEIGEN_1000"))
+    'SU01-selection'  = @(, @('transaction', 'start', '/nSU01'))
+    'SU01-display'    = @(@('transaction', 'start', '/nSU01'), @('element', 'fill', "$U/ctxtSUID_ST_BNAME-BNAME", 'DEVELOPER'), @('element', 'click', "$S/wnd[0]/tbar[1]/btn[7]"))
+    'SM50'            = @(, @('transaction', 'start', '/nSM50'))
+    'RZ04'            = @(, @('transaction', 'start', '/nRZ04'))
+    'SE16-TADIR'      = @(@('transaction', 'start', '/nSE16'), @('element', 'fill', "$U/ctxtDATABROWSE-TABLENAME", 'TADIR'), @('key', 'send', 'f7'))
+    'SE11-TADIR'      = @(@('transaction', 'start', '/nSE11'), @('element', 'fill', "$U/ctxtRSRD1-TBMA_VAL", 'TADIR'), @('key', 'send', 'f7'))
+    'SEGW'            = @(, @('transaction', 'start', '/nSEGW'))
+    'IWFND-MAINT'     = @(, @('transaction', 'start', '/n/IWFND/MAINT_SERVICE'))
+    'SE38'            = @(, @('transaction', 'start', '/nSE38'))
+    'SE80'            = @(, @('transaction', 'start', '/nSE80'))
+    'SM59'            = @(, @('transaction', 'start', '/nSM59'))
+    'SICF'            = @(, @('transaction', 'start', '/nSICF'))
 }
 
 $names = @($catalog.Keys)
@@ -111,7 +111,7 @@ if ($Screens.Count -gt 0) {
 
 if (-not $DryRun) {
     foreach ($e in @($OldExe, $NewExe)) { if (-not (Test-Path -LiteralPath $e)) { Write-Host "ERROR: not found: $e"; exit 2 } }
-    $a = Invoke-Build $NewExe @('attach', '--session-id', $S)
+    $a = Invoke-Build $NewExe @('session', 'attach', '--session-id', $S)
     if (-not $a.Ok) { Write-Host "ERROR: no SAP GUI session ($S): $($a.Code)"; exit 2 }
     $script:Conn = [string]$a.Json.data.connection_file_id
 } else { $script:Conn = '<conn-id>' }
@@ -130,7 +130,7 @@ try {
         if (-not $navOk) {
             Write-Host "SKIP  $name - navigation $navMsg"
             [void]$rows.Add([pscustomobject]@{ Screen = $name; OldMs = '-'; NewMs = '-'; OldEl = '-'; NewEl = '-'; OnlyOld = '-'; OnlyNew = '-'; OldKB = '-'; NewKB = '-' })
-            try { [void](Invoke-Build $NewExe @('close')) } catch { }
+            try { [void](Invoke-Build $NewExe @('popup', 'close')) } catch { }
             continue
         }
         $readArgs = @('screen', 'read', '--no-tabs', '--max-rows', '100', '--output', 'json')
@@ -158,7 +158,7 @@ try {
     }
 }
 finally {
-    if (-not $DryRun) { try { [void](Invoke-Build $NewExe @('close')) } catch { }; try { [void](Invoke-Build $NewExe @('tcode', '/n')) } catch { } }
+    if (-not $DryRun) { try { [void](Invoke-Build $NewExe @('popup', 'close')) } catch { }; try { [void](Invoke-Build $NewExe @('transaction', 'start', '/n')) } catch { } }
 }
 
 if ($DryRun) { Write-Host 'Dry run complete: fairyfly was not invoked.'; exit 0 }
