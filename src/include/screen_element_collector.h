@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -24,6 +25,7 @@ private:
     std::vector<std::string> container_element_ids_;  // GuiUserArea IDs found during traversal for Phase 2 extraction
     std::vector<std::string> grid_element_ids_;  // GuiGridView/GuiTableControl IDs found for Phase 2 extraction
     std::unordered_map<std::string, std::vector<std::tuple<int, int, std::string>>> grid_cells_;  // Grid cell coordinates for GuiUserArea grids
+    std::unordered_map<std::string, std::string> known_types_;  // id -> type seen in Phase 1
 
 public:
     ScreenElementCollector() = default;
@@ -32,6 +34,14 @@ public:
     /// @param element The SAP GUI element to add (ID will be extracted and stored)
     /// @return true if element was added, false if it was a duplicate
     bool add(ComGuiElementPtr element);
+
+    /// Add an element by ID without touching COM (identity already known)
+    /// @return true if the ID was new
+    bool add_id(const std::string& id) {
+        if (id.empty() || !seen_ids_.insert(id).second) return false;
+        element_ids_.push_back(id);
+        return true;
+    }
 
     /// Add pre-extracted data for an element (for elements whose COM pointers can't be safely stored)
     /// Used for GuiShell tree controls that cause segfaults when accessed later
@@ -50,6 +60,20 @@ public:
     /// Add GuiGridView/GuiTableControl element ID for Phase 2 extraction (collect during traversal, extract later)
     /// @param elem_id The grid element ID
     void add_grid_id(const std::string& elem_id);
+
+    /// True when the ID was already seen (collected element, tree, grid or extracted data)
+    bool contains(const std::string& id) const { return seen_ids_.find(id) != seen_ids_.end(); }
+
+    /// Remember the element type read during traversal so metadata extraction
+    /// does not have to read it again from a fresh COM object.
+    void set_known_type(const std::string& id, const std::string& type) { known_types_[id] = type; }
+
+    /// Type recorded by set_known_type, or empty when unknown
+    const std::string& known_type(const std::string& id) const {
+        static const std::string empty;
+        auto it = known_types_.find(id);
+        return it == known_types_.end() ? empty : it->second;
+    }
 
     /// Get all collected element IDs (safe - IDs never become stale)
     const std::vector<std::string>& element_ids() const { return element_ids_; }

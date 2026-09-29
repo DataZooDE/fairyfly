@@ -55,6 +55,35 @@ struct TabSelectionSnapshot {
     bool restore(const std::function<void(const std::string&)>& select_tab) const;
 };
 
+/// Whether selecting a tab is needed given the strip's currently selected tab.
+enum class TabSelectionPlan { AlreadySelected, Select };
+inline TabSelectionPlan plan_tab_selection(const std::string& selected_id,
+                                           const std::string& requested_id) {
+    return (!selected_id.empty() && selected_id == requested_id)
+        ? TabSelectionPlan::AlreadySelected : TabSelectionPlan::Select;
+}
+
+/// FindById paths worth probing below a container because Children may not list them.
+/// Pure: decides from the control type and the number of children Children enumerated.
+///  - Never probed: GuiToolbar, GuiTitlebar, GuiMenubar, GuiTabStrip, GuiBox,
+///    GuiStatusbar, GuiUserArea (their Children collection is complete; probing them
+///    only produced misses).
+///  - /shell, /shell[0..3], /shellcont[0..3], /shellcont: shell-hosting controls only
+///    (GuiCustomControl, GuiContainerShell, GuiSplitterShell, GuiSplitterContainer,
+///    GuiDockShell, GuiContainerCtrl).
+///  - /sub[0..3], /ssub<NAME>, /cntl<NAME>, /cntl[0..3]: subscreen-like containers
+///    (GuiSimpleContainer, GuiScrollContainer, GuiSubScreen, GuiTab) and only when
+///    Children enumeration yielded no children (safety net for SE16/SEGW layouts).
+std::vector<std::string> id_probe_candidates(const std::string& type,
+                                             const std::string& elem_id,
+                                             int children_found);
+
+/// Same, minus candidates the collector already knows.
+std::vector<std::string> id_probe_candidates(const std::string& type,
+                                             const std::string& elem_id,
+                                             int children_found,
+                                             const ScreenElementCollector& collector);
+
 struct ScreenSearchContext;
 
 /// Handles screen reading and element discovery
@@ -72,6 +101,12 @@ public:
     /// '/' boundary) is expanded; TAB_NOT_FOUND is returned when none matches.
     Result read_with_tabs(bool skip_trees = false, int max_rows = 20,
                           const std::string& only_tab = "");
+
+    /// Targeted read of a single tab (`screen read --tab <id>`): locates the owning tab
+    /// strip cheaply, selects the tab only if needed, re-fetches it after the wait and
+    /// extracts only that tab's subtree (including grids and trees). Restores the
+    /// previously selected tab afterwards.
+    Result read_tab(const std::string& only_tab, bool skip_trees = false, int max_rows = 20);
 
     /// Pure tab selection used by `screen read --tab`: an empty selector keeps all tabs.
     static std::vector<json> select_tabs(const std::vector<json>& tabs,
@@ -130,6 +165,16 @@ private:
     /// @return JSON object with grid data: {id, type, grid_data: {rows, row_count, col_count}}
     json extract_userarea_grid_data(ComGuiElementPtr element, const std::string& elem_id,
                                     const ScreenElementCollector& collector);
+
+    /// Phase 2/2B: extract trees and grids collected by traverse_element_tree using
+    /// fresh COM pointers.
+    void extract_collected_trees_and_grids(ScreenElementCollector& collector);
+
+    /// Select (when needed), wait, re-fetch and read one tab's subtree. Returns false
+    /// when the tab is missing or the session stays busy. `elements` is the tab subtree
+    /// only (not the surrounding window chrome).
+    bool read_tab_content(const std::string& tab_id, bool needs_select, bool skip_trees,
+                          json& elements);
 
     /// Extract metadata for all elements collected in collector
     json extract_metadata_for_collector(const ScreenElementCollector& collector);

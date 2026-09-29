@@ -7,6 +7,7 @@
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/cli_handler.h"
 #include <vector>
+#include <algorithm>
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -1194,4 +1195,81 @@ TEST_CASE("Selection screen markdown keeps captions after label collapse", "[scr
     REQUIRE(after.find("Orphan caption") != std::string::npos);
     REQUIRE(after.find("%_S_DATUM_%_APP_%-TEXT") == std::string::npos);
     REQUIRE(after.size() < before.size());
+}
+
+TEST_CASE("id_probe_candidates gates FindById probing by type and child count", "[screen][probe]") {
+    const std::string id = "wnd[0]/usr/x";
+    auto contains = [](const std::vector<std::string>& v, const std::string& e) {
+        return std::find(v.begin(), v.end(), e) != v.end();
+    };
+
+    SECTION("types whose Children collection is complete are never probed") {
+        for (const char* type : {"GuiToolbar", "GuiTitlebar", "GuiMenubar", "GuiTabStrip",
+                                 "GuiBox", "GuiStatusbar", "GuiUserArea", "GuiButton"}) {
+            REQUIRE(id_probe_candidates(type, id, 0).empty());
+            REQUIRE(id_probe_candidates(type, id, 5).empty());
+        }
+    }
+    SECTION("GuiTab with children is not probed") {
+        REQUIRE(id_probe_candidates("GuiTab", id, 2).empty());
+    }
+    SECTION("shell hosts get the shell/shellcont set regardless of child count") {
+        for (const char* type : {"GuiCustomControl", "GuiContainerShell", "GuiSplitterShell",
+                                 "GuiSplitterContainer", "GuiDockShell", "GuiContainerCtrl"}) {
+            for (int children : {0, 3}) {
+                const auto ids = id_probe_candidates(type, id, children);
+                REQUIRE(contains(ids, id + "/shell"));
+                REQUIRE(contains(ids, id + "/shell[0]"));
+                REQUIRE(contains(ids, id + "/shellcont[3]"));
+                REQUIRE(contains(ids, id + "/shellcont"));
+                REQUIRE_FALSE(contains(ids, id + "/sub[0]"));
+                REQUIRE_FALSE(contains(ids, id + "/cntlGRID_CONTAINER"));
+            }
+        }
+    }
+    SECTION("subscreen containers are probed only when Children was empty") {
+        for (const char* type : {"GuiSimpleContainer", "GuiScrollContainer", "GuiSubScreen", "GuiTab"}) {
+            REQUIRE(id_probe_candidates(type, id, 4).empty());
+            const auto ids = id_probe_candidates(type, id, 0);
+            REQUIRE(contains(ids, id + "/sub[0]"));
+            REQUIRE(contains(ids, id + "/cntlIMAGE_CONTAINER"));
+            REQUIRE(contains(ids, id + "/cntl[1]"));
+            REQUIRE(contains(ids, id + "/ssubSCR_PRESEL"));
+            REQUIRE_FALSE(contains(ids, id + "/shell"));
+        }
+    }
+    SECTION("candidates already known to the collector are filtered out") {
+        ScreenElementCollector collector;
+        collector.add_id(id + "/ssubSCR_PRESEL");
+        collector.add_grid_id(id + "/sub[0]");
+        const auto ids = id_probe_candidates("GuiSimpleContainer", id, 0, collector);
+        REQUIRE_FALSE(contains(ids, id + "/ssubSCR_PRESEL"));
+        REQUIRE_FALSE(contains(ids, id + "/sub[0]"));
+        REQUIRE(contains(ids, id + "/sub[1]"));
+    }
+}
+
+TEST_CASE("ScreenElementCollector dedupes grid and tree ids", "[screen][collector]") {
+    ScreenElementCollector collector;
+    REQUIRE_FALSE(collector.contains("g"));
+    collector.add_grid_id("g");
+    collector.add_grid_id("g");
+    collector.add_tree_id("t");
+    collector.add_tree_id("t");
+    REQUIRE(collector.get_grid_ids() == std::vector<std::string>{"g"});
+    REQUIRE(collector.get_tree_ids() == std::vector<std::string>{"t"});
+    REQUIRE(collector.contains("g"));
+    REQUIRE(collector.contains("t"));
+    REQUIRE_FALSE(collector.contains("other"));
+    REQUIRE(collector.add_id("e"));
+    REQUIRE_FALSE(collector.add_id("e"));
+    collector.set_known_type("e", "GuiTextField");
+    REQUIRE(collector.known_type("e") == "GuiTextField");
+    REQUIRE(collector.known_type("missing").empty());
+}
+
+TEST_CASE("plan_tab_selection selects only when the tab is not current", "[screen][tabs]") {
+    REQUIRE(plan_tab_selection("a/tabpX", "a/tabpX") == TabSelectionPlan::AlreadySelected);
+    REQUIRE(plan_tab_selection("a/tabpY", "a/tabpX") == TabSelectionPlan::Select);
+    REQUIRE(plan_tab_selection("", "a/tabpX") == TabSelectionPlan::Select);
 }

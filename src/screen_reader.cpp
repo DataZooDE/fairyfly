@@ -658,6 +658,66 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
     return grid_element;
 }
 
+namespace {
+// Positioned label cell (/lbl[col,row]) text with a single Text read. The type is implied by
+// the id prefix, so identity is primed instead of read. Redaction matches
+// ComGuiElement::get_text for labels (structured text carrying sensitive names).
+std::string read_positioned_label_text(const ComGuiElementPtr& label, const std::string& id) {
+    label->prime_identity(id, "GuiLabel");
+    const std::string text = label->get_string_property(L"Text");
+    const bool structured = text.find('=') != std::string::npos ||
+                            text.find(':') != std::string::npos;
+    if (structured && contains_sensitive_data_name(text)) return redact_sensitive_response_text(text);
+    return text;
+}
+} // namespace
+
+std::vector<std::string> id_probe_candidates(const std::string& type,
+                                             const std::string& elem_id,
+                                             int children_found) {
+    static const std::set<std::string> shell_hosts = {
+        "GuiCustomControl", "GuiContainerShell", "GuiSplitterShell",
+        "GuiSplitterContainer", "GuiDockShell", "GuiContainerCtrl"};
+    static const std::set<std::string> subscreen_hosts = {
+        "GuiSimpleContainer", "GuiScrollContainer", "GuiSubScreen", "GuiTab"};
+    // Deliberately never probed (Children is complete and probing only produced misses):
+    // GuiToolbar, GuiTitlebar, GuiMenubar, GuiTabStrip, GuiBox, GuiStatusbar, GuiUserArea,
+    // and every leaf/unknown type not listed above.
+    std::vector<std::string> ids;
+    if (shell_hosts.count(type)) {
+        ids.push_back(elem_id + "/shell");
+        for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i)
+            ids.push_back(elem_id + "/shell[" + std::to_string(i) + "]");
+        for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i)
+            ids.push_back(elem_id + "/shellcont[" + std::to_string(i) + "]");
+        ids.push_back(elem_id + "/shellcont");
+    } else if (subscreen_hosts.count(type) && children_found <= 0) {
+        // Subscreens whose dynamically generated fields (SE16 preselection, SEGW) are
+        // reachable by FindById only.
+        for (int i = 0; i < constants::MAX_SUB_CONTAINERS; ++i)
+            ids.push_back(elem_id + "/sub[" + std::to_string(i) + "]");
+        for (const char* name : {"IMAGE_CONTAINER", "GRID_CONTAINER", "TREE_CONTAINER",
+                                 "CUSTOM_CONTROL", "CC_CONTAINER"})
+            ids.push_back(elem_id + "/cntl" + name);
+        for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i)
+            ids.push_back(elem_id + "/cntl[" + std::to_string(i) + "]");
+        for (const char* name : {"SCR_PRESEL", "SCR_SEL", "AREA", "MAIN", "HEADER", "DETAIL"})
+            ids.push_back(elem_id + "/ssub" + name);
+    }
+    return ids;
+}
+
+std::vector<std::string> id_probe_candidates(const std::string& type,
+                                             const std::string& elem_id,
+                                             int children_found,
+                                             const ScreenElementCollector& collector) {
+    auto ids = id_probe_candidates(type, elem_id, children_found);
+    ids.erase(std::remove_if(ids.begin(), ids.end(),
+                             [&](const std::string& id) { return collector.contains(id); }),
+              ids.end());
+    return ids;
+}
+
 void ScreenReader::traverse_element_tree(
     ComGuiElementPtr element,
     ScreenElementCollector& collector,
@@ -759,6 +819,7 @@ void ScreenReader::traverse_element_tree(
         if (!collector.add(element)) {
             return;  // Already processed this element
         }
+        collector.set_known_type(elem_id, type);
 
         spdlog::debug("{}[depth={}] {} ({})",
                      std::string(depth * 2, ' '), depth, elem_id, type);
@@ -841,7 +902,7 @@ void ScreenReader::traverse_element_tree(
                                 try {
                                     int col = std::stoi(child_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5));
                                     int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
-                                    std::string text = child_ptr->get_text();
+                                    std::string text = read_positioned_label_text(child_ptr, child_id);
                                     grid_cells.push_back({child_ptr, col, row, text});
                                     continue; // Captured as grid cell, do not recurse or add to collector
                                 } catch (...) {}
@@ -913,159 +974,31 @@ void ScreenReader::traverse_element_tree(
 
         if (search && search->stopped) return;
 
-        spdlog::debug("{}[depth={}] Trying ID-based discovery for {}",
-                      std::string(depth * 2, ' '), depth, elem_id);
-
-        // For ALL container types (GuiUserArea, GuiContainerShell, GuiSplitterShell),
-        // try common child patterns via FindById
-        if (is_container) {
-            spdlog::debug("Trying ID-based discovery for container: {} ({})", elem_id, type);
-
-            // Try /shell child (without index)
+        // ID-based discovery is only a safety net for controls that FindById can reach but
+        // Children does not list. Which paths are worth a FindById round trip depends on the
+        // control type and on whether Children yielded anything (see id_probe_candidates).
+        const auto probes = id_probe_candidates(type, elem_id, child_count, collector);
+        if (!probes.empty()) {
+            spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
+                          std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
+        }
+        std::string missed_index_family;
+        for (const auto& probe_id : probes) {
+            if (search && search->stopped) return;
+            const auto bracket = probe_id.find('[');
+            const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
+            // Indexed families (/shell[N], /shellcont[N], /sub[N], /cntl[N]) end at the first miss.
+            if (!family.empty() && family == missed_index_family) continue;
             try {
-                std::string shell_id = elem_id + "/shell";
-                auto shell_child = session_->find_element_by_id(shell_id);
-                if (shell_child) {
-                    spdlog::debug("Found /shell child: {}", shell_id);
-                    traverse_element_tree(shell_child, collector, depth + 1, skip_trees, search);
+                auto probed = session_->find_element_by_id(probe_id);
+                if (probed) {
+                    spdlog::debug("Found probed child: {}", probe_id);
+                    traverse_element_tree(probed, collector, depth + 1, skip_trees, search);
                 }
             } catch (const std::exception& e) {
-                spdlog::debug("No /shell child for {}: {}", elem_id, e.what());
+                spdlog::trace("No probed child {}: {}", probe_id, e.what());
+                if (!family.empty()) missed_index_family = family;
             }
-
-            if (search && search->stopped) return;
-
-            // Try /shell[N] children (with index)
-            for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i) {
-                if (search && search->stopped) return;
-                try {
-                    std::string shell_indexed_id = elem_id + "/shell[" + std::to_string(i) + "]";
-                    auto shell_indexed_child = session_->find_element_by_id(shell_indexed_id);
-                    if (shell_indexed_child) {
-                        spdlog::info("Found /shell[{}] child: {}", i, shell_indexed_id);
-                        traverse_element_tree(shell_indexed_child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception&) {
-                    break;  // No more shell[N] children
-                }
-            }
-
-            // Try /shellcont[N] children (up to MAX_SHELLCONT_CHILDREN)
-            for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i) {
-                if (search && search->stopped) return;
-                try {
-                    std::string child_id = elem_id + "/shellcont[" + std::to_string(i) + "]";
-                    auto child = session_->find_element_by_id(child_id);
-                    if (child) {
-                        traverse_element_tree(child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception&) {
-                    break;  // No more shellcont children
-                }
-            }
-
-            // Try /shellcont child (no index)
-            if (search && search->stopped) return;
-            try {
-                auto shellcont_child = session_->find_element_by_id(elem_id + "/shellcont");
-                if (shellcont_child) {
-                    traverse_element_tree(shellcont_child, collector, depth + 1, skip_trees, search);
-                }
-            } catch (const std::exception&) {
-                // Shellcont child not found, continue
-            }
-
-            if (search && search->stopped) return;
-
-            // Try /sub[N] children (subscreen containers for selection screens like SE16)
-            // These contain dynamically-generated selection fields that don't appear in .Children
-            spdlog::debug("Trying /sub[N] patterns for {}", elem_id);
-            for (int i = 0; i < constants::MAX_SUB_CONTAINERS; ++i) {
-                if (search && search->stopped) return;
-                try {
-                    std::string sub_id = elem_id + "/sub[" + std::to_string(i) + "]";
-                    auto sub_child = session_->find_element_by_id(sub_id);
-                    if (sub_child) {
-                        spdlog::info("Found /sub[{}] child: {}", i, sub_id);
-                        traverse_element_tree(sub_child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception& e) {
-                    spdlog::debug("No /sub[{}] for {}: {}", i, elem_id, e.what());
-                    break;  // No more sub[N] children
-                }
-            }
-
-            // Try /cntl<NAME> children for GuiCustomControl (common grid/tree containers)
-            // These use named patterns like cntlIMAGE_CONTAINER, cntlGRID_CONTAINER, etc.
-            // NOTE: These are NOT in the .Children collection, but can be found via FindById
-            static const std::vector<std::string> cntl_names = {
-                "IMAGE_CONTAINER",
-                "GRID_CONTAINER",
-                "TREE_CONTAINER",
-                "CUSTOM_CONTROL",
-                "CC_CONTAINER"
-            };
-
-            spdlog::debug("Trying /cntl* patterns for {}", elem_id);
-            for (const auto& name : cntl_names) {
-                if (search && search->stopped) return;
-                try {
-                    std::string cntl_id = elem_id + "/cntl" + name;
-                    auto cntl_child = session_->find_element_by_id(cntl_id);
-                    if (cntl_child) {
-                        spdlog::info("Found /cntl{} child: {}", name, cntl_id);
-                        traverse_element_tree(cntl_child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception& e) {
-                    // This cntl name doesn't exist, try next
-                    spdlog::trace("No /cntl{} for {}: {}", name, elem_id, e.what());
-                    continue;
-                }
-            }
-
-            // Also try indexed /cntl[N] patterns (less common but possible)
-            for (int i = 0; i < constants::MAX_SHELLCONT_CHILDREN; ++i) {
-                if (search && search->stopped) return;
-                try {
-                    std::string cntl_indexed_id = elem_id + "/cntl[" + std::to_string(i) + "]";
-                    auto cntl_indexed_child = session_->find_element_by_id(cntl_indexed_id);
-                    if (cntl_indexed_child) {
-                        spdlog::info("Found /cntl[{}] child: {}", i, cntl_indexed_id);
-                        traverse_element_tree(cntl_indexed_child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception&) {
-                    break;  // No more cntl[N] children
-                }
-            }
-
-            // Try /ssub<NAME> children (named subscreens for selection screens)
-            // Pattern: ssubSCR_PRESEL (SE16), ssubAREA, ssubMAIN, etc.
-            static const std::vector<std::string> subscreen_names = {
-                "SCR_PRESEL",    // SE16 preselection screen
-                "SCR_SEL",       // General selection screen
-                "AREA",          // Generic area
-                "MAIN",          // Main content area
-                "HEADER",        // Header area
-                "DETAIL"         // Detail area
-            };
-
-            spdlog::debug("Trying /ssub* patterns for {}", elem_id);
-            for (const auto& name : subscreen_names) {
-                if (search && search->stopped) return;
-                try {
-                    std::string ssub_id = elem_id + "/ssub" + name;
-                    auto ssub_child = session_->find_element_by_id(ssub_id);
-                    if (ssub_child) {
-                        spdlog::info("Found /ssub{} child: {}", name, ssub_id);
-                        traverse_element_tree(ssub_child, collector, depth + 1, skip_trees, search);
-                    }
-                } catch (const std::exception& e) {
-                    // This ssub name doesn't exist, try next
-                    spdlog::trace("No /ssub{} for {}: {}", name, elem_id, e.what());
-                    continue;
-                }
-            }
-
         }
     } catch (const SapGuiException& e) {
         spdlog::debug("traverse_element_tree: SapGuiException: {}", e.what());
@@ -1076,6 +1009,118 @@ void ScreenReader::traverse_element_tree(
     } catch (const std::exception& e) {
         spdlog::debug("traverse_element_tree: std::exception: {}", e.what());
         // Skip elements that throw exceptions during processing
+    }
+}
+
+void ScreenReader::extract_collected_trees_and_grids(ScreenElementCollector& collector) {
+    // PHASE 2: Extract tree data using fresh COM pointers (matches VBScript pattern)
+    // After traversal completes, get each GuiShell by direct ID lookup for stable pointer
+    const auto& tree_ids = collector.get_tree_ids();
+    const auto& grid_ids = collector.get_grid_ids();
+
+    if (!tree_ids.empty()) {
+        spdlog::debug("PHASE 2: Extracting {} tree element(s) with fresh COM pointers", tree_ids.size());
+
+        // CRITICAL: Validate session is still alive before using it
+        // Session pointer can become stale if SAP GUI reorganizes connections
+        if (!session_->is_alive()) {
+            spdlog::error("PHASE 2 ABORTED: Session became invalid between Phase 1 and Phase 2 (connection reorganization detected)");
+            spdlog::error("This indicates SAP GUI closed/recreated the connection during traversal");
+            // Skip tree extraction but return partial results from Phase 1
+            return;
+        }
+
+        for (const auto& tree_id : tree_ids) {
+            try {
+                // Get FRESH pointer by direct ID lookup (like VBScript session.findById())
+                auto tree_element = session_->find_element_by_id(tree_id);
+                if (!tree_element) {
+                    spdlog::warn("Could not find tree element by ID: {}", tree_id);
+                    continue;
+                }
+
+                // Extract tree data from fresh pointer
+                spdlog::debug("Extracting tree data from {} using fresh COM pointer", tree_id);
+                json tree_data = extract_tree_data_immediately(tree_element, tree_id);
+
+                // Store extracted data
+                collector.add_extracted_data(tree_id, tree_data);
+
+                spdlog::debug("Successfully extracted {} nodes from tree {}",
+                           tree_data.value("node_count", 0), tree_id);
+
+            } catch (const ComException& e) {
+                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: 0x{:08X})",
+                             tree_id, e.what(), e.hresult());
+                spdlog::error("Possible causes: stale COM pointer, connection lost, or SAP GUI reorganized connections");
+                // Continue with other trees even if one fails
+            } catch (const std::exception& e) {
+                spdlog::error("Failed to extract tree {} in Phase 2: {}", tree_id, e.what());
+                // Continue with other trees even if one fails
+            }
+        }
+    }
+
+    // PHASE 2B: Extract grid data using fresh COM pointers (same pattern as trees)
+    // GuiGridView and GuiTableControl elements need fresh pointers to avoid stale pointer issues
+    if (!grid_ids.empty()) {
+        spdlog::debug("PHASE 2B: Extracting {} grid element(s) with fresh COM pointers", grid_ids.size());
+
+        // CRITICAL: Validate session is still alive before using it
+        if (!session_->is_alive()) {
+            spdlog::error("PHASE 2B ABORTED: Session became invalid (connection reorganization detected)");
+            return;
+        }
+
+        for (const auto& grid_id : grid_ids) {
+            try {
+                // Get FRESH pointer by direct ID lookup
+                auto grid_element = session_->find_element_by_id(grid_id);
+                if (!grid_element) {
+                    spdlog::warn("Could not find grid element by ID: {}", grid_id);
+                    continue;
+                }
+
+                // Extract grid data from fresh pointer
+                spdlog::debug("Extracting grid data from {} using fresh COM pointer", grid_id);
+
+                // Determine grid type and use appropriate extraction method
+                std::string grid_type = grid_element->get_type();
+                json grid_data;
+
+                if (grid_type == "GuiUserArea") {
+                    // Extract grid from positioned labels (lbl[row,col])
+                    grid_data = extract_userarea_grid_data(grid_element, grid_id, collector);
+                } else if (grid_type == "GuiGridView" || grid_type == "GuiTableControl" || grid_type == "GuiShell") {
+                    // Extract grid using SAP GUI grid APIs
+                    grid_data = extract_grid_data_immediately(grid_element, grid_id);
+                } else {
+                    spdlog::warn("Unknown grid type {} for element {}, skipping", grid_type, grid_id);
+                    continue;
+                }
+
+                // Store extracted data
+                collector.add_extracted_data(grid_id, grid_data);
+
+                // Safely extract row count - grid_data["table_data"] might be null
+                int row_count = 0;
+                if (grid_data.contains("table_data") && grid_data["table_data"].is_object()) {
+                    auto rows = grid_data["table_data"].value("rows", json::array());
+                    row_count = static_cast<int>(rows.size());
+                }
+                spdlog::debug("Successfully extracted {} rows from grid {}", row_count, grid_id);
+
+            } catch (const ComException& e) {
+                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: 0x{:08X})",
+                             grid_id, e.what(), e.hresult());
+            } catch (const std::exception& e) {
+                spdlog::error("Failed to extract grid {} in Phase 2B: {}", grid_id, e.what());
+            }
+        }
+    }
+
+    if (collector.extracted_count() > 0) {
+        spdlog::debug("Phase 2 complete: extracted {} tree/grid elements total", collector.extracted_count());
     }
 }
 
@@ -1147,116 +1192,7 @@ void ScreenReader::discover_elements(ComGuiWindowPtr window, ScreenElementCollec
 
     if (search) return;  // Search only needs control identities, never grid/tree contents.
 
-    // PHASE 2: Extract tree data using fresh COM pointers (matches VBScript pattern)
-    // After traversal completes, get each GuiShell by direct ID lookup for stable pointer
-    const auto& tree_ids = collector.get_tree_ids();
-    const auto& grid_ids = collector.get_grid_ids();  // Declare here to avoid goto skip issues
-
-    if (!tree_ids.empty()) {
-        spdlog::debug("PHASE 2: Extracting {} tree element(s) with fresh COM pointers", tree_ids.size());
-
-        // CRITICAL: Validate session is still alive before using it
-        // Session pointer can become stale if SAP GUI reorganizes connections
-        if (!session_->is_alive()) {
-            spdlog::error("PHASE 2 ABORTED: Session became invalid between Phase 1 and Phase 2 (connection reorganization detected)");
-            spdlog::error("This indicates SAP GUI closed/recreated the connection during traversal");
-            // Skip tree extraction but return partial results from Phase 1
-            goto skip_phase_2;
-        }
-
-        for (const auto& tree_id : tree_ids) {
-            try {
-                // Get FRESH pointer by direct ID lookup (like VBScript session.findById())
-                auto tree_element = session_->find_element_by_id(tree_id);
-                if (!tree_element) {
-                    spdlog::warn("Could not find tree element by ID: {}", tree_id);
-                    continue;
-                }
-
-                // Extract tree data from fresh pointer
-                spdlog::debug("Extracting tree data from {} using fresh COM pointer", tree_id);
-                json tree_data = extract_tree_data_immediately(tree_element, tree_id);
-
-                // Store extracted data
-                collector.add_extracted_data(tree_id, tree_data);
-
-                spdlog::debug("Successfully extracted {} nodes from tree {}",
-                           tree_data.value("node_count", 0), tree_id);
-
-            } catch (const ComException& e) {
-                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: 0x{:08X})",
-                             tree_id, e.what(), e.hresult());
-                spdlog::error("Possible causes: stale COM pointer, connection lost, or SAP GUI reorganized connections");
-                // Continue with other trees even if one fails
-            } catch (const std::exception& e) {
-                spdlog::error("Failed to extract tree {} in Phase 2: {}", tree_id, e.what());
-                // Continue with other trees even if one fails
-            }
-        }
-    }
-
-    // PHASE 2B: Extract grid data using fresh COM pointers (same pattern as trees)
-    // GuiGridView and GuiTableControl elements need fresh pointers to avoid stale pointer issues
-    if (!grid_ids.empty()) {
-        spdlog::debug("PHASE 2B: Extracting {} grid element(s) with fresh COM pointers", grid_ids.size());
-
-        // CRITICAL: Validate session is still alive before using it
-        if (!session_->is_alive()) {
-            spdlog::error("PHASE 2B ABORTED: Session became invalid (connection reorganization detected)");
-            goto skip_phase_2;
-        }
-
-        for (const auto& grid_id : grid_ids) {
-            try {
-                // Get FRESH pointer by direct ID lookup
-                auto grid_element = session_->find_element_by_id(grid_id);
-                if (!grid_element) {
-                    spdlog::warn("Could not find grid element by ID: {}", grid_id);
-                    continue;
-                }
-
-                // Extract grid data from fresh pointer
-                spdlog::debug("Extracting grid data from {} using fresh COM pointer", grid_id);
-
-                // Determine grid type and use appropriate extraction method
-                std::string grid_type = grid_element->get_type();
-                json grid_data;
-
-                if (grid_type == "GuiUserArea") {
-                    // Extract grid from positioned labels (lbl[row,col])
-                    grid_data = extract_userarea_grid_data(grid_element, grid_id, collector);
-                } else if (grid_type == "GuiGridView" || grid_type == "GuiTableControl" || grid_type == "GuiShell") {
-                    // Extract grid using SAP GUI grid APIs
-                    grid_data = extract_grid_data_immediately(grid_element, grid_id);
-                } else {
-                    spdlog::warn("Unknown grid type {} for element {}, skipping", grid_type, grid_id);
-                    continue;
-                }
-
-                // Store extracted data
-                collector.add_extracted_data(grid_id, grid_data);
-
-                // Safely extract row count - grid_data["table_data"] might be null
-                int row_count = 0;
-                if (grid_data.contains("table_data") && grid_data["table_data"].is_object()) {
-                    auto rows = grid_data["table_data"].value("rows", json::array());
-                    row_count = static_cast<int>(rows.size());
-                }
-                spdlog::debug("Successfully extracted {} rows from grid {}", row_count, grid_id);
-
-            } catch (const ComException& e) {
-                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: 0x{:08X})",
-                             grid_id, e.what(), e.hresult());
-            } catch (const std::exception& e) {
-                spdlog::error("Failed to extract grid {} in Phase 2B: {}", grid_id, e.what());
-            }
-        }
-    }
-
-skip_phase_2:
-    if (collector.extracted_count() > 0) {
-        spdlog::debug("Phase 2 complete: extracted {} tree/grid elements total", collector.extracted_count());
-    }
+    extract_collected_trees_and_grids(collector);
 }
 
 json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& collector) {
@@ -1304,6 +1240,10 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
 
                 std::string debug_type = "UNKNOWN";
                 try {
+                    // Type/id were read during Phase 1; seed the fresh object instead of
+                    // re-reading them over COM.
+                    const std::string& known_type = collector.known_type(elem_id);
+                    if (!known_type.empty()) elem->prime_identity(elem_id, known_type);
                     debug_type = elem->get_type();
                     spdlog::trace("read: Element {}/{} ID: {} (type: {})", elem_index + 1, element_ids.size(), elem_id, debug_type);
                 } catch (...) {
@@ -1634,6 +1574,308 @@ void ScreenReader::collapse_label_duplicates(json& elements) {
     elements = std::move(kept);
 }
 
+namespace {
+
+constexpr int kTabPollMs = 20;
+constexpr int kTabWaitMs = 5000;
+
+// Poll the session until it is no longer busy. False on timeout.
+bool wait_until_idle(const ComGuiSessionPtr& session) {
+    for (int waited = 0; session->is_busy(); waited += kTabPollMs) {
+        if (waited >= kTabWaitMs) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(kTabPollMs));
+    }
+    return true;
+}
+
+void restore_tab(const ComGuiSessionPtr& session, const std::string& tab_id) {
+    auto tab = session->find_element_by_id(tab_id);
+    if (!tab) throw ComException("Original tab is no longer available");
+    tab->select();
+    if (!wait_until_idle(session)) throw ComException("Timed out restoring original tab");
+}
+
+std::string tab_strip_id(const std::string& tab_id) {
+    const auto slash = tab_id.rfind('/');
+    return slash == std::string::npos ? std::string() : tab_id.substr(0, slash);
+}
+
+struct LocatedTabStrip {
+    std::string id;
+    std::vector<json> tabs;  // {id, type, text, strip_id}
+};
+
+void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStrip>& out) {
+    LocatedTabStrip info;
+    info.id = strip->get_id();
+    for (const auto& known : out) if (known.id == info.id) return;
+    auto children = strip->children();
+    const int count = children.count();
+    for (int i = 0; i < count; ++i) {
+        auto tab = children.item(i);
+        if (!tab) break;
+        json entry = {{"id", tab->get_id()}, {"type", "GuiTab"}, {"strip_id", info.id}};
+        try { entry["text"] = tab->get_string_property(L"Text"); } catch (const std::exception&) {}
+        info.tabs.push_back(std::move(entry));
+    }
+    out.push_back(std::move(info));
+}
+
+} // namespace
+
+Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int max_rows) {
+    TraceGuard trace("ScreenReader::read_tab");
+    const auto start = std::chrono::high_resolution_clock::now();
+    Result result;
+
+    try {
+        if (max_rows < 1 || max_rows > constants::MAX_REQUESTED_TABLE_ROWS) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INVALID_MAX_ROWS";
+            result.error["message"] = "Requested row limit must be between 1 and 200";
+            return result;
+        }
+        max_rows_ = max_rows;
+        if (!session_) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "NO_SESSION";
+            result.error["message"] = "No active SAP session";
+            return result;
+        }
+        auto window = session_->get_active_window();
+        if (!window) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "NO_WINDOW";
+            result.error["message"] = "No active window found";
+            return result;
+        }
+
+        // Header exactly as read() produces it.
+        const std::string window_id = window->get_id();
+        result.status = Result::Status::Success;
+        result.data["screen_id"] = window_id;
+        result.data["title"] = window->get_title();
+        result.data["transaction"] = session_->get_transaction_code();
+        attach_status_bar(result, read_action_status(session_));
+        result.data["child_count"] = window->get_child_count();
+
+        ElementMetadataExtractor::clear_cache();
+        ElementMetadataExtractor::set_skip_trees(skip_trees);
+
+        // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
+        std::vector<LocatedTabStrip> strips;
+        try {
+            auto usr = session_->find_element_by_id(window_id + "/usr");
+            const int kMaxScanned = 200;
+            auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
+                auto children = container->children();
+                const int count = std::min(children.count(), kMaxScanned);
+                for (int i = 0; i < count; ++i) {
+                    auto child = children.item(i);
+                    if (!child) break;
+                    const std::string type = child->get_type();
+                    if (type == "GuiTabStrip") {
+                        collect_tab_strip(child, strips);
+                    } else if (descend && (type == "GuiSimpleContainer" ||
+                                           type == "GuiScrollContainer" || type == "GuiSubScreen")) {
+                        self(self, child, false);
+                    }
+                }
+            };
+            if (usr) scan(scan, usr, true);
+        } catch (const std::exception& e) {
+            spdlog::debug("read_tab: cheap tab strip lookup failed: {}", e.what());
+        }
+
+        auto all_tabs = [&]() {
+            std::vector<json> tabs;
+            for (const auto& strip : strips) tabs.insert(tabs.end(), strip.tabs.begin(), strip.tabs.end());
+            return tabs;
+        };
+        std::vector<json> matched = select_tabs(all_tabs(), only_tab);
+
+        if (matched.empty()) {
+            // Fallback: nested or unusual layouts. Reuse the discovery path with a type filter.
+            ScreenFindOptions query;
+            query.type = "GuiTabStrip";
+            query.limit = 100;
+            ScreenSearchContext search{query};
+            ScreenElementCollector probe_collector;
+            discover_elements(window, probe_collector, skip_trees, &search);
+            for (const auto& match : search.matches) {
+                try {
+                    auto strip = session_->find_element_by_id(match.value("id", ""));
+                    if (strip) collect_tab_strip(strip, strips);
+                } catch (const std::exception&) {}
+            }
+            matched = select_tabs(all_tabs(), only_tab);
+        }
+
+        if (matched.empty()) {
+            json available = json::array();
+            for (const auto& tab : all_tabs()) available.push_back(tab.value("id", ""));
+            result.data = json::object();
+            result.status = Result::Status::Error;
+            result.error["code"] = "TAB_NOT_FOUND";
+            result.error["message"] = "No tab matches '" + only_tab + "'";
+            result.error["available_tabs"] = available;
+            return result;
+        }
+
+        // ERR-113: a read is observational. Snapshot only the strips that own the requested
+        // tabs, and put them back afterwards.
+        std::vector<std::string> owner_strips;
+        for (const auto& tab : matched) {
+            const std::string strip_id = tab.value("strip_id", "");
+            if (std::find(owner_strips.begin(), owner_strips.end(), strip_id) == owner_strips.end())
+                owner_strips.push_back(strip_id);
+        }
+        json owner_json = json::array();
+        for (const auto& id : owner_strips) owner_json.push_back({{"id", id}, {"type", "GuiTabStrip"}});
+        const auto selected_tabs = TabSelectionSnapshot::capture(owner_json, [&](const std::string& strip_id) {
+            auto strip = session_->find_element_by_id(strip_id);
+            if (!strip) return std::string();
+            auto selected_dispatch = strip->get_dispatch_property(L"SelectedTab");
+            if (!selected_dispatch) return std::string();
+            return ComGuiElement::create(selected_dispatch)->get_id();
+        });
+        if (selected_tabs.selected_ids.size() != owner_strips.size()) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "TAB_SELECTION_UNAVAILABLE";
+            result.error["message"] = "Cannot expand tabs without knowing which tab to restore";
+            return result;
+        }
+        std::map<std::string, std::string> current_selected;
+        for (const auto& selected_id : selected_tabs.selected_ids)
+            current_selected[tab_strip_id(selected_id)] = selected_id;
+
+        // Header elements: the owning strip(s) and their tab headers, as found.
+        ScreenElementCollector header_collector;
+        for (const auto& strip : strips) {
+            if (std::find(owner_strips.begin(), owner_strips.end(), strip.id) == owner_strips.end()) continue;
+            if (header_collector.add_id(strip.id)) header_collector.set_known_type(strip.id, "GuiTabStrip");
+            for (const auto& tab : strip.tabs) {
+                const std::string id = tab.value("id", "");
+                if (header_collector.add_id(id)) header_collector.set_known_type(id, "GuiTab");
+            }
+        }
+        json elements = extract_metadata_for_collector(header_collector);
+
+        json tabs_content = json::array();
+        for (size_t i = 0; i < matched.size(); ++i) {
+            const auto& tab = matched[i];
+            const std::string tab_id = tab.value("id", "");
+            const std::string tab_name = tab.value("text", "Unnamed Tab");
+            const std::string strip_id = tab.value("strip_id", "");
+            try {
+                const bool needs_select =
+                    plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
+                if (needs_select) current_selected[strip_id] = tab_id;
+
+                json tab_elements_list;
+                if (!read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list)) {
+                    spdlog::warn("Tab {} could not be read (missing or session busy)", tab_name);
+                    continue;
+                }
+                json tab_data;
+                tab_data["tab_id"] = tab_id;
+                tab_data["tab_name"] = tab_name;
+                tab_data["tab_type"] = "GuiTab";
+                tab_data["tab_index"] = i;
+                tab_data["elements"] = tab_elements_list;
+                tab_data["hierarchy"] = group_elements_by_container(tab_elements_list);
+                tab_data["element_count"] = tab_elements_list.size();
+                tabs_content.push_back(std::move(tab_data));
+
+                std::set<std::string> present;
+                for (const auto& e : elements) present.insert(e.value("id", ""));
+                for (const auto& e : tab_elements_list)
+                    if (!e.contains("id") || present.insert(e.value("id", "")).second) elements.push_back(e);
+            } catch (const std::exception& e) {
+                spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
+            }
+        }
+
+        TabSelectionSnapshot to_restore;
+        for (const auto& original_id : selected_tabs.selected_ids)
+            if (current_selected[tab_strip_id(original_id)] != original_id)
+                to_restore.selected_ids.push_back(original_id);
+        if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "TAB_RESTORE_FAILED";
+            result.error["message"] = "Screen read could not restore the original tab";
+            return result;
+        }
+
+        redact_sensitive_report_labels(elements);
+        result.data["elements"] = elements;
+        result.data["element_count"] = elements.size();
+        result.data["hierarchy"] = group_elements_by_container(elements);
+        json trees = json::array();
+        if (result.data["hierarchy"].contains("other")) {
+            for (const auto& elem : result.data["hierarchy"]["other"]) {
+                if (elem.value("type", "") == "GuiShell" &&
+                    elem.contains("tree_nodes") && !elem["tree_nodes"].empty()) {
+                    trees.push_back(elem);
+                }
+            }
+        }
+        if (!trees.empty()) result.data["trees"] = trees;
+        result.data["tabs_content"] = tabs_content;
+        result.data["tabs_expanded"] = true;
+        result.data["expanded_tab_count"] = tabs_content.size();
+        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::high_resolution_clock::now() - start);
+        spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
+    } catch (const ComException& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "COM_ERROR";
+        result.error["message"] = e.what();
+    } catch (const std::exception& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "EXCEPTION";
+        result.error["message"] = e.what();
+    }
+    return result;
+}
+
+bool ScreenReader::read_tab_content(const std::string& tab_id, bool needs_select,
+                                    bool skip_trees, json& elements) {
+    auto tab_elem = session_->find_element_by_id(tab_id);
+    if (!tab_elem) return false;
+    if (needs_select) {
+        tab_elem->select();
+        if (!wait_until_idle(session_)) return false;
+        // The pre-select pointer can be stale: traversing it yields nothing. Re-fetch.
+        tab_elem = session_->find_element_by_id(tab_id);
+        if (!tab_elem) return false;
+    }
+
+    ScreenElementCollector tab_collector;
+    traverse_element_tree(tab_elem, tab_collector, 0, skip_trees);
+    if (tab_elem->get_child_count() > 0) {
+        extract_collected_trees_and_grids(tab_collector);
+        elements = extract_metadata_for_collector(tab_collector);
+    } else {
+        // A re-fetched tab without children is an unusual layout: fall back to the window
+        // user area, as before.
+        spdlog::debug("Tab {} has no children, probing window user area", tab_id);
+        elements = json::array();
+        auto active_wnd = session_->get_active_window();
+        if (active_wnd) {
+            auto usr = session_->find_element_by_id(active_wnd->get_id() + "/usr");
+            if (usr) {
+                ScreenElementCollector usr_collector;
+                traverse_element_tree(usr, usr_collector, 0, skip_trees);
+                extract_collected_trees_and_grids(usr_collector);
+                elements = extract_metadata_for_collector(usr_collector);
+            }
+        }
+    }
+    redact_sensitive_report_labels(elements);
+    return true;
+}
+
 Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::string& only_tab) {
     TraceGuard trace("ScreenReader::read_with_tabs");
     auto start = std::chrono::high_resolution_clock::now();
@@ -1646,6 +1888,9 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             result.error["message"] = "No active SAP session";
             return result;
         }
+
+        // A single requested tab never needs the full base read plus every other tab.
+        if (!only_tab.empty()) return read_tab(only_tab, skip_trees, max_rows);
 
         // Get initial screen structure
         Result initial_result = read(true, skip_trees, max_rows);
@@ -1730,6 +1975,11 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             return initial_result;
         }
 
+        // Track each strip's current page so an already-selected tab is not re-selected.
+        std::map<std::string, std::string> current_selected;
+        for (const auto& selected_id : selected_tabs.selected_ids)
+            current_selected[tab_strip_id(selected_id)] = selected_id;
+
         // For each tab, select it and capture content
         for (size_t i = 0; i < tab_elements.size(); ++i) {
             const auto& tab = tab_elements[i];
@@ -1739,50 +1989,20 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             try {
                 spdlog::debug("Selecting tab {}/{}: {} [{}]", i + 1, tab_elements.size(), tab_name, tab_id);
 
-                // Find and select the tab
-                auto tab_elem = session_->find_element_by_id(tab_id);
-                if (!tab_elem) {
-                    spdlog::warn("Tab element not found: {}", tab_id);
+                // Skip select() (and its server round trip) when the tab is already the
+                // strip's current page; otherwise select, wait, and re-fetch inside
+                // read_tab_content so the subtree is read through a fresh COM pointer.
+                const std::string strip_id = tab_strip_id(tab_id);
+                const bool needs_select =
+                    plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
+                if (needs_select) current_selected[strip_id] = tab_id;
+
+                // NOTE: `elements` is the tab's own subtree (plus grids/trees inside it). It no
+                // longer repeats the whole window user area (tab headers, base fields) per tab.
+                json tab_elements_list;
+                if (!read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list)) {
+                    spdlog::warn("Tab {} could not be read (missing or session busy)", tab_name);
                     continue;
-                }
-
-                // Select the tab (triggers server communication)
-                tab_elem->select();
-
-                // Wait for session to be ready (server response)
-                int wait_attempts = 0;
-                const int max_wait_ms = 5000;
-                const int poll_interval_ms = 100;
-                while (session_->is_busy() && wait_attempts < (max_wait_ms / poll_interval_ms)) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms));
-                    wait_attempts++;
-                }
-
-                if (session_->is_busy()) {
-                    spdlog::warn("Timeout waiting for tab {} to load", tab_name);
-                    continue;
-                }
-
-                // Small additional delay to ensure content is loaded
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-                // Discover and extract ONLY elements within this tab (massive speedup vs reading whole window)
-                ScreenElementCollector tab_collector;
-                traverse_element_tree(tab_elem, tab_collector, 0, skip_trees);
-                json tab_elements_list = extract_metadata_for_collector(tab_collector);
-
-                // Fallback: if tab container had no direct children (uncommon layout), probe window user area
-                if (tab_elements_list.empty()) {
-                    auto active_wnd = session_->get_active_window();
-                    if (active_wnd) {
-                        std::string wnd_id = active_wnd->get_id();
-                        auto usr = session_->find_element_by_id(wnd_id + "/usr");
-                        if (usr) {
-                            ScreenElementCollector usr_collector;
-                            traverse_element_tree(usr, usr_collector, 0, skip_trees);
-                            tab_elements_list = extract_metadata_for_collector(usr_collector);
-                        }
-                    }
                 }
 
                 // Store tab data
@@ -1809,15 +2029,12 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             }
         }
 
-        if (!selected_tabs.restore([&](const std::string& tab_id) {
-                auto tab = session_->find_element_by_id(tab_id);
-                if (!tab) throw ComException("Original tab is no longer available");
-                tab->select();
-                for (int attempt = 0; session_->is_busy() && attempt < 50; ++attempt)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                if (session_->is_busy())
-                    throw ComException("Timed out restoring original tab");
-            })) {
+        // Only strips whose page actually changed need to be put back.
+        TabSelectionSnapshot to_restore;
+        for (const auto& original_id : selected_tabs.selected_ids)
+            if (current_selected[tab_strip_id(original_id)] != original_id)
+                to_restore.selected_ids.push_back(original_id);
+        if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
             result.status = Result::Status::Error;
             result.error["code"] = "TAB_RESTORE_FAILED";
             result.error["message"] = "Screen read could not restore the original tab";
