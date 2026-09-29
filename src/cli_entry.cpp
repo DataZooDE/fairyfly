@@ -292,6 +292,11 @@ namespace {
             return run_batch(batch_command->file(), batch_command->stop_on_error(), get_handler, global_opts);
         }
 
+        // PHASE 1: hook. `serve` must be special-cased here exactly like `batch` above: dynamic_cast
+        // to ServeCommand, copy options() BEFORE anything rebuilds the registry (register_all_commands
+        // destroys the command objects), then call mcp::run_serve(options, get_handler, global_opts,
+        // g_audit.sink, <peek handler>) and return its exit code. Not implemented in Phase 0.
+
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
         handler.set_batch_mode(batch_mode);  // credentials set/import-env cannot prompt inside `batch`

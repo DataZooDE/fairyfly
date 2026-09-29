@@ -149,6 +149,16 @@ set(FAIRYFLY_LIB_SOURCES
     src/console_prompt.cpp
     src/commands/credentials_command.cpp
     src/menu_navigation.cpp
+    src/mcp/json_rpc.cpp
+    src/mcp/transport.cpp
+    src/mcp/server.cpp
+    src/mcp/policy.cpp
+    src/mcp/tool_catalog.cpp
+    src/mcp/tool_catalog_write.cpp
+    src/mcp/result_shaper.cpp
+    src/mcp/dispatcher.cpp
+    src/mcp/mcp_audit.cpp
+    src/mcp/run_serve.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
