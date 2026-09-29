@@ -2,6 +2,7 @@
 #include "include/cli_handler.h"
 #include "include/com_automation_engine.h"
 #include "include/action_argument_checks.h"
+#include "include/read_only_guard.h"
 #include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
@@ -23,6 +24,9 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
 {
     if (auto invalid = sap::check_vkey_argument(key)) return *invalid;
     const auto vkey = sap::parse_vkey(key);
+    if (read_only_ && sap::is_state_changing_vkey(*vkey)) {
+        return sap::make_read_only_refusal("vkey:" + key, "Key", key, "", "vkey:" + std::to_string(*vkey));
+    }
 
     auto conn_result = resolve_and_validate_connection(connection_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {
@@ -42,6 +46,9 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
 
 Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
 {
+    if (read_only_ && sap::is_state_changing_vkey(vkey)) {
+        return sap::make_read_only_refusal("vkey:" + std::to_string(vkey), "Key", "", "", "vkey:" + std::to_string(vkey));
+    }
     auto conn_result = resolve_and_validate_connection(connection_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {
         return result_from_error(conn_result);
@@ -59,6 +66,19 @@ Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
 Result CommandHandler::handle_screen_menu(const std::string& select_path, const std::string& window,
                                           std::optional<int> connection_id)
 {
+    if (read_only_ && !select_path.empty()) {
+        // Every path segment is a menu label; refuse when any of them names a state-changing action.
+        size_t start = 0;
+        while (start <= select_path.size()) {
+            size_t end = select_path.find('/', start);
+            if (end == std::string::npos) end = select_path.size();
+            const std::string segment = select_path.substr(start, end - start);
+            const auto rule = sap::matched_read_only_rule("GuiMenu", segment, "", "");
+            if (!rule.empty())
+                return sap::make_read_only_refusal(select_path, "GuiMenu", segment, "", rule);
+            start = end + 1;
+        }
+    }
     auto conn_result = resolve_and_validate_connection(connection_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {
         return result_from_error(conn_result);

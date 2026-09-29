@@ -24,6 +24,7 @@ public:
         cmd_->add_option("--column", column_, "GridView column ID");
         cmd_->add_flag("--checkbox", checkbox_, "Set a GridView checkbox cell");
         cmd_->add_flag("--commit", commit_, "Notify SAP after the final GridView cell change");
+        cmd_->add_flag("--allow-fill", allow_fill_, "Permit fill while --read-only / FAIRYFLY_READ_ONLY is active");
         return cmd_;
     }
 
@@ -37,7 +38,7 @@ public:
             };
             return result;
         }
-        return handler.handle_fill(element_, value_, conn_id_, row_, column_, checkbox_, commit_);
+        return handler.handle_fill(element_, value_, conn_id_, row_, column_, checkbox_, commit_, allow_fill_);
     }
 
     bool was_invoked() const override {
@@ -55,6 +56,7 @@ private:
     std::string column_;
     bool checkbox_ = false;
     bool commit_ = false;
+    bool allow_fill_ = false;
 };
 
 // Factory function

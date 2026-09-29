@@ -50,6 +50,13 @@ private:
     std::unique_ptr<AutomationEngine> engine_;
     std::unique_ptr<ConnectionManager> conn_mgr_;
     SessionId current_session_;
+    bool read_only_ = false;  ///< --read-only guard: refuse state-changing actions
+
+    /// Look up type/text/tooltip of an element (best effort, empty on failure).
+    void describe_element(const std::string& element_id, std::string& type, std::string& text, std::string& tooltip);
+
+    /// In read-only mode: READ_ONLY_REFUSED result when the element's action changes SAP state.
+    std::optional<Result> guard_element(const std::string& element_id);
 
     /// Resolve and validate connection before command execution
     /// \param explicit_conn_id Optional connection ID from --connection flag
@@ -63,6 +70,10 @@ private:
 
 public:
     CommandHandler();
+
+    /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
+    void set_read_only(bool read_only) { read_only_ = read_only; }
+    bool read_only() const { return read_only_; }
 
     // Connection management - two modes
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
@@ -85,7 +96,8 @@ public:
                         const std::string& column = "", bool doubleclick = false);
     Result handle_fill(const std::string& element_id, const std::string& value,
                        std::optional<int> connection_id, std::optional<int> row = std::nullopt,
-                       const std::string& column = "", bool checkbox = false, bool commit = false);
+                       const std::string& column = "", bool checkbox = false, bool commit = false,
+                       bool allow_fill = false);
     Result handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes = false);
     Result handle_press_f4(const std::string& element_id, std::optional<int> connection_id);
 

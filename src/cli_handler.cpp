@@ -1,4 +1,5 @@
 #include "include/cli_handler.h"
+#include "include/read_only_guard.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
 #include "include/action_argument_checks.h"
@@ -36,6 +37,39 @@
 
 namespace fairyfly {
 namespace cli {
+
+void CommandHandler::describe_element(const std::string& element_id, std::string& type,
+                                       std::string& text, std::string& tooltip)
+{
+    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    if (!com_engine) return;
+    try {
+        auto session = com_engine->get_session();
+        if (!session) return;
+        std::string full_path = element_id;
+        if (full_path.rfind("@active", 0) == 0)
+            full_path = engine_->get_active_window_id().id + full_path.substr(7);
+        auto element = session->find_element_by_id(full_path);
+        if (!element) return;
+        try { type = element->get_type(); } catch (const std::exception&) {}
+        try { text = element->get_text(); } catch (const std::exception&) {}
+        try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+    } catch (const std::exception& e) {
+        spdlog::debug("Read-only guard could not inspect {}: {}", element_id, e.what());
+    }
+}
+
+std::optional<Result> CommandHandler::guard_element(const std::string& element_id)
+{
+    if (!read_only_) return std::nullopt;
+    std::string type, text, tooltip;
+    // Synthetic toolbar buttons (.../shell/btn_XXX) are not COM elements; their id is checked as-is.
+    if (element_id.find("/shell/btn_") == std::string::npos)
+        describe_element(element_id, type, text, tooltip);
+    const auto rule = sap::matched_read_only_rule(type, text, tooltip, element_id);
+    if (rule.empty()) return std::nullopt;
+    return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
+}
 
 CommandHandler::CommandHandler()
     : engine_(AutomationEngine::create()),
@@ -516,6 +550,17 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     std::string element_path = elem.path;
     bool is_synthetic_button = element_path.find("/shell/btn_") != std::string::npos;
 
+    // Read-only guard. Grid row select / double-click and tree select/expand/collapse/doubleclick stay allowed.
+    if (read_only_ && !row.has_value() && column.empty()) {
+        if (node_key.empty()) {
+            if (auto refusal = guard_element(element_id)) return *refusal;
+        } else if (tree_action == "contextmenu") {
+            const auto rule = sap::matched_read_only_rule("GuiMenu", menu_item, "", element_id);
+            if (!rule.empty())
+                return sap::make_read_only_refusal(element_id, "GuiMenu", menu_item, "", rule);
+        }
+    }
+
     // Get current active window before click (if monitoring for new windows)
     WindowId window_before;
     sap::ScreenSnapshot snapshot_before;
@@ -765,8 +810,14 @@ Result CommandHandler::handle_press_f4(const std::string& element_id, std::optio
 
 Result CommandHandler::handle_fill(const std::string& element_id, const std::string& value,
                                    std::optional<int> connection_id, std::optional<int> row,
-                                   const std::string& column, bool checkbox, bool commit)
+                                   const std::string& column, bool checkbox, bool commit, bool allow_fill)
 {
+    if (read_only_ && !allow_fill) {
+        // The value is deliberately not echoed (it may be a password).
+        std::string type, text, tooltip;
+        describe_element(element_id, type, text, tooltip);
+        return sap::make_read_only_refusal(element_id, type, text, tooltip, "fill:disabled-in-read-only");
+    }
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {

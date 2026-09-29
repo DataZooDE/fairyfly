@@ -22,6 +22,7 @@ std::unique_ptr<CommandBase> create_press_f4_command();
 std::unique_ptr<CommandBase> create_doctor_command();
 std::unique_ptr<CommandBase> create_send_key_command();
 std::unique_ptr<CommandBase> create_close_command();
+std::unique_ptr<CommandBase> create_batch_command();
 
 void register_all_commands() {
     auto& registry = CommandRegistry::instance();
@@ -44,6 +45,7 @@ void register_all_commands() {
     registry.register_command(create_doctor_command());
     registry.register_command(create_send_key_command());
     registry.register_command(create_close_command());
+    registry.register_command(create_batch_command());
 }
 
 } // namespace commands

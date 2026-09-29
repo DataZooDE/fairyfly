@@ -4,7 +4,7 @@ fairyfly is a Windows command-line tool for automating SAP GUI through the SAP G
 
 ## Current CLI
 
-The registered commands are: attach, launch, login, disconnect, connections, list, tcode, click, fill, get, screen, press_f4, send-key, close, doctor, and serve. The serve command currently returns NOT_IMPLEMENTED.
+The registered commands are: attach, launch, login, disconnect, connections, list, tcode, click, fill, get, screen, press_f4, send-key, close, batch, doctor, and serve. The serve command currently returns NOT_IMPLEMENTED.
 
 Typical use with an already open SAP session:
 
@@ -31,6 +31,10 @@ Use `fill <element-id> --clear` to empty a text field or TextEdit shell. This wo
 `disconnect --connection <id>` removes Fairyfly's saved connection while leaving SAP GUI open. Add `--close-session` to close that SAP GUI session before removing its saved connection.
 
 `launch <connection>` uses native SAP GUI COM by default. For a fresh logon screen, run `login --connection <id> --credentials-file trial.env`. The native command reads `Username`, `Password`, and three-digit `System ID` lines from the file, fills the SAP GUI form, and verifies the authenticated SAP user. An optional `Language` line defaults to `EN`. `login --credentials-stdin` accepts the same lines from standard input; include `New Password` when SAP requires a first-login password change. Passwords stay out of command arguments and output. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot; use `login` for authentication afterward. The fallback does not read `trial.env` or put a password on the child process command line. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file is ignored by Git but contains plaintext credentials; keep it private. Windows Credential Manager integration is not implemented.
+
+`batch [--file PATH] [--stop-on-error]` reads one command per line from stdin (or a file) and runs all of them in one process with one shared SAP handler, which avoids re-initialising COM for every call. A line is a JSON array of argv strings (`["tcode","SM37"]`) or shell-style words (double quotes; backslash escapes a space, quote or backslash). Blank lines and lines starting with `#` are ignored. Each line prints one compact JSON result (always JSON); a failing line does not stop the batch unless `--stop-on-error` is given, and the exit code is 1 if any line failed. Nested `batch` returns BATCH_NESTED, malformed lines return BATCH_PARSE_ERROR.
+
+The global `--read-only` flag (or `FAIRYFLY_READ_ONLY=1`) refuses state-changing actions with READ_ONLY_REFUSED (the error includes element id, text, tooltip and matched rule): buttons, menus and toolbar ids for Save, Delete, Release, Stop, Post, Activate, Lock/Unlock, Create, Change, Cancel job and Execute in background, ids containing `&DELETE`/`&SAVE`/`&RELEASE` or `tbar[0]/btn[11]`, `send-key`/`close` with VKey 11 or 14, `screen menu --select` paths, tree context-menu items, and `fill` entirely unless `--allow-fill` is given. Navigation (tcode, Back, Refresh, Display, Details, Job log, grid row select and double-click) stays allowed. `fairyfly --read-only batch` applies the guard to every line.
 
 ## Build
 

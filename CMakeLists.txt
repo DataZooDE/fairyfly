@@ -83,6 +83,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # Core library sources (shared between main executable and tests)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
+    src/read_only_guard.cpp
     src/cli_entry.cpp
     src/automation_engine.cpp
     src/com/wrapper.cpp
@@ -136,6 +137,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/doctor_command.cpp
     src/commands/send_key_command.cpp
     src/commands/close_command.cpp
+    src/commands/batch_command.cpp
     src/com_automation_engine_actions.cpp
     src/cli_handler_window_actions.cpp
     src/menu_navigation.cpp
