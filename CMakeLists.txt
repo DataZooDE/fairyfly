@@ -115,6 +115,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/grid_analyzer.cpp
     src/formatters/grid_renderer.cpp
     src/formatters/screen_markdown_formatter.cpp
+    src/formatters/compact_json.cpp
     src/connection_launcher.cpp
     src/login_flow.cpp
     src/screenshot_handler.cpp

@@ -12,6 +12,7 @@
 #include "include/formatters/table_formatter.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/formatters/toon_encoder.h"
+#include "include/formatters/compact_json.h"
 #include "include/element_renderer_registry.h"
 #include "include/semantic_classifier.h"
 #include "include/table_data_extractor.h"
@@ -1645,11 +1646,23 @@ Result CommandHandler::handle_doctor()
 // format_screen_markdown and all helper functions moved to ScreenMarkdownFormatter class
 // Grid layout functions moved to GridAnalyzer and GridRenderer classes
 
+// `screen read --compact` with json/toon output: replace duplicated hierarchy objects by ids.
+static void apply_compact_screen_output(json& output)
+{
+    if (!output.is_object() || output.value("status", "") != "success") return;
+    auto it = output.find("data");
+    if (it == output.end() || !it->is_object()) return;
+    if (it->contains("screen_id") && it->contains("hierarchy") && it->value("compact", false) == true) {
+        *it = formatters::compact_screen_json(*it);
+    }
+}
+
 std::string format_output(const Result& result, OutputFormat format, bool verbose_errors)
 {
     switch (format) {
         case OutputFormat::Json: {
             json output = result.to_json();
+            apply_compact_screen_output(output);
 
             // In compact error mode, remove suggestions array
             if (!verbose_errors && output.contains("error") && output["error"].contains("suggestions")) {
@@ -1841,6 +1854,7 @@ std::string format_output(const Result& result, OutputFormat format, bool verbos
             opts.length_marker = false;
 
             json output = result.to_json();
+            apply_compact_screen_output(output);
 
             // In compact error mode, remove suggestions array
             if (!verbose_errors && output.contains("error") && output["error"].contains("suggestions")) {

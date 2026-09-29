@@ -13,6 +13,7 @@ add_executable(unit_tests
     unit/test_login_flow.cpp
     unit/test_screenshot_handler.cpp
     unit/test_screen_reader.cpp
+    unit/test_compact_json.cpp
     unit/test_element_metadata_extractor.cpp
     unit/test_raii_core_renderers.cpp
     unit/test_doctor.cpp
