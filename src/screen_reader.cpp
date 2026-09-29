@@ -1592,6 +1592,7 @@ void ScreenReader::collapse_label_duplicates(json& elements) {
         return false;
     };
 
+    std::vector<std::pair<std::string, std::string>> to_carriers;  // base, trimmed "to" text
     json kept = json::array();
     for (auto& elem : elements) {
         if (elem.is_object()) {
@@ -1602,6 +1603,7 @@ void ScreenReader::collapse_label_duplicates(json& elements) {
                 bool drop = false;
                 if (is_to_text) {
                     drop = true;  // only ever holds the "to" range separator
+                    to_carriers.emplace_back(base, trimmed);
                 } else if (trimmed.empty() || sibling_has_label(base, trimmed)) {
                     drop = true;
                 } else if (elem.value("type", "") == "GuiLabel" && field_labels.count(trimmed)) {
@@ -1611,6 +1613,23 @@ void ScreenReader::collapse_label_duplicates(json& elements) {
             }
         }
         kept.push_back(std::move(elem));
+    }
+    // Range HIGH fields inherit the group caption; "to" moves to range_part.
+    for (const auto& [base, to_text] : to_carriers) {
+        json* low = nullptr;
+        json* high = nullptr;
+        for (auto& elem : kept) {
+            if (!elem.is_object()) continue;
+            const std::string name = elem.value("name", "");
+            if (name == base + "-LOW") low = &elem;
+            else if (name == base + "-HIGH") high = &elem;
+        }
+        if (!low || !high) continue;
+        if (trim_blanks(high->value("label", "")) != to_text) continue;
+        const std::string caption = trim_blanks(low->value("label", ""));
+        if (caption.empty()) continue;
+        (*high)["label"] = caption;
+        (*high)["range_part"] = to_text;
     }
     elements = std::move(kept);
 }

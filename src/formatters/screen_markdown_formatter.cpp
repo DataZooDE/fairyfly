@@ -498,6 +498,10 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
                         } else {
                             field_name = name;
                         }
+                        if (elem.contains("range_part") && elem["range_part"].is_string() &&
+                            !elem["range_part"].get<std::string>().empty()) {
+                            field_name += " (" + elem["range_part"].get<std::string>() + ")";
+                        }
 
                         // Add F4 search help indicator for GuiCTextField
                         bool has_f4_help = elem.value("has_f4_help", false);
@@ -929,6 +933,10 @@ void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
 
     // Field name with optional tooltip as description
     std::string field_col = label;
+    if (elem.contains("range_part") && elem["range_part"].is_string() &&
+        !elem["range_part"].get<std::string>().empty()) {
+        field_col += " (" + elem["range_part"].get<std::string>() + ")";
+    }
 
     // Add F4 search help indicator for GuiCTextField
     bool has_f4_help = elem.value("has_f4_help", false);

@@ -638,6 +638,13 @@ TEST_CASE("GuiCheckBox and GuiRadioButton direct reads report the selected state
         REQUIRE(checked.at("label") == "Flag");
         dispatch->selected = false;
         REQUIRE(read_element_value(element).at("selected") == false);
+
+        // No accessibility label: the caption doubles as the label.
+        auto* bare = new TextFieldDispatch(type, 14100, L"wnd[0]/usr/chkBARE", L"", L"", L"Flag text");
+        auto bare_element = ComGuiElement::create(IDispatchPtr(bare, true));
+        auto bare_data = read_element_value(bare_element);
+        REQUIRE(bare_data.at("label") == bare_data.at("value"));
+        REQUIRE(bare_data.at("label") == "Flag text");
     }
 }
 

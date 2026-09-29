@@ -1104,7 +1104,8 @@ nlohmann::json selection_fixture() {
         carrier("%_S_DATUM_%_APP_%-TEXT", "Date                          "),
         field("ctxt", "S_DATUM-LOW", "GuiCTextField", "Date", "29.09.2026", "System Date"),
         carrier("%_S_DATUM_%_APP_%-TO_TEXT", "to   ", "Date"),
-        field("ctxt", "S_DATUM-HIGH", "GuiCTextField", "to", "", "System Date"),
+        [&] { auto f = field("ctxt", "S_DATUM-HIGH", "GuiCTextField", "to", "", "System Date");
+              f["has_f4_help"] = true; return f; }(),
         carrier("%_S_UZEIT_%_APP_%-TEXT", "Time                          "),
         field("ctxt", "S_UZEIT-LOW", "GuiCTextField", "Time", "00:00:00", "System Time"),
         carrier("%_S_UZEIT_%_APP_%-TO_TEXT", "to   ", "Time"),
@@ -1145,7 +1146,10 @@ TEST_CASE("collapse_label_duplicates removes GuiTextField selection label carrie
     for (const auto& e : elements) {
         const std::string name = e.value("name", "");
         if (name == "S_DATUM-LOW") REQUIRE(e.at("label") == "Date");
-        if (name == "S_DATUM-HIGH") REQUIRE(e.at("label") == "to");
+        if (name == "S_DATUM-HIGH") {
+            REQUIRE(e.at("label") == "Date");
+            REQUIRE(e.at("range_part") == "to");
+        }
         if (name == "S_UZEIT-LOW") REQUIRE(e.at("label") == "Time");
         if (name == "P_DTMODE") REQUIRE(e.at("label") == "Time Restriction Mode");
     }
@@ -1185,6 +1189,8 @@ TEST_CASE("Selection screen markdown keeps captions after label collapse", "[scr
     }
     REQUIRE(after.find("**Time Restriction Mode<br>Mode**") != std::string::npos);
     REQUIRE(after.find("**Date<br>System Date**") != std::string::npos);
+    REQUIRE(after.find("Date (to) (F4 Search)") != std::string::npos);
+    REQUIRE(after.find("**to (F4 Search)") == std::string::npos);
     REQUIRE(after.find("Orphan caption") != std::string::npos);
     REQUIRE(after.find("%_S_DATUM_%_APP_%-TEXT") == std::string::npos);
     REQUIRE(after.size() < before.size());
