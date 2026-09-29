@@ -55,6 +55,8 @@ After importing, rotate the SAP password: the old one sat in plaintext on disk. 
 
 `launch <connection> --login [--credential NAME]` launches, waits for the session, then logs in through the scripting API (also after `--allow-sapshcut`; a password never goes on a sapshcut command line). The result keeps the launch fields and adds a `login` object (`transaction`, `credential_source`, `warnings`). If the launch worked but the login failed, the login error code is returned with `connection_open: true` and the launch data under `error.launch`; the connection is left open. `--login` is allowed under `--read-only` because authentication is not a business-state change.
 
+`login --multiple-logon fail|keep|end|terminate` (also on `launch --login`) controls what happens when the user is already logged on and SAP shows "License Information for Multiple Logons". `fail` (default) leaves the dialog open and returns `LOGON_NOT_COMPLETED` with `reason: multiple_logon_dialog`, a hint and the dialog texts. `keep` continues without ending other logons (success adds `multiple_logon`). `terminate` ends the new logon and returns `MULTIPLE_LOGON_TERMINATED` (SAP closes the session). `end` ends the user's other logons (unsaved data there is lost); it is never the default and is refused under `--read-only`.
+
 ## Audit trail
 
 Every invocation, and every line inside `batch`, appends one JSON record to `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (UTC month). Audit is on by default.

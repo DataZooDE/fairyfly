@@ -75,4 +75,44 @@ bool sap_user_matches(const std::string& actual, const std::string& requested) {
                       });
 }
 
+MultipleLogonPlan plan_multiple_logon(const std::string& choice, bool dialog_present, bool read_only) {
+    MultipleLogonPlan plan;
+    plan.choice = choice;
+    if (choice != "fail" && choice != "keep" && choice != "end" && choice != "terminate") {
+        plan.action = MultipleLogonPlan::Action::Refuse;
+        plan.error_code = "INVALID_ARGUMENT";
+        return plan;
+    }
+    if (!dialog_present) return plan;
+    if (choice == "fail") {
+        plan.action = MultipleLogonPlan::Action::Fail;
+    } else if (choice == "end" && read_only) {
+        plan.action = MultipleLogonPlan::Action::Refuse;
+        plan.error_code = "READ_ONLY_REFUSED";
+    } else {
+        plan.action = MultipleLogonPlan::Action::Select;
+        plan.radio_suffix = choice == "end" ? "usr/radMULTI_LOGON_OPT1"
+                          : choice == "keep" ? "usr/radMULTI_LOGON_OPT2"
+                                             : "usr/radMULTI_LOGON_OPT3";
+    }
+    return plan;
+}
+
+nlohmann::json make_multiple_logon_fail_error(const std::string& user_text, const std::string& terminal_text) {
+    return {{"code", "LOGON_NOT_COMPLETED"},
+            {"message", "SAP did not authenticate the requested user"},
+            {"reason", "multiple_logon_dialog"},
+            {"hint", "The user is already logged on; the multiple-logon dialog is still open. "
+                     "Retry with --multiple-logon keep (continue without ending other logons), "
+                     "--multiple-logon end (DESTRUCTIVE: ends the other logons, unsaved data is lost) "
+                     "or --multiple-logon terminate (leave cleanly)."},
+            {"dialog", {{"user", user_text}, {"terminal", terminal_text}}}};
+}
+
+nlohmann::json make_multiple_logon_annotation(const std::string& choice) {
+    nlohmann::json info = {{"detected", true}, {"choice", choice}};
+    if (choice == "end") info["warning"] = "other logons of this user were ended";
+    return info;
+}
+
 } // namespace fairyfly

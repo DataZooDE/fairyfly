@@ -21,6 +21,10 @@ public:
             "After launching, log in with stored credentials (Credential Manager entry named like the connection)");
         cmd_->add_option("--credential", credential_name_,
             "With --login: stored credential name (default: the connection name)");
+        cmd_->add_option("--multiple-logon", multiple_logon_,
+            "With --login: if the user is already logged on: fail (default), keep, terminate, or end "
+            "(DESTRUCTIVE: ends the user's other logons; refused under --read-only)")
+            ->check(CLI::IsMember({"fail", "keep", "end", "terminate"}));
         return cmd_;
     }
 
@@ -32,7 +36,15 @@ public:
                             {"message", "--credential requires --login"}};
             return result;
         }
-        return handler.handle_launch(connection_name_, allow_sapshcut_, login_, credential_name_);
+        if (!login_ && !multiple_logon_.empty()) {
+            Result result;
+            result.status = Result::Status::Error;
+            result.error = {{"code", "INVALID_ARGUMENT"},
+                            {"message", "--multiple-logon requires --login"}};
+            return result;
+        }
+        return handler.handle_launch(connection_name_, allow_sapshcut_, login_, credential_name_,
+                                     multiple_logon_.empty() ? "fail" : multiple_logon_);
     }
 
     bool was_invoked() const override {
@@ -45,6 +57,7 @@ private:
     bool allow_sapshcut_ = false;
     bool login_ = false;
     std::string credential_name_;
+    std::string multiple_logon_;
 };
 
 // Factory function

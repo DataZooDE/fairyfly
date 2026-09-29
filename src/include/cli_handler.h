@@ -100,9 +100,11 @@ public:
     /// With `login`, runs the same logon path as `login` after the launch succeeded
     /// (credential_name empty = Credential Manager entry keyed by the connection name).
     Result handle_launch(const std::string& connection_name, bool allow_sapshcut = false,
-                         bool login = false, const std::string& credential_name = {});
+                         bool login = false, const std::string& credential_name = {},
+                         const std::string& multiple_logon = "fail");
     Result handle_login(const std::string& credentials_file, std::optional<int> connection_id,
-                        bool from_stdin = false, const std::string& credential_name = "");
+                        bool from_stdin = false, const std::string& credential_name = "",
+                        const std::string& multiple_logon = "fail");
     Result handle_disconnect(std::optional<int> connection_id, bool close_session = false);
 
     // Connection listing and management
