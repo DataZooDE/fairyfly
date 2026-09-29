@@ -222,6 +222,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); });
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+        // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
+        // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
         // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
         // until gui_transaction_start succeeds with an allowed code (nothing navigates back automatically).
         if (!principal.tcodes.empty() && auth::acts_on_screen(spec->family) && tcode_blocked(principal.name))
@@ -352,6 +354,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 5b. post-call re-check of the transaction (same read-only facts provider as before the call). Only for tokens
     // with a T-code allowlist and only for calls that act on the screen or start a transaction. Unknown facts do not
     // flag (the next call fails closed on them anyway); a known transaction outside the allowlist does.
+    // Serialised with the blocked-state check above (single executor thread), see docs/MCP_REMOTE.md.
     bool tcode_left = false;
     if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
         std::string after;
