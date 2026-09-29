@@ -638,6 +638,46 @@ TEST_CASE("Executor: soft timeout, SERVER_BUSY and queue cap", "[mcp][http][exec
 
 // ---- SSE ------------------------------------------------------------------------------------------------
 
+TEST_CASE("SSE negotiation honours q-values and progressToken", "[mcp][http][sse]") {
+    // JSON and SSE equally acceptable, no progress token -> plain JSON
+    CHECK_FALSE(accept_prefers_sse("application/json, text/event-stream", false));
+    CHECK_FALSE(accept_prefers_sse("text/event-stream, application/json", false));
+    CHECK_FALSE(accept_prefers_sse("Application/JSON;q=0.9, TEXT/event-stream;q=0.9", false));
+    CHECK_FALSE(accept_prefers_sse("application/json", false));
+    CHECK_FALSE(accept_prefers_sse("*/*", false));
+    CHECK_FALSE(accept_prefers_sse("", false));
+    // only SSE listed
+    CHECK(accept_prefers_sse("text/event-stream", false));
+    CHECK(accept_prefers_sse("text/event-stream;q=0.5", false));
+    // higher q for SSE
+    CHECK(accept_prefers_sse("application/json;q=0.5, text/event-stream", false));
+    CHECK_FALSE(accept_prefers_sse("application/json, text/event-stream;q=0.5", false));
+    // wildcard counts as JSON acceptable
+    CHECK_FALSE(accept_prefers_sse("text/event-stream, */*", false));
+    CHECK(accept_prefers_sse("text/event-stream, */*;q=0.1", false));
+    // progress token -> SSE whenever it is acceptable at all
+    CHECK(accept_prefers_sse("application/json, text/event-stream", true));
+    CHECK(accept_prefers_sse("application/json;q=1, text/event-stream;q=0.1", true));
+    CHECK_FALSE(accept_prefers_sse("application/json", true));
+    CHECK_FALSE(accept_prefers_sse("application/json, text/event-stream;q=0", true));
+    CHECK_FALSE(accept_prefers_sse("*/*", true));
+}
+
+TEST_CASE("SSE: both Accept types without progressToken answer plain JSON", "[mcp][http][sse]") {
+    Fixture f;
+    auto req = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+    req.headers["Accept"] = "application/json, text/event-stream";
+    auto res = f.endpoint.handle(req);
+    REQUIRE(res.status == 200);
+    CHECK(res.header("Content-Type").find("application/json") != std::string::npos);
+    CHECK_FALSE(res.stream);
+
+    auto only_sse = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+    only_sse.headers["Accept"] = "text/event-stream";
+    auto res2 = f.endpoint.handle(only_sse);
+    CHECK(res2.header("Content-Type") == "text/event-stream");
+}
+
 TEST_CASE("SSE: progress, final message, keep-alive", "[mcp][http][sse]") {
     HttpEndpointOptions o;
     o.keepalive_ms = 40;

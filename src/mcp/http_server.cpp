@@ -278,7 +278,7 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
                     (config_.read_only_cap ? " [FAIRYFLY_READ_ONLY cap active]" : ""));
     lines.push_back(std::string("  auth:           ") + (config_.insecure_no_auth ? "NONE (--insecure-no-auth)" : "bearer tokens via authenticator"));
     lines.push_back(std::string("  binding:        ") + config_.host + (loopback ? " (loopback only)" : ""));
-    lines.push_back(std::string("  sse:            ") + (config_.endpoint.sse ? "on (Accept: text/event-stream on tools/call)" : "off"));
+    lines.push_back(std::string("  sse:            ") + (config_.endpoint.sse ? "on (tools/call: only when the client prefers text/event-stream or sends a progressToken)" : "off"));
     std::string hosts = "loopback";
     for (const auto& h : config_.endpoint.allowed_hosts) hosts += ", " + h;
     lines.push_back("  allowed hosts:  " + hosts);

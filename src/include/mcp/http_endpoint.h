@@ -63,6 +63,11 @@ struct HttpResponse {
 std::string format_sse_event(std::string_view event, std::string_view data, std::string_view id = {});
 std::string format_sse_comment(std::string_view text);
 
+/// Content negotiation for tools/call (pure). SSE only when text/event-stream is acceptable (q > 0) and either the
+/// request carries a progressToken, or application/json is not acceptable, or text/event-stream has the higher
+/// q-value. With equal preference (for example "application/json, text/event-stream") plain JSON wins.
+bool accept_prefers_sse(std::string_view accept_header, bool has_progress_token);
+
 struct HttpEndpointOptions {
     std::string path = "/mcp";
     std::size_t max_body_bytes = 1024 * 1024;
