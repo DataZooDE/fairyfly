@@ -210,8 +210,12 @@ function Send-Http([string]$Method, [string]$Path = '/mcp', $Body = $null, [hash
         $resp = $_.Exception.Response
         if ($null -eq $resp) { throw }
         $status = [int]$resp.StatusCode
-        $reader = New-Object System.IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8)
-        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        # Windows PowerShell 5.1 has already consumed the error stream into ErrorDetails; fall back to the stream.
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $text = [string]$_.ErrorDetails.Message }
+        else {
+            $reader = New-Object System.IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8)
+            try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
         foreach ($k in $resp.Headers.AllKeys) { $hdr[$k.ToLowerInvariant()] = [string]$resp.Headers[$k] }
     }
     return [pscustomobject]@{ Status = $status; Text = $text; Headers = $hdr; Json = (ConvertFrom-JsonSafe $text) }
@@ -270,7 +274,7 @@ Add-Type -Namespace Ffly -Name K -MemberDefinition $sig
 [void][Ffly.K]::FreeConsole()
 if (-not [Ffly.K]::AttachConsole($TargetPid)) { exit 3 }
 [void][Ffly.K]::SetConsoleCtrlHandler([IntPtr]::Zero, $true)
-[void][Ffly.K]::GenerateConsoleCtrlEvent(0, 0)
+[void][Ffly.K]::GenerateConsoleCtrlEvent(1, 0)
 Start-Sleep -Milliseconds 500
 [void][Ffly.K]::FreeConsole()
 exit 0
