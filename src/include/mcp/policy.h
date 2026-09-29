@@ -13,7 +13,7 @@ using EnvFn = std::function<std::string(const char*)>;
 
 /// Decides whether a call may run (read-only refusals). Pure and cheap; it checks policy only, not
 /// argument shapes (the dispatcher / argv builders do that). FAIRYFLY_READ_ONLY=1 is treated as
-/// read-only even when `policy` says otherwise (defensive; run_serve already enforces the cap).
+/// read-only even when `policy` says otherwise (defensive; run_mcp already enforces the cap).
 PolicyDecision check_call(const ToolSpec& spec, const json& args, const Policy& policy,
                           const EnvFn& getenv_fn = {});
 

@@ -55,22 +55,22 @@ PolicyDecision check_call(const ToolSpec& spec, const json& args, const Policy& 
 
     if (spec.write_tool)
         return refuse("TOOL_UNAVAILABLE_READ_ONLY",
-                      "The fairyfly server runs read-only; ask the user to restart it with `serve --allow-write`");
+                      "The fairyfly server runs read-only; ask the user to restart it with `mcp --allow-write`");
 
     const std::string& name = spec.def.name;
-    if ((name == "sap_launch" || name == "sap_login") && args.is_object()) {
+    if ((name == "gui_session_launch" || name == "gui_session_login") && args.is_object()) {
         auto it = args.find("multiple_logon");
         if (it != args.end() && it->is_string() && lower(it->get<std::string>()) == "end")
             return refuse("READ_ONLY_REFUSED",
                           "multiple_logon=end terminates other sessions and is refused while the fairyfly server "
-                          "runs read-only; ask the user to restart it with `serve --allow-write`");
+                          "runs read-only; ask the user to restart it with `mcp --allow-write`");
     }
-    if (name == "sap_disconnect" && args.is_object()) {
+    if (name == "gui_session_disconnect" && args.is_object()) {
         auto it = args.find("close_session");
         if (it != args.end() && is_true(*it))
             return refuse("READ_ONLY_REFUSED",
                           "close_session=true ends the SAP session and is refused while the fairyfly server runs "
-                          "read-only; ask the user to restart it with `serve --allow-write`");
+                          "read-only; ask the user to restart it with `mcp --allow-write`");
     }
     return PolicyDecision{};
 }

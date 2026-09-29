@@ -165,7 +165,7 @@ std::pair<std::uint32_t, std::uint32_t> png_dimensions(const std::string& b64) {
 }
 
 void attach_structured(ToolResult& out, const Result& result, const ToolSpec& spec) {
-    if (spec.def.name == "sap_screen_read" || spec.output == ToolOutput::Image) return;
+    if (spec.def.name == "gui_screen_read" || spec.output == ToolOutput::Image) return;
     json doc = result.to_json();
     if (doc.contains("diagnostics")) doc.erase("diagnostics");
     if (dump_compact(doc).size() <= kStructuredMaxBytes) out.structured = std::move(doc);

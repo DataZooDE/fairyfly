@@ -61,7 +61,7 @@ bool append_serve_event(audit::AuditSink* sink, const std::string& status, bool 
         audit::AuditRecord out;
         out.ts = std::chrono::system_clock::now();
         out.source = "mcp";
-        out.command = "serve";
+        out.command = "mcp";
         out.read_only = read_only;
         out.status = status;
         const bool ok = sink->append(out);

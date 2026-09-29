@@ -14,6 +14,8 @@
 #include <comdef.h>
 #endif
 
+#include "include/command_table.h"
+#include "include/commands/cli_app.h"
 #include "include/commands/command_registry.h"
 #include "include/element_renderers.h"
 #include "include/exceptions.h"
@@ -26,7 +28,7 @@ namespace fairyfly::mcp {
 
 namespace {
 
-const std::set<std::string> kScreenDataTools = {"sap_screen_read", "sap_screen_find", "sap_get", "sap_menu_list"};
+const std::set<std::string> kScreenDataTools = {"gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list"};
 
 std::string dump_compact(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
 
@@ -63,13 +65,8 @@ std::optional<int> int_from_json(const json& v) {
     return std::nullopt;
 }
 
-std::string command_of(const std::vector<std::string>& argv) {
-    if (argv.empty()) return {};
-    std::string command = argv[0];
-    if ((argv[0] == "screen" || argv[0] == "credentials") && argv.size() > 1 && !argv[1].empty() && argv[1][0] != '-')
-        command += " " + argv[1];
-    return command;
-}
+/// Audit command of an argv: the CLI path from the command table ("element click").
+std::string command_of(const std::vector<std::string>& argv) { return command_table::command_of_argv(argv); }
 
 std::string text_of(const ToolResult& r) {
     for (const auto& block : r.content)
@@ -204,15 +201,15 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (rate_gate_ && !rate_gate_(std::chrono::steady_clock::now()))
         return fail("RATE_LIMITED",
                     "too many tool calls (limit " + std::to_string(policy_.max_calls_per_minute) + " per minute)",
-                    "wait a few seconds and retry, or combine steps with sap_batch");
+                    "wait a few seconds and retry, or combine steps with gui_batch");
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
     if (!effective.default_connection) effective.default_connection = sticky_connection_;
 
-    // sap_attach without session_id: resolve through `list`.
-    if (name == "sap_attach" && args.is_object() && !args.contains("session_id")) {
-        Result listed = invoke({"list"});
+    // gui_session_attach without session_id: resolve through `list`.
+    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
+        Result listed = invoke({"session", "list"});
         if (listed.status != Result::Status::Success) {
             code = result_error_code(listed);
             return shape_result(listed, *spec, policy_, "");
@@ -229,10 +226,10 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                                              ? s["active_window_title"] : json("")}});
             }
         if (sessions.empty())
-            return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / sap_launch, then retry");
+            return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
         if (sessions.size() > 1)
             return fail("MULTIPLE_SESSIONS",
-                        std::to_string(sessions.size()) + " SAP GUI sessions are open; call sap_attach again with session_id. "
+                        std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
                         "Sessions: " + dump_compact(sessions));
         args["session_id"] = sessions[0]["session_id"];
     }
@@ -254,7 +251,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 5. invoke
     Result result = invoke(argv);
 
-    // sap_capture: enforce the image cap with one retry at half scale.
+    // gui_screen_capture: enforce the image cap with one retry at half scale.
     if (spec->output == ToolOutput::Image && result.status == Result::Status::Success &&
         image_payload_bytes(result) > policy_.max_image_bytes) {
         double current = 1.0;
@@ -293,7 +290,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
 
     // 8. sticky default connection
-    if (result.status == Result::Status::Success && (name == "sap_attach" || name == "sap_launch") &&
+    if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
         result.data.is_object() && result.data.contains("connection_file_id")) {
         if (auto id = int_from_json(result.data["connection_file_id"])) {
             sticky_connection_ = id;
@@ -308,7 +305,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 }
 
 ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext& ctx) {
-    const ToolSpec* spec = find_spec("sap_batch");
+    const ToolSpec* spec = find_spec("gui_batch");
     json args = raw_args.is_null() ? json::object() : raw_args;
 
     // Validate the whole batch up front (one audit record when it is rejected).
@@ -316,12 +313,12 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     try {
         validate_tool_arguments(args, spec->def.input_schema);
         for (const auto& item : args["items"])
-            if (item["tool"] == "sap_batch") throw std::invalid_argument("sap_batch cannot be nested inside sap_batch");
+            if (item["tool"] == "gui_batch") throw std::invalid_argument("gui_batch cannot be nested inside gui_batch");
     } catch (const std::exception& e) {
         problem = e.what();
     }
     if (!problem.empty())
-        return audited("sap_batch", [&](McpCallRecord&, std::string& code) {
+        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
             code = "INVALID_ARGUMENT";
             return error_result("INVALID_ARGUMENT", problem);
         }, ctx, nullptr);
@@ -364,7 +361,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
 }
 
 ToolResult CommandDispatcher::call_tool(const std::string& name, const json& args, const CallContext& ctx) {
-    if (name == "sap_batch" && find_spec("sap_batch")) return run_batch(args, ctx);
+    if (name == "gui_batch" && find_spec("gui_batch")) return run_batch(args, ctx);
     return run_single(name, args, ctx);
 }
 
@@ -378,9 +375,7 @@ Invoker make_registry_invoker(const std::function<cli::CommandHandler&()>& get_h
         std::lock_guard<std::mutex> lock(registry_mutex);
 
         CLI::App app{"fairyfly"};
-        app.allow_windows_style_options(false);  // element ids start with '/'
-        commands::register_all_commands();       // destroys the previous invocation's command objects
-        commands::CommandRegistry::instance().setup_all_commands(app);
+        commands::build_command_tree(app);  // register_all_commands() destroys the previous invocation's command objects
 
         static bool renderers_registered = false;
         if (!renderers_registered) {

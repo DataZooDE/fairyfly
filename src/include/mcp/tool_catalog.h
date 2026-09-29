@@ -5,12 +5,20 @@
 
 namespace fairyfly::mcp {
 
-/// Read-only tools (sap_screen_read, ...). Implemented in tool_catalog.cpp.
+/// Read-only tools (gui_screen_read, ...). Implemented in tool_catalog.cpp.
 std::vector<ToolSpec> read_tool_specs();
-/// State-changing tools (sap_click, sap_fill, ...), all with write_tool = true. tool_catalog_write.cpp.
+/// State-changing tools (gui_element_click, gui_element_fill, ...), all with write_tool = true. tool_catalog_write.cpp.
 std::vector<ToolSpec> write_tool_specs();
 /// read_tool_specs() followed by write_tool_specs().
 std::vector<ToolSpec> all_tool_specs();
+
+/// Keeps only the tools whose family is in `families` (`mcp --tools`); empty `families` keeps all.
+std::vector<ToolSpec> retain_families(std::vector<ToolSpec> specs, const std::vector<std::string>& families);
+
+/// The tool table printed by `fairyfly mcp tools` (and pasted into docs/MCP.md): one row per tool with
+/// name, family, CLI command, write flag and title. `markdown` selects a pipe table; otherwise aligned
+/// plain text. `specs` empty = all_tool_specs(). Pure function, no process spawn, no SAP access.
+std::string tool_table_text(bool markdown, const std::vector<ToolSpec>& specs = {});
 
 /// Validates `args` against the subset of JSON Schema used by the catalog (type, enum, minimum,
 /// maximum, minLength, minItems, maxItems, properties, required, additionalProperties, items).
