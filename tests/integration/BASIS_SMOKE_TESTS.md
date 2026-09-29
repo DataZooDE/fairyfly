@@ -22,11 +22,11 @@ Status legend: **verified live** means the check is part of `bigfox_regression.p
 | SE38 | editor start screen | `transaction start /nSE38`, `screen read` | id set identical between builds | verified live (compare_builds) |
 | SICF | ICF service tree selection | `transaction start /nSICF`, `screen read` | id set identical between builds | verified live (compare_builds) |
 | Session hygiene | no popup left, `session list --output toon`, `--read-only` refusals, `batch` of 8 read-only commands | `popup close`, `--output toon session list`, `--read-only ...`, `batch --file` | `popup close` returns NO_POPUP at the end; toon starts with `data:`; refusals return READ_ONLY_REFUSED; all 8 batch statuses success | verified live (regression) |
-| SM21 | system log selection and list | `transaction start /nSM21`, `screen read`, `screen find` | selection screen readable; list read succeeds | proposed - NOT YET VERIFIED |
-| SM04 | user list (ALV) | `transaction start /nSM04`, `screen read --max-rows 50` | at least the current user listed | proposed - NOT YET VERIFIED |
-| SM51 | server list | `transaction start /nSM51`, `screen read` | at least one application server row | proposed - NOT YET VERIFIED |
-| SM12 | lock entry selection (display only, never delete locks) | `transaction start /nSM12`, `screen read` | selection screen readable; never press Delete | proposed - NOT YET VERIFIED |
-| SM66 | global work process overview | `transaction start /nSM66`, `screen read` | list readable; ids stable between gated and `--probe-all` | proposed - NOT YET VERIFIED |
+| SM21 | system log selection and list | `transaction start /nSM21`, `screen read`, `screen find` | selection screen readable; list read succeeds | verified live 2026-09-29 (Bigfox A4H): selection screen readable (From/To date and time fields); `key send F8` opens "Syslog messages" |
+| SM04 | user list (ALV) | `transaction start /nSM04`, `screen read --max-rows 50` | at least the current user listed | verified live 2026-09-29: grid read, 2 rows, DEVELOPER listed (incl. the background user session) |
+| SM51 | server list | `transaction start /nSM51`, `screen read` | at least one application server row | verified live 2026-09-29: 1 row, `vhcala4hci_A4H_00`, Active, services Dialog Batch Update Upd2 Spool ICM |
+| SM12 | lock entry selection (display only, never delete locks) | `transaction start /nSM12`, `screen read` | selection screen readable; never press Delete | verified live 2026-09-29: selection screen readable (client, user, table, argument, limit); nothing pressed |
+| SM66 | global work process overview | `transaction start /nSM66`, `screen read` | list readable; ids stable between gated and `--probe-all` | verified live 2026-09-29: grid read; gated and `--probe-all` output identical in size with the same grid ids |
 
 Nothing in the catalogue presses Save, Delete, Release, Stop, Create or Change buttons; the only fills are selection-screen search values. Verification status is updated only after the orchestrator has run the scripts live.
 
