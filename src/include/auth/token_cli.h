@@ -15,6 +15,7 @@ struct TokenCliArgs {
     std::vector<std::string> scopes;      ///< --scope (already split on commas by the CLI layer; split again here to be safe)
     std::vector<std::string> systems;     ///< --system
     std::vector<std::string> tcodes;      ///< --tcode
+    std::vector<std::string> connections; ///< --connections
     std::vector<std::string> ips;         ///< --ip
     int rate = 0;                         ///< --rate
     std::string expires;                  ///< --expires 30d | 2026-12-31

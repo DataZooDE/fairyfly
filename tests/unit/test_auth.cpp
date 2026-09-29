@@ -869,3 +869,41 @@ TEST_CASE("auth: token CLI list/revoke/rotate never expose hashes or secrets", "
     CHECK(after.data["tokens"][0]["revoked"] == true);
     CHECK(after.to_json().dump().find(secret) == std::string::npos);
 }
+
+TEST_CASE("auth: --connections restriction is validated, stored, listed and reaches the principal", "[auth][token][connections]") {
+    Env env;
+    NewToken t;
+    t.scopes = {"session"};
+    t.connections = {"DEV*", "Bigfox"};
+    const auto created = env.create("scoped", t);
+    CHECK(created.meta.to_public_json()["connections"] == nlohmann::json::array({"DEV*", "Bigfox"}));
+    REQUIRE(env.store().list().size() == 1);
+    CHECK(env.store().list()[0].connections == t.connections);
+    const auto outcome = env.auth->authenticate(request_with(created.token));
+    REQUIRE(outcome.ok);
+    CHECK(outcome.principal.connections == t.connections);
+    // survives rotate
+    auto store = env.store();
+    store.rotate("scoped");
+    CHECK(store.list()[0].connections == t.connections);
+
+    NewToken bad;
+    bad.name = "bad";
+    bad.scopes = {"session"};
+    bad.connections = {"has space"};
+    CHECK_THROWS_AS(store.create(bad), AuthError);
+    bad.connections = {"semi;colon"};
+    CHECK_THROWS_AS(store.create(bad), AuthError);
+    bad.connections = {std::string(65, 'a')};
+    CHECK_THROWS_AS(store.create(bad), AuthError);
+
+    // CLI: --connections is split on commas
+    TokenCliArgs args;
+    args.action = "create";
+    args.name = "cli-scoped";
+    args.scopes = {"session"};
+    args.connections = {"DEV*,QAS"};
+    const auto r = run_token_action(args, store);
+    REQUIRE(r.status == Result::Status::Success);
+    CHECK(r.data["connections"] == nlohmann::json::array({"DEV*", "QAS"}));
+}

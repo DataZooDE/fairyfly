@@ -181,6 +181,17 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
                 if (!facts.any()) return std::nullopt;
                 return facts;
             });
+            // System and connection name of a launch/login/attach/disconnect target (token allowlists; fail closed).
+            dispatcher->set_session_target_resolver([peek](const CommandDispatcher::TargetQuery& query) -> auth::SessionTarget {
+                cli::CommandHandler* handler = peek();
+                if (!handler) return {};
+                const auto info = handler->peek_session_target(query.logon_name, query.session_id, query.connection);
+                auth::SessionTarget target;
+                target.connection_name = info.connection_name;
+                if (!info.facts.system.empty())
+                    target.system = info.facts.client.empty() ? info.facts.system : info.facts.system + "/" + info.facts.client;
+                return target;
+            });
             dispatcher->set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
             return dispatcher;
         };

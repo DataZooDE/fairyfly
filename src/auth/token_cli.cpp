@@ -62,6 +62,7 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             request.read_only = args.read_only_flag || !scopes_given;
             request.sap_systems = split_list(args.systems);
             request.tcodes = split_list(args.tcodes);
+            request.connections = split_list(args.connections);
             request.allowed_ips = split_list(args.ips);
             request.rate_per_minute = args.rate;
             if (std::find(request.scopes.begin(), request.scopes.end(), "*") != request.scopes.end() && !args.yes)

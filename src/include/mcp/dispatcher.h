@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "include/auth/authorize.h"
 #include "include/cli_handler.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/types.h"
@@ -33,6 +34,17 @@ public:
     /// Without a provider every call of a token that has a system allowlist is denied SYSTEM_UNKNOWN.
     using SapFactsProvider = std::function<std::optional<audit::SapFacts>(std::optional<int> connection)>;
     void set_sap_facts_provider(SapFactsProvider provider) { facts_provider_ = std::move(provider); }
+    /// Selector of a session/connection lookup (exactly one is set): a SAP Logon entry name (launch), a session id
+    /// (attach) or a saved connection id (everything else).
+    struct TargetQuery {
+        std::string logon_name;
+        std::string session_id;
+        std::optional<int> connection;
+    };
+    /// Resolves the SAP system and connection name a call targets, without contacting SAP (token allowlists).
+    /// Without a resolver every call of a token with sap_systems/connections that needs one is denied (fail closed).
+    using SessionTargetResolver = std::function<auth::SessionTarget(const TargetQuery&)>;
+    void set_session_target_resolver(SessionTargetResolver resolver) { target_resolver_ = std::move(resolver); }
     /// Per-call read-only override: called with true before a call of a read-only token while the server
     /// is in write mode, and with the server value afterwards. Wire it to CommandHandler::set_read_only.
     using ReadOnlyOverride = std::function<void(bool read_only)>;
@@ -64,6 +76,7 @@ private:
     std::optional<int> sticky_connection_;
     KeyedRateLimiter keyed_limiter_;
     SapFactsProvider facts_provider_;
+    SessionTargetResolver target_resolver_;
     ReadOnlyOverride read_only_override_;
 };
 

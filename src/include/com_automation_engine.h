@@ -112,6 +112,8 @@ public:
     /// changes anything. Empty facts when the session is gone, the server key differs or COM fails.
     audit::SapFacts peek_session_facts(const std::string& session_id,
                                        const std::string& server_session_key = "") const noexcept;
+    /// Description (SAP Logon entry name) of the connection that owns `session_id`; empty when unknown. Read-only.
+    std::string peek_session_connection_description(const std::string& session_id) const noexcept;
 
     // Enumerate all connections, sessions, and windows
     nlohmann::json get_application_info() const;

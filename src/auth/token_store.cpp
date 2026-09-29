@@ -85,6 +85,8 @@ void validate(const NewToken& request) {
         if (!valid_pattern(s, "*?/_-$")) throw AuthError("INVALID_ARGUMENT", "invalid SAP system pattern '" + s + "' (use SID/CLIENT, globs allowed)");
     for (const auto& t : request.tcodes)
         if (!valid_pattern(t, "*?/_-$.")) throw AuthError("INVALID_ARGUMENT", "invalid T-code pattern '" + t + "'");
+    for (const auto& c : request.connections)
+        if (!valid_pattern(c, "*?_-.$/")) throw AuthError("INVALID_ARGUMENT", "invalid connection name pattern '" + c + "' (letters, digits and * ? _ - . $ /; no spaces)");
     for (const auto& ip : request.allowed_ips)
         if (!parse_ip_rule(ip)) throw AuthError("INVALID_IP", "invalid IP address or CIDR block '" + ip + "'");
     if (request.rate_per_minute < 0) throw AuthError("INVALID_ARGUMENT", "rate must be >= 0");
@@ -112,6 +114,7 @@ json TokenMeta::to_public_json() const {
               {"scopes", scopes},
               {"sap_systems", sap_systems},
               {"tcodes", tcodes},
+              {"connections", connections},
               {"rate_per_minute", rate_per_minute},
               {"allowed_ips", allowed_ips},
               {"read_only", read_only},
@@ -135,6 +138,7 @@ json TokenMeta::to_compact_json() const {
     if (!scopes.empty()) j["s"] = scopes;
     if (!sap_systems.empty()) j["y"] = sap_systems;
     if (!tcodes.empty()) j["t"] = tcodes;
+    if (!connections.empty()) j["k"] = connections;
     if (rate_per_minute != 0) j["r"] = rate_per_minute;
     if (!allowed_ips.empty()) j["p"] = allowed_ips;
     if (revoked) j["x"] = true;
@@ -159,6 +163,7 @@ json expand_compact(const json& c) {
     j["scopes"] = c.contains("s") ? c["s"] : json::array();
     j["sap_systems"] = c.contains("y") ? c["y"] : json::array();
     j["tcodes"] = c.contains("t") ? c["t"] : json::array();
+    j["connections"] = c.contains("k") ? c["k"] : json::array();
     j["allowed_ips"] = c.contains("p") ? c["p"] : json::array();
     if (c.contains("r")) j["rate_per_minute"] = c["r"];
     if (c.contains("o")) j["read_only"] = c["o"];
@@ -188,6 +193,7 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     m.scopes = string_array(j, "scopes");
     m.sap_systems = string_array(j, "sap_systems");
     m.tcodes = string_array(j, "tcodes");
+    m.connections = string_array(j, "connections");
     m.allowed_ips = string_array(j, "allowed_ips");
     if (j.contains("rate_per_minute") && j["rate_per_minute"].is_number_integer()) m.rate_per_minute = j["rate_per_minute"].get<int>();
     m.read_only = j.contains("read_only") && j["read_only"].is_boolean() ? j["read_only"].get<bool>() : true;
@@ -415,6 +421,7 @@ CreatedToken TokenStore::create(const NewToken& request) {
     meta.scopes = request.scopes;
     meta.sap_systems = request.sap_systems;
     meta.tcodes = request.tcodes;
+    meta.connections = request.connections;
     meta.rate_per_minute = request.rate_per_minute;
     meta.allowed_ips = request.allowed_ips;
     meta.read_only = request.read_only;

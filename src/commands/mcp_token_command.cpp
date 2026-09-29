@@ -30,6 +30,8 @@ public:
             ->delimiter(',');
         create_->add_option("--system", args_.systems, "Allowed SAP systems SID/CLIENT, e.g. A4H/001 (globs allowed)")->delimiter(',');
         create_->add_option("--tcode", args_.tcodes, "Allowed T-codes, e.g. SE16,SM* (globs allowed)")->delimiter(',');
+        create_->add_option("--connections", args_.connections,
+                            "Allowed saved connections / SAP Logon entry names, e.g. DEV,QA* (globs allowed; no spaces)")->delimiter(',');
         create_->add_option("--ip", args_.ips, "Allowed client addresses or CIDR blocks")->delimiter(',');
         create_->add_option("--rate", args_.rate, "Calls per minute (0 = server default)")->check(CLI::NonNegativeNumber);
         create_->add_option("--expires", args_.expires, "Expiry: 30d, 12h, 90m or a date such as 2026-12-31");

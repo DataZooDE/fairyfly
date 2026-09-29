@@ -561,6 +561,16 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
     return facts;
 }
 
+std::string ComAutomationEngine::peek_session_connection_description(const std::string& session_id) const noexcept {
+    try {
+        auto found = find_session_by_id(session_id);
+        if (!found.first || !found.second) return {};
+        return found.first->get_description();
+    } catch (...) {
+        return {};
+    }
+}
+
 bool ComAutomationEngine::validate_session(const std::string& session_id,
                                            const std::string& server_session_key) const {
     try {
