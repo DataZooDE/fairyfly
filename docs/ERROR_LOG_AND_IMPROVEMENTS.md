@@ -1691,84 +1691,94 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 
 ### [ERR-135] Repeated `attach` Accumulates Stale Connection Files and Triggers MULTIPLE_CONNECTIONS
 
-- **Status**: OPEN (observed 2026-09-29 during the OPS-032 and SM50 sessions on Bigfox; cause not yet investigated)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Medium / affects every multi-step workflow
 - **Symptom**: Each `attach` wrote a new `fairyfly.N.con` (ids 1, 2, 4 seen) for the same session. Later commands without `--connection` failed with `MULTIPLE_CONNECTIONS` ("Found 3 connections"). `--connection 1` failed with `INVALID_CONNECTION` ("Connection 1 session no longer exists"), and one call reported `CONNECTION_NOT_FOUND` for `fairyfly.1.con`.
 - **Expected**: `attach` reuses or replaces the entry for an already-attached session, and dead entries are pruned when detected.
 - **Workaround**: Re-`attach` and pass the new id with `--connection`.
+- **Fix and verification**: `attach` prunes other cache entries for the same session path (`ConnectionManager::prune_other_entries_for_path`, conditional delete keeps concurrently replaced entries); auto-detect and `disconnect` drop entries whose session is confirmed gone (a throw from the check keeps the file, so an unreachable SAP cannot wipe the cache). Cause confirmed: the three entries had different server session keys for the same path `/app/con[0]/ses[0]` (re-logon), and nothing pruned the old ones. Live: three entries became one (`pruned_stale: 2`), later attaches pruned nothing. `connections` shows `server_session_key` and `cache_generation`. Tests: three `[prune]` cases in `tests/unit/test_connection_manager.cpp`.
 
 ---
 
 ### [ERR-136] Status-Bar Messages Are Not Returned by click, fill, tcode, or screen read
 
-- **Status**: OPEN (observed 2026-09-29; cause not yet investigated)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Medium / silent failures
 - **Symptom**: `click` on Display in RZ11 for the unknown parameter `rdisp/max_wprun_time` returned `success`, while the SAP status bar showed "The parameter name is not known". Only a screenshot revealed it. A JSON `screen read` search for status-bar text found nothing.
 - **Expected**: Command results and `screen read` include the status-bar text and message type (S/W/E/A/I), so callers can detect warnings and errors after an action.
+- **Fix and verification**: `status_bar_json` and `attach_status_bar` (`src/action_status.cpp`) add `status_bar` (`text`, `message_type`, `changed`, `message_id`, `message_number`) to `click`, toolbar presses, `fill`, grid fills and selects, `get`, `tcode`, and `screen read`/`find`; `read_action_status` reads the active window's status bar. Existing keys are unchanged. Live: RZ11 unknown parameter returned `The parameter name is not known`, type S, message PF 724.
+
 ---
 
 ### [ERR-137] RZ11 Parameter Detail Table Cell Values Not Exposed
 
-- **Status**: OPEN (observed 2026-09-29; control type not yet identified)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Medium / missing data
 - **Symptom**: On "Display Profile Parameter Details", `screen read` listed only labels ("Metadata for Parameter…", "Kernel Default", "Instance Profile") and reported 0 top-level elements. `screen find` for `GuiTextField`, `GuiCTextField`, and `GuiLabel` returned nothing, and the value cells (e.g. `rdisp/wp_no_dia` = 24) were only readable from `screen capture` images.
 - **Next step**: Identify the control type behind this table and add it to the element collector.
+- **Fix and verification**: `classify_shell_extraction` now sends only GridView to grid and Tree/TableTreeControl to tree; every other GuiShell is read as metadata with a generic probe (row/column count, UI Automation text pattern, `AccText`/`AccDescription`), keeps `subtype`, drops ProgID text, and renders as content or a `content unavailable` line. Live: RZ11 `rdisp/wp_no_dia` shows Kernel Default 2, Instance Profile 24, Result 24 in `screen read`. The exact shell subtype was not logged.
 
 ---
 
 ### [ERR-138] `tcode /n` Reports error Although Navigation Succeeds
 
-- **Status**: OPEN (observed 2026-09-29)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Low
 - **Symptom**: `fairyfly tcode /n` returned `TRANSACTION_FAILED` ("Transaction /N does not exist", message type E), but `list` showed the session on "SAP Easy Access" afterwards. Confirmed 2026-09-29: `tcode` appears to prepend its own `/n` to the argument, so `/n` becomes an unknown transaction name while the navigation itself still succeeds.
 - **Expected**: `/n` is treated as valid navigation to the start screen.
+- **Fix and verification**: cause confirmed in code: `StartTransaction` in SAP GUI already prepends `/n`. `normalize_transaction_request` sends `/n` and `/nXYZ` through `SendCommand`; bare `/n` skips the tcode match; `/o`, `/i`, `/nex` return `UNSUPPORTED_OK_CODE`. Live: `tcode /n` succeeds and `tcode /nSM37` lands on SM37.
 
 ---
 
 ### [IMP-005] Grid Cell Text Filtering and CLI Consistency
 
-- **Status**: OPEN (minor; observed 2026-09-29)
+- **Status**: DONE AND VERIFIED LIVE 2026-09-29
 - **Observation**: `screen read --text-contains ZFFLY` on the `/IWFND/MAINT_SERVICE` service list returned 0 elements although the grid held `ZFFLY_BIND_260929`; `--text-contains` appears to match element text, not grid cell values, so a full read plus a regex was needed. Also `list` rejects `--output toon` while other commands accept it, and `screen find --limit` is capped at 100.
 - **Suggested**: Let text filters search grid cells (or add a cell-search option); make `--output` consistent; document the `--limit` cap.
+- **Fix and verification**: `--text-contains` also searches `table_data`, `tree_nodes`, `text_content`; `list`, `get`, `connections` accept `--output`; the `screen find --limit` range 1-100 is documented in the README. Live: `--text-contains ZFFLY` finds `ZFFLY_BIND_260929` in the Gateway service grid; `list --output toon` works.
 
 ---
 
 ### [ERR-139] No Double-Click, F2, or Key Press on GridView Rows; Menu Items Opaque
 
-- **Status**: OPEN (observed 2026-09-29 in ST22; cause not yet investigated)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29 (menu selection not run live)
 - **Severity**: Medium / blocks drill-down workflows
 - **Symptom**: In the ST22 dump list, `click <grid> --row 0 --column GPROGRAM` only selected the row, and the full dump text could not be opened (the toolbar `&DETAIL` button opens only a summary popup). There is no command for Enter, F2, F3, F8, or F12. The menu bar returned `GuiMenu` entries with empty text and no children, so menu actions could not be discovered; ST22's menus include delete actions, so blind clicking was not attempted.
 - **Suggested**: Add grid double-click (`--doubleclick` on row/column), a key/vkey command, and menu item enumeration with text.
+- **Fix and verification**: `click --doubleclick --row --column` (`SetCurrentCell` + `DoubleClickCurrentCell`), `send-key <key>` (enter, f1-f12, shift+f1-f12, raw 0-99, else `INVALID_VKEY`), and `screen menu [--select A/B]` (enumeration selects nothing). Live: double-click on an ST22 row opened `Runtime Error Long Text` and the dump text is readable in `screen read`; `send-key f3` went back; the menu tree listed real items; `send-key bogus` returned `INVALID_VKEY`. `screen menu --select` was exercised live only for refusal under `--read-only`.
 
 ---
 
 ### [ERR-140] Checkbox State Unreadable
 
-- **Status**: OPEN (observed 2026-09-29 in SM37; cause not yet investigated)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Medium / missing data
 - **Symptom**: `get` on `chkBTCH2170-FINISHED` returned `element_type: GuiCheckBox`, `value: "Finished"` (the label), and `screen find` returned the same label as `text`; the selected state was not available, so the SM37 status filters could not be verified before executing.
 - **Suggested**: Return the ticked state (for example `selected: true/false`) from `get`, `screen find`, and `screen read`.
+- **Fix and verification**: `get` and `screen find` return `selected` for GuiCheckBox and GuiRadioButton (`screen read` already did). Live on SM37: FINISHED and ABORTED `true`, PRELIM `false`. The `label` field of `get` is empty; the label is in `value`.
 
 ---
 
 ### [ERR-141] `click --wait-for-window` Waits the Full Timeout on In-Place Screen Changes
 
-- **Status**: OPEN (observed 2026-09-29 in SM37)
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
 - **Severity**: Low / wasted time and inconsistent metrics
 - **Symptom**: Pressing Job log with `--wait-for-window` opened the log in the same window and returned `waited_ms: 5000`, `window_changed: false`, while `metadata.duration_ms` was 731.
 - **Suggested**: Detect screen or title changes in the main window, end the wait early, and report consistent timing.
+- **Fix and verification**: `click --wait-for-window` snapshots window id, title, transaction, and status text, ends the wait on any change, reports the measured `waited_ms`, `window_changed`, `screen_changed`, and adds the wait to `duration_ms`. Live: SM37 Job log returned in 506 ms wall (`waited_ms` 8, `screen_changed: true`), previously about 5 s.
 
 ---
 
 ### [IMP-006] Faster and Smaller Reads, and a Read-Only Guard Mode
 
-- **Status**: OPEN (measurements from 2026-09-29 on Bigfox)
+- **Status**: DONE AND VERIFIED LIVE 2026-09-29 (batch gain smaller than expected)
 - **Tab-targeted read**: An SU01 `screen read` with tabs took 11.7 s and 35 KB; clicking the Roles tab (0.35 s) and reading with `--no-tabs` took about 0.95 s. Add `screen read --tab <id>`.
 - **Output size**: The SM37 job list as JSON was 120 KB versus 13.6 KB as markdown, and the ST22 selection screen returned 16.8 KB, largely duplicate `%_..._%_APP_%-TEXT` label fields. Drop or collapse label duplicates.
 - **Per-call overhead**: Each CLI call takes about 0.3 to 0.6 s as a separate process, and the three scenarios needed about 40 calls. Consider a batch/script mode or implementing `serve`.
 - **Read-only guard**: On SM37 the Job log button sits beside Release, Stop job, and Delete job. A `--read-only` mode could refuse state-changing buttons.
 - **Minor**: `screen find --type GuiTab` returns empty tab text (names appear in `screen read`), and the popup close button varies (`btn[0]` on ST22 details, `btn[12]` on F4), so a "close active popup" helper would help.
 - **Bigfox observation (unverified)**: Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER), possibly caused by earlier ADT search calls.
+- **Results**: `screen read --tab <id>` (SU01 Roles 2.3 s versus 11.7 s; `TAB_NOT_FOUND`); duplicate `grid_data` removed and selection-screen label carriers collapsed (SM37 JSON 120.5 KB to 98.4 KB, ST22 selection JSON 89.1 KB to 70.0 KB, Markdown 16.9 KB to 12.1 KB; field rows now show the caption such as `Date (F4 Search)` where they showed the technical name); `screen find --type GuiTab` returns labels; new `close` (F12, falls back to the window's own Close for popups, never Enter; live: closed the ST22 Details popup with `method: window_close`, second call `NO_POPUP`); new `batch` command (8 commands in about 2.0 s versus about 2.8 s separately, 1.3-1.5x over three runs, because most time is spent in SAP waits; one 23 s run not reproduced); new `--read-only` / `FAIRYFLY_READ_ONLY=1` guard (`READ_ONLY_REFUSED` verified live for Save, F11, a Delete menu path, and `fill`; SM37 Release/Stop/Delete buttons covered by unit tests only). `serve` remains unimplemented. Unverified bullet below (ST22 dumps) stays open.
 
 ---
 

@@ -22,31 +22,25 @@ The latest complete Release run passed all 183 Catch2 unit test cases (178 passe
 
 ## Fairyfly gaps found during live use (2026-09-29)
 
-Found while creating the OPS-032 OData service and reading SM50/RZ04/RZ11 on Bigfox. Root causes are not yet investigated. Fix in this order, each with a unit test where possible and a live check on Bigfox.
+Found while creating the OPS-032 OData service and reading SM50/RZ04/RZ11 and the ST22/SM37/SU01 scenarios on Bigfox. Fixed on branch `fix/open-work` (streams A-E plus a follow-up) and verified live on Bigfox the same day. The release suite passes 226 Catch2 test cases (1480 assertions). Details are in the error log (ERR-135 to ERR-141, IMP-005, IMP-006).
 
-| Work | Detail | Status |
+| Work | Resolution & Evidence | Status |
 | --- | --- | --- |
-| Stale connection files after repeated `attach` (ERR-135) | `attach` creates a new `fairyfly.N.con` each time; stale entries cause `MULTIPLE_CONNECTIONS` and `INVALID_CONNECTION`. Reuse or replace the entry for the same session and prune dead ones. | **Open** |
-| Status-bar messages not returned (ERR-136) | `click`, `fill`, `tcode`, and `screen read` do not surface the status-bar text or type; an RZ11 "parameter name is not known" warning came back as `success`. | **Open** |
-| RZ11 parameter detail cells not exposed (ERR-137) | Value table on "Display Profile Parameter Details" appears only as labels; identify the control type and collect its cells. | **Open** |
-| `tcode /n` reports error (ERR-138) | Navigation succeeds but the result is `TRANSACTION_FAILED` ("Transaction /N does not exist"), so `tcode` appears to prepend its own `/n` to the argument. Confirmed 2026-09-29. | **Open** |
-| Grid text filter and CLI consistency (IMP-005) | `--text-contains` ignores grid cell values; `list` rejects `--output toon`; `screen find --limit` cap is undocumented. | **Open** (minor) |
-
-Additional findings from three read-only Basis scenarios on Bigfox (ST22 dump list, SM37 job overview and log, SU01 user display), 2026-09-29. Not yet in the error log.
-
-| Work | Detail | Status |
-| --- | --- | --- |
-| No double-click, F2, or key press on grid rows | `click --row --column` only selects the row, so the full ST22 dump could not be opened. There is no command for Enter/F3/F8/F12 either. | **Open** |
-| Menu items are opaque | `GuiMenu` entries return empty text and no children, so menu actions cannot be found or used safely (ST22 menus include delete actions). | **Open** |
-| Checkbox state unreadable | `get` and `screen find` return the label (for example "Finished"), not the ticked state, so SM37 status filters could not be verified. | **Open** |
-| `click --wait-for-window` waits the full timeout on in-place screen changes | Opening an SM37 job log reported `waited_ms: 5000`, `window_changed: false`, and `duration_ms: 731`; the metrics are inconsistent and the wait is wasted. | **Open** |
-| Tab labels empty in `screen find` | Tab names appear in `screen read` but `screen find --type GuiTab` returns empty text. | **Open** (minor) |
-| No generic "close active popup" | Popup close button differs (`btn[0]` on ST22 details, `btn[12]` on F4); add a helper. | **Open** (minor) |
-| Speed: tab-targeted read | SU01 full read with tabs took 11.7 s and 35 KB; clicking one tab and reading took about 1.3 s. Add `screen read --tab <id>`. | **Open** |
-| Speed: output size | SM37 job list JSON was 120 KB versus 13.6 KB markdown; the ST22 selection screen returned 16.8 KB, largely duplicate `%_..._%_APP_%-TEXT` label fields. Drop or collapse label duplicates. | **Open** |
-| Speed: per-call overhead | Each CLI call takes about 0.3 to 0.6 s in a separate process; a scenario needed about 40 calls. Consider a batch/script mode or the `serve` command. | **Open** |
-| Safety: read-only guard mode | SM37 places Release, Stop job, and Delete job buttons next to Job log; a `--read-only` mode could refuse state-changing buttons. | **Open** (idea) |
-| Bigfox observation: ST22 dumps | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER); possibly caused by earlier ADT search calls, not verified. | **Open** (unverified) |
+| Stale connection files after repeated `attach` (ERR-135) | `attach` prunes other cache entries for the same session path; auto-detect drops entries whose session is confirmed gone (`validate_session_for_cleanup`, a throw keeps the file). Live: three entries with three different server session keys became one after the first `attach` (`pruned_stale: 2`); later attaches pruned nothing. `connections` now shows `server_session_key` and `cache_generation`. | **Closed & Verified** |
+| Status-bar messages not returned (ERR-136) | `status_bar` (`text`, `message_type`, `changed`, `message_id`, `message_number`) is attached to `click`, `fill`, `tcode`, `get`, and `screen read`/`find`. Live: RZ11 unknown parameter returned "The parameter name is not known" (type S, PF 724). | **Closed & Verified** |
+| RZ11 parameter detail cells not exposed (ERR-137) | Unknown and other GuiShell subtypes are now read as metadata with a generic probe instead of being dropped as empty trees. Live: RZ11 `rdisp/wp_no_dia` now shows Kernel Default 2, Instance Profile 24, Result 24 in `screen read`. | **Closed & Verified** |
+| `tcode /n` reports error (ERR-138) | `/n` and `/nXYZ` go through `SendCommand`; `/o`, `/i`, `/nex` return `UNSUPPORTED_OK_CODE`. Live: `tcode /n` succeeds and `tcode /nSM37` lands on SM37. | **Closed & Verified** |
+| Grid text filter and CLI consistency (IMP-005) | `--text-contains` also searches table cells, tree nodes, and text content; `list`, `get`, `connections` accept `--output`; the `screen find --limit` cap (1-100) is in the README. Live: `--text-contains ZFFLY` finds `ZFFLY_BIND_260929` in the Gateway service grid; `list --output toon` works. | **Closed & Verified** |
+| No double-click, F2, or key press on grid rows (ERR-139) | `click --row --column --doubleclick`, `send-key <key>`, and `screen menu [--select A/B]` (enumeration selects nothing). Live: double-click on an ST22 row opens "Runtime Error Long Text" and the dump text is readable; `send-key f3` goes back; the menu tree lists real items; a bad key returns `INVALID_VKEY`. `screen menu --select` is verified only for refusal under `--read-only`. | **Closed & Verified** (menu selection not run live) |
+| Checkbox state unreadable (ERR-140) | `get` and `screen find` return `selected` for checkboxes and radio buttons. Live: SM37 FINISHED and ABORTED report `true`, PRELIM `false`. `label` in the `get` result is empty (minor). | **Closed & Verified** |
+| `click --wait-for-window` waits the full timeout on in-place screen changes (ERR-141) | The wait ends when window id, title, transaction, or status text changes; `waited_ms`, `window_changed`, `screen_changed` are measured and the wait is added to `duration_ms`. Live: SM37 Job log returned after 506 ms wall (8 ms waited) with `screen_changed: true`, previously about 5 s. | **Closed & Verified** |
+| Tab labels empty in `screen find` | Live: `screen find --type GuiTab` on SU01 returns Documentation, Address, Logon Data, Roles, Profiles and the rest. | **Closed & Verified** |
+| No generic "close active popup" | New `close` command sends F12; if SAP rejects it (the ST22 Details popup has only Close/Enter) it falls back to the window's own `Close` for popups only, never Enter. Live: closed the ST22 Details popup with `method: window_close`; a second `close` returns `NO_POPUP`. | **Closed & Verified** |
+| Speed: tab-targeted read | `screen read --tab <id>` (`TAB_NOT_FOUND` for unknown ids, excludes `--no-tabs`). Live: SU01 Roles read took 2.3 s versus 11.7 s for the full read. | **Closed & Verified** |
+| Speed: output size | Duplicate `grid_data` removed and selection-screen label carriers collapsed. Live: SM37 job list JSON 120.5 KB to 98.4 KB; ST22 selection JSON 89.1 KB to 70.0 KB (no `%_..._%_APP_%-` carriers left) and its Markdown 16.9 KB to 12.1 KB. Markdown behavior change: field rows now show the caption (for example `Date (F4 Search)`) where they showed the technical name; a high-value field appears as `to (F4 Search)`. | **Closed & Verified** |
+| Speed: per-call overhead | New `batch` command runs many commands in one process (one JSON line per command, `--file`, `--stop-on-error`, `BATCH_NESTED` guard). Live: 8 commands took about 2.0 s versus about 2.8 s as separate processes, consistently 1.3-1.5x faster over three runs; most per-command time is spent in SAP waits, not process start-up. One early batch run took 23 s and could not be reproduced. `serve` is still not implemented. | **Closed** (gain smaller than expected) |
+| Safety: read-only guard mode | New global `--read-only` flag and `FAIRYFLY_READ_ONLY=1`: state-changing clicks, all `fill`, `send-key` F11/Shift+F2, and `screen menu --select` with Save/Delete-style words return `READ_ONLY_REFUSED` with the matched rule. Live: Save button, `send-key f11`, `System/Delete` menu, and `fill` refused; Job log and F3 still allowed. The SM37 Release/Stop/Delete buttons are covered by unit tests only, not pressed live. Element lookup for text/tooltip is best-effort, and synthetic toolbar buttons are checked by id only. | **Closed & Verified** (destructive buttons unit-tested only) |
+| Bigfox observation: ST22 dumps | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER); possibly caused by earlier ADT search calls, not verified. Not a fairyfly defect. | **Open** (unverified) |
 
 ## Build and review
 
