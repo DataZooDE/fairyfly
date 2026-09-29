@@ -268,10 +268,14 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
     return std::nullopt;
 }
 
-HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
-    if (auto rejected = precheck(request)) return std::move(*rejected);
+HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) {
+    PreAuth out;
+    if (auto rejected = precheck(request)) {
+        out.rejection = std::move(*rejected);
+        return out;
+    }
 
-    // Authenticate BEFORE the body is parsed.
+    // Authenticate BEFORE the body is read or parsed.
     DenyAllAuthenticator fallback;
     IAuthenticator& auth = authenticator_ ? *authenticator_ : static_cast<IAuthenticator&>(fallback);
     AuthRequest auth_request;
@@ -301,11 +305,25 @@ HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
                          outcome.www_authenticate.empty() ? "Bearer realm=\"fairyfly\"" : outcome.www_authenticate);
         else if (!outcome.www_authenticate.empty())
             r.set_header("WWW-Authenticate", outcome.www_authenticate);
-        return finish(request, std::move(r));
+        out.rejection = finish(request, std::move(r));
+        return out;
     }
-    Principal principal = outcome.principal;
-    if (principal.remote_addr.empty()) principal.remote_addr = request.peer_addr;
+    out.principal = outcome.principal;
+    if (out.principal.remote_addr.empty()) out.principal.remote_addr = request.peer_addr;
+    return out;
+}
+
+HttpResponse HttpEndpoint::handle_authenticated(const HttpRequest& request, const Principal& principal) {
+    if (request.body.size() > options_.max_body_bytes)
+        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+                                           "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return finish(request, dispatch(request, principal));
+}
+
+HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
+    PreAuth pre = preauthenticate(request);
+    if (pre.rejection) return std::move(*pre.rejection);
+    return handle_authenticated(request, pre.principal);
 }
 
 HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {

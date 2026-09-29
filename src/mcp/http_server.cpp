@@ -71,6 +71,30 @@ void write_response(const httplib::Request& req, httplib::Response& res, HttpRes
     }
 }
 
+/// 413 means "too large": never read it (it may be endless).
+bool rejected_status_drainable(int status) { return status != 413; }
+
+/// Largest rejected request body that is read and thrown away so the close does not reset the connection.
+constexpr std::size_t kDrainMaxBytes = 64 * 1024;
+/// Idle time allowed while a request is read (headers and body); bounds slow-loris style clients.
+constexpr int kReadTimeoutSeconds = 5;
+
+/// Reject a request whose body has NOT been read: the response is sent and the connection is closed
+/// afterwards (the failing chunked provider makes cpp-httplib close the socket once the response is on the
+/// wire), so an unread body can never be mistaken for the start of the next request.
+void write_rejection(httplib::Response& res, HttpResponse r) {
+    res.status = r.status;
+    for (const auto& h : r.headers) res.set_header(h.first, h.second);
+    res.set_header("Connection", "close");
+    const std::string type = r.header("Content-Type").empty() ? "application/json" : r.header("Content-Type");
+    auto body = std::make_shared<std::string>(std::move(r.body));
+    res.set_chunked_content_provider(type, [body](size_t, httplib::DataSink& sink) {
+        if (!body->empty()) sink.write(body->data(), body->size());
+        sink.done();
+        return false;  // "cancelled" after the last chunk: the server closes the connection
+    });
+}
+
 } // namespace
 
 struct McpHttpServer::Impl {
@@ -86,6 +110,8 @@ struct McpHttpServer::Impl {
     HttpEndpoint endpoint;
     std::function<void(bool)> apply_read_only;
     httplib::Server svr;
+    std::atomic<int> draining{0};  ///< rejected requests whose small body is currently being read and discarded
+    int drain_cap = 1;
     int bound_port = 0;
     bool bound = false;
 };
@@ -99,19 +125,21 @@ McpHttpServer::McpHttpServer(HttpServerConfig config, ToolProvider& provider,
     const std::string path = config_.endpoint.path;
 
     const int workers = std::max(2, config_.worker_threads);
-    impl.svr.new_task_queue = [workers] { return new httplib::ThreadPool(static_cast<size_t>(workers)); };
+    // Half of the workers at most may sit in "drain a rejected body" at any time; the rest always stays
+    // available for authenticated requests (a slow client cannot starve the pool).
+    impl.drain_cap = std::max(1, workers / 2);
+    impl.svr.new_task_queue = [workers] { return new httplib::ThreadPool(static_cast<size_t>(workers), 256); };
     impl.svr.set_payload_max_length(config_.endpoint.max_body_bytes);
-    impl.svr.set_read_timeout(30, 0);
+    impl.svr.set_read_timeout(kReadTimeoutSeconds, 0);
     impl.svr.set_write_timeout(30, 0);
     impl.svr.set_keep_alive_max_count(100);
+    impl.svr.set_keep_alive_timeout(5);
 
     // Header-only checks (path, method, Host, Origin, Content-Type, size) before any body is read.
     impl.svr.set_pre_routing_handler([&impl](const httplib::Request& req, httplib::Response& res) {
         if (auto rejected = impl.endpoint.precheck(to_request(req))) {
-            // Answering before the body was read makes the OS reset the connection and the client may
-            // lose the response. So only body-less requests and over-limit bodies are refused here;
-            // any other rejection is produced by the POST handler (which re-runs precheck) after the
-            // body was read, still before authentication and JSON parsing.
+            // Requests that carry a body are refused by the handlers below, which decide about the body
+            // (they re-run precheck). Only body-less requests and over-limit bodies are answered here.
             const std::string length = req.get_header_value("Content-Length");
             const bool body_pending = (!length.empty() && length != "0") || req.has_header("Transfer-Encoding");
             if (body_pending && rejected->status != 413) return httplib::Server::HandlerResponse::Unhandled;
@@ -120,17 +148,71 @@ McpHttpServer::McpHttpServer(HttpServerConfig config, ToolProvider& provider,
         }
         return httplib::Server::HandlerResponse::Unhandled;
     });
-    impl.svr.Post(path, [&impl](const httplib::Request& req, httplib::Response& res) {
+
+    // Content-reader handlers run BEFORE the body is read: authentication happens on the headers alone, so an
+    // unauthenticated client never makes a worker wait for its body (slow-loris).
+    auto handler = [&impl](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
         try {
-            write_response(req, res, impl.endpoint.handle(to_request(req)));
+            HttpRequest request = to_request(req);
+            HttpEndpoint::PreAuth pre = impl.endpoint.preauthenticate(request);
+            if (pre.rejection) {
+                // Small bodies are read and discarded (bounded, and only for a limited number of connections at
+                // once) so closing does not reset the connection and the client still gets its 401/403/415.
+                const std::string length = req.get_header_value("Content-Length");
+                const bool chunked = req.has_header("Transfer-Encoding");
+                bool small = chunked;
+                if (!length.empty() && length.find_first_not_of("0123456789") == std::string::npos && length.size() < 8)
+                    small = std::stoul(length) <= kDrainMaxBytes;
+                const bool has_body = chunked || (!length.empty() && length != "0");
+                if (has_body && small && rejected_status_drainable(pre.rejection->status)) {
+                    if (impl.draining.fetch_add(1) < impl.drain_cap) {
+                        std::size_t total = 0;
+                        reader([&total](const char*, size_t n) {
+                            total += n;
+                            return total <= kDrainMaxBytes;
+                        });
+                    }
+                    impl.draining.fetch_sub(1);
+                }
+                write_rejection(res, std::move(*pre.rejection));
+                return;
+            }
+            std::string body;
+            bool too_big = false;
+            const bool read_ok = reader([&](const char* data, size_t n) {
+                if (body.size() + n > impl.endpoint.max_body_bytes()) {
+                    too_big = true;
+                    return false;
+                }
+                body.append(data, n);
+                return true;
+            });
+            if (!read_ok) {
+                HttpResponse failure;
+                failure.status = too_big ? 413 : 400;
+                failure.body = too_big ? R"({"error_code":"PAYLOAD_TOO_LARGE","message":"request body too large"})"
+                                       : R"({"error_code":"BAD_REQUEST","message":"request body could not be read"})";
+                failure.set_header("Content-Type", "application/json");
+                write_rejection(res, std::move(failure));
+                return;
+            }
+            request.body = std::move(body);
+            write_response(req, res, impl.endpoint.handle_authenticated(request, pre.principal));
         } catch (const std::exception& e) {
             spdlog::error("HTTP handler failed: {}", e.what());
             res.status = 500;
             res.set_content(R"({"error_code":"INTERNAL_ERROR","message":"internal error"})", "application/json");
         }
-    });
+    };
+    impl.svr.Post(path, handler);
+    // Any other request that could carry a body is refused the same way (no body is read for a wrong path or
+    // method); precheck answers 404/405 and the connection is closed.
+    impl.svr.Post(R"(.*)", handler);
+    impl.svr.Put(R"(.*)", handler);
+    impl.svr.Patch(R"(.*)", handler);
+    impl.svr.Delete(R"(.*)", handler);
     impl.svr.set_error_handler([](const httplib::Request& req, httplib::Response& res) {
-        if (!res.body.empty() || res.status < 400) return;
+        if (!res.body.empty() || res.status < 400 || res.get_header_value("Connection") == "close") return;
         // Payload too large / bad request raised by the library itself: same JSON shape as ours.
         res.set_content("{\"error_code\":\"HTTP_" + std::to_string(res.status) + "\",\"message\":\"request rejected\"}",
                         "application/json");
