@@ -56,6 +56,11 @@ private:
     /// \return Connection if successful, error Result otherwise
     ResultT<Connection> resolve_and_validate_connection(std::optional<int> explicit_conn_id);
 
+    /// When several cache files exist, delete those whose SAP session is
+    /// confirmed gone so auto-detect is not blocked by stale files.
+    /// Entries whose liveness cannot be determined are kept.
+    std::vector<int> prune_dead_entries();
+
 public:
     CommandHandler();
 
