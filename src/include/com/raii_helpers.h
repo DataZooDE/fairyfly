@@ -12,7 +12,8 @@ namespace com {
 /// Automatically calls VariantInit on construction and VariantClear on destruction
 class VariantGuard {
 private:
-    VARIANT* var_;
+    VARIANT inline_var_{};
+    VARIANT* var_ = nullptr;
 
     // Non-copyable
     VariantGuard(const VariantGuard&) = delete;
@@ -27,8 +28,7 @@ public:
     }
 
     /// Construct for standalone VARIANT (stack-allocated)
-    VariantGuard() {
-        var_ = new VARIANT;
+    VariantGuard() : var_(&inline_var_) {
         VariantInit(var_);
     }
 

@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace fairyfly {
 namespace sap {
@@ -25,6 +26,20 @@ struct TableData {
     int total_row_count = 0;
     int visible_row_count = 0;
 };
+
+/// Read a bounded grid using a column order resolved once for the whole grid.
+std::vector<std::vector<std::string>> read_grid_rows(
+    int row_count, int col_count, int max_rows,
+    const std::vector<std::string>& column_names,
+    const std::function<std::string(int, const std::string&)>& read_cell);
+
+/// Read-only GuiGridView viewport position for validating scroll-dependent data.
+json extract_grid_viewport_metadata(ComGuiElementPtr grid);
+
+/// Recover a tree label from item columns when SAP returns empty node text.
+std::string recover_tree_node_text(
+    const std::string& primary, const std::vector<std::string>& column_names,
+    const std::function<std::string(const std::string&)>& read_item);
 
 /// Extracted tree node structure
 struct TreeNode {
@@ -63,9 +78,6 @@ public:
 
 private:
     TableExtractionOptions options_;
-
-    /// Get cell value from grid at specified position
-    std::string get_grid_cell_value(ComGuiElementPtr grid, int row, int col) const;
 
     /// Get column names from grid or table
     std::vector<std::string> get_column_names(ComGuiElementPtr element) const;

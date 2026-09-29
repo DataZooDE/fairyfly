@@ -1,11 +1,58 @@
 #include "include/sap_gui_base.h"
+#include "include/com/utf8.h"
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
+#include <unordered_map>
+#include <mutex>
 
 namespace fairyfly {
 namespace sap {
 
 using fairyfly::utils::TraceGuard;
+
+// Static type-level DISPID cache: map<type_name, map<prop_name, DISPID>>
+static std::unordered_map<std::string, std::unordered_map<std::wstring, DISPID>> s_type_dispid_cache;
+static std::mutex s_dispid_cache_mutex;
+
+void SapGuiObject::clear_dispid_cache() {
+    std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+    s_type_dispid_cache.clear();
+}
+
+HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const {
+    if (!dispatch_ || !name || !dispid) return E_POINTER;
+
+    std::string type_name;
+    {
+        std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+        if (type_cached_) {
+            type_name = cached_type_;
+        }
+        if (!type_name.empty()) {
+            auto type_it = s_type_dispid_cache.find(type_name);
+            if (type_it != s_type_dispid_cache.end()) {
+                auto prop_it = type_it->second.find(name);
+                if (prop_it != type_it->second.end()) {
+                    *dispid = prop_it->second;
+                    return S_OK;
+                }
+            }
+        }
+    }
+
+    // Slow path: resolve via ITypeInfo
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, dispid);
+    if (SUCCEEDED(hr)) {
+        std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+        if (type_name.empty() && type_cached_) {
+            type_name = cached_type_;
+        }
+        if (!type_name.empty()) {
+            s_type_dispid_cache[type_name][name] = *dispid;
+        }
+    }
+    return hr;
+}
 
 // ============================================================================
 // SapGuiObject Implementation
@@ -27,9 +74,9 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
         return "";
     }
 
-    // Get DISPID using ITypeInfo pattern (required for SAP GUI)
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::debug("get_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -58,8 +105,8 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
 
     // Convert to string
     if (result.vt == VT_BSTR && result.bstrVal) {
-        std::string value = (const char*)_bstr_t(result.bstrVal);
-        spdlog::debug("get_string_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+        std::string value = com::bstr_to_utf8(result.bstrVal);
+        spdlog::debug("get_string_property|success|prop={}", (const char*)_bstr_t(name));
         return value;
     }
 
@@ -75,9 +122,9 @@ int SapGuiObject::get_int_property(const wchar_t* name) const {
         return 0;
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::debug("get_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -123,9 +170,9 @@ bool SapGuiObject::get_bool_property(const wchar_t* name) const {
         return false;
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::debug("get_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -171,9 +218,9 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
         return nullptr;
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::debug("get_dispatch_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -218,9 +265,9 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_string_property");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                      (const char*)_bstr_t(name), (unsigned int)hr);
@@ -228,7 +275,8 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
     }
 
     // Prepare parameters
-    _variant_t var_value(value.c_str());
+    const auto wide_value = com::utf8_to_wide(value);
+    _variant_t var_value(wide_value.c_str());
     DISPID dispid_named = DISPID_PROPERTYPUT;
     DISPPARAMS params;
     params.rgvarg = &var_value;
@@ -249,12 +297,12 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
     );
 
     if (FAILED(hr)) {
-        spdlog::error("set_string_property|Invoke failed|prop={}|value={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), value, (unsigned int)hr);
+        spdlog::error("set_string_property|Invoke failed|prop={}|hr={:#010x}",
+                     (const char*)_bstr_t(name), (unsigned int)hr);
         throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_string_property");
     }
 
-    spdlog::debug("set_string_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+    spdlog::debug("set_string_property|success|prop={}", (const char*)_bstr_t(name));
 }
 
 void SapGuiObject::set_int_property(const wchar_t* name, int value) {
@@ -265,9 +313,9 @@ void SapGuiObject::set_int_property(const wchar_t* name, int value) {
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_int_property");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                      (const char*)_bstr_t(name), (unsigned int)hr);
@@ -312,9 +360,9 @@ void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_bool_property");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                      (const char*)_bstr_t(name), (unsigned int)hr);
@@ -359,9 +407,9 @@ IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) co
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_dispatch");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
+    HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_dispatch|GetIDsOfNames failed|method={}|hr={:#010x}",
                      (const char*)_bstr_t(method_name), (unsigned int)hr);
@@ -405,9 +453,9 @@ void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const s
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_string");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
+    HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_string|GetIDsOfNames failed|method={}|hr={:#010x}",
                      (const char*)_bstr_t(method_name), (unsigned int)hr);
@@ -415,7 +463,8 @@ void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const s
     }
 
     // Prepare parameters
-    _variant_t var_param(param.c_str());
+    const auto wide_param = com::utf8_to_wide(param);
+    _variant_t var_param(wide_param.c_str());
     DISPPARAMS params;
     params.rgvarg = &var_param;
     params.rgdispidNamedArgs = nullptr;
@@ -451,9 +500,9 @@ void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param)
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_int");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
+    HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_int|GetIDsOfNames failed|method={}|hr={:#010x}",
                      (const char*)_bstr_t(method_name), (unsigned int)hr);
@@ -497,9 +546,9 @@ void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_void");
     }
 
-    // Get DISPID using ITypeInfo pattern
+    // Get DISPID using cached type lookup (falling back to ITypeInfo)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
+    HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_void|GetIDsOfNames failed|method={}|hr={:#010x}",
                      (const char*)_bstr_t(method_name), (unsigned int)hr);
@@ -557,8 +606,22 @@ std::string SapGuiObject::get_name() const {
 }
 
 bool SapGuiObject::operator==(const SapGuiObject& other) const {
-    // Compare by COM object pointer identity
-    return dispatch_ == other.dispatch_;
+    if (!dispatch_ || !other.dispatch_) return dispatch_ == other.dispatch_;
+
+    IUnknown* this_identity = nullptr;
+    IUnknown* other_identity = nullptr;
+    const HRESULT this_hr = dispatch_->QueryInterface(IID_IUnknown,
+                                                     reinterpret_cast<void**>(&this_identity));
+    const HRESULT other_hr = other.dispatch_->QueryInterface(IID_IUnknown,
+                                                            reinterpret_cast<void**>(&other_identity));
+    const bool same = this_identity == other_identity;
+    if (this_identity) this_identity->Release();
+    if (other_identity) other_identity->Release();
+    if (FAILED(this_hr) || FAILED(other_hr)) {
+        throw SapGuiException("Could not determine COM object identity",
+                              FAILED(this_hr) ? this_hr : other_hr);
+    }
+    return same;
 }
 
 } // namespace sap

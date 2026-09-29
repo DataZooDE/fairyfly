@@ -1,78 +1,60 @@
 #include <catch2/catch_test_macros.hpp>
-#include <fstream>
 #include "include/connection_launcher.h"
-#include "include/com/wrapper.h"
-#ifdef _WIN32
-#include <windows.h>
-#include <filesystem>
-#else
-#include <filesystem>
-#endif
-
-using namespace fairyfly;
+#include "include/com/utf8.h"
+#include <shellapi.h>
 using namespace fairyfly::sap;
 
-TEST_CASE("ConnectionLauncher - Credential reading", "[connection][launcher]") {
-    // Note: ConnectionLauncher::read_credentials_from_env reads from "trial.env" 
-    // and doesn't take a file path parameter, so these tests check the actual behavior
-    // when trial.env exists in the working directory (which it does in this project)
-    
-    SECTION("Reads credentials from existing trial.env if present") {
-        // This test checks that the function works if trial.env exists
-        // We can't easily mock the file reading without changing the implementation,
-        // so we just verify the function doesn't crash
-        auto creds_opt = ConnectionLauncher::read_credentials_from_env("TEST");
-        // May or may not have value depending on whether trial.env exists and has credentials
-        // Just verify it doesn't throw
-        REQUIRE(true);
-    }
+TEST_CASE("ConnectionLauncher matches only the requested connection", "[connection][launcher]") {
+    REQUIRE(ConnectionLauncher::matches_connection_name("Bigfox", "Bigfox"));
+    REQUIRE(ConnectionLauncher::matches_connection_name(" bigFOX ", "BIGfox"));
+    REQUIRE_FALSE(ConnectionLauncher::matches_connection_name("Bigfox", "Production"));
+    REQUIRE_FALSE(ConnectionLauncher::matches_connection_name("", "Bigfox"));
+}
 
-    SECTION("Returns nullopt for missing file") {
-        // Since read_credentials_from_env hardcodes "trial.env", this test just
-        // verifies the function handles missing files gracefully (returns nullopt)
-        // The actual behavior depends on whether trial.env exists
-        auto creds_opt = ConnectionLauncher::read_credentials_from_env("NONEXISTENT");
-        // Function may return nullopt if file doesn't exist, or value if it does
-        // Just verify it doesn't throw
-        REQUIRE(true);
+TEST_CASE("Fallback session identity survives GUI path reuse", "[connection][launcher]") {
+    REQUIRE_FALSE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "old-system-session", "/app/con[0]/ses[0]",
+        "new-system-session", false));
+    REQUIRE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "same-system-session", "/app/con[1]/ses[0]",
+        "same-system-session", false));
+    REQUIRE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "", "/app/con[0]/ses[0]", "", false));
+    REQUIRE_FALSE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "old-system-session", "/app/con[0]/ses[0]", "", false));
+    REQUIRE_FALSE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "old-system-session", "/app/con[0]/ses[0]",
+        "new-system-session", true));
+    REQUIRE(ConnectionLauncher::was_present_before_launch(
+        "/app/con[0]/ses[0]", "old-system-session", "/app/con[0]/ses[0]", "", true));
+}
+
+TEST_CASE("sapshcut arguments survive Windows command-line parsing", "[connection][launcher]") {
+    CHECK(ConnectionLauncher::sapshcut_command_line(L"C:\\Program Files\\SAP\\sapshcut.exe", "Bigfox") ==
+          L"\"C:\\Program Files\\SAP\\sapshcut.exe\" -sysname=Bigfox -maxgui");
+    for (const std::string value : {"plain", "with space", "quote\"inside",
+                                    "trailing\\", "slash\\\"quote", "p\xC3\xA4ss"}) {
+        const std::wstring command = ConnectionLauncher::sapshcut_command_line(
+            L"C:\\Program Files\\SAP\\sapshcut.exe", value);
+        int count = 0;
+        LPWSTR* parsed = CommandLineToArgvW(command.c_str(), &count);
+        REQUIRE(parsed != nullptr);
+        CHECK(count == 3);
+        if (count == 3) {
+            CHECK(std::wstring(parsed[0]) == L"C:\\Program Files\\SAP\\sapshcut.exe");
+            CHECK(std::wstring(parsed[1]) ==
+                  L"-sysname=" + fairyfly::com::utf8_to_wide(value));
+            CHECK(std::wstring(parsed[2]) == L"-maxgui");
+        }
+        LocalFree(parsed);
     }
 }
 
-TEST_CASE("ConnectionLauncher - sapshcut launch", "[connection][launcher]") {
-    SECTION("Returns false when sapshcut not found") {
-        // Use a connection name that definitely doesn't exist
-        ConnectionLauncher::Credentials creds;
-        creds.system_id = "NONEXISTENT";
-        creds.client = "100";
-        creds.username = "test";
-        creds.password = "test";
-        creds.instance = "00";
-
-        // This should return false because sapshcut.exe won't be found
-        // (unless test environment has it, but that's unlikely)
-        bool result = ConnectionLauncher::launch_sapshcut("NONEXISTENT", creds);
-        // Result depends on test environment, so we just verify it doesn't crash
-        // and returns a boolean
-        REQUIRE((result == true || result == false));
-    }
-}
-
-TEST_CASE("ConnectionLauncher - Session waiting", "[connection][launcher][!mayfail]") {
-    // This test requires actual SAP GUI, so mark as mayfail
-    ComGuiApplicationPtr app;
-    try {
-        app = ComGuiApplication::create();
-    } catch (const ComException& e) {
-        SKIP("SAP GUI not available: " + std::string(e.what()));
-    }
-
-    ConnectionLauncher launcher(app);
-
-    SECTION("Returns null pointers when no session found") {
-        // This test will timeout if no SAP session exists
-        auto [conn, sess] = launcher.wait_for_session("NONEXISTENT", 1);  // Short timeout
-        REQUIRE(conn == nullptr);
-        REQUIRE(sess == nullptr);
-    }
+TEST_CASE("Shortcut security prompt stops session polling with a specific reason", "[connection][launcher]") {
+    ConnectionLauncher launcher(nullptr, [] { return true; });
+    const auto [connection, session] = launcher.wait_for_session("Bigfox", 5, {});
+    CHECK(connection == nullptr);
+    CHECK(session == nullptr);
+    CHECK(launcher.wait_failure() == ConnectionLauncher::WaitFailure::SecurityPrompt);
 }
 

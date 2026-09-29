@@ -18,7 +18,7 @@ void TreeFormatter::format_to_markdown(const json& element_json, std::ostringstr
     // Check if we have tree_data
     if (!element_json.contains("tree_data")) {
         oss << "_Tree structure not available_\n\n";
-        oss << "**Technical ID:** `" << id << "`\n\n";
+        oss << "**Tree ID:** `" << id << "`\n\n";
         return;
     }
 
@@ -26,55 +26,77 @@ void TreeFormatter::format_to_markdown(const json& element_json, std::ostringstr
     const auto& nodes = tree_data.value("nodes", json::array());
     const auto& columns = tree_data.value("columns", json::array());
 
-    // Display column headers if this is a column tree
-    if (!columns.empty() && columns.size() > 1) {
-        oss << "| Structure |";
-        for (const auto& col : columns) {
-            std::string col_name = col.get<std::string>();
+    // Show tree element ID prominently
+    oss << "**Tree ID:** `" << id << "`\n\n";
 
-            // Map SAP internal column names to friendly names
-            std::string display_name;
-            if (col_name.find("C") == 0) {
-                // Column format is "C          1", "C          3", etc.
-                std::string trimmed = col_name;
-                // Remove extra spaces
-                trimmed.erase(std::unique(trimmed.begin(), trimmed.end(),
-                    [](char a, char b) { return a == ' ' && b == ' '; }), trimmed.end());
-
-                // Map common column positions to names
-                if (trimmed == "C 1") display_name = "Type";
-                else if (trimmed == "C 3") display_name = "PL";
-                else if (trimmed == "C 4") display_name = "Comment";
-                else display_name = trimmed;
-            } else {
-                display_name = col_name;
-            }
-
-            oss << " " << escape_markdown(display_name) << " |";
+    // Check if nodes have column_values that differ from text (indicates table-like data)
+    bool has_column_values = false;
+    for (const auto& node : nodes) {
+        if (node.contains("column_values") && !node["column_values"].empty()) {
+            has_column_values = true;
+            break;
         }
-        oss << "\n|-----------|";
-        for (size_t i = 0; i < columns.size(); ++i) {
-            oss << "----------|";
+    }
+
+    // Display as table if we have column values OR multiple columns
+    bool use_table_format = (!columns.empty() && columns.size() > 1) || has_column_values;
+
+    if (use_table_format) {
+        // Table header with row number
+        oss << "| # | Text |";
+
+        // Add column headers - if we have column_values, show "Technical Name"
+        if (has_column_values && !columns.empty()) {
+            for (const auto& col : columns) {
+                std::string col_name = col.get<std::string>();
+
+                // Map SAP internal column names to friendly names
+                std::string display_name;
+                if (col_name.find("C") == 0) {
+                    // Column format is "C          1", "C          3", etc.
+                    std::string trimmed = col_name;
+                    trimmed.erase(std::unique(trimmed.begin(), trimmed.end(),
+                        [](char a, char b) { return a == ' ' && b == ' '; }), trimmed.end());
+
+                    if (trimmed == "C 1") display_name = "Type";
+                    else if (trimmed == "C 3") display_name = "PL";
+                    else if (trimmed == "C 4") display_name = "Comment";
+                    else display_name = trimmed;
+                } else if (col_name == "Name") {
+                    display_name = "Technical Name";
+                } else {
+                    display_name = col_name;
+                }
+
+                oss << " " << escape_markdown(display_name) << " |";
+            }
+        }
+        oss << "\n|:--|:---------|";
+
+        // Add column separators
+        if (has_column_values && !columns.empty()) {
+            for (size_t i = 0; i < columns.size(); ++i) {
+                oss << "---------------|";
+            }
         }
         oss << "\n";
+
+        // Format each top-level node as table row
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            format_tree_node_table(nodes[i], oss, static_cast<int>(i), 0);
+        }
     } else {
         // Simple tree with no columns
         oss << "```\n";
-    }
-
-    // Format each top-level node
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        bool is_last = (i == nodes.size() - 1);
-        format_tree_node(nodes[i], oss, "", is_last, 0);
-    }
-
-    if (columns.empty() || columns.size() <= 1) {
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            bool is_last = (i == nodes.size() - 1);
+            format_tree_node(nodes[i], oss, "", is_last, 0);
+        }
         oss << "```\n";
     }
 
-    oss << "\n**Technical ID:** `" << id << "`\n\n";
-
-    // Add note about total nodes
+    // Add usage hint for tree interaction
+    oss << "\n_Select node_: `fairyfly click '" << id << "' --row <row_number>`\n";
     oss << "_Showing " << nodes.size() << " top-level nodes_\n\n";
 }
 
@@ -86,7 +108,6 @@ void TreeFormatter::format_tree_node(
     int level
 ) const {
     std::string text = node.value("text", "");
-    bool expanded = node.value("expanded", false);
     auto column_values = node.value("column_values", json::array());
     auto children = node.value("children", json::array());
 
@@ -124,6 +145,31 @@ void TreeFormatter::format_tree_node(
 
 std::string TreeFormatter::get_branch_char(bool is_last) const {
     return is_last ? "+--" : "|--";
+}
+
+void TreeFormatter::format_tree_node_table(
+    const json& node,
+    std::ostringstream& oss,
+    int row_index,
+    int level
+) const {
+    std::string text = node.value("text", "");
+    auto column_values = node.value("column_values", json::array());
+    auto children = node.value("children", json::array());
+
+    // Row number and text
+    std::string indent(level * 2, ' ');  // Indent child nodes
+    oss << "| " << row_index << " | " << indent << "**" << escape_markdown(text) << "** |";
+
+    // Column values (technical names, etc.)
+    for (const auto& val : column_values) {
+        std::string cell_value = val.is_string() ? val.get<std::string>() : "";
+        oss << " " << escape_markdown(cell_value) << " |";
+    }
+    oss << "\n";
+
+    // Note: Not recursing into children for table format to keep it flat
+    // Could be enhanced later if needed
 }
 
 } // namespace formatters

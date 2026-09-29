@@ -15,11 +15,13 @@ public:
         cmd_ = app.add_subcommand(name(), description());
         cmd_->add_option("connection", connection_name_, "Connection name (e.g., PRD, DEV)")
             ->required();
+        cmd_->add_flag("--allow-sapshcut", allow_sapshcut_,
+            "Allow sapshcut to open a SAP Logon entry when native COM cannot; log in separately");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_launch(connection_name_);
+        return handler.handle_launch(connection_name_, allow_sapshcut_);
     }
 
     bool was_invoked() const override {
@@ -29,6 +31,7 @@ public:
 private:
     CLI::App* cmd_ = nullptr;
     std::string connection_name_;
+    bool allow_sapshcut_ = false;
 };
 
 // Factory function

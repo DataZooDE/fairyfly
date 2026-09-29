@@ -5,7 +5,7 @@ namespace fairyfly {
 namespace formatters {
 
 bool TableFormatter::can_format(const std::string& type) const {
-    return type == "GuiGridView" || type == "GuiTableControl";
+    return type == "GuiGridView" || type == "GuiTableControl" || type == "GuiUserArea";
 }
 
 void TableFormatter::format_to_markdown(const json& element_json, std::ostringstream& oss) const {
@@ -16,8 +16,15 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
     // Header
     oss << "### " << (name.empty() ? "Table" : escape_markdown(name)) << "\n\n";
 
-    // Check if we have table_data
-    if (!element_json.contains("table_data")) {
+    // Check if we have table_data or grid_data
+    const json* data_ptr = nullptr;
+    if (element_json.contains("table_data") && !element_json["table_data"].is_null()) {
+        data_ptr = &element_json["table_data"];
+    } else if (element_json.contains("grid_data") && !element_json["grid_data"].is_null()) {
+        data_ptr = &element_json["grid_data"];
+    }
+
+    if (!data_ptr || (!data_ptr->contains("columns") && !data_ptr->contains("rows"))) {
         oss << "_Table data not available_\n\n";
         oss << "| Property | Value |\n";
         oss << "|----------|-------|\n";
@@ -26,7 +33,7 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
         return;
     }
 
-    const auto& table_data = element_json["table_data"];
+    const auto& table_data = *data_ptr;
 
     // Show metadata
     oss << "| Property | Value |\n";
@@ -49,11 +56,12 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
     format_table_data(table_data, oss);
 
     // Add usage examples
-    if (type == "GuiGridView") {
+    if (type == "GuiGridView" ||
+        (type == "GuiShell" && element_json.value("subtype", "") == "GridView")) {
         oss << "**Usage Examples:**\n";
         oss << "```bash\n";
-        oss << "# Read cell value\n";
-        oss << "fairyfly get '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
+        oss << "# Select a row\n";
+        oss << "fairyfly click '" << id << "' --row 0 --column 'COLUMN_NAME'\n\n";
         oss << "# Set cell value\n";
         oss << "fairyfly fill '" << id << "' 'value' --row 0 --column 'COLUMN_NAME'\n";
         oss << "```\n\n";
@@ -98,7 +106,7 @@ void TableFormatter::format_table_data(
             }
         }
 
-        // Cap maximum width at 50 characters per column
+        // Cap padding, but keep the full cell value in the Markdown output.
         for (auto& width : col_widths) {
             width = std::min(width, size_t(50));
         }
@@ -133,11 +141,6 @@ void TableFormatter::format_table_data(
                     cell_value = "_empty_";
                 }
                 std::string escaped = escape_markdown(cell_value);
-
-                // Truncate if necessary
-                if (escaped.length() > 50) {
-                    escaped = escaped.substr(0, 47) + "...";
-                }
 
                 oss << " " << escaped;
                 // Pad to column width

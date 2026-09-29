@@ -8,6 +8,7 @@ namespace commands {
 // Command factory functions (defined in each command file)
 std::unique_ptr<CommandBase> create_attach_command();
 std::unique_ptr<CommandBase> create_launch_command();
+std::unique_ptr<CommandBase> create_login_command();
 std::unique_ptr<CommandBase> create_disconnect_command();
 std::unique_ptr<CommandBase> create_connections_command();
 std::unique_ptr<CommandBase> create_tcode_command();
@@ -17,13 +18,17 @@ std::unique_ptr<CommandBase> create_get_command();
 std::unique_ptr<CommandBase> create_list_command();
 std::unique_ptr<CommandBase> create_screen_command();
 std::unique_ptr<CommandBase> create_serve_command();
+std::unique_ptr<CommandBase> create_press_f4_command();
+std::unique_ptr<CommandBase> create_doctor_command();
 
 void register_all_commands() {
     auto& registry = CommandRegistry::instance();
+    registry.clear();
 
     // Register all commands explicitly
     registry.register_command(create_attach_command());
     registry.register_command(create_launch_command());
+    registry.register_command(create_login_command());
     registry.register_command(create_disconnect_command());
     registry.register_command(create_connections_command());
     registry.register_command(create_tcode_command());
@@ -33,6 +38,8 @@ void register_all_commands() {
     registry.register_command(create_list_command());
     registry.register_command(create_screen_command());
     registry.register_command(create_serve_command());
+    registry.register_command(create_press_f4_command());
+    registry.register_command(create_doctor_command());
 }
 
 } // namespace commands

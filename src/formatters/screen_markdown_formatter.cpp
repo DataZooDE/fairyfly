@@ -31,15 +31,15 @@ namespace {
     std::string format_boolean_state(const std::string& type, bool selected);
     bool is_form_field(const std::string& type);
     void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
-                      const std::map<std::string, std::string>& label_map);
-    void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table);
+                      const std::map<std::string, std::string>& label_map, bool compact = false);
+    void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table, bool compact = false);
     void add_form_elements_recursive(const json& element, formatters::MarkdownTableFormatter& table,
                                     const std::map<std::string, std::string>& label_map,
-                                    std::set<std::string>& rendered_ids, int depth = 0);
+                                    std::set<std::string>& rendered_ids, int depth = 0, bool compact = false);
     void format_table_element(std::ostringstream& oss, const json& elem);
 }
 
-std::string ScreenMarkdownFormatter::format(const json& data) {
+std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
     std::ostringstream oss;
 
     // Screen title, transaction code, and ID
@@ -59,7 +59,9 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         oss << "**Transaction:** `" << transaction << "`\n\n";
     }
 
-    oss << "**Screen ID:** `" << screen_id << "`\n\n";
+    if (!compact) {
+        oss << "**Screen ID:** `" << screen_id << "`\n\n";
+    }
 
     // Check if we have hierarchy data
     if (!data.contains("hierarchy")) {
@@ -99,6 +101,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
             std::vector<json> menu_items;
             for (const auto& elem : hierarchy["other"]) {
+                if (!elem.is_object()) continue;
                 std::string type = elem.value("type", "");
                 std::string id = elem.value("id", "");
                 if (type == "GuiMenu" && id.find("/mbar/menu[") != std::string::npos) {
@@ -123,6 +126,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) {
             oss << "## Buttons\n\n";
             for (const auto& elem : hierarchy["buttons"]) {
+                if (!elem.is_object()) continue;
                 std::string label = elem.value("text", "");
                 if (label.empty()) {
                     label = elem.value("name", "Button");
@@ -142,7 +146,8 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         // IMPORTANT: Also render non-grid elements for report content
         // Report logs use individual GuiLabel elements with grid positions
         // Collect labels by row and format them together
-        if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
+        if ((hierarchy.contains("other") && !hierarchy["other"].empty()) ||
+            (hierarchy.contains("form_fields") && !hierarchy["form_fields"].empty())) {
             struct LabelInfo {
                 std::string text;
                 int row;
@@ -151,8 +156,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             std::vector<LabelInfo> labels;
 
             std::function<void(const json&, int)> collect_labels = [&](const json& elem, int depth) {
-                if (depth > MAX_RECURSION_DEPTH) {
-                    spdlog::warn("Max recursion depth reached in collect_labels");
+                if (depth > MAX_RECURSION_DEPTH || !elem.is_object()) {
                     return;
                 }
 
@@ -166,7 +170,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
                     trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
                     trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
 
-                    if (!trimmed.empty() && trimmed.length() > 2) {
+                    if (!trimmed.empty()) {
                         LabelInfo info;
                         info.text = trimmed;
                         info.row = elem.value("grid_row", -1);
@@ -176,16 +180,21 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
                 }
 
                 // Recurse into children
-                if (elem.contains("children") && elem["children"].is_array()) {
+                if (elem.contains("children") && elem["children"].is_array() && !elem["children"].empty()) {
                     for (const auto& child : elem["children"]) {
-                        collect_labels(child, depth + 1);
+                        if (child.is_object()) {
+                            collect_labels(child, depth + 1);
+                        }
                     }
                 }
             };
 
             // Collect all labels
-            for (const auto& elem : hierarchy["other"]) {
-                collect_labels(elem, 0);
+            for (const char* group : {"other", "form_fields"}) {
+                if (!hierarchy.contains(group) || !hierarchy[group].is_array()) continue;
+                for (const auto& elem : hierarchy[group]) {
+                    if (elem.is_object()) collect_labels(elem, 0);
+                }
             }
 
             // Group labels by row and format them
@@ -206,9 +215,19 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
                 // Render row by row
                 oss << "## Report Output\n\n";
                 oss << "```\n";
+                int previous_row = -1;
                 for (const auto& [row, row_labels] : rows) {
+                    if (previous_row >= 0 && row > previous_row + 1) {
+                        // Preserve report step separators without letting a bad
+                        // screen coordinate create an unbounded Markdown body.
+                        oss << std::string(static_cast<size_t>(
+                            std::min(row - previous_row - 1, 20)), '\n');
+                    }
                     // Combine labels in the same row
                     std::string line;
+                    if (row_labels.size() == 1 && row_labels[0].col > 0) {
+                        line.append(static_cast<size_t>(std::min(row_labels[0].col, 80)), ' ');
+                    }
                     for (size_t i = 0; i < row_labels.size(); ++i) {
                         if (i > 0) line += " ";
                         line += row_labels[i].text;
@@ -216,6 +235,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
                     if (!line.empty()) {
                         oss << line << "\n";
                     }
+                    previous_row = row;
                 }
                 oss << "```\n\n";
             }
@@ -286,6 +306,16 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         }
     }
 
+    // GuiGridView has a built-in toolbar whose buttons are exposed on the grid.
+    if (hierarchy.contains("tables") && hierarchy["tables"].is_array()) {
+        for (const auto& table_elem : hierarchy["tables"]) {
+            if (!table_elem.is_object() || !table_elem.contains("toolbar_buttons") ||
+                !table_elem["toolbar_buttons"].is_array()) continue;
+            for (const auto& button : table_elem["toolbar_buttons"])
+                all_buttons.push_back(button);
+        }
+    }
+
     // Render buttons table if we have any buttons
     if (!all_buttons.empty()) {
         oss << "## Toolbar Buttons\n\n";
@@ -318,6 +348,48 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         oss << "_Click with_: `fairyfly click '@active/<button_path>'`\n\n";
     }
 
+    // Status Bar section - extract from "other" category
+    if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
+        // Find status bar elements (GuiStatusbar and GuiStatusPane)
+        std::vector<json> status_panes;
+        for (const auto& elem : hierarchy["other"]) {
+            std::string type = elem.value("type", "");
+            std::string id = elem.value("id", "");
+
+            // Look for GuiStatusPane elements with content
+            if (type == "GuiStatusPane" && id.find("/sbar/pane[") != std::string::npos) {
+                std::string text = elem.value("text", "");
+                // Only include panes with non-empty, non-whitespace text
+                std::string trimmed = text;
+                trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
+                trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
+
+                if (!trimmed.empty()) {
+                    status_panes.push_back(elem);
+                }
+            }
+        }
+
+        // Render status bar if we have any non-empty panes
+        if (!status_panes.empty()) {
+            oss << "## ⚠️ Status Messages\n\n";
+
+            for (const auto& pane : status_panes) {
+                std::string text = pane.value("text", "");
+                std::string id = pane.value("id", "");
+
+                // First pane (pane[0]) is typically the main message - render prominently
+                if (id.find("pane[0]") != std::string::npos) {
+                    oss << "**" << escape_markdown(text) << "**\n\n";
+                } else {
+                    // Other panes are system info - render less prominently
+                    oss << "_" << escape_markdown(text) << "_  \n";
+                }
+            }
+            oss << "\n";
+        }
+    }
+
     // Form fields and content section - walk DOM tree to maintain spatial layout
     if (data.contains("elements") && data["elements"].is_array() && !data["elements"].empty()) {
         // Check if we have any form fields or inline buttons
@@ -330,12 +402,14 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             table.add_column("Field", formatters::MarkdownTableFormatter::Alignment::Left);
             table.add_column("Value", formatters::MarkdownTableFormatter::Alignment::Left);
             table.add_column("State", formatters::MarkdownTableFormatter::Alignment::Left);
-            table.add_column("Technical ID", formatters::MarkdownTableFormatter::Alignment::Left);
+            if (!compact) {
+                table.add_column("Technical ID", formatters::MarkdownTableFormatter::Alignment::Left);
+            }
 
             // Walk the element tree to add rows in DOM order
             std::set<std::string> rendered_ids;  // Track rendered elements to avoid duplicates
             for (const auto& root_elem : data["elements"]) {
-                add_form_elements_recursive(root_elem, table, label_map, rendered_ids);
+                add_form_elements_recursive(root_elem, table, label_map, rendered_ids, 0, compact);
             }
 
             // Render the table
@@ -408,10 +482,23 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
 
                         // Build row
                         oss << "| ";
+                        std::string field_name;
                         if (!label_text.empty()) {
-                            oss << "**" << escape_markdown(label_text) << "**";
+                            field_name = label_text;
                         } else {
-                            oss << escape_markdown(name);
+                            field_name = name;
+                        }
+
+                        // Add F4 search help indicator for GuiCTextField
+                        bool has_f4_help = elem.value("has_f4_help", false);
+                        if (has_f4_help) {
+                            field_name += " (F4 Search)";  // F4 search help available
+                        }
+
+                        if (!label_text.empty()) {
+                            oss << "**" << escape_markdown(field_name) << "**";
+                        } else {
+                            oss << escape_markdown(field_name);
                         }
                         oss << " | " << value_str;
                         oss << " | " << state_icon;
@@ -529,6 +616,26 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         }
     }
 
+    // Main-screen ABAP editors are grouped under "other", rather than tabs.
+    if (hierarchy.contains("other") && hierarchy["other"].is_array()) {
+        for (const auto& elem : hierarchy["other"]) {
+            if (!elem.is_object() || elem.value("type", "") != "GuiShell" ||
+                elem.value("subtype", "") != "AbapEditor" ||
+                !elem.contains("text_content") || !elem["text_content"].is_string()) continue;
+            const auto& source = elem["text_content"].get_ref<const std::string&>();
+            if (source.empty()) continue;
+            size_t fence_length = 3;
+            while (source.find(std::string(fence_length, '`')) != std::string::npos)
+                ++fence_length;
+            const std::string fence(fence_length, '`');
+            oss << "## ABAP Source\n\n" << fence << "abap\n" << source << "\n" << fence << "\n\n";
+            if (elem.value("source_truncated", false)) {
+                oss << "_Showing " << elem.value("source_lines_read", 0) << " of "
+                    << elem.value("source_total_lines", 0) << " source lines_\n\n";
+            }
+        }
+    }
+
     // Additional screen content (text editors, trees, etc.) shown inline
     if (hierarchy.contains("other") && !hierarchy["other"].empty()) {
         auto& registry = sap::ElementRendererRegistry::instance();
@@ -538,6 +645,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
         std::set<std::string> child_ids;
 
         for (const auto& elem : hierarchy["other"]) {
+            if (!elem.is_object()) continue;
             std::string id = elem.value("id", "");
             if (!id.empty()) {
                 all_ids.insert(id);
@@ -546,11 +654,16 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
 
         // Collect all IDs that appear as children of other elements
         for (const auto& elem : hierarchy["other"]) {
-            if (elem.contains("children") && elem["children"].is_array()) {
+            if (!elem.is_object()) continue;
+            if (elem.contains("children") && elem["children"].is_array() && !elem["children"].empty()) {
                 for (const auto& child : elem["children"]) {
-                    std::string child_id = child.value("id", "");
-                    if (!child_id.empty()) {
-                        child_ids.insert(child_id);
+                    if (child.is_string() && !child.get<std::string>().empty()) {
+                        child_ids.insert(child.get<std::string>());
+                    } else if (child.is_object()) {
+                        std::string child_id = child.value("id", "");
+                        if (!child_id.empty()) {
+                            child_ids.insert(child_id);
+                        }
                     }
                 }
             }
@@ -558,8 +671,7 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
 
         // Recursively find and render semantic elements
         std::function<void(const json&, int)> render_semantic_descendants = [&](const json& elem, int depth) {
-            if (depth > MAX_RECURSION_DEPTH) {
-                spdlog::warn("Max recursion depth reached in render_semantic_descendants");
+            if (depth > MAX_RECURSION_DEPTH || !elem.is_object()) {
                 return;
             }
 
@@ -567,28 +679,40 @@ std::string ScreenMarkdownFormatter::format(const json& data) {
             std::string subtype = elem.value("subtype", "");
 
             // Check if this element is truly semantic (has meaningful content)
-            bool is_truly_semantic = (subtype == "TextEdit") ||
+            bool is_truly_semantic = (subtype == "TextEdit" || subtype == "HTMLViewer") ||
                                     (subtype == "Tree" || elem.contains("tree_data")) ||
                                     (subtype == "GridView" || elem.contains("table_data"));
 
             if (is_truly_semantic && sap::SemanticClassifier::should_display(elem)) {
-                std::string rendered = registry.render_to_markdown(elem, 0);
-                if (!rendered.empty()) {
-                    oss << rendered;
+                try {
+                    std::string id = elem.value("id", "<no-id>");
+                    spdlog::debug("Rendering semantic element: type={}, subtype={}, id={}", type, subtype, id);
+                    std::string rendered = registry.render_to_markdown(elem, 0);
+                    if (!rendered.empty()) {
+                        oss << rendered;
+                    }
+                    spdlog::debug("Successfully rendered element: {}", id);
+                } catch (const std::exception& e) {
+                    std::string id = elem.value("id", "<no-id>");
+                    spdlog::error("Failed to render element {}: {}", id, e.what());
+                    // Continue processing other elements instead of crashing
                 }
                 return; // Don't recurse into children if we rendered this element
             }
 
             // Otherwise, recurse into children
-            if (elem.contains("children") && elem["children"].is_array()) {
+            if (elem.contains("children") && elem["children"].is_array() && !elem["children"].empty()) {
                 for (const auto& child : elem["children"]) {
-                    render_semantic_descendants(child, depth + 1);
+                    if (child.is_object()) {
+                        render_semantic_descendants(child, depth + 1);
+                    }
                 }
             }
         };
 
         // Start from top-level elements only
         for (const auto& elem : hierarchy["other"]) {
+            if (!elem.is_object()) continue;
             std::string id = elem.value("id", "");
             bool is_top_level = (id.empty() || child_ids.find(id) == child_ids.end());
 
@@ -684,6 +808,7 @@ void format_menu(const json& menu, std::ostringstream& oss, const std::string& /
             // Show first-level children inline
             std::vector<std::string> items;
             for (const auto& child : children) {
+                if (!child.is_object()) continue;
                 std::string child_text = child.value("text", child.value("name", ""));
                 if (!child_text.empty()) {
                     items.push_back(child_text);
@@ -739,7 +864,7 @@ bool is_form_field(const std::string& type) {
 }
 
 void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
-                  const std::map<std::string, std::string>& label_map) {
+                  const std::map<std::string, std::string>& label_map, bool compact) {
     std::string type = elem.value("type", "");
 
     // Skip labels - they're used for semantic context only
@@ -753,6 +878,20 @@ void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
     bool changeable = elem.value("changeable", false);
     bool enabled = elem.value("enabled", true);
     bool selected = elem.value("selected", false);
+
+    // In compact mode, skip empty and disabled fields
+    if (compact) {
+        // Skip if field is not enabled
+        if (!enabled) {
+            return;
+        }
+        // Skip if field is empty (text is empty or whitespace only) and not a checkbox/radiobutton
+        if (text.empty() &&
+            type.find("CheckBox") == std::string::npos &&
+            type.find("RadioButton") == std::string::npos) {
+            return;
+        }
+    }
 
     // Get label for this field
     std::string label = "";
@@ -773,6 +912,13 @@ void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
 
     // Field name with optional tooltip as description
     std::string field_col = label;
+
+    // Add F4 search help indicator for GuiCTextField
+    bool has_f4_help = elem.value("has_f4_help", false);
+    if (has_f4_help) {
+        field_col += " (F4 Search)";  // F4 search help available
+    }
+
     if (!tooltip.empty()) {
         field_col += "\n" + tooltip;  // Will be converted to <br> by formatter
     }
@@ -792,19 +938,28 @@ void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
     // State column
     std::string state_col = get_state_icon(enabled, changeable, type);
 
-    // Technical ID column
-    std::string id_col = id;
-
     // Add row with styles
-    std::vector<std::string> cells = {field_col, value_col, state_col, id_col};
-    std::vector<formatters::MarkdownTableFormatter::CellStyle> styles(4);
-    styles[0].bold = true;  // Field name in bold
-    styles[3].code = true;  // Technical ID in code
+    std::vector<std::string> cells;
+    std::vector<formatters::MarkdownTableFormatter::CellStyle> styles;
+
+    if (compact) {
+        // Compact mode: Field, Value, State (no Technical ID)
+        cells = {field_col, value_col, state_col};
+        styles.resize(3);
+        styles[0].bold = true;  // Field name in bold
+    } else {
+        // Full mode: Field, Value, State, Technical ID
+        std::string id_col = id;
+        cells = {field_col, value_col, state_col, id_col};
+        styles.resize(4);
+        styles[0].bold = true;  // Field name in bold
+        styles[3].code = true;  // Technical ID in code
+    }
 
     table.add_row(cells, styles);
 }
 
-void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table) {
+void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table, bool compact) {
     std::string label = elem.value("text", "");
     if (label.empty()) {
         label = elem.value("name", "Button");
@@ -813,23 +968,39 @@ void add_button_row(const json& elem, formatters::MarkdownTableFormatter& table)
     std::string id = elem.value("id", "");
     bool enabled = elem.value("enabled", true);
 
+    // In compact mode, skip disabled buttons
+    if (compact && !enabled) {
+        return;
+    }
+
     // Button as table row with special formatting
     std::string field_col = "[Button: " + label + "]";
     std::string value_col = "-";
     std::string state_col = enabled ? "Enabled" : "Disabled";
-    std::string id_col = id;
 
-    std::vector<std::string> cells = {field_col, value_col, state_col, id_col};
-    std::vector<formatters::MarkdownTableFormatter::CellStyle> styles(4);
-    styles[0].bold = true;  // Button label in bold
-    styles[3].code = true;  // Technical ID in code
+    std::vector<std::string> cells;
+    std::vector<formatters::MarkdownTableFormatter::CellStyle> styles;
+
+    if (compact) {
+        // Compact mode: no Technical ID column
+        cells = {field_col, value_col, state_col};
+        styles.resize(3);
+        styles[0].bold = true;
+    } else {
+        // Full mode: include Technical ID
+        std::string id_col = id;
+        cells = {field_col, value_col, state_col, id_col};
+        styles.resize(4);
+        styles[0].bold = true;
+        styles[3].code = true;
+    }
 
     table.add_row(cells, styles);
 }
 
 void add_form_elements_recursive(const json& element, formatters::MarkdownTableFormatter& table,
                                 const std::map<std::string, std::string>& label_map,
-                                std::set<std::string>& rendered_ids, int depth) {
+                                std::set<std::string>& rendered_ids, int depth, bool compact) {
     if (depth > MAX_RECURSION_DEPTH) {
         spdlog::warn("Max recursion depth reached in add_form_elements_recursive");
         return;
@@ -857,18 +1028,20 @@ void add_form_elements_recursive(const json& element, formatters::MarkdownTableF
 
     // Render form fields as table rows
     if (is_form_field(type)) {
-        add_field_row(element, table, label_map);
+        add_field_row(element, table, label_map, compact);
     }
 
     // Render inline buttons (in /usr/) as special table rows
     if (type == "GuiButton" && id.find("/usr/") != std::string::npos) {
-        add_button_row(element, table);
+        add_button_row(element, table, compact);
     }
 
     // Recurse into children
-    if (element.contains("children") && element["children"].is_array()) {
+    if (element.contains("children") && element["children"].is_array() && !element["children"].empty()) {
         for (const auto& child : element["children"]) {
-            add_form_elements_recursive(child, table, label_map, rendered_ids, depth + 1);
+            if (child.is_object()) {
+                add_form_elements_recursive(child, table, label_map, rendered_ids, depth + 1, compact);
+            }
         }
     }
 }

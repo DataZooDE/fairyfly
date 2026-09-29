@@ -2,7 +2,7 @@
 
 find_package(Catch2 3 CONFIG REQUIRED)
 
-# Unit tests
+# Unit tests (link against shared fairyfly_core library to avoid recompilation)
 add_executable(unit_tests
     unit/test_main.cpp
     unit/test_com_wrapper.cpp
@@ -10,60 +10,31 @@ add_executable(unit_tests
     unit/test_markdown_table_formatter.cpp
     unit/test_toon_encoder.cpp
     unit/test_connection_launcher.cpp
+    unit/test_login_flow.cpp
     unit/test_screenshot_handler.cpp
     unit/test_screen_reader.cpp
     unit/test_element_metadata_extractor.cpp
-    ../src/sap_gui_base.cpp
-    ../src/com/wrapper.cpp
-    ../src/com/wrapper_helpers.cpp
-    ../src/com/element.cpp
-    ../src/com/window.cpp
-    ../src/com/session.cpp
-    ../src/com/connection.cpp
-    ../src/com/application.cpp
-    ../src/com_automation_engine.cpp
-    ../src/automation_engine.cpp
-    ../src/trace.cpp
+    unit/test_raii_core_renderers.cpp
+    unit/test_doctor.cpp
+    unit/test_connection_manager.cpp
+    unit/test_grid_analyzer.cpp
     ../src/config.cpp
     ../src/session.cpp
-    ../src/cli_handler.cpp
-    ../src/connection_manager.cpp
-    ../src/element_type_registry.cpp
-    ../src/screen_element_collector.cpp
-    ../src/table_data_extractor.cpp
-    ../src/formatters/tree_formatter.cpp
-    ../src/formatters/table_formatter.cpp
-    ../src/formatters/markdown_table_formatter.cpp
-    ../src/formatters/toon_encoder.cpp
-    ../src/string_utils.cpp
-    ../src/base64.cpp
-    ../src/semantic_classifier.cpp
-    ../src/element_renderer_registry.cpp
-    ../src/element_renderers.cpp
-    ../src/grid_analyzer.cpp
-    ../src/formatters/grid_renderer.cpp
-    ../src/formatters/screen_markdown_formatter.cpp
-    ../src/connection_launcher.cpp
-    ../src/screenshot_handler.cpp
-    ../src/screen_reader.cpp
-    ../src/element_metadata_extractor.cpp
 )
 
-# Include directories for tests
-target_include_directories(unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Small SAP-free child process used to verify cross-process cache locking.
+add_executable(connection_cache_worker EXCLUDE_FROM_ALL unit/connection_cache_worker.cpp)
+target_link_libraries(connection_cache_worker PRIVATE fairyfly_core)
+add_dependencies(unit_tests connection_cache_worker)
 
+# Link against fairyfly_core library (all dependencies inherited)
 target_link_libraries(unit_tests PRIVATE
-    Catch2::Catch2WithMain
-    CImg::CImg
-    ZLIB::ZLIB
-    PNG::PNG
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    fmt::fmt
-    ole32
-    oleaut32
-    gdi32
+    fairyfly_core
+    Catch2::Catch2
 )
+if(WIN32)
+    target_link_libraries(unit_tests PRIVATE shell32)
+endif()
 
 # Add test discovery
 include(CTest)

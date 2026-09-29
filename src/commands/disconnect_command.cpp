@@ -10,17 +10,18 @@ public:
     std::string name() const override { return "disconnect"; }
 
     std::string description() const override {
-        return "Disconnect from SAP system";
+        return "Remove a saved connection; optionally close its SAP GUI session";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = app.add_subcommand(name(), description());
         cmd_->add_option("--connection", conn_id_, "Connection ID to disconnect");
+        cmd_->add_flag("--close-session", close_session_, "Close the SAP GUI session before removing its saved connection");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_disconnect(conn_id_);
+        return handler.handle_disconnect(conn_id_, close_session_);
     }
 
     bool was_invoked() const override {
@@ -30,6 +31,7 @@ public:
 private:
     CLI::App* cmd_ = nullptr;
     std::optional<int> conn_id_;
+    bool close_session_ = false;
 };
 
 // Factory function

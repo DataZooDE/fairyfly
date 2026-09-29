@@ -2,17 +2,29 @@
 # This validates that C++ implementation matches VBScript ground truth
 
 param(
-    [string]$BuildDir = "../../build/Release"
+    [string]$BuildDir = "",
+    [string]$OutputDir = ""
 )
+
+if (-not $BuildDir) {
+    $BuildDir = Join-Path $PSScriptRoot "../../build/Release"
+}
+if (-not $OutputDir) {
+    $OutputDir = Join-Path $PSScriptRoot "../../build/test-results/vbs"
+}
+New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+$vbsOutputPath = Join-Path $OutputDir "vbs_output.json"
+$cppOutputPath = Join-Path $OutputDir "cpp_output.json"
 
 Write-Host "=== SAP GUI Base Objects Test - VBScript vs C++ Comparison ===" -ForegroundColor Cyan
 Write-Host ""
 
 # Run VBScript test
 Write-Host "Running VBScript ground truth test..." -ForegroundColor Yellow
-$vbsOutput = cscript //NoLogo test_base_objects.vbs 2>&1 | Out-String
-$vbsOutput | Out-File -FilePath "vbs_output.json" -Encoding UTF8
-Write-Host "VBScript output saved to vbs_output.json" -ForegroundColor Green
+$vbsScript = Join-Path $PSScriptRoot "test_base_objects.vbs"
+$vbsOutput = cscript //NoLogo $vbsScript 2>&1 | Out-String
+$vbsOutput | Out-File -FilePath $vbsOutputPath -Encoding UTF8
+Write-Host "VBScript output saved to $vbsOutputPath" -ForegroundColor Green
 Write-Host ""
 
 # Run C++ test
@@ -25,8 +37,8 @@ if (-not (Test-Path $cppExe)) {
 }
 
 $cppOutput = & $cppExe 2>&1 | Out-String
-$cppOutput | Out-File -FilePath "cpp_output.json" -Encoding UTF8
-Write-Host "C++ output saved to cpp_output.json" -ForegroundColor Green
+$cppOutput | Out-File -FilePath $cppOutputPath -Encoding UTF8
+Write-Host "C++ output saved to $cppOutputPath" -ForegroundColor Green
 Write-Host ""
 
 # Parse JSON outputs

@@ -1,4 +1,5 @@
 #include "include/com/wrapper.h"
+#include "include/com/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/constants.h"
 #include "include/trace.h"
@@ -211,12 +212,45 @@ std::string ComGuiSession::get_transaction_code() const {
         }
 
         if (result.vt == VT_BSTR) {
-            return std::string(_bstr_t(result.bstrVal));
+            return com::bstr_to_utf8(result.bstrVal);
         }
         return "";
     } catch (const ComException&) {
         // Transaction property not available or error accessing it
         return "";
+    } catch (const std::exception&) {
+        return "";
+    }
+}
+
+std::string ComGuiSession::get_user() const {
+    try {
+        auto info = get_dispatch_property(L"Info");
+        if (!info) return "";
+        _bstr_t prop_name("User");
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(info, prop_name.GetBSTR(), &dispid);
+        if (FAILED(hr)) return "";
+        DISPPARAMS params = {nullptr, nullptr, 0, 0};
+        _variant_t value;
+        hr = info->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                          &params, &value, nullptr, nullptr);
+        if (FAILED(hr) || value.vt != VT_BSTR) return "";
+        return com::bstr_to_utf8(value.bstrVal);
+    } catch (const std::exception&) {
+        return "";
+    }
+}
+
+std::string ComGuiSession::get_server_session_key() const {
+    try {
+        auto info = get_dispatch_property(L"Info");
+        if (!info) return "";
+        SapGuiObject session_info(info);
+        const auto system_session_id = session_info.get_string_property(L"SystemSessionId");
+        if (system_session_id.empty()) return "";
+        const int session_number = session_info.get_int_property(L"SessionNumber");
+        return system_session_id + ":" + std::to_string(session_number);
     } catch (const std::exception&) {
         return "";
     }

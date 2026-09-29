@@ -1,7 +1,28 @@
 #include <catch2/catch_test_macros.hpp>
 #include "include/formatters/markdown_table_formatter.h"
+#include "include/formatters/table_formatter.h"
 
 using namespace fairyfly::formatters;
+
+TEST_CASE("Grid Markdown preserves complete operational messages", "[formatter][table]") {
+    const std::string message =
+        "Certificate with PSE type >System< has been invalid for 567 days";
+    nlohmann::json grid = {
+        {"type", "GuiShell"},
+        {"subtype", "GridView"},
+        {"id", "wnd[0]/usr/shell"},
+        {"table_data", {
+            {"columns", {"ZDATE", "TEXT"}},
+            {"rows", nlohmann::json::array({nlohmann::json::array({"25.09.2026", message})})},
+            {"total_row_count", 1},
+            {"visible_row_count", 1}
+        }}
+    };
+    std::ostringstream output;
+    TableFormatter formatter;
+    formatter.format_to_markdown(grid, output);
+    REQUIRE(output.str().find(message) != std::string::npos);
+}
 
 TEST_CASE("MarkdownTableFormatter - Basic table rendering", "[formatter][table]") {
     MarkdownTableFormatter table;
@@ -371,5 +392,44 @@ TEST_CASE("MarkdownTableFormatter - Edge cases", "[formatter][table]") {
         std::string result = table.render();
         // Should preserve the characters (they'll be escaped by markdown renderer)
         REQUIRE(result.find("Alice *asterisk* _underscore_") != std::string::npos);
+    }
+}
+
+TEST_CASE("TableFormatter - GuiUserArea table rendering", "[formatter][table][userarea]") {
+    TableFormatter formatter;
+
+    SECTION("can_format supports GuiUserArea") {
+        REQUIRE(formatter.can_format("GuiUserArea"));
+        REQUIRE(formatter.can_format("GuiGridView"));
+        REQUIRE(formatter.can_format("GuiTableControl"));
+    }
+
+    SECTION("Formats GuiUserArea with table_data into markdown table") {
+        nlohmann::json elem = {
+            {"id", "/app/con[0]/ses[0]/wnd[0]/usr"},
+            {"type", "GuiUserArea"},
+            {"name", "Table USR02"},
+            {"table_data", {
+                {"columns", nlohmann::json::array({"MANDT", "BNAME", "CLASS"})},
+                {"rows", nlohmann::json::array({
+                    nlohmann::json::array({"001", "DEVELOPER", "SUPER"}),
+                    nlohmann::json::array({"001", "SAP*", "SUPER"})
+                })},
+                {"total_row_count", 2},
+                {"visible_row_count", 2}
+            }}
+        };
+
+        std::ostringstream oss;
+        formatter.format_to_markdown(elem, oss);
+        std::string md = oss.str();
+
+        REQUIRE(md.find("### Table USR02") != std::string::npos);
+        REQUIRE(md.find("| MANDT") != std::string::npos);
+        REQUIRE(md.find("| BNAME") != std::string::npos);
+        REQUIRE(md.find("| CLASS") != std::string::npos);
+        REQUIRE(md.find("| 001") != std::string::npos);
+        REQUIRE(md.find("DEVELOPER") != std::string::npos);
+        REQUIRE(md.find("SAP*") != std::string::npos);
     }
 }

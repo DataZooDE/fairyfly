@@ -5,6 +5,11 @@ BUILD_DIR ?= build
 CMAKE_FLAGS ?= -DCMAKE_TOOLCHAIN_FILE=$${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake
 CMAKE_GENERATOR ?= "Visual Studio 17 2022"
 VERBOSE ?= 0
+# Parallel build settings - auto-detect CPU count or use specified value
+PARALLEL ?= $(NUMBER_OF_PROCESSORS)
+ifeq ($(PARALLEL),)
+	PARALLEL := 8
+endif
 
 # Default target - configure and build Release
 .DEFAULT_GOAL := build
@@ -14,9 +19,9 @@ help:
 	@echo "fairyfly - LLM-powered SAP GUI automation CLI"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make              - Build project (Release, auto-configure)"
-	@echo "  make release      - Build project (Release, auto-configure)"
-	@echo "  make debug        - Build project (Debug, auto-configure)"
+	@echo "  make              - Build CLI (Release, parallel, auto-configure)"
+	@echo "  make release      - Build CLI (Release, parallel, auto-configure)"
+	@echo "  make debug        - Build CLI (Debug, parallel, auto-configure)"
 	@echo "  make test         - Run tests"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make clean-all    - Clean everything including CMake cache"
@@ -26,10 +31,15 @@ help:
 	@echo "  make uninstall    - Uninstall from system"
 	@echo "  make help         - Show this help message"
 	@echo ""
+	@echo "Build Optimization:"
+	@echo "  Default: Parallel builds using all CPU cores (PARALLEL=$(PARALLEL))"
+	@echo "  Override: make PARALLEL=4  # Use 4 cores instead"
+	@echo ""
 	@echo "Examples:"
-	@echo "  make                  # Configure and build Release"
-	@echo "  make debug            # Configure and build Debug"
-	@echo "  make rebuild && test  # Clean, build, and test"
+	@echo "  make                  # Configure and build Release (all cores)"
+	@echo "  make PARALLEL=4       # Build with 4 cores"
+	@echo "  make debug            # Configure and build Debug (all cores)"
+	@echo "  make rebuild && make test  # Clean, build, and test"
 
 # Detect if VCPKG_ROOT is set
 check-vcpkg:
@@ -44,21 +54,21 @@ _configure-release: check-vcpkg
 _configure-debug: check-vcpkg
 	@if not exist "$(BUILD_DIR)\CMakeCache.txt" (echo Configuring CMake for Debug build... && cmake -B $(BUILD_DIR) -G $(CMAKE_GENERATOR) $(CMAKE_FLAGS) -DCMAKE_BUILD_TYPE=Debug) else (echo CMake already configured for Debug)
 
-# Build targets - auto-configure and build
+# Build targets - auto-configure and build with parallel compilation
 build: _configure-release
-	@echo Building project in Release mode...
-	@cmake --build $(BUILD_DIR) --config Release
-	@echo Build complete. Executable at: $(BUILD_DIR)/Release/fairyfly.exe
+	@echo Building project in Release mode (parallel=$(PARALLEL))...
+	@cmake --build $(BUILD_DIR) --config Release --target fairyfly --parallel $(PARALLEL)
+	@echo Build complete. Executable at: $(BUILD_DIR)/bin/Release/fairyfly.exe
 
 release: _configure-release
-	@echo Building project in Release mode...
-	@cmake --build $(BUILD_DIR) --config Release
-	@echo Build complete. Executable at: $(BUILD_DIR)/Release/fairyfly.exe
+	@echo Building project in Release mode (parallel=$(PARALLEL))...
+	@cmake --build $(BUILD_DIR) --config Release --target fairyfly --parallel $(PARALLEL)
+	@echo Build complete. Executable at: $(BUILD_DIR)/bin/Release/fairyfly.exe
 
 debug: _configure-debug
-	@echo Building project in Debug mode...
-	@cmake --build $(BUILD_DIR) --config Debug
-	@echo Build complete. Executable at: $(BUILD_DIR)/Debug/fairyfly.exe
+	@echo Building project in Debug mode (parallel=$(PARALLEL))...
+	@cmake --build $(BUILD_DIR) --config Debug --target fairyfly --parallel $(PARALLEL)
+	@echo Build complete. Executable at: $(BUILD_DIR)/bin/Debug/fairyfly.exe
 
 # Rebuild targets
 rebuild: clean release
@@ -68,18 +78,21 @@ rebuild-debug: clean debug
 	@echo ✓ Rebuild complete
 
 # Testing
-test: build
+test: _configure-release
 	@echo Running tests...
+	@cmake --build $(BUILD_DIR) --config Release --target unit_tests --parallel $(PARALLEL)
 	@ctest --test-dir $(BUILD_DIR) -C Release --output-on-failure
 	@echo ✓ Tests complete!
 
-test-debug: debug
+test-debug: _configure-debug
 	@echo Running tests (Debug)...
+	@cmake --build $(BUILD_DIR) --config Debug --target unit_tests --parallel $(PARALLEL)
 	@ctest --test-dir $(BUILD_DIR) -C Debug --output-on-failure --verbose
 	@echo ✓ Tests complete!
 
 test-verbose: build
 	@echo Running tests (verbose)...
+	@cmake --build $(BUILD_DIR) --config Release --target unit_tests --parallel $(PARALLEL)
 	@ctest --test-dir $(BUILD_DIR) -C Release --verbose --output-on-failure
 
 # Cleaning
@@ -129,6 +142,13 @@ info:
 	@echo   Build Directory: $(BUILD_DIR)
 	@echo   Generator: $(CMAKE_GENERATOR)
 	@echo   VCPKG_ROOT: $(VCPKG_ROOT)
+	@echo   Parallel Jobs: $(PARALLEL)
+	@echo ""
+	@echo Build Optimizations Enabled:
+	@echo   - Multiprocessor compilation with /MP flag
+	@echo   - Parallel CMake builds with --parallel $(PARALLEL)
+	@echo   - Static library architecture with fairyfly_core.lib
+	@echo   - Reduced Windows header overhead with WIN32_LEAN_AND_MEAN
 
 # Format code (if clang-format available)
 format:
@@ -144,7 +164,7 @@ lint:
 	@echo ✓ Lint complete!
 
 # Quick workflow
-quick: clean build test
+quick: test
 	@echo ✓ Quick build and test cycle complete!
 
 # All in one

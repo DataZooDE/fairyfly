@@ -8,8 +8,9 @@ namespace commands {
 
 /// Global CLI options shared across all commands
 struct GlobalOptions {
-    bool verbose = false;
+    std::string log_level = "error"; ///< Logging level: trace, debug, info, warn, error (default), critical, off
     std::string output_format = "json";
+    bool verbose_errors = false;     ///< Include detailed error suggestions (default: false for compact errors)
 
     /// Convert output format string to enum
     cli::OutputFormat get_output_format() const {

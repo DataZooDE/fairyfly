@@ -28,7 +28,8 @@ SemanticClassifier::ElementCategory SemanticClassifier::classify(
     // GuiShell can be semantic (toolbar, tree, grid, textedit) or layout depending on SubType/content
     if (type == "GuiShell") {
         std::string subtype = metadata.value("subtype", "");
-        if (subtype == "Tree" || subtype == "Toolbar" || subtype == "GridView" || subtype == "TextEdit") {
+        if (subtype == "Tree" || subtype == "Toolbar" || subtype == "GridView" ||
+            subtype == "TextEdit" || subtype == "HTMLViewer") {
             return ElementCategory::SEMANTIC;
         }
         // Check if it has tree_data or table_data
@@ -76,6 +77,10 @@ SemanticClassifier::ElementCategory SemanticClassifier::classify(
 }
 
 bool SemanticClassifier::should_display(const json& elem_json) {
+    if (!elem_json.is_object()) {
+        return false;
+    }
+
     std::string type = elem_json.value("type", "");
     ElementCategory category = classify(type, elem_json);
 
@@ -112,7 +117,23 @@ bool SemanticClassifier::has_semantic_children(const json& elem_json) {
     }
 
     const auto& children = elem_json["children"];
+
+    // Check if children array is empty
+    if (children.empty()) {
+        return false;
+    }
+
+    // Check if children are objects (old format) or strings (new optimized format)
+    if (!children[0].is_object()) {
+        // Children are ID strings (new format) - can't check semantics from IDs alone
+        // Full data is available in top-level elements array
+        return false;
+    }
+
     for (const auto& child : children) {
+        if (!child.is_object()) {
+            continue;
+        }
         std::string child_type = child.value("type", "");
         ElementCategory child_category = classify(child_type, child);
 

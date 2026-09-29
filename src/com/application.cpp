@@ -1,4 +1,5 @@
 #include "include/com/wrapper.h"
+#include "include/com/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/core.h"
 #include "include/constants.h"
@@ -15,11 +16,24 @@ namespace sap {
 // ComGuiApplication Implementation
 // ============================================================================
 
-ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app) : SapGuiObject(sap_gui_app) {
+ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count)
+    : SapGuiObject(sap_gui_app), com_uninit_count_(com_uninit_count) {
     if (!sap_gui_app) {
         throw ComException("Invalid SAP GUI application pointer");
     }
     spdlog::debug("ComGuiApplication initialized");
+}
+
+ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, bool owns_com_apartment)
+    : ComGuiApplication(sap_gui_app, owns_com_apartment ? 1 : 0) {}
+
+ComGuiApplication::~ComGuiApplication() {
+    // Release COM interfaces before tearing down this thread's apartment.
+    dispatch_ = nullptr;
+    while (com_uninit_count_ > 0) {
+        CoUninitialize();
+        --com_uninit_count_;
+    }
 }
 
 ComGuiApplicationPtr ComGuiApplication::create() {
@@ -27,7 +41,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
     // This is required for SAP GUI scripting API
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(hr) && hr != S_FALSE) {  // S_FALSE means already initialized
-        throw ComException("Failed to initialize COM library", hr);
+        throw ComInitializationException("Failed to initialize COM library", hr);
     }
 
     spdlog::debug("COM library initialized");
@@ -35,16 +49,49 @@ ComGuiApplicationPtr ComGuiApplication::create() {
     try {
         IDispatch* sap_gui = nullptr;
 
-        // Method 1: Try to connect to running SAP GUI instance using GetObject (Preferred)
-        // According to SAP GUI Scripting API documentation:
-        // "Set rotEntry = GetObject("SAPGUI")"
-        // "Set application = rotEntry.GetScriptingEngine"
-        // We must call GetScriptingEngine property on the ROT entry!
-        spdlog::debug("Attempting to get SAPGUI ROT entry...");
-        hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
+        // Method 1: Try SapROTWr.SapROTWrapper (Official SAP GUI Scripting entrypoint)
+        CLSID clsid_rot;
+        HRESULT rot_hr = CLSIDFromProgID(L"SapROTWr.SapROTWrapper", &clsid_rot);
+        spdlog::debug("SapROTWr CLSID lookup hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+        if (SUCCEEDED(rot_hr)) {
+            IDispatch* rot_wrapper = nullptr;
+            rot_hr = CoCreateInstance(clsid_rot, nullptr, CLSCTX_INPROC_SERVER, IID_IDispatch, (void**)&rot_wrapper);
+            spdlog::debug("SapROTWr creation hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+            if (SUCCEEDED(rot_hr)) {
+                OLECHAR* rot_entry_name = (OLECHAR*)L"GetROTEntry";
+                DISPID dispid_rot;
+                rot_hr = rot_wrapper->GetIDsOfNames(IID_NULL, &rot_entry_name, 1, LOCALE_USER_DEFAULT, &dispid_rot);
+                spdlog::debug("SapROTWr GetROTEntry lookup hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+                if (SUCCEEDED(rot_hr)) {
+                    VARIANT arg;
+                    VariantInit(&arg);
+                    arg.vt = VT_BSTR;
+                    arg.bstrVal = SysAllocString(L"SAPGUI");
+                    DISPPARAMS params{&arg, nullptr, 1, 0};
+                    VARIANT res;
+                    VariantInit(&res);
+                    HRESULT hr_call = rot_wrapper->Invoke(dispid_rot, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, &res, nullptr, nullptr);
+                    spdlog::debug("SapROTWr GetROTEntry invoke hr=0x{:08X}, result type={}",
+                                  static_cast<unsigned int>(hr_call), res.vt);
+                    VariantClear(&arg);
+                    if (SUCCEEDED(hr_call) && res.vt == VT_DISPATCH && res.pdispVal) {
+                        sap_gui = res.pdispVal;
+                        spdlog::debug("SapROTWr.SapROTWrapper returned SAPGUI ROT entry successfully");
+                    }
+                    if (res.vt != VT_DISPATCH || !res.pdispVal) VariantClear(&res);
+                }
+                rot_wrapper->Release();
+            }
+        }
 
-        if (SUCCEEDED(hr) && sap_gui) {
-            spdlog::debug("CoGetObject('SAPGUI') succeeded - SAP Logon is running");
+        // Fallback to CoGetObject("SAPGUI")
+        if (!sap_gui) {
+            spdlog::debug("Attempting to get SAPGUI ROT entry via CoGetObject...");
+            hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
+        }
+
+        if (sap_gui) {
+            spdlog::debug("SAPGUI ROT entry obtained successfully - SAP GUI is running");
 
             // CoGetObject("SAPGUI") returns SapGuiAuto (ROT entry). It exposes GetScriptingEngine.
             // Some builds expose it as a PROPERTYGET, others as a METHOD. Try both, PROPERTYGET first.
@@ -62,7 +109,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 if (SUCCEEDED(hr_prop) && vr.vt == VT_DISPATCH && vr.pdispVal) {
                     spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
                     sap_gui->Release();
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal));
+                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), true);
                 }
 
                 // Try METHOD
@@ -72,7 +119,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
                     spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
                     sap_gui->Release();
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal));
+                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), true);
                 }
 
                 spdlog::debug("GetScriptingEngine failed: prop_hr=0x{:08X}, meth_hr=0x{:08X}", hr_prop, hr_meth);
@@ -99,66 +146,40 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                                  (void**)&sap_gui);
 
             if (SUCCEEDED(hr) && sap_gui) {
-                spdlog::info("Created SAP GUI COM object via CoCreateInstance");
+                spdlog::info("Created SAP GUI COM object via CoCreateInstance (SapGui.ScriptingCtrl.1)");
 
-                // CRITICAL FIX: SAP GUI uses interface hierarchies. We need to do the IUnknown roundtrip
-                // to get the most derived IDispatch interface that exposes all methods.
-                // See: https://stackoverflow.com/questions/25965753/idispatch-returns-disp-e-unknownname
-                IUnknown* unknown = nullptr;
-                HRESULT qi_hr = sap_gui->QueryInterface(IID_IUnknown, (void**)&unknown);
-                spdlog::debug("QueryInterface for IID_IUnknown: hr=0x{:08X}", qi_hr);
+                // SapGui.ScriptingCtrl.1 provides GetScriptingEngine() which returns GuiApplication
+                DISPID ge_id = -1;
+                HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, L"GetScriptingEngine", &ge_id);
+                if (FAILED(ge_hr)) {
+                    _bstr_t ge_name(L"GetScriptingEngine");
+                    ge_hr = sap_gui->GetIDsOfNames(IID_NULL, (LPOLESTR*)&ge_name, 1, LOCALE_USER_DEFAULT, &ge_id);
+                }
 
-                if (SUCCEEDED(qi_hr) && unknown) {
-                    IDispatch* dispatch_derived = nullptr;
-                    qi_hr = unknown->QueryInterface(IID_IDispatch, (void**)&dispatch_derived);
-                    spdlog::debug("QueryInterface IUnknown->IDispatch (most derived): hr=0x{:08X}", qi_hr);
-
-                    if (SUCCEEDED(qi_hr) && dispatch_derived) {
-                        spdlog::info("Got most derived IDispatch interface via IUnknown roundtrip");
+                if (SUCCEEDED(ge_hr)) {
+                    DISPPARAMS noargs = {nullptr, nullptr, 0, 0};
+                    _variant_t vr;
+                    HRESULT hr_meth = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
+                                                      DISPATCH_METHOD | DISPATCH_PROPERTYGET, &noargs, &vr, nullptr, nullptr);
+                    if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
+                        spdlog::info("Got GuiApplication via SapGui.ScriptingCtrl.1 GetScriptingEngine");
                         sap_gui->Release();
-                        sap_gui = dispatch_derived;
+                        return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), 2);
                     }
-                    unknown->Release();
                 }
 
-                // Try alternative approach: Use ITypeInfo instead of GetIDsOfNames directly
-                // According to research, GetIDsOfNames may not work but ITypeInfo::GetIDsOfNames can
-                ITypeInfo* type_info = nullptr;
-                HRESULT ti_hr = sap_gui->GetTypeInfo(0, LOCALE_USER_DEFAULT, &type_info);
-                spdlog::debug("GetTypeInfo: hr=0x{:08X}", ti_hr);
-
+                // If GetScriptingEngine wasn't available, check if sap_gui itself implements OpenConnection
                 DISPID test_dispid = -1;
-                HRESULT test_hr = E_FAIL;
-
-                if (SUCCEEDED(ti_hr) && type_info) {
-                    // Try using ITypeInfo::GetIDsOfNames instead of IDispatch::GetIDsOfNames
-                    LPOLESTR method_names[1] = { const_cast<LPOLESTR>(L"OpenConnection") };
-                    test_hr = type_info->GetIDsOfNames(method_names, 1, &test_dispid);
-                    spdlog::debug("ITypeInfo::GetIDsOfNames for 'OpenConnection': hr=0x{:08X}, dispid={}", test_hr, test_dispid);
-                    type_info->Release();
-
-                    if (SUCCEEDED(test_hr)) {
-                        spdlog::debug("SUCCESS: OpenConnection found via ITypeInfo! GuiApplication is ready");
-                        return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui));
-                    }
+                HRESULT test_hr = get_dispid_via_typeinfo(sap_gui, L"OpenConnection", &test_dispid);
+                if (SUCCEEDED(test_hr)) {
+                    return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui), 2);
                 }
 
-                // Fallback: try IDispatch::GetIDsOfNames anyway
-                if (FAILED(test_hr)) {
-                    _bstr_t test_method("OpenConnection");
-                    test_hr = sap_gui->GetIDsOfNames(IID_NULL, (LPOLESTR*)&test_method, 1, LOCALE_USER_DEFAULT, &test_dispid);
-                    spdlog::debug("IDispatch::GetIDsOfNames for 'OpenConnection': hr=0x{:08X}, dispid={}", test_hr, test_dispid);
-
-                    if (SUCCEEDED(test_hr)) {
-                        spdlog::debug("SUCCESS: OpenConnection found! GuiApplication is ready");
-                        return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui));
-                    }
-                }
-
-                spdlog::error("FAILED: OpenConnection not found via ITypeInfo OR IDispatch");
-                spdlog::error("This indicates sapfewse.ocx may not be properly registered");
-                spdlog::error("Try: regsvr32 \"C:\\Program Files (x86)\\SAP\\FrontEnd\\SAPgui\\sapfewse.ocx\"");
-                spdlog::error("Or check: SAP GUI Options → Accessibility & Scripting → Enable scripting");
+                sap_gui->Release();
+                sap_gui = nullptr;
+                // SapGui.ScriptingCtrl.1 (sapfewse.ocx) incremented COM apartment count during
+                // CoCreateInstance. Balance it here since creation did not produce an application.
+                CoUninitialize();
             }
 
             spdlog::debug("CoCreateInstance failed (hr=0x{:08X})", hr);
@@ -211,8 +232,7 @@ int ComGuiApplication::get_connection_count() const {
     if (count > 0) {
         spdlog::debug("Connections collection has {} items", count);
     } else {
-        spdlog::warn("Connections collection exists but reports 0 items - no SAP connections currently open");
-        spdlog::warn("To see connections: Open SAP Logon, create a connection, or open a transaction");
+        spdlog::debug("Connections collection is empty; no SAP connections currently open");
     }
 
     return count;
@@ -238,6 +258,180 @@ SapGuiCollection<ComGuiConnection> ComGuiApplication::connections() const {
     return SapGuiCollection<ComGuiConnection>(connections_dispatch);
 }
 
+ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connection_name, bool sync, bool raise_error) {
+    if (!dispatch_) {
+        if (raise_error) throw ComException("GuiApplication dispatch is null");
+        return nullptr;
+    }
+
+    DISPID dispid = -1;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"OpenConnection", &dispid);
+    if (FAILED(hr)) {
+        _bstr_t name(L"OpenConnection");
+        hr = dispatch_->GetIDsOfNames(IID_NULL, (LPOLESTR*)&name, 1, LOCALE_USER_DEFAULT, &dispid);
+    }
+
+    if (FAILED(hr)) {
+        spdlog::error("OpenConnection method DISPID not found (hr=0x{:08X})", hr);
+        if (raise_error) throw ComException("OpenConnection method not found", hr);
+        return nullptr;
+    }
+
+    // Arguments in reverse order for IDispatch::Invoke:
+    // [0] = Raise (VARIANT_BOOL)
+    // [1] = Sync (VARIANT_BOOL)
+    // [2] = Description (BSTR)
+    VARIANT args[3];
+    VariantInit(&args[0]);
+    VariantInit(&args[1]);
+    VariantInit(&args[2]);
+
+    args[0].vt = VT_BOOL;
+    args[0].boolVal = raise_error ? VARIANT_TRUE : VARIANT_FALSE;
+
+    args[1].vt = VT_BOOL;
+    args[1].boolVal = sync ? VARIANT_TRUE : VARIANT_FALSE;
+
+    args[2].vt = VT_BSTR;
+    const auto wide_name = com::utf8_to_wide(connection_name);
+    args[2].bstrVal = SysAllocStringLen(wide_name.data(), static_cast<UINT>(wide_name.size()));
+
+    DISPPARAMS params;
+    params.rgvarg = args;
+    params.rgdispidNamedArgs = nullptr;
+    params.cArgs = 3;
+    params.cNamedArgs = 0;
+
+    _variant_t result;
+    EXCEPINFO excepinfo;
+    memset(&excepinfo, 0, sizeof(excepinfo));
+    UINT argerr = 0;
+
+    hr = dispatch_->Invoke(
+        dispid,
+        IID_NULL,
+        LOCALE_USER_DEFAULT,
+        DISPATCH_METHOD,
+        &params,
+        &result,
+        &excepinfo,
+        &argerr
+    );
+
+    VariantClear(&args[2]);
+
+    if (FAILED(hr)) {
+        std::string err_detail = "";
+        if (excepinfo.bstrDescription) {
+            err_detail = com::bstr_to_utf8(excepinfo.bstrDescription);
+            SysFreeString(excepinfo.bstrDescription);
+        }
+        if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
+        if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
+
+        spdlog::warn("OpenConnection('{}') failed: hr=0x{:08X} {}", connection_name, hr, err_detail);
+        if (raise_error) {
+            throw ComException(fmt::format("OpenConnection failed: {}", err_detail.empty() ? fmt::format("hr=0x{:08X}", hr) : err_detail), hr);
+        }
+        return nullptr;
+    }
+
+    if (result.vt == VT_DISPATCH && result.pdispVal) {
+        spdlog::info("OpenConnection('{}') succeeded", connection_name);
+        return std::make_shared<ComGuiConnection>(IDispatchPtr(result.pdispVal, true));
+    }
+
+    spdlog::warn("OpenConnection('{}') returned unexpected result type: {}", connection_name, result.vt);
+    return nullptr;
+}
+
+ComGuiConnectionPtr ComGuiApplication::open_connection_by_connection_string(const std::string& connection_string, bool sync, bool raise_error) {
+    if (!dispatch_) {
+        if (raise_error) throw ComException("GuiApplication dispatch is null");
+        return nullptr;
+    }
+
+    DISPID dispid = -1;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"OpenConnectionByConnectionString", &dispid);
+    if (FAILED(hr)) {
+        _bstr_t name(L"OpenConnectionByConnectionString");
+        hr = dispatch_->GetIDsOfNames(IID_NULL, (LPOLESTR*)&name, 1, LOCALE_USER_DEFAULT, &dispid);
+    }
+
+    if (FAILED(hr)) {
+        spdlog::error("OpenConnectionByConnectionString method DISPID not found (hr=0x{:08X})", hr);
+        if (raise_error) throw ComException("OpenConnectionByConnectionString method not found", hr);
+        return nullptr;
+    }
+
+    // Arguments in reverse order for IDispatch::Invoke:
+    // [0] = Raise (VARIANT_BOOL)
+    // [1] = Sync (VARIANT_BOOL)
+    // [2] = ConnectString (BSTR)
+    VARIANT args[3];
+    VariantInit(&args[0]);
+    VariantInit(&args[1]);
+    VariantInit(&args[2]);
+
+    args[0].vt = VT_BOOL;
+    args[0].boolVal = raise_error ? VARIANT_TRUE : VARIANT_FALSE;
+
+    args[1].vt = VT_BOOL;
+    args[1].boolVal = sync ? VARIANT_TRUE : VARIANT_FALSE;
+
+    args[2].vt = VT_BSTR;
+    const auto wide_connection = com::utf8_to_wide(connection_string);
+    args[2].bstrVal = SysAllocStringLen(wide_connection.data(), static_cast<UINT>(wide_connection.size()));
+
+    DISPPARAMS params;
+    params.rgvarg = args;
+    params.rgdispidNamedArgs = nullptr;
+    params.cArgs = 3;
+    params.cNamedArgs = 0;
+
+    _variant_t result;
+    EXCEPINFO excepinfo;
+    memset(&excepinfo, 0, sizeof(excepinfo));
+    UINT argerr = 0;
+
+    hr = dispatch_->Invoke(
+        dispid,
+        IID_NULL,
+        LOCALE_USER_DEFAULT,
+        DISPATCH_METHOD,
+        &params,
+        &result,
+        &excepinfo,
+        &argerr
+    );
+
+    VariantClear(&args[2]);
+
+    if (FAILED(hr)) {
+        std::string err_detail = "";
+        if (excepinfo.bstrDescription) {
+            err_detail = com::bstr_to_utf8(excepinfo.bstrDescription);
+            SysFreeString(excepinfo.bstrDescription);
+        }
+        if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
+        if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
+
+        spdlog::warn("OpenConnectionByConnectionString('{}') failed: hr=0x{:08X} {}", connection_string, hr, err_detail);
+        if (raise_error) {
+            throw ComException(fmt::format("OpenConnectionByConnectionString failed: {}", err_detail.empty() ? fmt::format("hr=0x{:08X}", hr) : err_detail), hr);
+        }
+        return nullptr;
+    }
+
+    if (result.vt == VT_DISPATCH && result.pdispVal) {
+        spdlog::info("OpenConnectionByConnectionString('{}') succeeded", connection_string);
+        return std::make_shared<ComGuiConnection>(IDispatchPtr(result.pdispVal, true));
+    }
+
+    spdlog::warn("OpenConnectionByConnectionString('{}') returned unexpected result type: {}", connection_string, result.vt);
+    return nullptr;
+}
+
 // ============================================================================
 // Mouse Hook Implementation for Window Selection
 // ============================================================================
@@ -247,18 +441,6 @@ static HWND g_clicked_hwnd = nullptr;
 static HANDLE g_click_event = nullptr;
 static HWND g_last_hwnd = nullptr;
 static HCURSOR g_crosshair_cursor = nullptr;
-
-// Debug logging function for hook callback (console won't work in hook context)
-static void hook_debug(const char* msg) {
-    static FILE* debug_file = nullptr;
-    if (!debug_file) {
-        fopen_s(&debug_file, "hook_debug.log", "a");
-    }
-    if (debug_file) {
-        fprintf(debug_file, "%s\n", msg);
-        fflush(debug_file);
-    }
-}
 
 // Helper function to check if window is SAP GUI
 static bool is_sap_gui_window(HWND hwnd) {
@@ -275,17 +457,12 @@ static bool is_sap_gui_window(HWND hwnd) {
 
 // Low-level mouse hook callback
 LRESULT CALLBACK MouseHookCallback(int nCode, WPARAM wParam, LPARAM lParam) {
-    char debug_msg[256];
-    
     if (nCode >= 0) {
         MSLLHOOKSTRUCT* mouse_data = (MSLLHOOKSTRUCT*)lParam;
         POINT pt = mouse_data->pt;
         HWND current_hwnd = WindowFromPoint(pt);
         
         if (wParam == WM_MOUSEMOVE) {
-            sprintf_s(debug_msg, "MouseMove: hwnd=0x%p", reinterpret_cast<void*>(current_hwnd));
-            hook_debug(debug_msg);
-            
             // Change cursor to crosshair on mouse move
             if (g_crosshair_cursor) {
                 SetCursor(g_crosshair_cursor);
@@ -298,23 +475,18 @@ LRESULT CALLBACK MouseHookCallback(int nCode, WPARAM wParam, LPARAM lParam) {
                 // Check if this is a SAP window
                 bool is_sap = is_sap_gui_window(current_hwnd);
                 
-                sprintf_s(debug_msg, "Window changed: is_sap=%d", is_sap ? 1 : 0);
-                hook_debug(debug_msg);
-                
-                // Print status to console
-                std::string status = is_sap ? "[SAP WINDOW DETECTED]" : "[Not a SAP window]";
-                std::cout << "\r                                                                 ";  // Clear line
-                std::cout << "\r" << status << std::flush;
+                // Log status change
+                if (is_sap) {
+                    spdlog::debug("[SAP WINDOW DETECTED]");
+                } else {
+                    spdlog::trace("[Not a SAP window]");
+                }
             }
         }
         else if (wParam == WM_LBUTTONDOWN) {
-            sprintf_s(debug_msg, "MouseClick detected!");
-            hook_debug(debug_msg);
-            
             if (g_click_event) {
                 g_clicked_hwnd = current_hwnd;
-                hook_debug("Setting click event...");
-                std::cout << "\r[CLICK DETECTED!]" << std::endl;
+                spdlog::info("[CLICK DETECTED]");
                 SetEvent(g_click_event);
                 // Note: We don't consume the event - let it propagate normally
             }
@@ -350,13 +522,11 @@ HWND select_window_by_mouse_click(int timeout_seconds) {
     }
     
     // Log hook installation
-    hook_debug("Mouse hook installed successfully");
     spdlog::debug("Mouse hook installed");
 
     // Show prompt to user
     spdlog::info("Click on SAP GUI window within {} seconds...", timeout_seconds);
-    std::cout << "\n>>> Click on SAP GUI window within " << timeout_seconds << " seconds..." << std::endl;
-    std::cout << ">>> Hover over SAP windows to see detection status" << std::endl;
+    spdlog::info("Hover over SAP windows to see detection status");
 
     // Process messages to allow hook to work - critical for WH_MOUSE_LL hooks!
     DWORD wait_result = WAIT_TIMEOUT;
@@ -392,9 +562,6 @@ HWND select_window_by_mouse_click(int timeout_seconds) {
     CloseHandle(g_click_event);
     g_click_event = nullptr;
     g_crosshair_cursor = nullptr;
-    
-    // Clear the status line
-    std::cout << "\r                                 " << std::endl;
 
     if (wait_result == WAIT_TIMEOUT) {
         throw ComException("Window selection timeout - no click detected within " +
@@ -459,9 +626,9 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
 
     // Track if we found connections but no sessions for better error reporting
     int total_sessions = 0;
+    std::optional<SAPGuiWindow> best_match;
 
-    // Since SAP COM doesn't expose native HWND directly, we match by window title
-    // This is the best we can do without direct HWND access from SAP COM
+    // Search for window by HWND first, then fallback to title
     for (int c = 0; c < conn_count; ++c) {
         try {
             auto connection = get_connection(c);
@@ -495,12 +662,27 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
                     }
                     
                     std::string active_title = active_window->get_title();
-                    spdlog::info("Session {}/{} active window title: '{}'", c, s, active_title);
-                    spdlog::info("Clicked window title: '{}'", title);
-                    spdlog::info("Titles match or using best match: conn={}, sess={}", c, s);
-                    
-                    // Return the first matching session
-                    return SAPGuiWindow(active_title, target_hwnd, c, s);
+                    HWND active_hwnd = nullptr;
+                    try {
+                        active_hwnd = (HWND)(intptr_t)active_window->get_int_property(L"Handle");
+                    } catch (...) {}
+
+                    spdlog::info("Session {}/{} active window title: '{}', hwnd: 0x{:X}", c, s, active_title, (uintptr_t)active_hwnd);
+                    spdlog::info("Target window title: '{}', hwnd: 0x{:X}", title, (uintptr_t)target_hwnd);
+
+                    // 1. Exact HWND match
+                    if (active_hwnd && active_hwnd == target_hwnd) {
+                        spdlog::info("Exact HWND match found: conn={}, sess={}", c, s);
+                        return SAPGuiWindow(active_title, target_hwnd, c, s);
+                    }
+
+                    // 2. Title match fallback
+                    if (!title.empty() && (active_title == title || active_title.find(title) != std::string::npos || title.find(active_title) != std::string::npos)) {
+                        spdlog::info("Title match found: conn={}, sess={}", c, s);
+                        if (!best_match.has_value()) {
+                            best_match = SAPGuiWindow(active_title, target_hwnd, c, s);
+                        }
+                    }
                 } catch (const std::exception& e) {
                     spdlog::error("Exception checking session {}/{}: {}", c, s, e.what());
                     continue;
@@ -510,6 +692,11 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
             spdlog::error("Exception checking connection {}: {}", c, e.what());
             continue;
         }
+    }
+
+    if (best_match.has_value()) {
+        spdlog::info("Returning best match SAP session by title");
+        return *best_match;
     }
 
     if (total_sessions == 0) {

@@ -16,7 +16,7 @@ bool GridAnalyzer::detect_grid_layout(const nlohmann::json& elements) {
 
     // Check if any element has grid_row and grid_col metadata
     for (const auto& elem : elements) {
-        if (elem.contains("grid_row") && elem.contains("grid_col")) {
+        if (elem.is_object() && elem.contains("grid_row") && elem.contains("grid_col")) {
             return true;
         }
     }
@@ -32,6 +32,10 @@ std::vector<GridCell> GridAnalyzer::parse_grid_labels(const nlohmann::json& elem
     }
 
     for (const auto& elem : elements) {
+        if (!elem.is_object()) {
+            continue;
+        }
+
         // Check if this is a GuiLabel with grid coordinates
         if (elem.value("type", "") == "GuiLabel" &&
             elem.contains("grid_row") && elem.contains("grid_col")) {
@@ -47,12 +51,6 @@ std::vector<GridCell> GridAnalyzer::parse_grid_labels(const nlohmann::json& elem
                 cell.col = elem["grid_col"].get<int>();
                 cells.push_back(cell);
             }
-        }
-
-        // Recursively search children for nested labels
-        if (elem.contains("children") && elem["children"].is_array()) {
-            auto child_cells = parse_grid_labels(elem["children"]);
-            cells.insert(cells.end(), child_cells.begin(), child_cells.end());
         }
     }
 
@@ -122,7 +120,9 @@ std::vector<GridSection> GridAnalyzer::identify_grid_sections(const std::vector<
             if (header_like >= constants::MIN_HEADER_LIKE_CELLS) {
                 has_rotated_table = true;
                 table_start_col = col;
-                table_start_row = col_cells.front().row;
+                auto min_row_it = std::min_element(col_cells.begin(), col_cells.end(),
+                    [](const GridCell& a, const GridCell& b) { return a.row < b.row; });
+                table_start_row = (min_row_it != col_cells.end()) ? min_row_it->row : 0;
                 break;
             }
         }

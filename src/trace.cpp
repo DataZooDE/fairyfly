@@ -5,7 +5,7 @@ namespace utils {
 
 TraceGuard::TraceGuard(const std::string& operation)
     : operation_(operation), start_(std::chrono::high_resolution_clock::now()) {
-    spdlog::debug("TRACE_ENTER|{}", operation_);
+    spdlog::trace("TRACE_ENTER|{}", operation_);
 }
 
 TraceGuard::~TraceGuard() {
@@ -17,9 +17,9 @@ void TraceGuard::log_exit() {
     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_).count();
 
     if (success_) {
-        spdlog::debug("TRACE_EXIT|{}|success|duration_ms={}", operation_, duration_ms);
+        spdlog::trace("TRACE_EXIT|{}|success|duration_ms={}", operation_, duration_ms);
     } else {
-        spdlog::debug("TRACE_EXIT|{}|error|duration_ms={}|error={}", operation_, duration_ms, error_msg_);
+        spdlog::trace("TRACE_EXIT|{}|error|duration_ms={}|error={}", operation_, duration_ms, error_msg_);
     }
 }
 

@@ -20,8 +20,6 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
         return "";
     }
 
-    oss << "## Status Information\n\n";
-
     // Build map of rows to cells
     std::map<int, std::vector<GridCell>> rows_map;
     for (const auto& cell : cells) {
@@ -34,19 +32,22 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
                   [](const GridCell& a, const GridCell& b) { return a.col < b.col; });
     }
 
-    // Identify label rows (contain colons) and value rows
+    // Identify actual label rows. Report prose may contain a colon in the
+    // middle of a line, but a status property label ends with one.
     std::vector<int> label_rows;
     std::map<int, int> label_to_value_row;  // Maps label row to value row
 
     for (const auto& [row, row_cells] : rows_map) {
-        bool has_colon = false;
+        std::set<int> label_columns;
         for (const auto& cell : row_cells) {
-            if (cell.text.find(':') != std::string::npos) {
-                has_colon = true;
-                break;
+            const auto end = cell.text.find_last_not_of(" \t\r\n");
+            if (end != std::string::npos && cell.text[end] == ':') {
+                label_columns.insert(cell.col);
             }
         }
-        if (has_colon) {
+        // One-column classic lists often have headings followed by prose. A
+        // status grid has multiple aligned property labels in the same row.
+        if (label_columns.size() >= 2) {
             label_rows.push_back(row);
         }
     }
@@ -134,6 +135,8 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
         }
     }
 
+    if (label_to_value_row.empty()) return "";
+
     // Create table using MarkdownTableFormatter
     formatters::MarkdownTableFormatter table;
     table.add_column("Property", formatters::MarkdownTableFormatter::Alignment::Left);
@@ -180,6 +183,7 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
         }
     }
 
+    oss << "## Status Information\n\n";
     oss << table.render();
     oss << "\n";
 

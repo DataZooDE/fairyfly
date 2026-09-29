@@ -55,12 +55,11 @@ jobs:
         Write-Host "Configuring CMake for Release build..."
         cmake -B build `
           -G "Visual Studio 17 2022" `
-          -DCMAKE_BUILD_TYPE=Release `
           -DVCPKG_TARGET_TRIPLET=x64-windows-static `
           -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
 
         Write-Host "`nBuilding project in Release mode..."
-        cmake --build build --config Release --parallel
+        cmake --build build --config Release --target fairyfly unit_tests --parallel
 
         Write-Host "`n✓ Build complete. Executable at: build/Release/fairyfly.exe"
       shell: pwsh
@@ -71,8 +70,6 @@ jobs:
         # Run tests excluding [!mayfail] tagged tests
         & "build/Release/unit_tests.exe" "~[!mayfail]" --reporter junit --out build/test-results.xml
 
-        # Also run with console output for CI logs
-        & "build/Release/unit_tests.exe" "~[!mayfail]"
       shell: pwsh
       continue-on-error: false
 

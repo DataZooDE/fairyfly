@@ -34,6 +34,19 @@ class TreeRenderer {
 public:
     static json to_json(const json& element_metadata);
     static std::string to_markdown(const json& element_metadata, int indent_level);
+
+private:
+    // Named constants for tree rendering
+    static constexpr int TREE_INDENT_SPACES = 2;
+    static constexpr const char* BRANCH_PREFIX = "|-- ";
+    static constexpr const char* LAST_BRANCH_PREFIX = "+-- ";
+
+    // Helper methods for tree rendering
+    static int calculate_path_depth(const std::string& path);
+    static void render_flat_tree_with_paths(std::ostringstream& oss, const json& nodes, const std::string& indent);
+    static void render_flat_tree_table_with_columns(std::ostringstream& oss, const json& nodes, const json& columns, const std::string& indent);
+    static void render_table_tree(std::ostringstream& oss, const json& nodes, const json& columns, const std::string& indent);
+    static void render_hierarchical_tree(std::ostringstream& oss, const json& nodes, const std::string& indent);
 };
 
 /// Toolbar renderer - displays buttons and actions

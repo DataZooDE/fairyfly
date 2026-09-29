@@ -55,24 +55,6 @@ public:
     }
 };
 
-/// Helper to trace COM property access with return value
-inline std::string trace_string_result(const std::string& property, const std::string& result) {
-    spdlog::debug("com_property|string|{}={}", property, result);
-    return result;
-}
-
-/// Helper to trace COM property access with int return value
-inline int trace_int_result(const std::string& property, int result) {
-    spdlog::debug("com_property|int|{}={}", property, result);
-    return result;
-}
-
-/// Helper to trace COM property access with bool return value
-inline bool trace_bool_result(const std::string& property, bool result) {
-    spdlog::debug("com_property|bool|{}={}", property, (result ? "true" : "false"));
-    return result;
-}
-
 /// Format bytes into readable output
 inline std::string format_bytes(const void* ptr) {
     if (!ptr) return "null";

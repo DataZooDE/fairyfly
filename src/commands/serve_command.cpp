@@ -22,6 +22,7 @@ public:
     }
 
     Result execute(cli::CommandHandler& handler) override {
+        (void)handler; // MCP server not yet implemented
         spdlog::info("Starting MCP server with transport: {}", transport_);
         if (transport_ == "http") {
             spdlog::info("HTTP server on port: {}", port_);

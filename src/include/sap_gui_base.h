@@ -46,6 +46,7 @@ protected:
     mutable bool id_cached_ = false;
     mutable bool type_cached_ = false;
 
+public:
     /// Get string property from COM object
     std::string get_string_property(const wchar_t* name) const;
 
@@ -78,6 +79,12 @@ protected:
 
     /// Invoke method with no parameters, no return
     void invoke_method_void(const wchar_t* method_name);
+
+    /// Resolve DISPID using type-based cache, falling back to ITypeInfo
+    HRESULT resolve_dispid(const wchar_t* name, DISPID* dispid) const;
+
+    /// Clear the global type-level DISPID cache
+    static void clear_dispid_cache();
 
 public:
     /// Construct from existing IDispatch pointer
@@ -253,7 +260,7 @@ template<typename T>
 class SapGuiCollection {
 private:
     IDispatchPtr collection_;
-    int cached_count_ = -1;
+    mutable int cached_count_ = -1;
 
 public:
     using iterator = SapGuiCollectionIterator<T>;
@@ -321,47 +328,66 @@ public:
             nullptr
         );
 
-        if (FAILED(hr) || enum_var.vt != VT_UNKNOWN) {
-            return nullptr;
-        }
-
-        IEnumVARIANT* enumerator = nullptr;
-        hr = enum_var.punkVal->QueryInterface(IID_IEnumVARIANT, (void**)&enumerator);
-        if (FAILED(hr)) {
-            return nullptr;
-        }
-
-        // Skip to requested index
-        if (index > 0) {
-            hr = enumerator->Skip(index);
-            if (FAILED(hr)) {
-                enumerator->Release();
-                return nullptr;
+        IUnknown* punk = nullptr;
+        if (SUCCEEDED(hr)) {
+            if (enum_var.vt == VT_UNKNOWN && enum_var.punkVal) {
+                punk = enum_var.punkVal;
+            } else if (enum_var.vt == VT_DISPATCH && enum_var.pdispVal) {
+                punk = enum_var.pdispVal;
             }
         }
 
-        // Fetch the item
-        VARIANT item_var;
-        VariantInit(&item_var);
-        ULONG fetched = 0;
-        hr = enumerator->Next(1, &item_var, &fetched);
-        enumerator->Release();
+        if (punk) {
+            IEnumVARIANT* enumerator = nullptr;
+            hr = punk->QueryInterface(IID_IEnumVARIANT, (void**)&enumerator);
+            if (SUCCEEDED(hr) && enumerator) {
+                bool skip_ok = true;
+                if (index > 0) {
+                    hr = enumerator->Skip(index);
+                    if (FAILED(hr)) {
+                        skip_ok = false;
+                    }
+                }
 
-        if (FAILED(hr) || fetched == 0) {
-            VariantClear(&item_var);
-            return nullptr;
+                if (skip_ok) {
+                    VARIANT item_var;
+                    VariantInit(&item_var);
+                    ULONG fetched = 0;
+                    hr = enumerator->Next(1, &item_var, &fetched);
+                    enumerator->Release();
+
+                    if (SUCCEEDED(hr) && fetched == 1) {
+                        if (item_var.vt == VT_DISPATCH && item_var.pdispVal) {
+                            IDispatchPtr item_dispatch(item_var.pdispVal, true);
+                            VariantClear(&item_var);
+                            return std::make_shared<T>(item_dispatch);
+                        }
+                        VariantClear(&item_var);
+                    }
+                } else {
+                    enumerator->Release();
+                }
+            }
         }
 
-        if (item_var.vt == VT_DISPATCH && item_var.pdispVal) {
-            IDispatchPtr item_dispatch(item_var.pdispVal, true); // Attach without AddRef
-            auto result = std::make_shared<T>(item_dispatch);
-            VariantClear(&item_var);
-            return result;
+        // Direct Item(index) fallback with PROPERTYGET | METHOD
+        DISPID item_dispid;
+        HRESULT item_hr = get_dispid_via_typeinfo(collection_, L"Item", &item_dispid);
+        if (SUCCEEDED(item_hr)) {
+            _variant_t idx(index);
+            DISPPARAMS params = {(VARIANT*)&idx, nullptr, 1, 0};
+            _variant_t item_result;
+            item_hr = collection_->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                         DISPATCH_METHOD | DISPATCH_PROPERTYGET,
+                                         &params, &item_result, nullptr, nullptr);
+            if (SUCCEEDED(item_hr) && item_result.vt == VT_DISPATCH && item_result.pdispVal) {
+                return std::make_shared<T>(item_result.pdispVal);
+            }
         }
 
-        VariantClear(&item_var);
         return nullptr;
     }
+
 
     /// STL-compatible begin iterator
     iterator begin() { return iterator(collection_); }

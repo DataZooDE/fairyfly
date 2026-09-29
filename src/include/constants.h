@@ -12,6 +12,9 @@ namespace constants {
 /// Maximum number of rows to extract from a table/grid
 constexpr int MAX_TABLE_ROWS = 20;
 
+/// Upper bound for an explicitly requested screen-read row limit
+constexpr int MAX_REQUESTED_TABLE_ROWS = 200;
+
 /// Maximum depth to traverse in tree structures
 constexpr int MAX_TREE_DEPTH = 10;
 
@@ -22,13 +25,13 @@ constexpr int MAX_ELEMENT_DEPTH = 15;
 constexpr int MAX_CHILDREN_TO_PROCESS = 50;
 
 /// Maximum row index for grid probing operations
-constexpr int MAX_GRID_ROW = 50;
+constexpr int MAX_GRID_ROW = 15;
 
 /// Maximum column index for grid probing operations
-constexpr int MAX_GRID_COL = 50;
+constexpr int MAX_GRID_COL = 15;
 
 /// Maximum consecutive misses before stopping grid probing
-constexpr int MAX_CONSECUTIVE_MISSES = 30;
+constexpr int MAX_CONSECUTIVE_MISSES = 10;
 
 /// Minimum number of header-like cells needed to identify a header column
 constexpr int MIN_HEADER_LIKE_CELLS = 3;
@@ -83,6 +86,9 @@ constexpr int CIMG_DISPLAY_GDI = 2;
 
 /// Maximum number of shellcont children to probe
 constexpr int MAX_SHELLCONT_CHILDREN = 4;
+
+/// Maximum number of subscreen containers to probe (SE16/selection screens)
+constexpr int MAX_SUB_CONTAINERS = 4;
 
 // ============================================================================
 // Type Aliases for Better Readability

@@ -2,11 +2,13 @@
 set(VCPKG_TARGET_TRIPLET "x64-windows-static" CACHE STRING "")
 
 # Set toolchain file - must be before project() call
-if(DEFINED ENV{VCPKG_ROOT})
-    file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}" VCPKG_ROOT_PATH)
-    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT_PATH}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "" FORCE)
-else()
-    set(CMAKE_TOOLCHAIN_FILE "C:/Users/jr/Desktop/Projects/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "" FORCE)
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    if(DEFINED ENV{VCPKG_ROOT})
+        file(TO_CMAKE_PATH "$ENV{VCPKG_ROOT}" VCPKG_ROOT_PATH)
+        set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT_PATH}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "" FORCE)
+    elseif(EXISTS "C:/Users/jr/Desktop/Projects/vcpkg/scripts/buildsystems/vcpkg.cmake")
+        set(CMAKE_TOOLCHAIN_FILE "C:/Users/jr/Desktop/Projects/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "" FORCE)
+    endif()
 endif()
 
 cmake_minimum_required(VERSION 3.20)
@@ -28,6 +30,24 @@ project(fairyfly VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Enable SEH (Structured Exception Handling) for catching OS-level exceptions
+# /EHa enables both C++ exceptions and SEH with proper unwinding
+if(MSVC)
+    add_compile_options(/EHa)
+    # Enable multiprocessor compilation - uses all available CPU cores
+    add_compile_options(/MP)
+endif()
+
+# Group generated projects in Visual Studio
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+# Use ccache if it is available with the selected generator
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+endif()
 
 # Set default build type to Release if not specified
 if(NOT CMAKE_BUILD_TYPE)
@@ -51,7 +71,7 @@ find_package(fmt CONFIG REQUIRED)
 # Platform-specific settings
 if(WIN32)
     # Windows-specific settings for COM support
-    add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 # Enable PNG support in CImg
@@ -60,9 +80,10 @@ add_compile_definitions(cimg_use_png)
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
-# Source files
-set(FAIRYFLY_SOURCES
-    src/main.cpp
+# Core library sources (shared between main executable and tests)
+set(FAIRYFLY_LIB_SOURCES
+    src/action_status.cpp
+    src/cli_entry.cpp
     src/automation_engine.cpp
     src/com/wrapper.cpp
     src/com/wrapper_helpers.cpp
@@ -86,18 +107,22 @@ set(FAIRYFLY_SOURCES
     src/string_utils.cpp
     src/base64.cpp
     src/semantic_classifier.cpp
+    src/sensitive_data.cpp
+    src/html_viewer_reader.cpp
     src/element_renderer_registry.cpp
     src/element_renderers.cpp
     src/grid_analyzer.cpp
     src/formatters/grid_renderer.cpp
     src/formatters/screen_markdown_formatter.cpp
     src/connection_launcher.cpp
+    src/login_flow.cpp
     src/screenshot_handler.cpp
     src/screen_reader.cpp
     src/element_metadata_extractor.cpp
     src/commands/command_registry.cpp
     src/commands/attach_command.cpp
     src/commands/launch_command.cpp
+    src/commands/login_command.cpp
     src/commands/disconnect_command.cpp
     src/commands/connections_command.cpp
     src/commands/tcode_command.cpp
@@ -107,13 +132,26 @@ set(FAIRYFLY_SOURCES
     src/commands/list_command.cpp
     src/commands/screen_command.cpp
     src/commands/serve_command.cpp
+    src/commands/press_f4_command.cpp
+    src/commands/doctor_command.cpp
 )
 
-# Create executable
-add_executable(fairyfly ${FAIRYFLY_SOURCES})
+# Create static library for core functionality (compiled once, linked by both exe and tests)
+add_library(fairyfly_core STATIC ${FAIRYFLY_LIB_SOURCES})
 
-# Link libraries
-target_link_libraries(fairyfly PRIVATE
+if(MSVC)
+    target_precompile_headers(fairyfly_core PRIVATE
+        <nlohmann/json.hpp>
+        <spdlog/spdlog.h>
+        <fmt/format.h>
+    )
+endif()
+
+# Set library properties
+target_include_directories(fairyfly_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
+# Link library dependencies
+target_link_libraries(fairyfly_core PUBLIC
     CLI11::CLI11
     CImg::CImg
     ZLIB::ZLIB
@@ -123,21 +161,41 @@ target_link_libraries(fairyfly PRIVATE
     fmt::fmt
 )
 
-# Windows-specific COM libraries and GDI for CImg display
+# Windows-specific COM libraries
 if(WIN32)
-    target_link_libraries(fairyfly PRIVATE
+    target_link_libraries(fairyfly_core PUBLIC
         ole32
         oleaut32
         gdi32
+        user32
+        uiautomationcore
+        advapi32
     )
 endif()
 
-# Compiler warnings
+# Compiler warnings for library
 if(MSVC)
-    target_compile_options(fairyfly PRIVATE /W4)
+    target_compile_options(fairyfly_core PRIVATE /W4)
 else()
-    target_compile_options(fairyfly PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(fairyfly_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# Create executable (only main.cpp, links against library)
+add_executable(fairyfly src/main.cpp)
+
+# Link executable against core library (all dependencies inherited)
+target_link_libraries(fairyfly PRIVATE fairyfly_core)
+
+# The Visual Studio output path can have path-specific SAP GUI ROT attachment
+# problems on this workstation. Stage the runnable binary away from build
+# intermediates after every link; copy_if_different keeps this inexpensive.
+add_custom_command(TARGET fairyfly POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:fairyfly>"
+            "${CMAKE_BINARY_DIR}/bin/$<CONFIG>/$<TARGET_FILE_NAME:fairyfly>"
+    VERBATIM
+)
 
 # Enable testing
 enable_testing()

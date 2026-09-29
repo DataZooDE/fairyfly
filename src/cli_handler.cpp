@@ -1,5 +1,7 @@
 #include "include/cli_handler.h"
 #include "include/com_automation_engine.h"
+#include "include/action_status.h"
+#include "include/login_flow.h"
 #include "include/constants.h"
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
@@ -10,6 +12,7 @@
 #include "include/formatters/toon_encoder.h"
 #include "include/element_renderer_registry.h"
 #include "include/semantic_classifier.h"
+#include "include/table_data_extractor.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <chrono>
@@ -19,6 +22,16 @@
 #include <unordered_set>
 #include <climits>
 #include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <tlhelp32.h>
+#include <psapi.h>
+#include <winreg.h>
+#endif
 
 namespace fairyfly {
 namespace cli {
@@ -42,9 +55,9 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     Connection conn = conn_result.value;
 
     // Validate that the session still exists
-    if (!engine_->validate_session(conn.session_id)) {
+    if (!engine_->select_session(conn.session_id, conn.server_session_key)) {
         spdlog::warn("Connection {} has invalid session {}, deleting", conn.id, conn.session_id);
-        conn_mgr_->delete_connection(conn.id);
+        conn_mgr_->delete_connection_if_unchanged(conn);
 
         ResultT<Connection> result;
         result.status = ResultT<Connection>::Status::Error;
@@ -59,7 +72,16 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     }
 
     // Update last_validated timestamp
-    conn_mgr_->touch_connection(conn.id);
+    if (conn.server_session_key.empty()) {
+        const auto key = engine_->current_server_session_key();
+        if (!key.empty()) {
+            conn = conn_mgr_->set_session_key(conn, key);
+        } else {
+            conn_mgr_->touch_connection(conn);
+        }
+    } else {
+        conn_mgr_->touch_connection(conn);
+    }
 
     ResultT<Connection> result;
     result.status = ResultT<Connection>::Status::Success;
@@ -67,16 +89,21 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     return result;
 }
 
-Result CommandHandler::handle_attach(int timeout_seconds)
+Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
 {
-    spdlog::info("Starting window attachment mode (timeout: {}s)", timeout_seconds);
-    auto result = engine_->attach_by_click(timeout_seconds);
+    if (session_id) {
+        spdlog::info("Attaching to SAP GUI session {}", *session_id);
+    } else {
+        spdlog::info("Starting window attachment mode (timeout: {}s)", timeout_seconds);
+    }
+    auto result = session_id ? engine_->attach_by_session_id(*session_id)
+                             : engine_->attach_by_click(timeout_seconds);
 
     if (result.status == Result::Status::Success) {
         spdlog::info("Successfully attached to SAP window");
 
         // Extract connection info from result
-        std::string session_id = result.data.value("session_id", "");
+        std::string attached_session_id = result.data.value("session_id", "");
         std::string connection_id = result.data.value("connection_id", "");
         std::string window_title = result.data.value("window_title", "");
 
@@ -85,41 +112,48 @@ Result CommandHandler::handle_attach(int timeout_seconds)
         std::string description = "";
         std::string connection_string = "";
 
-        if (app_info.contains("connections") && app_info["connections"].is_array() && !app_info["connections"].empty()) {
-            auto conn = app_info["connections"][0];
-            description = conn.value("description", "");
-            connection_string = conn.value("connection_string", "");
+        if (app_info.contains("connections") && app_info["connections"].is_array()) {
+            for (const auto& candidate : app_info["connections"]) {
+                if (candidate.value("id", "") == connection_id) {
+                    description = candidate.value("description", "");
+                    connection_string = candidate.value("connection_string", "");
+                    break;
+                }
+            }
         }
 
         // Create or update connection file
         Connection conn = conn_mgr_->create_or_update_connection(
-            session_id,
+            attached_session_id,
             connection_id,
             description,
             connection_string,
-            window_title
+            window_title,
+            engine_->current_server_session_key()
         );
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
-        result.data["message"] = fmt::format("Attached to SAP GUI window (connection: {})", conn.id);
+        result.data["message"] = fmt::format("Attached to SAP GUI session (connection: {})", conn.id);
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
     } else {
-        result.error["suggestions"] = json::array({
-            "Ensure you clicked on an active SAP transaction window (not just SAP Logon)",
-            "The window must contain an active SAP session with a transaction loaded",
-            "Try running 'fairyfly diagnose' to check SAP GUI status"
-        });
+        result.error["suggestions"] = session_id
+            ? json::array({"Run 'fairyfly list' to find an accessible exact session ID"})
+            : json::array({
+                "Ensure you clicked on an active SAP transaction window (not just SAP Logon)",
+                "The window must contain an active SAP session with a transaction loaded",
+                "Try running 'fairyfly doctor' to check SAP GUI status"
+            });
     }
 
     return result;
 }
 
-Result CommandHandler::handle_launch(const std::string& connection_name)
+Result CommandHandler::handle_launch(const std::string& connection_name, bool allow_sapshcut)
 {
     spdlog::info("Launching SAP connection: {}", connection_name);
-    auto result = engine_->launch_connection(connection_name);
+    auto result = engine_->launch_connection(connection_name, allow_sapshcut);
 
     if (result.status == Result::Status::Success) {
         spdlog::info("Successfully launched SAP connection: {}", connection_name);
@@ -133,10 +167,14 @@ Result CommandHandler::handle_launch(const std::string& connection_name)
         std::string description = connection_name;
         std::string connection_string = "";
 
-        if (app_info.contains("connections") && app_info["connections"].is_array() && !app_info["connections"].empty()) {
-            auto conn = app_info["connections"][0];
-            description = conn.value("description", connection_name);
-            connection_string = conn.value("connection_string", "");
+        if (app_info.contains("connections") && app_info["connections"].is_array()) {
+            for (const auto& candidate : app_info["connections"]) {
+                if (candidate.value("id", "") == connection_id) {
+                    description = candidate.value("description", connection_name);
+                    connection_string = candidate.value("connection_string", "");
+                    break;
+                }
+            }
         }
 
         // Create or update connection file
@@ -145,7 +183,8 @@ Result CommandHandler::handle_launch(const std::string& connection_name)
             connection_id,
             description,
             connection_string,
-            ""  // No window title for launch
+            "",  // No window title for launch
+            engine_->current_server_session_key()
         );
 
         result.data["connection_file_id"] = conn.id;
@@ -158,7 +197,126 @@ Result CommandHandler::handle_launch(const std::string& connection_name)
     return result;
 }
 
-Result CommandHandler::handle_disconnect(std::optional<int> connection_id)
+Result CommandHandler::handle_login(const std::string& credentials_file,
+                                    std::optional<int> connection_id, bool from_stdin)
+{
+    Result result;
+    std::ifstream file;
+    if (!from_stdin) file.open(credentials_file, std::ios::binary);
+    if (!from_stdin && !file) {
+        result.status = Result::Status::Error;
+        result.error = {{"code", "CREDENTIAL_FILE_UNAVAILABLE"},
+                        {"message", "Cannot open credential file"}};
+        return result;
+    }
+
+    LoginCredentials credentials;
+    try {
+        credentials = parse_login_credentials(from_stdin ? std::cin : file);
+    } catch (const std::invalid_argument& e) {
+        result.status = Result::Status::Error;
+        result.error = {{"code", "INVALID_CREDENTIAL_FILE"}, {"message", e.what()}};
+        return result;
+    }
+
+    auto selected = resolve_and_validate_connection(connection_id);
+    if (selected.status != ResultT<Connection>::Status::Success) {
+        return result_from_error(selected);
+    }
+
+    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    if (!com_engine || !com_engine->get_session()) {
+        result.status = Result::Status::Error;
+        result.error = {{"code", "ENGINE_TYPE_MISMATCH"},
+                        {"message", "SAP GUI logon requires the COM automation engine"}};
+        return result;
+    }
+    const auto session = com_engine->get_session();
+    const auto password_path = selected.value.session_id + "/wnd[0]/usr/pwdRSYST-BCODE";
+    const auto snapshot = [&]() {
+        json screen = {{"transaction", session->get_transaction_code()}, {"elements", json::array()}};
+        try {
+            session->find_element_by_id(password_path);
+            screen["elements"].push_back({{"id", password_path}});
+        } catch (const sap::ComException& error) {
+            if (!sap::is_missing_element_error(error.what())) throw;
+        }
+        return screen;
+    };
+    if (!is_sap_logon_screen(snapshot())) {
+        result.status = Result::Status::Error;
+        result.error = {{"code", "NOT_LOGON_SCREEN"},
+                        {"message", "Selected session is not on the SAP logon screen"}};
+        return result;
+    }
+
+    for (const auto& field : {
+             std::pair{"@active/usr/txtRSYST-MANDT", credentials.client},
+             std::pair{"@active/usr/txtRSYST-BNAME", credentials.username},
+             std::pair{"@active/usr/txtRSYST-LANGU", credentials.language},
+             std::pair{"@active/usr/pwdRSYST-BCODE", credentials.password}}) {
+        result = engine_->fill_field(ElementId(field.first), field.second);
+        if (result.status != Result::Status::Success) {
+            engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
+            return result;
+        }
+    }
+
+    result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
+    if (result.status != Result::Status::Success) {
+        engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
+        return result;
+    }
+
+    const auto new_password_path = selected.value.session_id + "/wnd[1]/usr/pwdRSYST-NCODE";
+    bool password_change_required = false;
+    try {
+        session->find_element_by_id(new_password_path);
+        password_change_required = true;
+    } catch (const sap::ComException& error) {
+        if (!sap::is_missing_element_error(error.what())) throw;
+    }
+    if (password_change_required) {
+        if (credentials.new_password.empty()) {
+            result.status = Result::Status::Error;
+            result.error = {{"code", "PASSWORD_CHANGE_REQUIRED"},
+                            {"message", "SAP requires a new password; provide New Password in the credential input"}};
+            return result;
+        }
+        for (const auto* field : {"@active/usr/pwdRSYST-NCODE", "@active/usr/pwdRSYST-NCOD2"}) {
+            result = engine_->fill_field(ElementId(field), credentials.new_password);
+            if (result.status != Result::Status::Success) return result;
+        }
+        result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
+        if (result.status != Result::Status::Success) return result;
+    }
+
+    std::string authenticated_user = session->get_user();
+    for (int attempt = 0; attempt < 10 &&
+         !sap_user_matches(authenticated_user, credentials.username); ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        authenticated_user = session->get_user();
+    }
+    if (!sap_user_matches(authenticated_user, credentials.username)) {
+        engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
+        result.status = Result::Status::Error;
+        result.error = {{"code", "LOGON_NOT_COMPLETED"},
+                        {"message", "SAP did not authenticate the requested user"},
+                        {"transaction", session->get_transaction_code()},
+                        {"password_change_detected", password_change_required}};
+        return result;
+    }
+
+    result = {};
+    result.status = Result::Status::Success;
+    result.data = {{"connection_id", selected.value.id},
+                   {"session_id", selected.value.session_id},
+                   {"transaction", session->get_transaction_code()},
+                   {"message", "SAP GUI logon completed"}};
+    return result;
+}
+
+Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool close_session)
 {
     Result result;
 
@@ -197,16 +355,35 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id)
         return result;
     }
 
-    // Delete the connection file
-    bool deleted = conn_mgr_->delete_connection(connection_id.value());
+    if (close_session) {
+        auto selected = resolve_and_validate_connection(connection_id);
+        if (selected.status != ResultT<Connection>::Status::Success) {
+            return result_from_error(selected);
+        }
+        auto closed = engine_->close_current_session();
+        if (closed.status != Result::Status::Success) {
+            return closed;
+        }
+        conn = selected.value;
+    }
+
+    // A replacement cache entry must survive even if the close action completed.
+    bool deleted = conn_mgr_->delete_connection_if_unchanged(*conn);
 
     result.status = Result::Status::Success;
     result.data["connection_id"] = connection_id.value();
     result.data["session_id"] = conn.value().session_id;
     result.data["file_deleted"] = deleted;
-    result.data["message"] = fmt::format("Disconnected connection {}", connection_id.value());
+    result.data["session_closed"] = close_session;
+    result.data["message"] = deleted
+        ? (close_session
+            ? fmt::format("Closed SAP GUI session and removed saved connection {}", connection_id.value())
+            : fmt::format("Removed saved connection {}; SAP GUI session remains open", connection_id.value()))
+        : (close_session
+            ? fmt::format("Closed SAP GUI session; saved connection {} changed and was retained", connection_id.value())
+            : fmt::format("Saved connection {} changed and was retained; SAP GUI session remains open", connection_id.value()));
 
-    spdlog::info("Disconnected and removed connection file: fairyfly.{}.con", connection_id.value());
+    spdlog::info("Disconnected connection {} (saved file removed: {})", connection_id.value(), deleted);
 
     return result;
 }
@@ -220,8 +397,8 @@ Result CommandHandler::handle_connections_list(bool cleanup)
     if (cleanup) {
         // Cleanup invalid connections
         int deleted = conn_mgr_->cleanup_invalid_connections(
-            [this](const std::string& session_id) {
-                return engine_->validate_session(session_id);
+            [this](const Connection& conn) {
+                return engine_->validate_session_for_cleanup(conn.session_id, conn.server_session_key);
             }
         );
 
@@ -235,7 +412,7 @@ Result CommandHandler::handle_connections_list(bool cleanup)
     // Build connection list with validation status
     json conn_list = json::array();
     for (const auto& conn : connections) {
-        bool valid = engine_->validate_session(conn.session_id);
+        bool valid = engine_->validate_session(conn.session_id, conn.server_session_key);
 
         conn_list.push_back({
             {"id", conn.id},
@@ -279,7 +456,10 @@ Result CommandHandler::handle_transaction(const std::string& tcode, std::optiona
 }
 
 Result CommandHandler::handle_click(const std::string& element_id, std::optional<int> connection_id,
-                                     bool wait_for_window, int timeout_ms)
+                                     bool wait_for_window, int timeout_ms,
+                                     const std::string& node_key, const std::string& tree_action,
+                                     const std::string& menu_item, std::optional<int> row,
+                                     const std::string& column)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -299,6 +479,10 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         return result;
     }
 
+    // Check if this is a synthetic toolbar button (pattern: .../shell/btn_XXXX)
+    std::string element_path = elem.path;
+    bool is_synthetic_button = element_path.find("/shell/btn_") != std::string::npos;
+
     // Get current active window before click (if monitoring for new windows)
     WindowId window_before;
     if (wait_for_window) {
@@ -309,7 +493,149 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         spdlog::info("Clicking element: {} on connection {}", element_id, conn_result.value.id);
     }
 
-    auto result = engine_->click_element(elem);
+    Result result;
+
+    if (row.has_value() || !column.empty()) {
+        if (!row.has_value() || *row < 0 || column.empty() || !node_key.empty() || is_synthetic_button) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "GRID_ROW_OPTIONS_REQUIRED";
+            result.error["message"] = "GridView selection requires --row >= 0 and --column on a grid element";
+            return result;
+        }
+        auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        if (!com_engine) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "ENGINE_TYPE_MISMATCH";
+            result.error["message"] = "GridView row selection requires the COM automation engine";
+            return result;
+        }
+        result = com_engine->select_grid_row(elem, *row, column);
+        if (result.status == Result::Status::Success)
+            result.data["connection_id"] = conn_result.value.id;
+        return result;
+    }
+
+    // Check if node_key is provided - if so, this is a tree operation
+    if (!node_key.empty()) {
+        if (tree_action == "contextmenu" && menu_item.empty()) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "MENU_ITEM_REQUIRED";
+            result.error["message"] = "--menu-item is required for tree context-menu actions";
+            return result;
+        }
+        spdlog::info("Tree operation requested: action='{}', node_key='{}'", tree_action, node_key);
+
+        try {
+            auto start = std::chrono::high_resolution_clock::now();
+
+            // Get the ComAutomationEngine to access session
+            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            if (!com_engine) {
+                result.status = Result::Status::Error;
+                result.error["code"] = "ENGINE_TYPE_MISMATCH";
+                result.error["message"] = "Tree operations require COM automation engine (stub mode active)";
+                return result;
+            }
+
+            auto session = com_engine->get_session();
+            if (!session) {
+                result.status = Result::Status::Error;
+                result.error["code"] = "NO_SESSION";
+                result.error["message"] = "No active session";
+                return result;
+            }
+
+            // Resolve element path to full path
+            std::string full_path = elem.path;
+            if (elem.path.rfind("@active", 0) == 0) {  // Starts with "@active"
+                WindowId active_window = engine_->get_active_window_id();
+                // Replace @active with actual window ID
+                full_path = active_window.id + elem.path.substr(7);  // Skip "@active"
+            }
+
+            // Find element by ID
+            auto tree_elem = session->find_element_by_id(full_path);
+            if (!tree_elem) {
+                result.status = Result::Status::Error;
+                result.error["code"] = "ELEMENT_NOT_FOUND";
+                result.error["message"] = fmt::format("Element not found: {}", full_path);
+                return result;
+            }
+
+            // Check if element is a tree (optional - will fail gracefully if not)
+            std::string elem_type = tree_elem->get_type();
+            const auto before_status = sap::read_action_status(session);
+
+            // Execute the tree action
+            if (tree_action == "select") {
+                tree_elem->select_node(node_key);
+            } else if (tree_action == "expand") {
+                tree_elem->expand_node(node_key);
+            } else if (tree_action == "collapse") {
+                tree_elem->collapse_node(node_key);
+            } else if (tree_action == "contextmenu") {
+                tree_elem->select_node_context_item(node_key, menu_item);
+            } else { // doubleclick (default)
+                tree_elem->doubleclick_node(node_key);
+            }
+            session->wait_for_completion(500);
+            if (auto rejection = sap::classify_action_status(before_status,
+                    sap::read_action_status(session), full_path,
+                    tree_action == "contextmenu" || tree_action == "doubleclick")) {
+                rejection->error["node_key"] = node_key;
+                rejection->error["tree_action"] = tree_action;
+                rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::high_resolution_clock::now() - start);
+                return *rejection;
+            }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+            result.status = Result::Status::Success;
+            result.data["action"] = tree_action + "_node";
+            result.data["node_key"] = node_key;
+            if (tree_action == "contextmenu") result.data["menu_item"] = menu_item;
+            result.data["element"] = full_path;
+            result.data["element_type"] = elem_type;
+            result.data["connection_id"] = conn_result.value.id;
+            result.duration = duration;
+
+            spdlog::info("Executed tree action '{}' on node '{}' (duration: {}ms)",
+                        tree_action, node_key, duration.count());
+
+            return result;
+
+        } catch (const std::exception& e) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "TREE_ACTION_FAILED";
+            result.error["message"] = fmt::format("Tree action '{}' failed: {}", tree_action, e.what());
+            result.error["node_key"] = node_key;
+            result.error["tree_action"] = tree_action;
+            result.error["suggestions"] = json::array({
+                fmt::format("List nodes: fairyfly get {} --list-nodes", element_id),
+                "Ensure element is a tree control (GuiShell or GuiTree)",
+                "Verify node key exists in tree"
+            });
+            return result;
+        }
+    }
+
+    // Handle synthetic toolbar buttons differently
+    if (is_synthetic_button) {
+        // Extract toolbar path and button ID from synthetic button path
+        size_t btn_pos = element_path.rfind("/btn_");
+        std::string toolbar_path = element_path.substr(0, btn_pos);
+        std::string button_id = element_path.substr(btn_pos + 5); // Skip "/btn_"
+
+        spdlog::debug("Detected synthetic button - toolbar: {}, button_id: {}", toolbar_path, button_id);
+
+        // Press button using toolbar's PressButton method
+        result = engine_->press_toolbar_button(ElementId(toolbar_path), button_id);
+    } else {
+        // Regular click for real COM elements
+        result = engine_->click_element(elem);
+    }
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
@@ -355,7 +681,43 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     return result;
 }
 
-Result CommandHandler::handle_fill(const std::string& element_id, const std::string& value, std::optional<int> connection_id)
+Result CommandHandler::handle_press_f4(const std::string& element_id, std::optional<int> connection_id)
+{
+    // Resolve and validate connection
+    auto conn_result = resolve_and_validate_connection(connection_id);
+    if (conn_result.status != ResultT<Connection>::Status::Success) {
+        return result_from_error(conn_result);
+    }
+
+    ElementId elem(element_id);
+    if (!elem.is_valid()) {
+        Result result;
+        result.status = Result::Status::Error;
+        result.error["code"] = "INVALID_ELEMENT";
+        result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
+        result.error["suggestions"] = json::array({
+            "Element IDs should start with 'wnd' or '@active' (e.g., wnd[0]/usr/ctxtFIELD or @active/usr/ctxtFIELD)"
+        });
+        return result;
+    }
+
+    spdlog::info("Pressing F4 for element: {} on connection {}", element_id, conn_result.value.id);
+
+    // Call the automation engine's press_f4 method
+    Result result = engine_->press_f4(elem);
+
+    if (result.status == Result::Status::Success) {
+        result.data["connection_id"] = conn_result.value.id;
+        result.data["element_id"] = element_id;
+        result.data["message"] = "F4 search help opened successfully";
+    }
+
+    return result;
+}
+
+Result CommandHandler::handle_fill(const std::string& element_id, const std::string& value,
+                                   std::optional<int> connection_id, std::optional<int> row,
+                                   const std::string& column, bool checkbox, bool commit)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -372,8 +734,27 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
         return result;
     }
 
-    spdlog::info("Filling element: {} with value: {} on connection {}", element_id, value, conn_result.value.id);
-    auto result = engine_->fill_field(elem, value);
+    const bool grid_requested = row.has_value() || !column.empty() || checkbox || commit;
+    Result result;
+    if (grid_requested) {
+        if (!row.has_value() || *row < 0 || column.empty()) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "GRID_CELL_OPTIONS_REQUIRED";
+            result.error["message"] = "GridView fill requires --row >= 0 and --column";
+            return result;
+        }
+        auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        if (!com_engine) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "ENGINE_TYPE_MISMATCH";
+            result.error["message"] = "GridView editing requires the COM automation engine";
+            return result;
+        }
+        result = com_engine->fill_grid_cell(elem, *row, column, value, checkbox, commit);
+    } else {
+        spdlog::info("Filling element: {} on connection {}", element_id, conn_result.value.id);
+        result = engine_->fill_field(elem, value);
+    }
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
@@ -382,7 +763,7 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
     return result;
 }
 
-Result CommandHandler::handle_read_field(const std::string& element_id, std::optional<int> connection_id)
+Result CommandHandler::handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -399,6 +780,131 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
         return result;
     }
 
+    // Handle tree node listing
+    if (list_nodes) {
+        spdlog::info("Listing tree nodes: {} on connection {}", element_id, conn_result.value.id);
+
+        try {
+            // Get the actual element COM object
+            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            if (!com_engine) {
+                Result result;
+                result.status = Result::Status::Error;
+                result.error["code"] = "ENGINE_TYPE_MISMATCH";
+                result.error["message"] = "Tree operations require COM automation engine (stub mode active)";
+                return result;
+            }
+
+            // Check for modal dialog blocking access to main window
+            auto dialog_info = com_engine->detect_modal_dialog();
+            if (!dialog_info.empty()) {
+                Result result;
+                result.status = Result::Status::Error;
+                result.error["code"] = "MODAL_DIALOG_ACTIVE";
+                result.error["message"] = "Cannot access element - modal dialog is active";
+                result.error["dialog"] = dialog_info;
+                result.error["suggestions"] = json::array({
+                    fmt::format("Close the dialog first: fairyfly click '@active/tbar[0]/btn[0]'"),
+                    fmt::format("Or use main window explicitly: fairyfly get '@main{}' --list-nodes", elem.path.substr(7))
+                });
+                result.error["requested_element"] = element_id;
+                result.error["active_window"] = dialog_info["window_id"];
+                result.error["main_window"] = "wnd[0]";
+                spdlog::warn("Modal dialog blocking access: {} ({})",
+                            dialog_info.value("window_id", "unknown"),
+                            dialog_info.value("title", "Unknown"));
+                return result;
+            }
+
+            auto session = com_engine->get_session();
+            if (!session) {
+                Result result;
+                result.status = Result::Status::Error;
+                result.error["code"] = "NO_SESSION";
+                result.error["message"] = "No active session";
+                return result;
+            }
+
+            // Resolve element path to full path
+            std::string full_path = elem.path;
+            if (elem.path.rfind("@active", 0) == 0) {  // Starts with "@active"
+                WindowId active_window = engine_->get_active_window_id();
+                // Replace @active with actual window ID
+                full_path = active_window.id + elem.path.substr(7);  // Skip "@active"
+            }
+
+            // Find element by ID
+            auto tree_elem = session->find_element_by_id(full_path);
+            if (!tree_elem) {
+                Result result;
+                result.status = Result::Status::Error;
+                result.error["code"] = "ELEMENT_NOT_FOUND";
+                result.error["message"] = fmt::format("Element not found: {}", full_path);
+                return result;
+            }
+
+            // Check if element is a tree
+            std::string elem_type = tree_elem->get_type();
+            if (elem_type != "GuiShell" && elem_type != "GuiTree") {
+                Result result;
+                result.status = Result::Status::Error;
+                result.error["code"] = "NOT_A_TREE";
+                result.error["message"] = fmt::format("Element is not a tree control (type: {})", elem_type);
+                result.error["element"] = full_path;
+                result.error["element_type"] = elem_type;
+                return result;
+            }
+
+            // Get all node keys
+            auto start = std::chrono::high_resolution_clock::now();
+            auto node_keys = tree_elem->get_all_node_keys();
+
+            // Build nodes array with keys and text
+            json nodes = json::array();
+            std::vector<std::string> tree_column_names;
+            bool tree_column_names_loaded = false;
+            for (const auto& key : node_keys) {
+                json node;
+                node["key"] = key;
+                std::string node_text = tree_elem->get_node_text_by_key(key);
+                if (node_text.empty() && !tree_column_names_loaded) {
+                    tree_column_names = tree_elem->get_tree_column_names();
+                    tree_column_names_loaded = true;
+                }
+                node["text"] = sap::recover_tree_node_text(
+                    node_text, tree_column_names,
+                    [&](const std::string& name) {
+                        return tree_elem->get_item_text(key, name);
+                    });
+                nodes.push_back(node);
+            }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+            Result result;
+            result.status = Result::Status::Success;
+            result.data["element"] = full_path;
+            result.data["element_type"] = elem_type;
+            result.data["nodes"] = nodes;
+            result.data["node_count"] = nodes.size();
+            result.data["connection_id"] = conn_result.value.id;
+            result.duration = duration;
+
+            spdlog::info("Listed {} tree nodes (duration: {}ms)", nodes.size(), duration.count());
+
+            return result;
+
+        } catch (const std::exception& e) {
+            Result result;
+            result.status = Result::Status::Error;
+            result.error["code"] = "TREE_LIST_FAILED";
+            result.error["message"] = fmt::format("Failed to list tree nodes: {}", e.what());
+            return result;
+        }
+    }
+
+    // Regular field reading
     spdlog::info("Reading field: {} on connection {}", element_id, conn_result.value.id);
     auto result = engine_->read_field(elem);
 
@@ -409,7 +915,200 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
     return result;
 }
 
-Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id, bool expand_tabs)
+/// Helper to check if an element matches filter criteria
+static bool element_matches_filter(const json& elem, const ScreenFilterOptions& filters)
+{
+    if (!elem.is_object()) {
+        return false;
+    }
+
+    bool matches = true;
+
+    // Type filters
+    std::string type = elem.value("type", "");
+
+    if (filters.only_buttons) {
+        matches = matches && (type == "GuiButton");
+    }
+
+    if (filters.only_fields) {
+        matches = matches && (type == "GuiTextField" || type == "GuiCTextField" ||
+                             type == "GuiPasswordField") && elem.value("changeable", false);
+    }
+
+    if (filters.only_editable) {
+        matches = matches && elem.value("changeable", false);
+    }
+
+    if (filters.only_f4_fields) {
+        matches = matches && elem.value("has_f4_help", false);
+    }
+
+    // Text search (case-insensitive)
+    if (filters.text_contains.has_value() && matches) {
+        std::string search_text = filters.text_contains.value();
+        std::transform(search_text.begin(), search_text.end(), search_text.begin(), ::tolower);
+
+        std::string elem_text = elem.value("text", "");
+        std::string elem_tooltip = elem.value("tooltip", "");
+        std::transform(elem_text.begin(), elem_text.end(), elem_text.begin(), ::tolower);
+        std::transform(elem_tooltip.begin(), elem_tooltip.end(), elem_tooltip.begin(), ::tolower);
+
+        matches = elem_text.find(search_text) != std::string::npos ||
+                 elem_tooltip.find(search_text) != std::string::npos;
+    }
+
+    // ID search
+    if (filters.id_contains.has_value() && matches) {
+        std::string id = elem.value("id", "");
+        matches = id.find(filters.id_contains.value()) != std::string::npos;
+    }
+
+    // Exact type filter
+    if (filters.type_filter.has_value() && matches) {
+        matches = (type == filters.type_filter.value());
+    }
+
+    return matches;
+}
+
+/// Recursively filter elements based on ScreenFilterOptions
+/// Returns flat array of all matching elements (including nested children)
+static std::pair<json, json> filter_elements(const json& elements, const ScreenFilterOptions& filters)
+{
+    json filter_stats;
+
+    // If no filters active, return all elements
+    bool any_filter = filters.only_buttons || filters.only_fields || filters.only_editable ||
+                      filters.only_f4_fields || filters.text_contains.has_value() ||
+                      filters.id_contains.has_value() || filters.type_filter.has_value() ||
+                      filters.first_match_only;
+
+    if (!any_filter) {
+        filter_stats["filter_applied"] = false;
+        return {elements, filter_stats};
+    }
+
+    json filtered = json::array();
+    int total_checked = 0;
+    bool found_first = false;
+
+    // Recursive lambda to collect all matching elements
+    std::function<void(const json&)> collect_matches = [&](const json& elem_array) {
+        if (!elem_array.is_array()) return;
+
+        for (const auto& elem : elem_array) {
+            // Child arrays may mix ID references with fully expanded objects.
+            if (!elem.is_object()) continue;
+            total_checked++;
+
+            // Check if this element matches
+            if (element_matches_filter(elem, filters)) {
+                filtered.push_back(elem);
+                found_first = true;
+
+                // If first_match_only, stop immediately
+                if (filters.first_match_only) {
+                    return;
+                }
+            }
+
+            // Recursively check all child objects, even after string ID references.
+            if (elem.is_object() && elem.contains("children") && elem["children"].is_array() &&
+                (!filters.first_match_only || !found_first)) {
+                collect_matches(elem["children"]);
+                if (filters.first_match_only && found_first) {
+                    return;
+                }
+            }
+
+            // Also check toolbar_buttons array (synthetic buttons)
+            if (elem.is_object() && elem.contains("toolbar_buttons") &&
+                elem["toolbar_buttons"].is_array() && (!filters.first_match_only || !found_first)) {
+                collect_matches(elem["toolbar_buttons"]);
+                if (filters.first_match_only && found_first) {
+                    return;
+                }
+            }
+            if (filters.first_match_only && found_first) return;
+        }
+    };
+
+    collect_matches(elements);
+
+    // Build filter stats
+    filter_stats["filter_applied"] = true;
+    filter_stats["total_elements_checked"] = total_checked;
+    filter_stats["filtered_element_count"] = static_cast<int>(filtered.size());
+
+    return {filtered, filter_stats};
+}
+
+void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
+{
+    json all_elements = json::array();
+    if (screen_data.contains("elements") && screen_data["elements"].is_array()) {
+        all_elements = screen_data["elements"];
+    } else if (screen_data.contains("hierarchy")) {
+        const json& hierarchy = screen_data["hierarchy"];
+        if (hierarchy.is_array()) {
+            all_elements = hierarchy;
+        } else if (hierarchy.is_object()) {
+            for (const auto& [category, elements] : hierarchy.items()) {
+                if (!elements.is_array()) continue;
+                for (const auto& element : elements) all_elements.push_back(element);
+            }
+        }
+    }
+
+    auto [filtered, filter_stats] = filter_elements(all_elements, filters);
+    if (!filter_stats.value("filter_applied", false)) return;
+
+    json categorized = json::object();
+    std::unordered_set<std::string> wanted_ids;
+    std::unordered_set<std::string> assigned_ids;
+    for (const auto& element : filtered) {
+        if (element.is_object()) wanted_ids.insert(element.value("id", ""));
+    }
+    if (screen_data.contains("hierarchy") && screen_data["hierarchy"].is_object()) {
+        for (const auto& [category, elements] : screen_data["hierarchy"].items()) {
+            if (!elements.is_array()) continue;
+            for (const auto& element : elements) {
+                if (!element.is_object()) continue;
+                const std::string id = element.value("id", "");
+                if (wanted_ids.count(id) && assigned_ids.insert(id).second)
+                    categorized[category].push_back(element);
+            }
+        }
+    }
+    // Some synthetic or nested elements have no top-level hierarchy category.
+    for (const auto& element : filtered) {
+        if (!element.is_object()) continue;
+        const std::string id = element.value("id", "");
+        if (!assigned_ids.insert(id).second) continue;
+        const std::string type = element.value("type", "");
+        const char* category = type == "GuiButton" ? "buttons" :
+                               type == "GuiTextField" || type == "GuiCTextField" ||
+                               type == "GuiPasswordField" || type == "GuiCheckBox" ||
+                               type == "GuiComboBox" || type == "GuiRadioButton" ? "form_fields" :
+                               type == "GuiTableControl" || type == "GuiGridView" ? "tables" :
+                               type == "GuiToolbar" ? "toolbar" : "other";
+        categorized[category].push_back(element);
+    }
+    screen_data["elements"] = filtered;
+    screen_data["element_count"] = filtered.size();
+    screen_data["hierarchy"] = categorized;
+    screen_data["filter_stats"] = filter_stats;
+    if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
+        for (auto& tab_data : screen_data["tabs_content"]) {
+            if (tab_data.is_object()) apply_screen_filters(tab_data, filters);
+        }
+    }
+}
+
+Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id,
+                                           bool expand_tabs, const ScreenFilterOptions& filters,
+                                           bool skip_trees, bool compact, int max_rows)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -417,20 +1116,43 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
         return result_from_error(conn_result);
     }
 
-    spdlog::info("Reading screen structure (include_children={}, expand_tabs={}) on connection {}",
-                 include_children, expand_tabs, conn_result.value.id);
+    spdlog::info("Reading screen structure (include_children={}, expand_tabs={}, skip_trees={}) on connection {}",
+                 include_children, expand_tabs, skip_trees, conn_result.value.id);
 
     Result result;
     if (expand_tabs) {
-        result = engine_->read_screen_with_tabs();
+        result = engine_->read_screen_with_tabs(skip_trees, max_rows);
     } else {
-        result = engine_->read_screen(include_children);
+        result = engine_->read_screen(include_children, skip_trees, max_rows);
     }
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
+        result.data["compact"] = compact;
+
+        apply_screen_filters(result.data, filters);
+        if (result.data.contains("filter_stats")) {
+            const auto& stats = result.data["filter_stats"];
+            spdlog::info("Applied filters: {} checked -> {} elements found",
+                         stats.value("total_elements_checked", 0),
+                         stats.value("filtered_element_count", 0));
+        }
     }
 
+    return result;
+}
+
+Result CommandHandler::handle_screen_find(const sap::ScreenFindOptions& query,
+                                          std::optional<int> connection_id)
+{
+    auto conn_result = resolve_and_validate_connection(connection_id);
+    if (conn_result.status != ResultT<Connection>::Status::Success) {
+        return result_from_error(conn_result);
+    }
+    auto result = engine_->find_screen(query);
+    if (result.status == Result::Status::Success) {
+        result.data["connection_id"] = conn_result.value.id;
+    }
     return result;
 }
 
@@ -463,7 +1185,12 @@ Result CommandHandler::handle_list_all()
         // Get application info
         json info = engine_->get_application_info();
         result.data = info;
-        result.status = Result::Status::Success;
+        if (info.contains("error")) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "ENUMERATION_FAILED";
+            result.error["message"] = info["error"];
+            return result;
+        }
         
         // Log summary
         int total_conns = info["total_connections"].get<int>();
@@ -480,26 +1207,399 @@ Result CommandHandler::handle_list_all()
     return result;
 }
 
+Result CommandHandler::handle_doctor()
+{
+    spdlog::info("Running preflight environment and scripting diagnostics");
+
+    Result result;
+    result.status = Result::Status::Success;
+
+    json checks = json::array();
+    bool all_passed = true;
+    bool has_warnings = false;
+
+    auto add_check = [&](const std::string& name, const std::string& status,
+                         const std::string& message, const std::string& details = "",
+                         const std::string& remediation = "") {
+        json c;
+        c["name"] = name;
+        c["status"] = status;
+        c["message"] = message;
+        if (!details.empty()) c["details"] = details;
+        if (!remediation.empty()) c["remediation"] = remediation;
+        checks.push_back(c);
+
+        if (status == "fail") all_passed = false;
+        if (status == "warn") has_warnings = true;
+    };
+
+#ifdef _WIN32
+    // 1. Desktop & Window Station Context
+    {
+        char station_name[256] = {0};
+        char desktop_name[256] = {0};
+        DWORD len = 0;
+
+        HWINSTA hwinsta = GetProcessWindowStation();
+        if (hwinsta && GetUserObjectInformationA(hwinsta, UOI_NAME, station_name, sizeof(station_name), &len)) {
+            // station retrieved
+        } else {
+            strncpy_s(station_name, sizeof(station_name), "Unknown", _TRUNCATE);
+        }
+
+        HDESK hdesk = GetThreadDesktop(GetCurrentThreadId());
+        if (hdesk && GetUserObjectInformationA(hdesk, UOI_NAME, desktop_name, sizeof(desktop_name), &len)) {
+            // desktop retrieved
+        } else {
+            strncpy_s(desktop_name, sizeof(desktop_name), "Unknown", _TRUNCATE);
+        }
+
+        std::string context_str = fmt::format("{}\\{}", station_name, desktop_name);
+        if (_stricmp(station_name, "WinSta0") == 0 && _stricmp(desktop_name, "Default") == 0) {
+            add_check("desktop_context", "pass", "Running on interactive desktop (" + context_str + ")");
+        } else {
+            add_check("desktop_context", "warn",
+                      "Running on non-default desktop: " + context_str,
+                      "SAP GUI COM scripting requires access to the interactive desktop.",
+                      "Ensure the process is running in the active user console session (WinSta0\\Default).");
+        }
+    }
+
+    // 2. SAP GUI Processes
+    {
+        bool found_logon = false;
+        bool found_gui = false;
+        bool found_pad = false;
+        std::vector<DWORD> pids;
+        DWORD toolhelp_error = ERROR_SUCCESS;
+        DWORD fallback_error = ERROR_SUCCESS;
+        size_t toolhelp_count = 0;
+        size_t fallback_count = 0;
+        bool fallback_attempted = false;
+
+        auto record_process = [&](const wchar_t* name, DWORD pid) {
+            bool matched = false;
+            if (_wcsicmp(name, L"saplogon.exe") == 0) {
+                found_logon = true;
+                matched = true;
+            } else if (_wcsicmp(name, L"sapgui.exe") == 0) {
+                found_gui = true;
+                matched = true;
+            } else if (_wcsicmp(name, L"saplgpad.exe") == 0) {
+                found_pad = true;
+                matched = true;
+            }
+            if (matched && std::find(pids.begin(), pids.end(), pid) == pids.end()) {
+                pids.push_back(pid);
+            }
+        };
+
+        HANDLE snapshot = INVALID_HANDLE_VALUE;
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (snapshot != INVALID_HANDLE_VALUE) break;
+            toolhelp_error = GetLastError();
+            if (toolhelp_error != ERROR_BAD_LENGTH) break;
+        }
+        if (snapshot != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32W pe{};
+            pe.dwSize = sizeof(pe);
+            if (Process32FirstW(snapshot, &pe)) {
+                do {
+                    ++toolhelp_count;
+                    record_process(pe.szExeFile, pe.th32ProcessID);
+                } while (Process32NextW(snapshot, &pe));
+                DWORD walk_error = GetLastError();
+                if (walk_error != ERROR_NO_MORE_FILES) toolhelp_error = walk_error;
+            } else {
+                toolhelp_error = GetLastError();
+            }
+            CloseHandle(snapshot);
+        }
+
+        // Toolhelp may expose only a restricted process snapshot. Fall back to PSAPI.
+        if (pids.empty()) {
+            fallback_attempted = true;
+            std::vector<DWORD> process_ids(1024);
+            DWORD bytes_returned = 0;
+            bool enumerated = false;
+            while (process_ids.size() <= 16384) {
+                if (!K32EnumProcesses(process_ids.data(),
+                                      static_cast<DWORD>(process_ids.size() * sizeof(DWORD)),
+                                      &bytes_returned)) {
+                    fallback_error = GetLastError();
+                    break;
+                }
+                if (bytes_returned < process_ids.size() * sizeof(DWORD)) {
+                    enumerated = true;
+                    break;
+                }
+                process_ids.resize(process_ids.size() * 2);
+            }
+            if (enumerated) {
+                fallback_count = bytes_returned / sizeof(DWORD);
+                for (size_t i = 0; i < fallback_count; ++i) {
+                    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_ids[i]);
+                    if (!process) continue;
+                    wchar_t image_path[MAX_PATH] = {};
+                    DWORD path_length = MAX_PATH;
+                    if (QueryFullProcessImageNameW(process, 0, image_path, &path_length)) {
+                        const wchar_t* filename = wcsrchr(image_path, L'\\');
+                        record_process(filename ? filename + 1 : image_path, process_ids[i]);
+                    }
+                    CloseHandle(process);
+                }
+            }
+        }
+
+        if (!pids.empty()) {
+            std::string proc_desc;
+            if (found_logon && found_gui) proc_desc = "saplogon.exe and sapgui.exe";
+            else if (found_logon) proc_desc = "saplogon.exe";
+            else if (found_gui) proc_desc = "sapgui.exe";
+            else proc_desc = "saplgpad.exe";
+
+            add_check("sapgui_processes", "pass",
+                      fmt::format("SAP GUI process is running ({})", proc_desc),
+                      fmt::format("{} process(es) detected; Toolhelp saw {} entries; {}",
+                                  pids.size(), toolhelp_count,
+                                  fallback_attempted
+                                      ? fmt::format("PSAPI saw {} entries", fallback_count)
+                                      : "PSAPI not run (Toolhelp found SAP GUI)"));
+        } else {
+            spdlog::debug("SAP process scan: Toolhelp saw {} entries (error {}), PSAPI saw {} (error {})",
+                          toolhelp_count, toolhelp_error, fallback_count, fallback_error);
+            add_check("sapgui_processes", "warn",
+                      "SAP GUI process is not visible to this process",
+                      fmt::format("Toolhelp saw {} processes (error {}); PSAPI saw {} (error {}).",
+                                  toolhelp_count, toolhelp_error, fallback_count, fallback_error),
+                      "Check SAP Logon manually. If it is running, process enumeration may be restricted.");
+        }
+    }
+
+    // 3. Client Registry Security Settings
+    {
+        HKEY hKey;
+        LPCWSTR subkey = L"Software\\SAP\\SAPGUI Front\\SAP Frontend Server\\Security";
+        LONG status = RegOpenKeyExW(HKEY_CURRENT_USER, subkey, 0, KEY_READ, &hKey);
+        if (status == ERROR_SUCCESS) {
+            DWORD user_scripting = 1;
+            DWORD warn_attach = 0;
+            DWORD warn_conn = 0;
+            DWORD size = sizeof(DWORD);
+            DWORD type = REG_DWORD;
+
+            bool has_user_scripting = (RegQueryValueExW(hKey, L"UserScripting", nullptr, &type, (LPBYTE)&user_scripting, &size) == ERROR_SUCCESS);
+            size = sizeof(DWORD);
+            bool has_warn_attach = (RegQueryValueExW(hKey, L"WarnOnAttach", nullptr, &type, (LPBYTE)&warn_attach, &size) == ERROR_SUCCESS);
+            size = sizeof(DWORD);
+            bool has_warn_conn = (RegQueryValueExW(hKey, L"WarnOnConnection", nullptr, &type, (LPBYTE)&warn_conn, &size) == ERROR_SUCCESS);
+
+            RegCloseKey(hKey);
+
+            if (has_user_scripting && user_scripting == 0) {
+                add_check("client_registry", "fail",
+                          "Client scripting is disabled in SAP GUI Security settings",
+                          "HKCU\\Software\\SAP\\SAPGUI Front\\SAP Frontend Server\\Security\\UserScripting is 0",
+                          "Open SAP GUI Options -> Accessibility & Scripting -> Scripting -> Check 'Enable scripting'.");
+            } else if ((has_warn_attach && warn_attach != 0) || (has_warn_conn && warn_conn != 0)) {
+                add_check("client_registry", "warn",
+                          "Client scripting is enabled, but modal security warnings are active",
+                          fmt::format("WarnOnAttach={}, WarnOnConnection={}", warn_attach, warn_conn),
+                          "Uncheck 'Notify when a script attaches to SAP GUI' and 'Notify when a script opens a connection' in SAP GUI Options to avoid blocking modal dialogs.");
+            } else {
+                add_check("client_registry", "pass",
+                          "Client scripting security configuration is optimal (enabled, modal warnings suppressed)");
+            }
+        } else {
+            add_check("client_registry", "pass",
+                      "SAP GUI client security registry key using standard defaults");
+        }
+    }
+#else
+    add_check("desktop_context", "info", "Non-Windows environment, desktop check skipped");
+    add_check("sapgui_processes", "info", "Non-Windows environment, process check skipped");
+    add_check("client_registry", "info", "Non-Windows environment, registry check skipped");
+#endif
+
+    // 4. COM Automation Engine & Scripting Engine
+    bool com_ok = false;
+    try {
+        if (engine_) {
+            com_ok = true;
+            add_check("com_engine", "pass", "SAP GUI COM scripting engine initialized successfully");
+        } else {
+            add_check("com_engine", "fail",
+                      "Failed to initialize SAP GUI COM scripting engine",
+                      "AutomationEngine returned null",
+                      "Verify SAP GUI Scripting component is installed via SAP GUI setup.");
+        }
+    } catch (const std::exception& e) {
+        add_check("com_engine", "fail",
+                  fmt::format("COM scripting engine error: {}", e.what()),
+                  "",
+                  "Ensure SAP GUI is installed with Scripting Support enabled.");
+    }
+
+    // 5. Active Connections and Backend Scripting Health
+    if (com_ok) {
+        try {
+            json info = engine_->get_application_info();
+            int total_conns = info.value("total_connections", 0);
+            int total_sess = info.value("total_sessions", 0);
+
+            if (info.contains("error")) {
+                add_check("active_sessions", "fail",
+                          "Could not enumerate SAP GUI sessions",
+                          info["error"].get<std::string>(),
+                          "Check SAP Logon and retry the diagnostic.");
+            } else if (info.value("backend_scripting_disabled", false) && total_sess == 0) {
+                add_check("active_sessions", "fail",
+                          "Backend scripting is disabled on an SAP connection",
+                          fmt::format("{} connection(s), {} accessible session(s)", total_conns, total_sess),
+                          "Enable sapgui/user_scripting on the backend and reconnect.");
+            } else if (total_conns == 0) {
+                add_check("active_sessions", "warn",
+                          "No active SAP connections found",
+                          "SAP GUI scripting engine is active, but no connections are currently open.",
+                          "Connect to an SAP system in SAP Logon (e.g. Bigfox / A4H) or run 'fairyfly launch <connection>'.");
+            } else if (info.value("connection_enumeration_errors", 0) > 0) {
+                add_check("active_sessions", "warn",
+                          "Some SAP connections could not be inspected",
+                          fmt::format("{} accessible session(s), {} connection error(s)",
+                                      total_sess, info.value("connection_enumeration_errors", 0)),
+                          "Inspect the connection error entries from 'fairyfly list'.");
+            } else if (info.value("session_enumeration_errors", 0) > 0) {
+                add_check("active_sessions", "warn",
+                          "Some SAP sessions could not be inspected",
+                          fmt::format("{} accessible session(s), {} enumeration error(s)",
+                                      total_sess, info.value("session_enumeration_errors", 0)),
+                          "Inspect the session_errors entries from 'fairyfly list'.");
+            } else if (info.value("backend_scripting_disabled", false)) {
+                add_check("active_sessions", "warn",
+                          "An older SAP connection still has backend scripting disabled",
+                          fmt::format("{} connection(s), {} accessible session(s)", total_conns, total_sess),
+                          "Reconnect or close the disabled connection; accessible sessions can still be used.");
+            } else if (total_sess == 0) {
+                add_check("active_sessions", "warn",
+                          "SAP connections are open, but no sessions are accessible",
+                          fmt::format("{} connection(s), zero accessible sessions", total_conns),
+                          "Finish SAP login and verify backend scripting is enabled.");
+            } else {
+                add_check("active_sessions", "pass",
+                          fmt::format("Active session verified with backend scripting enabled ({} connections, {} sessions)",
+                                      total_conns, total_sess));
+            }
+        } catch (const std::exception& e) {
+            std::string err = e.what();
+            if (err.find("disabled") != std::string::npos || err.find("Scripting") != std::string::npos) {
+                add_check("active_sessions", "fail",
+                          "Backend scripting is disabled by server administrator",
+                          err,
+                          "Enable sapgui/user_scripting = TRUE in transaction RZ11.");
+            } else {
+                add_check("active_sessions", "warn",
+                          fmt::format("Could not query active sessions: {}", err));
+            }
+        }
+    }
+
+    std::string overall = "ok";
+    if (!all_passed) {
+        overall = "error";
+    } else if (has_warnings) {
+        overall = "warning";
+    }
+
+    result.data["overall_health"] = overall;
+    result.data["checks"] = checks;
+
+    return result;
+}
+
 // format_screen_markdown and all helper functions moved to ScreenMarkdownFormatter class
 // Grid layout functions moved to GridAnalyzer and GridRenderer classes
 
-std::string format_output(const Result& result, OutputFormat format)
+std::string format_output(const Result& result, OutputFormat format, bool verbose_errors)
 {
     switch (format) {
         case OutputFormat::Json: {
-            return result.to_json().dump(2);
+            json output = result.to_json();
+
+            // In compact error mode, remove suggestions array
+            if (!verbose_errors && output.contains("error") && output["error"].contains("suggestions")) {
+                output["error"].erase("suggestions");
+            }
+
+            return output.dump(2);
         }
         case OutputFormat::Markdown: {
             std::ostringstream oss;
             const auto& response = result.to_json();
+
+            if (response["status"] == "success" && response.contains("data") &&
+                response["data"].contains("scanned_count") &&
+                response["data"].contains("elements") &&
+                response["data"]["elements"].is_array()) {
+                const auto& data = response["data"];
+                const auto escape = [](const std::string& value) {
+                    std::string safe;
+                    for (char ch : value) {
+                        switch (ch) {
+                            case '&': safe += "&amp;"; break;
+                            case '<': safe += "&lt;"; break;
+                            case '>': safe += "&gt;"; break;
+                            case '\n': case '\r': safe += ' '; break;
+                            case '\\': case '`': case '*': case '_': case '[':
+                            case ']': case '|': safe += '\\'; safe += ch; break;
+                            default: safe += ch; break;
+                        }
+                    }
+                    return safe;
+                };
+                oss << "# Screen matches\n\n";
+                oss << "**Screen:** " << escape(data.value("title", "")) << "\n\n";
+                oss << "**Scanned:** " << data.value("scanned_count", 0)
+                    << " controls\n\n";
+                if (data.value("scan_limit_reached", false))
+                    oss << "_Scan stopped at the 500-control limit._\n\n";
+                if (data["elements"].empty()) oss << "_No matches._\n";
+                for (const auto& match : data["elements"]) {
+                    if (!match.is_object()) continue;
+                    oss << "- **" << escape(match.value("type", "Control")) << "**: "
+                        << escape(match.value("id", "")) << "\n";
+                    if (!match.value("name", "").empty())
+                        oss << "  - Name: " << escape(match.value("name", "")) << "\n";
+                    if (match.contains("text") && match["text"].is_string())
+                        oss << "  - Text: " << escape(match["text"].get<std::string>()) << "\n";
+                }
+                return oss.str();
+            }
 
             // Check if this is screen data (special formatting)
             if (response["status"] == "success" &&
                 response.contains("data") &&
                 response["data"].contains("screen_id") &&
                 response["data"].contains("hierarchy")) {
+                // Check if compact mode is enabled
+                bool compact = false;
+                try {
+                    compact = response["data"].value("compact", false);
+                } catch (const json::exception& e) {
+                    spdlog::error("Failed to get 'compact' field: {}", e.what());
+                    spdlog::error("response[\"data\"] type: {}", response["data"].type_name());
+                    if (response["data"].contains("compact")) {
+                        spdlog::error("compact field type: {}", response["data"]["compact"].type_name());
+                    }
+                    throw;  // Re-throw to see full stack trace
+                }
                 // Use special screen markdown formatter
-                oss << ScreenMarkdownFormatter::format(response["data"]);
+                try {
+                    oss << ScreenMarkdownFormatter::format(response["data"], compact);
+                } catch (const json::exception& e) {
+                    spdlog::error("ScreenMarkdownFormatter::format() failed: {}", e.what());
+                    throw;  // Re-throw to see full stack trace
+                }
 
                 // Add metadata footer
                 if (response.contains("metadata") && response["metadata"].is_object()) {
@@ -509,6 +1609,35 @@ std::string format_output(const Result& result, OutputFormat format)
                     }
                 }
 
+                return oss.str();
+            }
+
+            // Check if this is doctor diagnostic data
+            if (response["status"] == "success" &&
+                response.contains("data") &&
+                response["data"].contains("overall_health") &&
+                response["data"].contains("checks")) {
+                std::string health = response["data"]["overall_health"];
+                if (health == "ok") {
+                    oss << "# ✅ Fairyfly Environment Diagnostics: Healthy\n\n";
+                } else if (health == "warning") {
+                    oss << "# ⚠️ Fairyfly Environment Diagnostics: Warnings Detected\n\n";
+                } else {
+                    oss << "# ❌ Fairyfly Environment Diagnostics: Issues Detected\n\n";
+                }
+
+                oss << "| Status | Check | Details | Remediation |\n";
+                oss << "| :--- | :--- | :--- | :--- |\n";
+                for (const auto& check : response["data"]["checks"]) {
+                    std::string st = check.value("status", "info");
+                    std::string icon = (st == "pass") ? "✅ PASS" : (st == "warn" ? "⚠️ WARN" : (st == "fail" ? "❌ FAIL" : "ℹ️ INFO"));
+                    std::string msg = check.value("message", "");
+                    std::string det = check.value("details", "-");
+                    std::string rem = check.value("remediation", "-");
+                    if (det.empty()) det = "-";
+                    if (rem.empty()) rem = "-";
+                    oss << "| " << icon << " | " << msg << " | " << det << " | " << rem << " |\n";
+                }
                 return oss.str();
             }
 
@@ -529,7 +1658,8 @@ std::string format_output(const Result& result, OutputFormat format)
                 if (error.contains("message")) {
                     oss << "**Message:** " << error["message"].get<std::string>() << "\n\n";
                 }
-                if (error.contains("suggestions") && error["suggestions"].is_array()) {
+                // Only show suggestions if verbose_errors is enabled
+                if (verbose_errors && error.contains("suggestions") && error["suggestions"].is_array()) {
                     oss << "**Suggestions:**\n";
                     for (const auto& suggestion : error["suggestions"]) {
                         oss << "- " << suggestion.get<std::string>() << "\n";
@@ -585,8 +1715,15 @@ std::string format_output(const Result& result, OutputFormat format)
             opts.delimiter = ',';
             opts.length_marker = false;
 
+            json output = result.to_json();
+
+            // In compact error mode, remove suggestions array
+            if (!verbose_errors && output.contains("error") && output["error"].contains("suggestions")) {
+                output["error"].erase("suggestions");
+            }
+
             // Encode the full result structure (status, data, error, metadata)
-            return encoder.encode(result.to_json(), opts);
+            return encoder.encode(output, opts);
         }
     }
 

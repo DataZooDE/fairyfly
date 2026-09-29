@@ -1,5 +1,8 @@
 #include "include/commands/command_base.h"
 #include "include/cli_handler.h"
+#include "include/constants.h"
+#include "include/screen_reader.h"
+#include <spdlog/spdlog.h>
 #include <optional>
 
 namespace fairyfly {
@@ -18,11 +21,35 @@ public:
         screen_cmd_ = app.add_subcommand(name(), description());
 
         // Add "read" subcommand
-        read_cmd_ = screen_cmd_->add_subcommand("read", "Read screen structure");
-        read_cmd_->add_flag("--no-children", read_children_, "Don't include child elements");
+        read_cmd_ = screen_cmd_->add_subcommand("read", "Read screen structure (max 500 elements)");
+        read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
+        read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
+        read_cmd_->add_flag("--compact", compact_, "Compact markdown output (hide IDs, collapse empty fields)");
+        read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
+            ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
         read_cmd_->add_option("--connection", read_conn_id_, "Connection ID to use");
         read_cmd_->add_option("--output", read_output_format_, "Output format: json, markdown, toon")
+            ->check(CLI::IsMember({"json", "markdown", "toon"}));
+
+        // Filter options
+        read_cmd_->add_flag("--only-buttons", filters_.only_buttons, "Show only GuiButton elements");
+        read_cmd_->add_flag("--only-fields", filters_.only_fields, "Show only input fields");
+        read_cmd_->add_flag("--only-editable", filters_.only_editable, "Show only changeable fields");
+        read_cmd_->add_flag("--only-f4-fields", filters_.only_f4_fields, "Show only fields with F4 search help");
+        read_cmd_->add_option("--text-contains", filter_text_contains_, "Filter by text/tooltip containing string (case-insensitive)");
+        read_cmd_->add_option("--id-contains", filter_id_contains_, "Filter by element ID containing string");
+        read_cmd_->add_option("--type", filter_type_, "Filter by exact element type");
+        read_cmd_->add_flag("--first", filters_.first_match_only, "Return only first matching element");
+
+        find_cmd_ = screen_cmd_->add_subcommand("find", "Find visible controls without reading unrelated values");
+        find_cmd_->add_option("--id-contains", find_id_contains_, "Element ID substring (case-sensitive)");
+        find_cmd_->add_option("--name-contains", find_name_contains_, "Control name substring (ASCII case-insensitive)");
+        find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
+        find_cmd_->add_option("--limit", find_limit_, "Maximum matches (default 1, maximum 100)")
+            ->check(CLI::Range(1, 100));
+        find_cmd_->add_option("--connection", find_conn_id_, "Connection ID to use");
+        find_cmd_->add_option("--output", find_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
 
         // Add "capture" subcommand
@@ -44,7 +71,28 @@ public:
     Result execute(cli::CommandHandler& handler) override {
         if (*read_cmd_) {
             bool should_expand_tabs = !no_tabs_;
-            return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs);
+
+            // Populate optional filter strings from CLI options
+            if (!filter_text_contains_.empty()) {
+                filters_.text_contains = filter_text_contains_;
+            }
+            if (!filter_id_contains_.empty()) {
+                filters_.id_contains = filter_id_contains_;
+            }
+            if (!filter_type_.empty()) {
+                filters_.type_filter = filter_type_;
+            }
+
+            return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
+                                              filters_, skip_trees_, compact_, max_rows_);
+        }
+        else if (*find_cmd_) {
+            sap::ScreenFindOptions query;
+            query.id_contains = find_id_contains_;
+            query.name_contains = find_name_contains_;
+            query.type = find_type_;
+            query.limit = find_limit_;
+            return handler.handle_screen_find(query, find_conn_id_);
         }
         else if (*capture_cmd_) {
             cli::ScreenshotOptions opts;
@@ -64,7 +112,7 @@ public:
         Result result;
         result.status = Result::Status::Error;
         result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No screen subcommand specified (read or capture)";
+        result.error["message"] = "No screen subcommand specified (read, find, or capture)";
         return result;
     }
 
@@ -73,9 +121,12 @@ public:
     }
 
     std::optional<std::string> get_preferred_output_format() const override {
-        // Only override if screen read was invoked (screen capture uses global format)
-        if (read_cmd_ && *read_cmd_) {
+        // Only override if screen read was invoked and an explicit output format was provided
+        if (read_cmd_ && *read_cmd_ && !read_output_format_.empty()) {
             return read_output_format_;
+        }
+        if (find_cmd_ && *find_cmd_ && !find_output_format_.empty()) {
+            return find_output_format_;
         }
         return std::nullopt;
     }
@@ -88,8 +139,26 @@ private:
     CLI::App* read_cmd_ = nullptr;
     bool read_children_ = true;
     bool no_tabs_ = false;
+    bool skip_trees_ = false;
+    bool compact_ = false;
+    int max_rows_ = constants::MAX_TABLE_ROWS;
     std::optional<int> read_conn_id_;
-    std::string read_output_format_ = "markdown";
+    std::string read_output_format_;
+
+    // Targeted search subcommand
+    CLI::App* find_cmd_ = nullptr;
+    std::string find_id_contains_;
+    std::string find_name_contains_;
+    std::string find_type_;
+    int find_limit_ = 1;
+    std::optional<int> find_conn_id_;
+    std::string find_output_format_;
+
+    // Filter options
+    cli::ScreenFilterOptions filters_;
+    std::string filter_text_contains_;
+    std::string filter_id_contains_;
+    std::string filter_type_;
 
     // Capture subcommand
     CLI::App* capture_cmd_ = nullptr;

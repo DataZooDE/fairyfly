@@ -36,3 +36,10 @@ TEST_CASE("ElementMetadataExtractor - Extract handles exceptions", "[metadata][e
     }
 }
 
+TEST_CASE("SapGuiObject - DISPID cache management", "[com][cache]") {
+    SECTION("Clear DISPID cache executes safely") {
+        SapGuiObject::clear_dispid_cache();
+        REQUIRE(true);
+    }
+}
+

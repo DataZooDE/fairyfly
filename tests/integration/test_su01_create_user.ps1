@@ -1,183 +1,198 @@
-# Test Script: Create User in SU01 (User Maintenance)
-# Demonstrates @active selector and --wait-for-window functionality
-
+# Disposable SU01 create/change/read/delete workflow.
 param(
-    [string]$ConnectionName = "Bigfox",
-    [string]$Username = "TESTUSER01",
-    [string]$FirstName = "Test",
-    [string]$LastName = "User",
-    [int]$Timeout = 30000
+    [string]$ConnectionName = 'Bigfox',
+    [int]$ExistingConnectionId = -1,
+    [switch]$LoginFromTrialEnv,
+    [switch]$VerifyChangedPasswordLogin,
+    [string]$FairyflyPath = (Join-Path $PSScriptRoot '..\..\build\bin\Release\fairyfly.exe'),
+    [string]$Username = ('ZFF' + [guid]::NewGuid().ToString('N').Substring(0, 8)).ToUpperInvariant(),
+    [string]$FirstName = 'Fairyfly',
+    [string]$LastName = 'Exploratory',
+    [string]$InitialPassword = ('Aa1!' + [guid]::NewGuid().ToString('N').Substring(0, 14)),
+    [string]$ChangedPassword = ('Bb2!' + [guid]::NewGuid().ToString('N').Substring(0, 14))
 )
 
-$ErrorActionPreference = "Stop"
-$fairyfly = ".\build\Release\fairyfly.exe"
-
-# Color output helpers
-function Write-Step {
-    param([string]$Message)
-    Write-Host "`n==> $Message" -ForegroundColor Cyan
+$ErrorActionPreference = 'Stop'
+if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -eq '1' -and
+    ([System.IO.Path]::GetExtension($FairyflyPath) -ne '.ps1' -or -not (Test-Path -LiteralPath $FairyflyPath))) {
+    throw 'Offline test mode requires an existing mock PowerShell CLI'
 }
+if ($Username -notmatch '^[A-Z0-9_]{1,12}$') { throw 'Username must be uppercase and at most 12 characters' }
+if ($ExistingConnectionId -lt -1) { throw 'ExistingConnectionId must be zero or greater' }
+if ($ExistingConnectionId -ge 0 -and $LoginFromTrialEnv) { throw 'LoginFromTrialEnv requires a newly launched connection' }
+if (-not (Test-Path -LiteralPath $FairyflyPath)) { throw "Fairyfly CLI was not found: $FairyflyPath" }
 
-function Write-Success {
-    param([string]$Message)
-    Write-Host "    ✓ $Message" -ForegroundColor Green
-}
-
-function Write-Error {
-    param([string]$Message)
-    Write-Host "    ✗ $Message" -ForegroundColor Red
-}
+$userField = 'wnd[0]/usr/ctxtSUID_ST_BNAME-BNAME'
+$firstField = 'wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST'
+$lastField = 'wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST'
+$passwordPrefix = 'wnd[0]/usr/tabsTABSTRIP1/tabpLOGO/ssubMAINAREA:SAPLSUID_MAINTENANCE:1101/pwdSUID_ST_NODE_PASSWORD_EXT-PASSWORD'
+$popupPasswordPrefix = 'wnd[1]/usr/subPOPUP:SAPLSUID_MAINTENANCE:1101/pwdSUID_ST_NODE_PASSWORD_EXT-PASSWORD'
+$ownedConnection = $false
+$creationAttempted = $false
+$deleted = $false
+$connectionId = $ExistingConnectionId
 
 function Invoke-Fairyfly {
-    param(
-        [string]$Command,
-        [string]$Description
-    )
-
-    Write-Host "    → $Description" -ForegroundColor Gray
-    Write-Host "      Command: $Command" -ForegroundColor DarkGray
-
-    $result = Invoke-Expression "$fairyfly $Command --output json" | ConvertFrom-Json
-
-    if ($result.status -eq "success") {
-        Write-Success $Description
-        return $result
+    param([string[]]$Arguments, [string[]]$InputLines, [switch]$AllowFailure)
+    $scopedArguments = @($Arguments)
+    if ($connectionId -ge 0 -and $Arguments[0] -notin @('list', 'connections', 'launch') -and $Arguments -notcontains '--connection') {
+        $scopedArguments += @('--connection', [string]$connectionId)
+    }
+    if ($InputLines) {
+        $raw = $InputLines | & $FairyflyPath @scopedArguments | Out-String -Width 32768
     } else {
-        Write-Error "$Description - Error: $($result.error.message)"
-        if ($result.error.suggestions) {
-            Write-Host "      Suggestions:" -ForegroundColor Yellow
-            foreach ($suggestion in $result.error.suggestions) {
-                Write-Host "        - $suggestion" -ForegroundColor Yellow
-            }
+        $raw = & $FairyflyPath @scopedArguments | Out-String -Width 32768
+    }
+    $exitCode = $LASTEXITCODE
+    try { $response = $raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "Fairyfly $($Arguments[0]) returned invalid JSON (exit $exitCode)" }
+    if ($response.status -ne 'success' -or $exitCode -ne 0) {
+        if ($AllowFailure) { return $response }
+        # Never echo raw CLI error text: password input may be present in it.
+        $errorCode = [string]$response.error.code
+        throw "Fairyfly $($Arguments[0]) failed at $($Arguments[1]) (code: $errorCode)"
+    }
+    return $response
+}
+
+function Start-SU01 {
+    [void](Invoke-Fairyfly @('tcode', 'SU01'))
+    [void](Invoke-Fairyfly @('fill', $userField, $Username))
+}
+
+function Assert-Status {
+    param([string]$Pattern, [string]$Phase)
+    $message = [string](Invoke-Fairyfly @('get', 'wnd[0]/sbar')).data.value
+    if ($message -notmatch $Pattern) { throw "SAP did not confirm $Phase for $Username" }
+    Write-Host "${Phase}: $message"
+}
+
+function Remove-TestUser {
+    Start-SU01
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[14]'))
+    [void](Invoke-Fairyfly @('click', 'wnd[1]/usr/btnBUTTON_1'))
+    Assert-Status -Pattern ([regex]::Escape($Username) + '.*(?i:deleted|gelöscht)') -Phase 'Delete'
+    $script:deleted = $true
+}
+
+function Test-ChangedPasswordLogin {
+    $userConnectionId = -1
+    try {
+        $launch = Invoke-Fairyfly @('launch', $ConnectionName)
+        if ($null -eq $launch.data.connection_file_id) { throw 'User login launch returned no connection file ID' }
+        $userConnectionId = [int]$launch.data.connection_file_id
+        if ($userConnectionId -eq $connectionId) { throw 'User login launch reused the admin connection file ID' }
+        $sessionId = [string]$launch.data.session_id
+        if ($sessionId -notmatch '^/app/con\[\d+\]/ses\[\d+\]$') { throw 'User login launch returned no valid session ID' }
+        $envPath = Join-Path $PSScriptRoot '..\..\trial.env'
+        if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -ne '1' -and -not (Test-Path -LiteralPath $envPath)) {
+            throw 'SAP GUI credential file was not found'
         }
-        throw "Command failed: $Command"
+        if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -eq '1') {
+            $client = '001'
+        } else {
+            $clientLine = Get-Content -LiteralPath $envPath | Where-Object { $_ -match '^System ID\s*:' } | Select-Object -First 1
+            if (-not $clientLine) { throw 'SAP client missing from credential file' }
+            $client = ($clientLine -split ':', 2)[1].Trim()
+        }
+        $postLoginPassword = 'Cc3!' + [guid]::NewGuid().ToString('N').Substring(0, 14)
+        $credentials = @("Username: $Username", "Password: $ChangedPassword",
+                         "New Password: $postLoginPassword", "System ID: $client")
+        [void](Invoke-Fairyfly -Arguments @('login', '--credentials-stdin', '--connection', [string]$userConnectionId) -InputLines $credentials)
+        Write-Host "Changed password authenticated $Username in a separate SAP GUI session"
+    } finally {
+        if ($userConnectionId -ge 0) {
+            try {
+                $closed = Invoke-Fairyfly @('disconnect', '--close-session', '--connection', [string]$userConnectionId)
+                if (-not $closed.data.session_closed -or -not $closed.data.file_deleted) {
+                    Write-Warning "Could not verify closure of disposable-user session $userConnectionId"
+                }
+            } catch { Write-Warning "Could not close disposable-user session $userConnectionId" }
+        }
     }
 }
 
-Write-Host @"
+try {
+    $listed = Invoke-Fairyfly @('list')
+    if ($ExistingConnectionId -ge 0) {
+        $saved = Invoke-Fairyfly @('connections')
+        $matching = @($saved.data.connections | Where-Object { $_.id -eq $ExistingConnectionId -and $_.valid })
+        if ($matching.Count -ne 1) { throw "Existing connection file ID $ExistingConnectionId has no valid live session" }
+        $guiConnection = @($listed.data.connections | Where-Object { $_.id -eq $matching[0].connection_id -and $_.session_count -gt 0 })
+        if ($guiConnection.Count -ne 1) { throw "Saved connection file ID $ExistingConnectionId is not in the GUI connection list" }
+        if ($guiConnection[0].backend_scripting_disabled) { throw 'SAP GUI scripting is disabled on the existing connection' }
+        Write-Host "Using existing SAP connection file ID $ExistingConnectionId"
+    } else {
+        $entry = @($listed.data.connections | Where-Object { $_.description -eq $ConnectionName -and $_.backend_scripting_disabled })
+        if ($entry.Count -gt 0) { throw "SAP GUI scripting is disabled for $ConnectionName" }
+        $launch = Invoke-Fairyfly @('launch', $ConnectionName)
+        if ($null -eq $launch.data.connection_file_id) { throw 'Launch did not return a connection file ID' }
+        $connectionId = [int]$launch.data.connection_file_id
+        $ownedConnection = $true
+        Write-Host "Launched SAP connection index $connectionId"
+        if ($LoginFromTrialEnv) {
+            $envPath = Join-Path $PSScriptRoot '..\..\trial.env'
+            if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -ne '1' -and -not (Test-Path -LiteralPath $envPath)) {
+                throw 'SAP GUI credential file was not found'
+            }
+            [void](Invoke-Fairyfly @('login', '--credentials-file', $envPath))
+            Write-Host 'Completed SAP GUI login for the launched session'
+        }
+    }
 
-╔═══════════════════════════════════════════════════════════════╗
-║  SU01 User Creation Test - Window Management Demo             ║
-║  Tests: @active selector, --wait-for-window, popup handling   ║
-╚═══════════════════════════════════════════════════════════════╝
+    # A caller-supplied name must never cause cleanup of a pre-existing user.
+    Start-SU01
+    $prior = Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[7]') -AllowFailure
+    if ($prior.status -eq 'success') { throw "User $Username already exists; refusing to modify it" }
+    if ([string]$prior.error.message -notmatch '(?i)does not exist|not found|existiert nicht|nicht vorhanden') {
+        throw "Could not prove that $Username is absent before creation"
+    }
 
-"@ -ForegroundColor Cyan
+    Start-SU01
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[8]'))
+    [void](Invoke-Fairyfly @('fill', $firstField, $FirstName))
+    [void](Invoke-Fairyfly @('fill', $lastField, $LastName))
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/usr/tabsTABSTRIP1/tabpLOGO'))
+    [void](Invoke-Fairyfly @('fill', $passwordPrefix, $InitialPassword))
+    [void](Invoke-Fairyfly @('fill', ($passwordPrefix + '2'), $InitialPassword))
+    $creationAttempted = $true
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/tbar[0]/btn[11]'))
+    Assert-Status -Pattern ([regex]::Escape($Username) + '.*(?i:created|angelegt)') -Phase 'Create'
 
-# Step 1: Launch SAP connection
-Write-Step "Step 1: Launch SAP connection '$ConnectionName'"
-$conn = Invoke-Fairyfly "launch `"$ConnectionName`"" "Launch SAP connection"
-Write-Host "      Connection ID: $($conn.data.connection_id)" -ForegroundColor DarkGray
-Write-Host "      Session ID: $($conn.data.session_id)" -ForegroundColor DarkGray
+    Start-SU01
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[7]'))
+    $savedFirst = ([string](Invoke-Fairyfly @('get', $firstField)).data.value).TrimEnd()
+    $savedLast = ([string](Invoke-Fairyfly @('get', $lastField)).data.value).TrimEnd()
+    if ($savedFirst -ne $FirstName -or $savedLast -ne $LastName) { throw 'Displayed SAP user details differ from saved input' }
+    Write-Host "Display readback matched $Username"
 
-Start-Sleep -Seconds 2
+    Start-SU01
+    [void](Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[20]'))
+    [void](Invoke-Fairyfly @('fill', $popupPasswordPrefix, $ChangedPassword))
+    [void](Invoke-Fairyfly @('fill', ($popupPasswordPrefix + '2'), $ChangedPassword))
+    [void](Invoke-Fairyfly @('click', 'wnd[1]/tbar[0]/btn[0]'))
+    Assert-Status -Pattern '(?i)password.*changed|kennwort.*geändert' -Phase 'Password change'
 
-# Step 2: Navigate to SU01
-Write-Step "Step 2: Navigate to transaction SU01 (User Maintenance)"
-$tcode = Invoke-Fairyfly "tcode SU01" "Execute transaction SU01"
-Start-Sleep -Seconds 2
+    if ($VerifyChangedPasswordLogin) { Test-ChangedPasswordLogin }
 
-# Step 3: Click "Create" button (opens user creation dialog)
-Write-Step "Step 3: Click 'Create' button (should open user creation dialog)"
-Write-Host "      Testing --wait-for-window flag..." -ForegroundColor DarkGray
-
-$create = Invoke-Fairyfly "click wnd[0]/usr/btnCREATE --wait-for-window --timeout $Timeout" "Click Create button"
-
-if ($create.data.window_changed) {
-    Write-Success "Popup detected: $($create.data.window_before) -> $($create.data.window_after)"
-    $currentWindow = $create.data.new_window
-} else {
-    Write-Host "      No popup detected, continuing with main window" -ForegroundColor Yellow
-    $currentWindow = "wnd[0]"
+    Remove-TestUser
+    Start-SU01
+    $afterDelete = Invoke-Fairyfly @('click', 'wnd[0]/tbar[1]/btn[7]') -AllowFailure
+    if ($afterDelete.status -eq 'success' -or
+        [string]$afterDelete.error.message -notmatch '(?i)does not exist|not found|existiert nicht|nicht vorhanden') {
+        throw "Could not prove that $Username is absent after deletion"
+    }
+    Write-Host "PASS: $Username was created, read back, had its password changed, and was deleted"
+} finally {
+    if ($creationAttempted -and -not $deleted) {
+        try { Remove-TestUser } catch { Write-Warning "Cleanup failed for disposable user $Username; manual deletion is required" }
+    }
+    if ($ownedConnection) {
+        try {
+            $closed = Invoke-Fairyfly @('disconnect', '--close-session')
+            if (-not $closed.data.session_closed -or -not $closed.data.file_deleted) {
+                Write-Warning "Could not verify closure of owned connection index $connectionId"
+            }
+        } catch { Write-Warning "Could not close owned connection index $connectionId" }
+    }
 }
-
-Start-Sleep -Seconds 1
-
-# Step 4: Fill username field using @active selector
-Write-Step "Step 4: Fill username field using @active selector"
-Write-Host "      Demonstrating @active selector (works in any window)" -ForegroundColor DarkGray
-
-$fill1 = Invoke-Fairyfly "fill `"@active/usr/txtUSERNAME`" `"$Username`"" "Fill username"
-
-if ($fill1.data.element_requested -and $fill1.data.element_requested -ne $fill1.data.element) {
-    Write-Success "@active resolved: $($fill1.data.element_requested) -> $($fill1.data.element)"
-} else {
-    Write-Host "      Filled at: $($fill1.data.element)" -ForegroundColor DarkGray
-}
-
-Start-Sleep -Seconds 1
-
-# Step 5: Fill last name
-Write-Step "Step 5: Fill user details"
-$fill2 = Invoke-Fairyfly "fill `"@active/usr/txtLASTNAME`" `"$LastName`"" "Fill last name"
-Start-Sleep -Milliseconds 500
-$fill3 = Invoke-Fairyfly "fill `"@active/usr/txtFIRSTNAME`" `"$FirstName`"" "Fill first name"
-
-Start-Sleep -Seconds 1
-
-# Step 6: Click Save (might open another dialog)
-Write-Step "Step 6: Click Save button"
-$save = Invoke-Fairyfly "click `"@active/usr/btnSAVE`" --wait-for-window --timeout 3000" "Click Save"
-
-if ($save.data.window_changed) {
-    Write-Success "Save triggered new window: $($save.data.window_after)"
-} else {
-    Write-Host "      No additional window opened" -ForegroundColor Gray
-}
-
-Start-Sleep -Seconds 2
-
-# Step 7: Read screen to verify user created
-Write-Step "Step 7: Verify user creation"
-$screen = Invoke-Fairyfly "screen read" "Read current screen state"
-
-Write-Host "`n      Screen contains:" -ForegroundColor Gray
-if ($screen.data.elements) {
-    $elementCount = ($screen.data.elements | Measure-Object).Count
-    Write-Host "        - $elementCount UI elements detected" -ForegroundColor DarkGray
-}
-
-# Step 8: Disconnect
-Write-Step "Step 8: Disconnect from SAP"
-$disconnect = Invoke-Fairyfly "disconnect" "Disconnect from SAP session"
-
-# Summary
-Write-Host @"
-
-╔═══════════════════════════════════════════════════════════════╗
-║  Test Summary                                                  ║
-╚═══════════════════════════════════════════════════════════════╝
-
-"@ -ForegroundColor Cyan
-
-Write-Host "  ✓ Connection launched successfully" -ForegroundColor Green
-Write-Host "  ✓ Navigated to SU01 transaction" -ForegroundColor Green
-Write-Host "  ✓ Detected popup windows with --wait-for-window" -ForegroundColor Green
-Write-Host "  ✓ Used @active selector for window-agnostic automation" -ForegroundColor Green
-Write-Host "  ✓ User creation workflow completed" -ForegroundColor Green
-Write-Host "  ✓ Disconnected cleanly" -ForegroundColor Green
-
-Write-Host "`n  Username: $Username" -ForegroundColor Cyan
-Write-Host "  Name: $FirstName $LastName" -ForegroundColor Cyan
-
-Write-Host @"
-
-╔═══════════════════════════════════════════════════════════════╗
-║  Key Features Demonstrated                                     ║
-╚═══════════════════════════════════════════════════════════════╝
-
-"@ -ForegroundColor Yellow
-
-Write-Host "  1. --wait-for-window flag" -ForegroundColor White
-Write-Host "     Automatically detects when click opens new window/dialog" -ForegroundColor Gray
-
-Write-Host "`n  2. @active selector" -ForegroundColor White
-Write-Host "     Element paths work regardless of which window is active" -ForegroundColor Gray
-Write-Host "     Example: @active/usr/txtUSERNAME works in wnd[0] or wnd[1]" -ForegroundColor Gray
-
-Write-Host "`n  3. Window mismatch detection" -ForegroundColor White
-Write-Host "     Smart error messages when element is in wrong window" -ForegroundColor Gray
-
-Write-Host "`n  4. Transparent resolution" -ForegroundColor White
-Write-Host "     See both @active request and resolved wnd[N] in response" -ForegroundColor Gray
-
-Write-Host "`n✅ Test completed successfully!`n" -ForegroundColor Green

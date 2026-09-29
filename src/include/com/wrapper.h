@@ -24,6 +24,12 @@ public:
     HRESULT hresult() const noexcept { return hresult_; }
 };
 
+/// COM apartment initialization failed; a disconnected SAP engine cannot recover.
+class ComInitializationException : public ComException {
+public:
+    using ComException::ComException;
+};
+
 // get_dispid_via_typeinfo is now provided by sap_gui_base.h
 
 // Forward declarations
@@ -56,16 +62,25 @@ enum class GuiElementType {
     Tab
 };
 
+struct AbapEditorContent {
+    std::string text;
+    int total_lines = 0;
+    int lines_read = 0;
+    bool truncated = false;
+};
+
 /// COM-based SAP GUI element wrapper
 class ComGuiElement : public SapGuiObject {
 private:
     mutable GuiElementType cached_element_type_ = GuiElementType::Unknown;
     mutable bool element_type_cached_ = false;
+    mutable bool label_cached_ = false;
+    mutable std::string cached_label_;
 
+public:
     /// Classify element type from type string
     static GuiElementType classify_type(const std::string& type_str);
 
-public:
     explicit ComGuiElement(IDispatchPtr elem);
 
     /// Create element wrapper from COM object
@@ -82,8 +97,11 @@ public:
     /// Get visible text of element
     std::string get_text() const;
 
-    /// Set text in element (for text fields)
-    void set_text(const std::string& text);
+    /// Read one element for direct CLI output, including positioned report-row context.
+    std::string get_text_for_direct_read() const;
+
+    /// Set text in element (for text fields). Returns false if SAP explicitly marks it read-only.
+    bool set_text(const std::string& text);
 
     /// Check if element is enabled
     bool is_enabled() const;
@@ -102,6 +120,7 @@ public:
     /// Press a button element (GuiButton, GuiOkCode, etc.)
     /// Throws ComException if element is not a button or operation fails
     void press();
+    void set_focus();
 
     /// Select checkbox or radio button
     /// Throws ComException if element is not selectable
@@ -147,6 +166,9 @@ public:
     /// Returns empty string if property doesn't exist or element doesn't support it
     std::string get_property_string(const std::wstring& property_name) const;
 
+    /// Read ABAP editor source through GetLineCount/GetLineText without altering it.
+    AbapEditorContent get_abap_editor_content(int max_lines) const;
+
     /// Get SubType property for GuiShell elements
     /// Returns SubType string (e.g., "GridView", "Tree", "Toolbar") or empty string if not a GuiShell
     std::string get_subtype() const;
@@ -154,6 +176,7 @@ public:
     /// Get all node keys from a tree control (GuiShell with SubType="Tree")
     /// Returns empty vector if element is not a tree or operation fails
     std::vector<std::string> get_all_node_keys() const;
+    std::vector<std::string> get_tree_column_names() const;
 
     /// Get node text by key from a tree control
     /// Returns empty string if node not found or operation fails
@@ -196,15 +219,64 @@ public:
     /// Returns false if position invalid or method fails
     bool get_button_enabled(int position) const;
 
+    /// Press a toolbar button by ID (for GuiShell Toolbar elements)
+    /// @param button_id Button identifier (e.g., "TECH", "PERF")
+    /// Throws ComException if not a toolbar or button not found
+    void press_button(const std::string& button_id);
+
+    /// Press F4 to open search help/value help (for GuiCTextField elements)
+    /// Equivalent to clicking the search button or pressing F4 key
+    /// Throws ComException if element doesn't support F4 help
+    void press_f4();
+
     /// Get cell value from GridView
     /// @param row Row index (0-based)
     /// @param column_name Column identifier from ColumnOrder
     /// @return Cell value as string, empty if not available
     std::string get_cell_value(int row, const std::string& column_name) const;
 
+    /// Select a GridView row and activate its cell (zero-based row, technical column ID).
+    void select_grid_row(int row, const std::string& column_name);
+
+    /// GridView built-in toolbar metadata (separate from GuiShell Toolbar buttons).
+    int get_grid_toolbar_button_count() const;
+    std::string get_grid_toolbar_button_id(int position) const;
+    std::string get_grid_toolbar_button_tooltip(int position) const;
+
+    /// Modify a GridView cell and optionally notify the backend after a batch.
+    void modify_grid_cell(int row, const std::string& column_name,
+                          const std::string& value, bool checkbox, bool commit);
+
     /// Get item text from tree node by column name
     /// Returns empty string if not found or operation fails
     std::string get_item_text(const std::string& node_key, const std::string& column_name) const;
+
+    // ============================================================================
+    // GuiShell Tree Navigation Methods (for GuiShell with SubType="Tree")
+    // ============================================================================
+
+    /// Select a tree node without expanding it
+    /// @param node_key Node identifier (from GetAllNodeKeys)
+    /// Throws ComException if element is not a tree or node not found
+    void select_node(const std::string& node_key);
+
+    /// Expand a collapsed tree node
+    /// @param node_key Node identifier (from GetAllNodeKeys)
+    /// Throws ComException if element is not a tree or node not found
+    void expand_node(const std::string& node_key);
+
+    /// Collapse an expanded tree node
+    /// @param node_key Node identifier (from GetAllNodeKeys)
+    /// Throws ComException if element is not a tree or node not found
+    void collapse_node(const std::string& node_key);
+
+    /// Double-click a tree node (default action: expand/collapse or drill-in)
+    /// @param node_key Node identifier (from GetAllNodeKeys)
+    /// Throws ComException if element is not a tree or node not found
+    void doubleclick_node(const std::string& node_key);
+
+    /// Open a tree node's context menu and select an item by its visible text.
+    void select_node_context_item(const std::string& node_key, const std::string& item_text);
 
     /// Get raw COM object (for advanced use) - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }
@@ -231,6 +303,11 @@ public:
 
     /// Get children collection (modern STL-compatible API)
     SapGuiCollection<ComGuiElement> children() const;
+
+    /// Send virtual key to window (F3, F8, Enter, etc.)
+    /// Common keys: 0=Enter, 1=F1, 4=F4, 8=F8, 3=F3, 12=F12, etc.
+    /// Throws ComException if operation fails
+    void send_vkey(int vkey);
 
     /// Get raw COM object - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }
@@ -279,6 +356,13 @@ public:
     /// @return Transaction code (e.g., "SM59") or empty string if not available
     std::string get_transaction_code() const;
 
+    /// Authenticated SAP user from GuiSessionInfo, or empty before logon.
+    std::string get_user() const;
+
+    /// Backend session identity when SAP exposes GuiSessionInfo.
+    /// Combines SystemSessionId and SessionNumber; empty when unavailable.
+    std::string get_server_session_key() const;
+
     /// Get raw COM object - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }
 };
@@ -314,8 +398,12 @@ public:
 
 /// COM-based SAP GUI application wrapper (root object)
 class ComGuiApplication : public SapGuiObject {
+    int com_uninit_count_ = 0;
 public:
-    explicit ComGuiApplication(IDispatchPtr sap_gui_app);
+    explicit ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count = 0);
+    explicit ComGuiApplication(IDispatchPtr sap_gui_app, bool owns_com_apartment);
+    ComGuiApplication(const ComGuiApplication&) = delete;
+    ComGuiApplication& operator=(const ComGuiApplication&) = delete;
 
     /// Create SAP GUI application COM wrapper
     /// Initializes COM library and creates root SAPGUI object
@@ -341,10 +429,24 @@ public:
     /// @return SAPGuiWindow with valid indices if found, invalid (indices=-1) if not found
     SAPGuiWindow find_window_by_hwnd(HWND hwnd) const;
 
+    /// Open a connection by description (SAP Logon entry name)
+    /// @param connection_name Name of the connection entry in SAP Logon (e.g. "Bigfox")
+    /// @param sync Whether the call blocks until the connection is established (default true)
+    /// @param raise_error Whether to raise an exception on failure (default false)
+    /// @return ComGuiConnectionPtr on success, nullptr on failure
+    ComGuiConnectionPtr open_connection(const std::string& connection_name, bool sync = true, bool raise_error = false);
+
+    /// Open a connection by connection string
+    /// @param connection_string Connection string (e.g. "/H/bigfox/S/3200")
+    /// @param sync Whether the call blocks until the connection is established (default true)
+    /// @param raise_error Whether to raise an exception on failure (default false)
+    /// @return ComGuiConnectionPtr on success, nullptr on failure
+    ComGuiConnectionPtr open_connection_by_connection_string(const std::string& connection_string, bool sync = true, bool raise_error = false);
+
     /// Get raw COM application object - deprecated, use get_dispatch()
     IDispatch* get_app_object() const { return dispatch_; }
 
-    ~ComGuiApplication() = default;
+    ~ComGuiApplication() override;
 };
 
 /// Utility function: Select SAP GUI window by mouse click

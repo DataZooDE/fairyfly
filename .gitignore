@@ -73,6 +73,7 @@ desktop.ini
 *.tmp
 *.temp
 *~
+*.bak
 
 # Package files
 *.zip
@@ -99,6 +100,8 @@ credentials.db
 # Test outputs
 test_results/
 coverage/
+__pycache__/
+*.pyc
 
 # Integration test outputs (real SAP GUI test artifacts)
 tests/integration/integration-test-*.log
@@ -109,6 +112,15 @@ tests/integration/test_diagnostics_summary.json
 # Test output files (generated during testing)
 test_screen_*.json
 test_screen_*.md
+tests/vbs/*_output.json
+tests/integration/search_result.txt
+tests/integration/se16_usr_structure.txt
+tests/integration/se16_selection_screen.txt
+tests/integration/se16_children_methods.txt
+ai/*_output.txt
+ai/filtered_technical.json
+ai/tech_btn.json
+/scratch/
 
 # SAP connection files (user-specific)
 *.con

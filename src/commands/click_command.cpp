@@ -23,11 +23,22 @@ public:
         cmd_->add_option("--timeout", timeout_ms_,
             "Timeout in milliseconds for window detection (default: 5000)")
             ->default_val(5000);
+        cmd_->add_option("--node-key", node_key_,
+            "Tree node key (required for tree elements, see 'get --list-nodes')");
+        cmd_->add_option("--tree-action", tree_action_,
+            "Tree action: select, expand, collapse, doubleclick, contextmenu (default: doubleclick)")
+            ->default_val("doubleclick")
+            ->check(CLI::IsMember({"select", "expand", "collapse", "doubleclick", "contextmenu"}));
+        cmd_->add_option("--menu-item", menu_item_,
+            "Context-menu item text (required with --tree-action contextmenu)");
+        cmd_->add_option("--row", row_, "Zero-based GridView row to select");
+        cmd_->add_option("--column", column_, "GridView column ID to activate");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_click(element_, conn_id_, wait_for_window_, timeout_ms_);
+        return handler.handle_click(element_, conn_id_, wait_for_window_, timeout_ms_,
+                                     node_key_, tree_action_, menu_item_, row_, column_);
     }
 
     bool was_invoked() const override {
@@ -40,6 +51,11 @@ private:
     std::optional<int> conn_id_;
     bool wait_for_window_ = false;
     int timeout_ms_ = 5000;
+    std::string node_key_;           // Tree node key
+    std::string tree_action_ = "doubleclick";  // Tree action
+    std::string menu_item_;
+    std::optional<int> row_;
+    std::string column_;
 };
 
 // Factory function

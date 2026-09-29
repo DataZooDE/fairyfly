@@ -17,8 +17,13 @@ public:
     /// Clear the extraction cache (used for table/tree data)
     static void clear_cache();
 
+    /// Enable/disable tree extraction (workaround for problematic trees)
+    static void set_skip_trees(bool skip);
+    static bool get_skip_trees();
+
 private:
     static std::map<std::string, json> tree_grid_cache_;
+    static bool skip_trees_;
 };
 
 } // namespace sap

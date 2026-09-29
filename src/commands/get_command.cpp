@@ -18,11 +18,13 @@ public:
         cmd_->add_option("element", element_, "Element ID")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
+        cmd_->add_flag("--list-nodes", list_nodes_,
+            "List all nodes in tree (only for tree elements)");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_read_field(element_, conn_id_);
+        return handler.handle_read_field(element_, conn_id_, list_nodes_);
     }
 
     bool was_invoked() const override {
@@ -33,6 +35,7 @@ private:
     CLI::App* cmd_ = nullptr;
     std::string element_;
     std::optional<int> conn_id_;
+    bool list_nodes_ = false;  // Tree node listing flag
 };
 
 // Factory function

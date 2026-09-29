@@ -22,6 +22,9 @@ public:
         commands_.push_back(std::move(command));
     }
 
+    /// Drop registrations tied to a previous CLI::App before a new invocation.
+    void clear() { commands_.clear(); }
+
     /// Setup all commands with CLI11
     void setup_all_commands(CLI::App& app) {
         for (auto& command : commands_) {

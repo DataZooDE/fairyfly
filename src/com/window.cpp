@@ -1,6 +1,7 @@
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
 #include <spdlog/spdlog.h>
+#include <fmt/format.h>
 
 namespace fairyfly {
 namespace sap {
@@ -56,6 +57,36 @@ SapGuiCollection<ComGuiElement> ComGuiWindow::children() const {
         return SapGuiCollection<ComGuiElement>(nullptr);
     }
     return SapGuiCollection<ComGuiElement>(children_dispatch);
+}
+
+void ComGuiWindow::send_vkey(int vkey) {
+    if (!dispatch_) throw ComException("Null window");
+
+    try {
+        _bstr_t method("SendVKey");
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
+        if (FAILED(hr)) {
+            throw ComException(fmt::format("SendVKey method not found: 0x{:08X}", hr), hr);
+        }
+
+        _variant_t vkey_var(vkey);
+        DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
+        _variant_t result;
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                             &params, &result, nullptr, nullptr);
+        if (FAILED(hr)) {
+            throw ComException(fmt::format("SendVKey invoke failed: 0x{:08X}", hr), hr);
+        }
+
+        spdlog::debug("Sent virtual key {} to window", vkey);
+    } catch (const _com_error& e) {
+        _bstr_t error_msg(e.ErrorMessage());
+        throw ComException(fmt::format("COM error sending VKey {}: {}", vkey,
+                          std::string(static_cast<const char*>(error_msg))), e.Error());
+    } catch (const std::exception& e) {
+        throw ComException(fmt::format("Exception sending VKey {}: {}", vkey, e.what()));
+    }
 }
 
 } // namespace sap

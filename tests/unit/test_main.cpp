@@ -1,5 +1,19 @@
+#include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    HDESK hDesk = OpenDesktopA("Default", 0, FALSE, GENERIC_ALL);
+    if (hDesk) {
+        SetThreadDesktop(hDesk);
+    }
+#endif
+    return Catch::Session().run(argc, argv);
+}
 
 using json = nlohmann::json;
 

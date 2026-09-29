@@ -1,490 +1,65 @@
 # fairyfly
 
-## Don't Wait for Walldorf.
+fairyfly is a Windows command-line tool for automating SAP GUI through the SAP GUI Scripting COM API. It can attach to an open session, navigate to a transaction, interact with controls, and read the current screen as structured data. The project aims to expose these operations to AI clients through MCP, but the MCP server is not implemented yet.
 
-SAP's enterprise backbone runs on a predictable release cycle. AI moves at the speed of thought.
+## Current CLI
 
-**fairyfly bridges that gap.**
+The registered commands are: attach, launch, login, disconnect, connections, list, tcode, click, fill, get, screen, press_f4, doctor, and serve. The serve command currently returns NOT_IMPLEMENTED.
 
-Modern C++ automation for SAP GUI today. Natural language control via LLMs tomorrow.
+Typical use with an already open SAP session:
 
-### The Problem We're Solving
+~~~powershell
+.\build\bin\Release\fairyfly.exe doctor
+.\build\bin\Release\fairyfly.exe attach
+.\build\bin\Release\fairyfly.exe tcode SM59
+.\build\bin\Release\fairyfly.exe screen read --output markdown
+.\build\bin\Release\fairyfly.exe screen read
+~~~
 
-SAP professionals know the drill: manual transactions, repetitive workflows, fragile GUI scripts that break on each quarterly upgrade. Meanwhile, AI agents can automate virtually everything—except SAP. Until now.
+JSON output and `error` logging are the defaults, so routine commands need neither `--output json` nor `--log-level error`. Use `--log-level info` for operational messages or `--verbose` for debug logging.
 
-AI enthusiasts face the opposite challenge: modern agent frameworks (Claude AI, Anthropic's ADK, LangChain) can chain together APIs and web services effortlessly, but enterprise SAP systems? They're still the black box that requires specialized scripting knowledge.
+When `list` shows multiple SAP GUI sessions, use `attach --session-id "/app/con[0]/ses[1]"` to save that exact session without mouse selection. Subsequent commands can target the returned numeric connection-file ID with `--connection`.
 
-**fairyfly solves both problems:**
-- **For SAP experts**: Stop writing brittle scripts. Get AI assistance without waiting for SAP's roadmap.
-- **For AI builders**: Make SAP accessible to modern agent frameworks through standard protocols.
+The CLI also supports TOON output, including formatted errors. Use --help on any command for current options. Screen reads can filter by element type, text, ID, or editability, and can skip tab or tree extraction when a screen is slow or problematic. Grid and table reads return up to 20 rows by default; use `screen read --max-rows 64` to request more (up to 200), with a longer read time on large screens. For classic `GuiUserArea` lists such as SE16, that limit applies to rows exposed by the current SAP GUI viewport; scroll to read later backend hits. TextEdit shells appear in JSON and Markdown screen reads. On a `GuiShell` with subtype `AbapEditor`, `get <element-id>` returns up to 200 redacted source lines as `value`, together with total/read line counts and a truncation flag.
 
----
+For a control search without a full screen extraction, use `screen find --id-contains RSRD1-TBMA_VAL --connection 0`. The command can combine an ID substring, an ASCII case-insensitive `--name-contains`, and exact `--type`, and returns up to `--limit` matches (default 1, maximum 100). It searches the active window's controls, stops after the match limit, and reads text only from matching simple controls. Grid and tree matches return control identity, not their rows or nodes; use `screen read` for that content. Search does not expand other tabs or search text values, and stops after 500 distinct controls with `scan_limit_reached=true`. The result reports `scanned_count` and whether the match limit was reached. When the complete ID is known, direct `get <element-id>` is faster.
 
-## The Vision: Natural Language SAP Automation
+Use `fill <element-id> --clear` to empty a text field or TextEdit shell. This works in Windows PowerShell 5.1, which can omit an empty quoted positional argument when launching a native executable.
 
-### What's Coming (Phase 3)
+`disconnect --connection <id>` removes Fairyfly's saved connection while leaving SAP GUI open. Add `--close-session` to close that SAP GUI session before removing its saved connection.
 
-Imagine this conversation with [Claude Desktop](https://claude.ai):
+`launch <connection>` uses native SAP GUI COM by default. For a fresh logon screen, run `login --connection <id> --credentials-file trial.env`. The native command reads `Username`, `Password`, and three-digit `System ID` lines from the file, fills the SAP GUI form, and verifies the authenticated SAP user. An optional `Language` line defaults to `EN`. `login --credentials-stdin` accepts the same lines from standard input; include `New Password` when SAP requires a first-login password change. Passwords stay out of command arguments and output. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot; use `login` for authentication afterward. The fallback does not read `trial.env` or put a password on the child process command line. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file is ignored by Git but contains plaintext credentials; keep it private. Windows Credential Manager integration is not implemented.
 
-```
-You: "Create a purchase order in SAP for 100 units of material 100-100-001 
-     from vendor 12345, delivered to warehouse 001, plant 1000"
+## Build
 
-Claude: *interacts with SAP through fairyfly*
-       "I've created purchase order #4500123456. The document is saved and 
-        awaiting approval. Would you like me to display it?"
-```
+Requirements: Windows, SAP GUI for Windows with scripting enabled for live automation, Visual Studio 2022 C++ tools, CMake 3.20+, and vcpkg. Set VCPKG_ROOT to your vcpkg checkout. The project uses C++20 and the x64-windows-static triplet.
 
-Or use it with Cline in VS Code, agent frameworks like the [Anthropic Agent Development Kit](https://github.com/anthropics/agent-development-kit), or any MCP-compatible client. fairyfly speaks the [Model Context Protocol](https://modelcontextprotocol.io/), making SAP a first-class citizen in the modern AI ecosystem.
+~~~powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+cmake --build build --config Release --target fairyfly --parallel
+~~~
 
-### Why This Matters
+Run `build/bin/Release/fairyfly.exe` after a Release build. CMake stages this copy automatically. An older direct Visual Studio output file once failed to attach to SAP GUI on this workstation; refreshing it and relinking restored the direct path, while the staged copy remains the documented execution path.
 
-**Traditional RPA approach:**
-```
-Record 50 clicks → Hard-code element IDs → Break on SAP upgrade → Debug for hours
-```
+For unit tests:
 
-**LLM-powered approach:**
-```
-Describe what you need → AI understands context → Executes via fairyfly → Handles errors gracefully
-```
+~~~powershell
+cmake --build build --config Release --target unit_tests --parallel
+ctest --test-dir build -C Release --output-on-failure
+~~~
 
-fairyfly provides the **reliable COM foundation** (SAP's battle-tested API since 2002) with the **modern MCP interface** that LLMs understand. You get the best of both worlds: SAP's stability meets AI's flexibility.
+The Makefile provides build shortcuts. Routine builds target the CLI; test targets build the unit test executable. See [the build guide](docs/BUILD_OPTIMIZATION.md) for current performance notes.
 
----
+## Project layout
 
-## What Works Today
+- src/commands/ contains the CLI commands.
+- src/com/ and src/com_automation_engine.cpp wrap SAP GUI COM operations.
+- src/screen_reader.cpp, screen_element_collector.cpp, and the formatters extract and render screen data.
+- tests/unit/ contains Catch2 tests; tests/integration/ contains scripts requiring a live SAP GUI session.
+- CMakeLists.txt builds the shared fairyfly_core static library and the CLI.
 
-While we build toward the LLM vision, **fairyfly already automates SAP through a powerful CLI**. Production-ready today, agent-ready tomorrow.
+## Status
 
-### Quick Demo: Extracting SAP Screen Data
+The CLI and its test suite are under active development. MCP, batch operations, credential manager integration, and cross-platform SAP GUI support remain future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
 
-```bash
-# Attach to running SAP window (click when prompted)
-fairyfly attach
-
-# Navigate to SM59 (RFC connections)
-fairyfly tcode SM59
-
-# Read the entire screen structure as JSON
-fairyfly screen read --output json
-
-# Or view it in human-readable Markdown
-fairyfly screen read --output markdown
-
-# Fill a field with a value
-fairyfly fill "wnd[0]/usr/txtRFCDEST" "MY_RFC_CONN"
-
-# Click a button
-fairyfly click "wnd[0]/tbar[0]/btn[3]"
-```
-
-**Real workflow example:**
-```powershell
-# PowerShell script automating SAP transaction
-$conn_id = (fairyfly attach --output json | ConvertFrom-Json).data.connection_file_id
-
-# Execute transaction SM59
-fairyfly --connection $conn_id tcode SM59
-
-# Extract screen data to analyze
-$screen = fairyfly --connection $conn_id screen read --output json | ConvertFrom-Json
-
-# Process with Python, then write back
-python process_sap_data.py $screen | Out-String | ForEach-Object {
-    fairyfly --connection $conn_id fill "wnd[0]/usr/txtFIELD" $_
-}
-```
-
----
-
-## Example Scenarios
-
-### Scenario A: Using fairyfly with Claude Desktop *(Coming in Phase 3)*
-
-Configure fairyfly as an MCP server in Claude Desktop:
-
-```json
-{
-  "mcpServers": {
-    "fairyfly": {
-      "command": "C:\\path\\to\\fairyfly.exe",
-      "args": ["serve", "--transport", "stdio"]
-    }
-  }
-}
-```
-
-Then have natural language conversations with Claude about your SAP system:
-
-```
-You: "Show me all purchase orders created today"
-Claude: *executes SAP transaction via fairyfly, extracts table data*
-       "I found 47 purchase orders created today. Here are the top 10 by value..."
-```
-
-### Scenario B: Integration with Agent Frameworks *(Design Ready)*
-
-fairyfly's JSON-native output is perfect for agent frameworks like the Anthropic Agent Development Kit. The agent reads screen context, reasons about the next action, and executes via fairyfly:
-
-```python
-# Example agent workflow (high-level design)
-agent = AnthropicAgent(tools=[fairyfly_connect, fairyfly_tcode, fairyfly_fill, ...])
-
-# Agent chain for complex workflow
-result = agent.execute(
-    "Create vendor 12345 with address in SAP",
-    tools=fairyfly_tools,
-    context=last_screen_state  # Maintained automatically
-)
-```
-
-### Scenario C: CLI Automation Today
-
-The CLI is fully functional **right now**. Use it in PowerShell, Bash, or Python:
-
-```bash
-#!/bin/bash
-# Automated report generation
-fairyfly attach
-fairyfly tcode SE16
-fairyfly fill "wnd[0]/usr/txtTABLENAME" "MATERIALS"
-fairyfly click "wnd[0]/usr/btn[0]"
-fairyfly screen read --output json > report.json
-```
-
----
-
-## Current Status & Roadmap
-
-### ✅ Phase 1: Core Automation (COMPLETE)
-
-Foundation that makes everything else possible:
-- Windows COM integration with SAP GUI Scripting API (20+ years of stability)
-- Core automation actions: transactions, clicks, field filling, reading
-- Smart retry logic with progressive backoff
-- Robust error handling with actionable suggestions
-- Session management with persistence across invocations
-
-**Tests: 16/16 passing** | **Production-ready**
-
-### ✅ Phase 2A: Command-Line Interface (COMPLETE)
-
-Full-featured CLI for immediate use:
-- 14+ commands for complete SAP workflow automation
-- Profile management: store multiple SAP system connections
-- Multiple output formats: JSON (machine-readable), Markdown (human-friendly), PlainText (scripting)
-- Attach to running SAP windows (no credentials in code)
-- Launch programmatic connections
-- Comprehensive diagnostics and troubleshooting
-
-**CLI commands implemented:**
-- `attach` - Click-to-attach to running SAP window
-- `launch` - Open SAP Logon connection programmatically
-- `tcode` - Execute SAP transaction codes
-- `click` / `fill` / `get` - Element manipulation
-- `screen read / capture` - Extract screen data or screenshots
-- `connections` - Manage SAP connection files
-- `diagnose` - Check SAP GUI status and configuration
-
-### ⏳ Phase 2B: Advanced Workflows (IN PROGRESS)
-
-Next up: make complex workflows effortless:
-- Batch operations (fill multiple fields in one round-trip)
-- Intelligent element caching (TTL-based, invalidated on screen changes)
-- Table extraction and export (CSV, Excel formats)
-- Advanced error recovery (automatic fallback strategies)
-- Windows Credential Manager integration (secure password storage)
-
-### 📅 Phase 3: LLM Integration (THE VISION)
-
-Where fairyfly transforms from tool to infrastructure:
-- **MCP Server**: JSON-RPC 2.0 over stdio and HTTP
-- **Tool Schemas**: OpenAI function calling format for LLM consumption
-- **Multimodal Support**: Screenshot capture for vision-language models
-- **Claude Desktop Integration**: Native support for Anthropic's desktop app
-- **Agent Framework Support**: Seamless integration with ADK, LangChain, etc.
-- **Natural Language Workflows**: Describe intent, get execution
-
-*Expected: Q2 2025*
-
-### 📅 Phase 4: Enterprise Scale
-
-Production hardening:
-- Cross-platform support (SAP GUI for Java on Mac/Linux)
-- Parallel session management (handle multiple users concurrently)
-- Advanced performance optimization
-- Enterprise deployment patterns and documentation
-- Audit logging and compliance features
-
----
-
-## Architecture: Reliability Meets Modern AI
-
-```
-┌─────────────────────────────────────┐
-│   Claude Desktop / Cline / Agents   │  ← Natural language interface
-├─────────────────────────────────────┤
-│   MCP Server (Phase 3)              │  ← Standards-compliant protocol
-├─────────────────────────────────────┤
-│   CLI Interface (Today)              │  ← Direct automation
-├─────────────────────────────────────┤
-│   SAP GUI Automation Engine         │  ← Smart retry, error handling
-│   - Session Management               │
-│   - Element Caching                 │
-│   - Screen Extraction               │
-├─────────────────────────────────────┤
-│   SAP GUI Scripting API (COM)       │  ← Battle-tested since 2002
-└─────────────────────────────────────┘
-```
-
-### Design Philosophy
-
-**1. Reliability over features**
-- Uses SAP's proven COM API, not screen scraping
-- Respects SAP's timing model (handles busy states correctly)
-- Handles all failure modes: connection loss, timeouts, element changes
-
-**2. Security-first**
-- Credentials never stored in plain text
-- Windows Credential Manager integration (Phase 2B)
-- Audit logging of all automation actions
-- Respects SAP's authorization model (no privilege escalation)
-
-**3. AI-ready by design**
-- JSON-native output format
-- Structured error responses with suggestions for LLM recovery
-- MCP protocol implementation for standard LLM integration
-- Multimodal support (structured data + screenshots)
-
-**Why C++?**
-- Cross-platform portability (Windows COM today, Java on Mac/Linux later)
-- Native performance (no runtime overhead, single binary deployment)
-- No garbage collection pauses (critical for time-sensitive SAP operations)
-- Type safety catches bugs at compile-time
-- Minimal dependencies: ~15MB executable, runs anywhere
-
----
-
-## Getting Started in 5 Minutes
-
-### Prerequisites
-
-**Required:**
-- Windows 10/11 (x64)
-- SAP GUI for Windows 7.60+ with Scripting enabled
-- CMake 3.20+ and Visual Studio 2019+ (or equivalent)
-
-**SAP GUI Configuration:**
-1. Open SAP Logon → Options → Accessibility & Scripting → Scripting
-2. Check "Enable scripting"
-3. Check "Open scripting API when SAP GUI starts"
-4. *(Server-side)*: Set `sapgui/user_scripting = TRUE` via transaction RZ11 (admin required)
-
-### Build from Source
-
-```bash
-# 1. Install vcpkg (if not already installed)
-cd C:\dev
-git clone https://github.com/Microsoft/vcpkg.git
-cd vcpkg
-.\bootstrap-vcpkg.bat
-
-# Set environment variable
-setx VCPKG_ROOT "C:\dev\vcpkg"
-
-# 2. Clone fairyfly
-git clone https://github.com/yourusername/fairyfly.git
-cd fairyfly
-
-# 3. Configure and build
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
-
-# 4. Run
-.\build\Release\fairyfly.exe --help
-```
-
-vcpkg will automatically download and compile dependencies (CLI11, nlohmann-json, spdlog, catch2).
-
-### Your First Automation
-
-```bash
-# 1. Open SAP Logon and connect to your system manually
-# 2. Navigate to any transaction (e.g., SM59)
-# 3. Run fairyfly attach
-.\build\Release\fairyfly.exe attach
-# Click on the SAP window when prompted
-
-# 4. Extract screen structure
-.\build\Release\fairyfly.exe screen read --output markdown
-
-# 5. Try interacting
-.\build\Release\fairyfly.exe tcode SE38
-.\build\Release\fairyfly.exe screen read --output json
-```
-
----
-
-## Output Formats
-
-fairyfly supports multiple output formats for different use cases:
-
-```bash
-# JSON (default) - Machine-readable, perfect for scripting and LLMs
-fairyfly screen read --output json
-```
-
-```json
-{
-  "status": "success",
-  "data": {
-    "window": {
-      "title": "Create Purchase Order",
-      "elements": [...]
-    }
-  },
-  "metadata": {
-    "timestamp": "2025-01-15T12:00:00Z",
-    "duration_ms": 123
-  }
-}
-```
-
-```bash
-# Markdown - Human-friendly formatting
-fairyfly screen read --output markdown
-```
-
-```markdown
-# Screen: Create Purchase Order (wnd[0])
-
-## Toolbar
-- Save (btn[11])
-- Back (btn[3])
-
-## Fields
-**Vendor**: [TextField] ""
-**Quantity**: [TextField] ""
-```
-
-```bash
-# PlainText - Minimal for scripts
-fairyfly profile list --output text
-```
-```
-production  abc123
-dev         xyz789
-```
-
----
-
-## Technology Stack
-
-- **Language**: Modern C++ (C++20 standard)
-- **Build System**: CMake 3.20+ with vcpkg dependency management
-- **CLI Framework**: CLI11 for argument parsing
-- **JSON Processing**: nlohmann/json (header-only, fast)
-- **Logging**: spdlog for structured, performant logging
-- **Testing**: Catch2 for unit tests
-- **Future**: Asio for async I/O (MCP server implementation)
-
-**Dependencies are minimal and well-maintained.** The final binary is a single ~15MB executable with no runtime dependencies.
-
----
-
-## Development & Contributing
-
-### Running Tests
-
-```bash
-# Build tests
-cmake --build build --config Release --target unit_tests
-
-# Run tests
-cd build
-ctest -C Release --output-on-failure
-```
-
-### Project Structure
-
-```
-fairyfly/
-├── src/
-│   ├── main.cpp                    # Entry point, CLI parsing
-│   ├── cli_handler.cpp             # Command implementation
-│   ├── com_automation_engine.cpp  # SAP COM integration
-│   ├── com_wrapper.cpp             # COM abstractions
-│   ├── connection_manager.cpp      # Session persistence
-│   └── include/                    # Public headers
-├── tests/
-│   ├── unit/                       # C++ unit tests (Catch2)
-│   └── integration/                # PowerShell integration tests
-├── docs/
-│   ├── ideas.md                    # Technical design document
-│   ├── CLAUDE.md                   # Development guide
-│   └── *.md                        # API documentation
-├── CMakeLists.txt                  # Build configuration
-└── vcpkg.json                      # Dependencies
-```
-
-### Contributing
-
-This project welcomes contributions! Areas of particular interest:
-- **Phase 2B**: Batch operations, element caching, table extraction
-- **Phase 3**: MCP server implementation, tool schema design
-- **Testing**: More integration tests with real SAP systems
-- **Documentation**: Usage examples, troubleshooting guides
-
-See `CLAUDE.md` for development guidelines and `ideas.md` for the comprehensive technical design.
-
----
-
-## Security Considerations
-
-- **Credentials**: Never stored in code or config files. Use OS credential managers (Windows Credential Manager support coming in Phase 2B)
-- **Audit Logging**: All automation actions logged with user context and timestamps
-- **Authorization**: Runs with user's SAP permissions (no privilege escalation)
-- **Network**: Supports SAP's SNC (Secure Network Communications)
-- **Scripting**: Requires SAP GUI scripting to be enabled (controlled via RZ11 on server side)
-
----
-
-## Call to Action
-
-**Don't wait for Walldorf** to deliver AI-powered SAP automation.
-
-- **SAP professionals**: Join us in building tools that respect SAP's complexity while bringing modern AI capabilities
-- **AI enthusiasts**: Help us make SAP a first-class citizen in the agent ecosystem
-- **Contributors**: Phase 2B is in active development - check the roadmap and pick a feature
-
-### Get Involved
-
-- 🌟 Star the repo to follow development
-- 💬 Join [Discussions](https://github.com/yourusername/fairyfly/discussions) to share ideas
-- 🐛 Report [Issues](https://github.com/yourusername/fairyfly/issues) with detailed diagnostics
-- 📖 Read [Technical Design](ideas.md) for architecture details
-- 🛠️ Read [Development Guide](CLAUDE.md) to start contributing
-
----
-
-## Acknowledgments
-
-Built on foundations that have stood the test of time:
-- **SAP GUI Scripting API**: Stable since 2002, used by all major RPA vendors
-- **Model Context Protocol**: Anthropic's vision for standardized LLM tool use
-- **RPA Best Practices**: Lessons learned from UiPath, Blue Prism, Power Automate
-
-fairyfly doesn't replace what works—it adds what's missing.
-
----
-
-## License
-
-MIT License - see LICENSE file for details
-
----
-
-**Ready to bridge the gap between SAP's enterprise stability and AI's transformative potential?**
-
-[Install now →](#getting-started-in-5-minutes) | [Read the vision →](#the-vision-natural-language-sap-automation) | [See the roadmap →](#current-status--roadmap)
+SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.

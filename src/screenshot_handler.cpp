@@ -1,4 +1,5 @@
 #include "include/screenshot_handler.h"
+#include "include/com/utf8.h"
 #include "include/com/raii_helpers.h"
 #include "include/constants.h"
 #include "include/trace.h"
@@ -6,6 +7,7 @@
 #include "include/string_utils.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
+#include <filesystem>
 #include <fmt/format.h>
 #include <CImg.h>
 
@@ -125,13 +127,18 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
 
         if (!needs_processing && !options.output_file.empty() && options.output_file != "-") {
             // Fast path: Direct HardCopy to file with subsection support
-            std::string filename = options.output_file;
+            // SAP GUI runs in another process and resolves relative HardCopy
+            // paths against its own working directory, not the CLI's.
+            const auto output_path = std::filesystem::absolute(
+                std::filesystem::path(com::utf8_to_wide(options.output_file)));
+            const std::string filename = com::wide_to_utf8(output_path.wstring());
 
             // Call HardCopy COM method
             VARIANT filename_var;
             VariantInit(&filename_var);
             filename_var.vt = VT_BSTR;
-            filename_var.bstrVal = SysAllocString(std::wstring(filename.begin(), filename.end()).c_str());
+            const auto wide_filename = com::utf8_to_wide(filename);
+            filename_var.bstrVal = SysAllocStringLen(wide_filename.data(), static_cast<UINT>(wide_filename.size()));
 
             VARIANT image_type;
             VariantInit(&image_type);
@@ -156,6 +163,12 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
                 DISPID dispid;
                 LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
                 HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+
+                if (FAILED(hr)) {
+                    VariantClear(&filename_var);
+                    VariantClear(&image_type);
+                    throw std::runtime_error(fmt::format("HardCopy method unavailable: 0x{:08X}", hr));
+                }
 
                 if (SUCCEEDED(hr)) {
                     VARIANT args[6];
@@ -187,6 +200,12 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
                 LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
                 HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
 
+                if (FAILED(hr)) {
+                    VariantClear(&filename_var);
+                    VariantClear(&image_type);
+                    throw std::runtime_error(fmt::format("HardCopy method unavailable: 0x{:08X}", hr));
+                }
+
                 if (SUCCEEDED(hr)) {
                     VARIANT args[2];
                     args[1] = filename_var;
@@ -212,6 +231,15 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             VariantClear(&filename_var);
             VariantClear(&image_type);
             VariantClear(&result_path);
+
+            std::error_code file_error;
+            if (!std::filesystem::is_regular_file(output_path, file_error) ||
+                std::filesystem::file_size(output_path, file_error) == 0 || file_error) {
+                result.status = Result::Status::Error;
+                result.error["code"] = "SCREENSHOT_NOT_CREATED";
+                result.error["message"] = "SAP GUI did not create the screenshot at the requested path";
+                return result;
+            }
 
             result.status = Result::Status::Success;
             result.data["filepath"] = filename;

@@ -90,50 +90,88 @@ inline Result result_from_error(const ResultT<T>& error_result) {
 }
 
 // Window identifier
+// Supported formats:
+//   - Explicit window: "wnd[0]" (main window), "wnd[1]" (first modal dialog), etc.
+//   - Special selectors:
+//     - "@active" - Resolves to current active window (may be modal dialog)
+//     - "@main"   - Always resolves to wnd[0] (main window), ignores modal dialogs
 struct WindowId {
-    std::string id;  // e.g., "wnd[0]", "wnd[1]", or "@active"
+    std::string id;  // e.g., "wnd[0]", "wnd[1]", "@active", or "@main"
 
     WindowId() = default;
     explicit WindowId(const std::string& wnd_id) : id(wnd_id) {}
 
     bool is_valid() const {
-        return !id.empty() && (id[0] == 'w' || id[0] == '@');
+        return !id.empty() && (id[0] == 'w' || id[0] == '@' || id[0] == '/');
     }
 
     bool is_active_selector() const {
         return id == "@active";
     }
 
-    // Extract window index from wnd[N] format, returns -1 for @active or invalid
+    bool is_main_selector() const {
+        return id == "@main";
+    }
+
+    bool is_special_selector() const {
+        return is_active_selector() || is_main_selector();
+    }
+
+    // Extract window index from wnd[N] format, returns -1 for special selectors or invalid
     int get_index() const {
-        if (is_active_selector()) return -1;
-        if (id.size() < 6) return -1;  // Minimum: "wnd[0]"
-
-        auto start = id.find('[');
-        auto end = id.find(']');
-        if (start == std::string::npos || end == std::string::npos) return -1;
-
-        try {
-            return std::stoi(id.substr(start + 1, end - start - 1));
-        } catch (...) {
-            return -1;
+        if (is_special_selector()) return -1;
+        auto wnd_pos = id.find("wnd[");
+        if (wnd_pos != std::string::npos) {
+            auto start = wnd_pos + 4;
+            auto end = id.find(']', start);
+            if (end != std::string::npos) {
+                try {
+                    return std::stoi(id.substr(start, end - start));
+                } catch (...) {
+                    return -1;
+                }
+            }
         }
+        return -1;
     }
 };
 
+inline bool window_ids_match(const WindowId& requested, const WindowId& active) {
+    if (requested.id.rfind("wnd[", 0) != 0)
+        return requested.id == active.id;
+    const int requested_index = requested.get_index();
+    return requested_index >= 0 && requested_index == active.get_index();
+}
+
 // Element identifier
+// Supported formats:
+//   - Explicit: "wnd[0]/usr/btn[3]" - Direct element path with window
+//   - @active:  "@active/usr/btn[3]" - Resolved to current active window
+//   - @main:    "@main/usr/btn[3]" - Always targets main window (wnd[0])
+//   - Canonical: "/app/con[0]/ses[0]/wnd[0]/usr/btn[3]" - Full SAP GUI ID
+//
+// The @main selector is agent-friendly: it bypasses modal dialogs and always
+// targets the main application window, preventing confusion when SAP opens
+// error/warning dialogs.
 struct ElementId {
-    std::string path;  // e.g., "wnd[0]/usr/btn[3]" or "@active/usr/btn[3]"
+    std::string path;  // e.g., "wnd[0]/usr/btn[3]", "@active/usr/btn[3]", or "@main/usr/btn[3]"
 
     ElementId() = default;
     explicit ElementId(const std::string& p) : path(p) {}
 
     bool is_valid() const {
-        return !path.empty() && (path[0] == 'w' || path[0] == '@');  // Must start with window or @active
+        return !path.empty() && (path[0] == 'w' || path[0] == '@' || path[0] == '/');  // Must start with window, special selector, or /app
     }
 
     // Extract window ID from element path
     WindowId get_window() const {
+        if (path.rfind("/app/", 0) == 0) {
+            auto wnd_pos = path.find("/wnd[");
+            if (wnd_pos != std::string::npos) {
+                auto end = path.find(']', wnd_pos + 5);
+                if (end != std::string::npos) return WindowId(path.substr(0, end + 1));
+            }
+        }
         auto slash_pos = path.find('/');
         if (slash_pos == std::string::npos) {
             return WindowId(path);  // Just window ID, no element path
@@ -143,6 +181,14 @@ struct ElementId {
 
     // Get element path without window prefix (e.g., "usr/btn[3]" from "wnd[0]/usr/btn[3]")
     std::string get_element_path() const {
+        if (path.rfind("/app/", 0) == 0) {
+            auto wnd_pos = path.find("/wnd[");
+            if (wnd_pos != std::string::npos) {
+                auto end = path.find(']', wnd_pos + 5);
+                if (end != std::string::npos)
+                    return end + 1 < path.size() && path[end + 1] == '/' ? path.substr(end + 2) : "";
+            }
+        }
         auto slash_pos = path.find('/');
         if (slash_pos == std::string::npos) {
             return "";  // Just window ID, no element path

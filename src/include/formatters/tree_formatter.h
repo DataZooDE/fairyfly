@@ -21,6 +21,14 @@ private:
         int level
     ) const;
 
+    /// Format a tree node as table row with row number and column values
+    void format_tree_node_table(
+        const json& node,
+        std::ostringstream& oss,
+        int row_index,
+        int level
+    ) const;
+
     /// Get tree branch character based on position
     std::string get_branch_char(bool is_last) const;
 };

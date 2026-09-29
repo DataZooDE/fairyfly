@@ -2,11 +2,16 @@
 
 #include "include/com/wrapper.h"
 #include "include/sap_gui_base.h"
+#include "include/com/utf8.h"
 #include <spdlog/spdlog.h>
 #include <comdef.h>
 
 namespace fairyfly {
 namespace sap {
+
+/// Read a COM collection count for session-close verification. Unlike the
+/// ordinary screen-reading helper, a failed read must not mean zero items.
+int get_collection_count_checked(IDispatch* collection);
 
 /// Get a string property from COM object (free function helper)
 inline std::string get_string_property(IDispatch* obj, const char* prop_name) {
@@ -25,7 +30,7 @@ inline std::string get_string_property(IDispatch* obj, const char* prop_name) {
                         &params, &result, nullptr, nullptr);
         if (FAILED(hr)) return "";
 
-        return (const char*)_bstr_t(result);
+        return result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
     } catch (const SapGuiException& e) {
         spdlog::debug("get_string_property: SapGuiException for {}: {}", prop_name, e.what());
         return "";
@@ -214,6 +219,17 @@ inline IDispatchPtr call_method_with_string(IDispatch* obj, const char* method_n
         return nullptr;
     }
 }
+
+/// Safely convert VARIANT with BSTR to string, with robust NULL pointer and access violation handling
+/// This prevents segfaults from NULL BSTR pointers or invalid memory access
+/// \param var The VARIANT to convert (should have vt == VT_BSTR)
+/// \param context Optional context string for diagnostic logging (e.g., "get_item_text key='Favo', col='Text'")
+/// \return String value, or empty string if BSTR is NULL or conversion fails
+std::string safe_bstr_to_string(const VARIANT& var, const char* context = nullptr);
+
+/// Safely invoke an IDispatch method or property with Win32 SEH protection
+/// Catches access violations (0xC0000005) inside native SAP GUI COM controls
+HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, DISPPARAMS* params, VARIANT* result);
 
 } // namespace sap
 } // namespace fairyfly

@@ -24,6 +24,10 @@ void ElementRendererRegistry::register_markdown_renderer(const std::string& type
 }
 
 json ElementRendererRegistry::render_to_json(const json& element_metadata) const {
+    if (!element_metadata.is_object()) {
+        return element_metadata;
+    }
+
     std::string type = element_metadata.value("type", "");
 
     // Look up renderer for this type
@@ -37,6 +41,10 @@ json ElementRendererRegistry::render_to_json(const json& element_metadata) const
 }
 
 std::string ElementRendererRegistry::render_to_markdown(const json& element_metadata, int indent_level) const {
+    if (!element_metadata.is_object()) {
+        return "";
+    }
+
     std::string type = element_metadata.value("type", "");
 
     // Look up renderer for this type
@@ -58,6 +66,10 @@ bool ElementRendererRegistry::has_markdown_renderer(const std::string& type) con
 }
 
 json ElementRendererRegistry::default_json_renderer(const json& element_metadata) const {
+    if (!element_metadata.is_object()) {
+        return element_metadata;
+    }
+
     // Default: return metadata as-is, but filter children recursively if semantic classifier says to hide
     json result = element_metadata;
 
@@ -82,6 +94,10 @@ json ElementRendererRegistry::default_json_renderer(const json& element_metadata
 }
 
 std::string ElementRendererRegistry::default_markdown_renderer(const json& element_metadata, int indent_level) const {
+    if (!element_metadata.is_object()) {
+        return "";
+    }
+
     // Check if this element should be displayed
     if (!SemanticClassifier::should_display(element_metadata)) {
         return "";  // Don't render layout-only elements
