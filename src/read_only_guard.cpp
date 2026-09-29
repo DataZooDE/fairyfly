@@ -1,4 +1,6 @@
 #include "include/read_only_guard.h"
+#include "include/com/wrapper.h"
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cctype>
@@ -83,8 +85,58 @@ bool is_state_changing_action(const std::string& element_type, const std::string
     return !matched_read_only_rule(element_type, text, tooltip, element_id).empty();
 }
 
+std::string read_only_vkey_rule(int vkey, int active_window_index) {
+    // Allowlist (everything else is refused): F1 help, F3 back, F4 value help, F7 display,
+    // F8 execute/refresh, F12 cancel, Shift+F3 exit (15), page keys (raw 80-83), and Enter (0)
+    // only on the main window: on a popup Enter may confirm a Save/Delete confirmation.
+    switch (vkey) {
+    case 1: case 3: case 4: case 7: case 8: case 12: case 15:
+    case 80: case 81: case 82: case 83:
+        return {};
+    case 0:
+        if (active_window_index <= 0) return {};
+        return "vkey:0";
+    default:
+        return "vkey:" + std::to_string(vkey);
+    }
+}
+
 bool is_state_changing_vkey(int vkey) {
-    return vkey == 11 || vkey == 14;
+    return !read_only_vkey_rule(vkey, 0).empty();
+}
+
+std::string read_only_doubleclick_rule(const std::string& element_type, const std::string& element_text,
+                                       const std::string& element_tooltip, const std::string& element_id,
+                                       const std::string& target_text) {
+    if (auto r = matched_read_only_rule(element_type, element_text, element_tooltip, element_id); !r.empty())
+        return r;
+    // The addressed cell/node text is judged like an action label (word rules).
+    return matched_read_only_rule("GuiButton", target_text, "", "");
+}
+
+std::string read_only_toolbar_button_rule(const ComGuiElement& shell, const std::string& button_id,
+                                          const std::string& element_id, std::string& text,
+                                          std::string& tooltip) {
+    if (!shell.find_toolbar_button_labels(button_id, text, tooltip)) {
+        spdlog::debug("Read-only guard could not read toolbar button '{}'; falling back to id rules",
+                      element_id);
+        text.clear();
+        tooltip.clear();
+    }
+    return matched_read_only_rule("GuiButton", text, tooltip, element_id);
+}
+
+std::string normalize_menu_segment(const std::string& segment) {
+    std::string out;
+    bool space = false;
+    for (unsigned char c : segment) {
+        if (c == '&') continue;
+        if (std::isspace(c)) { space = true; continue; }
+        if (space && !out.empty()) out.push_back(' ');
+        space = false;
+        out.push_back(static_cast<char>(std::tolower(c)));
+    }
+    return out;
 }
 
 Result make_read_only_refusal(const std::string& element_id, const std::string& element_type,
@@ -96,8 +148,15 @@ Result make_read_only_refusal(const std::string& element_id, const std::string& 
     result.error["message"] = "Refused in read-only mode: action would change SAP state (rule " + rule + ")";
     result.error["element_id"] = element_id;
     result.error["element_type"] = element_type;
-    result.error["text"] = text;
-    result.error["tooltip"] = tooltip;
+    // Never echo the text of input elements: it can hold a password or other credential.
+    const bool input_type = element_type == "GuiPasswordField" || element_type == "GuiTextField" ||
+                            element_type == "GuiCTextField" || element_type == "GuiComboBox" ||
+                            element_type == "GuiComboBoxControl" || element_type == "GuiTextedit" ||
+                            element_type == "GuiSimpleContainer";
+    if (!input_type) {
+        result.error["text"] = text;
+        result.error["tooltip"] = tooltip;
+    }
     result.error["rule"] = rule;
     result.error["suggestions"] = nlohmann::json::array(
         {"Run without --read-only / FAIRYFLY_READ_ONLY to perform this action"});

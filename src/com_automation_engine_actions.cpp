@@ -4,6 +4,7 @@
 #include "include/action_status.h"
 #include "include/constants.h"
 #include "include/menu_navigation.h"
+#include "include/read_only_guard.h"
 #include "include/vkey.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
@@ -237,7 +238,8 @@ Result ComAutomationEngine::read_menu(const std::string& window) {
     }
 }
 
-Result ComAutomationEngine::select_menu(const std::string& menu_path, const std::string& window) {
+Result ComAutomationEngine::select_menu(const std::string& menu_path, const std::string& window,
+                                        bool read_only) {
     const auto start = Clock::now();
     try {
         const auto segments = split_menu_path(menu_path);
@@ -259,6 +261,13 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
             return result;
         }
         const std::string item_id = item->get_id();
+        if (read_only) {
+            // Judge the item that was actually matched, not just what the caller typed.
+            std::string real_text;
+            try { real_text = item->get_property_string(L"Text"); } catch (const std::exception&) {}
+            const auto rule = matched_read_only_rule("GuiMenu", normalize_menu_segment(real_text), "", item_id);
+            if (!rule.empty()) return make_read_only_refusal(item_id, "GuiMenu", real_text, "", rule);
+        }
         if (!item->is_enabled()) {
             auto result = error_result("ELEMENT_DISABLED", "Menu item is disabled: " + menu_path);
             result.error["element"] = item_id;

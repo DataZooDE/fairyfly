@@ -1,4 +1,5 @@
 #include "include/action_status.h"
+#include "include/sensitive_data.h"
 
 #include <algorithm>
 #include <cctype>
@@ -96,7 +97,8 @@ bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStat
     try {
         auto bar = session->find_element_by_id(id);
         if (!bar) return false;
-        out.text = bar->get_text();
+        // SAP status text is free text and can echo credentials ("Password: x rejected"): mask it at the source.
+        out.text = redact_sensitive_response_text(bar->get_text());
         out.type = bar->get_property_string(L"MessageType");
         try { out.message_id = bar->get_property_string(L"MessageId"); } catch (const std::exception&) {}
         try { out.message_number = bar->get_property_string(L"MessageNumber"); } catch (const std::exception&) {}
@@ -197,6 +199,9 @@ TransactionRequest normalize_transaction_request(const std::string& input) {
     return req;
 }
 
+// Known limitation: only window id, title, transaction and status bar text are compared. A click
+// that changes nothing but field or grid contents (for example a "Next page" control) is reported
+// as screen_changed:false after the full --timeout. Behavior is intentionally unchanged.
 bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after) {
     return before.window_id != after.window_id || before.title != after.title ||
            before.transaction != after.transaction ||

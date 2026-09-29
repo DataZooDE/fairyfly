@@ -1621,6 +1621,30 @@ bool ComGuiElement::get_button_enabled(int position) const {
     }
 }
 
+bool ComGuiElement::find_toolbar_button_labels(const std::string& button_id, std::string& text,
+                                               std::string& tooltip) const {
+    try {
+        int count = 0;
+        try { count = get_button_count(); } catch (const std::exception&) {}
+        for (int i = 0; i < count; ++i) {
+            if (get_button_id(i) != button_id) continue;
+            text = get_button_text(i);
+            tooltip = get_button_tooltip(i);
+            return true;
+        }
+        const int grid_count = get_grid_toolbar_button_count();
+        for (int i = 0; i < grid_count; ++i) {
+            if (get_grid_toolbar_button_id(i) != button_id) continue;
+            text.clear();
+            tooltip = get_grid_toolbar_button_tooltip(i);
+            return true;
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("find_toolbar_button_labels failed for '{}': {}", button_id, e.what());
+    }
+    return false;
+}
+
 void ComGuiElement::press_button(const std::string& button_id) {
     try {
         _variant_t button_id_var(button_id.c_str());

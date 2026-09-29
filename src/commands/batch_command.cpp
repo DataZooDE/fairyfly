@@ -27,6 +27,9 @@ BatchLine parse_batch_line(const std::string& line) {
             for (const auto& item : parsed) {
                 if (!item.is_string()) throw std::runtime_error("array items must be strings");
                 out.argv.push_back(item.get<std::string>());
+                // A NUL would be silently truncated when the argument reaches CLI11 as a C string.
+                if (out.argv.back().find('\0') != std::string::npos)
+                    throw std::runtime_error("argument contains an embedded NUL (\\u0000)");
             }
         } catch (const std::exception& e) {
             out.ok = false;
@@ -35,6 +38,12 @@ BatchLine parse_batch_line(const std::string& line) {
             return out;
         }
         if (out.argv.empty()) out.skip = true;
+        return out;
+    }
+
+    if (line.find('\0') != std::string::npos) {
+        out.ok = false;
+        out.error = "Line contains an embedded NUL character";
         return out;
     }
 

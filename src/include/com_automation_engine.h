@@ -86,7 +86,9 @@ public:
     Result send_key(int vkey, const std::string& window = "@active");
     Result close_popup(int vkey = 12);
     Result read_menu(const std::string& window = "wnd[0]");
-    Result select_menu(const std::string& menu_path, const std::string& window = "wnd[0]");
+    /// read_only: refuse (READ_ONLY_REFUSED) when the RESOLVED menu item's real text is state-changing.
+    Result select_menu(const std::string& menu_path, const std::string& window = "wnd[0]",
+                       bool read_only = false);
     Result read_field(const ElementId& element) override;
     Result press_toolbar_button(const ElementId& toolbar_element, const std::string& button_id) override;
     Result press_f4(const ElementId& element) override;
