@@ -163,6 +163,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/dispatcher.cpp
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
+    src/iis/validators.cpp
+    src/iis/web_config.cpp
+    src/iis/iis_service.cpp
+    src/iis/powershell_host.cpp
+    src/commands/mcp_iis_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
@@ -199,6 +204,8 @@ if(WIN32)
         user32
         uiautomationcore
         advapi32
+        bcrypt
+        ws2_32
     )
 endif()
 
