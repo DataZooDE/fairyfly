@@ -10,7 +10,44 @@ namespace fairyfly::sap {
 struct ActionStatus {
     std::string text;
     std::string type;
+    std::string message_id;
+    std::string message_number;
 };
+
+/// JSON view of a status bar message: {text, message_type, changed}.
+/// Returns null when there is no message text. `changed` is only emitted when
+/// a previous status is supplied.
+json status_bar_json(const ActionStatus& status, const ActionStatus* before = nullptr);
+
+/// Attach the status bar message to result.data["status_bar"] on success and
+/// result.error["status_bar"] on error. No-op when the message is empty.
+void attach_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after);
+
+/// Single-snapshot variant (no change detection) for read-only commands.
+void attach_status_bar(Result& result, const ActionStatus& current);
+
+struct TransactionRequest {
+    bool valid = true;
+    std::string command;         // what to send / start
+    std::string expected_tcode;  // transaction code expected afterwards (may be empty)
+    bool use_send_command = false;
+    std::string error_code;      // set when !valid
+    std::string error_message;
+};
+
+/// Normalises a user supplied transaction string. "/nSE38" is sent via
+/// SendCommand (StartTransaction would prepend "/n" again). "/o", "/i" and
+/// "/nex" are rejected because they change or close sessions.
+TransactionRequest normalize_transaction_request(const std::string& input);
+
+struct ScreenSnapshot {
+    std::string window_id;
+    std::string title;
+    std::string transaction;
+    std::string statusbar_text;
+};
+
+bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after);
 
 std::optional<Result> classify_list_label_outcome(bool same_label,
                                                   bool same_window,

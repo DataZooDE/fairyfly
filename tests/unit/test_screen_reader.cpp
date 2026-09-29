@@ -1065,3 +1065,17 @@ TEST_CASE("screen find reports simple text for GuiTab", "[screen][find][imp006]"
     REQUIRE_FALSE(find_type_has_simple_text("GuiShell"));
     REQUIRE_FALSE(find_type_has_simple_text("GuiUserArea"));
 }
+
+TEST_CASE("Screen Markdown shows the status bar message", "[screen][markdown][status_bar]") {
+    renderers::register_all_renderers();
+    nlohmann::json data = {
+        {"title", "Job Overview"}, {"transaction", "SM37"},
+        {"hierarchy", nlohmann::json::object()},
+        {"status_bar", {{"text", "Job log displayed"}, {"message_type", "S"}}}
+    };
+    const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    REQUIRE(md.find("**Status [S]:** Job log displayed") != std::string::npos);
+
+    data.erase("status_bar");
+    REQUIRE(fairyfly::cli::ScreenMarkdownFormatter::format(data).find("**Status") == std::string::npos);
+}

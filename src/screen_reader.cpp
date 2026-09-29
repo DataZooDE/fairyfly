@@ -1,4 +1,5 @@
 #include "include/screen_reader.h"
+#include "include/action_status.h"
 #include "include/element_metadata_extractor.h"
 #include "include/screen_element_collector.h"
 #include "include/table_data_extractor.h"
@@ -1398,6 +1399,7 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.data["screen_id"] = window->get_id();
         result.data["title"] = window->get_title();
         result.data["transaction"] = session_->get_transaction_code();
+        attach_status_bar(result, read_action_status(session_));
         result.data["elements"] = search.matches;
         result.data["element_count"] = search.matches.size();
         result.data["scanned_count"] = search.scanned;
@@ -1449,6 +1451,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         result.data["screen_id"] = window->get_id();
         result.data["title"] = window->get_title();
         result.data["transaction"] = session_->get_transaction_code();
+        attach_status_bar(result, read_action_status(session_));
         result.data["child_count"] = window->get_child_count();
 
         if (include_structure) {

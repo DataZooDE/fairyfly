@@ -408,3 +408,88 @@ TEST_CASE("ElementRendererRegistry non-object robustness", "[renderers][json]") 
         REQUIRE_NOTHROW(registry.render_to_markdown(obj_with_string_children));
     }
 }
+
+TEST_CASE("status_bar_json reports text, type and change", "[action][status_bar]") {
+    for (const char* type : {"S", "W", "E", "A", "I"}) {
+        const ActionStatus before{"old", "S"};
+        const ActionStatus after{"Message text", type};
+        const auto bar = status_bar_json(after, &before);
+        REQUIRE(bar["text"] == "Message text");
+        REQUIRE(bar["message_type"] == type);
+        REQUIRE(bar["changed"] == true);
+    }
+    const ActionStatus same{"Same", "S"};
+    REQUIRE(status_bar_json(same, &same)["changed"] == false);
+    REQUIRE(status_bar_json({}, &same).is_null());
+    REQUIRE_FALSE(status_bar_json(same).contains("changed"));
+}
+
+TEST_CASE("attach_status_bar targets data on success and error on failure", "[action][status_bar]") {
+    const ActionStatus before{"", ""};
+    const ActionStatus after{"Saved", "S"};
+    Result ok;
+    ok.status = Result::Status::Success;
+    attach_status_bar(ok, before, after);
+    REQUIRE(ok.data["status_bar"]["text"] == "Saved");
+    REQUIRE(ok.data["status_bar"]["changed"] == true);
+
+    Result failed;
+    failed.status = Result::Status::Error;
+    failed.error["code"] = "X";
+    attach_status_bar(failed, before, {"Bad input", "E"});
+    REQUIRE(failed.error["status_bar"]["message_type"] == "E");
+    REQUIRE(failed.error["code"] == "X");
+
+    Result quiet;
+    quiet.status = Result::Status::Success;
+    attach_status_bar(quiet, before, {});
+    REQUIRE_FALSE(quiet.data.contains("status_bar"));
+}
+
+TEST_CASE("normalize_transaction_request handles OK-code prefixes", "[action][tcode]") {
+    auto bare = normalize_transaction_request("/n");
+    REQUIRE(bare.valid);
+    REQUIRE(bare.use_send_command);
+    REQUIRE(bare.command == "/n");
+    REQUIRE(bare.expected_tcode == "SESSION_MANAGER");
+
+    auto lower = normalize_transaction_request("/nSE38");
+    REQUIRE(lower.valid);
+    REQUIRE(lower.use_send_command);
+    REQUIRE(lower.command == "/nSE38");
+    REQUIRE(lower.expected_tcode == "SE38");
+
+    auto upper = normalize_transaction_request("/NSM37");
+    REQUIRE(upper.use_send_command);
+    REQUIRE(upper.command == "/nSM37");
+    REQUIRE(upper.expected_tcode == "SM37");
+
+    auto plain = normalize_transaction_request("SE38");
+    REQUIRE(plain.valid);
+    REQUIRE_FALSE(plain.use_send_command);
+    REQUIRE(plain.command == "SE38");
+    REQUIRE(plain.expected_tcode == "SE38");
+
+    for (const char* input : {"/o", "/oSE38", "/nex", "/NEX", "/i"}) {
+        auto rejected = normalize_transaction_request(input);
+        REQUIRE_FALSE(rejected.valid);
+        REQUIRE(rejected.error_code == "UNSUPPORTED_OK_CODE");
+    }
+}
+
+TEST_CASE("screen_snapshot_changed detects in-place screen changes", "[action][snapshot]") {
+    const ScreenSnapshot base{"wnd[0]", "Job Overview", "SM37", ""};
+    REQUIRE_FALSE(screen_snapshot_changed(base, base));
+    auto titled = base;
+    titled.title = "Job Log";
+    REQUIRE(screen_snapshot_changed(base, titled));
+    auto window = base;
+    window.window_id = "wnd[1]";
+    REQUIRE(screen_snapshot_changed(base, window));
+    auto tcode = base;
+    tcode.transaction = "SE38";
+    REQUIRE(screen_snapshot_changed(base, tcode));
+    auto status = base;
+    status.statusbar_text = "Job log displayed";
+    REQUIRE(screen_snapshot_changed(base, status));
+}

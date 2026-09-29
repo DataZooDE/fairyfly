@@ -516,7 +516,10 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
 
     // Get current active window before click (if monitoring for new windows)
     WindowId window_before;
+    sap::ScreenSnapshot snapshot_before;
+    auto* snapshot_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
     if (wait_for_window) {
+        if (snapshot_engine) snapshot_before = snapshot_engine->capture_screen_snapshot();
         window_before = engine_->get_active_window_id();
         spdlog::info("Clicking element: {} on connection {} (monitoring for new window, current={})",
                      element_id, conn_result.value.id, window_before.id);
@@ -610,9 +613,11 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                 tree_elem->doubleclick_node(node_key);
             }
             session->wait_for_completion(500);
+            const auto after_status = sap::read_action_status(session);
             if (auto rejection = sap::classify_action_status(before_status,
-                    sap::read_action_status(session), full_path,
+                    after_status, full_path,
                     tree_action == "contextmenu" || tree_action == "doubleclick")) {
+                sap::attach_status_bar(*rejection, before_status, after_status);
                 rejection->error["node_key"] = node_key;
                 rejection->error["tree_action"] = tree_action;
                 rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -630,6 +635,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             result.data["element"] = full_path;
             result.data["element_type"] = elem_type;
             result.data["connection_id"] = conn_result.value.id;
+            sap::attach_status_bar(result, before_status, after_status);
             result.duration = duration;
 
             spdlog::info("Executed tree action '{}' on node '{}' (duration: {}ms)",
@@ -671,40 +677,48 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
 
-        // If requested, wait for new window to appear
+        // If requested, wait until the window OR the screen content changes.
+        // SAP often updates in place (same window id), so a window-only check
+        // would always wait for the full timeout.
         if (wait_for_window) {
-            auto start = std::chrono::high_resolution_clock::now();
+            const auto start = std::chrono::steady_clock::now();
             bool window_changed = false;
+            bool screen_changed = false;
             WindowId new_window = window_before;
 
-            // Poll for window change with 100ms interval
             while (true) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
                 new_window = engine_->get_active_window_id();
-                if (new_window.id != window_before.id) {
-                    window_changed = true;
-                    break;
+                window_changed = new_window.id != window_before.id;
+                if (snapshot_engine) {
+                    screen_changed = sap::screen_snapshot_changed(
+                        snapshot_before, snapshot_engine->capture_screen_snapshot());
+                } else {
+                    screen_changed = window_changed;
                 }
+                if (window_changed || screen_changed) break;
 
-                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start
-                );
-                if (elapsed.count() > timeout_ms) {
-                    break;
-                }
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start);
+                if (elapsed.count() >= timeout_ms) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
 
+            const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start);
+            result.data["waited_ms"] = waited.count();
+            result.data["window_changed"] = window_changed;
+            result.data["screen_changed"] = screen_changed;
+            result.duration += waited;
+
             if (window_changed) {
-                result.data["window_changed"] = true;
                 result.data["window_before"] = window_before.id;
                 result.data["window_after"] = new_window.id;
                 result.data["new_window"] = new_window.id;  // For easy access
                 spdlog::info("New window detected after click: {} -> {}", window_before.id, new_window.id);
+            } else if (screen_changed) {
+                spdlog::info("Screen changed in place after click (waited {}ms)", waited.count());
             } else {
-                result.data["window_changed"] = false;
-                result.data["waited_ms"] = timeout_ms;
-                spdlog::debug("No new window detected after click (waited {}ms)", timeout_ms);
+                spdlog::debug("No screen change detected after click (waited {}ms)", waited.count());
             }
         }
     }
