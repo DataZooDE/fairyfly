@@ -26,6 +26,57 @@ using namespace fairyfly;
 using namespace fairyfly::sap;
 
 namespace {
+// Minimal IEnumVARIANT over a list of dispatch pointers (for _NewEnum fakes).
+class FakeEnumVariant final : public IEnumVARIANT {
+public:
+    explicit FakeEnumVariant(std::vector<IDispatch*> items, size_t position = 0)
+        : items_(std::move(items)), position_(position) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+        if (!object) return E_POINTER;
+        *object = nullptr;
+        if (iid == IID_IUnknown || iid == IID_IEnumVARIANT) {
+            *object = static_cast<IEnumVARIANT*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG remaining = --references_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    HRESULT STDMETHODCALLTYPE Next(ULONG count, VARIANT* out, ULONG* fetched) override {
+        ULONG got = 0;
+        while (got < count && position_ < items_.size()) {
+            VariantInit(&out[got]);
+            out[got].vt = VT_DISPATCH;
+            out[got].pdispVal = items_[position_++];
+            out[got].pdispVal->AddRef();
+            ++got;
+        }
+        if (fetched) *fetched = got;
+        return got == count ? S_OK : S_FALSE;
+    }
+    HRESULT STDMETHODCALLTYPE Skip(ULONG count) override {
+        position_ += count;
+        if (position_ > items_.size()) { position_ = items_.size(); return S_FALSE; }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Reset() override { position_ = 0; return S_OK; }
+    HRESULT STDMETHODCALLTYPE Clone(IEnumVARIANT** out) override {
+        *out = new FakeEnumVariant(items_, position_);
+        return S_OK;
+    }
+private:
+    ULONG references_ = 1;
+    std::vector<IDispatch*> items_;
+    size_t position_;
+};
+} // namespace
+
+namespace {
 class TextFieldDispatch final : public IDispatch {
 public:
     TextFieldDispatch(const wchar_t* type, DISPID type_id,
@@ -63,6 +114,12 @@ public:
     bool send_vkey_throws = false;
     bool close_throws = false;
     int close_calls = 0;
+    // Round-trip counters: GetIDsOfNames calls per member name, Children property reads,
+    // and _NewEnum calls (served from child_items when enumerable is set).
+    std::map<std::wstring, int> name_lookups;
+    int children_invokes = 0;
+    int new_enum_calls = 0;
+    bool enumerable = false;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -89,6 +146,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count,
                                             LCID, DISPID* ids) override {
         if (!names || !ids || count != 1) return E_INVALIDARG;
+        ++name_lookups[names[0]];
         if (std::wcscmp(names[0], L"Type") == 0) *ids = type_id_;
         else if (std::wcscmp(names[0], L"DisplayedText") == 0) *ids = type_id_ + 1;
         else if (std::wcscmp(names[0], L"Text") == 0) *ids = type_id_ + 2;
@@ -224,7 +282,15 @@ public:
             named_sibling_dispatch->AddRef();
             return S_OK;
         }
+        if (id == DISPID_NEWENUM && enumerable) {
+            ++new_enum_calls;
+            VariantInit(result);
+            result->vt = VT_UNKNOWN;
+            result->punkVal = new FakeEnumVariant(child_items);
+            return S_OK;
+        }
         if (id == type_id_ + 26 && (flags & DISPATCH_PROPERTYGET) && children_dispatch) {
+            ++children_invokes;
             VariantInit(result);
             result->vt = VT_DISPATCH;
             result->pdispVal = children_dispatch;
@@ -2000,4 +2066,151 @@ TEST_CASE("read_action_status returns status bar text and message type", "[com][
     REQUIRE(status.message_id == "BL");
     REQUIRE(status.message_number == "001");
     bar->Release();
+}
+
+
+TEST_CASE("Unknown member DISPID misses are cached per type", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiButton", 20000);
+    auto* second = new TextFieldDispatch(L"GuiButton", 20100);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_type() == "GuiButton");
+    REQUIRE(second_element->get_type() == "GuiButton");
+    // AccTooltip/DefaultTooltip/Tooltip are unknown to the fake: empty on both elements.
+    REQUIRE(first_element->get_tooltip().empty());
+    REQUIRE(second_element->get_tooltip().empty());
+    REQUIRE(first_element->get_tooltip().empty());
+    auto* first_fake = static_cast<TextFieldDispatch*>(first_element->get_dispatch());
+    auto* second_fake = static_cast<TextFieldDispatch*>(second_element->get_dispatch());
+    REQUIRE(first_fake->name_lookups[L"AccTooltip"] == 1);
+    REQUIRE(first_fake->name_lookups[L"Tooltip"] == 1);
+    // The second element of the same type never asks the object again.
+    REQUIRE(second_fake->name_lookups[L"AccTooltip"] == 0);
+    REQUIRE(second_fake->name_lookups[L"DefaultTooltip"] == 0);
+    REQUIRE(second_fake->name_lookups[L"Tooltip"] == 0);
+
+    // Clearing the cache also clears remembered misses.
+    SapGuiObject::clear_dispid_cache();
+    REQUIRE(second_element->get_type() == "GuiButton");
+    REQUIRE(second_element->get_tooltip().empty());
+    REQUIRE(second_fake->name_lookups[L"AccTooltip"] == 1);
+}
+
+TEST_CASE("is_enabled resolves Enabled once per type", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiCTextField", 20200);
+    auto* second = new TextFieldDispatch(L"GuiCTextField", 20200);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+    first_element->get_type();
+    second_element->get_type();
+
+    // "Enabled" is unknown to the fake, so both report enabled (unchanged behavior).
+    REQUIRE(first_element->is_enabled());
+    REQUIRE(second_element->is_enabled());
+    REQUIRE(static_cast<TextFieldDispatch*>(first_element->get_dispatch())->name_lookups[L"Enabled"] == 1);
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Enabled"] == 0);
+    // Same type means same DISPIDs (cached Visible id applies to both objects).
+    REQUIRE(first_element->is_visible());
+    REQUIRE(second_element->is_visible());
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Visible"] == 0);
+}
+
+TEST_CASE("find_element_by_id resolves FindById once and still returns not found", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* session_dispatch = new TextFieldDispatch(L"GuiSession", 20400);
+    auto* found = new TextFieldDispatch(L"GuiTextField", 20500, L"wnd[0]/usr/txtA");
+    session_dispatch->named_sibling_dispatch = found;
+    session_dispatch->named_sibling_id = L"wnd[0]/usr/txtA";
+    auto session = ComGuiSession::create(session_dispatch);
+    session_dispatch->Release();
+
+    REQUIRE(session->find_element_by_id("wnd[0]/usr/txtA")->get_id() == "wnd[0]/usr/txtA");
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE_THROWS_AS(session->find_element_by_id("wnd[0]/usr/missing"), ComException);
+    }
+    REQUIRE(session->find_element_by_id("wnd[0]/usr/txtA") != nullptr);
+    REQUIRE(static_cast<TextFieldDispatch*>(session->get_dispatch())->name_lookups[L"FindById"] == 1);
+    found->Release();
+}
+
+TEST_CASE("Children collection is fetched once per element wrapper", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* parent = new TextFieldDispatch(L"GuiContainerShell", 20600, L"wnd[0]/shellcont");
+    auto* first_child = new TextFieldDispatch(L"GuiLabel", 20700, L"wnd[0]/shellcont/lbl[0]");
+    auto* second_child = new TextFieldDispatch(L"GuiLabel", 20800, L"wnd[0]/shellcont/lbl[1]");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 20900);
+    collection->child_items = {first_child, second_child};
+    parent->children_dispatch = collection;
+    auto element = ComGuiElement::create(parent);
+    parent->Release();
+
+    REQUIRE(element->get_container_type() == "container");
+    REQUIRE(element->get_child_count() == 2);
+    auto children = element->children();
+    REQUIRE(children.count() == 2);
+    REQUIRE(element->get_child(0)->get_id() == "wnd[0]/shellcont/lbl[0]");
+    REQUIRE(element->get_child(1)->get_id() == "wnd[0]/shellcont/lbl[1]");
+    REQUIRE(element->get_child(2) == nullptr);
+    REQUIRE(static_cast<TextFieldDispatch*>(element->get_dispatch())->children_invokes == 1);
+
+    collection->Release();
+    first_child->Release();
+    second_child->Release();
+}
+
+TEST_CASE("SapGuiCollection::for_each uses one _NewEnum and matches item order", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first_child = new TextFieldDispatch(L"GuiLabel", 21000, L"a");
+    auto* second_child = new TextFieldDispatch(L"GuiLabel", 21100, L"b");
+    auto* third_child = new TextFieldDispatch(L"GuiLabel", 21200, L"c");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 21300);
+    collection->child_items = {first_child, second_child, third_child};
+    collection->enumerable = true;
+    SapGuiCollection<ComGuiElement> children{IDispatchPtr(collection)};
+
+    std::vector<std::string> by_item;
+    for (int i = 0; i < 3; ++i) by_item.push_back(children.item(i)->get_id());
+    const int enums_for_items = collection->new_enum_calls;
+    REQUIRE(enums_for_items == 3);
+
+    std::vector<std::string> by_walk;
+    REQUIRE(children.for_each([&](const std::shared_ptr<ComGuiElement>& child) {
+        by_walk.push_back(child->get_id());
+    }));
+    REQUIRE(collection->new_enum_calls == enums_for_items + 1);
+    REQUIRE(by_walk == by_item);
+    REQUIRE(by_walk == std::vector<std::string>{"a", "b", "c"});
+
+    // Returning false stops the walk early.
+    int seen = 0;
+    REQUIRE(children.for_each([&](const std::shared_ptr<ComGuiElement>&) { return ++seen < 2; }));
+    REQUIRE(seen == 2);
+
+    // A collection without _NewEnum reports that callers must fall back to item(i).
+    collection->enumerable = false;
+    REQUIRE_FALSE(children.for_each([&](const std::shared_ptr<ComGuiElement>&) {}));
+
+    collection->Release();
+    first_child->Release();
+    second_child->Release();
+    third_child->Release();
+}
+
+TEST_CASE("Label and tooltip values are unchanged by DISPID caching", "[com][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    for (int round = 0; round < 2; ++round) {
+        auto* labelled = new TextFieldDispatch(L"GuiTextField", 21400, L"wnd[0]/usr/txtA", L"Customer");
+        auto element = ComGuiElement::create(labelled);
+        labelled->Release();
+        REQUIRE(element->get_label() == "Customer");
+        REQUIRE(element->get_tooltip().empty());
+        REQUIRE_FALSE(element->get_label().empty());
+    }
 }

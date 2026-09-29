@@ -46,7 +46,18 @@ ComGuiWindowPtr ComGuiSession::get_active_window() const {
 }
 
 ComGuiElementPtr ComGuiSession::find_element_by_id(const std::string& id) const {
-    auto elem = ::fairyfly::sap::call_method_with_string(dispatch_, "FindById", id);
+    if (!dispatch_) throw ComException("Null object");
+    // Resolve FindById through the per-type DISPID cache (a raw call_method_with_string
+    // re-resolves it with ~3 round trips on every probe). get_type() is cached per
+    // wrapper and is what enables the type-level cache.
+    IDispatchPtr elem;
+    try {
+        (void)get_type();
+    } catch (const std::exception&) {}
+    DISPID find_dispid;
+    if (SUCCEEDED(resolve_dispid(L"FindById", &find_dispid))) {
+        elem = ::fairyfly::sap::call_method_with_string_dispid(dispatch_, find_dispid, id);
+    }
     if (!elem) {
         throw ComException("Element not found: " + id);
     }

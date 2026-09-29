@@ -188,6 +188,35 @@ inline void set_string_property(IDispatch* obj, const char* prop_name, const std
     }
 }
 
+/// Call a method on COM object with string parameter using an already-resolved DISPID
+/// (avoids the per-call ITypeInfo lookup). Same null-on-failure contract as
+/// call_method_with_string.
+inline IDispatchPtr call_method_with_string_dispid(IDispatch* obj, DISPID dispid,
+                                                    const std::string& param) {
+    if (!obj) throw ComException("Null object");
+
+    try {
+        HRESULT hr;
+        _variant_t param_var(param.c_str());
+        DISPPARAMS disp_params = {(VARIANT*)&param_var, nullptr, 1, 0};
+        _variant_t result;
+        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                        &disp_params, &result, nullptr, nullptr);
+        if (FAILED(hr) || result.vt != VT_DISPATCH) return nullptr;
+
+        return IDispatchPtr(result.pdispVal);
+    } catch (const SapGuiException& e) {
+        spdlog::debug("call_method_with_string: SapGuiException: {}", e.what());
+        return nullptr;
+    } catch (const ComException& e) {
+        spdlog::debug("call_method_with_string: ComException: {}", e.what());
+        return nullptr;
+    } catch (const std::exception& e) {
+        spdlog::debug("call_method_with_string: std::exception: {}", e.what());
+        return nullptr;
+    }
+}
+
 /// Call a method on COM object with string parameter (free function helper)
 inline IDispatchPtr call_method_with_string(IDispatch* obj, const char* method_name,
                                              const std::string& param) {
@@ -199,15 +228,7 @@ inline IDispatchPtr call_method_with_string(IDispatch* obj, const char* method_n
         // Use get_dispid_via_typeinfo for SAP GUI compatibility
         HRESULT hr = get_dispid_via_typeinfo(obj, method.GetBSTR(), &dispid);
         if (FAILED(hr)) return nullptr;
-
-        _variant_t param_var(param.c_str());
-        DISPPARAMS disp_params = {(VARIANT*)&param_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                        &disp_params, &result, nullptr, nullptr);
-        if (FAILED(hr) || result.vt != VT_DISPATCH) return nullptr;
-
-        return IDispatchPtr(result.pdispVal);
+        return call_method_with_string_dispid(obj, dispid, param);
     } catch (const SapGuiException& e) {
         spdlog::debug("call_method_with_string: SapGuiException: {}", e.what());
         return nullptr;

@@ -478,32 +478,58 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                         (child_count > 0 ? (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS) : constants::MAX_CHILDREN_TO_PROCESS) :
                         (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS);
 
-                    for (int i = 0; i < max_children; ++i) {
-                        try {
-                            ComGuiElementPtr child_ptr = children_collection.item(i);
-                            if (!child_ptr) {
-                                if (force_enumerate && child_count == 0) {
-                                    spdlog::debug("Force enumerate: Reached end at index {}", i);
-                                    break;
+                    // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of
+                    // item(i) (~4-5 round trips per child). Falls back to item(i) below if
+                    // the enumerator is unavailable or yielded nothing.
+                    int enumerated_children = 0;
+                    bool enumerated_ok = false;
+                    if (max_children > 0) {
+                        enumerated_ok = children_collection.for_each(
+                            [&](const ComGuiElementPtr& child_ptr) {
+                                if (enumerated_children >= max_children) return false;
+                                ++enumerated_children;
+                                try {
+                                    std::string child_id = child_ptr->get_id();
+                                    if (!child_id.empty()) {
+                                        children.push_back(child_id);
+                                    }
+                                } catch (const std::exception& e) {
+                                    if (force_enumerate && child_count == 0) return false;
+                                    spdlog::debug("extract_element_metadata: Exception processing child {}: {}",
+                                                 enumerated_children - 1, e.what());
                                 }
-                                continue;
-                            }
+                                return true;
+                            });
+                    }
 
-                            // Directly record child ID (avoiding duplicate recursive extraction
-                            // since all elements are traversed at top-level)
-                            std::string child_id = child_ptr->get_id();
-                            if (!child_id.empty()) {
-                                children.push_back(child_id);
+                    if (!enumerated_ok || enumerated_children == 0) {
+                        for (int i = 0; i < max_children; ++i) {
+                            try {
+                                ComGuiElementPtr child_ptr = children_collection.item(i);
+                                if (!child_ptr) {
+                                    if (force_enumerate && child_count == 0) {
+                                        spdlog::debug("Force enumerate: Reached end at index {}", i);
+                                        break;
+                                    }
+                                    continue;
+                                }
+
+                                // Directly record child ID (avoiding duplicate recursive extraction
+                                // since all elements are traversed at top-level)
+                                std::string child_id = child_ptr->get_id();
+                                if (!child_id.empty()) {
+                                    children.push_back(child_id);
+                                }
+                            } catch (const SapGuiException& e) {
+                                if (force_enumerate && child_count == 0) break;
+                                spdlog::debug("extract_element_metadata: SapGuiException processing child {}: {}", i, e.what());
+                            } catch (const ComException& e) {
+                                if (force_enumerate && child_count == 0) break;
+                                spdlog::debug("extract_element_metadata: ComException processing child {}: {}", i, e.what());
+                            } catch (const std::exception& e) {
+                                if (force_enumerate && child_count == 0) break;
+                                spdlog::debug("extract_element_metadata: Exception processing child {}: {}", i, e.what());
                             }
-                        } catch (const SapGuiException& e) {
-                            if (force_enumerate && child_count == 0) break;
-                            spdlog::debug("extract_element_metadata: SapGuiException processing child {}: {}", i, e.what());
-                        } catch (const ComException& e) {
-                            if (force_enumerate && child_count == 0) break;
-                            spdlog::debug("extract_element_metadata: ComException processing child {}: {}", i, e.what());
-                        } catch (const std::exception& e) {
-                            if (force_enumerate && child_count == 0) break;
-                            spdlog::debug("extract_element_metadata: Exception processing child {}: {}", i, e.what());
                         }
                     }
                 } catch (const std::exception& e) {

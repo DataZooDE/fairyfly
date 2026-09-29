@@ -12,11 +12,21 @@ using fairyfly::utils::TraceGuard;
 
 // Static type-level DISPID cache: map<type_name, map<prop_name, DISPID>>
 static std::unordered_map<std::string, std::unordered_map<std::wstring, DISPID>> s_type_dispid_cache;
+// Negative cache: map<type_name, map<prop_name, failing HRESULT>>. Members that a type
+// does not have (Visible, AccLabel, DisplayedText on non-text types, ...) miss on every
+// element of that type; each miss costs ~3 COM round trips, so remember it.
+static std::unordered_map<std::string, std::unordered_map<std::wstring, HRESULT>> s_type_dispid_miss_cache;
 static std::mutex s_dispid_cache_mutex;
+
+static bool is_cacheable_dispid_miss(HRESULT hr) {
+    return hr == DISP_E_UNKNOWNNAME || hr == DISP_E_MEMBERNOTFOUND ||
+           hr == TYPE_E_ELEMENTNOTFOUND;
+}
 
 void SapGuiObject::clear_dispid_cache() {
     std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
     s_type_dispid_cache.clear();
+    s_type_dispid_miss_cache.clear();
 }
 
 HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const {
@@ -37,6 +47,13 @@ HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const 
                     return S_OK;
                 }
             }
+            auto miss_type_it = s_type_dispid_miss_cache.find(type_name);
+            if (miss_type_it != s_type_dispid_miss_cache.end()) {
+                auto miss_it = miss_type_it->second.find(name);
+                if (miss_it != miss_type_it->second.end()) {
+                    return miss_it->second;
+                }
+            }
         }
     }
 
@@ -49,6 +66,14 @@ HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const 
         }
         if (!type_name.empty()) {
             s_type_dispid_cache[type_name][name] = *dispid;
+        }
+    } else if (is_cacheable_dispid_miss(hr)) {
+        std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+        if (type_name.empty() && type_cached_) {
+            type_name = cached_type_;
+        }
+        if (!type_name.empty()) {
+            s_type_dispid_miss_cache[type_name][name] = hr;
         }
     }
     return hr;
