@@ -40,7 +40,7 @@ Found while creating the OPS-032 OData service and reading SM50/RZ04/RZ11 and th
 | Speed: output size | Duplicate `grid_data` removed and selection-screen label carriers collapsed. Live: SM37 job list JSON 120.5 KB to 98.4 KB; ST22 selection JSON 89.1 KB to 70.0 KB (no `%_..._%_APP_%-` carriers left) and its Markdown 16.9 KB to 12.1 KB. Markdown behavior change: field rows now show the caption (for example `Date (F4 Search)`) where they showed the technical name; a high-value field appears as `to (F4 Search)`. | **Closed & Verified** |
 | Speed: per-call overhead | New `batch` command runs many commands in one process (one JSON line per command, `--file`, `--stop-on-error`, `BATCH_NESTED` guard). Live: 8 commands took about 2.0 s versus about 2.8 s as separate processes, consistently 1.3-1.5x faster over three runs; most per-command time is spent in SAP waits, not process start-up. One early batch run took 23 s and could not be reproduced. `serve` is still not implemented. | **Closed** (gain smaller than expected) |
 | Safety: read-only guard mode | New global `--read-only` flag and `FAIRYFLY_READ_ONLY=1`: state-changing clicks, all `fill`, `send-key` F11/Shift+F2, and `screen menu --select` with Save/Delete-style words return `READ_ONLY_REFUSED` with the matched rule. Live: Save button, `send-key f11`, `System/Delete` menu, and `fill` refused; Job log and F3 still allowed. The SM37 Release/Stop/Delete buttons are covered by unit tests only, not pressed live. Element lookup for text/tooltip is best-effort, and synthetic toolbar buttons are checked by id only. | **Closed & Verified** (destructive buttons unit-tested only) |
-| Bigfox observation: ST22 dumps (first sighting) | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER). Superseded by the recurring-dumps row below. | **Open** (unverified) |
+| Bigfox observation: ST22 dumps (first sighting) | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER). Superseded by the recurring-dumps row below. | **Closed** (superseded) |
 
 ## Speed and polish follow-ups (2026-09-29, after the fix/open-work merge)
 
@@ -67,6 +67,16 @@ Cause analysis by a read-only profiling pass on Bigfox (about 0.45 ms per COM ca
 | Medium: failed tab load reported as success | `TAB_LOAD_FAILED` (with `reason` not_found / busy_timeout) for `--tab`, after restoring the original tab; all-tabs reads add `tabs_failed` and fail only if every tab failed. | **Closed** (unit-tested; not forced live) |
 | Medium: tab fallback chosen by child count | The tab subtree is extracted first; the user-area fallback runs when nothing (or only the tab container) came back. | **Closed** (unit-tested) |
 | Low: partial COM enumeration accepted as complete | `for_each` returns false when `IEnumVARIANT::Next` errors, the caller discards partial children and uses `item(i)`. | **Closed** (unit-tested) |
+
+## Next-steps plan (2026-09-29, after pushing main)
+
+| Work | Detail | Status |
+| --- | --- | --- |
+| CI build red on the first push of this work | Run 36537158647 (`Build fairyfly`, commit d8a2f11) failed at CMake configure: `Generator Visual Studio 17 2022 could not find any instance of Visual Studio`. Not a code error: the `windows-latest` runner image no longer carries VS 2022 (the last green run was 2025-11-02 on the old image). Fix committed on branch `fix/ci` (`runs-on: windows-2022`), not yet pushed. The workflow triggers only on `main` pushes, pull requests, and `workflow_dispatch`, so after the branch is pushed run `gh workflow run "Build fairyfly" --ref fix/ci`. None of the new code has compiled on CI yet; a second round of fixes (MSVC strictness, static triplet) is possible. | **Open** |
+| Bigfox integration suite | Turn the ad-hoc live regression, the old-versus-new element-ID and timing comparison, and a soak mode (to catch the unexplained 18 s / 23 s stalls) into documented scripts under `tests/integration/`, plus a Basis smoke-test catalogue. | **Open** |
+| Independent review of the first-round changes | Codex review of the status bar, `tcode /n`, `batch`, `--read-only`, `close`, menu, connection pruning, and redaction changes (only the speed work has been reviewed so far). | **Open** |
+| Credentials and audit trail | Replace the plaintext `trial.env` read in `launch` with Windows Credential Manager (`credentials set/list/delete/import-env`, secret never on argv) and add an append-only JSONL audit log with redacted argv. Design first, then implementation. The trial password was printed once in a session transcript and should be rotated. | **Open** |
+| `serve` / MCP server | Registered but returns `NOT_IMPLEMENTED`. `batch` gives a one-process runner to build on. Separate design later. | **Open** |
 
 ## Build and review
 
