@@ -4,6 +4,7 @@
 #include "include/action_status.h"
 #include "include/action_argument_checks.h"
 #include "include/login_flow.h"
+#include "include/credential_resolver.h"
 #include "include/constants.h"
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
@@ -72,9 +73,10 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
     return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
 }
 
-CommandHandler::CommandHandler()
+CommandHandler::CommandHandler(std::unique_ptr<cred::CredentialStore> store)
     : engine_(AutomationEngine::create()),
-      conn_mgr_(std::make_unique<ConnectionManager>())
+      conn_mgr_(std::make_unique<ConnectionManager>()),
+      credential_store_(store ? std::move(store) : cred::make_default_store())
 {
     // Initialize command handler
     spdlog::debug("CommandHandler initialized");
@@ -262,31 +264,39 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 }
 
 Result CommandHandler::handle_login(const std::string& credentials_file,
-                                    std::optional<int> connection_id, bool from_stdin)
+                                    std::optional<int> connection_id, bool from_stdin,
+                                    const std::string& credential_name)
 {
     Result result;
-    std::ifstream file;
-    if (!from_stdin) file.open(credentials_file, std::ios::binary);
-    if (!from_stdin && !file) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "CREDENTIAL_FILE_UNAVAILABLE"},
-                        {"message", "Cannot open credential file"}};
-        return result;
-    }
-
-    LoginCredentials credentials;
-    try {
-        credentials = parse_login_credentials(from_stdin ? std::cin : file);
-    } catch (const std::invalid_argument& e) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "INVALID_CREDENTIAL_FILE"}, {"message", e.what()}};
-        return result;
-    }
 
     auto selected = resolve_and_validate_connection(connection_id);
     if (selected.status != ResultT<Connection>::Status::Success) {
         return result_from_error(selected);
     }
+
+    cred::LoginSource source;
+    if (!credentials_file.empty()) source.credentials_file = credentials_file;
+    source.from_stdin = from_stdin;
+    if (!credential_name.empty()) source.credential_name = credential_name;
+    auto resolved = cred::resolve_login_credentials(
+        source, selected.value.connection_description, credential_store(), std::cin,
+        [](const std::string& path) -> std::unique_ptr<std::istream> {
+            auto file = std::make_unique<std::ifstream>(path, std::ios::binary);
+            if (!*file) return nullptr;
+            return file;
+        });
+    if (resolved.status != ResultT<cred::ResolvedLogin>::Status::Success) {
+        result.status = Result::Status::Error;
+        result.error = resolved.error;
+        return result;
+    }
+    LoginCredentials credentials = std::move(resolved.value.credentials);
+    // Scrub the plaintext secrets on every exit path.
+    struct CredentialScrubber {
+        LoginCredentials& credentials;
+        ~CredentialScrubber() { cred::scrub_login_credentials(credentials); }
+    } scrubber{credentials};
+    for (const auto& warning : resolved.value.warnings) spdlog::warn("{}", warning);
 
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
     if (!com_engine || !com_engine->get_session()) {
@@ -376,7 +386,9 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     result.data = {{"connection_id", selected.value.id},
                    {"session_id", selected.value.session_id},
                    {"transaction", session->get_transaction_code()},
-                   {"message", "SAP GUI logon completed"}};
+                   {"message", "SAP GUI logon completed"},
+                   {"credential_source", resolved.value.source}};
+    if (!resolved.value.warnings.empty()) result.data["warnings"] = resolved.value.warnings;
     return result;
 }
 

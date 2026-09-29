@@ -141,6 +141,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/batch_command.cpp
     src/com_automation_engine_actions.cpp
     src/cli_handler_window_actions.cpp
+    src/cli_handler_credentials.cpp
+    src/credential_store.cpp
+    src/credential_resolver.cpp
+    src/console_prompt.cpp
+    src/commands/credentials_command.cpp
     src/menu_navigation.cpp
 )
 
