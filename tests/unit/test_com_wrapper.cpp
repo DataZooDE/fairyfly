@@ -14,6 +14,7 @@
 #include "include/action_argument_checks.h"
 #include <nlohmann/json.hpp>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -1993,4 +1994,370 @@ TEST_CASE("read_action_status returns status bar text and message type", "[com][
     REQUIRE(status.message_id == "BL");
     REQUIRE(status.message_number == "001");
     bar->Release();
+}
+
+
+namespace {
+// Generic scriptable SAP object for ScreenReader tests: string/bool/dispatch properties by
+// name, FindById lookups, collection Item/Count, Select hook, and per-property read counters.
+// DISPIDs come from one global name table so the type-level DISPID cache stays consistent
+// across instances.
+class FakeNode final : public IDispatch {
+public:
+    std::map<std::wstring, std::wstring> strings;
+    std::map<std::wstring, bool> bools;
+    std::map<std::wstring, long> ints;
+    std::map<std::wstring, IDispatch*> dispatches;
+    std::map<std::wstring, IDispatch*> find_by_id;
+    std::vector<IDispatch*> items;
+    std::function<void()> on_select;
+    std::map<std::wstring, int> reads;
+    int select_calls = 0;
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+        if (!object) return E_POINTER;
+        *object = nullptr;
+        if (iid == IID_IUnknown || iid == IID_IDispatch) {
+            *object = static_cast<IDispatch*>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG remaining = --references_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* count) override {
+        if (!count) return E_POINTER;
+        *count = 0;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, ITypeInfo**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID,
+                                            DISPID* ids) override {
+        if (!names || !ids || count != 1) return E_INVALIDARG;
+        auto& table = name_table();
+        for (size_t i = 0; i < table.size(); ++i) {
+            if (table[i] == names[0]) { *ids = static_cast<DISPID>(1000 + i); return S_OK; }
+        }
+        table.emplace_back(names[0]);
+        *ids = static_cast<DISPID>(1000 + table.size() - 1);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags, DISPPARAMS* params,
+                                     VARIANT* result, EXCEPINFO*, UINT*) override {
+        const auto& table = name_table();
+        if (id < 1000 || static_cast<size_t>(id - 1000) >= table.size()) return DISP_E_MEMBERNOTFOUND;
+        const std::wstring& name = table[id - 1000];
+        if ((flags & DISPATCH_METHOD) && name == L"Select") {
+            ++select_calls;
+            if (on_select) on_select();
+            return S_OK;
+        }
+        if ((flags & DISPATCH_METHOD) && name == L"FindById") {
+            if (!result || !params || params->cArgs != 1 || params->rgvarg[0].vt != VT_BSTR)
+                return DISP_E_BADPARAMCOUNT;
+            auto it = find_by_id.find(params->rgvarg[0].bstrVal);
+            if (it == find_by_id.end()) return DISP_E_EXCEPTION;
+            VariantInit(result);
+            result->vt = VT_DISPATCH;
+            result->pdispVal = it->second;
+            it->second->AddRef();
+            return S_OK;
+        }
+        if (!result) return DISP_E_MEMBERNOTFOUND;
+        if (name == L"Item" && (flags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET))) {
+            if (!params || params->cArgs != 1 || params->rgvarg[0].lVal < 0 ||
+                static_cast<size_t>(params->rgvarg[0].lVal) >= items.size())
+                return DISP_E_BADINDEX;
+            VariantInit(result);
+            result->vt = VT_DISPATCH;
+            result->pdispVal = items[params->rgvarg[0].lVal];
+            result->pdispVal->AddRef();
+            return S_OK;
+        }
+        if (!(flags & DISPATCH_PROPERTYGET)) return DISP_E_MEMBERNOTFOUND;
+        ++reads[name];
+        VariantInit(result);
+        if (name == L"Count") {
+            result->vt = VT_I4;
+            result->lVal = static_cast<long>(items.size());
+            return S_OK;
+        }
+        if (auto d = dispatches.find(name); d != dispatches.end()) {
+            result->vt = VT_DISPATCH;
+            result->pdispVal = d->second;
+            d->second->AddRef();
+            return S_OK;
+        }
+        if (auto n = ints.find(name); n != ints.end()) {
+            result->vt = VT_I4;
+            result->lVal = n->second;
+            return S_OK;
+        }
+        if (auto b = bools.find(name); b != bools.end()) {
+            result->vt = VT_BOOL;
+            result->boolVal = b->second ? VARIANT_TRUE : VARIANT_FALSE;
+            return S_OK;
+        }
+        if (auto v = strings.find(name); v != strings.end()) {
+            result->vt = VT_BSTR;
+            result->bstrVal = SysAllocString(v->second.c_str());
+            return S_OK;
+        }
+        return DISP_E_MEMBERNOTFOUND;
+    }
+
+private:
+    static std::vector<std::wstring>& name_table() {
+        static std::vector<std::wstring> table;
+        return table;
+    }
+    ULONG references_ = 1;
+};
+
+// Scene: session -> wnd[0] -> usr -> tab strip (Address selected, Roles) with a grid on Roles.
+struct TabScene {
+    static constexpr const wchar_t* kWnd = L"/app/con[0]/ses[0]/wnd[0]";
+    static constexpr const wchar_t* kUsr = L"/app/con[0]/ses[0]/wnd[0]/usr";
+    static constexpr const wchar_t* kStrip = L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1";
+    static constexpr const wchar_t* kTabA = L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR";
+    static constexpr const wchar_t* kTabB = L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES";
+    static constexpr const wchar_t* kGrid =
+        L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES/cntlG/shellcont/shell";
+    static constexpr const wchar_t* kField =
+        L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/txtNAME";
+
+    std::vector<FakeNode*> nodes;
+    FakeNode *session, *window, *info, *usr, *usr_children, *strip, *strip_children,
+        *tab_a, *tab_a_children, *tab_b_stale, *tab_b_fresh, *tab_b_children, *grid, *field;
+    int restore_of_a_selected = 0;
+
+    FakeNode* make(const wchar_t* type, const wchar_t* id) {
+        auto* node = new FakeNode();
+        node->strings[L"Type"] = type;
+        node->strings[L"Id"] = id;
+        nodes.push_back(node);
+        return node;
+    }
+    TabScene() {
+        session = make(L"GuiSession", L"/app/con[0]/ses[0]");
+        info = make(L"GuiSessionInfo", L"");
+        info->strings[L"Transaction"] = L"SU01";
+        window = make(L"GuiMainWindow", kWnd);
+        window->strings[L"Text"] = L"Maintain Users";
+        usr = make(L"GuiUserArea", kUsr);
+        usr_children = make(L"GuiCollection", L"");
+        strip = make(L"GuiTabStrip", kStrip);
+        strip_children = make(L"GuiCollection", L"");
+        tab_a = make(L"GuiTab", kTabA);
+        tab_a->strings[L"Text"] = L"Address";
+        tab_a_children = make(L"GuiCollection", L"");
+        field = make(L"GuiTextField", kField);
+        field->strings[L"Text"] = L"Miller";
+        field->strings[L"DisplayedText"] = L"Miller";
+        tab_a_children->items = {field};
+        tab_a->dispatches[L"Children"] = tab_a_children;
+        // Roles: the first (pre-select) tab pointer is stale and reports no children.
+        tab_b_stale = make(L"GuiTab", kTabB);
+        tab_b_stale->strings[L"Text"] = L"Roles";
+        tab_b_fresh = make(L"GuiTab", kTabB);
+        tab_b_fresh->strings[L"Text"] = L"Roles";
+        tab_b_children = make(L"GuiCollection", L"");
+        grid = make(L"GuiShell", kGrid);
+        grid->strings[L"SubType"] = L"GridView";
+        grid->ints[L"ColumnCount"] = 2;  // headers fall back to Column0/Column1, no rows
+        tab_b_children->items = {grid};
+        tab_b_fresh->dispatches[L"Children"] = tab_b_children;
+        strip_children->items = {tab_a, tab_b_stale};
+        strip->dispatches[L"Children"] = strip_children;
+        strip->dispatches[L"SelectedTab"] = tab_a;
+        usr_children->items = {strip};
+        usr->dispatches[L"Children"] = usr_children;
+        auto* window_children = make(L"GuiCollection", L"");
+        window_children->items = {usr};
+        window->dispatches[L"Children"] = window_children;
+        session->dispatches[L"ActiveWindow"] = window;
+        session->dispatches[L"Info"] = info;
+        session->bools[L"Busy"] = false;
+        auto& ids = session->find_by_id;
+        ids[kWnd] = window;
+        ids[kUsr] = usr;
+        ids[kStrip] = strip;
+        ids[kTabA] = tab_a;
+        ids[kTabB] = tab_b_stale;
+        ids[kGrid] = grid;
+        ids[kField] = field;
+        tab_b_stale->on_select = [this] {
+            session->find_by_id[kTabB] = tab_b_fresh;
+            strip->dispatches[L"SelectedTab"] = tab_b_fresh;
+        };
+        tab_b_fresh->on_select = tab_b_stale->on_select;
+        tab_a->on_select = [this] {
+            ++restore_of_a_selected;
+            strip->dispatches[L"SelectedTab"] = tab_a;
+        };
+    }
+    ~TabScene() { for (auto* node : nodes) node->Release(); }
+    ComGuiSessionPtr session_wrapper() { return ComGuiSession::create(IDispatchPtr(session)); }
+};
+} // namespace
+
+TEST_CASE("read_tab selects, re-fetches the tab, restores, and reads grids inside it", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpROLES");
+    REQUIRE(result.status == Result::Status::Success);
+    REQUIRE(result.data.contains("screen_id"));
+    REQUIRE(result.data.at("title") == "Maintain Users");
+    REQUIRE(result.data.at("transaction") == "SU01");
+    for (const char* key : {"child_count", "elements", "element_count", "hierarchy",
+                            "tabs_content", "tabs_expanded", "expanded_tab_count"})
+        REQUIRE(result.data.contains(key));
+    REQUIRE(result.data.at("tabs_expanded") == true);
+    REQUIRE(result.data.at("expanded_tab_count") == 1);
+
+    // Exactly one Select on the requested tab; the previously selected tab was restored.
+    REQUIRE(scene.tab_b_stale->select_calls == 1);
+    REQUIRE(scene.tab_b_fresh->select_calls == 0);
+    REQUIRE(scene.restore_of_a_selected == 1);
+
+    const auto& tab = result.data.at("tabs_content").at(0);
+    REQUIRE(tab.at("tab_id") == "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES");
+    REQUIRE(tab.at("tab_name") == "Roles");
+    REQUIRE(tab.at("tab_type") == "GuiTab");
+    REQUIRE(tab.at("tab_index") == 0);
+    REQUIRE(tab.contains("hierarchy"));
+    REQUIRE(tab.at("element_count") == tab.at("elements").size());
+
+    // The tab's elements are its subtree: the grid (found via the re-fetched tab) with table
+    // data, and none of the other tab's fields.
+    bool grid_found = false;
+    for (const auto& element : tab.at("elements")) {
+        const auto id = element.value("id", "");
+        REQUIRE(id.find("txtNAME") == std::string::npos);
+        if (id.find("cntlG/shellcont/shell") != std::string::npos) {
+            grid_found = true;
+            REQUIRE(element.contains("table_data"));
+        }
+    }
+    REQUIRE(grid_found);
+}
+
+TEST_CASE("read_tab does not select an already selected tab", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpADDR");
+    REQUIRE(result.status == Result::Status::Success);
+    REQUIRE(scene.tab_a->select_calls == 0);
+    REQUIRE(scene.tab_b_stale->select_calls == 0);
+    REQUIRE(result.data.at("expanded_tab_count") == 1);
+    const auto& elements = result.data.at("tabs_content").at(0).at("elements");
+    bool field_found = false;
+    for (const auto& element : elements)
+        field_found |= element.value("id", "").find("txtNAME") != std::string::npos;
+    REQUIRE(field_found);
+}
+
+TEST_CASE("read_tab reports TAB_NOT_FOUND with the available tab ids", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpMISSING");
+    REQUIRE(result.status == Result::Status::Error);
+    REQUIRE(result.error.at("code") == "TAB_NOT_FOUND");
+    REQUIRE(result.error.at("message") == "No tab matches 'tabpMISSING'");
+    REQUIRE(result.error.at("available_tabs") == json::array({
+        "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+        "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES"}));
+    REQUIRE(scene.tab_b_stale->select_calls == 0);
+}
+
+TEST_CASE("read_tab reports TAB_SELECTION_UNAVAILABLE when the current tab is unknown", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    scene.strip->dispatches.erase(L"SelectedTab");
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpROLES");
+    REQUIRE(result.status == Result::Status::Error);
+    REQUIRE(result.error.at("code") == "TAB_SELECTION_UNAVAILABLE");
+    REQUIRE(scene.tab_b_stale->select_calls == 0);
+}
+
+TEST_CASE("read_with_tabs delegates a single requested tab to read_tab", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_with_tabs(false, 20, "tabpROLES");
+    REQUIRE(result.status == Result::Status::Success);
+    REQUIRE(result.data.at("expanded_tab_count") == 1);
+    REQUIRE(scene.tab_b_stale->select_calls == 1);
+    REQUIRE(scene.restore_of_a_selected == 1);
+}
+
+TEST_CASE("Positioned label cells are read with one Text property and no Type or DisplayedText", "[screen][labels]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    scene.usr_children->items.clear();
+    const wchar_t* ids[] = {L"/app/con[0]/ses[0]/wnd[0]/usr/lbl[1,1]",
+                            L"/app/con[0]/ses[0]/wnd[0]/usr/lbl[10,1]"};
+    std::vector<FakeNode*> labels;
+    for (const auto* id : ids) {
+        auto* label = scene.make(L"GuiLabel", id);
+        label->strings[L"Text"] = L"Hello";
+        label->strings[L"DisplayedText"] = L"Hello";
+        scene.usr_children->items.push_back(label);
+        scene.session->find_by_id[id] = label;
+        labels.push_back(label);
+    }
+    ScreenReader reader(scene.session_wrapper());
+    auto result = reader.read(true);
+    REQUIRE(result.status == Result::Status::Success);
+    for (auto* label : labels) {
+        REQUIRE(label->reads[L"Type"] == 0);   // implied by /lbl[ prefix, then carried to Phase 3
+        REQUIRE(label->reads[L"Text"] >= 1);
+        // Only the Phase 3 metadata extraction may read DisplayedText; the cell read must not.
+        REQUIRE(label->reads[L"DisplayedText"] <= 1);
+    }
+    // Label text is still reported.
+    bool hello = false;
+    for (const auto& element : result.data.at("elements"))
+        hello |= element.dump().find("Hello") != std::string::npos;
+    REQUIRE(hello);
+}
+
+TEST_CASE("read_with_tabs skips select for the current tab and keeps tab content to the tab subtree", "[screen][tabs][read_tab]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_with_tabs();
+    REQUIRE(result.status == Result::Status::Success);
+    REQUIRE(result.data.at("expanded_tab_count") == 2);
+    // Address is current: never selected while reading it, only re-selected by the restore
+    // because reading Roles moved the strip.
+    REQUIRE(scene.tab_b_stale->select_calls == 1);
+    REQUIRE(scene.restore_of_a_selected == 1);
+    for (const auto& tab : result.data.at("tabs_content")) {
+        for (const auto& element : tab.at("elements")) {
+            const auto id = element.value("id", "");
+            const auto prefix = tab.at("tab_id").get<std::string>();
+            REQUIRE(id.rfind(prefix, 0) == 0);  // nothing outside this tab's subtree
+        }
+    }
+    const auto& roles = result.data.at("tabs_content").at(1);
+    bool grid_found = false;
+    for (const auto& element : roles.at("elements"))
+        grid_found |= element.value("id", "").find("cntlG/shellcont/shell") != std::string::npos;
+    REQUIRE(grid_found);
 }

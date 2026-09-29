@@ -1,4 +1,5 @@
 #include "include/screen_element_collector.h"
+#include <algorithm>
 
 namespace fairyfly {
 namespace sap {
@@ -30,7 +31,11 @@ void ScreenElementCollector::add_extracted_data(const std::string& elem_id, json
 }
 
 void ScreenElementCollector::add_tree_id(const std::string& elem_id) {
-    tree_element_ids_.push_back(elem_id);
+    // A tree reachable both via Children and via an ID probe must be extracted once.
+    if (std::find(tree_element_ids_.begin(), tree_element_ids_.end(), elem_id) ==
+        tree_element_ids_.end()) {
+        tree_element_ids_.push_back(elem_id);
+    }
     // Also mark as seen to prevent duplicate processing
     seen_ids_.insert(elem_id);
 }
@@ -42,7 +47,8 @@ void ScreenElementCollector::add_container_id(const std::string& elem_id) {
 }
 
 void ScreenElementCollector::add_grid_id(const std::string& elem_id) {
-    grid_element_ids_.push_back(elem_id);
+    // Same dedupe as add_tree_id: never extract a grid twice.
+    if (!is_grid_id(elem_id)) grid_element_ids_.push_back(elem_id);
     // Also mark as seen to prevent duplicate processing
     seen_ids_.insert(elem_id);
 }
@@ -68,6 +74,7 @@ void ScreenElementCollector::clear() {
     container_element_ids_.clear();
     grid_element_ids_.clear();
     grid_cells_.clear();
+    known_types_.clear();
 }
 
 void ScreenElementCollector::reserve(size_t capacity) {

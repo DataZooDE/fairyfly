@@ -111,6 +111,13 @@ public:
     /// Check if wrapped object is valid
     bool is_valid() const { return dispatch_ != nullptr; }
 
+    /// Seed the Id/Type cache with values already known from enumeration, so a
+    /// fresh FindById object does not re-read them over COM.
+    void prime_identity(const std::string& id, const std::string& type) {
+        if (!id.empty()) { cached_id_ = id; id_cached_ = true; }
+        if (!type.empty()) { cached_type_ = type; type_cached_ = true; }
+    }
+
     /// Equality comparison by COM object identity
     bool operator==(const SapGuiObject& other) const;
     bool operator!=(const SapGuiObject& other) const { return !(*this == other); }
