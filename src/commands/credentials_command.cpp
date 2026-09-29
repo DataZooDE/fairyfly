@@ -32,7 +32,7 @@ public:
         delete_cmd_->add_option("connection", delete_connection_, "Connection name")->required();
 
         import_cmd_ = cmd_->add_subcommand("import-env", "Import a colon-separated credential file into the store");
-        import_cmd_->add_option("path", import_path_, "Credential file (default trial.env)");
+        import_cmd_->add_option("path", import_path_, "Colon-separated credential file to import")->required();
         import_cmd_->add_option("--connection", import_connection_, "Connection name when the file has no Connection: line");
         import_cmd_->add_flag("--delete-file", delete_file_, "Delete the file after a successful import");
         return cmd_;
@@ -45,7 +45,7 @@ public:
         if (*list_cmd_) return handler.handle_credentials_list();
         if (*delete_cmd_) return handler.handle_credentials_delete(delete_connection_);
         if (*import_cmd_) {
-            return handler.handle_credentials_import_env(import_path_.empty() ? "trial.env" : import_path_,
+            return handler.handle_credentials_import_env(import_path_,
                                                          import_connection_, delete_file_);
         }
         Result result;

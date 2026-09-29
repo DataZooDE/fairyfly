@@ -118,7 +118,7 @@ if ($command -eq 'list') {
     Remove-Item -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG
     $output = & $scriptPath -FairyflyPath $mock -LoginFromTrialEnv -Username $env:FAIRYFLY_SU01_MOCK_USER -FirstName $env:FAIRYFLY_SU01_MOCK_FIRST -LastName $env:FAIRYFLY_SU01_MOCK_LAST 2>&1 | Out-String
     $calls = @(Get-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG)
-    if (-not ($calls -match '^login\|--credentials-file\|8$')) { throw "Launch mode did not target its new connection for login: $output" }
+    if (-not ($calls -match '^login\|--connection\|8$')) { throw "Launch mode did not target its new connection for login: $output" }
     if (-not ($calls -match '^disconnect\|--close-session\|8$')) { throw "Launch mode did not close its own session: $output" }
     if ($calls | Where-Object { $_ -match '^(fill|click|get|tcode)\|' -and $_ -notmatch '\|8$' }) { throw 'Launch-mode GUI action used the wrong saved connection' }
     Write-Host 'PASS: launch-mode SU01 workflow logged in and closed its owned session.'
@@ -139,7 +139,7 @@ if ($command -eq 'list') {
     } catch {}
     Remove-Item Env:FAIRYFLY_SU01_MOCK_LOGIN_FAIL -ErrorAction SilentlyContinue
     $calls = @(Get-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG)
-    if (-not ($calls -match '^login\|--credentials-file\|8$')) { throw 'Failed-login path did not attempt the targeted login' }
+    if (-not ($calls -match '^login\|--connection\|8$')) { throw 'Failed-login path did not attempt the targeted login' }
     if (-not ($calls -match '^disconnect\|--close-session\|8$')) { throw 'Failed-login path did not close its owned session' }
     if ($calls -match '^(tcode|fill|click|get)\|') { throw 'Failed-login path performed SU01 actions' }
     Write-Host 'PASS: failed launch-mode login closed the owned session without SU01 actions.'

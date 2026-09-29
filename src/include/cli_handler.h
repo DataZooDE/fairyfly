@@ -20,6 +20,12 @@ enum class OutputFormat {
     Toon
 };
 
+/// Compose the result of `launch --login` from the (successful) launch result and the
+/// login result. Success: launch data plus a `login` object (transaction, credential_source,
+/// warnings). Login failure: the login error, carrying the launch data under error.launch
+/// and `connection_open: true` so the caller knows the connection is still open.
+Result compose_launch_login_result(Result launch, const Result& login);
+
 /// Screenshot capture options
 struct ScreenshotOptions {
     std::string output_file;       ///< Output file path (empty = auto-generate, "-" = stdout)
@@ -91,7 +97,10 @@ public:
 
     // Connection management - two modes
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
-    Result handle_launch(const std::string& connection_name, bool allow_sapshcut = false);
+    /// With `login`, runs the same logon path as `login` after the launch succeeded
+    /// (credential_name empty = Credential Manager entry keyed by the connection name).
+    Result handle_launch(const std::string& connection_name, bool allow_sapshcut = false,
+                         bool login = false, const std::string& credential_name = {});
     Result handle_login(const std::string& credentials_file, std::optional<int> connection_id,
                         bool from_stdin = false, const std::string& credential_name = "");
     Result handle_disconnect(std::optional<int> connection_id, bool close_session = false);

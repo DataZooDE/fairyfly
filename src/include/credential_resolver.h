@@ -29,7 +29,7 @@ struct ResolvedLogin {
 using OpenFileFn = std::function<std::unique_ptr<std::istream>(const std::string& path)>;
 
 /// Order: stdin, credentials file (deprecated), credential store (credential_name or
-/// default_connection). There is deliberately no implicit ./trial.env fallback.
+/// default_connection). There is deliberately no implicit credential-file fallback.
 /// Errors: CREDENTIALS_NOT_FOUND, CREDENTIAL_FILE_UNAVAILABLE, INVALID_CREDENTIAL_FILE,
 /// CREDENTIAL_STORE_UNAVAILABLE, CREDENTIAL_STORE_ERROR.
 ResultT<ResolvedLogin> resolve_login_credentials(const LoginSource& source,
