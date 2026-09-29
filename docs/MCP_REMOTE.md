@@ -192,7 +192,10 @@ Layers, outside in:
 2. **IIS IP allow-list** (`--allow-ip`), a 403 before fairyfly sees the request. Path restriction to `/mcp`,
    1 MiB body limit, header hygiene (client-supplied `X-Forwarded-*` and the proxy secret header are dropped).
 3. **Bearer tokens** (`ffy_<id>_<secret>`): only SHA-256 plus metadata are stored, in Windows Credential Manager
-   (`fairyfly-mcp:<name>`); constant-time comparison; optional expiry and per-token IP binding; revocation takes
+   (`fairyfly-mcp:<name>`; a compact JSON record, split over `fairyfly-mcp:<name>#1..n` chunk entries when a long
+   allowlist exceeds one Credential Manager value, up to 16 chunks, else `TOKEN_TOO_LARGE`; the head entry is written
+   last and a damaged or incomplete set never authenticates; `token delete` removes every chunk, `cmdkey` users must
+   delete the `#n` entries as well); constant-time comparison; optional expiry and per-token IP binding; revocation takes
    effect within 5 s (instantly in the revoking process).
 4. **Scopes** per tool family, the token **read-only** flag, **SAP system/client** allowlist and **T-code**
    allowlist, a per-token **rate limit**. The effective policy is the server policy intersected with the token's:

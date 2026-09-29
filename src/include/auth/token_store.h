@@ -1,8 +1,10 @@
 #pragma once
 // Named bearer tokens for the remote MCP endpoint.
 //   token   = ffy_<id>_<secret>      id = 8 hex chars, secret = 32 CSPRNG bytes as base64url (43 chars)
-//   stored  = per token NAME one JSON metadata blob (id, name, sha256(secret), created, expires,
-//             scopes, sap_systems, tcodes, rate_per_minute, allowed_ips, read_only, revoked)
+//   stored  = per token NAME one compact JSON metadata blob (short keys; id, name, sha256(secret), created, expires,
+//             scopes, sap_systems, tcodes, rate_per_minute, allowed_ips, read_only, revoked). A record that does not
+//             fit one Credential Manager value is split over chunk entries NAME#1..n written BEFORE the head entry
+//             NAME (which holds count, length and sha256 of the payload). Old long-key single entries still load.
 // The secret itself is NEVER stored; it is returned once by create()/rotate().
 
 #include <chrono>
@@ -44,6 +46,8 @@ struct TokenMeta {
     bool has_all_scopes() const;
     /// Stored form (includes the hash).
     nlohmann::json to_stored_json() const;
+    /// Storage form: short keys, defaults omitted ("v":2). from_json() reads this and the long form.
+    nlohmann::json to_compact_json() const;
     /// Listing form: no hash, no secret.
     nlohmann::json to_public_json() const;
     static std::optional<TokenMeta> from_json(const nlohmann::json& j);
@@ -119,6 +123,14 @@ private:
     std::vector<TokenMeta> load_all();
     const Snapshot& snapshot();  // caller holds mutex_
     void save(const TokenMeta& meta);
+    /// The record JSON of `name`: one entry, or the chunks `name#1..n` behind a head entry
+    /// {"chunks":n,"len":L,"sha":sha256}. nullopt when unknown; `*incomplete` is set when a chunked record is
+    /// damaged (missing chunk, size or hash mismatch): such a token never authenticates.
+    std::optional<std::string> read_record(const std::string& name, bool* incomplete);
+    /// Writes small records as one entry, large ones as chunks (written first) plus the head entry (last).
+    void write_record(const std::string& name, const std::string& blob);
+    /// Removes chunk entries `name#k` with k >= first.
+    void remove_chunks(const std::string& name, std::size_t first);
     CreatedToken issue(TokenMeta meta);
 
     std::shared_ptr<SecretBackend> backend_;

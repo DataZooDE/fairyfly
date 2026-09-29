@@ -126,8 +126,50 @@ json TokenMeta::to_stored_json() const {
     return j;
 }
 
-std::optional<TokenMeta> TokenMeta::from_json(const json& j) {
-    if (!j.is_object()) return std::nullopt;
+json TokenMeta::to_compact_json() const {
+    // Short keys, empty/default values omitted: keeps realistic records inside one Credential Manager entry.
+    json j = {{"v", 2}, {"i", id}, {"n", name}, {"h", secret_hash},
+              {"c", std::chrono::floor<std::chrono::seconds>(created).time_since_epoch().count()},
+              {"o", read_only}};
+    if (expires) j["e"] = std::chrono::floor<std::chrono::seconds>(*expires).time_since_epoch().count();
+    if (!scopes.empty()) j["s"] = scopes;
+    if (!sap_systems.empty()) j["y"] = sap_systems;
+    if (!tcodes.empty()) j["t"] = tcodes;
+    if (rate_per_minute != 0) j["r"] = rate_per_minute;
+    if (!allowed_ips.empty()) j["p"] = allowed_ips;
+    if (revoked) j["x"] = true;
+    return j;
+}
+
+namespace {
+/// Expands a compact (v2) record into the long-key form parsed by from_json().
+json expand_compact(const json& c) {
+    json j = json::object();
+    j["id"] = c.value("i", std::string());
+    j["name"] = c.value("n", std::string());
+    j["sha256"] = c.value("h", std::string());
+    if (c.contains("c") && c["c"].is_number_integer())
+        j["created"] = format_iso_utc(TimePoint(std::chrono::seconds(c["c"].get<long long>())));
+    if (c.contains("e")) {
+        // a malformed expiry must stay malformed (from_json rejects it) rather than become "never"
+        j["expires"] = c["e"].is_number_integer()
+                           ? json(format_iso_utc(TimePoint(std::chrono::seconds(c["e"].get<long long>()))))
+                           : json("invalid");
+    }
+    j["scopes"] = c.contains("s") ? c["s"] : json::array();
+    j["sap_systems"] = c.contains("y") ? c["y"] : json::array();
+    j["tcodes"] = c.contains("t") ? c["t"] : json::array();
+    j["allowed_ips"] = c.contains("p") ? c["p"] : json::array();
+    if (c.contains("r")) j["rate_per_minute"] = c["r"];
+    if (c.contains("o")) j["read_only"] = c["o"];
+    if (c.contains("x")) j["revoked"] = c["x"];
+    return j;
+}
+} // namespace
+
+std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
+    if (!input.is_object()) return std::nullopt;
+    const json j = input.contains("v") && input["v"].is_number_integer() && input["v"].get<int>() == 2 ? expand_compact(input) : input;
     TokenMeta m;
     if (!j.contains("id") || !j["id"].is_string() || !j.contains("name") || !j["name"].is_string() ||
         !j.contains("sha256") || !j["sha256"].is_string())
@@ -223,15 +265,86 @@ TokenStore::TokenStore(std::shared_ptr<SecretBackend> backend, Clock clock, Rand
     : backend_(std::move(backend)), clock_(clock ? std::move(clock) : default_clock()),
       rng_(rng ? std::move(rng) : default_rng()), ttl_(cache_ttl) {}
 
+namespace {
+constexpr std::size_t kChunkChars = 1000;   // well below the 1280 UTF-16 limit of one Credential Manager value
+constexpr std::size_t kMaxChunks = 16;
+
+std::string chunk_name(const std::string& name, std::size_t index) { return name + "#" + std::to_string(index); }
+bool is_chunk_name(const std::string& name) { return name.find('#') != std::string::npos; }
+} // namespace
+
+std::optional<std::string> TokenStore::read_record(const std::string& name, bool* incomplete) {
+    if (incomplete) *incomplete = false;
+    const auto head = backend_->get(name);
+    if (!head) return std::nullopt;
+    json parsed;
+    try {
+        parsed = json::parse(*head);
+    } catch (const std::exception&) {
+        return *head;  // corrupt: the caller's parse reports it
+    }
+    if (!parsed.is_object() || !parsed.contains("chunks")) return *head;  // single-entry record (old or compact)
+    const auto fail = [&]() -> std::optional<std::string> {
+        if (incomplete) *incomplete = true;
+        return std::nullopt;
+    };
+    if (!parsed["chunks"].is_number_integer() || !parsed.contains("len") || !parsed["len"].is_number_integer() ||
+        !parsed.contains("sha") || !parsed["sha"].is_string())
+        return fail();
+    const long long count = parsed["chunks"].get<long long>();
+    if (count < 1 || count > static_cast<long long>(kMaxChunks)) return fail();
+    std::string payload;
+    for (long long k = 1; k <= count; ++k) {
+        const auto part = backend_->get(chunk_name(name, static_cast<std::size_t>(k)));
+        if (!part) return fail();  // missing chunk: an interrupted write, never authenticate from it
+        payload += *part;
+    }
+    if (static_cast<long long>(payload.size()) != parsed["len"].get<long long>() ||
+        sha256_hex(payload) != parsed["sha"].get<std::string>())
+        return fail();
+    return payload;
+}
+
+void TokenStore::write_record(const std::string& name, const std::string& blob) {
+    const std::size_t limit = backend_->max_value_chars();
+    if (blob.size() <= limit) {
+        backend_->put(name, blob);
+        remove_chunks(name, 1);  // a former chunked record: its chunks are orphans now
+        return;
+    }
+    const std::size_t chunk = std::min(kChunkChars, limit);
+    const std::size_t count = (blob.size() + chunk - 1) / chunk;
+    if (count > kMaxChunks)
+        throw AuthError("TOKEN_TOO_LARGE", "token restrictions are too long to store even in chunks; shorten the allowlists");
+    // Chunks first, the head entry LAST: readers ignore a set whose head is missing or does not match.
+    for (std::size_t k = 1; k <= count; ++k) backend_->put(chunk_name(name, k), blob.substr((k - 1) * chunk, chunk));
+    const json head = {{"v", 2}, {"chunks", count}, {"len", blob.size()}, {"sha", sha256_hex(blob)}};
+    backend_->put(name, head.dump());
+    remove_chunks(name, count + 1);
+}
+
+void TokenStore::remove_chunks(const std::string& name, std::size_t first) {
+    const std::string prefix = name + "#";
+    for (const auto& entry : backend_->list_names()) {
+        if (entry.compare(0, prefix.size(), prefix) != 0) continue;
+        const std::string tail = entry.substr(prefix.size());
+        if (tail.empty() || tail.size() > 6 ||
+            !std::all_of(tail.begin(), tail.end(), [](unsigned char c) { return std::isdigit(c); }))
+            continue;
+        if (std::stoul(tail) >= first) backend_->remove(entry);
+    }
+}
+
 std::vector<TokenMeta> TokenStore::load_all() {
     std::vector<TokenMeta> out;
     for (const auto& name : backend_->list_names()) {
-        const auto value = backend_->get(name);
-        if (!value) continue;
+        if (is_chunk_name(name)) continue;  // chunk of a large record, read through its head entry
         try {
+            const auto value = read_record(name, nullptr);
+            if (!value) continue;
             if (auto meta = TokenMeta::from_json(json::parse(*value))) out.push_back(std::move(*meta));
         } catch (const std::exception&) {
-            // corrupt entry: ignore (fail closed: it can never authenticate)
+            // corrupt or incomplete entry: ignore (fail closed: it can never authenticate)
         }
     }
     std::sort(out.begin(), out.end(), [](const TokenMeta& a, const TokenMeta& b) { return a.name < b.name; });
@@ -274,10 +387,7 @@ std::vector<TokenMeta> TokenStore::list() {
 }
 
 void TokenStore::save(const TokenMeta& meta) {
-    const std::string blob = meta.to_stored_json().dump();
-    if (blob.size() > backend_->max_value_chars())
-        throw AuthError("TOKEN_TOO_LARGE", "token restrictions are too long to store; shorten the allowlists");
-    backend_->put(meta.name, blob);
+    write_record(meta.name, meta.to_compact_json().dump());
     snapshot_.valid = false;
 }
 
@@ -321,8 +431,10 @@ CreatedToken TokenStore::create(const NewToken& request) {
 
 bool TokenStore::revoke(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto value = backend_->get(name);
-    if (!value) return false;
+    bool incomplete = false;
+    const auto value = read_record(name, &incomplete);
+    if (!value && !incomplete) return false;
+    if (!value) throw AuthError("TOKEN_CORRUPT", "the stored record of token '" + name + "' is incomplete");
     std::optional<TokenMeta> meta;
     try { meta = TokenMeta::from_json(json::parse(*value)); } catch (const std::exception&) {}
     if (!meta) throw AuthError("TOKEN_CORRUPT", "the stored record of token '" + name + "' is unreadable");
@@ -333,15 +445,18 @@ bool TokenStore::revoke(const std::string& name) {
 
 bool TokenStore::remove(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool removed = backend_->remove(name);
+    const bool removed = backend_->remove(name);  // head first: without it the record no longer authenticates
+    remove_chunks(name, 1);
     snapshot_.valid = false;
     return removed;
 }
 
 CreatedToken TokenStore::rotate(const std::string& name) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const auto value = backend_->get(name);
-    if (!value) throw AuthError("TOKEN_NOT_FOUND", "no token named '" + name + "'");
+    bool incomplete = false;
+    const auto value = read_record(name, &incomplete);
+    if (!value && !incomplete) throw AuthError("TOKEN_NOT_FOUND", "no token named '" + name + "'");
+    if (!value) throw AuthError("TOKEN_CORRUPT", "the stored record of token '" + name + "' is incomplete");
     std::optional<TokenMeta> meta;
     try { meta = TokenMeta::from_json(json::parse(*value)); } catch (const std::exception&) {}
     if (!meta) throw AuthError("TOKEN_CORRUPT", "the stored record of token '" + name + "' is unreadable");

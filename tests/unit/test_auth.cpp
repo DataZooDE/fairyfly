@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -129,10 +130,129 @@ TEST_CASE("auth: the secret is never stored, only its hash", "[auth][token]") {
         CHECK(value.find(created.meta.secret_hash) != std::string::npos);
     }
     const auto blob = nlohmann::json::parse(env.tokens->all_values().front());
-    for (const char* key : {"id", "name", "sha256", "created", "scopes", "sap_systems", "tcodes", "rate_per_minute", "allowed_ips",
-                            "read_only", "revoked"})
-        CHECK(blob.contains(key));
-    CHECK_FALSE(blob.contains("expires"));  // optional
+    for (const char* key : {"v", "i", "n", "h", "c", "s", "o"}) CHECK(blob.contains(key));  // compact keys
+    CHECK_FALSE(blob.contains("e"));  // optional
+    CHECK_FALSE(blob.contains("t"));  // empty lists are omitted
+}
+
+namespace {
+NewToken huge_token(std::size_t systems) {
+    NewToken t;
+    t.scopes = {"screen"};
+    for (std::size_t i = 0; i < systems; ++i) t.sap_systems.push_back("S" + std::to_string(1000 + i) + "/" + std::to_string(100 + i % 800));
+    return t;
+}
+} // namespace
+
+TEST_CASE("auth: a very long allowlist is chunked and read back whole", "[auth][token][chunks]") {
+    Env env;
+    const auto t = huge_token(200);  // ~2 KB compact
+    const auto created = env.create("big", t);
+    CHECK(env.tokens->size() > 1);   // head + chunks
+    auto names = env.tokens->list_names();
+    CHECK(std::count(names.begin(), names.end(), "big#1") == 1);
+    for (const auto& value : env.tokens->all_values()) CHECK(value.size() <= 1200);
+    // the token still authenticates and carries the full allowlist
+    const auto listed = env.store().list();
+    REQUIRE(listed.size() == 1);
+    CHECK(listed[0].sap_systems == t.sap_systems);
+    CHECK(env.store().find_by_id(created.meta.id).has_value());
+    const auto outcome = env.auth->authenticate(request_with(created.token));
+    REQUIRE(outcome.ok);
+    CHECK(outcome.principal.sap_systems.size() == 200);
+    // revoke and rotate keep working on a chunked record
+    auto store = env.store();
+    const auto rotated = store.rotate("big");
+    CHECK(store.list()[0].sap_systems == t.sap_systems);
+    CHECK(env.auth->authenticate(request_with(created.token)).ok == false);
+    CHECK(env.auth->authenticate(request_with(rotated.token)).ok);
+    CHECK(store.revoke("big"));
+    CHECK(store.list()[0].revoked);
+    CHECK(store.list()[0].sap_systems == t.sap_systems);
+}
+
+TEST_CASE("auth: too large even for chunks is refused as TOKEN_TOO_LARGE", "[auth][token][chunks]") {
+    Env env;
+    auto store = env.store();
+    NewToken t = huge_token(2500);
+    t.name = "toobig";
+    try {
+        store.create(t);
+        FAIL("expected TOKEN_TOO_LARGE");
+    } catch (const AuthError& e) {
+        CHECK(e.code() == "TOKEN_TOO_LARGE");
+    }
+    CHECK(store.list().empty());
+}
+
+TEST_CASE("auth: a missing chunk or a missing head never authenticates", "[auth][token][chunks]") {
+    Env env;
+    const auto created = env.create("big", huge_token(200));
+    REQUIRE(env.store().find_by_id(created.meta.id));
+    env.tokens->remove("big#2");  // interrupted or damaged set
+    CHECK(env.store().list().empty());
+    CHECK_FALSE(env.store().find_by_id(created.meta.id).has_value());
+    CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
+    auto store = env.store();
+    CHECK_THROWS_AS(store.revoke("big"), AuthError);
+    CHECK_THROWS_AS(store.rotate("big"), AuthError);
+    // delete cleans the remains up and frees the name
+    CHECK(store.remove("big"));
+    CHECK(env.tokens->size() == 0);
+    CHECK_NOTHROW(env.create("big", huge_token(200)));
+}
+
+TEST_CASE("auth: a partial write (chunks without head) is invisible and cleaned by delete", "[auth][token][chunks]") {
+    Env env;
+    env.tokens->put("half#1", "{\"v\":2,\"i\":\"deadbeef\"");
+    env.tokens->put("half#2", "garbage");
+    CHECK(env.store().list().empty());
+    CHECK(env.store().count() == 0);
+    auto store = env.store();
+    CHECK_FALSE(store.remove("half"));  // no such token, but the orphans are swept
+    CHECK(env.tokens->size() == 0);
+    // a corrupted chunk (hash mismatch) is rejected as well
+    const auto created = env.create("big", huge_token(200));
+    env.tokens->put("big#1", std::string(1000, 'x'));
+    CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
+}
+
+TEST_CASE("auth: shrinking a chunked token drops its stale chunks; delete removes every chunk", "[auth][token][chunks]") {
+    Env env;
+    env.create("big", huge_token(300));
+    const std::size_t before = env.tokens->size();
+    CHECK(before >= 4);
+    auto store = env.store();
+    // rewrite the same name with a smaller record (as a rewrite of the entry would)
+    NewToken small = huge_token(3);
+    small.name = "big";
+    TokenMeta meta = store.list()[0];
+    meta.sap_systems = small.sap_systems;
+    const std::string blob = meta.to_compact_json().dump();
+    env.tokens->put("big", blob);  // old-style single write over a chunked head
+    CHECK(store.list()[0].sap_systems == small.sap_systems);
+    auto rotated = store.rotate("big");  // save() removes the orphans
+    (void)rotated;
+    CHECK(env.tokens->size() == 1);
+    CHECK(store.remove("big"));
+    CHECK(env.tokens->size() == 0);
+}
+
+TEST_CASE("auth: legacy long-key single-entry records still load, revoke and rotate", "[auth][token][chunks]") {
+    Env env;
+    const auto created = env.create("legacy");
+    TokenMeta meta = env.store().list()[0];
+    env.tokens->put("legacy", meta.to_stored_json().dump());  // the pre-compact format
+    auto store = env.store();
+    REQUIRE(store.list().size() == 1);
+    CHECK(store.list()[0].secret_hash == created.meta.secret_hash);
+    CHECK(env.auth->authenticate(request_with(created.token)).ok);
+    CHECK(store.revoke("legacy"));
+    CHECK(store.list()[0].revoked);
+    const auto again = env.create("legacy2");
+    env.tokens->put("legacy2", env.store().list()[1].to_stored_json().dump());
+    CHECK_NOTHROW(store.rotate("legacy2"));
+    (void)again;
 }
 
 TEST_CASE("auth: create validates names, scopes and restrictions", "[auth][token]") {
