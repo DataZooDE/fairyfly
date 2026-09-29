@@ -342,3 +342,43 @@ TEST_CASE("CLI --audit-required fails before running when the file is unwritable
     REQUIRE(code == 1);
     REQUIRE(output.find("AUDIT_UNAVAILABLE") != std::string::npos);
 }
+
+TEST_CASE("AuditRecord source defaults to cli and MCP fields are omitted when empty", "[audit]") {
+    AuditRecord r = sample_record();
+    REQUIRE(r.source == "cli");
+    const auto j = json::parse(format_record(r));
+    REQUIRE(j["audit_source"] == "cli");
+    REQUIRE_FALSE(j.contains("tool"));
+    REQUIRE_FALSE(j.contains("client"));
+    REQUIRE_FALSE(j.contains("request_id"));
+}
+
+TEST_CASE("AuditRecord MCP fields are emitted after audit_source in stable order", "[audit]") {
+    AuditRecord r = sample_record();
+    r.source = "mcp";
+    r.tool = "sap_fill";
+    r.client = "claude-code/1.2.3";
+    r.request_id = "42";
+    const auto j = nlohmann::ordered_json::parse(format_record(r));
+    std::vector<std::string> keys;
+    for (auto it = j.begin(); it != j.end(); ++it) keys.push_back(it.key());
+    REQUIRE(keys.size() == 18);
+    REQUIRE(keys[14] == "audit_source");
+    REQUIRE(keys[15] == "tool");
+    REQUIRE(keys[16] == "client");
+    REQUIRE(keys[17] == "request_id");
+    REQUIRE(j["audit_source"] == "mcp");
+}
+
+TEST_CASE("AuditRecord with huge MCP fields stays within the record cap", "[audit]") {
+    AuditRecord r = sample_record();
+    r.source = "mcp";
+    r.tool = std::string(5000, 't');
+    r.client = std::string(5000, 'c');
+    r.request_id = std::string(5000, 'r');
+    const auto line = format_record(r);
+    REQUIRE(line.size() <= 16 * 1024);
+    const auto j = json::parse(line);
+    REQUIRE(j["tool"].get<std::string>().size() <= 64);
+    REQUIRE(j["request_id"].get<std::string>().size() <= 64);
+}
