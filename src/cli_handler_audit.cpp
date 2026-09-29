@@ -68,10 +68,10 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
         info.facts = engine->peek_session_facts(resolved.value.session_id, resolved.value.server_session_key);
         // The saved record must match the live session (session id AND server session key), otherwise a reused id could
         // let a stale record vouch for another connection: not validated = no name (the caller denies, fail closed).
-        // The name is then the live connection's description; the saved one only fills in when the live one is empty.
+        // The name is then the live connection's description only; when that is empty the name stays empty (the caller
+        // denies with CONNECTION_DENIED) and the saved record's description is never used as a fallback.
         if (!engine->validate_session(resolved.value.session_id, resolved.value.server_session_key)) return info;
         info.connection_name = engine->peek_session_connection_description(resolved.value.session_id);
-        if (info.connection_name.empty()) info.connection_name = resolved.value.connection_description;
     } catch (...) {
         info.ambiguous = true;  // a launch is denied when the open sessions of the entry could not be inspected
     }

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <future>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1037,4 +1038,74 @@ TEST_CASE("Session core: initialize/notifications state machine is unchanged", "
     CHECK(session.ready());
     CHECK(session.process(list, no_cancel)["result"]["tools"].size() == 5);
     CHECK(session.process(Pending{3, "server/discover", json()}, no_cancel)["error"]["code"] == kMethodNotFound);
+}
+
+// ---- serialised tool calls ----------------------------------------------------------------------
+// The dispatcher's per-principal state machine (T-code blocked check -> invoke -> update) relies on this:
+// tools/call reaches ToolProvider::call_tool only from the executor thread, one call at a time.
+
+namespace {
+class OverlapProvider : public ToolProvider {
+public:
+    std::vector<ToolDef> list_tools() const override { return {}; }
+    bool has_tool(const std::string&) const override { return true; }
+    ToolResult call_tool(const std::string&, const json&, const CallContext&) override {
+        const int now = ++inside;
+        int seen = max_inside.load();
+        while (now > seen && !max_inside.compare_exchange_weak(seen, now)) {}
+        {
+            std::lock_guard<std::mutex> lock(m);
+            threads.insert(std::this_thread::get_id());
+        }
+        std::this_thread::sleep_for(2ms);
+        --inside;
+        ++total;
+        ToolResult r;
+        r.content = json::array({json{{"type", "text"}, {"text", "ok"}}});
+        return r;
+    }
+    std::atomic<int> inside{0}, max_inside{0}, total{0};
+    std::mutex m;
+    std::set<std::thread::id> threads;
+};
+} // namespace
+
+TEST_CASE("CallExecutor: concurrent submitters never overlap inside call_tool", "[mcp][http][executor][serial]") {
+    OverlapProvider provider;
+    CallExecutor exec(64, 5000);
+    std::thread loop([&] { exec.run(); });
+    const std::thread::id loop_id = loop.get_id();
+
+    constexpr int kPerThread = 15;
+    auto submitter = [&](int base, std::vector<std::future<json>>& out) {
+        for (int i = 0; i < kPerThread; ++i) {
+            ExecJob job;
+            job.id = base + i;
+            job.timed = true;
+            const json id = job.id;
+            job.run = [&provider, id](CallState&) {
+                Pending p{id, "tools/call", json{{"name", "gui_x"}, {"arguments", json::object()}}};
+                return call_tool_message(provider, p, CallContext{});
+            };
+            SubmitResult res;
+            auto fut = exec.submit_future(std::move(job), &res);
+            REQUIRE(res == SubmitResult::Queued);
+            out.push_back(std::move(fut));
+        }
+    };
+    std::vector<std::future<json>> a, b;
+    std::thread t1([&] { submitter(0, a); });
+    std::thread t2([&] { submitter(100, b); });
+    t1.join();
+    t2.join();
+    for (auto* set : {&a, &b})
+        for (auto& f : *set) REQUIRE(f.wait_for(10s) == std::future_status::ready);
+
+    CHECK(provider.total == 2 * kPerThread);
+    CHECK(provider.max_inside == 1);
+    CHECK(provider.threads.size() == 1);
+    CHECK(provider.threads.count(loop_id) == 1);  // ran on the executor thread, not on a submitter
+
+    exec.request_stop();
+    loop.join();
 }

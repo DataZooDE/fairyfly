@@ -474,6 +474,7 @@ TEST_CASE("auth: rejection matrix", "[auth][authn]") {
         const auto out = env.auth->authenticate(r);
         REQUIRE(out.ok);
         CHECK(out.principal.name == "ci-bot");
+        CHECK_FALSE(out.principal.id.empty());  // per-principal state is keyed by id
         CHECK(out.principal.authenticated);
         CHECK(out.principal.remote_addr == "127.0.0.1");
     }
@@ -1005,6 +1006,42 @@ TEST_CASE("auth: any malformed restriction field makes the record unusable, neve
     const auto good = ok.create("good", t);
     CHECK(ok.store().list().size() == 1);
     CHECK(ok.auth->authenticate(request_with(good.token)).ok);
+}
+
+TEST_CASE("auth: records mixing compact and long-form restriction keys are unusable", "[auth][token][malformed][mixed]") {
+    const std::vector<std::pair<const char*, const char*>> fields = {
+        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"}};
+    for (const auto& field : fields) {
+        // compact v:2 record carrying a long-form restriction key (which the compact parser would ignore)
+        Env env;
+        const auto created = env.create("t");
+        auto record = nlohmann::json::parse(env.tokens->get("t").value());
+        REQUIRE(record["v"] == 2);
+        record[field.second] = nlohmann::json::array({"X*"});
+        env.tokens->put("t", record.dump());
+        INFO("compact record with long key " << field.second);
+        CHECK(env.store().list().empty());
+        CHECK_FALSE(env.auth->authenticate(request_with(created.token)).ok);
+
+        // legacy record carrying a compact restriction key (which the legacy parser would ignore)
+        Env env2;
+        const auto created2 = env2.create("t");
+        nlohmann::json stored = env2.store().list()[0].to_stored_json();
+        stored[field.first] = nlohmann::json::array({"X*"});
+        env2.tokens->put("t", stored.dump());
+        INFO("legacy record with compact key " << field.first);
+        CHECK(env2.store().list().empty());
+        CHECK_FALSE(env2.auth->authenticate(request_with(created2.token)).ok);
+    }
+    // an untouched legacy record (long keys only) still loads
+    Env env3;
+    NewToken t;
+    t.connections = {"DEV*"};
+    const auto created3 = env3.create("t", t);
+    nlohmann::json stored = env3.store().list()[0].to_stored_json();
+    env3.tokens->put("t", stored.dump());
+    CHECK(env3.store().list().size() == 1);
+    CHECK(env3.auth->authenticate(request_with(created3.token)).ok);
 }
 
 // ---- allow_navigation (T-code allowlist hardening) ---------------------------------------------

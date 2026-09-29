@@ -193,7 +193,14 @@ json expand_compact(const json& c) {
 
 std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     if (!input.is_object()) return std::nullopt;
-    const json j = input.contains("v") && input["v"].is_number_integer() && input["v"].get<int>() == 2 ? expand_compact(input) : input;
+    const bool compact = input.contains("v") && input["v"].is_number_integer() && input["v"].get<int>() == 2;
+    // A record mixing both key styles is ambiguous: the parser would silently ignore one style and could turn a
+    // restriction into "unrestricted". Such a record is unusable. Legacy records without compact keys load as before.
+    static const char* const kLongKeys[] = {"scopes", "sap_systems", "tcodes", "connections", "allowed_ips"};
+    static const char* const kCompactKeys[] = {"s", "y", "t", "k", "p"};
+    for (std::size_t i = 0; i < 5; ++i)
+        if (input.contains(compact ? kLongKeys[i] : kCompactKeys[i])) return std::nullopt;
+    const json j = compact ? expand_compact(input) : input;
     TokenMeta m;
     if (!j.contains("id") || !j["id"].is_string() || !j.contains("name") || !j["name"].is_string() ||
         !j.contains("sha256") || !j["sha256"].is_string())

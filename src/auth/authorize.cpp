@@ -79,6 +79,11 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
         return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; "
                                            "gui_connection_list with cleanup=true could delete other saved connections and is refused");
 
+    // gui_doctor reports global connection and session counts of the desktop, which name other connections' existence.
+    if (!principal.connections.empty() && tool == "gui_doctor")
+        return refuse("CONNECTION_DENIED", "token '" + principal.name + "' is limited to specific saved connections; gui_doctor "
+                                           "reports environment-wide connection and session counts and is refused");
+
     if (check_system && !principal.sap_systems.empty() && !system_exempt(family, tool)) {
         if (!current_system || current_system->empty())
             return refuse("SYSTEM_UNKNOWN", "the target SAP system is not known yet and the token is limited to specific systems; "
@@ -117,6 +122,18 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                 return refuse("TCODE_DENIED", "key '" + key + "' can leave the transaction and is denied for tokens with a T-code "
                                               "allowlist (allowed: enter, f4, f8, page keys); ask the operator to create the "
                                               "token with --allow-navigation");
+        } else if (!principal.allow_navigation && tool == "gui_popup_close") {
+            // The popup's own default (F12 = cancel, only ever sent to the popup window) stays usable; any other VKey
+            // must be a navigation-safe one (Shift+F3 = 15 would exit the transaction).
+            if (args.is_object() && args.contains("vkey")) {
+                const auto& v = args["vkey"];
+                const bool safe = v.is_number_integer() &&
+                                  (v.get<long long>() == 12 || tcode_safe_key(std::to_string(v.get<long long>())));
+                if (!safe)
+                    return refuse("TCODE_DENIED", "gui_popup_close vkey " + v.dump() + " can leave the transaction and is denied for "
+                                                  "tokens with a T-code allowlist (allowed: 12 (default), 0, 4, 8, 80-83); ask the "
+                                                  "operator to create the token with --allow-navigation");
+            }
         } else if (tool == "gui_element_fill") {
             const std::string element = args.is_object() && args.contains("element") && args["element"].is_string()
                                             ? args["element"].get<std::string>() : std::string();

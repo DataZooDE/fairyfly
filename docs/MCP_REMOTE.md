@@ -28,7 +28,10 @@ and doctor are in [MCP_TRAY.md](MCP_TRAY.md). Verify current flags with `fairyfl
   supported way to expose the server: fairyfly speaks only plain HTTP, has no TLS of its own and defaults to
   binding `127.0.0.1`.
 - All tool calls are serialized on one main thread (queue of 16, soft timeout 120 s). HTTP worker threads only
-  queue and wait.
+  queue and wait. Because of this, the per-token check -> invoke -> update sequence in the dispatcher (for example the
+  "left the T-code allowlist" block) is atomic per process: no two calls, not even of the same token, are ever
+  inside `call_tool` at once (unit test `CallExecutor: concurrent submitters never overlap inside call_tool`). A
+  multi-threaded executor would need a per-principal lock first.
 - The transport is `POST /mcp` only. There is no `Mcp-Session-Id` and no GET stream; every request stands alone.
 
 ### Why a console/tray program and not a Windows service
