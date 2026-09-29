@@ -72,7 +72,7 @@ std::vector<KeySpec> build_specs() {
     k = make("server.transport", ValueType::String, Value{std::string("stdio")}, "stdio (default) or http");
     k.allowed = {"stdio", "http"};
     add(k);
-    add(make("server.sse", ValueType::Bool, Value{false}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call"));
+    add(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"));
     add(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
              "Extra accepted Host header values (loopback names are always accepted)"));
     add(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"));
@@ -487,6 +487,12 @@ void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     if (auto v = c.get_list("tools.families")) o.families = *v;
     if (auto v = c.get_string("server.transport")) o.transport = *v;
     if (auto v = c.get_int("server.port")) o.port = static_cast<int>(*v);
+    if (auto v = c.get_string("server.host")) o.host = *v;
+    if (auto v = c.get_bool("server.sse")) o.sse = *v;
+    if (auto v = c.get_list("server.allowed_hosts")) o.allowed_hosts = *v;
+    if (auto v = c.get_list("server.cors_origins")) o.cors_origins = *v;
+    // insecure_no_auth is deliberately NOT a config key: authentication can only be switched off with the
+    // --insecure-no-auth flag on the command line, never from a file or the environment.
 }
 
 EnvLookup process_env() {

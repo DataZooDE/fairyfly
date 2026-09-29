@@ -79,11 +79,10 @@ Relevant options (see `fairyfly mcp --help`):
 | `--insecure-no-auth` | disables authentication; never use on a reachable port |
 | `-c/--config PATH`, `--tray` | YAML config, tray mode (MCP_TRAY.md) |
 
-Note on the YAML file: at present only `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format`,
-`server.transport` and `server.port` are applied to the running server. `server.host`, `server.sse`,
-`server.allowed_hosts` and `server.cors_origins` are validated and shown by `mcp config show` but are **not**
-applied yet: pass `--mcp-host`, `--no-sse`, `--allowed-hosts`, `--cors-origin` as flags (and in the autostart
-command line) if you need them.
+Note on the YAML file: `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format` and `server.transport`,
+`server.port`, `server.host`, `server.sse` (default on, like `--sse`), `server.allowed_hosts` and
+`server.cors_origins` are applied to the running server, with precedence flag > `FAIRYFLY_MCP_*` environment >
+YAML > default. `--insecure-no-auth` is flag-only on purpose: it cannot be set from YAML or the environment.
 
 ### 3. Create tokens
 

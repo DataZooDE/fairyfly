@@ -105,9 +105,8 @@ McpConfig env_layer(const EnvLookup& env, std::vector<ConfigIssue>* issues = nul
 McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const EnvLookup& env);
 
 /// Copies the keys present in `layers` into `options`; keys that are absent leave the field alone.
-/// Only fields ServeOptions has today are set: mode.*, limits.*, tools.families, default_connection,
-/// format, server.transport, server.port. Server host/sse/allowed_hosts/cors_origins are read from
-/// the McpConfig by the HTTP layer (see docs/MCP_TRAY.md).
+/// Sets mode.*, limits.*, tools.families, default_connection, format and server.transport/port/host/sse/
+/// allowed_hosts/cors_origins. insecure_no_auth is never set from configuration (flag only).
 void apply_config(const McpConfig& layers, mcp::ServeOptions& options);
 
 // ---- Paths and text -----------------------------------------------------------------------------
