@@ -1800,6 +1800,35 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 
 ---
 
+### [ERR-143] Negative DISPID Cache Poisoned Across GuiShell Subtypes
+
+- **Status**: FIXED AND VERIFIED LIVE 2026-09-29
+- **Severity**: High / silent data loss
+- **Found by**: Codex review of the speed work, reproduced on Bigfox.
+- **Symptom**: `resolve_dispid` cached failed member lookups per COM Type string, and SAP reports every shell (grid, tree, toolbar, HTML viewer, calendar) as `GuiShell` although their members differ by SubType. In one process (`batch`), reading a tree screen first cached a `RowCount` miss; the next ST22 ALV grid then returned `table_data.rows` = 0 instead of 6. A fresh process returned 6.
+- **Fix and verification**: no negative caching for `GuiShell` (`GuiCustomControl` and the other types keep it), plus a regression test with a tree-like and a grid-like fake of the same Type. Live: the same batch (SM59 tree, SE80 tree, then ST22 grid) returns 6 rows.
+
+---
+
+### [ERR-144] Failed Tab Load Reported as Success; Fallback Chosen by Child Count
+
+- **Status**: FIXED (unit-tested)
+- **Found by**: Codex review.
+- **Symptom**: when `read_tab_content` failed (tab missing, or `wait_until_idle` timed out), `read_tab` and the all-tabs loop logged a warning and returned success with an empty or incomplete `tabs_content`. The user-area fallback was chosen by `get_child_count() > 0` and not by whether anything was extracted.
+- **Fix**: `TabReadStatus` (Ok / NotFound / BusyTimeout); `--tab` returns `TAB_LOAD_FAILED` (`tab_id`, `reason`) after restoring the original tab; all-tabs reads add `tabs_failed` and fail only when every tab failed; the fallback runs when the extracted subtree is empty. Also fixed: `for_each` reported success after a failed `IEnumVARIANT::Next` (now returns false, callers fall back to `item(i)`).
+
+---
+
+### [IMP-008] Compact JSON, Probe Escape Hatch, and Enumeration in Traversal
+
+- **Status**: DONE AND VERIFIED LIVE 2026-09-29
+- **`--compact` for JSON/TOON**: hierarchy groups and per-tab `elements` become id arrays (objects live in `data.elements`), empty strings, nulls, empty arrays and `false` booleans are omitted (`id`, `type`, `name` are always kept), markers `hierarchy_format: "ids"` and `tab_elements_format: "ids"`. Default JSON and Markdown are unchanged. Live SU01 full read: 380 KB to 181 KB; `--tab` read 47 KB to 17 KB.
+- **`--probe-all`**: restores the pre-gating exhaustive `FindById` probing (also `FAIRYFLY_PROBE_ALL=1`).
+- **`for_each` in traversal**: one enumeration per container, user-area cell block, and window child list. Live SM37 job list 2392 to 1326 ms; element IDs identical to the pre-change build on 17 screens.
+- **`visible`**: now `true` unless SAP exposes a real `Visible` property (was `false` for every element).
+
+---
+
 ### [OPS-030] SEPM_REF_APPS_DG 8-Phase Report Structure Verified
 
 - **Status**: VERIFIED WITH ADT SOURCE AUDIT AND UNIT TESTS
