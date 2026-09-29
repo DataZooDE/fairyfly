@@ -90,6 +90,13 @@ json supported_json() {
     return a;
 }
 
+/// Negotiates against ALL served versions; an unsupported request falls back to the newest legacy version.
+std::string negotiate_http_version(const std::string& requested) {
+    const auto& all = HttpEndpoint::supported_versions();
+    if (std::find(all.begin(), all.end(), requested) != all.end()) return requested;
+    return all.size() > 1 ? all[1] : all.front();
+}
+
 json http_capabilities() { return json{{"tools", json{{"listChanged", false}}}}; }
 
 json decorate_stateless(json message, const std::string& method) {
@@ -367,7 +374,11 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const std::string hv = trim(request.header("MCP-Protocol-Version"));
     ProtocolEra era = ProtocolEra::Legacy;
     if (method == "initialize") {
-        era = ProtocolEra::Legacy;  // negotiated below; unsupported versions fall back to our newest legacy one
+        // The era follows the negotiated version: a client asking for the stateless version gets a stateless
+        // answer, everything else (including versions we do not know) the legacy one.
+        const std::string requested = params.is_object() && params.contains("protocolVersion") && params["protocolVersion"].is_string()
+                                          ? params["protocolVersion"].get<std::string>() : std::string();
+        era = negotiate_http_version(requested) == kStatelessVersion ? ProtocolEra::Stateless : ProtocolEra::Legacy;
     } else {
         const std::string version = !pv.empty() ? pv : hv;
         if (!version.empty()) {
@@ -402,8 +413,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
         if (!params.is_object() || !params.contains("protocolVersion") || !params["protocolVersion"].is_string())
             return reply(make_error(message.id, kInvalidParams, "initialize requires params.protocolVersion"));
         // No Mcp-Session-Id is minted: HTTP is stateless, every later request is served on its own.
-        const std::vector<std::string> legacy(supported_versions().begin() + 1, supported_versions().end());
-        json result = make_initialize_result(options_.server, negotiate_version(legacy, params["protocolVersion"].get<std::string>()));
+        json result = make_initialize_result(options_.server, negotiate_http_version(params["protocolVersion"].get<std::string>()));
         result["capabilities"] = http_capabilities();
         return reply(make_result(message.id, result));
     }

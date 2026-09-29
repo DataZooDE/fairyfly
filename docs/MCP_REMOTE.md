@@ -132,7 +132,7 @@ fairyfly serves both generations of the MCP HTTP transport on the same URL:
 | | Legacy (2025-06-18, 2025-11-25) | Stateless (2026-07-28) |
 |---|---|---|
 | Handshake | `initialize` (echoes the negotiated version), then `notifications/initialized` (answered 202) | none; `server/discover` lists `supportedVersions`, capabilities, serverInfo, instructions |
-| Version selection | `params.protocolVersion` in `initialize`; optional `MCP-Protocol-Version` header | `MCP-Protocol-Version` header or `params._meta.protocolVersion` |
+| Version selection | `params.protocolVersion` in `initialize` (negotiated against all three versions: asking for `2026-07-28` yields a stateless answer with `resultType`, an unknown version falls back to `2025-11-25`); optional `MCP-Protocol-Version` header | `MCP-Protocol-Version` header or `params._meta.protocolVersion` |
 | Client info | from `initialize` | `params._meta.clientInfo` per request |
 | Session | none: no `Mcp-Session-Id` is ever minted, each request is served on its own | none |
 | Result extras | none | `resultType: "complete"`; `tools/list` adds `ttlMs: 30000` and `cacheScope: "private"` |

@@ -455,6 +455,26 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
     }
 }
 
+TEST_CASE("initialize negotiates against all served versions; the era follows", "[mcp][http][era]") {
+    Fixture f;
+    // stateless version: negotiated as such and answered in the stateless era
+    auto res = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2026-07-28"},
+                                                                           {"clientInfo", json{{"name", "c"}}}})));
+    REQUIRE(res.status == 200);
+    json result = body_of(res)["result"];
+    CHECK(result["protocolVersion"] == "2026-07-28");
+    CHECK(result["resultType"] == "complete");
+    CHECK(result["serverInfo"]["name"] == "fairyfly");
+    CHECK(res.header("Mcp-Session-Id").empty());
+    // the two legacy versions keep working and are answered in the legacy shape
+    for (const char* version : {"2025-11-25", "2025-06-18"}) {
+        res = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", version}})));
+        result = body_of(res)["result"];
+        CHECK(result["protocolVersion"] == version);
+        CHECK_FALSE(result.contains("resultType"));
+    }
+}
+
 TEST_CASE("Legacy era: initialize, no session id, no prior initialize needed", "[mcp][http][era]") {
     Fixture f;
     SECTION("initialize negotiates and mints no session") {
@@ -470,8 +490,10 @@ TEST_CASE("Legacy era: initialize, no session id, no prior initialize needed", "
             CHECK(result["capabilities"]["tools"]["listChanged"] == false);
             CHECK_FALSE(result.contains("resultType"));
         }
-        auto newer = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2026-07-28"}})));
-        CHECK(body_of(newer)["result"]["protocolVersion"] == "2025-11-25");
+        // an unknown version falls back to the newest legacy version, still a legacy answer
+        auto unknown = f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2031-01-01"}})));
+        CHECK(body_of(unknown)["result"]["protocolVersion"] == "2025-11-25");
+        CHECK_FALSE(body_of(unknown)["result"].contains("resultType"));
         auto bad = f.endpoint.handle(f.post(Fixture::rpc("initialize", json::object())));
         CHECK(body_of(bad)["error"]["code"] == kInvalidParams);
     }
