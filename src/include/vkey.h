@@ -4,6 +4,7 @@
 #include <cctype>
 #include <optional>
 #include <string>
+#include <exception>
 
 namespace fairyfly::sap {
 
@@ -47,6 +48,38 @@ enum class CloseOutcome { Closed, NoPopup, StillOpen };
 inline CloseOutcome classify_close_outcome(int before_index, int after_index) {
     if (before_index <= 0) return CloseOutcome::NoPopup;
     return after_index < before_index ? CloseOutcome::Closed : CloseOutcome::StillOpen;
+}
+
+/// Which mechanism closed (or failed to close) a popup.
+enum class CloseMethod { Vkey, WindowClose, Unsupported };
+
+struct CloseAttempt {
+    CloseMethod method = CloseMethod::Vkey;
+    std::string original_error;  // text of the SendVKey exception, when it threw
+    std::string close_error;     // text of the Close exception, when it also threw
+};
+
+/// Try to close a popup with a key press; if SendVKey throws, fall back to the
+/// window's own Close method. Never falls back to Enter, and never calls
+/// close for the main window (window_index <= 0).
+template <typename SendFn, typename CloseFn>
+CloseAttempt attempt_close(int window_index, SendFn send_key, CloseFn close_window) {
+    CloseAttempt attempt;
+    try {
+        send_key();
+        return attempt;
+    } catch (const std::exception& e) {
+        attempt.original_error = e.what();
+    }
+    attempt.method = CloseMethod::Unsupported;
+    if (window_index <= 0) return attempt;
+    try {
+        close_window();
+        attempt.method = CloseMethod::WindowClose;
+    } catch (const std::exception& e) {
+        attempt.close_error = e.what();
+    }
+    return attempt;
 }
 
 } // namespace fairyfly::sap

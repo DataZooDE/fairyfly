@@ -89,6 +89,36 @@ void ComGuiWindow::send_vkey(int vkey) {
     }
 }
 
+void ComGuiWindow::close() {
+    if (!dispatch_) throw ComException("Null window");
+
+    try {
+        _bstr_t method("Close");
+        DISPID dispid;
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
+        if (FAILED(hr)) {
+            throw ComException(fmt::format("Close method not found: 0x{:08X}", hr), hr);
+        }
+
+        DISPPARAMS params = {nullptr, nullptr, 0, 0};
+        _variant_t result;
+        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                             &params, &result, nullptr, nullptr);
+        if (FAILED(hr)) {
+            throw ComException(fmt::format("Close invoke failed: 0x{:08X}", hr), hr);
+        }
+        spdlog::debug("Closed window via Close method");
+    } catch (const _com_error& e) {
+        _bstr_t error_msg(e.ErrorMessage());
+        throw ComException(fmt::format("COM error closing window: {}",
+                          std::string(static_cast<const char*>(error_msg))), e.Error());
+    } catch (const ComException&) {
+        throw;
+    } catch (const std::exception& e) {
+        throw ComException(fmt::format("Exception closing window: {}", e.what()));
+    }
+}
+
 } // namespace sap
 } // namespace fairyfly
 

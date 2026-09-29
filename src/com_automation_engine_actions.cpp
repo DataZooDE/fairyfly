@@ -153,7 +153,21 @@ Result ComAutomationEngine::close_popup(int vkey) {
         }
 
         const auto before_status = read_action_status(session);
-        window->send_vkey(vkey);
+        const auto close_attempt = attempt_close(before_index,
+            [&] { window->send_vkey(vkey); },
+            [&] { window->close(); });
+        if (close_attempt.method == CloseMethod::Unsupported) {
+            auto result = error_result("CLOSE_NOT_SUPPORTED",
+                "The popup could not be closed: SendVKey " + std::to_string(vkey) +
+                " failed and the window Close method is unavailable. Original error: " +
+                close_attempt.original_error);
+            result.error["window"] = window_before;
+            result.error["vkey"] = vkey;
+            result.error["original_error"] = close_attempt.original_error;
+            if (!close_attempt.close_error.empty()) result.error["close_error"] = close_attempt.close_error;
+            result.duration = elapsed_since(start);
+            return result;
+        }
         try { session->wait_for_completion(500); } catch (const ComException&) { /* poll below */ }
 
         int after_index = before_index;
@@ -167,7 +181,9 @@ Result ComAutomationEngine::close_popup(int vkey) {
 
         if (classify_close_outcome(before_index, after_index) != CloseOutcome::Closed) {
             auto result = error_result("POPUP_STILL_OPEN",
-                "The popup did not close after sending VKey " + std::to_string(vkey));
+                close_attempt.method == CloseMethod::WindowClose
+                    ? std::string("The popup did not close after calling the window Close method")
+                    : "The popup did not close after sending VKey " + std::to_string(vkey));
             result.error["window"] = window_before;
             result.error["vkey"] = vkey;
             result.duration = elapsed_since(start);
@@ -183,6 +199,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
         result.status = Result::Status::Success;
         result.data["action"] = "close";
         result.data["vkey"] = vkey;
+        result.data["method"] = close_attempt.method == CloseMethod::WindowClose ? "window_close" : "vkey";
         result.data["window_before"] = window_before;
         result.data["window_after"] = window_after;
         result.data["closed"] = true;

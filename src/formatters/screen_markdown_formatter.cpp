@@ -918,6 +918,11 @@ void add_field_row(const json& elem, formatters::MarkdownTableFormatter& table,
         label = elem.value("text", "");
     }
 
+    // Fields carry their caption as a "label" property (selection screens).
+    if (label.empty() && elem.contains("label") && elem["label"].is_string()) {
+        label = elem["label"].get<std::string>();
+    }
+
     if (label.empty()) {
         label = elem.value("name", "Field");
     }

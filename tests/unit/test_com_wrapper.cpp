@@ -60,6 +60,9 @@ public:
     int sent_vkey = -1;
     int send_vkey_calls = 0;
     int select_calls = 0;
+    bool send_vkey_throws = false;
+    bool close_throws = false;
+    int close_calls = 0;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -131,6 +134,7 @@ public:
         else if (std::wcscmp(names[0], L"DoubleClickCurrentCell") == 0) *ids = type_id_ + 33;
         else if (std::wcscmp(names[0], L"SendVKey") == 0) *ids = type_id_ + 34;
         else if (std::wcscmp(names[0], L"Select") == 0) *ids = type_id_ + 35;
+        else if (std::wcscmp(names[0], L"Close") == 0) *ids = type_id_ + 36;
         else return DISP_E_UNKNOWNNAME;
         return S_OK;
     }
@@ -159,7 +163,12 @@ public:
             grid_calls.push_back("DoubleClickCurrentCell");
             return S_OK;
         }
+        if (id == type_id_ + 36 && (flags & DISPATCH_METHOD)) {
+            ++close_calls;
+            return close_throws ? DISP_E_EXCEPTION : S_OK;
+        }
         if (id == type_id_ + 34 && (flags & DISPATCH_METHOD)) {
+            if (send_vkey_throws) return DISP_E_EXCEPTION;
             if (!params || params->cArgs != 1) return DISP_E_BADPARAMCOUNT;
             if (params->rgvarg[0].vt != VT_I4 && params->rgvarg[0].vt != VT_INT)
                 return DISP_E_TYPEMISMATCH;
@@ -651,6 +660,48 @@ TEST_CASE("Window send_vkey passes the numeric key as an integer variant", "[com
     window.send_vkey(8);
     REQUIRE(dispatch->send_vkey_calls == 1);
     REQUIRE(dispatch->sent_vkey == 8);
+}
+
+TEST_CASE("Popup close falls back to window Close when SendVKey throws", "[com][window][close]") {
+    using fairyfly::sap::attempt_close;
+    using fairyfly::sap::CloseMethod;
+    ScopedDispatchCacheReset cache_reset;
+
+    SECTION("vkey works: no fallback") {
+        auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+        ComGuiWindow window(IDispatchPtr(dispatch, true));
+        auto a = attempt_close(1, [&] { window.send_vkey(12); }, [&] { window.close(); });
+        REQUIRE(a.method == CloseMethod::Vkey);
+        REQUIRE(dispatch->close_calls == 0);
+    }
+    SECTION("vkey throws, Close succeeds") {
+        auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+        dispatch->send_vkey_throws = true;
+        ComGuiWindow window(IDispatchPtr(dispatch, true));
+        auto a = attempt_close(1, [&] { window.send_vkey(12); }, [&] { window.close(); });
+        REQUIRE(a.method == CloseMethod::WindowClose);
+        REQUIRE(dispatch->close_calls == 1);
+        REQUIRE(dispatch->sent_vkey == -1);  // never fell back to Enter
+        REQUIRE_FALSE(a.original_error.empty());
+    }
+    SECTION("both throw") {
+        auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+        dispatch->send_vkey_throws = true;
+        dispatch->close_throws = true;
+        ComGuiWindow window(IDispatchPtr(dispatch, true));
+        auto a = attempt_close(1, [&] { window.send_vkey(12); }, [&] { window.close(); });
+        REQUIRE(a.method == CloseMethod::Unsupported);
+        REQUIRE(a.original_error.find("SendVKey invoke failed") != std::string::npos);
+        REQUIRE_FALSE(a.close_error.empty());
+    }
+    SECTION("main window never gets Close") {
+        auto* dispatch = new TextFieldDispatch(L"GuiMainWindow", 14400);
+        dispatch->send_vkey_throws = true;
+        ComGuiWindow window(IDispatchPtr(dispatch, true));
+        auto a = attempt_close(0, [&] { window.send_vkey(12); }, [&] { window.close(); });
+        REQUIRE(a.method == CloseMethod::Unsupported);
+        REQUIRE(dispatch->close_calls == 0);
+    }
 }
 
 TEST_CASE("Menu tree enumeration nests children and never selects", "[com][menu]") {

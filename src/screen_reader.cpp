@@ -1530,26 +1530,84 @@ std::vector<json> ScreenReader::select_tabs(const std::vector<json>& tabs,
     return selected;
 }
 
+namespace {
+
+std::string trim_blanks(const std::string& text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return std::string();
+    return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+// Split '%_<base>_%_APP_%-TEXT' / '-TO_TEXT' into base and kind. Returns false when
+// the name is not a selection-screen label carrier.
+bool parse_selection_label_name(const std::string& name, std::string& base, bool& is_to_text) {
+    static const std::string prefix = "%_";
+    static const std::string text_suffix = "_%_APP_%-TEXT";
+    static const std::string to_suffix = "_%_APP_%-TO_TEXT";
+    auto ends_with = [&](const std::string& suffix) {
+        return name.size() > prefix.size() + suffix.size() &&
+               name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+    if (name.rfind(prefix, 0) != 0) return false;
+    if (ends_with(to_suffix)) {
+        is_to_text = true;
+        base = name.substr(prefix.size(), name.size() - prefix.size() - to_suffix.size());
+        return true;
+    }
+    if (ends_with(text_suffix)) {
+        is_to_text = false;
+        base = name.substr(prefix.size(), name.size() - prefix.size() - text_suffix.size());
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
 void ScreenReader::collapse_label_duplicates(json& elements) {
     if (!elements.is_array()) return;
+
+    // Trimmed labels of real fields, globally (legacy GuiLabel rule) and per field name.
     std::unordered_set<std::string> field_labels;
+    std::vector<std::pair<std::string, std::string>> named_labels;  // field name, trimmed label
     for (const auto& elem : elements) {
         if (!elem.is_object() || elem.value("type", "") == "GuiLabel") continue;
-        const std::string label = elem.value("label", "");
-        if (!label.empty()) field_labels.insert(label);
+        const std::string label = trim_blanks(elem.value("label", ""));
+        if (label.empty()) continue;
+        field_labels.insert(label);
+        std::string base;
+        bool is_to = false;
+        const std::string name = elem.value("name", "");
+        if (!name.empty() && !parse_selection_label_name(name, base, is_to)) {
+            named_labels.emplace_back(name, label);
+        }
     }
+    auto sibling_has_label = [&](const std::string& base, const std::string& text) {
+        for (const auto& [name, label] : named_labels) {
+            const bool same_base = name == base ||
+                (name.size() > base.size() && name.compare(0, base.size(), base) == 0 &&
+                 name[base.size()] == '-');
+            if (same_base && label == text) return true;
+        }
+        return false;
+    };
+
     json kept = json::array();
     for (auto& elem : elements) {
-        if (elem.is_object() && elem.value("type", "") == "GuiLabel") {
-            const std::string name = elem.value("name", "");
-            const bool selection_text = name.rfind("%_", 0) == 0 &&
-                name.find("_%_APP_%-TEXT") != std::string::npos;
-            if (selection_text) {
-                const std::string text = elem.value("text", "");
-                const auto first = text.find_first_not_of(" \t\r\n");
-                const std::string trimmed = first == std::string::npos ? std::string() :
-                    text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
-                if (trimmed.empty() || field_labels.count(trimmed)) continue;
+        if (elem.is_object()) {
+            std::string base;
+            bool is_to_text = false;
+            if (parse_selection_label_name(elem.value("name", ""), base, is_to_text)) {
+                const std::string trimmed = trim_blanks(elem.value("text", ""));
+                bool drop = false;
+                if (is_to_text) {
+                    drop = true;  // only ever holds the "to" range separator
+                } else if (trimmed.empty() || sibling_has_label(base, trimmed)) {
+                    drop = true;
+                } else if (elem.value("type", "") == "GuiLabel" && field_labels.count(trimmed)) {
+                    drop = true;  // legacy GuiLabel rule: label repeated on some field
+                }
+                if (drop) continue;
             }
         }
         kept.push_back(std::move(elem));
