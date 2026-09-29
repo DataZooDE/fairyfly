@@ -10,7 +10,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "include/auth/token_store.h"
 #include "include/config/mcp_config.h"
+#include "include/iis/iis_host.h"
 
 namespace fairyfly::config {
 
@@ -41,7 +43,7 @@ struct DesktopState {
 enum class LockState { Active, Locked, RdpDisconnected, Unknown };
 
 struct IisState {
-    bool checked = false;
+    bool checked = false;   ///< false = informational skip (message says why, e.g. "IIS not installed")
     bool ok = false;
     std::string message;
 };
@@ -76,6 +78,13 @@ struct DoctorInput {
 };
 
 std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& input, DoctorProbes& probes);
+
+/// Count of tokens that are neither revoked nor expired (read-only). nullopt when the store cannot be read.
+std::optional<int> count_active_tokens(auth::TokenStore& store);
+
+/// Read-only IIS probe (IisHost::detect and get_site only; never changes anything). IIS or the site being absent is
+/// reported as an informational skip (checked=false), a stopped site as a problem (checked=true, ok=false).
+IisState probe_iis_state(iis::IisHost& host, const std::string& site_name = "fairyfly-mcp");
 
 /// "fail" when any check failed, else "warn" when any warned, else "pass".
 std::string overall_status(const std::vector<DoctorCheck>& checks);

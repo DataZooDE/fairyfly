@@ -18,8 +18,8 @@ class HttpTrayRunner final : public tray::IServerRunner, public IServerControl {
 public:
     HttpTrayRunner(ServeOptions options, std::function<cli::CommandHandler&()> get_handler,
                    commands::GlobalOptions global, audit::AuditSink* sink,
-                   std::function<cli::CommandHandler*()> peek)
-        : options_(std::move(options)), get_handler_(std::move(get_handler)), global_(std::move(global)), sink_(sink),
+                   std::function<cli::CommandHandler*()> peek, RunMcpFunction run_fn)
+        : run_fn_(std::move(run_fn)), options_(std::move(options)), get_handler_(std::move(get_handler)), global_(std::move(global)), sink_(sink),
           peek_(std::move(peek)) {
         read_only_ = !options_.allow_write || options_.read_only;
     }
@@ -45,7 +45,7 @@ public:
                 if (!want_run_ || quit_) control.request_stop();  // stop arrived before the server was up
             };
             lock.unlock();
-            exit_code = run_mcp(opts, get_handler_, global_, sink_, peek_, &hooks);
+            exit_code = run_fn_(opts, get_handler_, global_, sink_, peek_, &hooks);
             lock.lock();
             inner_ = nullptr;
             if (exit_code != 0 && !quit_) {
@@ -110,6 +110,7 @@ public:
     }
 
 private:
+    RunMcpFunction run_fn_;
     ServeOptions options_;
     std::function<cli::CommandHandler&()> get_handler_;
     commands::GlobalOptions global_;
@@ -131,7 +132,16 @@ std::unique_ptr<tray::IServerRunner> make_http_tray_runner(const ServeOptions& o
                                                            std::function<cli::CommandHandler&()> get_handler,
                                                            const commands::GlobalOptions& global, audit::AuditSink* sink,
                                                            std::function<cli::CommandHandler*()> peek) {
-    return std::make_unique<HttpTrayRunner>(options, std::move(get_handler), global, sink, std::move(peek));
+    return make_http_tray_runner(options, std::move(get_handler), global, sink, std::move(peek), RunMcpFunction(run_mcp));
+}
+
+std::unique_ptr<tray::IServerRunner> make_http_tray_runner(const ServeOptions& options,
+                                                           std::function<cli::CommandHandler&()> get_handler,
+                                                           const commands::GlobalOptions& global, audit::AuditSink* sink,
+                                                           std::function<cli::CommandHandler*()> peek,
+                                                           RunMcpFunction run_fn) {
+    return std::make_unique<HttpTrayRunner>(options, std::move(get_handler), global, sink, std::move(peek),
+                                            std::move(run_fn));
 }
 
 } // namespace fairyfly::mcp

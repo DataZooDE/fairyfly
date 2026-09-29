@@ -167,6 +167,55 @@ std::string HttpResponse::header(const std::string& name) const {
     return {};
 }
 
+bool accept_prefers_sse(std::string_view accept_header, bool has_progress_token) {
+    // best q per specificity: [0] exact type, [1] type/*, [2] */*; -1 = not listed
+    double sse[3] = {-1, -1, -1};
+    double json_q[3] = {-1, -1, -1};
+    const std::string header = lower(std::string(accept_header));
+    size_t pos = 0;
+    while (pos <= header.size()) {
+        size_t comma = header.find(',', pos);
+        if (comma == std::string::npos) comma = header.size();
+        std::string part = header.substr(pos, comma - pos);
+        pos = comma + 1;
+        double q = 1.0;
+        std::string media = part;
+        const size_t semi = part.find(';');
+        if (semi != std::string::npos) {
+            media = part.substr(0, semi);
+            const size_t qpos = part.find("q=", semi);
+            if (qpos != std::string::npos) {
+                try {
+                    q = std::stod(part.substr(qpos + 2));
+                } catch (...) {
+                    q = 1.0;
+                }
+            }
+        }
+        const auto trim = [](std::string& t) {
+            while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
+            while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
+        };
+        trim(media);
+        if (media.empty()) continue;
+        if (media == "text/event-stream") sse[0] = std::max(sse[0], q);
+        else if (media == "application/json") json_q[0] = std::max(json_q[0], q);
+        else if (media == "application/*") json_q[1] = std::max(json_q[1], q);
+        else if (media == "*/*") json_q[2] = std::max(json_q[2], q);
+    }
+    const auto effective = [](const double (&v)[3]) {
+        for (double q : v)
+            if (q >= 0) return q;  // most specific listing wins
+        return -1.0;
+    };
+    const double q_sse = sse[0];  // only an explicit listing enables SSE; wildcards never do
+    const double q_json = effective(json_q);
+    if (q_sse <= 0) return false;
+    if (has_progress_token) return true;
+    if (q_json <= 0) return true;
+    return q_sse > q_json;
+}
+
 std::string format_sse_event(std::string_view event, std::string_view data, std::string_view id) {
     std::string out;
     if (!id.empty()) out += "id: " + std::string(id) + "\n";
@@ -427,8 +476,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                                  params["_meta"].contains("progressToken"))
                                     ? params["_meta"]["progressToken"]
                                     : json();
-    const std::string accept = lower(request.header("Accept"));
-    const bool sse = options_.sse && is_call && accept.find("text/event-stream") != std::string::npos;
+    const bool sse = options_.sse && is_call && accept_prefers_sse(request.header("Accept"), !progress_token.is_null());
 
     auto waiter = std::make_shared<Waiter>();
     ExecJob job;

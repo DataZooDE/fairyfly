@@ -171,17 +171,24 @@ client can see 404/405/415/413 but never learns whether a token is valid from th
 
 ## SSE behaviour
 
-For `tools/call` with `Accept: text/event-stream` (and `--sse`, the default) the response is a
-`text/event-stream` (`Cache-Control: no-cache`, `X-Accel-Buffering: no`):
+For `tools/call` (with `--sse`, the default) the response is a `text/event-stream` only when the client asks for it
+through content negotiation, else plain JSON. The rule honours q-values on the `Accept` header:
+
+- SSE when `text/event-stream` is the only acceptable type, or has a higher q-value than `application/json`;
+- SSE when the request carries `params._meta.progressToken` and `text/event-stream` is acceptable (q > 0), so
+  clients that need progress notifications still get them;
+- plain JSON otherwise, in particular for `Accept: application/json, text/event-stream` (equal preference, the
+  usual header of curl-style and MCP SDK clients) without a progress token.
+
+The SSE response is a `text/event-stream` (`Cache-Control: no-cache`, `X-Accel-Buffering: no`):
 
 - a `: keep-alive` comment every 15 s so proxies do not time out long SAP calls;
 - when the request carries `params._meta.progressToken`, `notifications/progress` events (started/finished);
 - the final JSON-RPC response as `event: message`;
 - if the client disconnects, the call is cancelled between GUI steps (never in the middle of a click).
 
-Any other request (including `tools/call` without that Accept header, and `tools/list`) is a plain JSON
-response. Note that most clients send `Accept: application/json, text/event-stream`, so their `tools/call`
-answers arrive as SSE. IIS must not buffer or compress the stream (the generated `web.config` handles it;
+Any other request (including `tools/call` under the rules above, and `tools/list`) is a plain JSON
+response. IIS must not buffer or compress the stream (the generated `web.config` handles it;
 `mcp iis status` checks for drift).
 
 ## Security model
