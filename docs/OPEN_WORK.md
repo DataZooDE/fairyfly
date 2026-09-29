@@ -40,7 +40,20 @@ Found while creating the OPS-032 OData service and reading SM50/RZ04/RZ11 and th
 | Speed: output size | Duplicate `grid_data` removed and selection-screen label carriers collapsed. Live: SM37 job list JSON 120.5 KB to 98.4 KB; ST22 selection JSON 89.1 KB to 70.0 KB (no `%_..._%_APP_%-` carriers left) and its Markdown 16.9 KB to 12.1 KB. Markdown behavior change: field rows now show the caption (for example `Date (F4 Search)`) where they showed the technical name; a high-value field appears as `to (F4 Search)`. | **Closed & Verified** |
 | Speed: per-call overhead | New `batch` command runs many commands in one process (one JSON line per command, `--file`, `--stop-on-error`, `BATCH_NESTED` guard). Live: 8 commands took about 2.0 s versus about 2.8 s as separate processes, consistently 1.3-1.5x faster over three runs; most per-command time is spent in SAP waits, not process start-up. One early batch run took 23 s and could not be reproduced. `serve` is still not implemented. | **Closed** (gain smaller than expected) |
 | Safety: read-only guard mode | New global `--read-only` flag and `FAIRYFLY_READ_ONLY=1`: state-changing clicks, all `fill`, `send-key` F11/Shift+F2, and `screen menu --select` with Save/Delete-style words return `READ_ONLY_REFUSED` with the matched rule. Live: Save button, `send-key f11`, `System/Delete` menu, and `fill` refused; Job log and F3 still allowed. The SM37 Release/Stop/Delete buttons are covered by unit tests only, not pressed live. Element lookup for text/tooltip is best-effort, and synthetic toolbar buttons are checked by id only. | **Closed & Verified** (destructive buttons unit-tested only) |
-| Bigfox observation: ST22 dumps | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER); possibly caused by earlier ADT search calls, not verified. Not a fairyfly defect. | **Open** (unverified) |
+| Bigfox observation: ST22 dumps (first sighting) | Four `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` on 2026-09-29 04:49:55-58 (work process 22, user DEVELOPER). Superseded by the recurring-dumps row below. | **Open** (unverified) |
+
+## Speed and polish follow-ups (2026-09-29, after the fix/open-work merge)
+
+Measured on Bigfox with the merged build, rerunning the ST22, SM37, and SU01 scenarios. Cause analysis and fixes are tracked here.
+
+| Work | Detail | Status |
+| --- | --- | --- |
+| `screen read --tab` is slower than clicking the tab and reading with `--no-tabs` | SU01 Roles: `--tab tabpACTG` took 2.3 s versus about 1.3 s for `click <tab>` (0.35 s) plus `screen read --no-tabs` (0.95 s), because `--tab` still performs the full base read first and only then expands the one tab. Target: read only the requested tab's subtree, close to the manual route. | **Open** |
+| Full tab read stays slow | SU01 `screen read` with all 12 tabs took 11.1 s (35 KB). It expands every tab one by one. Investigate where the time goes (per-tab select/wait, tree traversal, metadata extraction) and reduce it, for example by skipping empty or non-requested tabs, shorter waits, or fewer COM round trips per element. | **Open** |
+| Classic list read is slow | SM37 job list (34 rows) takes about 2.2 s per `screen read` (JSON and Markdown alike) and the ST22 selection screen about 1.2 s, regardless of output format. Profile per-element COM calls (`--log-level debug` / `trace.h`) and cut redundant property reads. | **Open** |
+| `get` on a checkbox leaves `label` empty | `get` returns `value` (the caption) and `selected`, but `label` is empty. Fill it with the caption or drop the key. | **Open** (minor) |
+| Range field caption `to (F4 Search)` | After the label-collapse change the high field of a range (for example `S_DATUM-HIGH`) shows the caption `to`; prefer the group caption (`Date`) plus a `to` marker. | **Open** (minor) |
+| Bigfox observation: recurring ST22 dumps | Two more `DYN_TABLE_ILL_COMP_VAL` dumps in `CL_RSO_RES_IS_BWSEARCH` appeared at 05:03:17 and 05:03:25 (six today), with no fairyfly or ADT activity of ours at that time, so the earlier guess (our ADT searches) looks wrong. Not a fairyfly defect; cause unknown. | **Open** (unverified) |
 
 ## Build and review
 
