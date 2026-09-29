@@ -1123,6 +1123,30 @@ void ComGuiElement::select_grid_row(int row, const std::string& column_name) {
     }
 }
 
+void ComGuiElement::doubleclick_grid_cell(int row, const std::string& column_name) {
+    if (!dispatch_) throw ComException("Null GridView element");
+    if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");
+
+    DISPID dispid;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetCurrentCell", &dispid);
+    if (FAILED(hr)) throw ComException("GridView SetCurrentCell method not found", hr);
+    _variant_t arguments[2];
+    const auto wide_column = com::utf8_to_wide(column_name);
+    arguments[0] = _variant_t(wide_column.c_str());
+    arguments[1] = _variant_t(row);
+    DISPPARAMS params = {arguments, nullptr, 2, 0};
+    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                           DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
+    if (FAILED(hr)) throw ComException("Failed to set GridView current cell", hr);
+
+    hr = get_dispid_via_typeinfo(dispatch_, L"DoubleClickCurrentCell", &dispid);
+    if (FAILED(hr)) throw ComException("GridView DoubleClickCurrentCell method not found", hr);
+    DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
+    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                           DISPATCH_METHOD, &no_arguments, nullptr, nullptr, nullptr);
+    if (FAILED(hr)) throw ComException("Failed to double-click GridView cell", hr);
+}
+
 int ComGuiElement::get_grid_toolbar_button_count() const {
     try { return get_int_property(L"ToolbarButtonCount"); }
     catch (const std::exception&) { return 0; }

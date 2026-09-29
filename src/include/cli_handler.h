@@ -82,7 +82,7 @@ public:
                         bool wait_for_window = false, int timeout_ms = 5000,
                         const std::string& node_key = "", const std::string& tree_action = "doubleclick",
                         const std::string& menu_item = "", std::optional<int> row = std::nullopt,
-                        const std::string& column = "");
+                        const std::string& column = "", bool doubleclick = false);
     Result handle_fill(const std::string& element_id, const std::string& value,
                        std::optional<int> connection_id, std::optional<int> row = std::nullopt,
                        const std::string& column = "", bool checkbox = false, bool commit = false);
@@ -97,6 +97,13 @@ public:
     Result handle_screen_find(const sap::ScreenFindOptions& query,
                               std::optional<int> connection_id);
     Result handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options);
+
+    // Window-level actions (implemented in cli_handler_window_actions.cpp)
+    Result handle_send_key(const std::string& key, const std::string& window,
+                           std::optional<int> connection_id);
+    Result handle_close(int vkey, std::optional<int> connection_id);
+    Result handle_screen_menu(const std::string& select_path, const std::string& window,
+                              std::optional<int> connection_id);
 
     // Diagnostic and enumeration
     Result handle_list_all();

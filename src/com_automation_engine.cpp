@@ -1336,6 +1336,14 @@ json read_element_value(const ComGuiElementPtr& element) {
         if (page.truncated) data["content_truncated"] = true;
     } else {
         data["value"] = element->get_text_for_direct_read();
+        if (type == "GuiCheckBox" || type == "GuiRadioButton") {
+            try { data["selected"] = element->get_property_bool(L"Selected"); }
+            catch (const std::exception&) { /* State unavailable; keep value only. */ }
+            try {
+                const auto label = element->get_label();
+                if (!label.empty()) data["label"] = label;
+            } catch (const std::exception&) { /* Optional label. */ }
+        }
     }
     return data;
 }

@@ -1,6 +1,7 @@
 #include "include/cli_handler.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
+#include "include/action_argument_checks.h"
 #include "include/login_flow.h"
 #include "include/constants.h"
 #include "include/grid_analyzer.h"
@@ -490,8 +491,9 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                                      bool wait_for_window, int timeout_ms,
                                      const std::string& node_key, const std::string& tree_action,
                                      const std::string& menu_item, std::optional<int> row,
-                                     const std::string& column)
+                                     const std::string& column, bool doubleclick)
 {
+    if (auto invalid = sap::check_doubleclick_options(doubleclick, row, column)) return *invalid;
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
     if (conn_result.status != ResultT<Connection>::Status::Success) {
@@ -543,7 +545,8 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             result.error["message"] = "GridView row selection requires the COM automation engine";
             return result;
         }
-        result = com_engine->select_grid_row(elem, *row, column);
+        result = doubleclick ? com_engine->doubleclick_grid_cell(elem, *row, column)
+                             : com_engine->select_grid_row(elem, *row, column);
         if (result.status == Result::Status::Success)
             result.data["connection_id"] = conn_result.value.id;
         return result;

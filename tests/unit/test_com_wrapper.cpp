@@ -9,6 +9,9 @@
 #include "include/element_metadata_extractor.h"
 #include "include/table_data_extractor.h"
 #include "include/screen_reader.h"
+#include "include/menu_navigation.h"
+#include "include/vkey.h"
+#include "include/action_argument_checks.h"
 #include <nlohmann/json.hpp>
 #include <exception>
 #include <iostream>
@@ -51,6 +54,12 @@ public:
     const wchar_t* named_sibling_id = L"txtIP_HEADER_NAME";
     IDispatch* children_dispatch = nullptr;
     std::vector<IDispatch*> child_items;
+    std::vector<std::string> grid_calls;
+    int set_cell_row = -1;
+    std::wstring set_cell_column;
+    int sent_vkey = -1;
+    int send_vkey_calls = 0;
+    int select_calls = 0;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -118,6 +127,10 @@ public:
         else if (std::wcscmp(names[0], L"Changeable") == 0) *ids = type_id_ + 29;
         else if (std::wcscmp(names[0], L"UnselectAll") == 0) *ids = type_id_ + 30;
         else if (std::wcscmp(names[0], L"SelectNode") == 0) *ids = type_id_ + 31;
+        else if (std::wcscmp(names[0], L"SetCurrentCell") == 0) *ids = type_id_ + 32;
+        else if (std::wcscmp(names[0], L"DoubleClickCurrentCell") == 0) *ids = type_id_ + 33;
+        else if (std::wcscmp(names[0], L"SendVKey") == 0) *ids = type_id_ + 34;
+        else if (std::wcscmp(names[0], L"Select") == 0) *ids = type_id_ + 35;
         else return DISP_E_UNKNOWNNAME;
         return S_OK;
     }
@@ -129,6 +142,33 @@ public:
         }
         if (id == type_id_ + 18 && (flags & DISPATCH_METHOD)) {
             ++tree_item_doubleclicks;
+            return S_OK;
+        }
+        if (id == type_id_ + 32 && (flags & DISPATCH_METHOD)) {
+            if (!params || params->cArgs != 2) return DISP_E_BADPARAMCOUNT;
+            if (params->rgvarg[1].vt != VT_I4 && params->rgvarg[1].vt != VT_INT)
+                return DISP_E_TYPEMISMATCH;
+            if (params->rgvarg[0].vt != VT_BSTR) return DISP_E_TYPEMISMATCH;
+            set_cell_row = params->rgvarg[1].lVal;
+            set_cell_column = params->rgvarg[0].bstrVal;
+            grid_calls.push_back("SetCurrentCell");
+            return S_OK;
+        }
+        if (id == type_id_ + 33 && (flags & DISPATCH_METHOD)) {
+            if (params && params->cArgs != 0) return DISP_E_BADPARAMCOUNT;
+            grid_calls.push_back("DoubleClickCurrentCell");
+            return S_OK;
+        }
+        if (id == type_id_ + 34 && (flags & DISPATCH_METHOD)) {
+            if (!params || params->cArgs != 1) return DISP_E_BADPARAMCOUNT;
+            if (params->rgvarg[0].vt != VT_I4 && params->rgvarg[0].vt != VT_INT)
+                return DISP_E_TYPEMISMATCH;
+            sent_vkey = params->rgvarg[0].lVal;
+            ++send_vkey_calls;
+            return S_OK;
+        }
+        if (id == type_id_ + 35 && (flags & DISPATCH_METHOD)) {
+            ++select_calls;
             return S_OK;
         }
         if (id == type_id_ + 30 && (flags & DISPATCH_METHOD)) {
@@ -575,6 +615,120 @@ TEST_CASE("Screen metadata reports selected radio and checkbox state", "[com][me
         const auto unchecked = ElementMetadataExtractor::extract(element);
         REQUIRE(unchecked.at("selected") == false);
     }
+}
+
+TEST_CASE("GuiCheckBox and GuiRadioButton direct reads report the selected state", "[com][get]") {
+    ScopedDispatchCacheReset cache_reset;
+    for (const auto* type : {L"GuiCheckBox", L"GuiRadioButton"}) {
+        auto* dispatch = new TextFieldDispatch(type, 14000, L"wnd[0]/usr/chkTEST", L"Flag", L"", L"Flag text");
+        auto element = ComGuiElement::create(IDispatchPtr(dispatch, true));
+        dispatch->selected = true;
+        auto checked = read_element_value(element);
+        REQUIRE(checked.at("selected") == true);
+        REQUIRE(checked.at("value") == "Flag text");
+        REQUIRE(checked.at("label") == "Flag");
+        dispatch->selected = false;
+        REQUIRE(read_element_value(element).at("selected") == false);
+    }
+}
+
+TEST_CASE("GridView double-click sets the current cell before double-clicking it", "[com][grid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiGridView", 14200);
+    auto grid = ComGuiElement::create(IDispatchPtr(dispatch, true));
+    grid->doubleclick_grid_cell(3, "MATNR");
+    REQUIRE(dispatch->set_cell_row == 3);
+    REQUIRE(dispatch->set_cell_column == L"MATNR");
+    REQUIRE(dispatch->grid_calls == std::vector<std::string>{"SetCurrentCell", "DoubleClickCurrentCell"});
+    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(-1, "MATNR"), ComException);
+    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(0, ""), ComException);
+}
+
+TEST_CASE("Window send_vkey passes the numeric key as an integer variant", "[com][window]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+    ComGuiWindow window(IDispatchPtr(dispatch, true));
+    window.send_vkey(8);
+    REQUIRE(dispatch->send_vkey_calls == 1);
+    REQUIRE(dispatch->sent_vkey == 8);
+}
+
+TEST_CASE("Menu tree enumeration nests children and never selects", "[com][menu]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* bar = new TextFieldDispatch(L"GuiMenubar", 14600, L"wnd[0]/mbar");
+    auto* system_menu = new TextFieldDispatch(L"GuiMenu", 14700, L"wnd[0]/mbar/menu[0]", L"", L"", L"S&ystem");
+    auto* display = new TextFieldDispatch(L"GuiMenu", 14800, L"wnd[0]/mbar/menu[0]/menu[0]", L"", L"", L"Runtime Errors");
+    auto* bar_children = new TextFieldDispatch(L"GuiCollection", 14900);
+    auto* system_children = new TextFieldDispatch(L"GuiCollection", 15000);
+    bar_children->child_items = {system_menu};
+    system_children->child_items = {display};
+    bar->children_dispatch = bar_children;
+    system_menu->children_dispatch = system_children;
+    auto root = ComGuiElement::create(IDispatchPtr(bar, true));
+
+    const auto tree = read_menu_tree(root);
+    REQUIRE(tree.size() == 1);
+    REQUIRE(tree[0].at("id") == "wnd[0]/mbar/menu[0]");
+    REQUIRE(tree[0].at("text") == "S&ystem");
+    REQUIRE(tree[0].at("enabled") == true);
+    REQUIRE(tree[0].at("children").size() == 1);
+    REQUIRE(tree[0].at("children")[0].at("text") == "Runtime Errors");
+    REQUIRE(tree[0].at("children")[0].at("children").empty());
+    REQUIRE(system_menu->select_calls == 0);
+    REQUIRE(display->select_calls == 0);
+
+    bar_children->Release();
+    system_children->Release();
+    system_menu->Release();
+    display->Release();
+}
+
+TEST_CASE("Menu path selection calls Select only on the matching leaf", "[com][menu]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* bar = new TextFieldDispatch(L"GuiMenubar", 15200, L"wnd[0]/mbar");
+    auto* other = new TextFieldDispatch(L"GuiMenu", 15300, L"wnd[0]/mbar/menu[0]", L"", L"", L"Edit");
+    auto* utilities = new TextFieldDispatch(L"GuiMenu", 15400, L"wnd[0]/mbar/menu[1]", L"", L"", L"&Utilities");
+    auto* leaf = new TextFieldDispatch(L"GuiMenu", 15500, L"wnd[0]/mbar/menu[1]/menu[0]", L"", L"", L"Display");
+    auto* bar_children = new TextFieldDispatch(L"GuiCollection", 15600);
+    auto* utilities_children = new TextFieldDispatch(L"GuiCollection", 15700);
+    bar_children->child_items = {other, utilities};
+    utilities_children->child_items = {leaf};
+    bar->children_dispatch = bar_children;
+    utilities->children_dispatch = utilities_children;
+    auto root = ComGuiElement::create(IDispatchPtr(bar, true));
+
+    auto item = find_menu_by_path(root, split_menu_path("utilities/ DISPLAY "));
+    REQUIRE(item != nullptr);
+    REQUIRE(find_menu_by_path(root, split_menu_path("Utilities/Missing")) == nullptr);
+    REQUIRE(leaf->select_calls == 0);
+    item->select(true);
+    REQUIRE(leaf->select_calls == 1);
+    REQUIRE(utilities->select_calls == 0);
+    REQUIRE(other->select_calls == 0);
+
+    bar_children->Release();
+    utilities_children->Release();
+    other->Release();
+    utilities->Release();
+    leaf->Release();
+}
+
+TEST_CASE("send-key rejects an unknown key with INVALID_VKEY", "[cli][send-key]") {
+    const auto bad = check_vkey_argument("banana");
+    REQUIRE(bad.has_value());
+    REQUIRE(bad->status == Result::Status::Error);
+    REQUIRE(bad->error.at("code") == "INVALID_VKEY");
+    REQUIRE_FALSE(check_vkey_argument("F8").has_value());
+}
+
+TEST_CASE("click --doubleclick requires a grid row and column", "[cli][click]") {
+    const auto missing_row = check_doubleclick_options(true, std::nullopt, "MATNR");
+    REQUIRE(missing_row.has_value());
+    REQUIRE(missing_row->error.at("code") == "GRID_ROW_OPTIONS_REQUIRED");
+    REQUIRE(check_doubleclick_options(true, 2, "").has_value());
+    REQUIRE(check_doubleclick_options(true, -1, "MATNR").has_value());
+    REQUIRE_FALSE(check_doubleclick_options(true, 0, "MATNR").has_value());
+    REQUIRE_FALSE(check_doubleclick_options(false, std::nullopt, "").has_value());
 }
 
 TEST_CASE("SAP collection lookup uses object ID after connection indices become sparse", "[com][identity]") {

@@ -33,12 +33,15 @@ public:
             "Context-menu item text (required with --tree-action contextmenu)");
         cmd_->add_option("--row", row_, "Zero-based GridView row to select");
         cmd_->add_option("--column", column_, "GridView column ID to activate");
+        cmd_->add_flag("--doubleclick", doubleclick_,
+            "Double-click the GridView cell at --row/--column (opens the row's detail)");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
         return handler.handle_click(element_, conn_id_, wait_for_window_, timeout_ms_,
-                                     node_key_, tree_action_, menu_item_, row_, column_);
+                                     node_key_, tree_action_, menu_item_, row_, column_,
+                                     doubleclick_);
     }
 
     bool was_invoked() const override {
@@ -56,6 +59,7 @@ private:
     std::string menu_item_;
     std::optional<int> row_;
     std::string column_;
+    bool doubleclick_ = false;
 };
 
 // Factory function

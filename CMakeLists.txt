@@ -134,6 +134,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/serve_command.cpp
     src/commands/press_f4_command.cpp
     src/commands/doctor_command.cpp
+    src/commands/send_key_command.cpp
+    src/commands/close_command.cpp
+    src/com_automation_engine_actions.cpp
+    src/cli_handler_window_actions.cpp
+    src/menu_navigation.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
