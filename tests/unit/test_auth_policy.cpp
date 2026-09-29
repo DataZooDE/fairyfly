@@ -225,9 +225,11 @@ TEST_CASE("authorize: T-code allowlist", "[auth][authz]") {
     CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}, false, std::nullopt, "SE38").code == "TCODE_DENIED");
     CHECK(decide(p, "gui_element_fill", {{"element", "wnd[0]/usr/txtRSYST-BNAME"}, {"value", "x"}}).code == "TCODE_DENIED");
 
-    // key send and menus act on the open transaction: allowed when it is allowlisted
+    // safe keys and menu listings act on the open transaction: allowed when it is allowlisted
     CHECK(decide(p, "gui_key_send", {{"key", "enter"}}, false, std::nullopt, "SE16").allowed);
-    CHECK(decide(p, "gui_menu_select", {{"path", "System > Services"}}, false, std::nullopt, "SM50").allowed);
+    CHECK(decide(p, "gui_menu_list", {}, false, std::nullopt, "SM50").allowed);
+    // menu selection is fail-closed (menu paths start transactions), see the navigation tests below
+    CHECK(decide(p, "gui_menu_select", {{"path", "System > Services"}}, false, std::nullopt, "SM50").code == "TCODE_DENIED");
 
     // without an allowlist the command field is fillable
     Principal open = token("open", {"element"});
@@ -742,6 +744,8 @@ TEST_CASE("cli: mcp token subcommands parse and do not start the server", "[auth
     CHECK(dry({"mcp", "token", "revoke", "ci"}).path == "mcp token revoke");
     CHECK(dry({"mcp", "token", "rotate", "ci", "--output", "markdown"}).path == "mcp token rotate");
     CHECK(dry({"mcp", "token", "delete", "ci", "--yes"}).path == "mcp token delete");
+    CHECK(dry({"mcp", "token", "create", "ci", "--tcode", "SE16", "--allow-navigation"}).ok);
+    CHECK(dry({"mcp", "token", "create", "ci", "--tcode", "SE16", "--allow-navigation"}).path == "mcp token create");
     CHECK_FALSE(dry({"mcp", "token", "delete"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token", "create"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token"}).ok);             // a verb is required
@@ -1039,4 +1043,97 @@ TEST_CASE("dispatcher: per-family rate limits name the family and are independen
     CHECK(text_of(batch).find("RATE_LIMITED") != std::string::npos);
     // the stdio principal has no family limits
     for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_element_click", click, ctx_for(Principal{}, false)).is_error);
+}
+
+// ---- navigation hardening ----------------------------------------------------------------------
+TEST_CASE("authorize: menu selection and navigating keys are denied with a T-code allowlist", "[auth][authz][navigation]") {
+    Principal p = token("nav", {"menu", "key", "popup", "element"});
+    p.tcodes = {"SE16"};
+
+    auto d = decide(p, "gui_menu_select", {{"path", "System > Services"}}, false, std::nullopt, "SE16");
+    CHECK_FALSE(d.allowed);
+    CHECK(d.code == "TCODE_DENIED");
+    CHECK(d.message.find("--allow-navigation") != std::string::npos);
+    CHECK(decide(p, "gui_menu_list", {}, false, std::nullopt, "SE16").allowed);
+
+    for (const char* key : {"enter", "ENTER", "f4", "F8", "0", "4", "8", "80", "81", "82", "83"}) {
+        INFO(key);
+        CHECK(decide(p, "gui_key_send", {{"key", key}}, false, std::nullopt, "SE16").allowed);
+    }
+    for (const char* key : {"f1", "f3", "F12", "f5", "f7", "shift+f3", "shift+f4", "3", "12", "15", "1", "bogus"}) {
+        INFO(key);
+        d = decide(p, "gui_key_send", {{"key", key}}, false, std::nullopt, "SE16");
+        CHECK_FALSE(d.allowed);
+        CHECK(d.code == "TCODE_DENIED");
+    }
+    CHECK(auth::tcode_safe_key(" f8 "));
+    CHECK_FALSE(auth::tcode_safe_key("ctrl+/"));
+
+    // popup close, element clicks and F4 stay allowed (mitigated by the post-call re-check)
+    CHECK(decide(p, "gui_popup_close", {}, false, std::nullopt, "SE16").allowed);
+    CHECK(decide(p, "gui_element_click", {{"element", "wnd[0]/usr/btnX"}}, false, std::nullopt, "SE16").allowed);
+    CHECK(decide(p, "gui_element_f4", {{"element", "wnd[0]/usr/txtA"}}, false, std::nullopt, "SE16").allowed);
+
+    // --allow-navigation restores menus and every key
+    p.allow_navigation = true;
+    CHECK(decide(p, "gui_menu_select", {{"path", "System > Services"}}, false, std::nullopt, "SE16").allowed);
+    CHECK(decide(p, "gui_key_send", {{"key", "f3"}}, false, std::nullopt, "SE16").allowed);
+    CHECK(decide(p, "gui_key_send", {{"key", "shift+f3"}}, false, std::nullopt, "SE16").allowed);
+    // ... but the open transaction must still be allowlisted
+    CHECK(decide(p, "gui_menu_select", {{"path", "x"}}, false, std::nullopt, "SE38").code == "TCODE_DENIED");
+
+    // no allowlist: completely unchanged
+    Principal free = token("free", {"menu", "key"});
+    CHECK(decide(free, "gui_menu_select", {{"path", "System > Services"}}).allowed);
+    CHECK(decide(free, "gui_key_send", {{"key", "f3"}}).allowed);
+}
+
+TEST_CASE("authorize: batch items follow the navigation rules", "[auth][authz][batch][navigation]") {
+    Principal p = token("nb", {"batch", "menu", "key"});
+    p.tcodes = {"SE16"};
+    auto batch = [&](const Principal& who, json items) { return decide(who, "gui_batch", {{"items", items}}); };
+
+    auto d = batch(p, json::array({{{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}},
+                                   {{"tool", "gui_key_send"}, {"arguments", {{"key", "f3"}}}}}));
+    CHECK_FALSE(d.allowed);
+    CHECK(d.code == "TCODE_DENIED");
+    CHECK(d.message.find("batch item 2") != std::string::npos);
+    d = batch(p, json::array({{{"tool", "gui_menu_select"}, {"arguments", {{"path", "System > Services"}}}}}));
+    CHECK(d.code == "TCODE_DENIED");
+    CHECK(batch(p, json::array({{{"tool", "gui_key_send"}, {"arguments", {{"key", "f8"}}}}})).allowed);
+
+    p.allow_navigation = true;
+    CHECK(batch(p, json::array({{{"tool", "gui_key_send"}, {"arguments", {{"key", "f3"}}}},
+                                {{"tool", "gui_menu_select"}, {"arguments", {{"path", "a > b"}}}}})).allowed);
+}
+
+TEST_CASE("dispatcher: navigation rules reach the CLI only for allowed calls", "[auth][dispatch][navigation]") {
+    Fixture f;
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal p = token("nav", {"menu", "key", "batch"});
+    p.tcodes = {"SE16"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "SE16"};
+
+    auto r = d.call_tool("gui_menu_select", {{"path", "System > Services"}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("TCODE_DENIED") != std::string::npos);
+    r = d.call_tool("gui_key_send", {{"key", "f3"}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(f.calls.empty());
+    CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    CHECK(f.calls.size() == 1);
+
+    // batch: the whole batch is refused up front, nothing runs
+    f.calls.clear();
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}},
+                                                        {{"tool", "gui_key_send"}, {"arguments", {{"key", "f12"}}}}})}}, ctx_for(p));
+    CHECK(r.is_error);
+    CHECK(f.calls.empty());
+
+    Principal nav = p;
+    nav.name = "nav2";
+    nav.allow_navigation = true;
+    CHECK_FALSE(d.call_tool("gui_menu_select", {{"path", "System > Services"}}, ctx_for(nav)).is_error);
+    CHECK_FALSE(d.call_tool("gui_key_send", {{"key", "f3"}}, ctx_for(nav)).is_error);
 }

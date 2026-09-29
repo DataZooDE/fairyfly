@@ -43,6 +43,7 @@ struct TokenMeta {
     std::map<std::string, int> rate_families; ///< calls per minute per tool family; empty = none
     std::vector<std::string> allowed_ips;  ///< addresses or CIDR blocks; empty = any
     bool read_only = true;
+    bool allow_navigation = false;         ///< only meaningful with tcodes: keeps gui_menu_select and navigating keys usable
     bool revoked = false;
 
     bool has_all_scopes() const;
@@ -67,6 +68,7 @@ struct NewToken {
     std::vector<std::string> allowed_ips;
     std::optional<TimePoint> expires;
     bool read_only = true;
+    bool allow_navigation = false;         ///< --allow-navigation (needs tcodes)
 };
 
 /// create()/rotate() result: the ONLY place the plain token exists.

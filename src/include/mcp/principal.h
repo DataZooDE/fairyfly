@@ -22,6 +22,7 @@ struct Principal {
     int rate_per_minute = 0;             ///< 0 = server default
     std::map<std::string, int> rate_families; ///< extra calls-per-minute budget per tool family (e.g. element=10); empty = none
     bool read_only = false;              ///< token can only narrow the server mode
+    bool allow_navigation = false;       ///< with a T-code allowlist: menus and navigating keys stay usable (--allow-navigation)
     std::string remote_addr;             ///< client address (from proxy header only when the proxy secret matched)
     bool authenticated = false;          ///< false for stdio and for --insecure-no-auth
 };

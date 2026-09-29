@@ -172,6 +172,7 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
     ok.principal.rate_per_minute = meta->rate_per_minute;
     ok.principal.rate_families = meta->rate_families;
     ok.principal.read_only = meta->read_only;
+    ok.principal.allow_navigation = meta->allow_navigation;
     ok.principal.remote_addr = client.address;
     ok.principal.authenticated = true;
     return ok;
