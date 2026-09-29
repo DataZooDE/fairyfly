@@ -16,6 +16,7 @@
 
 #include "include/command_table.h"
 #include "include/mcp/dispatcher.h"
+#include "include/mcp/http_server.h"
 #include "include/mcp/mcp_audit.h"
 #include "include/mcp/server.h"
 #include "include/mcp/tool_catalog.h"
@@ -72,7 +73,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         spdlog::set_level(spdlog::level::from_str(global.log_level));
     }
 
-    if (options.transport != "stdio") {
+    const bool http = options.http || options.transport == "http";
+    if (!http && options.transport != "stdio") {
         Result nyi;
         nyi.status = Result::Status::NotImplemented;
         nyi.error["code"] = "NOT_IMPLEMENTED";
@@ -101,7 +103,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     }
 
 #ifdef _WIN32
-    if (_isatty(_fileno(stdin))) {
+    if (!http && _isatty(_fileno(stdin))) {
         std::cerr << "fairyfly mcp speaks MCP (JSON-RPC) over stdin/stdout and must be launched by an MCP "
                      "client, not from an interactive console. Configure it as a stdio server, e.g. "
                      "command: fairyfly, args: [\"mcp\"]." << std::endl;
@@ -138,14 +140,39 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         hook = make_mcp_audit_hook(sink, peek, read_only);
     }
 
-    CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,
-                                 retain_families(all_tool_specs(), options.families));
-    StdioTransport transport;
-
     ServerOptions server_options;
     server_options.version = fairyfly::FAIRYFLY_VERSION;
     server_options.instructions = kInstructions;
     server_options.call_timeout_ms = options.call_timeout_ms;
+
+    if (http) {
+        // Remote transport: plain HTTP (TLS is the reverse proxy's job). The provider is rebuilt when the
+        // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
+        if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
+            return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        HttpRunArgs http_args;
+        http_args.options = options;
+        http_args.server_options = server_options;
+        http_args.read_only = read_only;
+        http_args.read_only_cap = env_flag_read_only();
+        const auto families = options.families;
+        http_args.make_provider = [policy, hook, lazy_handler, families](bool ro) mutable -> std::unique_ptr<ToolProvider> {
+            Policy p = policy;
+            p.read_only = ro;
+            p.allow_write = !ro;
+            return std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
+                                                       retain_families(all_tool_specs(), families));
+        };
+        http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };
+        append_serve_event(sink, "started", read_only);
+        const int http_exit = run_mcp_http(std::move(http_args));
+        append_serve_event(sink, "stopped", read_only);
+        return http_exit;
+    }
+
+    CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,
+                                 retain_families(all_tool_specs(), options.families));
+    StdioTransport transport;
 
     McpServer server(transport, dispatcher, server_options);
     // Audit lifecycle records (only when auditing is enabled). Required mode: probe first.

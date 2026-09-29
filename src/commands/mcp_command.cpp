@@ -26,9 +26,21 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
                      "Rate limit for tool calls (default 120)");
     cmd_->add_option("--call-timeout-ms", options_.call_timeout_ms,
                      "Soft timeout per tool call in milliseconds (default 120000)");
-    cmd_->add_option("--transport", options_.transport, "Transport: stdio (http is not implemented)")
+    cmd_->add_option("--transport", options_.transport, "Transport: stdio (default) or http (same as --http)")
         ->check(CLI::IsMember({"stdio", "http"}));
-    cmd_->add_option("--port", options_.port, "HTTP port (reserved; transport=http is not implemented)");
+    cmd_->add_flag("--http", http_flag_,
+                   "Serve MCP over plain HTTP (POST /mcp) instead of stdio; TLS is the reverse proxy's job");
+    cmd_->add_option("--mcp-host", options_.host, "HTTP bind address (default 127.0.0.1)");
+    cmd_->add_option("--mcp-port,--port", options_.port, "HTTP port (default 8383)");
+    cmd_->add_option("--allowed-hosts", options_.allowed_hosts,
+                     "Extra Host header values accepted besides loopback (comma separated; DNS-rebinding defence)")
+        ->delimiter(',');
+    cmd_->add_option("--cors-origin", options_.cors_origins,
+                     "Origin values accepted (comma separated or repeated); default: none, requests with an Origin are rejected")
+        ->delimiter(',');
+    cmd_->add_flag("--insecure-no-auth", options_.insecure_no_auth,
+                   "HTTP only: disable authentication (dangerous; for local experiments)");
+    cmd_->add_flag("--sse,!--no-sse", options_.sse, "HTTP only: allow SSE streaming for tools/call (default on)");
     cmd_->add_option("--tools", tools_filter_,
                      "Only expose the tools of these families (comma or space separated), e.g. "
                      "\"session,screen,element\". Families: " + [] {
@@ -57,6 +69,8 @@ Result McpCommand::execute(cli::CommandHandler& handler) {
 
 mcp::ServeOptions McpCommand::options() const {
     mcp::ServeOptions out = options_;
+    out.http = http_flag_ || options_.transport == "http";
+    if (out.http) out.transport = "http";
     if (default_connection_ >= 0) out.default_connection = default_connection_;
     out.families = command_table::parse_family_list(tools_filter_);
     return out;

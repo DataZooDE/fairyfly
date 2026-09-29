@@ -65,6 +65,10 @@ struct CallContext {
     Principal principal;                   ///< caller identity (default: local stdio principal)
     ProtocolEra era = ProtocolEra::Legacy; ///< protocol era of this request
     bool http = false;                     ///< transport: false = stdio
+    /// Optional progress reporter (added for the HTTP/SSE transport, additive): emits a
+    /// notifications/progress event when the client supplied a progressToken. Empty = no reporting.
+    /// Providers may call it from the main thread between GUI steps; it never blocks.
+    std::function<void(double progress, std::optional<double> total, const std::string& message)> report_progress;
 };
 
 /// Backend of the server: exposes tools and runs them. Called ONLY from the main (COM) thread,
@@ -126,6 +130,13 @@ struct ServeOptions {
     int port = 0;                    ///< reserved for a future http transport
     /// `--tools` (added in 0.2.0, additive): expose only tools of these families; empty = all.
     std::vector<std::string> families;
+    // ---- remote MCP over HTTP (added in the protocol-core phase, additive) ----
+    bool http = false;                       ///< --http (or --transport http)
+    std::string host = "127.0.0.1";          ///< --mcp-host
+    std::vector<std::string> allowed_hosts;  ///< --allowed-hosts: extra Host header values accepted
+    std::vector<std::string> cors_origins;   ///< --cors-origin: accepted Origin values ("" = none)
+    bool insecure_no_auth = false;           ///< --insecure-no-auth: AllowAllAuthenticator
+    bool sse = true;                         ///< --sse / --no-sse
 };
 
 /// How a tool renders its result.

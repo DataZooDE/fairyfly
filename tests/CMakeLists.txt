@@ -29,6 +29,7 @@ add_executable(unit_tests
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
     unit/test_mcp_dispatcher.cpp
+    unit/test_mcp_http.cpp
     unit/test_command_table.cpp
     unit/test_iis.cpp
     unit/test_auth.cpp
