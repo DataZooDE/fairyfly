@@ -1342,6 +1342,10 @@ json read_element_value(const ComGuiElementPtr& element) {
             try {
                 const auto label = element->get_label();
                 if (!label.empty()) data["label"] = label;
+                else if (data.contains("value") && data["value"].is_string() &&
+                         !data["value"].get<std::string>().empty()) {
+                    data["label"] = data["value"];  // caption is the label
+                }
             } catch (const std::exception&) { /* Optional label. */ }
         }
     }
