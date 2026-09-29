@@ -30,8 +30,9 @@ namespace {
 // Minimal IEnumVARIANT over a list of dispatch pointers (for _NewEnum fakes).
 class FakeEnumVariant final : public IEnumVARIANT {
 public:
-    explicit FakeEnumVariant(std::vector<IDispatch*> items, size_t position = 0)
-        : items_(std::move(items)), position_(position) {}
+    explicit FakeEnumVariant(std::vector<IDispatch*> items, size_t position = 0,
+                             size_t fail_after = static_cast<size_t>(-1))
+        : items_(std::move(items)), position_(position), fail_after_(fail_after) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
         *object = nullptr;
@@ -50,6 +51,10 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Next(ULONG count, VARIANT* out, ULONG* fetched) override {
         ULONG got = 0;
+        if (position_ >= fail_after_) {
+            if (fetched) *fetched = 0;
+            return E_FAIL;
+        }
         while (got < count && position_ < items_.size()) {
             VariantInit(&out[got]);
             out[got].vt = VT_DISPATCH;
@@ -67,13 +72,14 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Reset() override { position_ = 0; return S_OK; }
     HRESULT STDMETHODCALLTYPE Clone(IEnumVARIANT** out) override {
-        *out = new FakeEnumVariant(items_, position_);
+        *out = new FakeEnumVariant(items_, position_, fail_after_);
         return S_OK;
     }
 private:
     ULONG references_ = 1;
     std::vector<IDispatch*> items_;
     size_t position_;
+    size_t fail_after_;
 };
 } // namespace
 
@@ -121,6 +127,8 @@ public:
     int children_invokes = 0;
     int new_enum_calls = 0;
     bool enumerable = false;
+    size_t enum_fail_after = static_cast<size_t>(-1);
+    bool has_row_count = false;  // grid-like GuiShell: RowCount exists (tree-like: unknown name)
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -194,6 +202,7 @@ public:
         else if (std::wcscmp(names[0], L"SendVKey") == 0) *ids = type_id_ + 34;
         else if (std::wcscmp(names[0], L"Select") == 0) *ids = type_id_ + 35;
         else if (std::wcscmp(names[0], L"Close") == 0) *ids = type_id_ + 36;
+        else if (std::wcscmp(names[0], L"RowCount") == 0 && has_row_count) *ids = type_id_ + 37;
         else return DISP_E_UNKNOWNNAME;
         return S_OK;
     }
@@ -252,6 +261,12 @@ public:
             return S_OK;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
+        if (id == type_id_ + 37 && (flags & DISPATCH_PROPERTYGET)) {
+            VariantInit(result);
+            result->vt = VT_I4;
+            result->lVal = 6;
+            return S_OK;
+        }
         if (id == type_id_ + 22 && (flags & DISPATCH_PROPERTYGET) && connections_dispatch) {
             VariantInit(result);
             result->vt = VT_DISPATCH;
@@ -287,7 +302,7 @@ public:
             ++new_enum_calls;
             VariantInit(result);
             result->vt = VT_UNKNOWN;
-            result->punkVal = new FakeEnumVariant(child_items);
+            result->punkVal = new FakeEnumVariant(child_items, 0, enum_fail_after);
             return S_OK;
         }
         if (id == type_id_ + 26 && (flags & DISPATCH_PROPERTYGET) && children_dispatch) {
@@ -2101,6 +2116,69 @@ TEST_CASE("Unknown member DISPID misses are cached per type", "[com][perf]") {
     REQUIRE(second_fake->name_lookups[L"AccTooltip"] == 1);
 }
 
+TEST_CASE("Shell member misses are not cached across GuiShell subtypes", "[com][perf][err142]") {
+    ScopedDispatchCacheReset cache_reset;
+    // Same COM Type string "GuiShell" for both: a tree-like shell without RowCount and a
+    // grid-like shell with it. The tree's miss must not hide the grid's RowCount.
+    auto* tree = new TextFieldDispatch(L"GuiShell", 30000, L"wnd[0]/usr/cntlT/shellcont/shell",
+                                       L"", L"Tree", L"");
+    auto* grid = new TextFieldDispatch(L"GuiShell", 30000, L"wnd[0]/usr/cntlG/shellcont/shell",
+                                       L"", L"GridView", L"");
+    grid->has_row_count = true;
+    auto tree_element = ComGuiElement::create(tree);
+    auto grid_element = ComGuiElement::create(grid);
+    tree->Release();
+    grid->Release();
+    REQUIRE(tree_element->get_type() == "GuiShell");
+    REQUIRE(grid_element->get_type() == "GuiShell");
+
+    REQUIRE(tree_element->get_property_int(L"RowCount") == 0);
+    REQUIRE(grid_element->get_property_int(L"RowCount") == 6);
+    // The shell miss was asked again on the grid object (not served from a cached miss).
+    REQUIRE(static_cast<TextFieldDispatch*>(grid_element->get_dispatch())->name_lookups[L"RowCount"] == 1);
+}
+
+TEST_CASE("Enumeration failure mid-way falls back to indexed children without duplicates", "[com][perf][enum]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* parent = new TextFieldDispatch(L"GuiContainerShell", 31000, L"wnd[0]/shellcont");
+    auto* a = new TextFieldDispatch(L"GuiLabel", 31100, L"a");
+    auto* b = new TextFieldDispatch(L"GuiLabel", 31200, L"b");
+    auto* c = new TextFieldDispatch(L"GuiLabel", 31300, L"c");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 31400);
+    collection->child_items = {a, b, c};
+    collection->enumerable = true;
+    collection->enum_fail_after = 2;  // yields a, b, then IEnumVARIANT::Next fails
+    parent->children_dispatch = collection;
+    auto element = ComGuiElement::create(parent);
+    parent->Release();
+
+    const auto metadata = ElementMetadataExtractor::extract(element);
+    REQUIRE(metadata.contains("children"));
+    REQUIRE(metadata.at("children") == json::array({"a", "b", "c"}));
+
+    collection->Release();
+    a->Release();
+    b->Release();
+    c->Release();
+}
+
+TEST_CASE("for_each reports a failed enumeration so callers fall back", "[com][perf][enum]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* a = new TextFieldDispatch(L"GuiLabel", 32000, L"a");
+    auto* b = new TextFieldDispatch(L"GuiLabel", 32100, L"b");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 32200);
+    collection->child_items = {a, b};
+    collection->enumerable = true;
+    collection->enum_fail_after = 1;
+    SapGuiCollection<ComGuiElement> children{IDispatchPtr(collection)};
+    int seen = 0;
+    REQUIRE_FALSE(children.for_each([&](const std::shared_ptr<ComGuiElement>&) { ++seen; }));
+    REQUIRE(seen == 1);
+    collection->Release();
+    a->Release();
+    b->Release();
+}
+
 TEST_CASE("is_enabled resolves Enabled once per type", "[com][perf]") {
     ScopedDispatchCacheReset cache_reset;
     auto* first = new TextFieldDispatch(L"GuiCTextField", 20200);
@@ -2579,4 +2657,98 @@ TEST_CASE("read_with_tabs skips select for the current tab and keeps tab content
     for (const auto& element : roles.at("elements"))
         grid_found |= element.value("id", "").find("cntlG/shellcont/shell") != std::string::npos;
     REQUIRE(grid_found);
+}
+
+namespace {
+struct ScopedTabWaitTimeout {
+    explicit ScopedTabWaitTimeout(int ms) { set_tab_wait_timeout_ms_for_testing(ms); }
+    ~ScopedTabWaitTimeout() { set_tab_wait_timeout_ms_for_testing(0); }
+};
+
+// Selecting Roles leaves the session busy; selecting Address (restore) clears it.
+void make_roles_select_leave_session_busy(TabScene& scene) {
+    auto roles_select = scene.tab_b_stale->on_select;
+    scene.tab_b_stale->on_select = [&scene, roles_select] {
+        roles_select();
+        scene.session->bools[L"Busy"] = true;
+    };
+    auto address_select = scene.tab_a->on_select;
+    scene.tab_a->on_select = [&scene, address_select] {
+        address_select();
+        scene.session->bools[L"Busy"] = false;
+    };
+}
+} // namespace
+
+TEST_CASE("read --tab reports TAB_LOAD_FAILED when the session stays busy and restores the tab",
+          "[screen][tabs][read_tab][err142]") {
+    ScopedDispatchCacheReset cache_reset;
+    ScopedTabWaitTimeout short_wait(60);
+    TabScene scene;
+    make_roles_select_leave_session_busy(scene);
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpROLES");
+    REQUIRE(result.status == Result::Status::Error);
+    REQUIRE(result.error.at("code") == "TAB_LOAD_FAILED");
+    REQUIRE(result.error.at("reason") == "busy_timeout");
+    REQUIRE(result.error.at("tab_id") == "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES");
+    REQUIRE(scene.tab_b_stale->select_calls == 1);
+    // The originally selected tab was restored before returning.
+    REQUIRE(scene.restore_of_a_selected == 1);
+    REQUIRE(scene.strip->dispatches.at(L"SelectedTab") == scene.tab_a);
+}
+
+TEST_CASE("read --tab reports TAB_LOAD_FAILED when the tab element is missing",
+          "[screen][tabs][read_tab][err142]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    scene.session->find_by_id.erase(TabScene::kTabB);
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpROLES");
+    REQUIRE(result.status == Result::Status::Error);
+    REQUIRE(result.error.at("code") == "TAB_LOAD_FAILED");
+    REQUIRE(result.error.at("reason") == "not_found");
+    REQUIRE(scene.strip->dispatches.at(L"SelectedTab") == scene.tab_a);
+}
+
+TEST_CASE("all-tabs read lists a failed tab in tabs_failed and still succeeds",
+          "[screen][tabs][err142]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    scene.session->find_by_id.erase(TabScene::kTabB);
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_with_tabs();
+    REQUIRE(result.status == Result::Status::Success);
+    REQUIRE(result.data.at("tabs_expanded") == true);
+    REQUIRE(result.data.at("expanded_tab_count") == 1);
+    REQUIRE(result.data.at("tabs_failed").size() == 1);
+    const auto& failed = result.data.at("tabs_failed").at(0);
+    REQUIRE(failed.at("tab_id") == "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES");
+    REQUIRE(failed.at("reason") == "not_found");
+}
+
+TEST_CASE("Tab whose reported children yield nothing falls back to the user area",
+          "[screen][tabs][read_tab][err142]") {
+    ScopedDispatchCacheReset cache_reset;
+    TabScene scene;
+    // Address reports one child, but that child exposes no type/metadata at all.
+    // (a GuiTree is skipped by --skip-trees before any metadata is read).
+    auto* ghost = scene.make(L"GuiTree", L"/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/tree");
+    scene.tab_a_children->items = {ghost};
+    auto* extra = scene.make(L"GuiTextField", L"/app/con[0]/ses[0]/wnd[0]/usr/txtEXTRA");
+    extra->strings[L"Text"] = L"reachable";
+    extra->strings[L"DisplayedText"] = L"reachable";
+    scene.usr_children->items = {scene.strip, extra};
+    scene.session->find_by_id[L"/app/con[0]/ses[0]/wnd[0]/usr/txtEXTRA"] = extra;
+    ScreenReader reader(scene.session_wrapper());
+
+    auto result = reader.read_tab("tabpADDR", true);
+    REQUIRE(result.status == Result::Status::Success);
+    bool extra_found = false;
+    for (const auto& element : result.data.at("tabs_content").at(0).at("elements"))
+        extra_found |= element.value("id", "").find("txtEXTRA") != std::string::npos;
+    REQUIRE(extra_found);
 }

@@ -27,6 +27,8 @@ public:
         read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
             ->excludes("--no-tabs");
         read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
+        read_cmd_->add_flag("--probe-all", probe_all_,
+            "Exhaustively probe every container by FindById (slower; restores pre-gating behavior; also FAIRYFLY_PROBE_ALL=1)");
         read_cmd_->add_flag("--compact", compact_, "Compact markdown output (hide IDs, collapse empty fields)");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
             ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
@@ -50,6 +52,8 @@ public:
         find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
         find_cmd_->add_option("--limit", find_limit_, "Maximum matches (default 1, maximum 100)")
             ->check(CLI::Range(1, 100));
+        find_cmd_->add_flag("--probe-all", find_probe_all_,
+            "Exhaustively probe every container by FindById (slower; also FAIRYFLY_PROBE_ALL=1)");
         find_cmd_->add_option("--connection", find_conn_id_, "Connection ID to use");
         find_cmd_->add_option("--output", find_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
@@ -94,7 +98,7 @@ public:
             }
 
             return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
-                                              filters_, skip_trees_, compact_, max_rows_, only_tab_);
+                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_);
         }
         else if (*find_cmd_) {
             sap::ScreenFindOptions query;
@@ -102,6 +106,7 @@ public:
             query.name_contains = find_name_contains_;
             query.type = find_type_;
             query.limit = find_limit_;
+            query.probe_all = find_probe_all_;
             return handler.handle_screen_find(query, find_conn_id_);
         }
         else if (*menu_cmd_) {
@@ -155,6 +160,7 @@ private:
     std::string only_tab_;
     bool skip_trees_ = false;
     bool compact_ = false;
+    bool probe_all_ = false;
     int max_rows_ = constants::MAX_TABLE_ROWS;
     std::optional<int> read_conn_id_;
     std::string read_output_format_;
@@ -165,6 +171,7 @@ private:
     std::string find_name_contains_;
     std::string find_type_;
     int find_limit_ = 1;
+    bool find_probe_all_ = false;
     std::optional<int> find_conn_id_;
     std::string find_output_format_;
 

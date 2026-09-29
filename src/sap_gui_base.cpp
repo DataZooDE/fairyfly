@@ -72,7 +72,12 @@ HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const 
         if (type_name.empty() && type_cached_) {
             type_name = cached_type_;
         }
-        if (!type_name.empty()) {
+        // SAP reports every shell (grid, tree, toolbar, HTML viewer, calendar, ...) as Type
+        // "GuiShell" while the members differ by SubType (RowCount/GetCellValue exist on
+        // GridView only). A miss on one shell must not poison the others, so shells are never
+        // negatively cached. Other types (GuiTextField, GuiButton, GuiCustomControl,
+        // GuiContainerShell, ...) have a fixed interface per Type string and stay cached.
+        if (!type_name.empty() && type_name != "GuiShell") {
             s_type_dispid_miss_cache[type_name][name] = hr;
         }
     }

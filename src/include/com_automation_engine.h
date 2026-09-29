@@ -34,6 +34,7 @@ private:
     std::unique_ptr<ConnectionLauncher> connection_launcher_;
     std::unique_ptr<ScreenshotHandler> screenshot_handler_;
     std::unique_ptr<ScreenReader> screen_reader_;
+    bool probe_all_ = false;
 
     // Helper to ensure connection exists
     ComGuiConnectionPtr ensure_connection();
@@ -96,6 +97,7 @@ public:
     Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20,
                                  const std::string& only_tab = "") override;
     Result find_screen(const ScreenFindOptions& query) override;
+    void set_probe_all(bool probe_all) override { probe_all_ = probe_all; }
     Result capture_screenshot(const cli::ScreenshotOptions& options) override;
 
     // Getters for testing/debugging

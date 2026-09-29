@@ -402,7 +402,9 @@ public:
     /// std::shared_ptr<T> for every VT_DISPATCH child, in enumeration order (the same
     /// order item(0), item(1), ... yields), and may return bool (false stops the walk)
     /// or void. Returns true if the enumerator could be obtained (even if the collection
-    /// was empty or the callback stopped early), false if callers should fall back to item(i).
+    /// was empty or the callback stopped early), false if callers should fall back to item(i)
+    /// (enumerator unavailable, or IEnumVARIANT::Next failed midway: the callback may already
+    /// have seen a partial prefix, which the caller must discard).
     template<class F>
     bool for_each(F&& fn) const {
         if (!collection_) return false;
@@ -431,7 +433,14 @@ public:
             VariantInit(&item_var);
             ULONG fetched = 0;
             hr = enumerator->Next(1, &item_var, &fetched);
-            if (FAILED(hr) || fetched == 0) {
+            if (FAILED(hr)) {
+                // Partial enumeration: the caller must discard what it collected and
+                // fall back to indexed access.
+                VariantClear(&item_var);
+                enumerator->Release();
+                return false;
+            }
+            if (fetched == 0) {
                 VariantClear(&item_var);
                 break;
             }
