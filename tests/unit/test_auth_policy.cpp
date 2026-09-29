@@ -1368,8 +1368,26 @@ TEST_CASE("authorize: menu selection and navigating keys are denied with a T-cod
     CHECK(auth::tcode_safe_key(" f8 "));
     CHECK_FALSE(auth::tcode_safe_key("ctrl+/"));
 
-    // popup close, element clicks and F4 stay allowed (mitigated by the post-call re-check)
+    // popup close: the default (F12) and safe keys stay allowed, navigation VKeys are refused
     CHECK(decide(p, "gui_popup_close", {}, false, std::nullopt, "SE16").allowed);
+    for (int v : {12, 0, 4, 8, 80, 83})
+        CHECK(decide(p, "gui_popup_close", {{"vkey", v}}, false, std::nullopt, "SE16").allowed);
+    for (int v : {15, 3, 1, 5, 99}) {
+        d = decide(p, "gui_popup_close", {{"vkey", v}}, false, std::nullopt, "SE16");
+        CHECK_FALSE(d.allowed);
+        CHECK(d.code == "TCODE_DENIED");
+    }
+    {
+        Principal b = token("pb", {"batch", "popup"});
+        b.tcodes = {"SE16"};
+        auto bd = decide(b, "gui_batch", {{"items", json::array({{{"tool", "gui_popup_close"}, {"arguments", {{"vkey", 15}}}}})}});
+        CHECK_FALSE(bd.allowed);
+        CHECK(bd.code == "TCODE_DENIED");
+        CHECK(decide(b, "gui_batch", {{"items", json::array({{{"tool", "gui_popup_close"}}})}}).allowed);
+        b.allow_navigation = true;
+        CHECK(decide(b, "gui_popup_close", {{"vkey", 15}}, false, std::nullopt, "SE16").allowed);
+    }
+    // element clicks and F4 stay allowed (mitigated by the post-call re-check)
     CHECK(decide(p, "gui_element_click", {{"element", "wnd[0]/usr/btnX"}}, false, std::nullopt, "SE16").allowed);
     CHECK(decide(p, "gui_element_f4", {{"element", "wnd[0]/usr/txtA"}}, false, std::nullopt, "SE16").allowed);
 
