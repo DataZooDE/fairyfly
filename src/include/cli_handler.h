@@ -109,6 +109,7 @@ public:
     struct SessionTargetInfo {
         audit::SapFacts facts;
         std::string connection_name;
+        bool ambiguous = false;  ///< launch: open sessions of that entry name run on different systems
     };
     SessionTargetInfo peek_session_target(const std::string& logon_name, const std::string& session_id,
                                           std::optional<int> connection) const noexcept;

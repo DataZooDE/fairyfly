@@ -61,7 +61,8 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
 /// SAP (saved connection files, the live session's own metadata). Empty fields mean "not determinable".
 struct SessionTarget {
     std::string system;           ///< "SID/CLIENT" (or just "SID" when the client is not known yet)
-    std::string connection_name;  ///< saved connection description / SAP Logon entry name
+    std::string connection_name;  ///< live connection description / saved connection / SAP Logon entry name
+    bool ambiguous = false;       ///< launch: open sessions of the entry name run on different systems
 };
 
 /// True when `tool` must be checked against the target (see authorize_session_target) for this principal, so the
@@ -69,9 +70,15 @@ struct SessionTarget {
 bool needs_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args);
 
 /// Enforces the token's SAP-system allowlist and `connections` allowlist on the calls that choose or end a session:
-///  - gui_session_launch / gui_session_login / gui_session_attach, and gui_session_disconnect with close_session:
-///    with sap_systems set the target system must be determinable and allowed -> SYSTEM_UNKNOWN (fail closed,
-///    e.g. a SAP Logon entry that has no open session yet) / SYSTEM_DENIED.
+///  - gui_session_login / gui_session_attach, and gui_session_disconnect with close_session:
+///    with sap_systems set the target system must be determinable and allowed -> SYSTEM_UNKNOWN (fail closed) /
+///    SYSTEM_DENIED.
+///  - gui_session_launch (also with login=true) with sap_systems set: the SAP system of a SAP Logon entry cannot be
+///    known before it is opened, and facts of OTHER sessions are no proof (an entry can be renamed or repointed, two
+///    entries can share a description). It is therefore allowed only when the token ALSO has a `connections` glob that
+///    matches the entry name (the operator vouches that the name maps to an allowed system) -> otherwise
+///    SYSTEM_UNKNOWN. When sessions of that name are open, their system must additionally be allowed (SYSTEM_DENIED;
+///    ambiguous -> SYSTEM_UNKNOWN). Every later call is checked against the real system facts.
 ///  - with `connections` set, every tool that acts on a connection (launch, login, attach, disconnect and the
 ///    screen/element/key/... tools) needs the connection name to be determinable and to match one glob
 ///    -> CONNECTION_DENIED. gui_session_list, gui_connection_list, gui_credentials_list, gui_doctor and

@@ -38,7 +38,7 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
     SessionTargetInfo info;
     try {
         auto* engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-        if (!engine || !conn_mgr_) return info;
+        if (!engine || !conn_mgr_) { info.ambiguous = true; return info; }
         if (!logon_name.empty()) {
             info.connection_name = logon_name;
             bool have = false;
@@ -48,6 +48,7 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
                 if (facts.system.empty()) continue;
                 if (have && (facts.system != info.facts.system || facts.client != info.facts.client)) {
                     info.facts = {};  // one entry, different systems: do not guess
+                    info.ambiguous = true;
                     return info;
                 }
                 info.facts = facts;
@@ -72,6 +73,7 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
         info.connection_name = engine->peek_session_connection_description(resolved.value.session_id);
         if (info.connection_name.empty()) info.connection_name = resolved.value.connection_description;
     } catch (...) {
+        info.ambiguous = true;  // a launch is denied when the open sessions of the entry could not be inspected
     }
     return info;
 }

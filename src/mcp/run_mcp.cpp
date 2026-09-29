@@ -184,10 +184,11 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             // System and connection name of a launch/login/attach/disconnect target (token allowlists; fail closed).
             dispatcher->set_session_target_resolver([peek](const CommandDispatcher::TargetQuery& query) -> auth::SessionTarget {
                 cli::CommandHandler* handler = peek();
-                if (!handler) return {};
+                if (!handler) { auth::SessionTarget unknown; unknown.ambiguous = true; return unknown; }
                 const auto info = handler->peek_session_target(query.logon_name, query.session_id, query.connection);
                 auth::SessionTarget target;
                 target.connection_name = info.connection_name;
+                target.ambiguous = info.ambiguous;
                 if (!info.facts.system.empty())
                     target.system = info.facts.client.empty() ? info.facts.system : info.facts.system + "/" + info.facts.client;
                 return target;

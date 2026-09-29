@@ -241,7 +241,23 @@ bool needs_session_target(const mcp::Principal& principal, const std::string& to
 
 mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
                                              const SessionTarget& target) {
-    if (!principal.sap_systems.empty() && session_system_tool(tool, args)) {
+    if (!principal.sap_systems.empty() && tool == "gui_session_launch") {
+        // The system of a SAP Logon entry is unknown before it is opened. Facts of other sessions are not proof, so the
+        // operator has to vouch for the entry name with --connections (fail closed otherwise).
+        const std::string name = args.is_object() && args.contains("name") && args["name"].is_string()
+                                     ? args["name"].get<std::string>() : std::string();
+        if (name.empty() || principal.connections.empty() || !matches_any(principal.connections, name))
+            return refuse("SYSTEM_UNKNOWN",
+                          "token '" + principal.name + "' is limited to specific SAP systems and the system of SAP Logon entry '" +
+                              name + "' cannot be known before it is opened; launching is only allowed for entries named by the "
+                              "token's --connections list (create the token with --connections " +
+                              (name.empty() ? std::string("NAME") : name) + ") or start the session on the desktop and attach");
+        if (target.ambiguous)
+            return refuse("SYSTEM_UNKNOWN", "open sessions of SAP Logon entry '" + name + "' run on different SAP systems; "
+                                            "the target cannot be determined");
+        if (!target.system.empty() && !system_allowed(principal.sap_systems, target.system))
+            return refuse("SYSTEM_DENIED", "token '" + principal.name + "' is not allowed to use SAP system " + target.system);
+    } else if (!principal.sap_systems.empty() && session_system_tool(tool, args)) {
         if (target.system.empty())
             return refuse("SYSTEM_UNKNOWN",
                           "token '" + principal.name + "' is limited to specific SAP systems and the system of this " +

@@ -769,7 +769,8 @@ TEST_CASE("authorize: session target rules are pure and fail closed", "[auth][au
     CHECK_FALSE(auth::needs_session_target(open, "gui_session_launch", {{"name", "PRD"}}));
 
     // system allowlist: launch/login/attach and disconnect --close-session; unknown target => SYSTEM_UNKNOWN
-    for (const char* tool : {"gui_session_launch", "gui_session_login", "gui_session_attach"}) {
+    CHECK(auth::needs_session_target(sys, "gui_session_launch", json::object()));
+    for (const char* tool : {"gui_session_login", "gui_session_attach"}) {
         CHECK(auth::needs_session_target(sys, tool, json::object()));
         CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"A4H/001", ""}).allowed);
         CHECK(auth::authorize_session_target(sys, tool, {{"name", "X"}}, SessionTarget{"QAS/300", ""}).allowed);  // "QAS" = any client
@@ -778,6 +779,28 @@ TEST_CASE("authorize: session target rules are pure and fail closed", "[auth][au
         CHECK_FALSE(unknown.allowed);
         CHECK(unknown.code == "SYSTEM_UNKNOWN");
         CHECK_FALSE(unknown.message.empty());
+    }
+    // launch with sap_systems: only for entry names vouched for by a --connections glob; other sessions' facts are no proof
+    {
+        Principal vouched = token("vouched", {"session"});
+        vouched.sap_systems = {"A4H/001"};
+        vouched.connections = {"DEV*"};
+        const json dev = {{"name", "DEV1"}};
+        const auto no_connections = auth::authorize_session_target(sys, "gui_session_launch", dev, SessionTarget{"A4H/001", "DEV1"});
+        CHECK(no_connections.code == "SYSTEM_UNKNOWN");  // even when the entry looks like an allowed system
+        CHECK(no_connections.message.find("--connections") != std::string::npos);
+        CHECK(auth::authorize_session_target(sys, "gui_session_launch", dev, SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        // vouched entry name, no open session of that name: allowed
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{}).allowed);
+        // entry name outside the glob: the system rule says unknown, never allowed
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", {{"name", "PRD"}}, SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", json::object(), SessionTarget{}).code == "SYSTEM_UNKNOWN");
+        // an open session of that name must be on an allowed system
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{"A4H/001", "DEV1"}).allowed);
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, SessionTarget{"PRD/100", "DEV1"}).code == "SYSTEM_DENIED");
+        SessionTarget ambiguous;
+        ambiguous.ambiguous = true;
+        CHECK(auth::authorize_session_target(vouched, "gui_session_launch", dev, ambiguous).code == "SYSTEM_UNKNOWN");
     }
     CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", json::object()));
     CHECK_FALSE(auth::needs_session_target(sys, "gui_session_disconnect", {{"close_session", false}}));
@@ -804,6 +827,7 @@ TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through th
     auto& d = *d_ptr;
     Principal p = token("sys", {"session"});
     p.sap_systems = {"A4H/001"};
+    p.connections = {"DEV", "PRD", "NEW"};  // launch needs the entry names vouched for by --connections
     std::vector<CommandDispatcher::TargetQuery> queries;
     std::map<std::string, auth::SessionTarget> by_logon = {{"DEV", {"A4H/001", "DEV"}}, {"PRD", {"PRD/100", "PRD"}}};
     std::map<std::string, auth::SessionTarget> by_session = {{"/app/con[0]/ses[0]", {"A4H/001", "DEV"}},
@@ -819,12 +843,29 @@ TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through th
     // launch by SAP Logon name
     auto r = d.call_tool("gui_session_launch", {{"name", "PRD"}}, ctx_for(p));
     CHECK(text_of(r).find("SYSTEM_DENIED") != std::string::npos);
-    r = d.call_tool("gui_session_launch", {{"name", "NEW"}}, ctx_for(p));  // no open session: system unknown
+    r = d.call_tool("gui_session_launch", {{"name", "OTHER"}}, ctx_for(p));  // not vouched for by --connections
     CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
     CHECK(f.calls.empty());
-    r = d.call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(p));
+    r = d.call_tool("gui_session_launch", {{"name", "DEV"}, {"login", true}}, ctx_for(p));
     CHECK_FALSE(r.is_error);
     REQUIRE(f.calls.size() == 1);
+    f.calls.clear();
+    r = d.call_tool("gui_session_launch", {{"name", "NEW"}}, ctx_for(p));  // vouched, no open session: allowed
+    CHECK_FALSE(r.is_error);
+    REQUIRE(f.calls.size() == 1);
+    f.calls.clear();
+    // a token WITHOUT connections cannot launch at all, even for an entry whose open session is on an allowed system
+    Principal no_conn = token("sys2", {"session", "batch"});
+    no_conn.sap_systems = {"A4H/001"};
+    r = d.call_tool("gui_session_launch", {{"name", "DEV"}}, ctx_for(no_conn));
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+    // inside gui_batch too
+    r = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_session_launch"}, {"arguments", {{"name", "DEV"}, {"login", true}}}}})}},
+                    ctx_for(no_conn));
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("SYSTEM_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
 
     // attach by explicit session id
     f.calls.clear();

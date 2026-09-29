@@ -245,8 +245,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             query.connection = record.connection;
         }
         auth::SessionTarget target;
+        target.ambiguous = true;  // no resolver / resolver failure: a launch cannot be checked against open sessions -> denied
         if (target_resolver_) {
-            try { target = target_resolver_(query); } catch (...) { target = {}; }
+            try { target = target_resolver_(query); } catch (...) { target = {}; target.ambiguous = true; }
         }
         auto decision = auth::authorize_session_target(principal, name, call_args, target);
         if (decision.allowed) return std::nullopt;
