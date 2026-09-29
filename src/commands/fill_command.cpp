@@ -7,14 +7,14 @@ namespace commands {
 
 class FillCommand : public CommandBase {
 public:
-    std::string name() const override { return "fill"; }
+    std::string name() const override { return "element fill"; }
 
     std::string description() const override {
         return "Fill text field";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"element","fill"});
         cmd_->add_option("element", element_, "Element ID")
             ->required();
         value_option_ = cmd_->add_option("value", value_, "Value to enter");

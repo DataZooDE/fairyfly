@@ -6,14 +6,14 @@ namespace commands {
 
 class ListCommand : public CommandBase {
 public:
-    std::string name() const override { return "list"; }
+    std::string name() const override { return "session list"; }
 
     std::string description() const override {
         return "List all SAP GUI connections, sessions, and windows";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"session","list"});
         add_output_option(cmd_, output_format_);
         return cmd_;
     }

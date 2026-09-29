@@ -12,7 +12,7 @@ public:
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"doctor"});
         return cmd_;
     }
 

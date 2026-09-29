@@ -1528,19 +1528,19 @@ TEST_CASE("Unknown GuiShell subtype keeps its subtype and drops the ProgID text"
     REQUIRE(data.at("content_available") == false);
 }
 
-TEST_CASE("list accepts a per-command --output option", "[com][cli][imp005]") {
-    const auto result = run_cli_on_mta({"fairyfly", "list", "--output", "toon"});
+TEST_CASE("session list accepts a per-command --output option", "[com][cli][imp005]") {
+    const auto result = run_cli_on_mta({"fairyfly", "session", "list", "--output", "toon"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);
     REQUIRE(result.output.find("INTERNAL_ERROR") != std::string::npos);
-    const auto global = run_cli_on_mta({"fairyfly", "--output", "toon", "list"});
+    const auto global = run_cli_on_mta({"fairyfly", "--output", "toon", "session", "list"});
     REQUIRE(global.exit_code == 1);
     REQUIRE(global.output.find("INTERNAL_ERROR") != std::string::npos);
 }
 
 TEST_CASE("CLI serializes COM initialization failure and exits nonzero", "[com][cli]") {
-    const auto result = run_cli_on_mta({"fairyfly", "list"});
+    const auto result = run_cli_on_mta({"fairyfly", "session", "list"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);
@@ -1551,7 +1551,7 @@ TEST_CASE("CLI serializes COM initialization failure and exits nonzero", "[com][
 }
 
 TEST_CASE("Fill accepts an explicit clear option without a value", "[com][cli][fill]") {
-    const auto result = run_cli_on_mta({"fairyfly", "fill", "wnd[0]/usr/txtFIELD", "--clear"});
+    const auto result = run_cli_on_mta({"fairyfly", "element", "fill", "wnd[0]/usr/txtFIELD", "--clear"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);
@@ -1559,7 +1559,7 @@ TEST_CASE("Fill accepts an explicit clear option without a value", "[com][cli][f
 }
 
 TEST_CASE("Disconnect accepts an explicit close-session option", "[com][cli][disconnect]") {
-    const auto result = run_cli_on_mta({"fairyfly", "disconnect", "--connection", "0", "--close-session"});
+    const auto result = run_cli_on_mta({"fairyfly", "session", "disconnect", "--connection", "0", "--close-session"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);
@@ -1567,7 +1567,7 @@ TEST_CASE("Disconnect accepts an explicit close-session option", "[com][cli][dis
 }
 
 TEST_CASE("Attach accepts an exact SAP GUI session ID", "[com][cli][attach]") {
-    const auto result = run_cli_on_mta({"fairyfly", "attach", "--session-id", "/app/con[0]/ses[1]"});
+    const auto result = run_cli_on_mta({"fairyfly", "session", "attach", "--session-id", "/app/con[0]/ses[1]"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);
@@ -1575,7 +1575,7 @@ TEST_CASE("Attach accepts an exact SAP GUI session ID", "[com][cli][attach]") {
 }
 
 TEST_CASE("CLI exception honors global TOON output", "[com][cli][format]") {
-    const auto result = run_cli_on_mta({"fairyfly", "--output", "toon", "list"});
+    const auto result = run_cli_on_mta({"fairyfly", "--output", "toon", "session", "list"});
     REQUIRE(result.mta_initialized);
     REQUIRE_FALSE(result.failure);
     REQUIRE(result.exit_code == 1);

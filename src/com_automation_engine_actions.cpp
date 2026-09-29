@@ -257,7 +257,7 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
         if (!item) {
             auto result = error_result("MENU_ITEM_NOT_FOUND", "No menu item matches: " + menu_path);
             result.error["menu_path"] = menu_path;
-            result.error["suggestions"] = nlohmann::json::array({"Run 'screen menu' to list available menu items"});
+            result.error["suggestions"] = nlohmann::json::array({"Run 'menu list' to list available menu items"});
             return result;
         }
         const std::string item_id = item->get_id();

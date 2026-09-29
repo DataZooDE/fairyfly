@@ -544,6 +544,23 @@ std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> ComAutomationEngine::find_sessi
     return {conn, sess};
 }
 
+audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& session_id,
+                                                        const std::string& server_session_key) const noexcept {
+    audit::SapFacts facts;
+    try {
+        auto sess = find_session_by_id(session_id).second;
+        if (!sess) return facts;
+        if (!server_session_key.empty() && sess->get_server_session_key() != server_session_key) return facts;
+        facts.system = sess->get_system_name();
+        facts.client = sess->get_client();
+        facts.user = sess->get_user();
+        facts.transaction = sess->get_transaction_code();
+    } catch (...) {
+        return audit::SapFacts{};
+    }
+    return facts;
+}
+
 bool ComAutomationEngine::validate_session(const std::string& session_id,
                                            const std::string& server_session_key) const {
     try {
@@ -790,10 +807,10 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
                     "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
                 );
                 suggestions.push_back(
-                    "Try: fairyfly click " + active_window.id + "/" + resolved_element.get_element_path()
+                    "Try: fairyfly element click " + active_window.id + "/" + resolved_element.get_element_path()
                 );
                 suggestions.push_back(
-                    "Or use: fairyfly click @active/" + resolved_element.get_element_path()
+                    "Or use: fairyfly element click @active/" + resolved_element.get_element_path()
                 );
             }
 
@@ -1165,10 +1182,10 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
                     "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
                 );
                 suggestions.push_back(
-                    "Try: fairyfly fill " + active_window.id + "/" + resolved_element.get_element_path() + " \"<value>\""
+                    "Try: fairyfly element fill " + active_window.id + "/" + resolved_element.get_element_path() + " \"<value>\""
                 );
                 suggestions.push_back(
-                    "Or use: fairyfly fill @active/" + resolved_element.get_element_path() + " \"<value>\""
+                    "Or use: fairyfly element fill @active/" + resolved_element.get_element_path() + " \"<value>\""
                 );
             }
 

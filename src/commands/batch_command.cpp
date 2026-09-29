@@ -89,10 +89,10 @@ BatchLine parse_batch_line(const std::string& line) {
 }
 
 CLI::App* BatchCommand::setup_cli(CLI::App& app) {
-    cmd_ = app.add_subcommand(name(), description());
+    cmd_ = add_leaf(app, {"batch"});
     cmd_->add_option("--file", file_, "Read commands from this file instead of stdin");
     cmd_->add_flag("--stop-on-error", stop_on_error_, "Stop at the first failing command");
-    cmd_->footer("One command per line, without the program name: a JSON array ([\"tcode\",\"SM37\"]) "
+    cmd_->footer("One command per line, without the program name: a JSON array ([\"transaction\",\"start\",\"SM37\"]) "
                  "or shell-style words (double quotes, backslash-escaped spaces). Blank lines and "
                  "lines starting with '#' are ignored. Each line prints one compact JSON result. "
                  "Exit code is non-zero if any command failed.");

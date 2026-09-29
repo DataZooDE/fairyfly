@@ -7,14 +7,14 @@ namespace commands {
 
 class PressF4Command : public CommandBase {
 public:
-    std::string name() const override { return "press_f4"; }
+    std::string name() const override { return "element f4"; }
 
     std::string description() const override {
         return "Press F4 to open search help dialog for a field";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"element","f4"});
         cmd_->add_option("element", element_, "Element ID of GuiCTextField (e.g., wnd[0]/usr/ctxtFIELD or @active/usr/ctxtFIELD)")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

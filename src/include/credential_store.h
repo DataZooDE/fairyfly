@@ -69,16 +69,24 @@ std::string trim_connection_name(std::string_view connection);
 std::wstring target_name(const std::string& connection);
 /// Inverse of target_name; nullopt for foreign or empty targets.
 std::optional<std::string> connection_from_target(std::wstring_view target);
+/// Overloads with an explicit target prefix (additive; the remote-MCP token store uses "fairyfly-mcp:").
+std::wstring target_name(const std::string& connection, std::wstring_view prefix);
+std::optional<std::string> connection_from_target(std::wstring_view target, std::wstring_view prefix);
 /// UTF-8 password -> UTF-16LE bytes without terminating NUL. Throws CredentialError(PASSWORD_TOO_LONG) above 2560 bytes.
 std::vector<unsigned char> encode_password_blob(const std::string& utf8);
 SecretBuffer decode_password_blob(const unsigned char* data, size_t size);
 
 class WindowsCredentialStore final : public CredentialStore {
 public:
+    /// `target_prefix` (UTF-8) defaults to "fairyfly:"; the token store passes "fairyfly-mcp:".
+    explicit WindowsCredentialStore(std::string target_prefix = std::string(kTargetPrefix));
     std::optional<StoredCredential> read(const std::string& connection) override;
     void write(const std::string& connection, const CredentialSummary& meta, const SecretBuffer& password) override;
     bool remove(const std::string& connection) override;
     std::vector<CredentialSummary> list() override;
+
+private:
+    std::wstring prefix_;
 };
 
 class InMemoryCredentialStore final : public CredentialStore {

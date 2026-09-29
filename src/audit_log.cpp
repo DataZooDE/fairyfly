@@ -59,7 +59,7 @@ bool option_name_is_sensitive(const std::string& raw_name) {
     return sap::is_sensitive_data_name(name) || sap::contains_sensitive_data_name(name);
 }
 
-/// Options of `fill` that consume the next token.
+/// Options of `element fill` that consume the next token.
 bool fill_option_takes_value(const std::string& name) {
     return name == "--connection" || name == "--row" || name == "--column";
 }
@@ -115,7 +115,14 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     if (!r.error_code.empty()) j["error_code"] = cap_bytes(r.error_code, kMaxFactBytes, false);
     j["exit"] = r.exit_code;
     j["duration_ms"] = r.duration_ms;
-    j["audit_source"] = "cli";
+    j["audit_source"] = r.source.empty() ? std::string("cli") : cap_bytes(r.source, kMaxFactBytes, false);
+    if (!r.tool.empty()) j["tool"] = cap_bytes(r.tool, kMaxFactBytes, false);
+    if (!r.client.empty()) j["client"] = cap_bytes(r.client, kMaxFactBytes * 2, false);
+    if (!r.request_id.empty()) j["request_id"] = cap_bytes(r.request_id, kMaxFactBytes, false);
+    if (!r.principal.empty()) j["principal"] = cap_bytes(r.principal, kMaxFactBytes, false);
+    if (!r.remote_addr.empty()) j["remote_addr"] = cap_bytes(r.remote_addr, kMaxFactBytes, false);
+    if (!r.transport.empty()) j["transport"] = cap_bytes(r.transport, kMaxFactBytes, false);
+    if (!r.era.empty()) j["era"] = cap_bytes(r.era, kMaxFactBytes, false);
     return j;
 }
 
@@ -223,7 +230,7 @@ std::vector<std::string> redact_argv(const std::vector<std::string>& argv) {
             }
             continue;
         }
-        if (!in_fill && tok == "fill") {
+        if (!in_fill && tok == "fill" && i > 0 && argv[i - 1] == "element") {
             in_fill = true;
             out.push_back(tok);
             continue;

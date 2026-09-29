@@ -65,10 +65,10 @@ std::string attribute_value(const CREDENTIALW& credential, std::wstring_view key
     return {};
 }
 
-CredentialSummary summary_from(const CREDENTIALW& credential) {
+CredentialSummary summary_from(const CREDENTIALW& credential, std::wstring_view prefix = kTargetPrefixW) {
     CredentialSummary summary;
     if (credential.TargetName) {
-        summary.connection = connection_from_target(credential.TargetName).value_or(std::string());
+        summary.connection = connection_from_target(credential.TargetName, prefix).value_or(std::string());
     }
     if (credential.UserName) summary.username = narrow(credential.UserName);
     summary.client = attribute_value(credential, L"fairyfly:client");
@@ -92,6 +92,10 @@ std::string trim_connection_name(std::string_view connection) {
 }
 
 std::wstring target_name(const std::string& connection) {
+    return target_name(connection, kTargetPrefixW);
+}
+
+std::wstring target_name(const std::string& connection, std::wstring_view prefix) {
     const std::string trimmed = trim_connection_name(connection);
     const bool has_control = std::any_of(trimmed.begin(), trimmed.end(),
                                          [](unsigned char c) { return c < 0x20 || c == 0x7F; });
@@ -99,14 +103,18 @@ std::wstring target_name(const std::string& connection) {
         throw CredentialError("INVALID_CONNECTION_NAME",
                               "Connection name must be 1-200 characters without control characters");
     }
-    return std::wstring(kTargetPrefixW) + widen(trimmed);
+    return std::wstring(prefix) + widen(trimmed);
 }
 
 std::optional<std::string> connection_from_target(std::wstring_view target) {
-    if (target.size() <= kTargetPrefixW.size() || target.substr(0, kTargetPrefixW.size()) != kTargetPrefixW) {
+    return connection_from_target(target, kTargetPrefixW);
+}
+
+std::optional<std::string> connection_from_target(std::wstring_view target, std::wstring_view prefix) {
+    if (target.size() <= prefix.size() || target.substr(0, prefix.size()) != prefix) {
         return std::nullopt;
     }
-    std::string name = narrow(target.substr(kTargetPrefixW.size()));
+    std::string name = narrow(target.substr(prefix.size()));
     if (name.empty()) return std::nullopt;
     return name;
 }
@@ -132,8 +140,11 @@ SecretBuffer decode_password_blob(const unsigned char* data, size_t size) {
 
 // ---------------------------------------------------------------- Windows store
 
+WindowsCredentialStore::WindowsCredentialStore(std::string target_prefix)
+    : prefix_(target_prefix.empty() ? std::wstring(kTargetPrefixW) : widen(target_prefix)) {}
+
 std::optional<StoredCredential> WindowsCredentialStore::read(const std::string& connection) {
-    const std::wstring target = target_name(connection);
+    const std::wstring target = target_name(connection, prefix_);
     PCREDENTIALW raw = nullptr;
     if (!CredReadW(target.c_str(), CRED_TYPE_GENERIC, 0, &raw)) {
         const DWORD error = GetLastError();
@@ -142,7 +153,7 @@ std::optional<StoredCredential> WindowsCredentialStore::read(const std::string& 
     }
     CredentialPtr credential(raw);
     StoredCredential stored;
-    stored.meta = summary_from(*credential);
+    stored.meta = summary_from(*credential, prefix_);
     stored.meta.connection = trim_connection_name(connection);
     stored.password = decode_password_blob(credential->CredentialBlob, credential->CredentialBlobSize);
     return stored;
@@ -150,7 +161,7 @@ std::optional<StoredCredential> WindowsCredentialStore::read(const std::string& 
 
 void WindowsCredentialStore::write(const std::string& connection, const CredentialSummary& meta,
                                    const SecretBuffer& password) {
-    const std::wstring target = target_name(connection);
+    const std::wstring target = target_name(connection, prefix_);
     std::vector<unsigned char> blob = encode_password_blob(password.utf8());
     struct BlobScrubber {
         std::vector<unsigned char>& v;
@@ -204,7 +215,7 @@ void WindowsCredentialStore::write(const std::string& connection, const Credenti
 }
 
 bool WindowsCredentialStore::remove(const std::string& connection) {
-    const std::wstring target = target_name(connection);
+    const std::wstring target = target_name(connection, prefix_);
     if (CredDeleteW(target.c_str(), CRED_TYPE_GENERIC, 0)) return true;
     const DWORD error = GetLastError();
     if (error == ERROR_NOT_FOUND) return false;
@@ -214,7 +225,7 @@ bool WindowsCredentialStore::remove(const std::string& connection) {
 std::vector<CredentialSummary> WindowsCredentialStore::list() {
     PCREDENTIALW* items = nullptr;
     DWORD count = 0;
-    if (!CredEnumerateW(L"fairyfly:*", 0, &count, &items)) {
+    if (!CredEnumerateW((prefix_ + L"*").c_str(), 0, &count, &items)) {
         const DWORD error = GetLastError();
         if (error == ERROR_NOT_FOUND) return {};
         throw_win_error("CredEnumerateW", error);
@@ -223,7 +234,7 @@ std::vector<CredentialSummary> WindowsCredentialStore::list() {
     std::vector<CredentialSummary> result;
     for (size_t i = 0; i < array.size(); ++i) {
         if (array[i].Type != CRED_TYPE_GENERIC) continue;
-        CredentialSummary summary = summary_from(array[i]);
+        CredentialSummary summary = summary_from(array[i], prefix_);
         if (summary.connection.empty()) continue;
         result.push_back(std::move(summary));
     }

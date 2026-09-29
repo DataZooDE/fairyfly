@@ -79,8 +79,8 @@ AuditRecord sample_record() {
     AuditRecord r;
     r.ts = utc(2026, 9, 29, 12, 34, 56, 789);
     r.pid = 1234;
-    r.command = "fill";
-    r.argv = {"fill", "wnd[0]/usr/txtX", "secret-value", "--connection", "0"};
+    r.command = "element fill";
+    r.argv = {"element", "fill", "wnd[0]/usr/txtX", "secret-value", "--connection", "0"};
     r.connection = 0;
     r.sap = SapFacts{"A4H", "001", "DEVELOPER", "SU01"};
     r.read_only = false;
@@ -107,47 +107,47 @@ std::string run_cli_capture(std::vector<std::string> args, int& exit_code) {
 } // namespace
 
 TEST_CASE("redact_argv masks the fill value but keeps flags", "[audit]") {
-    const auto out = redact_argv({"fill", "wnd[0]/usr/txtX", "hunter2", "--connection", "0", "--commit"});
-    REQUIRE(out == std::vector<std::string>{"fill", "wnd[0]/usr/txtX", "<redacted>", "--connection", "0", "--commit"});
+    const auto out = redact_argv({"element", "fill", "wnd[0]/usr/txtX", "hunter2", "--connection", "0", "--commit"});
+    REQUIRE(out == std::vector<std::string>{"element", "fill", "wnd[0]/usr/txtX", "<redacted>", "--connection", "0", "--commit"});
 
-    const auto grid = redact_argv({"--read-only", "fill", "wnd[0]/usr/cntl/shell", "42", "--row", "3",
+    const auto grid = redact_argv({"--read-only", "element", "fill", "wnd[0]/usr/cntl/shell", "42", "--row", "3",
                                    "--column", "AMOUNT", "--checkbox"});
-    REQUIRE(grid == std::vector<std::string>{"--read-only", "fill", "wnd[0]/usr/cntl/shell", "<redacted>", "--row", "3",
+    REQUIRE(grid == std::vector<std::string>{"--read-only", "element", "fill", "wnd[0]/usr/cntl/shell", "<redacted>", "--row", "3",
                                              "--column", "AMOUNT", "--checkbox"});
 }
 
 TEST_CASE("redact_argv leaves fill --clear untouched", "[audit]") {
-    const std::vector<std::string> argv{"fill", "wnd[0]/usr/txtX", "--clear"};
+    const std::vector<std::string> argv{"element", "fill", "wnd[0]/usr/txtX", "--clear"};
     REQUIRE(redact_argv(argv) == argv);
 }
 
 TEST_CASE("redact_argv masks sensitive option values", "[audit]") {
-    REQUIRE(redact_argv({"login", "--password", "x", "--connection", "0"}) ==
-            std::vector<std::string>{"login", "--password", "<redacted>", "--connection", "0"});
-    REQUIRE(redact_argv({"login", "--token=abc"}) == std::vector<std::string>{"login", "--token=<redacted>"});
+    REQUIRE(redact_argv({"session", "login", "--password", "x", "--connection", "0"}) ==
+            std::vector<std::string>{"session", "login", "--password", "<redacted>", "--connection", "0"});
+    REQUIRE(redact_argv({"session", "login", "--token=abc"}) == std::vector<std::string>{"session", "login", "--token=<redacted>"});
     REQUIRE(redact_argv({"x", "--client-secret", "s", "--api-key=k"}) ==
             std::vector<std::string>{"x", "--client-secret", "<redacted>", "--api-key=<redacted>"});
     // A sensitive flag followed by another option must not swallow it.
-    REQUIRE(redact_argv({"login", "--password-stdin", "--connection", "1"}) ==
-            std::vector<std::string>{"login", "--password-stdin", "--connection", "1"});
+    REQUIRE(redact_argv({"session", "login", "--password-stdin", "--connection", "1"}) ==
+            std::vector<std::string>{"session", "login", "--password-stdin", "--connection", "1"});
 }
 
 TEST_CASE("redact_argv handles JSON-array style values", "[audit]") {
     const auto out = redact_argv({"x", "--secret", "[\"a\",\"b\"]", "--items", "[\"a\",\"b\"]"});
     REQUIRE(out == std::vector<std::string>{"x", "--secret", "<redacted>", "--items", "[\"a\",\"b\"]"});
-    const auto fill = redact_argv({"fill", "wnd[0]/usr/txtX", "[\"pw\"]"});
-    REQUIRE(fill[2] == "<redacted>");
+    const auto fill = redact_argv({"element", "fill", "wnd[0]/usr/txtX", "[\"pw\"]"});
+    REQUIRE(fill[3] == "<redacted>");
 }
 
 TEST_CASE("redact_argv keeps the login credentials file path and search terms", "[audit]") {
-    const std::vector<std::string> argv{"login", "--credentials-file", "C:\\keys\\trial.cfg", "screen", "find",
+    const std::vector<std::string> argv{"session", "login", "--credentials-file", "C:\\keys\\trial.cfg", "screen", "find",
                                         "--text-contains", "Invoice"};
     REQUIRE(redact_argv(argv) == argv);
 }
 
 TEST_CASE("redact_argv enforces element and array limits", "[audit]") {
-    const auto long_out = redact_argv({"get", std::string(2000, 'a')});
-    REQUIRE(long_out[1].size() == 512);
+    const auto long_out = redact_argv({"element", "get", std::string(2000, 'a')});
+    REQUIRE(long_out[2].size() == 512);
 
     std::vector<std::string> many(200, "x");
     const auto out = redact_argv(many);
@@ -167,7 +167,7 @@ TEST_CASE("format_record emits one parseable line with fixed key order", "[audit
                                              "duration_ms", "audit_source"});
     REQUIRE(j["ts"] == "2026-09-29T12:34:56.789Z");
     REQUIRE(j["v"] == 1);
-    REQUIRE(j["argv"][2] == "<redacted>");
+    REQUIRE(j["argv"][3] == "<redacted>");
     REQUIRE(j["sap"]["system"] == "A4H");
     REQUIRE(j["batch_line"] == 3);
     REQUIRE(j["audit_source"] == "cli");
@@ -257,7 +257,7 @@ TEST_CASE("AuditSink concurrent appends never interleave", "[audit]") {
         threads.emplace_back([&, t] {
             for (int i = 0; i < kPerThread; ++i) {
                 AuditRecord r = sample_record();
-                r.argv = {"get", "wnd[0]/usr/txt" + std::to_string(t) + "-" + std::to_string(i)};
+                r.argv = {"element", "get", "wnd[0]/usr/txt" + std::to_string(t) + "-" + std::to_string(i)};
                 sink.append(r);
             }
         });
@@ -341,4 +341,44 @@ TEST_CASE("CLI --audit-required fails before running when the file is unwritable
     const auto output = run_cli_capture({"fairyfly", "--audit-required", "--help"}, code);
     REQUIRE(code == 1);
     REQUIRE(output.find("AUDIT_UNAVAILABLE") != std::string::npos);
+}
+
+TEST_CASE("AuditRecord source defaults to cli and MCP fields are omitted when empty", "[audit]") {
+    AuditRecord r = sample_record();
+    REQUIRE(r.source == "cli");
+    const auto j = json::parse(format_record(r));
+    REQUIRE(j["audit_source"] == "cli");
+    REQUIRE_FALSE(j.contains("tool"));
+    REQUIRE_FALSE(j.contains("client"));
+    REQUIRE_FALSE(j.contains("request_id"));
+}
+
+TEST_CASE("AuditRecord MCP fields are emitted after audit_source in stable order", "[audit]") {
+    AuditRecord r = sample_record();
+    r.source = "mcp";
+    r.tool = "gui_element_fill";
+    r.client = "claude-code/1.2.3";
+    r.request_id = "42";
+    const auto j = nlohmann::ordered_json::parse(format_record(r));
+    std::vector<std::string> keys;
+    for (auto it = j.begin(); it != j.end(); ++it) keys.push_back(it.key());
+    REQUIRE(keys.size() == 18);
+    REQUIRE(keys[14] == "audit_source");
+    REQUIRE(keys[15] == "tool");
+    REQUIRE(keys[16] == "client");
+    REQUIRE(keys[17] == "request_id");
+    REQUIRE(j["audit_source"] == "mcp");
+}
+
+TEST_CASE("AuditRecord with huge MCP fields stays within the record cap", "[audit]") {
+    AuditRecord r = sample_record();
+    r.source = "mcp";
+    r.tool = std::string(5000, 't');
+    r.client = std::string(5000, 'c');
+    r.request_id = std::string(5000, 'r');
+    const auto line = format_record(r);
+    REQUIRE(line.size() <= 16 * 1024);
+    const auto j = json::parse(line);
+    REQUIRE(j["tool"].get<std::string>().size() <= 64);
+    REQUIRE(j["request_id"].get<std::string>().size() <= 64);
 }

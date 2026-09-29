@@ -1,4 +1,4 @@
-// CommandHandler entry points for send-key, close and screen menu.
+// CommandHandler entry points for key send, popup close and menu list/select.
 #include "include/cli_handler.h"
 #include "include/com_automation_engine.h"
 #include "include/action_argument_checks.h"
@@ -35,7 +35,7 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
         return result_from_error(conn_result);
     }
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-    if (!com_engine) return engine_mismatch("send-key");
+    if (!com_engine) return engine_mismatch("key send");
     if (read_only_ && *vkey == 0) {
         // The target window decides: Enter on a popup may confirm a Save/Delete dialog.
         const std::string target = (window.empty() || window == "@active")
@@ -66,7 +66,7 @@ Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
         return result_from_error(conn_result);
     }
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-    if (!com_engine) return engine_mismatch("close");
+    if (!com_engine) return engine_mismatch("popup close");
 
     Result result = com_engine->close_popup(vkey);
     if (result.status == Result::Status::Success) {
@@ -97,7 +97,7 @@ Result CommandHandler::handle_screen_menu(const std::string& select_path, const 
         return result_from_error(conn_result);
     }
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-    if (!com_engine) return engine_mismatch("screen menu");
+    if (!com_engine) return engine_mismatch("menu");
 
     // Enumeration never selects; selection only happens for an explicit --select path.
     Result result = select_path.empty() ? com_engine->read_menu(window)

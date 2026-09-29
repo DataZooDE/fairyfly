@@ -1,5 +1,7 @@
 # Error Log & Foundational Improvements Register
 
+> Note (0.2.0): the CLI was restructured into noun/verb groups and the MCP tools were renamed. Entries below use the command names of their time (`tcode`, `click`, `fill`, `list`, `screen menu`, `send-key`, `serve`, `sap_*`) and are left as written; see [MIGRATION_0.2.md](MIGRATION_0.2.md) for the mapping to the current names.
+
 This is a historical record of errors and fixes encountered while testing Fairyfly against SAP GUI. A dated entry may describe a past limitation or an untested variant; it is not by itself a current bug or todo. The maintained list of concrete unfinished work is [OPEN_WORK.md](OPEN_WORK.md).
 
 ---
@@ -1891,3 +1893,21 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 - **Implementation**: pure `plan_multiple_logon`, `make_multiple_logon_fail_error` and `make_multiple_logon_annotation` in `src/login_flow.*` (unit-tested in `tests/unit/test_login_flow.cpp`); the COM part is in `CommandHandler::handle_login`. `launch --login` passes the option through and keeps `connection_open` from the login error when it is set.
 - **Status**: implemented with unit tests; live verification pending (orchestrator).
 - **Live verification (2026-09-29, Bigfox)**: `fail` (default), `terminate` and `keep` verified end to end through `launch Bigfox --login`, the read-only refusal of `end` verified, `end` itself unit-tested only. Findings: the second dialog line `txtMULTI_LOGON_TEXT2` (terminal, since) is optional, so `dialog.terminal` may be empty; `dialog.user` was padded with blanks and is now trimmed. `disconnect --connection N --close-session` closes a test session cleanly.
+
+---
+
+### [IMP-012] MCP server (`fairyfly serve`)
+
+- **Design**: `fairyfly serve` is an MCP server over stdio (newline-delimited JSON-RPC 2.0, nothing but protocol messages on stdout, logs on stderr). Reader thread plus a main thread that owns COM; tool calls run one at a time (queue of 16, soft 120 s timeout answered as `CALL_TIMEOUT`, `SERVER_BUSY` while a timed-out call is still running). 20 `sap_*` tools (`sap_doctor`, `sap_sessions`, `sap_connections`, `sap_attach`, `sap_launch`, `sap_login`, `sap_tcode`, `sap_screen_read`, `sap_screen_find`, `sap_get`, `sap_menu_list`, `sap_capture`, `sap_credentials_list`, `sap_click`, `sap_send_key`, `sap_close_popup`, `sap_press_f4`, `sap_menu_select`, `sap_disconnect`, `sap_batch`) plus `sap_fill` in write mode. Module map in [MCP_DESIGN.md](MCP_DESIGN.md), user guide in [MCP.md](MCP.md).
+- **Decisions**:
+  - Read-only guard is the default; `serve --allow-write` is opt-in and `FAIRYFLY_READ_ONLY=1` is a hard cap. Write-only tools are hidden from `tools/list`.
+  - Legacy handshake only (2024-11-05 to 2025-11-25); `server/discover` answers -32601 so dual-era clients fall back to `initialize`.
+  - `sap_batch` is included; every item passes the same policy, rate limit and audit path as a standalone call (one audit record per item, per-item errors, `stop_on_error`), and nesting is rejected.
+  - Tools are mapped to CLI argv and dispatched through the normal command registry on the shared handler in batch mode; no command is reimplemented for MCP.
+  - No credentials over MCP: no tool takes a password; logon uses the Credential Manager entry (`credentials set` in a console, then `sap_login` or `sap_launch login=true`); `multiple_logon=end` and `close_session` need write mode.
+  - Hand-written protocol layer (JSON-RPC parsing, transport, server loop) on nlohmann::json instead of an MCP SDK: the needed surface is small and stdout hygiene and threading stay under our control.
+  - Screen text is untrusted: screen results start with an untrusted-data header, and the server instructions say so. Results are capped at 60000 characters, images at 2 MiB (one retry at half scale).
+  - The audit trail records each tool call with `audit_source: "mcp"`, `tool`, `client`, `request_id`; never results. `serve` writes `started` and `stopped` records.
+- **Findings from the first live session**: a call to a tool that is hidden in read-only mode now returns `TOOL_UNAVAILABLE_READ_ONLY` with a policy message; when the audit trail is required and cannot be written, the call returns `AUDIT_UNAVAILABLE` (the action already ran); `sap_capture.scale` is numeric (0.01-1.0, or a width in pixels above 1).
+- **Verification**: unit tests (protocol, catalog, dispatcher, policy, audit) and `tests/integration/mcp_smoke.ps1`, a live script that speaks JSON-RPC to a spawned server (protocol errors, read tools, read-only refusals, batch, audit assertions, write-mode fill redaction, env hard cap).
+- **Status**: implemented; live verification by the orchestrator.

@@ -24,7 +24,7 @@ if(WIN32)
 endif()
 
 # Set the project name and version
-project(fairyfly VERSION 0.1.0 LANGUAGES CXX)
+project(fairyfly VERSION 0.2.0 LANGUAGES CXX)
 
 # Require C++20
 set(CMAKE_CXX_STANDARD 20)
@@ -67,6 +67,8 @@ find_package(PNG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 
 # Platform-specific settings
 if(WIN32)
@@ -135,7 +137,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/get_command.cpp
     src/commands/list_command.cpp
     src/commands/screen_command.cpp
-    src/commands/serve_command.cpp
+    src/commands/mcp_command.cpp
+    src/commands/menu_command.cpp
+    src/commands/command_groups.cpp
+    src/commands/cli_app.cpp
+    src/command_table.cpp
     src/commands/press_f4_command.cpp
     src/commands/doctor_command.cpp
     src/commands/send_key_command.cpp
@@ -149,6 +155,44 @@ set(FAIRYFLY_LIB_SOURCES
     src/console_prompt.cpp
     src/commands/credentials_command.cpp
     src/menu_navigation.cpp
+    src/mcp/json_rpc.cpp
+    src/mcp/transport.cpp
+    src/mcp/server.cpp
+    src/mcp/policy.cpp
+    src/mcp/tool_catalog.cpp
+    src/mcp/tool_catalog_write.cpp
+    src/mcp/result_shaper.cpp
+    src/mcp/dispatcher.cpp
+    src/mcp/mcp_audit.cpp
+    src/mcp/run_mcp.cpp
+    src/mcp/http_tray_runner.cpp
+    src/iis/validators.cpp
+    src/iis/web_config.cpp
+    src/iis/iis_service.cpp
+    src/iis/powershell_host.cpp
+    src/commands/mcp_iis_command.cpp
+    src/auth/crypto.cpp
+    src/auth/ip.cpp
+    src/auth/secret_backend.cpp
+    src/auth/token_store.cpp
+    src/auth/authenticator.cpp
+    src/auth/authorize.cpp
+    src/auth/token_cli.cpp
+    src/commands/mcp_token_command.cpp
+    src/mcp/call_executor.cpp
+    src/mcp/protocol_session.cpp
+    src/mcp/http_endpoint.cpp
+    src/mcp/http_server.cpp
+    src/mcp/http_auth.cpp
+    src/config/mcp_config.cpp
+    src/config/client_config.cpp
+    src/config/mcp_doctor.cpp
+    src/tray/tray_model.cpp
+    src/tray/tray_controller.cpp
+    src/tray/tray_win32.cpp
+    src/commands/mcp_config_command.cpp
+    src/commands/mcp_client_config_command.cpp
+    src/commands/mcp_doctor_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
@@ -174,6 +218,8 @@ target_link_libraries(fairyfly_core PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     fmt::fmt
+    httplib::httplib
+    yaml-cpp::yaml-cpp
 )
 
 # Windows-specific COM libraries
@@ -185,6 +231,11 @@ if(WIN32)
         user32
         uiautomationcore
         advapi32
+        bcrypt
+        ws2_32
+        shell32
+        ws2_32
+        wtsapi32
     )
 endif()
 
@@ -196,7 +247,13 @@ else()
 endif()
 
 # Create executable (only main.cpp, links against library)
-add_executable(fairyfly src/main.cpp)
+if(WIN32)
+    # Tray icon resources (assets/icons via src/tray/fairyfly.rc)
+    enable_language(RC)
+    add_executable(fairyfly src/main.cpp src/tray/fairyfly.rc)
+else()
+    add_executable(fairyfly src/main.cpp)
+endif()
 
 # Link executable against core library (all dependencies inherited)
 target_link_libraries(fairyfly PRIVATE fairyfly_core)

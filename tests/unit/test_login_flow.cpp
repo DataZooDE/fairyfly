@@ -131,12 +131,12 @@ TEST_CASE("multiple-logon fail error and success annotation shapes", "[login][mu
 
 TEST_CASE("CLI validates --multiple-logon without touching SAP", "[login][multiple-logon]") {
     int code = 0;
-    auto out = run_cli_text({"fairyfly", "--no-audit", "login", "--multiple-logon", "bogus"}, code);
+    auto out = run_cli_text({"fairyfly", "--no-audit", "session", "login", "--multiple-logon", "bogus"}, code);
     REQUIRE(code != 0);
     REQUIRE(out.find("bogus") != std::string::npos);
-    out = run_cli_text({"fairyfly", "--no-audit", "login", "--multiple-logon", "END"}, code);
+    out = run_cli_text({"fairyfly", "--no-audit", "session", "login", "--multiple-logon", "END"}, code);
     REQUIRE(code != 0);
-    out = run_cli_text({"fairyfly", "--no-audit", "launch", "SomeConn", "--multiple-logon", "keep"}, code);
+    out = run_cli_text({"fairyfly", "--no-audit", "session", "launch", "SomeConn", "--multiple-logon", "keep"}, code);
     REQUIRE(code != 0);
     REQUIRE(out.find("INVALID_ARGUMENT") != std::string::npos);
 }

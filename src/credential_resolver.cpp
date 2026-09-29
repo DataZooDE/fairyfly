@@ -46,7 +46,7 @@ ResultT<ResolvedLogin> resolve_login_credentials(const LoginSource& source,
         Resolved result = parse_source(*file, "file");
         if (result.status == Resolved::Status::Success) {
             result.value.warnings.push_back(
-                "deprecated: use `fairyfly credentials import-env` then `login`");
+                "deprecated: use `fairyfly credentials import-env` then `session login`");
         }
         return result;
     }

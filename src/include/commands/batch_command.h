@@ -19,8 +19,8 @@ struct BatchLine {
 /// Parse one batch input line into argv. Pure function (no SAP, no I/O).
 ///
 /// Accepted formats:
-///   - JSON array of strings:   ["tcode","SM37"]
-///   - shell-style words:       tcode SM37 / click "wnd[0]/usr/btn[1]" / fill a\ b
+///   - JSON array of strings:   ["transaction","start","SM37"]
+///   - shell-style words:       transaction start SM37 / element click "wnd[0]/usr/btn[1]" / element fill ID a\ b
 ///     Words are split on blanks. Double quotes group a word (inside quotes \" and \\
 ///     are escapes). Outside quotes a backslash escapes a following space, double quote
 ///     or backslash; before any other character it is kept literally (Windows paths work).

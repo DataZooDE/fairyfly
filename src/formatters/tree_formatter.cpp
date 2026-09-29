@@ -96,7 +96,7 @@ void TreeFormatter::format_to_markdown(const json& element_json, std::ostringstr
     }
 
     // Add usage hint for tree interaction
-    oss << "\n_Select node_: `fairyfly click '" << id << "' --row <row_number>`\n";
+    oss << "\n_Select node_: `fairyfly element click '" << id << "' --row <row_number>`\n";
     oss << "_Showing " << nodes.size() << " top-level nodes_\n\n";
 }
 

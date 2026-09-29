@@ -7,14 +7,14 @@ namespace commands {
 
 class GetCommand : public CommandBase {
 public:
-    std::string name() const override { return "get"; }
+    std::string name() const override { return "element get"; }
 
     std::string description() const override {
         return "Read field value";
     }
 
     CLI::App* setup_cli(CLI::App& app) override {
-        cmd_ = app.add_subcommand(name(), description());
+        cmd_ = add_leaf(app, {"element","get"});
         cmd_->add_option("element", element_, "Element ID")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

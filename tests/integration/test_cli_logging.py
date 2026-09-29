@@ -16,7 +16,7 @@ class CliLoggingTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["FFLYLOG_LEVEL"] = "error"
         process = subprocess.run(
-            [str(CLI), "list"], capture_output=True, text=True,
+            [str(CLI), "session", "list"], capture_output=True, text=True,
             encoding="utf-8", errors="replace", env=environment, timeout=30,
         )
         self.assertEqual(process.returncode, 0)
