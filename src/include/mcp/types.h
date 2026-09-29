@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "include/core.h"  // fairyfly::Result
+#include "include/mcp/principal.h"
 
 namespace fairyfly::mcp {
 
@@ -61,6 +62,9 @@ struct CallContext {
     json request_id;                       ///< JSON-RPC id of the tools/call request
     std::optional<json> progress_token;    ///< params._meta.progressToken when supplied
     std::function<bool()> cancelled;       ///< polled by long calls; true after notifications/cancelled
+    Principal principal;                   ///< caller identity (default: local stdio principal)
+    ProtocolEra era = ProtocolEra::Legacy; ///< protocol era of this request
+    bool http = false;                     ///< transport: false = stdio
 };
 
 /// Backend of the server: exposes tools and runs them. Called ONLY from the main (COM) thread,
@@ -157,6 +161,10 @@ struct McpCallRecord {
     std::string request_id;            ///< JSON-RPC id rendered as text
     long long duration_ms = 0;
     bool read_only = true;
+    std::string principal;             ///< token name ("stdio" locally)
+    std::string remote_addr;           ///< client address for HTTP, "" for stdio
+    std::string transport = "stdio";   ///< "stdio" | "http"
+    std::string era;                   ///< "legacy" | "stateless" | ""
 };
 
 /// Receives one record per tools/call. Never throws.
