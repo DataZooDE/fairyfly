@@ -137,7 +137,13 @@ int run_serve(const ServeOptions& options, const std::function<cli::CommandHandl
     server_options.call_timeout_ms = options.call_timeout_ms;
 
     McpServer server(transport, dispatcher, server_options);
-    return server.run();
+    // Audit lifecycle records (only when auditing is enabled). Required mode: probe first.
+    if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
+        return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+    append_serve_event(sink, "started", read_only);
+    const int exit_code = server.run();
+    append_serve_event(sink, "stopped", read_only);
+    return exit_code;
 }
 
 } // namespace fairyfly::mcp

@@ -8,9 +8,9 @@ namespace commands {
 CLI::App* ServeCommand::setup_cli(CLI::App& app) {
     cmd_ = app.add_subcommand(name(), description());
     cmd_->add_flag("--read-only", options_.read_only,
-                   "Serve read-only tools only (default unless --allow-write); FAIRYFLY_READ_ONLY=1 forces it");
+                   "Read-only guard mode (default): state-changing actions are refused, write tools are hidden; FAIRYFLY_READ_ONLY=1 forces it");
     cmd_->add_flag("--allow-write", options_.allow_write,
-                   "Expose state-changing tools (click, fill, tcode, ...)");
+                   "Enable write mode: expose sap_fill, allow multiple_logon=end and close_session, turn the read-only guard off");
     cmd_->add_option("--default-connection", default_connection_,
                      "Connection index used when a tool call omits 'connection'");
     cmd_->add_option("--format", options_.format, "Text format of tool results: markdown (default), json")

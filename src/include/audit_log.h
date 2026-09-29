@@ -37,6 +37,10 @@ struct AuditRecord {
     std::string error_code;            ///< machine code only (never the message)
     int exit_code = 0;
     long long duration_ms = 0;
+    std::string source = "cli";        ///< "cli" | "mcp" (emitted as audit_source)
+    std::string tool;                  ///< MCP tool name (emitted only when non-empty)
+    std::string client;                ///< MCP client "name/version" (emitted only when non-empty)
+    std::string request_id;            ///< JSON-RPC id as text (emitted only when non-empty)
 };
 
 enum class Mode { Enabled, Disabled, Required };
