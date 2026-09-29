@@ -448,7 +448,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                waiter](CallState& state) -> json {
         json out;
         if (pending.method == "tools/list") {
-            out = tools_list_message(provider_, pending, true);
+            out = tools_list_message(provider_, pending, true, &principal);
         } else {
             try {
                 provider_.set_client_info(client_info.is_object() ? client_info : json::object());

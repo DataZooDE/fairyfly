@@ -455,6 +455,58 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
     }
 }
 
+TEST_CASE("HTTP tools/list follows the caller's principal", "[mcp][http][era]") {
+    // A provider that filters by scope: tools whose name is gui_<scope>_... belong to that scope.
+    class ScopedProvider : public FakeProvider {
+    public:
+        std::vector<ToolDef> list_tools_for(const Principal& principal) const override {
+            std::vector<ToolDef> out;
+            for (const auto& d : list_tools())
+                if (principal.all_scopes || principal.scopes.count(d.name.substr(4, d.name.find('_', 4) - 4)) > 0) out.push_back(d);
+            return out;
+        }
+    };
+    ScopedProvider scoped;
+    TokenAuth auth;  // "Bearer good" -> principal alice with scopes {"screen"}
+    CallExecutor exec(16, 5000);
+    HttpEndpointOptions opts;
+    opts.server.name = "fairyfly";
+    opts.server.version = "1";
+    opts.poll_ms = 10;
+    HttpEndpoint endpoint(opts, exec, scoped, &auth);
+    std::thread loop([&] { exec.run(); });
+
+    HttpRequest req;
+    req.method = "POST";
+    req.path = "/mcp";
+    req.headers["Host"] = "127.0.0.1:8383";
+    req.headers["Content-Type"] = "application/json";
+    req.headers["Authorization"] = "Bearer good";
+    req.peer_addr = "127.0.0.1";
+    req.body = json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/list"}}.dump();
+    const auto res = endpoint.handle(req);
+    exec.request_stop();
+    loop.join();
+
+    REQUIRE(res.status == 200);
+    std::vector<std::string> names;
+    const json parsed = json::parse(res.body);
+    for (const auto& t : parsed["result"]["tools"]) names.push_back(t["name"]);
+    // alice has the scope "screen": only gui_screen_read is visible, the rest of the fake catalog is hidden
+    CHECK(names == std::vector<std::string>{"gui_screen_read"});
+}
+
+TEST_CASE("HTTP tools/list without a principal-aware provider stays complete and sorted", "[mcp][http][era]") {
+    Fixture f;  // FakeProvider keeps the default list_tools_for() (= list_tools())
+    const auto res = f.endpoint.handle(f.post(Fixture::rpc("tools/list")));
+    REQUIRE(res.status == 200);
+    std::vector<std::string> names;
+    const json parsed = body_of(res);
+    for (const auto& t : parsed["result"]["tools"]) names.push_back(t["name"]);
+    CHECK(names.size() == 5);
+    CHECK(std::is_sorted(names.begin(), names.end()));
+}
+
 TEST_CASE("initialize negotiates against all served versions; the era follows", "[mcp][http][era]") {
     Fixture f;
     // stateless version: negotiated as such and answered in the stateless era

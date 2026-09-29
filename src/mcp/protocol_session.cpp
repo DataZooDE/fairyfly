@@ -43,10 +43,10 @@ json make_initialize_result(const ServerOptions& options, const std::string& ver
         {"instructions", options.instructions}};
 }
 
-json tools_list_message(ToolProvider& provider, const Pending& p, bool sort_by_name) {
+json tools_list_message(ToolProvider& provider, const Pending& p, bool sort_by_name, const Principal* principal) {
     if (p.params.is_object() && p.params.contains("cursor"))
         return make_error(p.id, kInvalidParams, "Invalid cursor: pagination is not supported");
-    std::vector<ToolDef> defs = provider.list_tools();
+    std::vector<ToolDef> defs = principal ? provider.list_tools_for(*principal) : provider.list_tools();
     if (sort_by_name)
         std::stable_sort(defs.begin(), defs.end(), [](const ToolDef& a, const ToolDef& b) { return a.name < b.name; });
     json tools = json::array();
