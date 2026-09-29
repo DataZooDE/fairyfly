@@ -17,7 +17,7 @@ Since 0.2.0 the CLI is a noun/verb tree (see [docs/MIGRATION_0.2.md](docs/MIGRAT
 | `popup` | `close` |
 | `transaction` | `start` |
 | `credentials` | `list`, `set`, `delete`, `import-env` |
-| `mcp` | starts the MCP server; `mcp tools [--markdown]` prints the tool table |
+| `mcp` | starts the MCP server (stdio, or `--http`, `--tray`); `mcp tools [--markdown]`, `mcp token`, `mcp iis`, `mcp config`, `mcp client-config`, `mcp doctor` |
 | root verbs | `doctor`, `batch` |
 
 Global options (`--log-level`, `-v`, `--output`, `--verbose-errors`, `--read-only`, `--no-audit`, `--audit-required`, `--version`) work before and after the noun/verb: `fairyfly screen read --read-only` is the same as `fairyfly --read-only screen read`. `fairyfly --help` groups the commands by section; `fairyfly <group> --help` lists the verbs.
@@ -85,13 +85,18 @@ Every invocation, and every line inside `batch`, appends one JSON record to `%LO
 
 ## MCP server
 
-`fairyfly mcp` is a Model Context Protocol server over stdio with 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path (`gui_screen_read`, `gui_element_click`, `gui_transaction_start`, ..., `gui_batch`, and `gui_element_fill` in write mode). It starts in read-only guard mode; `mcp --allow-write` enables write mode, `mcp --tools screen,element` exposes only some tool families, and `FAIRYFLY_READ_ONLY=1` is a hard cap. Every tool call is audited (`audit_source: "mcp"`); no tool accepts a password.
+`fairyfly mcp` is a Model Context Protocol server with 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path (`gui_screen_read`, `gui_element_click`, `gui_transaction_start`, ..., `gui_batch`, and `gui_element_fill` in write mode). It starts in read-only guard mode; `mcp --allow-write` enables write mode, `mcp --tools screen,element` exposes only some tool families, and `FAIRYFLY_READ_ONLY=1` is a hard cap. Every tool call is audited (`audit_source: "mcp"`); no tool accepts a password. Two transports:
+
+- **stdio** (default): a local MCP client launches it. Do not run it in an interactive console.
+- **HTTP** (`mcp --http`, since 0.2.0): plain `POST /mcp` on `127.0.0.1:8383` for remote clients (for example Claude Code on Linux), with named bearer tokens (`mcp token create|list|revoke|rotate`, stored hashed in the Windows Credential Manager) that carry scopes per tool family, a read-only flag, SAP system and T-code allowlists, a rate limit, an IP binding and an expiry. TLS is terminated by an IIS reverse proxy that `mcp iis setup|status|remove` configures. It serves both MCP HTTP protocol generations (legacy 2025-06-18/2025-11-25 and stateless 2026-07-28) with optional SSE. SAP GUI needs an interactive desktop, so it is a console app, or with `--tray` a system-tray app with logon autostart, not a Windows service. Also: YAML config (`mcp config init|show|validate|path`), paste-ready client snippets (`mcp client-config`) and `mcp doctor`.
 
 ~~~powershell
-claude mcp add fairyfly -- C:\path\to\fairyfly.exe mcp
+claude mcp add fairyfly -- C:\path\to\fairyfly.exe mcp                      # local, stdio
+fairyfly mcp token create linux-reader --scope session,connection,screen   # remote: create a token (shown once)
+fairyfly mcp --http                                                          # remote: serve on 127.0.0.1:8383
 ~~~
 
-Do not run `mcp` in an interactive console; an MCP client launches it. Setup for Claude Code, Claude Desktop and MCP Inspector, the full tool list (`fairyfly mcp tools`), options, safety model, audit trail and troubleshooting are in [docs/MCP.md](docs/MCP.md); example configs are under docs/examples/. The live check is `tests/integration/mcp_smoke.ps1`.
+Setup for Claude Code, Claude Desktop and MCP Inspector, the full tool list (`fairyfly mcp tools`), options, safety model, audit trail and troubleshooting are in [docs/MCP.md](docs/MCP.md); example configs are under docs/examples/. The remote deployment (architecture, threat model, protocol and status codes, client cookbook, Linux check list) is in [docs/MCP_REMOTE.md](docs/MCP_REMOTE.md), with [docs/MCP_IIS.md](docs/MCP_IIS.md) for IIS and [docs/MCP_TRAY.md](docs/MCP_TRAY.md) for the tray, YAML config, client-config and doctor. Live checks: `tests/integration/mcp_smoke.ps1` (stdio) and `tests/integration/mcp_http_smoke.ps1` (HTTP).
 
 ## Build
 
@@ -123,6 +128,6 @@ The Makefile provides build shortcuts. Routine builds target the CLI; test targe
 
 ## Status
 
-The CLI and its test suite are under active development. The MCP server is stdio only (no HTTP transport, no `2026-07-28` handshake); cross-platform SAP GUI support remains future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
+The CLI and its test suite are under active development. Version 0.2.0. The MCP server offers stdio and, for remote use, HTTP behind IIS (stateless 2026-07-28 and legacy protocol eras); cross-platform SAP GUI support remains future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
 
 SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.
