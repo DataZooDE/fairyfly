@@ -76,6 +76,12 @@ private:
     mutable bool element_type_cached_ = false;
     mutable bool label_cached_ = false;
     mutable std::string cached_label_;
+    // Children collection and its count are fetched at most once per wrapper (one
+    // wrapper is created per FindById, so lifetime is a single read).
+    mutable bool children_fetched_ = false;
+    mutable IDispatchPtr children_dispatch_;
+    mutable int children_count_ = -1;
+    IDispatchPtr children_dispatch_cached() const;
 
 public:
     /// Classify element type from type string

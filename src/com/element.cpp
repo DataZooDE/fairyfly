@@ -220,10 +220,9 @@ bool ComGuiElement::set_text(const std::string& text) {
 bool ComGuiElement::is_enabled() const {
     if (!dispatch_) return false;
 
-    // Try to get Enabled property via DISPID
-    _bstr_t prop(L"Enabled");
+    // Try to get Enabled property via DISPID (per-type cache, including misses)
     DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, prop.GetBSTR(), &dispid);
+    HRESULT hr = resolve_dispid(L"Enabled", &dispid);
 
     if (FAILED(hr)) {
         // Property doesn't exist - most SAP GUI elements don't have "Enabled"
@@ -249,6 +248,10 @@ bool ComGuiElement::is_enabled() const {
 }
 
 bool ComGuiElement::is_visible() const {
+    // Known behavior: "Visible" is not exposed by SAP GUI scripting objects, so this
+    // lookup fails silently (get_bool_property returns false) and every element is
+    // reported "visible": false. That output is preserved on purpose; the DISPID miss
+    // is negative-cached per type so it costs no COM round trips after the first.
     return get_bool_property(L"Visible");
 }
 
@@ -494,16 +497,28 @@ bool ComGuiElement::is_changeable() const {
     }
 }
 
+IDispatchPtr ComGuiElement::children_dispatch_cached() const {
+    if (!children_fetched_) {
+        // Throws on COM failure; nothing is cached in that case.
+        children_dispatch_ = get_dispatch_property(L"Children");
+        children_fetched_ = true;
+    }
+    return children_dispatch_;
+}
+
 int ComGuiElement::get_child_count() const {
     if (!dispatch_) return 0;
+    if (children_count_ >= 0) return children_count_;
 
     try {
-        auto children = get_dispatch_property(L"Children");
+        auto children = children_dispatch_cached();
         if (!children) {
             spdlog::debug("get_child_count: Children property is null for {}", get_id());
+            children_count_ = 0;
             return 0;
         }
         int count = ::fairyfly::sap::get_int_property(children, "Count");
+        children_count_ = count;
         if (count > 0) {
             spdlog::debug("get_child_count: {} has {} children", get_id(), count);
         }
@@ -533,7 +548,7 @@ SapGuiCollection<ComGuiElement> ComGuiElement::children() const {
     }
 
     try {
-        auto children_dispatch = get_dispatch_property(L"Children");
+        auto children_dispatch = children_dispatch_cached();
         if (!children_dispatch) {
             spdlog::debug("children(): Children property is null");
             return SapGuiCollection<ComGuiElement>(nullptr);

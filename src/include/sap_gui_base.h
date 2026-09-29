@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 #include <windows.h>
 #include <comdef.h>
 
@@ -388,6 +389,69 @@ public:
         return nullptr;
     }
 
+
+    /// Walk the collection with a single _NewEnum and one IEnumVARIANT::Next call per
+    /// child (item(i) costs ~4-5 COM round trips per index). The callback receives a
+    /// std::shared_ptr<T> for every VT_DISPATCH child, in enumeration order (the same
+    /// order item(0), item(1), ... yields), and may return bool (false stops the walk)
+    /// or void. Returns true if the enumerator could be obtained (even if the collection
+    /// was empty or the callback stopped early), false if callers should fall back to item(i).
+    template<class F>
+    bool for_each(F&& fn) const {
+        if (!collection_) return false;
+
+        _variant_t enum_var;
+        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+        HRESULT hr = collection_->Invoke(DISPID_NEWENUM, IID_NULL, LOCALE_USER_DEFAULT,
+                                         DISPATCH_PROPERTYGET | DISPATCH_METHOD,
+                                         &no_params, &enum_var, nullptr, nullptr);
+        if (FAILED(hr)) return false;
+
+        IUnknown* punk = nullptr;
+        if (enum_var.vt == VT_UNKNOWN && enum_var.punkVal) {
+            punk = enum_var.punkVal;
+        } else if (enum_var.vt == VT_DISPATCH && enum_var.pdispVal) {
+            punk = enum_var.pdispVal;
+        }
+        if (!punk) return false;
+
+        IEnumVARIANT* enumerator = nullptr;
+        hr = punk->QueryInterface(IID_IEnumVARIANT, (void**)&enumerator);
+        if (FAILED(hr) || !enumerator) return false;
+
+        for (;;) {
+            VARIANT item_var;
+            VariantInit(&item_var);
+            ULONG fetched = 0;
+            hr = enumerator->Next(1, &item_var, &fetched);
+            if (FAILED(hr) || fetched == 0) {
+                VariantClear(&item_var);
+                break;
+            }
+            std::shared_ptr<T> child;
+            if (item_var.vt == VT_DISPATCH && item_var.pdispVal) {
+                IDispatchPtr item_dispatch(item_var.pdispVal, true);
+                child = std::make_shared<T>(item_dispatch);
+            }
+            VariantClear(&item_var);
+            if (!child) continue;
+
+            bool keep_going = true;
+            try {
+                if constexpr (std::is_void_v<decltype(fn(child))>) {
+                    fn(child);
+                } else {
+                    keep_going = static_cast<bool>(fn(child));
+                }
+            } catch (...) {
+                enumerator->Release();
+                throw;
+            }
+            if (!keep_going) break;
+        }
+        enumerator->Release();
+        return true;
+    }
 
     /// STL-compatible begin iterator
     iterator begin() { return iterator(collection_); }
