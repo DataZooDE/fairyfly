@@ -108,6 +108,7 @@ int run_serve(const ServeOptions& options, const std::function<cli::CommandHandl
     policy.max_result_chars = options.max_result_chars;
     policy.max_image_bytes = options.max_image_bytes;
     policy.max_calls_per_minute = options.max_calls_per_minute;
+    policy.audit_required = sink && sink->mode() == audit::Mode::Required;
 
     // Configure the shared handler once, on first use, from the main (COM) thread.
     auto configured = std::make_shared<bool>(false);

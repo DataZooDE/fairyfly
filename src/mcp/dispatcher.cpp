@@ -17,6 +17,7 @@
 #include "include/commands/command_registry.h"
 #include "include/element_renderers.h"
 #include "include/exceptions.h"
+#include "include/mcp/mcp_audit.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
@@ -160,6 +161,14 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
                              std::chrono::steady_clock::now() - started).count();
     if (hook_) {
         try { hook_(record); } catch (...) {}
+        // Required-audit mode: the action already ran, but the model and user must learn that it
+        // could not be recorded (mirrors the CLI's exit-code rule for --audit-required).
+        if (policy_.audit_required && mcp_audit_failed()) {
+            result = error_result("AUDIT_UNAVAILABLE",
+                                  "The action was carried out but could not be recorded in the audit trail "
+                                  "(audit is required). Tell the user and do not repeat the action.");
+            code = "AUDIT_UNAVAILABLE";
+        }
     }
     if (code_out) *code_out = result.is_error ? code : std::string();
     return result;

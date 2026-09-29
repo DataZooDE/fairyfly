@@ -69,6 +69,15 @@ class ToolProvider {
 public:
     virtual ~ToolProvider() = default;
     virtual std::vector<ToolDef> list_tools() const = 0;
+    /// True when `name` is a tool this provider can answer for, even if it is currently hidden from
+    /// list_tools() (for example write tools in read-only mode). The server answers unknown names
+    /// with the protocol error -32602; known-but-hidden names reach call_tool(), which returns a
+    /// model-readable isError result (TOOL_UNAVAILABLE_READ_ONLY). Default: listed tools only.
+    virtual bool has_tool(const std::string& name) const {
+        for (const auto& tool : list_tools())
+            if (tool.name == name) return true;
+        return false;
+    }
     virtual ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) = 0;
     /// Receives initialize.params.clientInfo (for auditing). Default: ignore.
     virtual void set_client_info(const json& client_info) { (void)client_info; }
@@ -94,6 +103,9 @@ struct Policy {
     std::size_t max_result_chars = 60000;    ///< truncation cap for text results
     std::size_t max_image_bytes = 2 * 1024 * 1024; ///< cap for base64-decoded image payloads
     int max_calls_per_minute = 120;          ///< RateLimiter budget
+    /// --audit-required / FAIRYFLY_AUDIT=required: a tool call whose audit record could not be
+    /// written is reported as AUDIT_UNAVAILABLE (the action itself already ran).
+    bool audit_required = false;
 };
 
 /// Parsed options of `fairyfly serve` (raw CLI values, before the env cap is applied).

@@ -114,6 +114,13 @@ public:
         boom.input_schema = json{{"type", "object"}};
         return {echo, slow, boom};
     }
+    /// Names that exist but are not listed (like write tools hidden in read-only mode).
+    std::vector<std::string> hidden;
+    bool has_tool(const std::string& name) const override {
+        for (const auto& h : hidden)
+            if (h == name) return true;
+        return ToolProvider::has_tool(name);
+    }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
         ++calls;
         if (name == "boom") throw std::runtime_error("kaboom");
@@ -334,6 +341,23 @@ TEST_CASE("MCP tools/call validates parameters", "[mcp][protocol]") {
     CHECK(unknown["error"]["code"] == kInvalidParams);
     CHECK(unknown["error"]["message"] == "Unknown tool: nope");
     CHECK(h.provider.calls == 0);
+}
+
+TEST_CASE("MCP tools/call reaches the provider for known but unlisted tools", "[mcp][protocol]") {
+    Harness h;
+    h.provider.hidden = {"secret"};
+    h.init();
+    // Not in tools/list ...
+    const json listed = h.call(1, "tools/list")["result"]["tools"];
+    for (const auto& tool : listed) CHECK(tool["name"] != "secret");
+    // ... but the provider decides what to answer (the dispatcher returns TOOL_UNAVAILABLE_READ_ONLY),
+    // so the server must not answer with the protocol error -32602.
+    const json reply = h.call(2, "tools/call", json{{"name", "secret"}});
+    CHECK_FALSE(reply.contains("error"));
+    CHECK(reply.contains("result"));
+    CHECK(h.provider.calls == 1);
+    // Truly unknown names still get the protocol error.
+    CHECK(h.call(3, "tools/call", json{{"name", "nope"}})["error"]["code"] == kInvalidParams);
 }
 
 TEST_CASE("MCP tools/call result mapping", "[mcp][protocol]") {

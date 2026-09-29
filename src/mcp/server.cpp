@@ -304,10 +304,7 @@ private:
             args = p.params["arguments"];
         }
         const std::string name = p.params["name"].get<std::string>();
-        bool known = false;
-        for (const auto& tool : provider_.list_tools())
-            if (tool.name == name) { known = true; break; }
-        if (!known) return send(make_error(p.id, kInvalidParams, "Unknown tool: " + name));
+        if (!provider_.has_tool(name)) return send(make_error(p.id, kInvalidParams, "Unknown tool: " + name));
 
         auto state = std::make_shared<CallState>();
         state->id = p.id;

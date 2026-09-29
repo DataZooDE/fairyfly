@@ -21,6 +21,8 @@ public:
     CommandDispatcher(Invoker invoker, Policy policy, AuditHook hook = nullptr,
                       std::vector<ToolSpec> specs = {});
     std::vector<ToolDef> list_tools() const override;
+    /// Includes tools hidden by policy so a call to them gets the friendly policy refusal.
+    bool has_tool(const std::string& name) const override { return find_spec(name) != nullptr; }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override;
     void set_client_info(const json& client_info) override;
 

@@ -1,11 +1,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 
+#include "include/audit_log.h"
 #include "include/mcp/dispatcher.h"
+#include "include/mcp/mcp_audit.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
@@ -86,6 +91,48 @@ CallContext ctx_with_id(int id = 1) {
 }
 
 } // namespace
+
+TEST_CASE("Dispatcher: a failed audit write in required mode reports AUDIT_UNAVAILABLE", "[mcp][dispatcher][audit]") {
+    mcp_audit_reset_failure();
+    // The "directory" of the audit file is a regular file, so every append fails.
+    const auto blocker = std::filesystem::temp_directory_path() /
+                         ("ff_audit_blocker_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    { std::ofstream(blocker) << "x"; }
+    fairyfly::audit::AuditSink sink(fairyfly::audit::AuditConfig{fairyfly::audit::Mode::Required, blocker / "audit.jsonl"});
+
+    Fixture f;
+    Policy required;
+    required.audit_required = true;
+    CommandDispatcher strict(f.invoker(), required, make_mcp_audit_hook(&sink, {}, true));
+    auto r = strict.call_tool("sap_doctor", json::object(), ctx_with_id());
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("AUDIT_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 1);  // the action itself ran
+
+    // Without the requirement the same audit failure is tolerated.
+    mcp_audit_reset_failure();
+    CommandDispatcher relaxed(f.invoker(), Policy{}, make_mcp_audit_hook(&sink, {}, true));
+    auto ok_result = relaxed.call_tool("sap_doctor", json::object(), ctx_with_id());
+    CHECK_FALSE(ok_result.is_error);
+
+    mcp_audit_reset_failure();
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+}
+
+TEST_CASE("Dispatcher: hidden write tools are known but refused with guidance", "[mcp][dispatcher]") {
+    Fixture f;
+    auto d = f.make();  // default policy = read-only
+    const auto listed = d.list_tools();
+    for (const auto& tool : listed) CHECK(tool.name != "sap_fill");
+    CHECK(d.has_tool("sap_fill"));
+    CHECK_FALSE(d.has_tool("sap_nope"));
+    auto r = d.call_tool("sap_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id());
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("TOOL_UNAVAILABLE_READ_ONLY") != std::string::npos);
+    CHECK(text_of(r).find("serve --allow-write") != std::string::npos);
+    CHECK(f.calls.empty());
+}
 
 TEST_CASE("Dispatcher: unknown tool and invalid arguments are tool errors", "[mcp][dispatcher]") {
     Fixture f;
