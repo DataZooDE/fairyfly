@@ -201,7 +201,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (!spec) return fail("TOOL_NOT_FOUND", "unknown tool '" + name + "'", "use tools/list to see the available tools");
     json args = raw_args.is_null() ? json::object() : raw_args;
     if (args.is_object() && args.contains("connection")) record.connection = int_from_json(args["connection"]);
-    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection_;
+    else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection(ctx.principal.name);
 
     // 2. policy
     const PolicyDecision decision = check_call(*spec, args, policy_);
@@ -278,7 +278,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
-    if (!effective.default_connection) effective.default_connection = sticky_connection_;
+    if (!effective.default_connection) effective.default_connection = sticky_connection(ctx.principal.name);
 
     // gui_session_attach without session_id: resolve through `list`.
     if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
@@ -368,7 +368,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
         result.data.is_object() && result.data.contains("connection_file_id")) {
         if (auto id = int_from_json(result.data["connection_file_id"])) {
-            sticky_connection_ = id;
+            set_sticky_connection(ctx.principal.name, *id);
             record.connection = id;
             const std::string note = "connection " + std::to_string(*id) +
                                      " is now the default for later calls that omit `connection`.";

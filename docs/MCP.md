@@ -207,7 +207,7 @@ The file is append-only by convention, not tamper-proof.
 
 ## Sessions and connections
 
-- The first `gui_session_attach` or `gui_session_launch` becomes the sticky default: later calls without `connection` use it. `--default-connection N` sets a default at start.
+- The last successful `gui_session_attach` or `gui_session_launch` becomes the sticky default of the calling principal: later calls of the same principal without `connection` use it (over HTTP each token has its own default, the local stdio principal has one). `--default-connection N` sets a server-wide default at start. The sticky default is only a targeting convenience: all principals still drive the same SAP GUI (one shared session per connection, one call at a time), so one client navigating changes the screen the next client sees.
 - Pass `connection` to target another saved connection. `gui_connection_list` and `gui_session_list` show what exists.
 - `gui_session_attach` without `session_id` attaches automatically when exactly one session is open; with several it fails with MULTIPLE_SESSIONS and lists them, so call it again with a `session_id` from `gui_session_list`.
 

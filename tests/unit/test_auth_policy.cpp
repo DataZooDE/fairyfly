@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -906,4 +907,92 @@ TEST_CASE("dispatcher: connections allowlist binds session and connection-target
                                                                     {{"tool", "gui_screen_read"}, {"arguments", {{"connection", 2}}}}})},
                                               {"stop_on_error", false}}, ctx_for(p));
     CHECK(text_of(r).find("CONNECTION_DENIED") != std::string::npos);
+}
+
+// ---- per-principal sticky connection and budgets -------------------------------------------------
+namespace {
+bool argv_targets(const Argv& argv, const std::string& id) {
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
+        if (argv[i] == "--connection" && argv[i + 1] == id) return true;
+    return false;
+}
+bool argv_has_connection(const Argv& argv) {
+    return std::find(argv.begin(), argv.end(), "--connection") != argv.end();
+}
+} // namespace
+
+TEST_CASE("dispatcher: the sticky connection belongs to one principal", "[auth][dispatch][sticky]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        Result r = ok_result();
+        if (argv.size() >= 3 && argv[0] == "session" && argv[1] == "attach") {
+            // the attach result names the connection file; encode it from the session id (con[N] -> N)
+            const std::string& sid = argv.back();
+            const auto open = sid.find("con[");
+            r.data = {{"connection_file_id", std::stoi(sid.substr(open + 4))}};
+        }
+        return r;
+    };
+    auto d_ptr = f.make(write_mode());
+    auto& d = *d_ptr;
+    Principal a = token("token-a", {"session", "screen"});
+    Principal b = token("token-b", {"session", "screen"});
+
+    // A attaches connection 5; B has no default yet
+    CHECK_FALSE(d.call_tool("gui_session_attach", {{"session_id", "/app/con[5]/ses[0]"}}, ctx_for(a)).is_error);
+    CHECK(d.sticky_connection("token-a") == 5);
+    CHECK_FALSE(d.sticky_connection("token-b").has_value());
+    f.calls.clear();
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    REQUIRE(f.calls.size() == 1);
+    CHECK_FALSE(argv_has_connection(f.calls[0]));           // A's attach did not retarget B
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+
+    // B attaches 7: interleaved calls keep their own targets
+    CHECK_FALSE(d.call_tool("gui_session_attach", {{"session_id", "/app/con[7]/ses[0]"}}, ctx_for(b)).is_error);
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    CHECK(argv_targets(f.calls.back(), "7"));
+    CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(argv_targets(f.calls.back(), "5"));
+    CHECK(f.records.back().connection == 5);
+
+    // an explicit connection argument still wins and does not change any default
+    CHECK_FALSE(d.call_tool("gui_screen_read", {{"connection", 9}}, ctx_for(b)).is_error);
+    CHECK(argv_targets(f.calls.back(), "9"));
+    CHECK(d.sticky_connection("token-b") == 7);
+
+    // the local stdio principal keeps the old single-default behaviour
+    Fixture g;
+    g.handler = f.handler;
+    auto dg_ptr = g.make(write_mode());
+    auto& dg = *dg_ptr;
+    CHECK_FALSE(dg.call_tool("gui_session_attach", {{"session_id", "/app/con[3]/ses[0]"}}, ctx_for(Principal{}, false)).is_error);
+    CHECK(dg.sticky_connection() == 3);
+    CHECK_FALSE(dg.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false)).is_error);
+    CHECK(argv_targets(g.calls.back(), "3"));
+}
+
+TEST_CASE("dispatcher: the server default rate budget is per principal", "[auth][dispatch][sticky]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.max_calls_per_minute = 2;
+    auto d_ptr = f.make(policy);
+    auto& d = *d_ptr;
+    Principal a = token("token-a", {"screen"});
+    Principal b = token("token-b", {"screen"});
+    Principal own = token("token-own", {"screen"});
+    own.rate_per_minute = 5;
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(a))).find("RATE_LIMITED") != std::string::npos);
+    // B and a token with its own rate are not affected by A's exhausted budget
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(b))).find("RATE_LIMITED") != std::string::npos);
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(own)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(own))).find("RATE_LIMITED") != std::string::npos);
+    // the stdio principal has its own server-wide gate
+    for (int i = 0; i < 2; ++i) CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false)).is_error);
+    CHECK(text_of(d.call_tool("gui_screen_read", json::object(), ctx_for(Principal{}, false))).find("RATE_LIMITED") != std::string::npos);
 }

@@ -1,6 +1,8 @@
 #pragma once
 #include <chrono>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -51,8 +53,14 @@ public:
     void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
     /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
     std::vector<ToolDef> list_tools_for(const Principal& principal) const override;
-    /// Connection remembered from the last successful gui_session_attach / gui_session_launch.
-    std::optional<int> sticky_connection() const { return sticky_connection_; }
+    /// Connection remembered from the last successful gui_session_attach / gui_session_launch OF THIS PRINCIPAL
+    /// (HTTP tokens by name; the local stdio principal is "stdio"). One principal attaching never retargets
+    /// another; only the targeting is separate, the SAP GUI session and its screen state are shared.
+    std::optional<int> sticky_connection(const std::string& principal_name = "stdio") const {
+        std::lock_guard<std::mutex> lock(sticky_mutex_);
+        const auto it = sticky_by_principal_.find(principal_name);
+        return it == sticky_by_principal_.end() ? std::nullopt : std::optional<int>(it->second);
+    }
 
 private:
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
@@ -73,7 +81,12 @@ private:
     std::string client_;
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
-    std::optional<int> sticky_connection_;
+    void set_sticky_connection(const std::string& principal_name, int id) {
+        std::lock_guard<std::mutex> lock(sticky_mutex_);
+        sticky_by_principal_[principal_name] = id;
+    }
+    mutable std::mutex sticky_mutex_;
+    std::map<std::string, int> sticky_by_principal_;
     KeyedRateLimiter keyed_limiter_;
     SapFactsProvider facts_provider_;
     SessionTargetResolver target_resolver_;

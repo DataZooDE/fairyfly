@@ -229,7 +229,7 @@ the VM; (e) an operator with an over-privileged token.
 | Prompt injection via SAP content | screen results are labelled untrusted; server instructions tell the model not to follow them; read-only default | the model may still be persuaded to use write tools it has been granted; keep write tokens rare and confirm destructive actions client-side |
 | Credential theft | no tool accepts a password; SAP logon uses the Credential Manager; tokens only stored as hashes; secrets never in logs, audit, YAML or listings | Credential Manager entries are readable by any process of the same Windows user |
 | Repudiation, forensics | audit record per call with principal, remote address and era; start/stop records | append-only by convention, not tamper-proof |
-| Shared state between principals | none by design for auth | one shared SAP session and one sticky default connection for all tokens: one client's navigation changes what the next client sees |
+| Shared state between principals | none by design for auth | the sticky default connection and the default rate budget are per token, but the SAP GUI session and its screen state (open transaction, popups, field contents) are shared: one client's navigation still changes what the next client sees, so tokens with different purposes should use different saved connections (`--connections`) |
 | Session unavailable | `mcp doctor` and the tray warn | RDP disconnect, lock screen or log off yields black screenshots and failing calls; nothing restarts the desktop |
 
 ## Client cookbook
