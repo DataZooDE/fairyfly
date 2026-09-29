@@ -3,6 +3,7 @@
 #include "core.h"
 #include "automation_engine.h"
 #include "connection_manager.h"
+#include "credential_store.h"
 #include <string>
 #include <memory>
 #include <optional>
@@ -51,6 +52,8 @@ private:
     std::unique_ptr<ConnectionManager> conn_mgr_;
     SessionId current_session_;
     bool read_only_ = false;  ///< --read-only guard: refuse state-changing actions
+    bool batch_mode_ = false; ///< inside `batch`: stdin belongs to the batch file, no prompts
+    std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
     void describe_element(const std::string& element_id, std::string& type, std::string& text, std::string& tooltip);
@@ -69,7 +72,14 @@ private:
     std::vector<int> prune_dead_entries();
 
 public:
-    CommandHandler();
+    explicit CommandHandler(std::unique_ptr<cred::CredentialStore> store = nullptr);
+
+    /// Credential store used by login and the credentials command (Windows Credential Manager by default).
+    cred::CredentialStore& credential_store() { return *credential_store_; }
+
+    /// Batch mode disables interactive/stdin secret prompts (credentials set / import-env).
+    void set_batch_mode(bool batch_mode) { batch_mode_ = batch_mode; }
+    bool batch_mode() const { return batch_mode_; }
 
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }
@@ -79,7 +89,7 @@ public:
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     Result handle_launch(const std::string& connection_name, bool allow_sapshcut = false);
     Result handle_login(const std::string& credentials_file, std::optional<int> connection_id,
-                        bool from_stdin = false);
+                        bool from_stdin = false, const std::string& credential_name = "");
     Result handle_disconnect(std::optional<int> connection_id, bool close_session = false);
 
     // Connection listing and management
@@ -116,6 +126,15 @@ public:
     Result handle_close(int vkey, std::optional<int> connection_id);
     Result handle_screen_menu(const std::string& select_path, const std::string& window,
                               std::optional<int> connection_id);
+
+    // Credential store commands (implemented in cli_handler_credentials.cpp)
+    Result handle_credentials_set(const std::string& connection, const std::string& user,
+                                  const std::string& client, const std::string& language,
+                                  bool password_stdin);
+    Result handle_credentials_list();
+    Result handle_credentials_delete(const std::string& connection);
+    Result handle_credentials_import_env(const std::string& path, const std::string& connection,
+                                         bool delete_file);
 
     // Diagnostic and enumeration
     Result handle_list_all();

@@ -8,6 +8,7 @@
 namespace fairyfly {
 
 struct LoginCredentials {
+    std::string connection;  ///< optional "Connection:" key (name for the credential store)
     std::string username;
     std::string password;
     std::string new_password;

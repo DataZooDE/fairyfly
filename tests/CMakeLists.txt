@@ -20,6 +20,8 @@ add_executable(unit_tests
     unit/test_connection_manager.cpp
     unit/test_grid_analyzer.cpp
     unit/test_batch_command.cpp
+    unit/test_credential_store.cpp
+    unit/test_credential_resolver.cpp
     ../src/config.cpp
     ../src/session.cpp
 )
