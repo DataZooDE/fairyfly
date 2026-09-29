@@ -12,7 +12,9 @@ env:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # Pinned: windows-latest moved to an image without Visual Studio 2022, so the
+    # "Visual Studio 17 2022" CMake generator below could not find any instance (2026-09-29).
+    runs-on: windows-2022
 
     steps:
     - name: Checkout code
