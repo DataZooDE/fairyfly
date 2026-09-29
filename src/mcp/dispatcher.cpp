@@ -14,6 +14,7 @@
 #include <comdef.h>
 #endif
 
+#include "include/auth/authorize.h"
 #include "include/command_table.h"
 #include "include/commands/cli_app.h"
 #include "include/commands/command_registry.h"
@@ -97,6 +98,13 @@ std::vector<ToolDef> CommandDispatcher::list_tools() const {
     return defs;
 }
 
+std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principal) const {
+    std::vector<ToolDef> defs;
+    for (const auto& spec : specs_)
+        if (tool_visible(spec, policy_) && auth::tool_allowed_for(principal, spec)) defs.push_back(spec.def);
+    return defs;
+}
+
 void CommandDispatcher::set_client_info(const json& client_info) {
     client_info_ = client_info;
     std::string name, version;
@@ -136,7 +144,11 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
     McpCallRecord record;
     record.tool = tool;
     record.client = client_;
-    record.read_only = policy_.read_only;
+    record.read_only = policy_.read_only || ctx.principal.read_only;
+    record.principal = ctx.principal.name;
+    record.remote_addr = ctx.principal.remote_addr;
+    record.transport = transport_label(ctx.http);
+    record.era = ctx.http ? (ctx.era == ProtocolEra::Stateless ? "stateless" : "legacy") : "";
     record.request_id = ctx.request_id.is_null() ? std::string() : dump_compact(ctx.request_id);
     if (record.request_id.size() > 64) record.request_id.resize(64);
 
@@ -173,12 +185,12 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
 
 ToolResult CommandDispatcher::run_single(const std::string& name, const json& args, const CallContext& ctx,
                                          std::string* code_out) {
-    return audited(name, [&](McpCallRecord& record, std::string& code) { return execute_call(name, args, record, code); },
+    return audited(name, [&](McpCallRecord& record, std::string& code) { return execute_call(name, args, record, code, ctx); },
                    ctx, code_out);
 }
 
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
-                                           std::string& code) {
+                                           std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
         code = c;
         return error_result(c, message, hint);
@@ -197,11 +209,45 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         return fail(decision.code.empty() ? "REFUSED" : decision.code,
                     decision.message.empty() ? "call refused by policy" : decision.message);
 
-    // 3. rate limit
-    if (rate_gate_ && !rate_gate_(std::chrono::steady_clock::now()))
+    // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
+    const Principal& principal = ctx.principal;
+    {
+        std::optional<std::string> current_system, current_tcode;
+        if ((!principal.sap_systems.empty() || !principal.tcodes.empty()) && facts_provider_) {
+            if (auto facts = facts_provider_(record.connection); facts && facts->any()) {
+                if (!facts->system.empty()) current_system = facts->system + "/" + facts->client;
+                if (!facts->transaction.empty()) current_tcode = facts->transaction;
+            }
+        }
+        const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
+                                                          current_tcode, [this](const std::string& n) { return find_spec(n); });
+        if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+    }
+
+    // 3. rate limit (per principal for tokens; the server-wide gate for the local stdio principal)
+    const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
+    const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
+    const bool rate_ok = per_principal ? keyed_limiter_.allow(principal.name, budget, std::chrono::steady_clock::now())
+                                       : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
+    if (!rate_ok)
         return fail("RATE_LIMITED",
-                    "too many tool calls (limit " + std::to_string(policy_.max_calls_per_minute) + " per minute)",
+                    "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
+                        " per minute)",
                     "wait a few seconds and retry, or combine steps with gui_batch");
+
+    // A read-only token narrows the server mode for this call only (restored afterwards).
+    struct ReadOnlyScope {
+        const ReadOnlyOverride& hook;
+        bool server_value;
+        bool active;
+        ReadOnlyScope(const ReadOnlyOverride& h, bool narrow, bool server)
+            : hook(h), server_value(server), active(narrow && static_cast<bool>(h)) {
+            if (active) hook(true);
+        }
+        ~ReadOnlyScope() {
+            if (active) { try { hook(server_value); } catch (...) {} }
+        }
+    } read_only_scope(read_only_override_, principal.read_only && !policy_.read_only, policy_.read_only);
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
@@ -322,6 +368,20 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
             code = "INVALID_ARGUMENT";
             return error_result("INVALID_ARGUMENT", problem);
         }, ctx, nullptr);
+
+    // Token authorization of the whole batch up front (scope "batch" + the static rules of every item; the
+    // server's own read-only refusals and the SAP-system rule are applied per item at execution time).
+    {
+        Policy static_policy = policy_;
+        static_policy.read_only = false;
+        const PolicyDecision authz = auth::authorize_call(ctx.principal, *spec, spec->family, args, static_policy, std::nullopt,
+                                                          std::nullopt, [this](const std::string& n) { return find_spec(n); });
+        if (!authz.allowed)
+            return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
+                code = authz.code.empty() ? "REFUSED" : authz.code;
+                return error_result(code, authz.message);
+            }, ctx, nullptr);
+    }
 
     const bool stop_on_error = args.value("stop_on_error", true);
     json summary = json::array();

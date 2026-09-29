@@ -41,6 +41,10 @@ struct AuditRecord {
     std::string tool;                  ///< MCP tool name (emitted only when non-empty)
     std::string client;                ///< MCP client "name/version" (emitted only when non-empty)
     std::string request_id;            ///< JSON-RPC id as text (emitted only when non-empty)
+    std::string principal;             ///< remote MCP: token name (emitted only when non-empty; never a secret)
+    std::string remote_addr;           ///< remote MCP: client address (emitted only when non-empty)
+    std::string transport;             ///< MCP: "stdio" | "http" (emitted only when non-empty)
+    std::string era;                   ///< MCP: "legacy" | "stateless" (emitted only when non-empty)
 };
 
 enum class Mode { Enabled, Disabled, Required };

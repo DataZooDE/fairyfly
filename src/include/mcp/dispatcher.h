@@ -29,13 +29,24 @@ public:
     /// Replaces the rate-limit decision (default: RateLimiter(policy.max_calls_per_minute)).
     /// Test seam; the gate returns false to refuse the call with RATE_LIMITED.
     void set_rate_gate(std::function<bool(std::chrono::steady_clock::time_point)> gate);
+    /// SAP system/client/transaction the call will run against (for token allowlists); nullopt = unknown.
+    /// Without a provider every call of a token that has a system allowlist is denied SYSTEM_UNKNOWN.
+    using SapFactsProvider = std::function<std::optional<audit::SapFacts>(std::optional<int> connection)>;
+    void set_sap_facts_provider(SapFactsProvider provider) { facts_provider_ = std::move(provider); }
+    /// Per-call read-only override: called with true before a call of a read-only token while the server
+    /// is in write mode, and with the server value afterwards. Wire it to CommandHandler::set_read_only.
+    using ReadOnlyOverride = std::function<void(bool read_only)>;
+    void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
+    /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
+    std::vector<ToolDef> list_tools_for(const Principal& principal) const;
     /// Connection remembered from the last successful gui_session_attach / gui_session_launch.
     std::optional<int> sticky_connection() const { return sticky_connection_; }
 
 private:
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
                           std::string* code_out = nullptr);
-    ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code);
+    ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,
+                            const CallContext& ctx);
     ToolResult run_batch(const json& args, const CallContext& ctx);
     ToolResult audited(const std::string& tool, const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
                        const CallContext& ctx, std::string* code_out);
@@ -51,6 +62,9 @@ private:
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
     std::optional<int> sticky_connection_;
+    KeyedRateLimiter keyed_limiter_;
+    SapFactsProvider facts_provider_;
+    ReadOnlyOverride read_only_override_;
 };
 
 /// Real Invoker: builds a private CLI::App, register_all_commands(), setup_all_commands, parses the

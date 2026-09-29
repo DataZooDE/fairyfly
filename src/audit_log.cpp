@@ -119,6 +119,10 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     if (!r.tool.empty()) j["tool"] = cap_bytes(r.tool, kMaxFactBytes, false);
     if (!r.client.empty()) j["client"] = cap_bytes(r.client, kMaxFactBytes * 2, false);
     if (!r.request_id.empty()) j["request_id"] = cap_bytes(r.request_id, kMaxFactBytes, false);
+    if (!r.principal.empty()) j["principal"] = cap_bytes(r.principal, kMaxFactBytes, false);
+    if (!r.remote_addr.empty()) j["remote_addr"] = cap_bytes(r.remote_addr, kMaxFactBytes, false);
+    if (!r.transport.empty()) j["transport"] = cap_bytes(r.transport, kMaxFactBytes, false);
+    if (!r.era.empty()) j["era"] = cap_bytes(r.era, kMaxFactBytes, false);
     return j;
 }
 
