@@ -35,7 +35,7 @@ $connectionId = $ExistingConnectionId
 function Invoke-Fairyfly {
     param([string[]]$Arguments, [string[]]$InputLines, [switch]$AllowFailure)
     $scopedArguments = @($Arguments)
-    if ($connectionId -ge 0 -and $Arguments[0] -notin @('list', 'connections', 'launch') -and $Arguments -notcontains '--connection') {
+    if ($connectionId -ge 0 -and $Arguments[0] -notin @('list', 'connections', 'launch', 'credentials') -and $Arguments -notcontains '--connection') {
         $scopedArguments += @('--connection', [string]$connectionId)
     }
     if ($InputLines) {
@@ -84,16 +84,14 @@ function Test-ChangedPasswordLogin {
         if ($userConnectionId -eq $connectionId) { throw 'User login launch reused the admin connection file ID' }
         $sessionId = [string]$launch.data.session_id
         if ($sessionId -notmatch '^/app/con\[\d+\]/ses\[\d+\]$') { throw 'User login launch returned no valid session ID' }
-        $envPath = Join-Path $PSScriptRoot '..\..\trial.env'
-        if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -ne '1' -and -not (Test-Path -LiteralPath $envPath)) {
-            throw 'SAP GUI credential file was not found'
-        }
         if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -eq '1') {
             $client = '001'
         } else {
-            $clientLine = Get-Content -LiteralPath $envPath | Where-Object { $_ -match '^System ID\s*:' } | Select-Object -First 1
-            if (-not $clientLine) { throw 'SAP client missing from credential file' }
-            $client = ($clientLine -split ':', 2)[1].Trim()
+            # The client comes from the Credential Manager entry (no secret is listed).
+            $stored = Invoke-Fairyfly @('credentials', 'list')
+            $entry = @($stored.data.credentials | Where-Object { $_.connection -eq $ConnectionName }) | Select-Object -First 1
+            if (-not $entry -or -not $entry.client) { throw "No stored credential for $ConnectionName; run 'fairyfly credentials set' or 'credentials import-env'" }
+            $client = [string]$entry.client
         }
         $postLoginPassword = 'Cc3!' + [guid]::NewGuid().ToString('N').Substring(0, 14)
         $credentials = @("Username: $Username", "Password: $ChangedPassword",
@@ -131,11 +129,8 @@ try {
         $ownedConnection = $true
         Write-Host "Launched SAP connection index $connectionId"
         if ($LoginFromTrialEnv) {
-            $envPath = Join-Path $PSScriptRoot '..\..\trial.env'
-            if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -ne '1' -and -not (Test-Path -LiteralPath $envPath)) {
-                throw 'SAP GUI credential file was not found'
-            }
-            [void](Invoke-Fairyfly @('login', '--credentials-file', $envPath))
+            # Credential Manager entry named like the launched connection (no file, no password here).
+            [void](Invoke-Fairyfly @('login', '--connection', [string]$connectionId))
             Write-Host 'Completed SAP GUI login for the launched session'
         }
     }

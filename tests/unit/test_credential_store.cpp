@@ -235,3 +235,30 @@ TEST_CASE("Windows Credential Manager round trip", "[!mayfail][credstore]") {
     REQUIRE_FALSE(store.read(name).has_value());
     REQUIRE_FALSE(store.remove(name));
 }
+
+TEST_CASE("launch --login composes launch data with the login result", "[cli][launch]") {
+    fairyfly::Result launch;
+    launch.status = fairyfly::Result::Status::Success;
+    launch.data = {{"connection_id", "c1"}, {"session_id", "s1"}};
+
+    fairyfly::Result ok;
+    ok.status = fairyfly::Result::Status::Success;
+    ok.data = {{"transaction", "SESSION_MANAGER"}, {"credential_source", "credential_manager"},
+               {"warnings", nlohmann::json::array({"w"})}, {"session_id", "s1"}};
+    const auto merged = fairyfly::cli::compose_launch_login_result(launch, ok);
+    REQUIRE(merged.status == fairyfly::Result::Status::Success);
+    CHECK(merged.data.at("connection_id") == "c1");
+    CHECK(merged.data.at("login").at("transaction") == "SESSION_MANAGER");
+    CHECK(merged.data.at("login").at("credential_source") == "credential_manager");
+    CHECK(merged.data.at("login").at("warnings").size() == 1);
+    CHECK_FALSE(merged.data.at("login").contains("session_id"));
+
+    fairyfly::Result failed;
+    failed.status = fairyfly::Result::Status::Error;
+    failed.error = {{"code", "LOGON_NOT_COMPLETED"}, {"message", "x"}};
+    const auto err = fairyfly::cli::compose_launch_login_result(launch, failed);
+    REQUIRE(err.status == fairyfly::Result::Status::Error);
+    CHECK(err.error.at("code") == "LOGON_NOT_COMPLETED");
+    CHECK(err.error.at("connection_open") == true);
+    CHECK(err.error.at("launch").at("session_id") == "s1");
+}

@@ -21,13 +21,10 @@ tests_failed = 0
 
 
 def login_from_trial_env(connection_file_id):
-    """Use Fairyfly's native GUI logon; no script host or password argument."""
-    repo_root = Path(__file__).resolve().parents[2]
-    env_file = repo_root / "trial.env"
-    if not env_file.is_file():
-        return False
-    result = run_fairyfly(["login", "--connection",
-                           str(connection_file_id), "--credentials-file", str(env_file)])
+    """Log in through Fairyfly's native GUI logon using the Windows Credential Manager entry
+    named like the connection (see `fairyfly credentials set` / `import-env`). This script
+    never reads a credential file and passes no password."""
+    result = run_fairyfly(["login", "--connection", str(connection_file_id)])
     if not result["success"]:
         return False
     try:
@@ -114,8 +111,8 @@ def main(argv=()):
         help="Use an existing Fairyfly connection-file ID without launching or disconnecting it",
     )
     parser.add_argument(
-        "--login-from-trial-env", action="store_true",
-        help="Log into a newly launched SAP GUI session using local trial.env credentials",
+        "--login-stored", "--login-from-trial-env", dest="login_from_trial_env", action="store_true",
+        help="Log into a newly launched SAP GUI session with the Credential Manager entry for the connection",
     )
     options = parser.parse_args(argv)
     existing_connection_id = options.existing_connection_id

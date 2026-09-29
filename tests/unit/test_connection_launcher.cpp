@@ -32,6 +32,10 @@ TEST_CASE("Fallback session identity survives GUI path reuse", "[connection][lau
 TEST_CASE("sapshcut arguments survive Windows command-line parsing", "[connection][launcher]") {
     CHECK(ConnectionLauncher::sapshcut_command_line(L"C:\\Program Files\\SAP\\sapshcut.exe", "Bigfox") ==
           L"\"C:\\Program Files\\SAP\\sapshcut.exe\" -sysname=Bigfox -maxgui");
+    // Credentials must never reach the sapshcut command line (launch --login uses the scripting API).
+    const auto sapshcut_line = ConnectionLauncher::sapshcut_command_line(L"C:\\sapshcut.exe", "Bigfox");
+    CHECK(sapshcut_line.find(L"-pw") == std::wstring::npos);
+    CHECK(sapshcut_line.find(L"-user") == std::wstring::npos);
     for (const std::string value : {"plain", "with space", "quote\"inside",
                                     "trailing\\", "slash\\\"quote", "p\xC3\xA4ss"}) {
         const std::wstring command = ConnectionLauncher::sapshcut_command_line(

@@ -30,11 +30,38 @@ Use `fill <element-id> --clear` to empty a text field or TextEdit shell. This wo
 
 `disconnect --connection <id>` removes Fairyfly's saved connection while leaving SAP GUI open. Add `--close-session` to close that SAP GUI session before removing its saved connection.
 
-`launch <connection>` uses native SAP GUI COM by default. For a fresh logon screen, run `login --connection <id> --credentials-file trial.env`. The native command reads `Username`, `Password`, and three-digit `System ID` lines from the file, fills the SAP GUI form, and verifies the authenticated SAP user. An optional `Language` line defaults to `EN`. `login --credentials-stdin` accepts the same lines from standard input; include `New Password` when SAP requires a first-login password change. Passwords stay out of command arguments and output. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot; use `login` for authentication afterward. The fallback does not read `trial.env` or put a password on the child process command line. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file is ignored by Git but contains plaintext credentials; keep it private. Windows Credential Manager integration is not implemented.
+`launch <connection>` uses native SAP GUI COM by default and never reads credentials. For a fresh logon screen, run `login --connection <id>`; see "Credentials and login" below. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot (the child command line is only `-sysname=<name> -maxgui`); use `login` or `launch --login` for authentication afterward. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file (legacy plaintext credentials) stays ignored by Git; keep it private and migrate it as described below.
 
 `batch [--file PATH] [--stop-on-error]` reads one command per line from stdin (or a file) and runs all of them in one process with one shared SAP handler, which avoids re-initialising COM for every call. A line is a JSON array of argv strings (`["tcode","SM37"]`) or shell-style words (double quotes; backslash escapes a space, quote or backslash). Blank lines and lines starting with `#` are ignored. Each line prints one compact JSON result (always JSON); a failing line does not stop the batch unless `--stop-on-error` is given, and the exit code is 1 if any line failed. Nested `batch` returns BATCH_NESTED, malformed lines return BATCH_PARSE_ERROR.
 
 The global `--read-only` flag (or `FAIRYFLY_READ_ONLY=1`) refuses state-changing actions with READ_ONLY_REFUSED (the error includes element id, text, tooltip and matched rule): buttons, menus and toolbar ids for Save, Delete, Release, Stop, Post, Activate, Lock/Unlock, Create, Change, Cancel job and Execute in background, ids containing `&DELETE`/`&SAVE`/`&RELEASE` or `tbar[0]/btn[11]`, `send-key`/`close` with VKey 11 or 14, `screen menu --select` paths, tree context-menu items, and `fill` entirely unless `--allow-fill` is given. Navigation (tcode, Back, Refresh, Display, Details, Job log, grid row select and double-click) stays allowed. `fairyfly --read-only batch` applies the guard to every line.
+
+## Credentials and login
+
+Credentials live in the Windows Credential Manager under `fairyfly:<connection name>` (user, client, language and password; the password is never listed or printed).
+
+~~~powershell
+fairyfly credentials set Bigfox --user DEVELOPER --client 001      # prompts for the password (or add --password-stdin)
+fairyfly credentials list
+fairyfly credentials delete Bigfox
+fairyfly credentials import-env trial.env --connection Bigfox --delete-file   # migrate a legacy plaintext file
+~~~
+
+After importing, rotate the SAP password: the old one sat in plaintext on disk. `credentials set` and `import-env` need a console or piped stdin and return CREDENTIALS_PROMPT_UNAVAILABLE inside `batch`; they are allowed under `--read-only` (they do not touch SAP) but are audited.
+
+`login [--connection <id>]` takes credentials from exactly one source: `--credentials-stdin` (colon-separated `Username`, `Password`, `System ID`, optional `Language` and `New Password` lines), `--credentials-file PATH` (deprecated, prints a warning), `--credential NAME` (a stored entry), or, with no flag, the stored entry named like the saved connection. There is no implicit `./trial.env` fallback. The result reports `credential_source` and any warnings, never the password.
+
+`launch <connection> --login [--credential NAME]` launches, waits for the session, then logs in through the scripting API (also after `--allow-sapshcut`; a password never goes on a sapshcut command line). The result keeps the launch fields and adds a `login` object (`transaction`, `credential_source`, `warnings`). If the launch worked but the login failed, the login error code is returned with `connection_open: true` and the launch data under `error.launch`; the connection is left open. `--login` is allowed under `--read-only` because authentication is not a business-state change.
+
+## Audit trail
+
+Every invocation, and every line inside `batch`, appends one JSON record to `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (UTC month). Audit is on by default.
+
+- Control: `--no-audit`, `--audit-required` (fail with AUDIT_UNAVAILABLE when the file cannot be written), `FAIRYFLY_AUDIT=0|off|required`, `FAIRYFLY_AUDIT_FILE=<path>`. `--audit-required` wins over any disable.
+- Record fields: timestamp, pid, command, redacted argv, connection, SAP system/client/user/transaction, read_only, batch_line, status, error_code, exit code, duration_ms.
+- Never logged: error messages, screen content, cell values, passwords or other secrets (secret-looking option values and `fill` values are replaced by a placeholder), the Windows user name and the host name. Search terms are kept.
+- Append failures print a single warning and never break a command, unless audit is required.
+- The file is append-only by convention, not tamper-proof: any process of the same Windows user can edit it.
 
 ## Build
 
@@ -66,6 +93,6 @@ The Makefile provides build shortcuts. Routine builds target the CLI; test targe
 
 ## Status
 
-The CLI and its test suite are under active development. MCP, batch operations, credential manager integration, and cross-platform SAP GUI support remain future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
+The CLI and its test suite are under active development. MCP (`serve` returns NOT_IMPLEMENTED) and cross-platform SAP GUI support remain future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
 
 SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.

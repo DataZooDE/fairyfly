@@ -1829,6 +1829,20 @@ This is a historical record of errors and fixes encountered while testing Fairyf
 
 ---
 
+### [IMP-009] Credential Store, Audit Trail, and `launch --login`
+
+- **Status**: IMPLEMENTED AND UNIT-TESTED; LIVE VERIFICATION BY THE ORCHESTRATOR
+- **Correction**: earlier notes (CLAUDE.md, README, OPEN_WORK) said `launch` read plaintext credentials from `trial.env`. It never did: `launch` opens the connection through native COM, and the sapshcut fallback command line is exactly `"<exe>" -sysname=<name> -maxgui` (asserted in `test_connection_launcher.cpp`, now also with `-pw` and `-user` absent). Only `login --credentials-file` read the file.
+- **Credential store**: `credentials set|list|delete|import-env` over the Windows Credential Manager (generic credentials, target `fairyfly:<connection name>`, blob holds the password only, metadata user/client/language). The password is prompted for or read from the first stdin line, never an argument, and is scrubbed after use. `import-env trial.env --connection Bigfox --delete-file` migrates the legacy file; the SAP password should be rotated afterwards.
+- **Login sources**: `--credentials-stdin`, `--credentials-file PATH` (deprecated, warns), `--credential NAME`, or with no flag the entry named like the saved connection. Result reports `credential_source` and warnings. Errors are structured (`CREDENTIALS_NOT_FOUND`, `CREDENTIALS_PROMPT_UNAVAILABLE` inside `batch`, ...).
+- **Audit trail**: one JSON record per invocation and per `batch` line in `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (redacted argv, SAP system/client/user/transaction, read_only, batch_line, status, error_code, exit, duration_ms). Never error messages, screen content or cell values. Controls: `--no-audit`, `--audit-required`, `FAIRYFLY_AUDIT=0|off|required`, `FAIRYFLY_AUDIT_FILE`.
+- **`launch --login [--credential NAME]`**: after the session is ready, runs the same logon as `login` through the scripting API (also after `--allow-sapshcut`). Success: launch data plus a `login` object (`transaction`, `credential_source`, `warnings`). Login failure: the login error code with `connection_open: true` and the launch data under `error.launch`; the connection is not closed. The composition is the pure function `compose_launch_login_result` (unit-tested). `batch` now sets the handler's batch mode so the credential prompts are refused there.
+- **Decisions**: no implicit `./trial.env` fallback; `credentials` commands are allowed under `--read-only` (they never touch SAP) but are audited; `--login` is allowed under `--read-only` (authentication, not business state); audit is on by default and never blocks a command (only `--audit-required` / `FAIRYFLY_AUDIT=required` turns a write failure into an error); no Windows user name or host name is recorded; search terms are kept in the argv.
+- **Residual risks**: the password sits in a plain `std::string` during logon and is scrubbed afterwards; BSTR copies inside COM are not scrubbed; Credential Manager entries are readable by any process of the same Windows user; the audit file is not tamper-proof.
+- **Integration scripts**: `test_integration.py` and `test_su01_create_user.ps1` no longer read `trial.env`; they use `login --connection <id>` with the stored credential (stdin only for the forced password change).
+
+---
+
 ### [OPS-030] SEPM_REF_APPS_DG 8-Phase Report Structure Verified
 
 - **Status**: VERIFIED WITH ADT SOURCE AUDIT AND UNIT TESTS

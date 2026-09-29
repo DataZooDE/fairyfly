@@ -17,11 +17,22 @@ public:
             ->required();
         cmd_->add_flag("--allow-sapshcut", allow_sapshcut_,
             "Allow sapshcut to open a SAP Logon entry when native COM cannot; log in separately");
+        cmd_->add_flag("--login", login_,
+            "After launching, log in with stored credentials (Credential Manager entry named like the connection)");
+        cmd_->add_option("--credential", credential_name_,
+            "With --login: stored credential name (default: the connection name)");
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_launch(connection_name_, allow_sapshcut_);
+        if (!login_ && !credential_name_.empty()) {
+            Result result;
+            result.status = Result::Status::Error;
+            result.error = {{"code", "INVALID_ARGUMENT"},
+                            {"message", "--credential requires --login"}};
+            return result;
+        }
+        return handler.handle_launch(connection_name_, allow_sapshcut_, login_, credential_name_);
     }
 
     bool was_invoked() const override {
@@ -32,6 +43,8 @@ private:
     CLI::App* cmd_ = nullptr;
     std::string connection_name_;
     bool allow_sapshcut_ = false;
+    bool login_ = false;
+    std::string credential_name_;
 };
 
 // Factory function

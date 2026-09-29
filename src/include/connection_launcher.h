@@ -28,6 +28,8 @@ public:
     /// Launch the selected SAP Logon entry without putting credentials in a process command line.
     static bool launch_sapshcut(const std::string& connection_name);
 
+    /// NOTE: credentials never go on this command line (no -pw/-user); `launch --login`
+    /// logs on afterwards through the scripting API once the session is ready.
     /// Build the sapshcut command line for a logon screen, using Windows quoting rules.
     static std::wstring sapshcut_command_line(const std::wstring& executable_path,
                                               const std::string& connection_name);

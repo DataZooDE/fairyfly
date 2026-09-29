@@ -294,6 +294,7 @@ namespace {
 
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
+        handler.set_batch_mode(batch_mode);  // credentials set/import-env cannot prompt inside `batch`
         command_result = CommandRegistry::instance().execute_active_command(handler);
         note_result(audit_out, command_result);
 

@@ -216,7 +216,24 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
     return result;
 }
 
-Result CommandHandler::handle_launch(const std::string& connection_name, bool allow_sapshcut)
+Result compose_launch_login_result(Result launch, const Result& login)
+{
+    if (login.status == Result::Status::Success) {
+        json info = {{"transaction", login.data.value("transaction", "")},
+                     {"credential_source", login.data.value("credential_source", "")}};
+        if (login.data.contains("warnings")) info["warnings"] = login.data["warnings"];
+        launch.data["login"] = std::move(info);
+        return launch;
+    }
+    Result failed = login;
+    if (!failed.error.is_object()) failed.error = json::object();
+    failed.error["connection_open"] = true;
+    failed.error["launch"] = launch.data;
+    return failed;
+}
+
+Result CommandHandler::handle_launch(const std::string& connection_name, bool allow_sapshcut,
+                                     bool login, const std::string& credential_name)
 {
     spdlog::info("Launching SAP connection: {}", connection_name);
     auto result = engine_->launch_connection(connection_name, allow_sapshcut);
@@ -258,6 +275,15 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         result.data["message"] = fmt::format("Launched SAP connection '{}' (connection: {})", connection_name, conn.id);
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
+
+        // --login: authenticate through the scripting API (never a sapshcut command line),
+        // also after the --allow-sapshcut fallback. Allowed under --read-only on purpose:
+        // logging on is authentication, not a change of business state. On failure the
+        // connection stays open and the launch data is returned with the login error.
+        if (login) {
+            auto login_result = handle_login("", conn.id, false, credential_name);
+            return compose_launch_login_result(std::move(result), login_result);
+        }
     }
 
     return result;

@@ -22,11 +22,11 @@ The old one-off VBScript screen probes were removed after their findings were re
 
 `test_integration.py` checks for server-side scripting before attempting its SM59 workflow. It targets the numeric connection-file ID returned by `launch` and closes only the SAP GUI session it created. If SM59 navigation fails, it skips the screen checks and proceeds to targeted cleanup. It reads JSON and Markdown screen output in memory and verifies a relative screenshot path in a temporary directory, which it removes after checking the PNG signature. It does not create persistent `test_screen_sm59.json`, `.md`, or PNG captures. The failure and authenticated paths have offline regressions in `test_integration_runner.py` and were verified on live Bigfox.
 
-For the authenticated launch path, run `python tests/integration/test_integration.py --login-from-trial-env` from the repository root. The option calls Fairyfly's native `login --credentials-file trial.env` command for the newly launched GUI session; it needs no VBScript host. The password is not placed on a process command line or printed by the runner. A failed login still closes the runner-owned session.
+Prerequisite for every authenticated run: store the credentials once with `fairyfly credentials set Bigfox --user <USER> --client 001` (password prompted) or migrate a legacy file with `fairyfly credentials import-env trial.env --connection Bigfox --delete-file`. For the authenticated launch path, run `python tests/integration/test_integration.py --login-stored` (alias `--login-from-trial-env`) from the repository root. The option calls `fairyfly login --connection <id>` for the newly launched GUI session, which reads the Credential Manager entry named like the connection; the runner never reads a credential file and no password appears on a command line or in output. A failed login still closes the runner-owned session.
 
 When a suitable SAP GUI session is already open, run `python tests/integration/test_integration.py --existing-connection-id 0` with its actual Fairyfly connection-file ID. This mode checks that the ID exists, uses it for SM59 navigation and screen reads, and leaves the session connected. It never launches another connection.
 
-For the disposable SU01 create, readback, password-change, and delete workflow, run `powershell -NoProfile -File tests/integration/test_su01_create_user.ps1 -LoginFromTrialEnv`. Add `-VerifyChangedPasswordLogin` to authenticate the disposable user in a second session and complete SAP's first-login password change before deletion. Passwords are piped to the GUI helper, not passed as command arguments. Both test-owned sessions are closed after cleanup. See [the SU01 workflow guide](README_SU01_TEST.md) for details.
+For the disposable SU01 create, readback, password-change, and delete workflow, run `powershell -NoProfile -File tests/integration/test_su01_create_user.ps1 -LoginFromTrialEnv` (the switch name is historical: it logs in with the Credential Manager entry, not a file). Add `-VerifyChangedPasswordLogin` to authenticate the disposable user in a second session and complete SAP's first-login password change before deletion. Only the disposable user's changed password is piped to `login --credentials-stdin`; nothing is passed as a command argument. Both test-owned sessions are closed after cleanup. See [the SU01 workflow guide](README_SU01_TEST.md) for details.
 
 For SAP-independent checks, build unit_tests and run ctest --test-dir build -C Release --output-on-failure.
 
@@ -42,7 +42,7 @@ Prerequisites
 - Windows, SAP GUI with scripting enabled (client and server), no external PowerShell modules.
 - A logged-in Bigfox session open as `/app/con[0]/ses[0]`, sitting on the SAP Easy Access screen, with no popup open. The user needs display authorizations only.
 - A built `fairyfly.exe` (`build\Release\fairyfly.exe` by default; `build\bin\Release\fairyfly.exe` is used as a fallback).
-- The scripts never read `trial.env` and never print credentials.
+- The scripts never read `trial.env` and never print credentials (`trial.env` remains git-ignored).
 
 Transactions used: RZ11, ST22, SM37, SU01 (display), SM59, SE80 (bigfox_regression.ps1); additionally SM50, RZ04, SE16 (TADIR), SE11 (TADIR), SEGW, /IWFND/MAINT_SERVICE, SE38, SICF (compare_builds.ps1).
 
