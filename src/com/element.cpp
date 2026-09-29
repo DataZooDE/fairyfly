@@ -248,10 +248,22 @@ bool ComGuiElement::is_enabled() const {
 }
 
 bool ComGuiElement::is_visible() const {
-    // Known behavior: "Visible" is not exposed by SAP GUI scripting objects, so this
-    // lookup fails silently (get_bool_property returns false) and every element is
-    // reported "visible": false. That output is preserved on purpose; the DISPID miss
-    // is negative-cached per type so it costs no COM round trips after the first.
+    // "Visible" is not a GuiVComponent scripting property, so the DISPID lookup normally
+    // misses (negative-cached per type, so it costs no COM round trips after the first).
+    // SAP only returns elements that exist on the current screen, so a missing property
+    // means "visible". When a Visible property does exist its actual value is returned.
+    // Any other COM failure keeps the conservative answer (false) with a debug log.
+    if (!dispatch_) return false;
+    DISPID dispid;
+    const HRESULT lookup = resolve_dispid(L"Visible", &dispid);
+    if (lookup == DISP_E_UNKNOWNNAME || lookup == DISP_E_MEMBERNOTFOUND ||
+        lookup == TYPE_E_ELEMENTNOTFOUND) {
+        return true;
+    }
+    if (FAILED(lookup)) {
+        spdlog::debug("is_visible|lookup failed|hr={:#010x}", (unsigned int)lookup);
+        return false;
+    }
     return get_bool_property(L"Visible");
 }
 

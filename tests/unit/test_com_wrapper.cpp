@@ -121,6 +121,10 @@ public:
     int children_invokes = 0;
     int new_enum_calls = 0;
     bool enumerable = false;
+    // Visible member behavior: known (value visible_value), missing, or failing with E_FAIL.
+    bool visible_missing = false;
+    bool visible_fails = false;
+    bool visible_value = true;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -185,7 +189,10 @@ public:
         else if (std::wcscmp(names[0], L"FindById") == 0) *ids = type_id_ + 25;
         else if (std::wcscmp(names[0], L"Children") == 0) *ids = type_id_ + 26;
         else if (std::wcscmp(names[0], L"Selected") == 0) *ids = type_id_ + 27;
-        else if (std::wcscmp(names[0], L"Visible") == 0) *ids = type_id_ + 28;
+        else if (std::wcscmp(names[0], L"Visible") == 0) {
+            if (visible_missing) return DISP_E_UNKNOWNNAME;
+            *ids = type_id_ + 28;
+        }
         else if (std::wcscmp(names[0], L"Changeable") == 0) *ids = type_id_ + 29;
         else if (std::wcscmp(names[0], L"UnselectAll") == 0) *ids = type_id_ + 30;
         else if (std::wcscmp(names[0], L"SelectNode") == 0) *ids = type_id_ + 31;
@@ -362,6 +369,12 @@ public:
         }
         if (!(flags & DISPATCH_PROPERTYGET)) return DISP_E_MEMBERNOTFOUND;
         VariantInit(result);
+        if (id == type_id_ + 28) {
+            if (visible_fails) return E_FAIL;
+            result->vt = VT_BOOL;
+            result->boolVal = visible_value ? VARIANT_TRUE : VARIANT_FALSE;
+            return S_OK;
+        }
         if (id >= type_id_ + 27 && id <= type_id_ + 29) {
             result->vt = VT_BOOL;
             result->boolVal = id == type_id_ + 27 && !selected ? VARIANT_FALSE : VARIANT_TRUE;
@@ -2121,6 +2134,34 @@ TEST_CASE("is_enabled resolves Enabled once per type", "[com][perf]") {
     REQUIRE(first_element->is_visible());
     REQUIRE(second_element->is_visible());
     REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Visible"] == 0);
+}
+
+TEST_CASE("is_visible reports true when Visible is missing, else the real value", "[com]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto make = [](DISPID base, auto configure) {
+        auto* fake = new TextFieldDispatch(L"GuiCTextField", base);
+        configure(fake);
+        auto element = ComGuiElement::create(fake);
+        fake->Release();
+        element->get_type();
+        return element;
+    };
+    SECTION("missing property means visible") {
+        auto e = make(30100, [](TextFieldDispatch* f) { f->visible_missing = true; });
+        REQUIRE(e->is_visible());
+    }
+    SECTION("Visible=false") {
+        auto e = make(30200, [](TextFieldDispatch* f) { f->visible_value = false; });
+        REQUIRE_FALSE(e->is_visible());
+    }
+    SECTION("Visible=true") {
+        auto e = make(30300, [](TextFieldDispatch*) {});
+        REQUIRE(e->is_visible());
+    }
+    SECTION("transient failure stays false") {
+        auto e = make(30400, [](TextFieldDispatch* f) { f->visible_fails = true; });
+        REQUIRE_FALSE(e->is_visible());
+    }
 }
 
 TEST_CASE("find_element_by_id resolves FindById once and still returns not found", "[com][perf]") {
