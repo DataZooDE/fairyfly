@@ -343,7 +343,8 @@ function Invoke-Suite {
         $m = Invoke-FF @('screen', 'read', '--no-tabs', '--output', 'markdown')
         Assert-That ($m.Raw -match 'Date \(to\)') "markdown lacks 'Date (to)' range caption"
         $j = Invoke-FF @('screen', 'read', '--no-tabs', '--output', 'json')
-        Assert-That ($j.Raw -notmatch '_%_APP_%-') 'JSON still contains %_..._%_APP_%- carrier elements'
+        # Only the label carriers (-TEXT / -TO_TEXT) are collapsed; the -VALU_PUSH buttons (multiple selection) are real controls.
+Assert-That ($j.Raw -notmatch '_%_APP_%-(TO_)?TEXT') 'JSON still contains %_..._%_APP_%-TEXT / -TO_TEXT label carrier elements'
         [void](Go '/n')
     }
 
