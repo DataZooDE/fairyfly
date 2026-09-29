@@ -1,10 +1,10 @@
 # fairyfly
 
-fairyfly is a Windows command-line tool for automating SAP GUI through the SAP GUI Scripting COM API. It can attach to an open session, navigate to a transaction, interact with controls, and read the current screen as structured data. The project aims to expose these operations to AI clients through MCP, but the MCP server is not implemented yet.
+fairyfly is a Windows command-line tool for automating SAP GUI through the SAP GUI Scripting COM API. It can attach to an open session, navigate to a transaction, interact with controls, and read the current screen as structured data. `fairyfly serve` exposes these operations to AI clients as an MCP server over stdio (see [MCP server](#mcp-server)).
 
 ## Current CLI
 
-The registered commands are: attach, launch, login, disconnect, connections, list, tcode, click, fill, get, screen, press_f4, send-key, close, batch, doctor, and serve. The serve command currently returns NOT_IMPLEMENTED.
+The registered commands are: attach, launch, login, disconnect, connections, list, tcode, click, fill, get, screen, press_f4, send-key, close, batch, doctor, and serve (the MCP server).
 
 Typical use with an already open SAP session:
 
@@ -67,6 +67,16 @@ Every invocation, and every line inside `batch`, appends one JSON record to `%LO
 - Append failures print a single warning and never break a command, unless audit is required.
 - The file is append-only by convention, not tamper-proof: any process of the same Windows user can edit it.
 
+## MCP server
+
+`fairyfly serve` is a Model Context Protocol server over stdio with 20 `sap_*` tools (screen read/find, get, capture, tcode, click, send-key, menus, attach/launch/login, `sap_batch`, and `sap_fill` in write mode). It starts in read-only guard mode; `serve --allow-write` enables write mode, and `FAIRYFLY_READ_ONLY=1` is a hard cap. Every tool call is audited (`audit_source: "mcp"`); no tool accepts a password.
+
+~~~powershell
+claude mcp add fairyfly -- C:\path\to\fairyfly.exe serve
+~~~
+
+Do not run `serve` in an interactive console; an MCP client launches it. Setup for Claude Code, Claude Desktop and MCP Inspector, the full tool list, options, safety model, audit trail and troubleshooting are in [docs/MCP.md](docs/MCP.md); example configs are under docs/examples/. The live check is `tests/integration/mcp_smoke.ps1`.
+
 ## Build
 
 Requirements: Windows, SAP GUI for Windows with scripting enabled for live automation, Visual Studio 2022 C++ tools, CMake 3.20+, and vcpkg. Set VCPKG_ROOT to your vcpkg checkout. The project uses C++20 and the x64-windows-static triplet.
@@ -97,6 +107,6 @@ The Makefile provides build shortcuts. Routine builds target the CLI; test targe
 
 ## Status
 
-The CLI and its test suite are under active development. MCP (`serve` returns NOT_IMPLEMENTED) and cross-platform SAP GUI support remain future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
+The CLI and its test suite are under active development. The MCP server is stdio only (no HTTP transport, no `2026-07-28` handshake); cross-platform SAP GUI support remains future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
 
 SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.

@@ -29,3 +29,13 @@ Status legend: **verified live** means the check is part of `bigfox_regression.p
 | SM66 | global work process overview | `tcode /nSM66`, `screen read` | list readable; ids stable between gated and `--probe-all` | proposed - NOT YET VERIFIED |
 
 Nothing in the catalogue presses Save, Delete, Release, Stop, Create or Change buttons; the only fills are selection-screen search values. Verification status is updated only after the orchestrator has run the scripts live.
+
+## MCP
+
+`mcp_smoke.ps1` (see [README.md](README.md)) checks the MCP server on the SM37 selection screen. Status: implemented; live verification by the orchestrator.
+
+- Protocol: initialize echoes the requested version and reports serverInfo `fairyfly`; `tools/list` has 20 tools with `additionalProperties: false` and annotations and no `sap_fill`; ping; unknown method and `server/discover` give -32601; unknown tool -32602; a malformed line gives -32700 and the server keeps answering.
+- SAP reads: `sap_sessions`, `sap_attach`, `sap_tcode /nSM37`, `sap_screen_read` (untrusted-data header, "Simple Job Selection"), `sap_get` on the FINISHED checkbox (`selected`, `label`), `sap_screen_find`, `sap_capture` (numeric scale, PNG), `sap_menu_list`, `sap_close_popup` (NO_POPUP).
+- Read-only refusals (nothing pressed): Save button, `send-key f11`, `sap_launch multiple_logon=end` give READ_ONLY_REFUSED; hidden `sap_fill` gives TOOL_UNAVAILABLE_READ_ONLY; `sap_batch` with a refused item reports it per item.
+- Shutdown and audit: exit code 0 after stdin closes, every stdout line valid JSON-RPC, one audit record per call with `audit_source: "mcp"`, tool and client, a serve started/stopped pair, no screen text in the audit file.
+- Write mode: 21 tools with `--allow-write`; `sap_fill` of the job name marker is redacted in the response and the audit file, then restored; `FAIRYFLY_READ_ONLY=1` with `--allow-write` still lists 20 tools.

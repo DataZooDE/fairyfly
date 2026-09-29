@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fairyfly": {
+      "command": "${CLAUDE_PROJECT_DIR}/build/Release/fairyfly.exe",
+      "args": ["serve"],
+      "env": {
+        "FAIRYFLY_READ_ONLY": "1"
+      }
+    }
+  }
+}
