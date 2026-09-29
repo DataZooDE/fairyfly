@@ -25,6 +25,8 @@ add_executable(unit_tests
     unit/test_audit_log.cpp
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
+    unit/test_mcp_json_rpc.cpp
+    unit/test_mcp_protocol.cpp
     ../src/config.cpp
     ../src/session.cpp
 )
