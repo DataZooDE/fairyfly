@@ -1,7 +1,7 @@
 #pragma once
-// HTTP transport of `fairyfly mcp --http`: a thin cpp-httplib adapter around HttpEndpoint, the
-// CallExecutor main-thread loop, IServerControl and the posture banner. Plain HTTP only: TLS is the
-// reverse proxy's job. Never writes to stdout.
+// HTTP transport of `fairyfly mcp --http`: a thin http.sys (HTTP Server API) adapter around HttpEndpoint, the
+// CallExecutor main-thread loop, IServerControl and the posture banner. TLS is terminated in-kernel by http.sys
+// (certificate bound by `fairyfly mcp setup`); plain HTTP is for loopback development. Never writes to stdout.
 
 #include <atomic>
 #include <functional>
@@ -35,7 +35,7 @@ private:
 
 struct HttpServerConfig {
     std::string host = "127.0.0.1";
-    int port = 8383;                       ///< 0 = ephemeral (tests)
+    int port = 8383;                       ///< fixed port; 0 is an error (http.sys has no ephemeral ports)
     HttpEndpointOptions endpoint;
     bool insecure_no_auth = false;         ///< for the posture banner only (the authenticator decides)
     bool read_only = true;                 ///< initial mode
@@ -56,11 +56,16 @@ public:
                   std::function<void(bool read_only)> apply_read_only = {});
     ~McpHttpServer() override;
 
-    /// Binds the listening socket (port 0 = ephemeral). Idempotent. Returns false with a message on failure.
+    /// Registers the http.sys prefix (server session, URL group, request queue). Idempotent. Returns false with a
+    /// message on failure; bind_error_reason() then holds one of: no_url_reservation, prefix_registered,
+    /// invalid_prefix, insecure_bind, http_sys_error.
     bool bind(std::string* error = nullptr);
+    const std::string& bind_error_reason() const;
+    /// The registered http.sys prefix ("https://+:8443/mcp/"); empty before a successful bind().
+    const std::string& prefix() const;
     int port() const;
     /// Runs the main-thread executor loop (the CALLING thread must be the COM/main thread) and the
-    /// listener on a helper thread. Returns 0 after request_stop()/request_restart().
+    /// http.sys receive workers on helper threads. Returns immediately when a stop was requested before. Returns 0 after request_stop()/request_restart().
     int run();
     bool restart_requested() const { return restart_.load(); }
 
@@ -84,6 +89,11 @@ private:
     std::atomic<bool> restart_{false};
     std::atomic<bool> running_{false};
 };
+
+/// Scheme-aware endpoint URL for banners/status: https://<first allowed host or +>:<port><path> when `tls`,
+/// http://127.0.0.1:<port><path> for plain loopback ("localhost" is shown as 127.0.0.1).
+std::string http_endpoint_url(bool tls, const std::string& host, const std::vector<std::string>& allowed_hosts, int port,
+                              const std::string& path);
 
 /// Everything run_mcp hands over to the HTTP transport.
 struct HttpRunArgs {

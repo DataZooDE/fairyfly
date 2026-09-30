@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 
+#include "include/mcp/http_server.h"
 #include "include/mcp/run_mcp.h"
 
 namespace fairyfly::mcp {
@@ -76,8 +77,8 @@ public:
         if (inner_) return inner_->status();
         ServerStatus st;
         st.running = false;
-        st.endpoint = "http://" + (options_.host.empty() ? std::string("127.0.0.1") : options_.host) + ":" +
-                      std::to_string(options_.port == 0 ? 8383 : options_.port) + "/mcp";
+        st.endpoint = http_endpoint_url(options_.tls, options_.host, options_.allowed_hosts,
+                                        options_.port == 0 ? (options_.tls ? 8443 : 8383) : options_.port, "/mcp");
         st.read_only = read_only_.load();
         if (!last_error_.empty()) st.warnings.push_back(last_error_);
         return st;
