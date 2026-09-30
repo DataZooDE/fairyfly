@@ -272,20 +272,21 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     x.client_config->add_option("--name", x.client.name, "Server name in the client (default fairyfly)");
     output_option(x.client_config, x.output);
 
-    x.doctor = mcp.add_subcommand("doctor", "Check the MCP server environment (config, port, SAP GUI, desktop, tokens, autostart, tray)");
+    x.doctor = mcp.add_subcommand("doctor", "Check the MCP server environment (config, port, SAP GUI, desktop, tokens, http.sys setup: urlacl, sslcert, certificate, TLS, autostart, tray)");
     x.doctor->fallthrough();
     output_option(x.doctor, x.output);
+    setup_mcp_setup_commands(mcp, x);
 }
 
 std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, const HandlerProvider& get_handler,
                                   const GlobalOptions& global) {
-    (void)global;
     if (x.config_path_cmd && *x.config_path_cmd) return cmd_path(x);
     if (x.config_init && *x.config_init) return cmd_init(x);
     if (x.config_validate && *x.config_validate) return cmd_validate(x);
     if (x.config_show && *x.config_show) return cmd_show(x);
     if (x.client_config && *x.client_config) return run_client_config_command(x);
     if (x.doctor && *x.doctor) return run_mcp_doctor_command(x, get_handler);
+    if (const auto setup_exit = run_mcp_setup_commands(x, global)) return setup_exit;
 
     // Server path: apply YAML < env < flags on top of the parsed options.
     const auto env = process_env();

@@ -169,6 +169,15 @@ set(FAIRYFLY_LIB_SOURCES
     src/system/powershell_runner.cpp
     src/system/cert_scripts.cpp
     src/setup/setup_validators.cpp
+    src/setup/setup_model.cpp
+    src/setup/setup_service.cpp
+    src/setup/http_sys_config_win.cpp
+    src/setup/cert_store_win.cpp
+    src/setup/firewall_win.cpp
+    src/setup/elevator_win.cpp
+    src/setup/system_probe_win.cpp
+    src/setup/winhttp_client.cpp
+    src/setup/verify_win.cpp
     src/auth/crypto.cpp
     src/auth/ip.cpp
     src/auth/secret_backend.cpp
@@ -191,6 +200,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/mcp_config_command.cpp
     src/commands/mcp_client_config_command.cpp
     src/commands/mcp_doctor_command.cpp
+    src/commands/mcp_setup_command.cpp
 )
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)

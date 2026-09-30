@@ -37,6 +37,7 @@ add_executable(unit_tests
     unit/test_mcp_config.cpp
     unit/test_mcp_client_config.cpp
     unit/test_mcp_doctor.cpp
+    unit/test_mcp_setup.cpp
     unit/test_tray.cpp
     unit/test_mcp_tray_runner.cpp
     unit/test_mcp_tool_metadata.cpp

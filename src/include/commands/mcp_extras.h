@@ -5,6 +5,7 @@
 
 #include <CLI/CLI.hpp>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -33,6 +34,7 @@ struct McpExtras {
     bool init_force = false;
     std::string output = "text";   ///< text | json | markdown (each leaf has its own --output bound here)
     config::ClientConfigOptions client;
+    std::shared_ptr<void> setup_state;   ///< `setup`/`teardown`/`cert` subcommands (mcp_setup_command.cpp)
 };
 
 /// Registers the options/subcommands on the `mcp` app.
@@ -62,5 +64,7 @@ int report_error(const std::string& output, const std::string& code, const std::
 // ---- other subcommands ---------------------------------------------------------------------------
 int run_client_config_command(McpExtras& extras);
 int run_mcp_doctor_command(McpExtras& extras, const HandlerProvider& get_handler);
+void setup_mcp_setup_commands(CLI::App& mcp_app, McpExtras& extras);                        // mcp_setup_command.cpp
+std::optional<int> run_mcp_setup_commands(McpExtras& extras, const GlobalOptions& global);   // nullopt = not a setup command
 
 } // namespace fairyfly::commands
