@@ -9,6 +9,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "include/auth/ip.h"
 #include "include/mcp/authenticators.h"
 #include "include/mcp/json_rpc.h"
 #include "include/mcp/protocol_session.h"
@@ -278,7 +279,15 @@ HttpResponse HttpEndpoint::finish(const HttpRequest& request, HttpResponse respo
 }
 
 std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) const {
-    // DNS-rebinding defence first: it applies to every path and method.
+    // Server-level client allow-list first (before Host/Origin/auth/body): loopback always passes, an empty list
+    // allows everyone, anything else must match a CIDR. An unparsable peer fails closed.
+    if (!options_.allow_ip.empty() && !auth::ip_is_loopback(request.peer_addr) &&
+        !auth::ip_allowed(request.peer_addr, options_.allow_ip)) {
+        ++calls_denied_;
+        return finish(request, plain_error(403, "ADDRESS_NOT_ALLOWED",
+                                           "this address is not allowed to use this server"));
+    }
+    // DNS-rebinding defence: it applies to every path and method.
     if (!host_allowed(request.header("Host"))) {
         ++calls_denied_;
         return finish(request, plain_error(403, "HOST_NOT_ALLOWED",
@@ -336,9 +345,6 @@ HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) 
     IAuthenticator& auth = authenticator_ ? *authenticator_ : static_cast<IAuthenticator&>(fallback);
     AuthRequest auth_request;
     auth_request.authorization = request.header("Authorization");
-    auth_request.proxy_secret = request.header("X-Fairyfly-Proxy-Secret");
-    auth_request.forwarded_for = request.header("X-Forwarded-For");
-    auth_request.forwarded_proto = request.header("X-Forwarded-Proto");
     auth_request.peer_addr = request.peer_addr;
     AuthOutcome outcome;
     try {

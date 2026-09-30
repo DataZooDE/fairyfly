@@ -43,19 +43,15 @@ RandomFn counting_rng() {
 
 struct Env {
     std::shared_ptr<InMemorySecretBackend> tokens = std::make_shared<InMemorySecretBackend>();
-    std::shared_ptr<InMemorySecretBackend> proxy = std::make_shared<InMemorySecretBackend>();
     FakeClock clock;
     RandomFn rng = counting_rng();
     AuthConfig config;
     std::unique_ptr<TokenAuthenticator> auth;
 
-    explicit Env(const std::string& proxy_secret = "", bool with_proxy_in_backend = false) {
+    Env() {
         config.token_backend = tokens;
-        config.proxy_backend = proxy;
         config.clock = clock.fn();
         config.cache_ttl = std::chrono::milliseconds(0);  // every request sees the store as it is now
-        config.proxy_secret = with_proxy_in_backend ? "" : proxy_secret;
-        if (with_proxy_in_backend) proxy->put(config.proxy_name, proxy_secret);
         auth = std::make_unique<TokenAuthenticator>(config);
     }
     CreatedToken create(const std::string& name, NewToken t = {}) {
@@ -546,6 +542,12 @@ TEST_CASE("auth: IP binding with addresses and CIDR", "[auth][authn][ip]") {
     CHECK(ip_allowed("::ffff:10.1.2.3", {"10.0.0.0/8"}));       // IPv4-mapped IPv6
     CHECK(ip_allowed("127.0.0.1", {"0.0.0.0/0"}));
     CHECK_FALSE(ip_allowed("garbage", {"0.0.0.0/0"}));           // fail closed
+    CHECK(ip_is_loopback("127.0.0.1"));
+    CHECK(ip_is_loopback("127.1.2.3"));
+    CHECK(ip_is_loopback("::1"));
+    CHECK(ip_is_loopback("::ffff:127.0.0.1"));
+    CHECK_FALSE(ip_is_loopback("10.0.0.1"));
+    CHECK_FALSE(ip_is_loopback("garbage"));
     CHECK_FALSE(parse_ip_rule("10.0.0.0/33"));
     CHECK_FALSE(parse_ip_rule("10.0.0.0/x"));
 
@@ -565,66 +567,42 @@ TEST_CASE("auth: IP binding with addresses and CIDR", "[auth][authn][ip]") {
     CHECK(env.auth->authenticate(request_with(open.token, "198.51.100.1")).ok);
 }
 
-TEST_CASE("auth: trusted proxy matrix", "[auth][authn][proxy]") {
-    const std::string kSecret = "proxy-shared-secret";
-    NewToken t;
-    t.allowed_ips = {"203.0.113.0/24"};
-
-    auto request = [&](const Env& env, const std::string& token, const std::string& xff, const std::string& proxy_header,
-                       const std::string& peer = "127.0.0.1") {
-        (void)env;
-        AuthRequest r = request_with(token, peer);
-        r.forwarded_for = xff;
-        r.forwarded_proto = xff.empty() ? "" : "https";
-        r.proxy_secret = proxy_header;
-        return r;
-    };
-
-    SECTION("secret configured and matching: forwarded address is used") {
-        Env env(kSecret);
-        const auto c = env.create("bound", t);
-        const auto out = env.auth->authenticate(request(env, c.token, "203.0.113.7", kSecret));
+TEST_CASE("auth: forwarded headers are ignored, the socket peer is the client address", "[auth][authn][ip]") {
+    Env env;
+    SECTION("a spoofed X-Forwarded-For neither helps nor hurts: the peer decides") {
+        NewToken t;
+        t.allowed_ips = {"127.0.0.1"};
+        const auto bound = env.create("local-only", t);
+        auto ok = request_with(bound.token, "127.0.0.1");
+        const auto out = env.auth->authenticate(ok);
         REQUIRE(out.ok);
-        CHECK(out.principal.remote_addr == "203.0.113.7");
-        // the proxy's own (last) entry wins over a client-forged first entry
-        const auto forged = env.auth->authenticate(request(env, c.token, "203.0.113.7, 198.51.100.1", kSecret));
-        CHECK_FALSE(forged.ok);
-        CHECK(forged.error_code == "IP_NOT_ALLOWED");
-        const auto ok_last = env.auth->authenticate(request(env, c.token, "198.51.100.1, 203.0.113.8", kSecret));
-        CHECK(ok_last.ok);
+        CHECK(out.principal.remote_addr == "127.0.0.1");
+
+        NewToken remote;
+        remote.allowed_ips = {"203.0.113.0/24"};
+        const auto other = env.create("lan-only", remote);
+        // from loopback with a header naming an allowed address: still refused
+        const auto denied = env.auth->authenticate(request_with(other.token, "127.0.0.1"));
+        CHECK_FALSE(denied.ok);
+        CHECK(denied.http_status == 403);
+        CHECK(denied.error_code == "IP_NOT_ALLOWED");
+        // from an allowed peer the request passes and the principal carries the peer address
+        const auto lan = env.auth->authenticate(request_with(other.token, "203.0.113.50"));
+        REQUIRE(lan.ok);
+        CHECK(lan.principal.remote_addr == "203.0.113.50");
     }
-    SECTION("secret configured but wrong or missing: forwarded headers are ignored, the peer address is used") {
-        Env env(kSecret);
-        const auto c = env.create("bound", t);
-        for (const std::string& header : {std::string("wrong"), std::string()}) {
-            const auto out = env.auth->authenticate(request(env, c.token, "203.0.113.7", header));
-            CHECK_FALSE(out.ok);
-            CHECK(out.error_code == "IP_NOT_ALLOWED");  // peer 127.0.0.1 is not in the bound range
-        }
-        const auto peer_ok = env.auth->authenticate(request(env, c.token, "198.51.100.1", "wrong", "203.0.113.50"));
-        REQUIRE(peer_ok.ok);
-        CHECK(peer_ok.principal.remote_addr == "203.0.113.50");
+    SECTION("IPv4-mapped IPv6 peers match IPv4 CIDRs") {
+        NewToken t;
+        t.allowed_ips = {"203.0.113.0/24"};
+        const auto c = env.create("mapped", t);
+        CHECK(env.auth->authenticate(request_with(c.token, "::ffff:203.0.113.9")).ok);
+        CHECK_FALSE(env.auth->authenticate(request_with(c.token, "::ffff:198.51.100.9")).ok);
     }
-    SECTION("no proxy secret configured: the header is never trusted") {
-        Env env("");
-        const auto c = env.create("bound", t);
-        const auto out = env.auth->authenticate(request(env, c.token, "203.0.113.7", "anything"));
-        CHECK_FALSE(out.ok);
-        CHECK(out.error_code == "IP_NOT_ALLOWED");
-        CHECK(env.auth->resolve_client(request(env, c.token, "203.0.113.7", "")).proxy_trusted == false);
-    }
-    SECTION("secret read from the backend (Credential Manager entry)") {
-        Env env(kSecret, /*with_proxy_in_backend=*/true);
-        const auto c = env.create("bound", t);
-        const auto out = env.auth->authenticate(request(env, c.token, "203.0.113.7", kSecret));
-        REQUIRE(out.ok);
-        CHECK(out.principal.remote_addr == "203.0.113.7");
-        CHECK(env.auth->resolve_client(request(env, c.token, "203.0.113.7", kSecret)).proxy_trusted);
-    }
-    SECTION("forwarded address without port and with port") {
-        Env env(kSecret);
-        const auto c = env.create("open");
-        CHECK(env.auth->authenticate(request(env, c.token, "203.0.113.7:4711", kSecret)).principal.remote_addr == "203.0.113.7:4711");
+    SECTION("the AuthRequest has no forwarded or proxy fields") {
+        AuthRequest r;
+        r.authorization = "Bearer x";
+        r.peer_addr = "127.0.0.1";
+        CHECK(r.peer_addr == "127.0.0.1");
     }
 }
 
@@ -668,10 +646,10 @@ TEST_CASE("auth: posture warnings", "[auth][authn]") {
         Env env;
         const auto text = joined(env.auth->posture_warnings());
         CHECK(text.find("no access tokens configured") != std::string::npos);
-        CHECK(text.find("proxy secret not set") != std::string::npos);
+        CHECK(text.find("proxy") == std::string::npos);
     }
     {
-        Env env("secret");
+        Env env;
         NewToken star;
         star.scopes = {"*"};
         env.create("everything", star);
@@ -680,13 +658,13 @@ TEST_CASE("auth: posture warnings", "[auth][authn]") {
         env.create("expiring", expiring);
         const auto text = joined(env.auth->posture_warnings());
         CHECK(text.find("no access tokens") == std::string::npos);
-        CHECK(text.find("proxy secret") == std::string::npos);
+        CHECK(text.find("proxy") == std::string::npos);
         CHECK(text.find("without an expiry: everything") != std::string::npos);
         CHECK(text.find("expiring") == std::string::npos);
         CHECK(text.find("all scopes (*): everything") != std::string::npos);
     }
     {
-        Env env("secret");
+        Env env;
         env.create("only");
         env.store().revoke("only");
         CHECK(joined(env.auth->posture_warnings()).find("no access tokens configured") != std::string::npos);

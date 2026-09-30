@@ -1,3 +1,4 @@
+#include "include/auth/ip.h"
 #include "include/config/mcp_config.h"
 
 #include <algorithm>
@@ -64,7 +65,7 @@ std::vector<KeySpec> build_specs() {
     add(k);
 
     k = make("server.host", ValueType::String, Value{std::string("127.0.0.1")},
-             "Listen address of the HTTP transport. Keep 127.0.0.1 and put a TLS-terminating reverse proxy in front");
+             "URL prefix host: 127.0.0.1 (default, loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
     add(k);
     k = make("server.port", ValueType::Int, Value{8383LL}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
@@ -72,6 +73,10 @@ std::vector<KeySpec> build_specs() {
     k = make("server.transport", ValueType::String, Value{std::string("stdio")}, "stdio (default) or http");
     k.allowed = {"stdio", "http"};
     add(k);
+    add(make("server.tls", ValueType::Bool, Value{false},
+             "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"));
+    add(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
+             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback is always allowed"));
     add(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"));
     add(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
              "Extra accepted Host header values (loopback names are always accepted)"));
@@ -105,10 +110,6 @@ std::vector<KeySpec> build_specs() {
 
     k = make("auth.token_prefix", ValueType::String, Value{std::string("ffy")}, "Prefix of generated bearer tokens (2-8 lower-case letters/digits)");
     add(k);
-    k = make("auth.proxy_secret_source", ValueType::String, Value{std::string("credential-manager")},
-             "Where the reverse-proxy secret is read from. The secret itself never goes into this file");
-    k.allowed = {"credential-manager"};
-    add(k);
     return s;
 }
 
@@ -136,10 +137,13 @@ bool validate_value(const KeySpec& spec, const Value& value, std::string* error)
             return fail("must be one of: " + list);
         }
         if (spec.key == "server.host" && (text.empty() || text.find_first_of(" \t/") != std::string::npos))
-            return fail("must be a host name or IP address without spaces or slashes");
+            return fail("must be a host name, an IP address, '+' or '*' without spaces or slashes");
         if (spec.key == "auth.token_prefix" && !valid_token_prefix(text))
             return fail("must be 2-8 lower-case letters or digits");
         if (spec.key == "audit.file" && text.empty()) return fail("must not be empty (remove the key for the default)");
+    } else if (spec.type == ValueType::StringList && spec.key == "server.allow_ip") {
+        for (const auto& entry : std::get<Vec>(value))
+            if (!auth::parse_ip_rule(entry)) return fail("'" + entry + "' is not an IPv4/IPv6 address or CIDR block");
     } else if (spec.type == ValueType::StringList && spec.key == "tools.families") {
         const auto& list = std::get<Vec>(value);
         const auto unknown = command_table::unknown_families(list);
@@ -191,6 +195,12 @@ struct Walker {
     void unknown_key(const std::string& path, const YAML::Node& key_node, const YAML::Node& value) {
         const int line = key_node.Mark().line + 1;
         const auto dot = path.rfind('.');
+        if (removed_key(path)) {
+            issue(Severity::Warning, "CONFIG_UNKNOWN_KEY",
+                  "unknown key '" + path + "' is ignored (removed: fairyfly no longer trusts a reverse proxy; "
+                  "it listens with http.sys directly)", line, path);
+            return;
+        }
         if (looks_secret_key(dot == std::string::npos ? path : path.substr(dot + 1))) {
             const bool has_value = value.IsDefined() && !value.IsNull() &&
                                    !(value.IsScalar() && trim(value.Scalar()).empty());
@@ -204,6 +214,9 @@ struct Walker {
         }
         issue(Severity::Warning, "CONFIG_UNKNOWN_KEY", "unknown key '" + path + "' is ignored", line, path);
     }
+
+    /// Keys of earlier versions: reported as unknown, with the reason.
+    static bool removed_key(const std::string& path) { return path == "auth.proxy_secret_source"; }
 
     void leaf(const KeySpec& spec, const YAML::Node& key_node, const YAML::Node& node) {
         const int line = key_node.Mark().line + 1;
@@ -489,10 +502,13 @@ void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     if (auto v = c.get_int("server.port")) o.port = static_cast<int>(*v);
     if (auto v = c.get_string("server.host")) o.host = *v;
     if (auto v = c.get_bool("server.sse")) o.sse = *v;
+    if (auto v = c.get_bool("server.tls")) o.tls = *v;
+    if (auto v = c.get_list("server.allow_ip")) o.allow_ip = *v;
     if (auto v = c.get_list("server.allowed_hosts")) o.allowed_hosts = *v;
     if (auto v = c.get_list("server.cors_origins")) o.cors_origins = *v;
-    // insecure_no_auth is deliberately NOT a config key: authentication can only be switched off with the
-    // --insecure-no-auth flag on the command line, never from a file or the environment.
+    // insecure_no_auth and insecure_http are deliberately NOT config keys: authentication can only be switched off
+    // with --insecure-no-auth and plain HTTP on a non-loopback host allowed with --insecure-http, on the command
+    // line, never from a file or the environment.
 }
 
 EnvLookup process_env() {

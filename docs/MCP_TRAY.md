@@ -1,8 +1,8 @@
 # fairyfly MCP: tray, YAML config, client config and doctor
 
 This page covers the operator side of the remote MCP server on the Windows VM: the system-tray mode,
-the YAML config file, autostart, `mcp client-config` and `mcp doctor`. The HTTP protocol and IIS are
-described elsewhere (docs/MCP.md, docs/MCP_REMOTE.md).
+the YAML config file, autostart, `mcp client-config` and `mcp doctor`. The HTTP protocol and the HTTPS setup are
+described elsewhere (docs/MCP.md, docs/MCP_REMOTE.md, docs/MCP_SETUP.md).
 
 ## Why a console app with a tray, not a Windows service
 
@@ -92,7 +92,9 @@ Keys (every active line of the generated template equals the default):
 
 | Key | Default | Meaning |
 |---|---|---|
-| `server.host` / `server.port` | 127.0.0.1 / 8383 | HTTP listen address (keep loopback; IIS terminates TLS) |
+| `server.host` / `server.port` | 127.0.0.1 / 8383 | URL prefix host: `127.0.0.1` (loopback), `+` (all interfaces, TLS recommended) or a host name; `localhost` is treated as 127.0.0.1 |
+| `server.tls` | false | TLS via http.sys; the certificate binding is created by `fairyfly mcp setup` (which also writes the file with `tls: true`) |
+| `server.allow_ip[]` | empty | client allow-list (addresses or CIDR); empty = any, loopback is always allowed |
 | `server.transport` | stdio | `stdio` or `http` |
 | `server.sse` | true | allow SSE streaming on tools/call |
 | `server.allowed_hosts[]` / `server.cors_origins[]` | empty | extra Host values / browser origins |
@@ -102,7 +104,7 @@ Keys (every active line of the generated template equals the default):
 | `default_connection`, `format` | unset, markdown | defaults for tool calls |
 | `tray.enabled` / `start_minimized_notice` / `autostart` | false / true / false | tray behavior (`autostart` documents intent; use `--install-autostart`) |
 | `audit.enabled` / `required` / `file` | true / false / default | audit trail settings |
-| `auth.token_prefix` / `proxy_secret_source` | ffy / credential-manager | token prefix; where the IIS proxy secret lives |
+| `auth.token_prefix` | ffy | prefix of generated tokens |
 
 No secrets belong in this file. Unknown keys and keys named password/secret/token* produce a warning; a
 secret-like key with a value, or a value that looks like a token or `Bearer ...`, is refused with
@@ -129,9 +131,9 @@ printed; `--token-env` takes the NAME of a variable, and a token-shaped value is
 
 Checks (pass / warn / fail / skip): config validity, port free or bound, SAP GUI scripting available and a
 logged-in session (through the read-only `doctor` diagnostics; nothing is clicked), interactive desktop
-(not Session 0), locked or RDP-disconnected session, token count, IIS status, autostart registered, tray
-running. Token count and IIS report "unknown / not checked" until the token store and IIS integration
-provide their probes. Exit code 1 when any check fails.
+(not Session 0), locked or RDP-disconnected session, token count, elevation, URL ACL, TLS binding, certificate, firewall, TLS handshake, autostart registered,
+tray running (see MCP_SETUP.md for the setup-related checks). Token count reports "unknown / not checked" until the token store
+provides its probe. Exit code 1 when any check fails.
 
 ## Manual checklist (desktop, not CI)
 

@@ -24,7 +24,7 @@ struct Principal {
     std::map<std::string, int> rate_families; ///< extra calls-per-minute budget per tool family (e.g. element=10); empty = none
     bool read_only = false;              ///< token can only narrow the server mode
     bool allow_navigation = false;       ///< with a T-code allowlist: menus and navigating keys stay usable (--allow-navigation)
-    std::string remote_addr;             ///< client address (from proxy header only when the proxy secret matched)
+    std::string remote_addr;             ///< client address: the socket peer address (forwarded headers are never trusted)
     bool authenticated = false;          ///< false for stdio and for --insecure-no-auth
 };
 
@@ -42,10 +42,7 @@ inline const char* transport_label(bool http) { return http ? "http" : "stdio"; 
 /// Raw request facts the authenticator needs (HTTP adapter fills this; header names are case-insensitive upstream).
 struct AuthRequest {
     std::string authorization;      ///< "Authorization" header value ("" if absent)
-    std::string proxy_secret;       ///< "X-Fairyfly-Proxy-Secret" value
-    std::string forwarded_for;      ///< "X-Forwarded-For" value
-    std::string forwarded_proto;    ///< "X-Forwarded-Proto" value
-    std::string peer_addr;          ///< socket peer address (127.0.0.1 when a reverse proxy fronts us)
+    std::string peer_addr;          ///< socket peer address (the client address used for IP binding)
 };
 
 /// Result of authenticating one request.

@@ -24,5 +24,7 @@ std::optional<IpRule> parse_ip_rule(const std::string& text);
 bool ip_in_rule(const IpBytes& address, const IpRule& rule);
 /// True when `address` matches any rule; false for an unparsable address or rule (fail closed).
 bool ip_allowed(const std::string& address, const std::vector<std::string>& rules);
+/// True for 127.0.0.0/8, ::1 and their IPv4-mapped forms; false for anything unparsable.
+bool ip_is_loopback(const std::string& address);
 
 } // namespace fairyfly::auth

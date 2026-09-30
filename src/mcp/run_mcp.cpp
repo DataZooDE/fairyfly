@@ -16,6 +16,7 @@
 
 #include "include/command_table.h"
 #include "include/auth/authenticator.h"
+#include "include/auth/ip.h"
 #include "include/mcp/authenticators.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/http_server.h"
@@ -148,18 +149,17 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     server_options.call_timeout_ms = options.call_timeout_ms;
 
     if (http) {
-        // Remote transport: plain HTTP (TLS is the reverse proxy's job). The provider is rebuilt when the
+        // Remote transport: http.sys (TLS in the kernel when --tls). The provider is rebuilt when the
         // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
         if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
             return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
-        // Bearer-token authentication (Credential Manager). The reverse-proxy secret is stored as
-        // "fairyfly:fairyfly-mcp-proxy"; --insecure-no-auth bypasses the factory in make_http_authenticator.
-        g_make_authenticator = [] {
-            auth::AuthConfig config;
-            config.proxy_prefix = "fairyfly:";
-            config.proxy_name = "fairyfly-mcp-proxy";
-            return auth::make_default_authenticator(config);
-        };
+        for (const auto& cidr : options.allow_ip) {
+            if (!auth::parse_ip_rule(cidr))
+                return refuse("INVALID_ARGUMENT", "invalid --allow-ip entry '" + cidr + "': expected an IPv4/IPv6 address or CIDR block");
+        }
+        // Bearer-token authentication (Credential Manager); --insecure-no-auth bypasses the factory in
+        // make_http_authenticator.
+        g_make_authenticator = [] { return auth::make_default_authenticator(auth::AuthConfig{}); };
         HttpRunArgs http_args;
         http_args.options = options;
         http_args.server_options = server_options;

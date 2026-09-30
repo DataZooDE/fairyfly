@@ -87,7 +87,8 @@ TEST_CASE("config: validation errors carry line numbers", "[config]") {
         {"server:\n  allowed_hosts: notalist\n", "CONFIG_INVALID_VALUE", 2},
         {"server: 5\n", "CONFIG_INVALID_STRUCTURE", 1},
         {"auth:\n  token_prefix: BAD!\n", "CONFIG_INVALID_VALUE", 2},
-        {"auth:\n  proxy_secret_source: file\n", "CONFIG_INVALID_VALUE", 2},
+        {"server:\n  allow_ip: [10.0.0.0/33]\n", "CONFIG_INVALID_VALUE", 2},
+        {"server:\n  tls: maybe\n", "CONFIG_INVALID_VALUE", 2},
         {"format: xml\n", "CONFIG_INVALID_VALUE", 1},
         {"- a\n- b\n", "CONFIG_INVALID_STRUCTURE", 1},
         {"server:\n  host: [\n", "CONFIG_PARSE_ERROR", 0},
@@ -137,9 +138,18 @@ TEST_CASE("config: unknown keys warn, secret-like keys and values are handled", 
         CHECK(bearer.has_secret());
     }
     SECTION("the known auth keys are not mistaken for secrets") {
-        const auto r = parse_yaml("auth:\n  token_prefix: ffy\n  proxy_secret_source: credential-manager\n");
+        const auto r = parse_yaml("auth:\n  token_prefix: ffy\n");
         CHECK(r.ok());
         CHECK(r.issues.empty());
+    }
+    SECTION("the removed auth.proxy_secret_source key is reported as unknown, with the reason") {
+        const auto r = parse_yaml("auth:\n  proxy_secret_source: credential-manager\n");
+        CHECK(r.ok());
+        const auto* issue = find_issue(r, "CONFIG_UNKNOWN_KEY");
+        REQUIRE(issue != nullptr);
+        CHECK(issue->line == 2);
+        CHECK(issue->message.find("removed") != std::string::npos);
+        CHECK(config::find_key("auth.proxy_secret_source") == nullptr);
     }
 }
 
@@ -226,6 +236,54 @@ TEST_CASE("config: HTTP keys are applied with precedence flag > env > yaml > def
     apply_config(McpConfig{}, untouched);
     CHECK(untouched.sse);
     CHECK(untouched.host == "127.0.0.1");
+}
+
+TEST_CASE("config: tls and allow_ip keys apply with precedence flag > env > yaml > default", "[config][precedence]") {
+    mcp::ServeOptions defaults;
+    CHECK_FALSE(defaults.tls);
+    CHECK(defaults.allow_ip.empty());
+    const auto eff = resolve(McpConfig{}, McpConfig{}, fake_env({}));
+    CHECK_FALSE(std::get<bool>(eff.at("server.tls").value));
+    CHECK(std::get<std::vector<std::string>>(eff.at("server.allow_ip").value).empty());
+    CHECK(config::find_key("server.tls")->env == "FAIRYFLY_MCP_SERVER_TLS");
+    CHECK(config::find_key("server.allow_ip")->env == "FAIRYFLY_MCP_SERVER_ALLOW_IP");
+
+    const auto parsed = parse_yaml("server:\n  host: \"+\"\n  tls: true\n  allow_ip: [192.168.0.0/16, fd00::/8]\n");
+    REQUIRE(parsed.ok());
+    mcp::ServeOptions y;
+    apply_config(merged_layers(parsed.config, McpConfig{}, fake_env({})), y);
+    CHECK(y.host == "+");
+    CHECK(y.tls);
+    CHECK(y.allow_ip == std::vector<std::string>{"192.168.0.0/16", "fd00::/8"});
+
+    mcp::ServeOptions e;
+    apply_config(merged_layers(parsed.config, McpConfig{},
+                               fake_env({{"FAIRYFLY_MCP_SERVER_TLS", "false"}, {"FAIRYFLY_MCP_SERVER_ALLOW_IP", "10.0.0.0/8"}})), e);
+    CHECK_FALSE(e.tls);
+    CHECK(e.allow_ip == std::vector<std::string>{"10.0.0.0/8"});
+
+    McpConfig flags;
+    flags.set("server.tls", true);
+    flags.set("server.allow_ip", std::vector<std::string>{"172.16.0.0/12"});
+    mcp::ServeOptions f;
+    apply_config(merged_layers(parsed.config, flags, fake_env({{"FAIRYFLY_MCP_SERVER_TLS", "false"}})), f);
+    CHECK(f.tls);
+    CHECK(f.allow_ip == std::vector<std::string>{"172.16.0.0/12"});
+
+    // an invalid entry from the environment is ignored (defaults stay), from the flag layer the value validator refuses it
+    std::vector<ConfigIssue> issues;
+    const auto env_only = env_layer(fake_env({{"FAIRYFLY_MCP_SERVER_ALLOW_IP", "not-an-ip"}}), &issues);
+    CHECK(env_only.values.count("server.allow_ip") == 0);
+    CHECK_FALSE(issues.empty());
+}
+
+TEST_CASE("config: insecure_http is flag-only like insecure_no_auth", "[config][secret]") {
+    const auto parsed = parse_yaml("server:\n  insecure_http: true\n");
+    CHECK(find_issue(parsed, "CONFIG_UNKNOWN_KEY") != nullptr);
+    mcp::ServeOptions o;
+    apply_config(merged_layers(parsed.config, McpConfig{}, fake_env({{"FAIRYFLY_MCP_SERVER_INSECURE_HTTP", "true"}})), o);
+    CHECK_FALSE(o.insecure_http);
+    CHECK(config::find_key("server.insecure_http") == nullptr);
 }
 
 TEST_CASE("config: insecure_no_auth can never come from YAML or the environment", "[config][secret]") {
