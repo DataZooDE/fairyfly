@@ -1,6 +1,6 @@
-# Migrating to fairyfly 0.2.0
+# Migrating to the noun/verb CLI
 
-0.2.0 is a deliberate breaking change: the flat CLI commands became a noun/verb tree, the MCP tools were renamed after that tree, and `serve` became `mcp`. There are no aliases. Old command names fail with the normal CLI11 "not expected" error, and old `sap_*` tool names are unknown tools.
+The noun/verb CLI (first released as 0.2.0, before the switch to calendar versions) is a deliberate breaking change: the flat CLI commands became a noun/verb tree, the MCP tools were renamed after that tree, and `serve` became `mcp`. There are no aliases. Old command names fail with the normal CLI11 "not expected" error, and old `sap_*` tool names are unknown tools.
 
 The mapping is defined once in `src/command_table.cpp`; `fairyfly mcp tools` prints the current tool table.
 

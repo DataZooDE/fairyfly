@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2026.09.30 (unreleased)
+
+Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are retired.
 
 ### Security
 
@@ -8,7 +10,7 @@
 
 ## 0.2.0
 
-Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/MIGRATION_0.2.md](docs/MIGRATION_0.2.md) for the full old-to-new tables.
+Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/MIGRATION_CLI.md](docs/MIGRATION_CLI.md) for the full old-to-new tables.
 
 ### Changed (breaking)
 

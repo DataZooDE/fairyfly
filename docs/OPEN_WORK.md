@@ -1,6 +1,6 @@
 # Open work
 
-Note (0.2.0): the CLI was restructured into noun/verb groups and the MCP tools were renamed to `gui_<noun>_<verb>`. Command and tool names in the historical rows below use the pre-0.2.0 flat names (`tcode`, `click`, `screen menu`, `serve`, `sap_*`); see [MIGRATION_0.2.md](MIGRATION_0.2.md) for the mapping.
+Note (0.2.0): the CLI was restructured into noun/verb groups and the MCP tools were renamed to `gui_<noun>_<verb>`. Command and tool names in the historical rows below use the pre-0.2.0 flat names (`tcode`, `click`, `screen menu`, `serve`, `sap_*`); see [MIGRATION_CLI.md](MIGRATION_CLI.md) for the mapping.
 
 Updated 2026-09-29. This file tracks items under active investigation or verification. Completed fixes and their evidence remain in the [historical error log](ERROR_LOG_AND_IMPROVEMENTS.md); build measurements remain in [build performance](BUILD_OPTIMIZATION.md). All 8 items from the 2026-09-27 baseline have been resolved, verified with automated tests, or had their environmental boundaries documented below.
 

@@ -1,6 +1,6 @@
 # fairyfly MCP server
 
-`fairyfly mcp` is a Model Context Protocol (MCP) server that lets an AI client (Claude Code, Claude Desktop, MCP Inspector, any stdio MCP client) drive a live SAP GUI session through 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path. Breaking change in 0.2.0: the old `sap_*` tool names and the `serve` command are gone (see [MIGRATION_0.2.md](MIGRATION_0.2.md)). It is a thin layer over the normal CLI: every tool call is mapped to a fairyfly command and run through the same command registry, read-only guard, redaction and audit trail. For the module layout see [MCP_DESIGN.md](MCP_DESIGN.md).
+`fairyfly mcp` is a Model Context Protocol (MCP) server that lets an AI client (Claude Code, Claude Desktop, MCP Inspector, any stdio MCP client) drive a live SAP GUI session through 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path. Breaking change in 0.2.0: the old `sap_*` tool names and the `serve` command are gone (see [MIGRATION_CLI.md](MIGRATION_CLI.md)). It is a thin layer over the normal CLI: every tool call is mapped to a fairyfly command and run through the same command registry, read-only guard, redaction and audit trail. For the module layout see [MCP_DESIGN.md](MCP_DESIGN.md).
 
 Remote use (HTTP behind IIS, bearer tokens, tray, Linux clients, threat model): [MCP_REMOTE.md](MCP_REMOTE.md).
 
