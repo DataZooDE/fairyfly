@@ -99,9 +99,18 @@ Parameters: `-Exe`, `-AuditFile` (default a temp file; the write and cap servers
 
 ## HTTP MCP smoke test (mcp_http_smoke.ps1)
 
-`tests\integration\mcp_http_smoke.ps1` starts `fairyfly mcp --http` on a free loopback port (a read-only server, then an `--allow-write` server), creates temporary bearer tokens with `mcp token create` and checks the HTTP surface over `Invoke-WebRequest`: 401/405/415/404, both protocol eras, `tools/list` order, a real `gui_screen_read`, `SCOPE_DENIED`, `TCODE_DENIED` (SM50 allowed, SE16 refused), `RATE_LIMITED`, revocation within 6 s, SSE framing, the audit fields (`principal`, `transport: http`, `remote_addr`, no token string) and a clean Ctrl+C shutdown. Deployment guide: [docs/MCP_REMOTE.md](../../docs/MCP_REMOTE.md).
+`tests\integration\mcp_http_smoke.ps1` starts `fairyfly mcp --http --no-tls` (http.sys, plain HTTP, loopback only) on the fixed port 18383 (a read-only server, an `--allow-write` server, and a server with `--allow-ip 203.0.113.0/24`), creates temporary bearer tokens with `mcp token create` and checks the HTTP surface over `Invoke-WebRequest`: 401/405/415/404, both protocol eras, `tools/list` order, a real `gui_screen_read`, `SCOPE_DENIED`, `TCODE_DENIED` (SM50 allowed, SE16 refused), `RATE_LIMITED`, revocation within 6 s, SSE framing, that a spoofed `X-Forwarded-For` is ignored (`http.xff_ignored`, `http.forwarded_cannot_bypass_ip`: the token `--ip` binding uses the real peer address), that the server `--allow-ip` list never locks out loopback (`http.allow_ip_loopback_always`), the audit fields (`principal`, `transport: http`, `remote_addr`, no token string) and a clean Ctrl+C shutdown. Readiness is an HTTP request answered with 405, not a TCP connect. Deployment guide: [docs/MCP_REMOTE.md](../../docs/MCP_REMOTE.md).
 
-Prerequisites: as for `mcp_smoke.ps1` (logged-in SAP Easy Access session, Windows PowerShell 5.1, built exe) plus the Windows Credential Manager of the current user, where the tokens live. It presses and fills nothing; it starts SM50 (display) with the T-code-restricted token and returns to `/n`. Tokens are named `ffsmoke-<random>-<role>`, are never printed, and are revoked and deleted (`cmdkey /delete:fairyfly-mcp:<name>`) in a `finally` block. A temporary yaml config and audit file keep the user's real ones out of the run. The expired-token check is reported as SKIP (a past `--expires` is rejected at creation; that rejection is checked instead).
+Dev reservation (one time, elevated, required): http.sys has no ephemeral ports and needs a URL reservation for every non-elevated listener, even on loopback, so the port is fixed and the reservation must exist:
+
+~~~powershell
+netsh http add urlacl url=http://127.0.0.1:18383/mcp/ user=%USERDOMAIN%\%USERNAME%
+# remove later: netsh http delete urlacl url=http://127.0.0.1:18383/mcp/
+~~~
+
+If the server fails with `BIND_FAILED` reason `no_url_reservation`, the script prints that exact command and exits 2. With another `-Port`, reserve that port instead.
+
+Prerequisites: as for `mcp_smoke.ps1` (logged-in SAP Easy Access session, Windows PowerShell 5.1, built exe) plus the dev reservation above and the Windows Credential Manager of the current user, where the tokens live. It presses and fills nothing; it starts SM50 (display) with the T-code-restricted token and returns to `/n`. Tokens are named `ffsmoke-<random>-<role>`, are never printed, and are revoked and deleted (`cmdkey /delete:fairyfly-mcp:<name>`) in a `finally` block. A temporary yaml config and audit file keep the user's real ones out of the run. The expired-token check is reported as SKIP (a past `--expires` is rejected at creation; that rejection is checked instead).
 
 ~~~powershell
 powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1 -DryRun
@@ -109,4 +118,44 @@ powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1
 powershell -NoProfile -File tests\integration\mcp_http_smoke.ps1 -SkipWriteMode -Port 18383 -AllowedTcode SM50 -DeniedTcode SE16
 ~~~
 
-Parameters: `-Exe`, `-Port` (0 = free port), `-AuditFile` (write server uses `<name>-write.jsonl`), `-AllowedTcode`, `-DeniedTcode`, `-DryRun`, `-SkipWriteMode`. Output and exit codes as for `mcp_smoke.ps1` (0 passed, 1 a FAIL, 2 no SAP session).
+Parameters: `-Exe`, `-Port` (default 18383, fixed), `-AuditFile` (write server uses `<name>-write.jsonl`, the allow-ip server `<name>-allowip.jsonl`), `-AllowedTcode`, `-DeniedTcode`, `-DryRun`, `-SkipWriteMode`. Output as for `mcp_smoke.ps1`; exit codes 0 all passed, 1 a FAIL, 2 a prerequisite is missing (no SAP session, or no URL reservation).
+
+## End-to-end http.sys test (mcp_e2e_httpsys.ps1) - the Definition of Done
+
+`tests\integration\mcp_e2e_httpsys.ps1` is the acceptance test of the http.sys listener and of `mcp setup|doctor|teardown`. It must pass end to end on the maintainer's machine before the feature counts as done. It walks the twelve Definition-of-Done items and prints one named PASS/FAIL/SKIP line per check:
+
+1. `doctor.before`: nothing set up, urlacl/sslcert/certificate missing with a remedy, exit 1.
+2. `setup.dry_run`, `setup.runbook`: plan and runbook without any change or prompt.
+3. `setup.apply`, `setup.apply_state`, `setup.idempotent`, `cert.export`: `mcp setup --yes`, verify by a real TLS round trip, urlacl for the user and sslcert visible in `netsh`, `.cer`, manifest and yaml written; the second run says "nothing - already set up.".
+4. `doctor.after_setup`: no failing check.
+5. `server.start`, `server.banner`, `tls.handshake`, `http.plain_on_tls_port`: unelevated `mcp --http`, TLS >= 1.2, the exact certificate, plain HTTP on the TLS port refused.
+6. `http.other_path_404`, `http.get_405`, `http.content_type_415`, `http.no_token_401`, `http.bad_token_401`, `http.wrong_host_403`, `http.oversized_413` (answered before the body is sent).
+7. `token.create`, `mcp.initialize.curl|ps`, `mcp.tools_list.curl|ps`, `sap.gui_session_list`, `sap.gui_screen_read`, `sse.tools_call.h2|http1`, `audit.http_fields`, `audit.no_token_string`.
+8. `authz.scope_denied`, `authz.read_only_refused` (write-mode server, nothing reaches SAP), `token.revoke` (401 within 6 s).
+9. `ip.token_bound_refused`, `ip.xff_ignored`, `ip.forwarded_cannot_bypass`, `ip.server_allow_ip_loopback`, `ip.server_allow_ip_lan` (server `--allow-ip`, reached through the LAN address with `curl --resolve`).
+10. `pool.slow_bodies` (12 slow-body and 12 half-header TLS clients, SslStream with a thumbprint-pinned callback; a legitimate request stays under 3 s), `pool.half_header_closed`, `server.clean_stop` (Ctrl+Break, exit 0 within 15 s; also `.rw` and `.allowip`).
+11. `teardown.apply`, `teardown.idempotent` ("nothing - already removed."), `token.cleanup`, `doctor.after_teardown`: back to the initial state, no fairyfly certificate left in `LocalMachine\My`.
+12. `suites.unit_tests`, `suites.bigfox_regression`, `suites.mcp_smoke`, `suites.mcp_http_smoke`: all must be green (run these with the dev reservation for port 18383 in place; `-SkipSuites` skips them and reports SKIP).
+
+~~~powershell
+# plan and check list only: parses, starts nothing, touches nothing
+powershell -NoProfile -File tests\integration\mcp_e2e_httpsys.ps1 -DryRun
+# full run (asks once for confirmation, then two UAC prompts)
+powershell -NoProfile -File tests\integration\mcp_e2e_httpsys.ps1
+# unattended confirmation, without the other suites and the SSE checks
+powershell -NoProfile -File tests\integration\mcp_e2e_httpsys.ps1 -Yes -SkipSuites -SkipSse -Hostname myhost.example.com
+~~~
+
+Parameters: `-Exe`, `-Hostname` (default: this computer's DNS name, lower case; must be the name in the certificate and should resolve), `-Port` (default 8443), `-SkipSuites`, `-SkipSse`, `-DryRun`, `-Yes`. Exit codes: 0 every check passed (a SKIP always prints its reason), 1 at least one FAIL, 2 a prerequisite is missing.
+
+Prerequisites: Windows PowerShell 5.1 started NON-elevated (the script warns when elevated: the server must run unelevated, otherwise the test proves nothing), UAC available, a logged-in SAP session (Bigfox, SAP Easy Access, no popup), `curl.exe`, a built `fairyfly.exe` (and `unit_tests.exe` for the suites step), and a clean machine: no fairyfly URL ACL, SSL binding, certificate or `mcp-setup.json` from an earlier run (the script checks read-only via `netsh http show urlacl|sslcert` and exits 2 with the teardown command otherwise).
+
+UAC prompts: the script itself never elevates. `mcp setup --yes` and `mcp teardown --yes` self-elevate, so exactly two UAC prompts appear (the script prints `A UAC prompt will appear now - please approve` before each); the script only asserts on the results. Without `-Yes` it asks for confirmation once before starting.
+
+Recovery: the script runs setup and teardown around the server checks. If it aborts after setup but before a successful teardown (a FAIL that stops the run, Ctrl+C, a declined prompt), the `finally` block stops servers, deletes all `ffe2e-<rand>-*` tokens, restores the TLS callback and prints the recovery command; with `-Yes` it runs it (one more UAC prompt):
+
+~~~powershell
+build\Release\fairyfly.exe mcp teardown --yes
+~~~
+
+Isolation: a temp config (`-c`), a temp audit file (`FAIRYFLY_AUDIT_FILE`) and temp files under `%TEMP%\fairyfly-e2e-httpsys-*` keep the real `mcp.yaml` and audit trail out of the run; tokens are held in variables only and never printed. Trust: `curl.exe` gets `--cacert <exported PEM>` (never `-k`; `--ssl-no-revoke` because a self-signed certificate has no revocation endpoint), Windows PowerShell 5.1 and the raw TLS clients accept only the exact expected SHA-1 thumbprint. In SAP it only reads (`gui_session_list`, `gui_screen_read`) and attempts refused writes; it never presses Save, Delete, Release or Stop. All flag names, JSON field names and literal texts the script assumes about the CLI are collected in the marked `ASSUMPTIONS ABOUT THE C++ SIDE` block at the top of the script.
