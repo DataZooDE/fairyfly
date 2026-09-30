@@ -78,6 +78,8 @@ struct Manifest {
     std::string appid;
     std::string created_at;
     std::string updated_at;
+    bool config_created = false;          ///< setup created mcp.yaml (teardown may delete it while unmodified)
+    std::string config_sha256;            ///< sha256 of the text setup wrote
 
     nlohmann::json to_json() const;
     static std::optional<Manifest> from_json(const nlohmann::json& j);
@@ -146,6 +148,7 @@ struct TeardownWork {
     std::string cert_thumbprint;
     std::string cer_path;
     std::string manifest_path;
+    std::string config_path;              ///< mcp.yaml to delete (created by setup, unmodified)
 };
 
 struct Plan {
@@ -205,6 +208,8 @@ struct TeardownDiagnosis {
     CertInfo cert;                                ///< certificate named in the manifest
     bool cer_exists = false;
     bool config_says_tls = false;
+    bool config_exists = false;
+    std::string config_sha256;                    ///< sha256 of the current file text (empty when missing/unreadable)
     std::string cer_path;
     std::string manifest_path;
     std::string config_path;

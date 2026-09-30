@@ -22,7 +22,11 @@ struct FakeProbes : DoctorProbes {
 
     SetupFacts setup_facts(const SetupQuery&) override { return setup; }
     bool legacy_proxy_secret() override { return legacy_secret; }
-    PortState probe_port(const std::string&, int) override { return port; }
+    std::string probed_host;
+    PortState probe_port(const std::string& host, int) override {
+        probed_host = host;
+        return port;
+    }
     SapState sap() override { return sap_state; }
     DesktopState desktop() override { return desktop_state; }
     LockState lock_state() override { return lock; }
@@ -105,6 +109,21 @@ TEST_CASE("mcp doctor: port matrix", "[mcp_doctor]") {
     in.transport = "stdio";
     probes.port = PortState::InUse;
     CHECK(get(run_mcp_doctor(in, probes), "port").status == CheckStatus::Skip);
+}
+
+TEST_CASE("mcp doctor: the '+' wildcard host is probed on loopback", "[mcp_doctor]") {
+    FakeProbes probes;
+    auto in = http_input();
+    in.host = "+";
+    in.port = 8443;
+    probes.port = PortState::Free;
+    const auto checks = run_mcp_doctor(in, probes);
+    CHECK(probes.probed_host == "127.0.0.1");
+    CHECK(get(checks, "port").status == CheckStatus::Pass);
+    CHECK(get(checks, "port").message == "127.0.0.1:8443 is free");
+    in.host = "10.1.2.3";
+    run_mcp_doctor(in, probes);
+    CHECK(probes.probed_host == "10.1.2.3");
 }
 
 TEST_CASE("mcp doctor: SAP GUI checks", "[mcp_doctor]") {

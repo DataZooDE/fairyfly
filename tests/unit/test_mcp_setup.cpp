@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include "include/auth/crypto.h"
 #include "include/setup/fake_hosts.h"
 #include "include/setup/setup_doctor.h"
 #include "include/setup/setup_model.h"
@@ -465,9 +466,12 @@ TEST_CASE("setup --yes: one elevated child with the explicit SID, then export, c
     // unelevated parent wrote config + manifest
     REQUIRE(r.m.sys.files.count(kConfigPath));
     CHECK(r.m.sys.files.at(kConfigPath).find("tls: true") != std::string::npos);
+    CHECK(r.m.sys.files.at(kConfigPath).find("transport") == std::string::npos);   // the server is started with --http
     REQUIRE(r.m.sys.files.count(kManifestPath));
     const auto manifest = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
     REQUIRE(manifest.has_value());
+    CHECK(manifest->config_created);
+    CHECK(manifest->config_sha256 == fairyfly::auth::sha256_hex(r.m.sys.files.at(kConfigPath)));
     CHECK(manifest->thumbprint == thumb);
     CHECK(manifest->cert_mode == "self-signed");
     CHECK(manifest->sid == kSid);
@@ -839,6 +843,95 @@ TEST_CASE("teardown is idempotent", "[mcp_setup]") {
     CHECK(r.m.elevator.plans_seen.size() == prompts);
 }
 
+TEST_CASE("desired config and rendered yaml carry no server.transport", "[mcp_setup]") {
+    for (const bool tls : {true, false}) {
+        for (const auto& kv : desired_config(tls, kHost, 8443, {"10.0.0.0/8"})) CHECK(kv.first != "server.transport");
+        CHECK(render_config_yaml(tls, kHost, 8443, {"10.0.0.0/8"}).find("transport") == std::string::npos);
+    }
+}
+
+TEST_CASE("manifest round trip keeps config_created and config_sha256 (schema stays 1)", "[mcp_setup]") {
+    Manifest m;
+    m.mode = "no-tls";
+    m.port = 8383;
+    m.config_created = true;
+    m.config_sha256 = std::string(64, 'a');
+    const json j = m.to_json();
+    CHECK(j["schema"] == 1);
+    CHECK(j["config_created"] == true);
+    const auto back = Manifest::from_json(j);
+    REQUIRE(back.has_value());
+    CHECK(back->config_created);
+    CHECK(back->config_sha256 == m.config_sha256);
+    CHECK(back->same_setup(m));
+    // an older manifest without the fields still loads
+    json old = j;
+    old.erase("config_created");
+    old.erase("config_sha256");
+    const auto legacy = Manifest::from_json(old);
+    REQUIRE(legacy.has_value());
+    CHECK_FALSE(legacy->config_created);
+    CHECK(legacy->config_sha256.empty());
+}
+
+TEST_CASE("teardown removes an unmodified mcp.yaml that setup created", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    REQUIRE(r.m.sys.files.count(kConfigPath) == 1);
+    TeardownOptions t;
+    t.yes = true;
+    t.dry_run = true;
+    CHECK(r.teardown(t) == 0);
+    CHECK(r.out.str().find("mcp.yaml") != std::string::npos);
+    CHECK(r.m.sys.files.count(kConfigPath) == 1);   // dry run keeps it
+    t.dry_run = false;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.sys.files.count(kConfigPath) == 0);
+    CHECK(r.m.sys.files.count(kManifestPath) == 0);
+    CHECK(r.out.str().find("teardown complete") != std::string::npos);
+}
+
+TEST_CASE("teardown keeps a modified mcp.yaml and names it for a human", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    r.m.sys.files[kConfigPath] += "# my own note\n";
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.sys.files.count(kConfigPath) == 1);
+    CHECK(r.m.sys.files.count(kManifestPath) == 0);
+    const std::string out = r.out.str();
+    CHECK(out.find("Left for a human") != std::string::npos);
+    CHECK(out.find(kConfigPath) != std::string::npos);
+}
+
+TEST_CASE("teardown leaves a pre-existing mcp.yaml alone", "[mcp_setup]") {
+    Rig r;
+    r.m.sys.files[kConfigPath] = "server:\n  tls: true\n  host: '+'\n  port: 8443\n  allowed_hosts: [" + kHost + "]\n";
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.sys.files.count(kConfigPath) == 1);   // setup never created it
+}
+
+TEST_CASE("teardown --dry-run json lists the config step", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    TeardownOptions t;
+    t.dry_run = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    const json j = json::parse(r.out.str());
+    bool found = false;
+    for (const auto& s : j["data"]["steps"])
+        if (s["id"] == "config") {
+            found = true;
+            CHECK(s["status"] == "would_remove");
+        }
+    CHECK(found);
+}
+
 TEST_CASE("teardown --keep-cert and --keep-firewall", "[mcp_setup]") {
     Rig r;
     Options o = Rig::self_signed();
@@ -935,7 +1028,8 @@ TEST_CASE("teardown: consent, elevation and read-only", "[mcp_setup]") {
         CHECK(r.teardown(t) == 1);
         CHECK(r.m.http.urlacls.size() == 1);
     }
-    SECTION("config still saying tls: true becomes a human item") {
+    SECTION("a config still saying tls: true (edited after setup, so kept) becomes a human item") {
+        r.m.sys.files[kConfigPath] += "# edited\n";
         t.yes = true;
         t.json = true;
         REQUIRE(r.teardown(t) == 0);

@@ -140,8 +140,10 @@ environment. The old `auth.proxy_secret_source` key is gone (reported as an unkn
 `fairyfly mcp --tray --http -c C:\path\mcp.yaml` detaches the server into a tray icon;
 `fairyfly mcp --tray --install-autostart` registers it in `HKCU\...\Run` so it starts at logon of that user.
 Details, the icon menu (start/stop/restart, read-only toggle) and the manual checklist are in
-[MCP_TRAY.md](MCP_TRAY.md). Put `server.transport: http` and the other settings into the YAML because the Run
-value only carries the config path.
+[MCP_TRAY.md](MCP_TRAY.md). The tray needs the HTTP transport: pass `--http` (also to `--install-autostart`) or, as
+your own choice, put `server.transport: http` into the YAML because the Run value only carries the config path.
+`fairyfly mcp setup` does not write `server.transport` on purpose, so a plain stdio `fairyfly mcp` (for example a
+Claude Desktop config) keeps working after setup.
 
 ### 6. Trust the certificate on the client
 

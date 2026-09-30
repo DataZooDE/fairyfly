@@ -5,6 +5,7 @@
 #include <ctime>
 #include <sstream>
 
+#include "include/auth/crypto.h"
 #include "include/setup/setup_validators.h"
 
 namespace fairyfly::setup {
@@ -195,7 +196,7 @@ json Manifest::to_json() const {
     return json{{"schema", schema}, {"mode", mode}, {"hostname", hostname}, {"port", port}, {"prefixes", prefixes},
                 {"ipports", ipports}, {"sid", sid}, {"user", user}, {"cert_mode", cert_mode}, {"thumbprint", thumbprint},
                 {"cer_path", cer_path}, {"firewall_rule", firewall_rule}, {"appid", appid}, {"created_at", created_at},
-                {"updated_at", updated_at}};
+                {"updated_at", updated_at}, {"config_created", config_created}, {"config_sha256", config_sha256}};
 }
 
 std::optional<Manifest> Manifest::from_json(const json& j) {
@@ -216,6 +217,8 @@ std::optional<Manifest> Manifest::from_json(const json& j) {
         m.appid = j.value("appid", "");
         m.created_at = j.value("created_at", "");
         m.updated_at = j.value("updated_at", "");
+        m.config_created = j.value("config_created", false);
+        m.config_sha256 = j.value("config_sha256", "");
         if ((m.mode != "tls" && m.mode != "no-tls") || m.port < 1 || m.port > 65535) return std::nullopt;
         return m;
     } catch (...) {
@@ -226,7 +229,8 @@ std::optional<Manifest> Manifest::from_json(const json& j) {
 bool Manifest::same_setup(const Manifest& o) const {
     return mode == o.mode && hostname == o.hostname && port == o.port && prefixes == o.prefixes && ipports == o.ipports &&
            sid == o.sid && user == o.user && cert_mode == o.cert_mode && thumbprint == o.thumbprint && cer_path == o.cer_path &&
-           firewall_rule == o.firewall_rule && appid == o.appid;
+           firewall_rule == o.firewall_rule && appid == o.appid && config_created == o.config_created &&
+           config_sha256 == o.config_sha256;
 }
 
 const StepItem* Plan::step(const std::string& id) const {
@@ -252,7 +256,6 @@ std::string list_text(const std::vector<std::string>& v) {
 std::vector<std::pair<std::string, std::string>> desired_config(bool tls, const std::string& hostname, int port,
                                                                 const std::vector<std::string>& allow_ip) {
     std::vector<std::pair<std::string, std::string>> out;
-    out.emplace_back("server.transport", "http");
     out.emplace_back("server.tls", tls ? "true" : "false");
     out.emplace_back("server.host", tls ? "+" : "127.0.0.1");
     out.emplace_back("server.port", std::to_string(port));
@@ -266,8 +269,8 @@ std::string render_config_yaml(bool tls, const std::string& hostname, int port, 
     out << "# fairyfly MCP server configuration, written by 'fairyfly mcp setup'.\n"
            "# Everything not listed here uses the defaults; see 'fairyfly mcp config show' and 'fairyfly mcp config init'.\n"
            "# No secrets belong in this file: create bearer tokens with 'fairyfly mcp token create'.\n"
-           "server:\n"
-           "  transport: http\n";
+           "# The server itself is started explicitly with 'fairyfly mcp --http'; these keys only apply to HTTP.\n"
+           "server:\n";
     if (tls) {
         out << "  # TLS is terminated by http.sys with the certificate bound by 'fairyfly mcp setup'.\n"
                "  tls: true\n"
@@ -600,7 +603,7 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         if (d.config_unreadable) {
             p.steps.push_back(make_step("config", "mcp.yaml", "blocked", "cannot read " + d.config_path));
         } else if (!d.config_exists) {
-            p.steps.push_back(make_step("config", "Write " + d.config_path, "would_create", "commented mcp.yaml with server.transport/tls/host/port"));
+            p.steps.push_back(make_step("config", "Write " + d.config_path, "would_create", "commented mcp.yaml with server.tls/host/port"));
         } else if (differing.empty()) {
             p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", d.config_path + " already has the settings"));
         } else {
@@ -634,6 +637,10 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         m.cer_path = tls ? d.cer_path : "";
         m.firewall_rule = tls && o.open_firewall ? p.firewall_rule : "";
         m.appid = tls ? normalize_app_id(kAppId) : "";
+        if (const StepItem* cs = p.step("config"); cs && cs->status == "would_create") {
+            m.config_created = true;
+            m.config_sha256 = auth::sha256_hex(p.config_yaml);   // replaced by the hash of the bytes on disk after the write
+        }
         p.manifest = m;
         if (!d.manifest) {
             p.steps.push_back(make_step("manifest", "Record the setup in " + d.manifest_path, "would_create", "used by teardown and doctor"));
@@ -642,6 +649,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             // A firewall rule created by an earlier run stays recorded even when this run did not ask for it.
             if (m.firewall_rule.empty()) p.manifest.firewall_rule = cur.firewall_rule;
             p.manifest.created_at = cur.created_at;
+            // The config file recorded by an earlier run stays recorded unless this run creates a fresh one.
+            if (!p.manifest.config_created) {
+                p.manifest.config_created = cur.config_created;
+                p.manifest.config_sha256 = cur.config_sha256;
+            }
             if (cert_thumb.empty() && !cert_will_be_new) p.manifest.thumbprint = cur.thumbprint;
             const bool same = !cert_will_be_new && cur.same_setup(p.manifest);
             p.steps.push_back(make_step("manifest", "Record the setup in " + d.manifest_path, same ? "unchanged" : "would_update",
@@ -688,7 +700,7 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
 
     // ---- next steps ----
     p.next_steps.push_back("fairyfly mcp token create NAME   (bearer token for a client; shown once)");
-    p.next_steps.push_back(tls ? "fairyfly mcp --http   (or --tray) serves " + p.url : "fairyfly mcp --http   serves " + p.url);
+    p.next_steps.push_back(tls ? "fairyfly mcp --http   (or --tray --http) serves " + p.url : "fairyfly mcp --http   serves " + p.url);
     p.next_steps.push_back("fairyfly mcp doctor");
     return p;
 }
@@ -720,6 +732,7 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
         p.steps.push_back(make_step("certificate", "Certificate", "unchanged", "nothing recorded"));
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
+        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "no manifest"));
         p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
         p.nothing = true;
         return p;
@@ -784,6 +797,18 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
     }
+    // config: only a file setup created and nobody has edited since
+    if (!have_manifest || !d.manifest->config_created) {
+        p.steps.push_back(make_step("config", "mcp.yaml", "skipped", "not created by setup; left untouched"));
+    } else if (!d.config_exists) {
+        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "already gone"));
+    } else if (!d.manifest->config_sha256.empty() && d.config_sha256 == d.manifest->config_sha256) {
+        p.teardown.config_path = d.config_path;
+        p.steps.push_back(make_step("config", "Delete " + d.config_path, "would_remove", "mcp.yaml written by setup, unmodified"));
+    } else {
+        p.steps.push_back(make_step("config", "mcp.yaml", "skipped", d.config_path + " was modified after setup; left in place"));
+        p.human.push_back({"config_modified", "Review " + d.config_path + " and delete it yourself if you no longer need it: it was changed after 'mcp setup' created it."});
+    }
     // manifest
     if (have_manifest) p.steps.push_back(make_step("manifest", "Delete " + d.manifest_path, "would_remove", "setup manifest"));
     else p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
@@ -795,7 +820,7 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
             if (s.elevated) p.needs_elevation = true;
         }
     p.nothing = nothing;
-    if (d.config_says_tls)
+    if (d.config_says_tls && p.teardown.config_path.empty())
         p.human.push_back({"config_tls", "Edit " + d.config_path + ": it still says 'tls: true' (and server.host: '+'); the server will not start until you set tls: false or run setup again."});
     if (d.cer_exists || !p.teardown.cert_thumbprint.empty())
         p.human.push_back({"untrust_certificate", "Remove the trusted fairyfly certificate from every client that imported it."});
