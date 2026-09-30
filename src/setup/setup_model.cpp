@@ -473,7 +473,19 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     // ---- urlacl ----
     {
         StepItem s = make_step("urlacl", "URL reservation " + d.prefix + " for " + d.user, "", "", true);
-        if (!d.urlacl_sddl) {
+        if (!tls) {
+            // Loopback prefixes need no reservation on this Windows build (verified by a bind probe); never block on it.
+            s.elevated = false;
+            if (d.urlacl_sddl) {
+                s.status = "unchanged";
+                s.detail = "a reservation exists (optional for loopback prefixes)";
+                p.diagnosis.push_back({"urlacl", "ok", d.prefix + " is reserved (optional for loopback)"});
+            } else {
+                s.status = "skipped";
+                s.detail = "not required for loopback prefixes on this Windows build (verified by a bind probe)";
+                p.diagnosis.push_back({"urlacl", "skip", "not required for loopback prefixes"});
+            }
+        } else if (!d.urlacl_sddl) {
             s.status = "would_create";
             s.detail = "no reservation; SDDL " + sddl_for_sid(d.sid);
             p.sddl = sddl_for_sid(d.sid);
@@ -500,6 +512,7 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     } else {
         StepItem s = make_step("sslcert", "TLS binding to certificate for " + std::string("0.0.0.0/[::]") + ":" + std::to_string(d.port), "unchanged", "", true);
         bool any_blocked = false, any_create = false, any_update = false;
+        std::vector<std::string> skipped_ipports;
         std::string detail;
         std::string diag;
         std::string diag_status = "ok";
@@ -507,7 +520,13 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             const auto it = d.ssl.find(ipport);
             const std::optional<SslBinding> b = it == d.ssl.end() ? std::nullopt : it->second;
             std::string line;
-            if (!b) {
+            // An address family the previous setup could not bind (IPv6 disabled) stays skipped instead of failing every run.
+            const bool skipped_before = d.manifest && d.manifest->port == d.port && d.manifest->hostname == d.hostname &&
+                                        std::find(d.manifest->ipports.begin(), d.manifest->ipports.end(), ipport) == d.manifest->ipports.end();
+            if (!b && skipped_before) {
+                line = ipport + ": unavailable on this machine (skipped by the previous setup)";
+                skipped_ipports.push_back(ipport);
+            } else if (!b) {
                 any_create = true;
                 line = ipport + ": not bound -> bind";
                 diag_status = "missing";
@@ -600,6 +619,14 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         m.port = d.port;
         m.prefixes = {d.prefix};
         m.ipports = d.ipports;
+        if (tls && d.manifest && d.manifest->port == d.port && d.manifest->hostname == d.hostname) {
+            m.ipports.clear();   // keep only the address families that were actually bound
+            for (const auto& ip : d.ipports)
+                if (std::find(d.manifest->ipports.begin(), d.manifest->ipports.end(), ip) != d.manifest->ipports.end() ||
+                    (d.ssl.count(ip) && d.ssl.at(ip) && is_our_app_id(d.ssl.at(ip)->app_id)))
+                    m.ipports.push_back(ip);
+            if (m.ipports.empty()) m.ipports = d.ipports;
+        }
         m.sid = d.sid;
         m.user = d.user;
         m.cert_mode = !tls ? "none" : (o.cert_mode == CertMode::SelfSigned ? "self-signed" : "thumbprint");

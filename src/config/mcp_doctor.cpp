@@ -166,6 +166,79 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
         }
     }
 
+    // 7b. http.sys setup (read-only facts; never elevated)
+    {
+        SetupQuery query;
+        query.tls = in.tls;
+        query.hostname = in.hostname;
+        query.port = in.port;
+        const SetupFacts f = probes.setup_facts(query);
+        const bool relevant = f.available && (http || f.manifest_present);
+        const std::string skip_reason = f.available ? "stdio transport, no http.sys setup needed" : "setup state not collected";
+        const std::string tls_flag = in.tls ? "--self-signed" : "--no-tls";
+        const std::string fix = "Run 'fairyfly mcp setup " + tls_flag + "' (see docs/MCP_SETUP.md).";
+        const bool tls = f.manifest_present ? f.manifest_mode == "tls" : in.tls;
+
+        // elevation (info)
+        if (!f.available || f.elevation.empty() || f.elevation == "unknown") out.push_back(check("elevation", CheckStatus::Skip, "elevation state unknown"));
+        else out.push_back(check("elevation", CheckStatus::Pass, f.elevation + (f.elevation == "elevated" ? " (doctor itself never needs it)" : "")));
+
+        // setup_manifest
+        if (!relevant) out.push_back(check("setup_manifest", CheckStatus::Skip, skip_reason));
+        else if (f.manifest_unreadable) out.push_back(check("setup_manifest", CheckStatus::Warn, "the setup manifest is unreadable: " + f.manifest_path, "Run 'fairyfly mcp teardown --hostname H --port P' and set up again."));
+        else if (!f.manifest_present) out.push_back(check("setup_manifest", CheckStatus::Warn, "no setup recorded (" + f.manifest_path + ")", fix));
+        else out.push_back(check("setup_manifest", CheckStatus::Pass, "setup for " + f.manifest_hostname + ":" + std::to_string(f.manifest_port) + " (" + f.manifest_mode + ")"));
+
+        // urlacl
+        if (!relevant) out.push_back(check("urlacl", CheckStatus::Skip, skip_reason));
+        else if (!f.urlacl_known) out.push_back(check("urlacl", CheckStatus::Skip, "could not read the URL reservation of " + f.prefix));
+        else if (!f.urlacl_reserved && !tls) out.push_back(check("urlacl", CheckStatus::Pass, "not required for the loopback prefix " + f.prefix + " on this Windows build"));
+        else if (!f.urlacl_reserved) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is not reserved: the server cannot listen without elevation", fix));
+        else if (!f.urlacl_covers_user && tls) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is reserved, but not for the current user", "Run 'fairyfly mcp setup " + tls_flag + "' as this user (it adds the user to the reservation) or use --user."));
+        else out.push_back(check("urlacl", CheckStatus::Pass, f.prefix + " is reserved for the current user"));
+
+        // sslcert
+        if (!relevant) out.push_back(check("sslcert", CheckStatus::Skip, skip_reason));
+        else if (!tls) out.push_back(check("sslcert", CheckStatus::Skip, "plain HTTP mode: no TLS binding"));
+        else if (!f.ssl_known) out.push_back(check("sslcert", CheckStatus::Skip, "could not read the TLS bindings"));
+        else if (f.ssl_foreign) out.push_back(check("sslcert", CheckStatus::Warn, "port " + std::to_string(in.port) + " is bound by another application", "Free the binding or re-run setup with --force-binding."));
+        else if (!f.ssl_v4) out.push_back(check("sslcert", CheckStatus::Fail, "no certificate is bound to 0.0.0.0:" + std::to_string(in.port), fix));
+        else if (!f.cert_found && f.cert_known) out.push_back(check("sslcert", CheckStatus::Fail, "the bound certificate " + f.ssl_thumbprint + " is not in LocalMachine\\My", fix));
+        else if (!f.manifest_thumbprint.empty() && f.manifest_thumbprint != f.ssl_thumbprint) out.push_back(check("sslcert", CheckStatus::Warn, "the bound certificate differs from the one recorded by setup", "Run 'fairyfly mcp setup " + tls_flag + "' to rebind."));
+        else if (!f.ssl_v6) out.push_back(check("sslcert", CheckStatus::Warn, "bound on 0.0.0.0:" + std::to_string(in.port) + " but not on [::]:" + std::to_string(in.port) + " (IPv6 clients cannot connect)", fix));
+        else out.push_back(check("sslcert", CheckStatus::Pass, "certificate " + f.ssl_thumbprint.substr(0, 8) + "... bound on 0.0.0.0 and [::]"));
+
+        // certificate
+        if (!relevant) out.push_back(check("certificate", CheckStatus::Skip, skip_reason));
+        else if (!tls) out.push_back(check("certificate", CheckStatus::Skip, "plain HTTP mode: no certificate"));
+        else if (!f.cert_known) out.push_back(check("certificate", CheckStatus::Skip, "could not read LocalMachine\\My"));
+        else if (!f.cert_found) out.push_back(check("certificate", CheckStatus::Fail, "no certificate for this server in LocalMachine\\My", fix));
+        else if (!f.cert_has_key) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " has no private key", "Import the certificate with its private key into LocalMachine\\My."));
+        else if (f.cert_not_after <= f.now) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " expired", "Run 'fairyfly mcp teardown' then 'fairyfly mcp setup " + tls_flag + "' to issue a new one (clients must trust it again)."));
+        else if (!f.cert_san_ok) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " does not cover the host name" + (in.hostname.empty() ? std::string() : " '" + in.hostname + "'"), "Set up again with --hostname matching the certificate."));
+        else if ((f.cert_not_after - f.now) < 30LL * 86400) out.push_back(check("certificate", CheckStatus::Warn, "certificate expires in " + std::to_string((f.cert_not_after - f.now) / 86400) + " days", "Plan a renewal: 'fairyfly mcp teardown' then 'fairyfly mcp setup " + tls_flag + "'."));
+        else out.push_back(check("certificate", CheckStatus::Pass, "certificate " + f.cert_thumbprint.substr(0, 8) + "... valid for " + std::to_string((f.cert_not_after - f.now) / 86400) + " more days, private key present"));
+
+        // firewall (only when setup recorded a rule)
+        if (!relevant || f.manifest_firewall_rule.empty()) out.push_back(check("firewall", CheckStatus::Skip, "no firewall rule recorded by setup"));
+        else if (!f.firewall_known) out.push_back(check("firewall", CheckStatus::Skip, "could not read the firewall rule"));
+        else if (!f.firewall_exists) out.push_back(check("firewall", CheckStatus::Warn, "the firewall rule '" + f.manifest_firewall_rule + "' recorded by setup is gone", "Run 'fairyfly mcp setup " + tls_flag + " --open-firewall'."));
+        else out.push_back(check("firewall", CheckStatus::Pass, "rule '" + f.manifest_firewall_rule + "' exists"));
+
+        // tls_handshake (only when something listens)
+        if (!relevant || !tls) out.push_back(check("tls_handshake", CheckStatus::Skip, relevant ? "plain HTTP mode" : skip_reason));
+        else if (!f.port_listening || f.tls_status.empty()) out.push_back(check("tls_handshake", CheckStatus::Skip, "nothing listens on port " + std::to_string(in.port) + " (start 'fairyfly mcp --http')"));
+        else if (f.tls_status != "ok") out.push_back(check("tls_handshake", CheckStatus::Warn, "TLS handshake failed (" + f.tls_status + ")", "Check the TLS binding and the certificate."));
+        else if (!f.tls_thumbprint_match) out.push_back(check("tls_handshake", CheckStatus::Warn, "the server presents a different certificate than the one installed", "Rebind with 'fairyfly mcp setup " + tls_flag + "' and restart the server."));
+        else if (f.tls_protocol == "TLS 1.0" || f.tls_protocol == "TLS 1.1" || f.tls_protocol.rfind("SSL", 0) == 0) out.push_back(check("tls_handshake", CheckStatus::Warn, "negotiated " + f.tls_protocol, "Raise the machine Schannel policy to TLS 1.2 or newer."));
+        else out.push_back(check("tls_handshake", CheckStatus::Pass, "negotiated " + (f.tls_protocol.empty() ? std::string("TLS") : f.tls_protocol) + ", certificate matches"));
+
+        // legacy proxy secret (retired reverse-proxy design)
+        if (probes.legacy_proxy_secret())
+            out.push_back(check("legacy_proxy_secret", CheckStatus::Warn, "the retired proxy secret 'fairyfly:fairyfly-mcp-proxy' is still stored", "cmdkey /delete:fairyfly:fairyfly-mcp-proxy"));
+        else out.push_back(check("legacy_proxy_secret", CheckStatus::Pass, "no legacy proxy secret"));
+    }
+
     // 8. autostart
     {
         const auto command = probes.autostart_command();

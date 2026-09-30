@@ -97,83 +97,6 @@ struct FakeHttpSys : HttpSysConfig {
     }
 };
 
-struct FakeCertStore : CertStore {
-    explicit FakeCertStore(FakeElevator& e) : elevator(e) {}
-    FakeElevator& elevator;
-    std::vector<CertInfo> certs;
-    std::map<std::string, std::string> files;        ///< path -> thumbprint written there
-    std::vector<std::string> calls;
-    long long clock = 1800000000;
-    int counter = 0;
-
-    CertInfo find_by_thumbprint(const std::string& thumbprint) override {
-        for (const auto& c : certs)
-            if (c.thumbprint == thumbprint) return c;
-        return {};
-    }
-    CertInfo find_self_signed(const std::string& hostname) override {
-        CertInfo best;
-        for (const auto& c : certs)
-            if (c.friendly_name == "fairyfly-mcp " + hostname && (!best.found || c.not_after > best.not_after)) best = c;
-        return best;
-    }
-    CertInfo create_self_signed(const std::string& hostname, int valid_days) override {
-        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        CertInfo c;
-        c.found = true;
-        c.thumbprint = std::string(36, 'A') + (std::to_string(1000 + ++counter));
-        c.subject = "CN=" + hostname;
-        c.friendly_name = "fairyfly-mcp " + hostname;
-        c.dns_names = {hostname};
-        c.not_after = clock + static_cast<long long>(valid_days) * 86400;
-        c.has_private_key = true;
-        certs.push_back(c);
-        calls.push_back("create_self_signed " + hostname);
-        return c;
-    }
-    CerFileState cer_file_state(const std::string& thumbprint, const std::string& path, CerFormat) override {
-        const auto it = files.find(path);
-        if (it == files.end()) return CerFileState::Missing;
-        return it->second == thumbprint ? CerFileState::Matches : CerFileState::Differs;
-    }
-    std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) override {
-        const auto state = cer_file_state(thumbprint, path, format);
-        files[path] = thumbprint;
-        calls.push_back("export_cer " + path);
-        return state == CerFileState::Missing ? "created" : state == CerFileState::Matches ? "unchanged" : "updated";
-    }
-    bool remove(const std::string& thumbprint) override {
-        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("remove_cert " + thumbprint);
-        const auto before = certs.size();
-        certs.erase(std::remove_if(certs.begin(), certs.end(), [&](const CertInfo& c) { return c.thumbprint == thumbprint; }),
-                    certs.end());
-        return certs.size() != before;
-    }
-};
-
-struct FakeFirewall : Firewall {
-    explicit FakeFirewall(FakeElevator& e) : elevator(e) {}
-    FakeElevator& elevator;
-    std::map<std::string, int> rules;
-    std::vector<std::string> calls;
-    bool exists(const std::string& rule_name) override { return rules.count(rule_name) != 0; }
-    std::string ensure(const std::string& rule_name, int port) override {
-        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_ensure " + rule_name);
-        const auto it = rules.find(rule_name);
-        if (it == rules.end()) { rules[rule_name] = port; return "created"; }
-        if (it->second == port) return "unchanged";
-        it->second = port;
-        return "updated";
-    }
-    bool remove(const std::string& rule_name) override {
-        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_remove " + rule_name);
-        return rules.erase(rule_name) > 0;
-    }
-};
-
 struct FakeSystem : SystemProbe {
     std::map<std::string, std::string> files;
     std::vector<int> listening;                      ///< ports that accept connections
@@ -209,6 +132,83 @@ struct FakeSystem : SystemProbe {
     std::string local_app_data() override { return lad; }
 };
 
+struct FakeCertStore : CertStore {
+    explicit FakeCertStore(FakeElevator& e, FakeSystem* s = nullptr) : elevator(e), sys(s) {}
+    FakeElevator& elevator;
+    FakeSystem* sys;                                 ///< exported .cer files live in the fake file system
+    std::vector<CertInfo> certs;
+    std::vector<std::string> calls;
+    long long clock = 1800000000;
+    int counter = 0;
+
+    CertInfo find_by_thumbprint(const std::string& thumbprint) override {
+        for (const auto& c : certs)
+            if (c.thumbprint == thumbprint) return c;
+        return {};
+    }
+    CertInfo find_self_signed(const std::string& hostname) override {
+        CertInfo best;
+        for (const auto& c : certs)
+            if (c.friendly_name == "fairyfly-mcp " + hostname && (!best.found || c.not_after > best.not_after)) best = c;
+        return best;
+    }
+    CertInfo create_self_signed(const std::string& hostname, int valid_days) override {
+        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
+        CertInfo c;
+        c.found = true;
+        c.thumbprint = std::string(36, 'A') + (std::to_string(1000 + ++counter));
+        c.subject = "CN=" + hostname;
+        c.friendly_name = "fairyfly-mcp " + hostname;
+        c.dns_names = {hostname};
+        c.not_after = clock + static_cast<long long>(valid_days) * 86400;
+        c.has_private_key = true;
+        certs.push_back(c);
+        calls.push_back("create_self_signed " + hostname);
+        return c;
+    }
+    CerFileState cer_file_state(const std::string& thumbprint, const std::string& path, CerFormat) override {
+        const auto it = sys->files.find(path);
+        if (it == sys->files.end()) return CerFileState::Missing;
+        return it->second == "cer:" + thumbprint ? CerFileState::Matches : CerFileState::Differs;
+    }
+    std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) override {
+        const auto state = cer_file_state(thumbprint, path, format);
+        sys->files[path] = "cer:" + thumbprint;
+        calls.push_back("export_cer " + path);
+        return state == CerFileState::Missing ? "created" : state == CerFileState::Matches ? "unchanged" : "updated";
+    }
+    bool remove(const std::string& thumbprint) override {
+        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
+        calls.push_back("remove_cert " + thumbprint);
+        const auto before = certs.size();
+        certs.erase(std::remove_if(certs.begin(), certs.end(), [&](const CertInfo& c) { return c.thumbprint == thumbprint; }),
+                    certs.end());
+        return certs.size() != before;
+    }
+};
+
+struct FakeFirewall : Firewall {
+    explicit FakeFirewall(FakeElevator& e) : elevator(e) {}
+    FakeElevator& elevator;
+    std::map<std::string, int> rules;
+    std::vector<std::string> calls;
+    bool exists(const std::string& rule_name) override { return rules.count(rule_name) != 0; }
+    std::string ensure(const std::string& rule_name, int port) override {
+        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
+        calls.push_back("firewall_ensure " + rule_name);
+        const auto it = rules.find(rule_name);
+        if (it == rules.end()) { rules[rule_name] = port; return "created"; }
+        if (it->second == port) return "unchanged";
+        it->second = port;
+        return "updated";
+    }
+    bool remove(const std::string& rule_name) override {
+        if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
+        calls.push_back("firewall_remove " + rule_name);
+        return rules.erase(rule_name) > 0;
+    }
+};
+
 struct FakeVerify : VerifyHost {
     VerifyResult result{"ok", "TLS 1.3", 401, true, ""};
     std::vector<VerifyRequest> requests;
@@ -224,9 +224,9 @@ struct FakeVerify : VerifyHost {
 struct FakeMachine {
     FakeElevator elevator;
     FakeHttpSys http{elevator};
-    FakeCertStore certs{elevator};
-    FakeFirewall firewall{elevator};
     FakeSystem sys;
+    FakeCertStore certs{elevator, &sys};
+    FakeFirewall firewall{elevator};
     FakeVerify verify;
     Hosts hosts() { return Hosts{http, certs, firewall, elevator, sys, verify}; }
 };

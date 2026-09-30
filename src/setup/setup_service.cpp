@@ -318,6 +318,7 @@ json execute_setup_work(const json& w, Hosts& h) {
     const bool tls = w.value("tls", true);
     const std::string prefix = url_prefix(tls, host, port);
     std::string failed;
+    std::vector<std::string> bound;   // address families that ended up bound
     auto fail = [&](const std::string& id, const std::string& why) {
         steps.push_back(step_json(id, "failed", why));
         failed = id;
@@ -364,7 +365,10 @@ json execute_setup_work(const json& w, Hosts& h) {
                 const auto b = h.http.query_sslcert(ipport);
                 if (b && !is_our_app_id(b->app_id) && !w.value("force_binding", false))
                     throw HostError("BINDING_FOREIGN", ipport + " is bound by another application " + b->app_id + " (use --force-binding)");
-                if (b && is_our_app_id(b->app_id) && b->thumbprint == thumb) continue;
+                if (b && is_our_app_id(b->app_id) && b->thumbprint == thumb) {
+                    bound.push_back(ipport);
+                    continue;
+                }
                 try {
                     h.http.set_sslcert(ipport, thumb);
                 } catch (const HostError& e) {
@@ -374,6 +378,7 @@ json execute_setup_work(const json& w, Hosts& h) {
                     }
                     throw;
                 }
+                bound.push_back(ipport);
                 status = b ? "updated" : (status == "updated" ? "updated" : "created");
                 if (b) status = "updated";
                 detail += (detail.empty() ? "" : "; ") + ipport + " bound";
@@ -393,6 +398,7 @@ json execute_setup_work(const json& w, Hosts& h) {
         }
     }
     json out{{"ok", failed.empty()}, {"steps", steps}, {"thumbprint", thumb}};
+    if (!bound.empty()) out["bound_ipports"] = bound;
     if (!failed.empty()) out["error"] = {{"code", "STEP_FAILED"}, {"message", "step " + failed + " failed"}};
     return out;
 }
@@ -656,6 +662,8 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
         return false;
     };
 
+    if (result.contains("bound_ipports") && result["bound_ipports"].is_array() && !result["bound_ipports"].empty())
+        plan.manifest.ipports = result["bound_ipports"].get<std::vector<std::string>>();
     if (!any_failed && plan.tls) {
         if (pending("certificate_export")) {
             try {
