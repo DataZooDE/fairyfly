@@ -1,38 +1,50 @@
 # Remote MCP: driving SAP GUI on a Windows VM from Linux or another host
 
 This is the deployment guide for `fairyfly mcp --http`. The protocol basics, tools and stdio use are in
-[MCP.md](MCP.md); the IIS reverse proxy is in [MCP_IIS.md](MCP_IIS.md); the tray, YAML config, client-config
-and doctor are in [MCP_TRAY.md](MCP_TRAY.md). Verify current flags with `fairyfly mcp --help`.
+[MCP.md](MCP.md); the one-time setup of the certificate, URL reservation and TLS binding is in
+[MCP_SETUP.md](MCP_SETUP.md); the tray, YAML config, client-config and doctor are in [MCP_TRAY.md](MCP_TRAY.md).
+Verify current flags with `fairyfly mcp --help`.
 
 ## Architecture
 
 ~~~text
- Linux / macOS / Windows client                    Windows VM (interactive user session, SAP GUI running)
+ Linux / macOS / Windows client                     Windows VM (interactive user session, SAP GUI running)
  Claude Code, Claude Desktop (mcp-remote), curl
         |
-        |  HTTPS + "Authorization: Bearer ffy_<id>_<secret>"
+        |  HTTPS (TLS 1.2+) + "Authorization: Bearer ffy_<id>_<secret>"
         v
- +---------------------------+   plain HTTP, loopback only   +---------------------------------------+
- | IIS (URL Rewrite + ARR)   | ----------------------------> | fairyfly mcp --http  (console / tray)  |
- |  TLS, IP allow-list,      |   127.0.0.1:8383  POST /mcp   |  bearer-token auth, scopes, allowlists |
- |  /mcp only, else 404      |   X-Fairyfly-Proxy-Secret     |  rate limit, audit trail               |
- +---------------------------+   X-Forwarded-For/-Proto      |  one COM (STA) thread: one SAP call    |
-                                                              |  at a time                             |
-                                                              +------------------+--------------------+
-                                                                                 | SAP GUI Scripting COM API
-                                                                                 v
-                                                                        SAP GUI for Windows -> SAP system
+ +------------------------------------------------------------------------------------+
+ | http.sys (Windows kernel HTTP driver)                                              |
+ |   TLS termination with the certificate bound by `fairyfly mcp setup` (Schannel)    |
+ |   kernel timeouts, header/body limits, URL prefix routing (only /mcp/ is served)   |
+ +---------------------------------------+--------------------------------------------+
+                                         | HTTP Server API request queue
+                                         v
+ +------------------------------------------------------------------------------------+
+ | fairyfly mcp --http  (console or tray, UNELEVATED, the logged-on user's session)   |
+ |   server --allow-ip, Host/Origin checks, bearer-token auth (token --ip on the peer)|
+ |   scopes, allowlists, rate limit, audit trail; 16 receive workers, queue of 256    |
+ |   one COM (STA) thread: one SAP call at a time                                     |
+ +------------------------------------+-----------------------------------------------+
+                                      | SAP GUI Scripting COM API
+                                      v
+                             SAP GUI for Windows -> SAP system
 ~~~
 
-- IIS is optional in a lab (you can point a client at `http://127.0.0.1:8383/mcp` on the VM itself), but it is the
-  supported way to expose the server: fairyfly speaks only plain HTTP, has no TLS of its own and defaults to
-  binding `127.0.0.1`.
-- All tool calls are serialized on one main thread (queue of 16, soft timeout 120 s). HTTP worker threads only
-  queue and wait. Because of this, the per-token check -> invoke -> update sequence in the dispatcher (for example the
-  "left the T-code allowlist" block) is atomic per process: no two calls, not even of the same token, are ever
-  inside `call_tool` at once (unit test `CallExecutor: concurrent submitters never overlap inside call_tool`). A
-  multi-threaded executor would need a per-principal lock first.
+- fairyfly listens itself, through the HTTP Server API (http.sys), and needs no IIS, no reverse proxy and no
+  extra software. TLS is terminated in the kernel: the private key stays in the machine certificate store and is
+  never loaded into the fairyfly process, which runs unelevated and holds no key and no administrator rights.
+- Plain HTTP on `127.0.0.1` stays possible for development and tests (`fairyfly mcp --http` without `--tls`).
+  Plain HTTP on any other host is refused (`INSECURE_BIND`) unless the flag-only `--insecure-http` is given.
+- All tool calls are serialized on one main thread (queue of 256 at the listener, executor queue of 16, soft timeout
+  120 s). HTTP worker threads only queue and wait. Because of this, the per-token check -> invoke -> update
+  sequence in the dispatcher (for example the "left the T-code allowlist" block) is atomic per process: no two
+  calls, not even of the same token, are ever inside `call_tool` at once (unit test `CallExecutor: concurrent
+  submitters never overlap inside call_tool`). A multi-threaded executor would need a per-principal lock first.
 - The transport is `POST /mcp` only. There is no `Mcp-Session-Id` and no GET stream; every request stands alone.
+- The client address is the socket peer address. Forwarded headers (`X-Forwarded-For`, `X-Forwarded-Proto`,
+  `X-Fairyfly-Proxy-Secret`) are ignored like any unknown header; there is no trusted-proxy mode and none is
+  planned (non-goal).
 
 ### Why a console/tray program and not a Windows service
 
@@ -40,7 +52,8 @@ SAP GUI scripting talks to the SAP GUI process of a logged-on user and needs tha
 A Windows service runs in Session 0, which has no access to that desktop, so it cannot see SAP GUI. fairyfly
 is therefore an ordinary process started by the VM user: a console window, or with `--tray` a hidden console
 plus a notification-area icon (see [MCP_TRAY.md](MCP_TRAY.md)). It only runs while that user is logged on to
-an interactive session that stays unlocked.
+an interactive session that stays unlocked. http.sys does not need a service either: an unelevated process can
+own a URL prefix once an administrator has reserved it for the user (the URL ACL created by `mcp setup`).
 
 ## Step-by-step setup
 
@@ -58,34 +71,19 @@ an interactive session that stays unlocked.
   [MCP_TRAY.md](MCP_TRAY.md#rdp-and-lock-screen-caveats).
 - `fairyfly.exe` from a Release build (`build\Release\fairyfly.exe`). No OpenSSL or other runtime is needed.
 
-### 2. Start the server
+### 2. One-time setup (one elevated step)
 
 ~~~powershell
-fairyfly mcp --http                              # read-only guard mode, 127.0.0.1:8383, POST /mcp
-fairyfly mcp --http --mcp-port 8383 --allow-write   # write mode: gui_element_fill etc. for tokens that allow it
+fairyfly mcp setup --hostname mcp.example.com --self-signed --allow-ip 203.0.113.0/24 --dry-run   # plan only
+fairyfly mcp setup --hostname mcp.example.com --self-signed --yes
 ~~~
 
-The posture banner is printed to stderr and lists endpoint, mode, auth, binding, SSE, allowed hosts, protocol
-eras and every WARNING (no tokens, tokens without expiry or with `*`, write mode, non-loopback bind, missing
-proxy secret). Without any token the server starts but answers every request with 401 `AUTH_REQUIRED`.
-
-Relevant options (see `fairyfly mcp --help`):
-
-| Option | Effect |
-|---|---|
-| `--http` / `--transport http` | serve HTTP instead of stdio |
-| `--mcp-host` (default 127.0.0.1), `--mcp-port` / `--port` (8383) | bind address |
-| `--allow-write`, `--read-only` | server mode; a token can only narrow it; `FAIRYFLY_READ_ONLY=1` is a hard cap |
-| `--allowed-hosts`, `--cors-origin` | extra accepted Host values, accepted browser Origins (default: none, any Origin is refused with 403) |
-| `--sse` / `--no-sse` | SSE streaming on `tools/call` (default on) |
-| `--tools FAMILIES` | expose only these tool families |
-| `--insecure-no-auth` | disables authentication; never use on a reachable port |
-| `-c/--config PATH`, `--tray` | YAML config, tray mode (MCP_TRAY.md) |
-
-Note on the YAML file: `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format` and `server.transport`,
-`server.port`, `server.host`, `server.sse` (default on, like `--sse`), `server.allowed_hosts` and
-`server.cors_origins` are applied to the running server, with precedence flag > `FAIRYFLY_MCP_*` environment >
-YAML > default. `--insecure-no-auth` is flag-only on purpose: it cannot be set from YAML or the environment.
+`mcp setup` creates the certificate (`--self-signed`, or bring your own with `--cert-thumbprint`), the URL ACL for
+your user SID, the TLS binding of the certificate to the port (default 8443) and, on request, a firewall rule
+(`--open-firewall`). It self-elevates once (one UAC prompt), then proves the result with a real TLS round trip
+(401 `AUTH_REQUIRED`, pinned by thumbprint, negotiated protocol reported), and it writes `mcp.yaml` with
+`server.tls: true` when none exists. `--print-runbook` prints the equivalent commands for an administrator
+instead. Full reference, plan, exit codes and the "Left for a human" list: [MCP_SETUP.md](MCP_SETUP.md).
 
 ### 3. Create tokens
 
@@ -98,16 +96,44 @@ fairyfly mcp token list
 The token (`ffy_<id>_<secret>`) is printed once. See [Tokens and scopes](MCP.md#tokens-and-scopes). A token
 without `--scope` gets `session,connection,screen` and is read-only; an explicit `--scope` grants what it names
 (still capped by the server mode) unless `--read-only` is added. Prefer named tokens per client and an expiry.
+`--ip` binds a token to client addresses; the address checked is the real socket peer.
 `revoke` keeps the (revoked) Credential Manager entry `fairyfly-mcp:<name>`; `fairyfly mcp token delete NAME --yes` removes it for good.
 
-### 4. IIS in front (TLS)
+### 4. Start the server
 
-Run `fairyfly mcp iis setup --hostname mcp.example.com --self-signed --allow-ip <client CIDRs> --dry-run`, then
-again with `--yes`, elevated. Prerequisites (IIS, URL Rewrite, ARR), self-signed certificate trust on Linux,
-`status` and `remove` are in [MCP_IIS.md](MCP_IIS.md). The setup stores the proxy secret in the Credential
-Manager (`fairyfly:fairyfly-mcp-proxy`); the running server reads it from there, so no configuration is needed
-in fairyfly. Without the secret, `X-Forwarded-For` is ignored and every client appears as the proxy address
-(token IP binding then cannot work; the banner warns about it).
+~~~powershell
+fairyfly mcp --http --tls --mcp-host mcp.example.com --mcp-port 8443    # HTTPS, read-only guard mode
+fairyfly mcp --http --tls --mcp-host mcp.example.com --allow-write      # write mode: gui_element_fill etc. for tokens that allow it
+fairyfly mcp --http                                                     # dev: plain HTTP on 127.0.0.1:8383
+~~~
+
+With `server.tls: true` and the host in `mcp.yaml` (written by `mcp setup`), `fairyfly mcp --http` is enough. The
+posture banner is printed to stderr and lists endpoint, `tls: http.sys`, mode, auth, client allow-list, SSE,
+allowed hosts, protocol eras and every WARNING (no tokens, tokens without expiry or with `*`, write mode,
+non-loopback bind). Without any token the server starts but answers every request with 401 `AUTH_REQUIRED`.
+
+Relevant options (see `fairyfly mcp --help`):
+
+| Option | Effect |
+|---|---|
+| `--http` / `--transport http` | serve MCP over HTTP or HTTPS (http.sys) instead of stdio |
+| `--tls` / `--no-tls` | HTTPS; the certificate binding must exist (`mcp setup`) |
+| `--mcp-host` (default 127.0.0.1), `--mcp-port` / `--port` (8383; `mcp setup` chooses 8443 for TLS) | URL prefix: `127.0.0.1` (loopback), `+` (all interfaces, TLS recommended) or a host name; `localhost` is treated as 127.0.0.1 |
+| `--allow-ip CIDR,...` | server-level client allow-list; loopback is always allowed; empty = any |
+| `--insecure-http` | allow plain HTTP on a non-loopback host (flag-only, dangerous) |
+| `--allow-write`, `--read-only` | server mode; a token can only narrow it; `FAIRYFLY_READ_ONLY=1` is a hard cap |
+| `--allowed-hosts`, `--cors-origin` | extra accepted Host values, accepted browser Origins (default: none, any Origin is refused with 403) |
+| `--sse` / `--no-sse` | SSE streaming on `tools/call` (default on) |
+| `--tools FAMILIES` | expose only these tool families |
+| `--insecure-no-auth` | disables authentication; never use on a reachable port |
+| `-c/--config PATH`, `--tray` | YAML config, tray mode (MCP_TRAY.md) |
+
+Note on the YAML file: `mode.*`, `limits.*`, `tools.families`, `default_connection`, `format` and `server.transport`,
+`server.port`, `server.host`, `server.tls`, `server.allow_ip`, `server.sse` (default on, like `--sse`),
+`server.allowed_hosts` and `server.cors_origins` are applied to the running server, with precedence flag >
+`FAIRYFLY_MCP_*` environment (for example `FAIRYFLY_MCP_SERVER_TLS`, `FAIRYFLY_MCP_SERVER_ALLOW_IP`) > YAML >
+default. `--insecure-no-auth` and `--insecure-http` are flag-only on purpose: they cannot be set from YAML or the
+environment. The old `auth.proxy_secret_source` key is gone (reported as an unknown key).
 
 ### 5. Tray and autostart
 
@@ -117,15 +143,35 @@ Details, the icon menu (start/stop/restart, read-only toggle) and the manual che
 [MCP_TRAY.md](MCP_TRAY.md). Put `server.transport: http` and the other settings into the YAML because the Run
 value only carries the config path.
 
-### 6. Check
+### 6. Trust the certificate on the client
+
+For a self-signed certificate export it on the VM and trust it on every client:
 
 ~~~powershell
-fairyfly mcp doctor          # config, port, SAP GUI, interactive desktop, lock/RDP, autostart, tray
-fairyfly mcp iis status      # elevated
+fairyfly mcp cert export --out fairyfly.cer            # or --format pem
+~~~
+
+curl: `--cacert fairyfly.pem`; Node (Claude Code, mcp-remote): `NODE_EXTRA_CA_CERTS=/path/fairyfly.pem`; Windows:
+`certutil -addstore -user Root fairyfly.cer`. Never use `curl -k`. A certificate from your own CA needs only the
+CA to be trusted. Details in [MCP_SETUP.md](MCP_SETUP.md).
+
+### 7. Check
+
+~~~powershell
+fairyfly mcp doctor          # config, elevation, URL ACL, TLS binding, certificate, firewall, port, TLS handshake, SAP GUI, desktop, tokens, autostart, tray
 ~~~
 
 Then run the Linux-side checklist below. From the VM itself,
 `tests\integration\mcp_http_smoke.ps1` exercises the whole HTTP surface against a live SAP session.
+
+### 8. Teardown
+
+~~~powershell
+fairyfly mcp teardown --dry-run
+fairyfly mcp teardown --yes        # one UAC prompt; removes only what setup created (manifest-driven, idempotent)
+~~~
+
+`--keep-cert` and `--keep-firewall` keep those parts. Tokens are separate: `fairyfly mcp token delete NAME --yes`.
 
 ## Protocol: two eras, status codes and errors
 
@@ -160,7 +206,8 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 | 400 | JSON-RPC **-32022** | unsupported protocol version; `error.data.supported` lists ours |
 | 401 | `AUTH_REQUIRED` | no bearer token, or no token exists on the server yet (with `WWW-Authenticate: Bearer realm="fairyfly"`) |
 | 401 | `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED` | malformed/unknown/wrong secret (deliberately not distinguishable), expired, revoked |
-| 403 | `IP_NOT_ALLOWED` | client address outside the token's `--ip` list |
+| 403 | `ADDRESS_NOT_ALLOWED` | peer address outside the server's `--allow-ip` list (checked first, before everything else; loopback always passes) |
+| 403 | `IP_NOT_ALLOWED` | peer address outside the token's `--ip` list |
 | 403 | `HOST_NOT_ALLOWED`, `ORIGIN_NOT_ALLOWED` | DNS-rebinding defence: Host not loopback/`--allowed-hosts`, or an Origin that is not in `--cors-origin` |
 | 404 | `NOT_FOUND` | any path other than `/mcp` |
 | 405 | `METHOD_NOT_ALLOWED` | anything but POST (`Allow: POST`); an OPTIONS preflight of an allowed Origin gets 204 |
@@ -169,8 +216,10 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 | 500/503 | `AUTH_ERROR`, `AUTH_UNAVAILABLE`, `INTERNAL_ERROR` | authenticator or token store failure |
 | 503 | JSON-RPC -32000, `Retry-After: 1` | executor queue full (16) or server shutting down |
 
-Host, Origin, path, method, content type and size are checked before authentication, so an unauthenticated
-client can see 404/405/415/413 but never learns whether a token is valid from those.
+The server allow-list, Host, Origin, path, method, content type and size are checked before authentication, so an
+unauthenticated client can see 403/404/405/415/413 but never learns whether a token is valid from those. Requests
+the kernel rejects itself (malformed HTTP, unregistered paths, header limits, timeouts) get http.sys' own answer
+and never reach fairyfly.
 
 ## SSE behaviour
 
@@ -185,41 +234,48 @@ through content negotiation, else plain JSON. The rule honours q-values on the `
 
 The SSE response is a `text/event-stream` (`Cache-Control: no-cache`, `X-Accel-Buffering: no`):
 
-- a `: keep-alive` comment every 15 s so proxies do not time out long SAP calls;
+- a `: keep-alive` comment every 15 s so intermediaries and idle timeouts do not cut long SAP calls;
 - when the request carries `params._meta.progressToken`, `notifications/progress` events (started/finished);
 - the final JSON-RPC response as `event: message`;
 - if the client disconnects, the call is cancelled between GUI steps (never in the middle of a click).
 
 Any other request (including `tools/call` under the rules above, and `tools/list`) is a plain JSON
-response. IIS must not buffer or compress the stream (the generated `web.config` handles it;
-`mcp iis status` checks for drift).
+response. Events are written progressively by http.sys; put no buffering or compressing intermediary between
+client and server. HTTP/2 and HTTP/1.1 clients are both served (verification against a live host is tracked in
+[OPEN_WORK.md](OPEN_WORK.md)).
 
 ## Security model
 
 Layers, outside in:
 
-1. **TLS at IIS** (certificate by thumbprint or self-signed). fairyfly itself listens on loopback in plain HTTP.
-2. **IIS IP allow-list** (`--allow-ip`), a 403 before fairyfly sees the request. Path restriction to `/mcp`,
-   1 MiB body limit, header hygiene (client-supplied `X-Forwarded-*` and the proxy secret header are dropped).
+1. **TLS in the kernel** (http.sys with the certificate bound by `mcp setup`; Schannel negotiates, machine policy
+   sets the minimum version, setup warns below TLS 1.2). The private key never enters the fairyfly process.
+2. **Server `--allow-ip`**: a client allow-list of addresses or CIDR blocks on the socket peer, checked first, a
+   403 `ADDRESS_NOT_ALLOWED` before anything else is looked at. Loopback always passes; empty = any. Combine it
+   with a firewall rule (`mcp setup --open-firewall`) for defence in depth.
 3. **Bearer tokens** (`ffy_<id>_<secret>`): only SHA-256 plus metadata are stored, in Windows Credential Manager
    (`fairyfly-mcp:<name>`; a compact JSON record, split over `fairyfly-mcp:<name>#1..n` chunk entries when a long
    allowlist exceeds one Credential Manager value, up to 16 chunks, else `TOKEN_TOO_LARGE`; the head entry is written
    last and a damaged or incomplete set never authenticates; `token delete` removes every chunk, `cmdkey` users must
-   delete the `#n` entries as well); constant-time comparison; optional expiry and per-token IP binding; revocation takes
-   effect within 5 s (instantly in the revoking process).
+   delete the `#n` entries as well); constant-time comparison; optional expiry and per-token **IP binding on the
+   real peer address** (`IP_NOT_ALLOWED`); revocation takes effect within 5 s (instantly in the revoking process).
 4. **Scopes** per tool family, the token **read-only** flag, **SAP system/client** allowlist and **T-code**
    allowlist, a per-token **rate limit**. The effective policy is the server policy intersected with the token's:
    a token can narrow, never widen. `FAIRYFLY_READ_ONLY=1` is a hard cap that no token or flag overrides.
-5. **Proxy secret** (`X-Fairyfly-Proxy-Secret`): only requests carrying it may set the client address through
-   `X-Forwarded-For` (the last entry, appended by IIS, is used).
-6. **Audit trail**: one record per tool call with `principal`, `transport: "http"`, `remote_addr`, `era`,
-   tool, status and error code; never results, screen content, fill values or tokens.
+5. **Request limits**: kernel timeouts (header wait 10 s, body 15 s, idle connection 120 s, minimum send rate),
+   16 receive workers, a request queue of 256, 1 MiB body limit answered before the body is read.
+6. **Audit trail**: one record per tool call with `principal`, `transport: "http"`, `remote_addr` (the real peer),
+   `era`, tool, status and error code; never results, screen content, fill values or tokens.
 7. The read-only **guard** of the CLI (refuses Save/Delete/Release/... in read-only mode), unchanged from stdio.
+
+There is no reverse proxy and no trusted-proxy mode: `X-Forwarded-For`, `X-Forwarded-Proto` and
+`X-Fairyfly-Proxy-Secret` are ignored, so a client cannot choose the address it is judged by. Terminating TLS in a
+front proxy is a non-goal; if you run one anyway, token `--ip` and server `--allow-ip` see the proxy's address.
 
 ### Threat model
 
 Assets: the SAP session and its data (whatever the logged-on SAP user may do), the SAP credentials in the
-Credential Manager, the bearer tokens and the proxy secret, the audit trail.
+Credential Manager, the bearer tokens, the TLS private key, the audit trail.
 
 Actors: (a) a legitimate client with a token; (b) a network attacker without a token; (c) a compromised or
 malicious client or MCP host (including prompt injection through SAP screen text); (d) a local user or malware on
@@ -227,25 +283,27 @@ the VM; (e) an operator with an over-privileged token.
 
 | Threat | Control | Residual risk |
 |---|---|---|
-| Sniffing or tampering on the wire | TLS at IIS; HSTS; loopback hop only | plain HTTP on loopback: any local process can talk to `127.0.0.1:8383` (it still needs a token or `--insecure-no-auth`) |
+| Sniffing or tampering on the wire | TLS 1.2+ in the kernel (http.sys/Schannel); plain HTTP only on loopback unless `--insecure-http`; certificate pinned by thumbprint in the setup verification | a self-signed certificate must be distributed and trusted on each client by hand; the minimum TLS version follows the machine's Schannel policy, not fairyfly; on loopback any local process can reach `127.0.0.1` (it still needs a token or `--insecure-no-auth`) |
 | Unauthenticated access | bearer tokens required always; 401 for everything while no token exists; `TOKEN_INVALID` does not reveal which part is wrong | a leaked token is valid until revoked, rotated or expired |
-| Access from unexpected networks | IIS IP allow-list; per-token `--ip` (needs a working proxy secret) | anyone who can read the proxy secret (local admin, Credential Manager reader) can spoof `X-Forwarded-For` and defeat token IP binding |
+| Access from unexpected networks | server `--allow-ip` (403 `ADDRESS_NOT_ALLOWED`); per-token `--ip`; both judge the real socket peer, forwarded headers are ignored; optional firewall rule | behind NAT or a proxy every client shares one address; an allowed host that is compromised is trusted; IPv6 privacy addresses need CIDR blocks |
 | Browser-based attacks (DNS rebinding, CSRF) | Host check (loopback or `--allowed-hosts`); any `Origin` refused unless in `--cors-origin`; POST + JSON only | none known beyond misconfigured `--allowed-hosts`/`--cors-origin` |
 | Client does more than intended | scopes per tool family; token read-only flag; server mode ceiling; `FAIRYFLY_READ_ONLY` hard cap; per-item checks in `gui_batch` | token scopes are coarse (a whole family); a write-mode server with a write token can change any data the SAP user may |
 | Access to unintended SAP systems | `--system SID/CLIENT` allowlist, checked against the connection the call targets (explicit, default or sticky; read-only lookup, no attach); `SYSTEM_DENIED`, `SYSTEM_UNKNOWN` when it cannot be established | login/attach/disconnect --close-session are checked against their own target (attach: the LIVE connection description and system, never a saved record); a launch (also `login=true`) under `--system` is fail closed: it needs the entry name in `--connections` (operator vouches that the name maps to an allowed system) and any open session of that name must be on an allowed system, else `SYSTEM_UNKNOWN`/`SYSTEM_DENIED`; a changed SAP Logon entry can still be reached by the launch itself once; `--connections NAME` restricts saved connections by name (`CONNECTION_DENIED`); the three listing tools return only the token's connections (result filtering), and the SAP Logon system of a not-yet-open entry cannot be known |
 | Access to unintended transactions | `--tcode` allowlist on `gui_transaction_start`, on the transaction already open for every screen, element, key, popup and menu tool (unknown = denied), and on `gui_batch` items; typing into the command field is blocked; with an allowlist `gui_menu_select` is denied and `gui_key_send` is limited to enter, f4, f8 and page keys unless the token has `--allow-navigation` (fail closed); after every screen-acting call the transaction is read again: a token that ended outside its allowlist gets `tcode_left_allowlist` in the result and audit and is blocked (`TCODE_DENIED`) until an allowed `gui_transaction_start` succeeds | partly mitigated: `gui_element_click`, `gui_element_f4` and `gui_popup_close` can still navigate, and that is noticed only after the call (the destination screen has loaded); tokens with `--allow-navigation` can use menus and F3/F12 freely; the transaction is read just before a call and can change during it; treat T-code lists as a guard rail, not isolation |
-| Runaway or abusive clients | per-token rate limit (`--rate`, optional per-family `--rate-family element=10,key=10`, `RATE_LIMITED`); one call at a time; queue of 16; 1 MiB request limit; result size caps | a busy client can still delay others (single shared SAP session, calls are serialized) |
-| Slow-body / slow-loris clients exhausting the HTTP worker pool | authentication and the header checks (Host, Origin, Content-Type, path, method) run on the request headers BEFORE the body is read; a rejected request gets its answer and the connection is closed; small rejected bodies (up to 64 KiB) are read and discarded so the close does not reset the connection, but at most half of the workers do that at a time; 5 s read timeout; bounded connection queue | headers that never complete, or a slow body sent with a VALID token, still occupy a worker for up to the 5 s read timeout each: keep the IIS reverse proxy (it buffers requests) and the IP allowlist in front |
+| Runaway or abusive clients | per-token rate limit (`--rate`, optional per-family `--rate-family element=10,key=10`, `RATE_LIMITED`); one call at a time; executor queue of 16, listener queue of 256, 16 receive workers; 1 MiB request limit; result size caps; kernel timeouts | a busy client can still delay others (single shared SAP session, calls are serialized) |
+| Slow-body / slow-loris clients exhausting the workers | the kernel enforces the timeouts (header wait 10 s, entity body 15 s, drain 5 s, idle connection 120 s, minimum send rate) and never hands a request without complete headers to fairyfly; authentication and the header checks run on the headers BEFORE the body is read, and a rejected request never has its body read | a slow body sent with a VALID token still occupies one of the 16 workers until the kernel timeout; the server allow-list, a firewall rule and short-lived tokens limit who can do that |
+| Local privilege boundary | `mcp setup`/`teardown` need exactly one elevated step (self-elevating, explicit user SID in the plan file); the running server is unelevated, holds no private key and no administrator rights; the URL ACL reserves the prefix for one user SID only, so other local users cannot bind it or hijack the port | a local administrator can rebind the port or read the machine key; another process of the same user can bind another prefix and can read that user's Credential Manager entries |
+| Legacy artefacts of earlier proxy setups | none are created any more | a leftover Credential Manager entry `fairyfly:fairyfly-mcp-proxy` is unused: delete it (`cmdkey /delete:fairyfly:fairyfly-mcp-proxy`); `mcp doctor` reports it |
 | Prompt injection via SAP content | screen results are labelled untrusted; server instructions tell the model not to follow them; read-only default | the model may still be persuaded to use write tools it has been granted; keep write tokens rare and confirm destructive actions client-side |
 | Credential theft | no tool accepts a password; SAP logon uses the Credential Manager; tokens only stored as hashes; secrets never in logs, audit, YAML or listings | Credential Manager entries are readable by any process of the same Windows user |
-| Repudiation, forensics | audit record per call with principal, remote address and era; start/stop records | append-only by convention, not tamper-proof |
+| Repudiation, forensics | audit record per call with principal, real peer address and era; start/stop records | append-only by convention, not tamper-proof |
 | Shared state between principals | none by design for auth | the sticky default connection and the default rate budget are per token, but the SAP GUI session and its screen state (open transaction, popups, field contents) are shared: one client's navigation still changes what the next client sees, so tokens with different purposes should use different saved connections (`--connections`) |
 | Session unavailable | `mcp doctor` and the tray warn | RDP disconnect, lock screen or log off yields black screenshots and failing calls; nothing restarts the desktop |
 
 ## Client cookbook
 
 Set the token in an environment variable, never in a command line you share. `fairyfly mcp client-config
---url https://mcp.example.com:8443/mcp` prints all of the following with placeholders.
+--url https://mcp.example.com:8443/mcp` prints all of the following with placeholders and the certificate trust hint.
 
 ### Claude Code (Linux or Windows)
 
@@ -258,8 +316,8 @@ claude mcp list
 
 Project-scoped `.mcp.json` with `"type": "http"`, `"url"` and `"headers": {"Authorization": "Bearer ${FAIRYFLY_TOKEN}"}`
 lets Claude Code expand the variable when it loads the file, so the token stays out of the config. Tools appear
-as `mcp__fairyfly__gui_screen_read` and so on. For a self-signed IIS certificate set `NODE_EXTRA_CA_CERTS`
-(or install the `.cer`, see MCP_IIS.md).
+as `mcp__fairyfly__gui_screen_read` and so on. For a self-signed certificate set `NODE_EXTRA_CA_CERTS` to the
+exported PEM (`fairyfly mcp cert export --format pem`, see [MCP_SETUP.md](MCP_SETUP.md)).
 
 ### Claude Desktop through mcp-remote
 
@@ -285,7 +343,7 @@ Do not commit this file.
 ~~~bash
 URL=https://mcp.example.com:8443/mcp
 H=(-H "Authorization: Bearer $FAIRYFLY_TOKEN" -H "Content-Type: application/json" -H "Accept: application/json")
-CA=(--cacert fairyfly-mcp.crt)         # self-signed: the exported .cer converted to PEM
+CA=(--cacert fairyfly.pem)             # self-signed: `fairyfly mcp cert export --format pem`; never use -k
 
 # legacy handshake
 curl -sS "${CA[@]}" "${H[@]}" -X POST "$URL" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
@@ -311,8 +369,8 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
   audited, needs `--yes`; `cmdkey /delete:fairyfly-mcp:NAME` also works).
 - **List**: `fairyfly mcp token list` (id prefix, scopes, systems, T-codes, allow_navigation, rate, IPs, expiry, revoked; never
   hashes or secrets).
-- **Proxy secret**: `fairyfly mcp iis setup --rotate-secret --yes` issues a new one; restart is not needed (the
-  server re-reads the entry within 5 s).
+- **Certificate**: `fairyfly mcp cert export` writes the public certificate for clients; renew it by running
+  `mcp setup` again ([MCP_SETUP.md](MCP_SETUP.md)); `mcp doctor` warns before it expires.
 - **Logs**: `%LOCALAPPDATA%\fairyfly\logs\mcp.log` in tray mode (rotating 3 x 5 MB); in console mode stderr.
   Verbosity: `FFLYLOG_LEVEL` or `--log-level`.
 - **Audit**: `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (override with `FAIRYFLY_AUDIT_FILE`, require with
@@ -322,9 +380,9 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
   Get-Content $env:LOCALAPPDATA\fairyfly\audit\2026-09.jsonl | ConvertFrom-Json |
     Where-Object transport -eq http | Select-Object ts, principal, remote_addr, tool, status, error_code
   ~~~
-- **Diagnostics**: `fairyfly mcp doctor [--output json]` (exit 1 on a failed check) and `fairyfly mcp iis status`.
-  The `tokens` and `iis` checks of `mcp doctor` currently report "unknown / not checked"; use `mcp token list` and
-  `mcp iis status` directly.
+- **Diagnostics**: `fairyfly mcp doctor [--output json]` (read-only, never elevated; exit 1 on a failed check)
+  with stable check ids and a remedy for each failure. The `tokens` check reports "unknown / not checked"; use
+  `mcp token list` directly.
 - **Mode switch**: the tray toggles read-only/write at run time; otherwise restart with or without `--allow-write`.
 
 ## Troubleshooting
@@ -334,12 +392,15 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 | 401 `AUTH_REQUIRED` and the message says no tokens are configured | no token exists on the VM (as this user): `fairyfly mcp token create NAME` |
 | 401 `TOKEN_INVALID` | wrong, truncated or rotated token, or the client added quotes; recreate or rotate |
 | 401 `TOKEN_REVOKED` / `TOKEN_EXPIRED` | revoked or past its `--expires`; create or rotate a token |
-| 403 `IP_NOT_ALLOWED` | the client address is not in the token's `--ip`; behind IIS this also needs the proxy secret (banner warning "proxy secret not set") |
-| 403 from IIS (HTML, no JSON) | client outside `--allow-ip` of `mcp iis setup` |
-| 403 `HOST_NOT_ALLOWED` / `ORIGIN_NOT_ALLOWED` | a client talks to fairyfly with an unexpected Host (direct, not via IIS) or a browser Origin; use `--allowed-hosts` / `--cors-origin` |
+| 403 `ADDRESS_NOT_ALLOWED` | the client address is not in the server's `--allow-ip` / `server.allow_ip`; loopback is always allowed |
+| 403 `IP_NOT_ALLOWED` | the client address is not in the token's `--ip`; the real peer address is judged, `X-Forwarded-For` is ignored (check NAT: the server may see the NAT address) |
+| 403 `HOST_NOT_ALLOWED` / `ORIGIN_NOT_ALLOWED` | a client uses a Host name that is not loopback or in `--allowed-hosts` (add the DNS name of the VM), or a browser Origin; use `--allowed-hosts` / `--cors-origin` |
 | 404 | wrong path; it must be exactly `/mcp` |
 | 405 / 415 | client did GET or sent another content type; use POST with `application/json` |
-| 502.3 from IIS | fairyfly is not running or is on another port; see MCP_IIS.md troubleshooting |
+| Connection refused or timeout | fairyfly is not running, wrong port, or the Windows firewall blocks the port: `mcp doctor` (`firewall`, `port`), `mcp setup --open-firewall` |
+| TLS handshake fails, "certificate verify failed" | the client does not trust the certificate: export and trust it (`mcp cert export`; curl `--cacert`, `NODE_EXTRA_CA_CERTS`, `certutil`); the name in the URL must be in the certificate's SAN |
+| TLS handshake fails, "protocol version" / negotiated below TLS 1.2 | the client or the machine's Schannel policy only offers TLS 1.0/1.1; enable TLS 1.2 on the older side; `mcp setup` verify and `mcp doctor` (`tls_handshake`) report the negotiated protocol |
+| Client cannot resolve the host name | DNS or hosts entry for the certificate's name is missing on the client; use the name given to `mcp setup --hostname`, or add a hosts entry |
 | Tool error `SCOPE_DENIED` | the token lacks the tool's family; create a token with that `--scope` |
 | `READ_ONLY` | the token is read-only; `TOOL_UNAVAILABLE_READ_ONLY` / `READ_ONLY_REFUSED`: the server is in read-only mode, restart with `--allow-write` if intended |
 | `TCODE_DENIED` | transaction not in the token's `--tcode`; the same code blocks typing into the command field, `gui_menu_select` and navigating keys (F3, F12, ...) unless the token was created with `--allow-navigation`, and every screen call after a result carried `tcode_left_allowlist` until an allowed `gui_transaction_start` succeeds |
@@ -347,30 +408,33 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 | `RATE_LIMITED` | over the token's `--rate` (or the server default 120/min); combine steps with `gui_batch` |
 | `NO_SESSIONS`, `MULTIPLE_SESSIONS` | no SAP session, or several open; `gui_session_list` then `gui_session_attach` with `session_id` |
 | Screenshot is black, calls fail after a while | the desktop is locked or the RDP session is disconnected; `tscon`, disable lock, see MCP_TRAY.md |
-| SSE events arrive in one burst | IIS/another proxy buffers; `mcp iis status` drift check, no WAF or antivirus proxy in between |
-| Startup: `BIND_FAILED` (exit 2) | port already in use; choose `--mcp-port` |
+| SSE events arrive in one burst | an intermediary (proxy, WAF, antivirus HTTPS inspection) buffers the stream; connect directly |
+| Startup: `BIND_FAILED` (exit 2), reason `no_url_reservation` | no URL ACL for this user and prefix: run `fairyfly mcp setup` (elevated once), or as an administrator `netsh http add urlacl url=<prefix> user=<DOMAIN\user>` |
+| Startup: `BIND_FAILED`, reason `prefix_registered` | another process (a second fairyfly, the tray) already serves this prefix; stop it or choose another `--mcp-port` |
+| Startup: `INSECURE_BIND` (exit 2) | plain HTTP on a non-loopback host; use `--tls` after `mcp setup`, or accept the risk with `--insecure-http` |
+| Startup: `INVALID_ARGUMENT` about `--allow-ip` | an entry is not an IPv4/IPv6 address or CIDR block |
 | `mcp` exits at once when started with a config error | `fairyfly mcp config validate` |
 
 ## Linux-side manual check list
 
-Run these from the Linux client (not on the VM) against the real IIS endpoint after every setup or upgrade.
+Run these from the Linux client (not on the VM) against the real HTTPS endpoint after every setup or upgrade.
 `URL`, `TOKEN` and `CA` as in the cookbook; expected results in the right column.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | `curl -i "${CA[@]}" $URL` (GET, no token) | 405 (`Allow: POST`) from fairyfly, or 401/403 from IIS if the request is rejected earlier; never 200 |
+| 1 | `curl -i "${CA[@]}" $URL` (GET, no token) | 405 (`Allow: POST`); never 200 |
 | 2 | `curl -i "${CA[@]}" -X POST $URL -H 'Content-Type: application/json' -d '{}'` | 401 `AUTH_REQUIRED` with `WWW-Authenticate: Bearer realm="fairyfly"` |
 | 3 | same with `-H "Authorization: Bearer ffy_00000000_bad"` | 401 `TOKEN_INVALID` |
-| 4 | `curl -i "${CA[@]}" https://host:8443/other` | 404 (IIS) |
-| 5 | TLS: `openssl s_client -connect host:8443 -servername host </dev/null` and `curl` without `--cacert` | trusted chain (CA certificate) or the documented failure for self-signed; no fallback to HTTP on port 80 |
+| 4 | `curl -i "${CA[@]}" https://host:8443/other` | 404 (http.sys, no JSON body) |
+| 5 | TLS: `openssl s_client -connect host:8443 -servername host </dev/null` and `curl` without `--cacert` | negotiated TLS 1.2 or 1.3, the expected subject; without `--cacert` the documented failure for a self-signed certificate; plain HTTP on the TLS port is not answered with a 2xx |
 | 6 | `initialize` (legacy), then `server/discover` with `MCP-Protocol-Version: 2026-07-28` | both answer 200; discover lists `supportedVersions` |
 | 7 | `tools/list` | 200; tool names sorted; `gui_element_fill` present only when the server is in write mode |
 | 8 | `tools/call gui_screen_read` (token with `screen`) | 200, text starts with `SAP screen data (untrusted` |
 | 9 | `tools/call gui_transaction_start` with a token lacking `transaction` | tool error `SCOPE_DENIED` |
 | 10 | read-only token, `tools/call gui_element_fill` on a write server | tool error `READ_ONLY` |
 | 11 | SSE: `Accept: text/event-stream`, `curl -N` on a slow call (for example `gui_screen_read` on a 12-tab screen) | frames arrive progressively, `: keep-alive` on long calls, final `event: message`; nothing is held back until the end |
-| 12 | request from an address outside `--allow-ip` (a second host) | 403 from IIS |
-| 13 | token with `--ip <your CIDR>` used from another address | 403 `IP_NOT_ALLOWED` (proves the proxy secret and `X-Forwarded-For` work) |
+| 12 | request from an address outside the server `--allow-ip` (a second host) | 403 `ADDRESS_NOT_ALLOWED` |
+| 13 | token with `--ip <your CIDR>` used from another address, with and without a spoofed `X-Forwarded-For` naming an allowed address | 403 `IP_NOT_ALLOWED` both times (the real peer decides) |
 | 14 | `fairyfly mcp token revoke NAME` on the VM, retry within 6 s | 401 `TOKEN_REVOKED` |
 | 15 | `claude mcp add --transport http ...` then `claude mcp list` and a prompt that reads a screen | server is connected, tool call succeeds |
 | 16 | MCP Inspector CLI: `npx @modelcontextprotocol/inspector --cli $URL --transport http --header "Authorization: Bearer $TOKEN" --method tools/list` | tool list |
