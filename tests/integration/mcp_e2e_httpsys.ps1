@@ -90,13 +90,13 @@ $A_StatusWouldCreate = 'would_create'                           # dry-run status
 $A_StatusCreated    = 'created'                                 # apply status of a step that was created
 $A_CriticalSteps    = @('certificate', 'urlacl', 'sslcert', 'certificate_export', 'manifest')   # step ids that must be would_create/created
 $A_VerifyPath       = 'data.verify'                             # { ok: bool, tls_protocol: string, thumbprint_match: bool }
-$A_VerifyOk         = 'ok'
+$A_VerifyOk         = 'status'   # verify.status is the string 'ok' (not a bool)
 $A_VerifyThumbMatch = 'thumbprint_match'
 $A_SetupThumbPath   = 'data.certificate.thumbprint'             # optional: compared with the PEM thumbprint when present
 $A_ChecksPath       = 'data.checks'                             # doctor: array of { id, status, remedy }
 $A_CheckId          = 'id'
 $A_CheckStatus      = 'status'                                  # pass|ok|skip|info  vs  fail|error|warn|missing
-$A_CheckRemedy      = 'remedy'
+$A_CheckRemedy      = 'remediation'
 $A_DoctorSetupIds   = @('urlacl', 'sslcert', 'certificate')     # doctor check ids that reflect setup state
 $A_PassStatuses     = @('pass', 'ok', 'skip', 'info')
 $A_WarnStatuses     = @('warn', 'warning')
@@ -742,7 +742,7 @@ try {
         }
         $v = Get-Path $r.Json $A_VerifyPath
         Assert-That ($null -ne $v) "no verify object under $A_VerifyPath"
-        Assert-That ($v.$A_VerifyOk -eq $true) 'verify is not ok (401 over TLS, thumbprint, TLS >= 1.2)'
+        Assert-That ([string]$v.$A_VerifyOk -eq 'ok') 'verify is not ok (401 over TLS, thumbprint, TLS >= 1.2)'
         if (Has-Prop $v $A_VerifyThumbMatch) { Assert-That ($v.$A_VerifyThumbMatch -eq $true) 'verify: thumbprint does not match' }
     } -Fatal
     Check 'setup.apply_state' {
