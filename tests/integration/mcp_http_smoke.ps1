@@ -3,12 +3,21 @@
   Live smoke test of the fairyfly HTTP MCP server (`fairyfly mcp --http`) against a logged-in SAP GUI session.
 
 .DESCRIPTION
-  Starts `fairyfly mcp --http` on a free loopback port (a read-only server, then a write-mode server), creates
-  short-lived bearer tokens with `mcp token create`, and checks over plain HTTP: authentication failures
-  (401), method and content-type errors (405, 415, 404), both protocol eras (legacy initialize and stateless
-  server/discover), tools/list ordering, a real read call, scope / token read-only / T-code / rate-limit
-  refusals, revocation, SSE framing, the audit trail (principal, transport, remote_addr, no token string) and
-  a clean shutdown of the server process.
+  Starts `fairyfly mcp --http --no-tls` on the fixed loopback port 18383 (http.sys, plain HTTP, loopback only:
+  a read-only server, a write-mode server, and a server with --allow-ip), creates short-lived bearer tokens
+  with `mcp token create`, and checks over plain HTTP: authentication failures (401), method and content-type
+  errors (405, 415, 404), both protocol eras (legacy initialize and stateless server/discover), tools/list
+  ordering, a real read call, scope / token read-only / T-code / rate-limit refusals, revocation, SSE framing,
+  that X-Forwarded-For is ignored (no proxy trust: token --ip binding uses the real peer address), that the
+  server --allow-ip list never locks out loopback, the audit trail (principal, transport, remote_addr, no
+  token string) and a clean shutdown of the server process.
+
+  PREREQUISITE (one time, elevated, dev reservation): the listener is http.sys, which has no ephemeral ports
+  and needs a URL reservation for an unelevated process, even on loopback. Run once in an elevated prompt:
+      netsh http add urlacl url=http://127.0.0.1:18383/mcp/ user=%USERDOMAIN%\%USERNAME%
+  When the server fails with BIND_FAILED reason no_url_reservation the script prints that exact command and
+  exits 2. Remove the reservation later with:
+      netsh http delete urlacl url=http://127.0.0.1:18383/mcp/
 
   Prerequisites: Windows PowerShell 5.1, SAP GUI with scripting enabled, a logged-in session (SAP Easy Access, no
   popup), a built fairyfly.exe, and access to the Windows Credential Manager of the current user (tokens are
@@ -27,12 +36,13 @@
   so the user's real mcp.yaml and audit trail are not involved. The token-expiry check that would need an already
   expired token is reported as SKIP (creation rejects a past --expires; that rejection is checked instead).
 
-  Exit code: 0 all checks passed, 1 at least one check failed, 2 no SAP session (or no session reachable).
+  Exit code: 0 all checks passed, 1 at least one check failed, 2 prerequisite missing (no SAP session, or no
+  URL reservation for the port).
 
 .PARAMETER Exe
   Path to fairyfly.exe (default: build\Release\fairyfly.exe, then build\bin\Release\fairyfly.exe under the repo root).
 .PARAMETER Port
-  TCP port on 127.0.0.1 for the servers (default 0: pick a free port).
+  TCP port on 127.0.0.1 for the servers (default 18383, fixed: http.sys needs a URL reservation per port).
 .PARAMETER AuditFile
   Audit file of the read-only server (default: a temp file). The write server uses <name>-write.jsonl.
 .PARAMETER AllowedTcode
@@ -47,7 +57,7 @@
 [CmdletBinding()]
 param(
     [string]$Exe = '',
-    [int]$Port = 0,
+    [int]$Port = 18383,
     [string]$AuditFile = '',
     [string]$AllowedTcode = 'SM50',
     [string]$DeniedTcode = 'SE16',
@@ -56,6 +66,24 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ======================================================================================================
+# ASSUMPTIONS ABOUT THE C++ SIDE (http.sys listener) - adjust here after merging streams A/B/C
+# ======================================================================================================
+$A_NoTlsFlag        = '--no-tls'                 # plain HTTP on loopback (server flag)
+$A_AllowIpFlag      = '--allow-ip'               # server-level CIDR allow-list flag; loopback is always allowed
+$A_TokenIpFlag      = '--ip'                     # mcp token create --ip <CIDR|address>
+$A_ReadyStatus      = 405                        # readiness probe: GET /mcp answers 405 (method check before auth)
+$A_BannerEndpoint   = 'endpoint: http://127.0.0.1:{0}/mcp'   # {0} = port (regex-escaped by the script)
+$A_BannerPlain      = 'plain HTTP \(loopback only\)'
+$A_BannerReadOnly   = 'read-only guard'
+$A_BindFailedRegex  = 'BIND_FAILED'              # stderr text when http.sys cannot register the prefix ...
+$A_NoReservationRe  = 'no_url_reservation'       # ... with this reason
+$A_ErrIpNotAllowed  = 'IP_NOT_ALLOWED'           # JSON error_code of a token --ip refusal (403)
+$A_XffHeader        = 'X-Forwarded-For'
+$A_Endpoint         = '/mcp'                     # client path (adapter strips the trailing slash of the /mcp/ prefix)
+# ======================================================================================================
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 # ---- Exe and file resolution --------------------------------------------------------------------------
@@ -67,17 +95,23 @@ if (-not $Exe) {
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 if (-not $AuditFile) { $AuditFile = Join-Path ([IO.Path]::GetTempPath()) ('fairyfly-mcp-http-smoke-{0}.jsonl' -f $Stamp) }
 $AuditWrite = ($AuditFile -replace '\.jsonl$', '') + '-write.jsonl'
+$AuditAllowIp = ($AuditFile -replace '\.jsonl$', '') + '-allowip.jsonl'
 
 $Plan = @(
+    "prerequisite: dev reservation (elevated, once): netsh http add urlacl url=http://127.0.0.1:$Port/mcp/ user=%USERDOMAIN%\%USERNAME%",
     "tokens: <prefix>-main (session,connection,screen,transaction), -screen (screen), -tcode (--tcode $AllowedTcode),",
     '        -rate (--rate 3), -revoke, -ro (session,screen,element); all --read-only; revoked and deleted in finally',
-    'server 1: mcp --http --mcp-port <free> (read-only), FAIRYFLY_AUDIT_FILE=<AuditFile>, temp yaml',
-    '  server.banner                  posture banner names the endpoint and read-only mode',
+    '        -ipok (--ip 127.0.0.1), -ipnet (--ip 203.0.113.0/24) for the X-Forwarded-For checks',
+    "server 1: mcp --http --no-tls --mcp-port $Port (read-only), FAIRYFLY_AUDIT_FILE=<AuditFile>, temp yaml",
+    '  (readiness = HTTP GET /mcp answering 405; BIND_FAILED no_url_reservation -> print the netsh command, exit 2)',
+    '  server.banner                  banner: "endpoint: http://127.0.0.1:<port>/mcp", "plain HTTP (loopback only)", read-only guard',
     '  http.no_token_401              401 AUTH_REQUIRED + WWW-Authenticate',
     '  http.bad_token_401             401 TOKEN_INVALID',
     '  http.get_405                   405, Allow: POST',
     '  http.content_type_415          415 for text/plain',
     '  http.other_path_404            404',
+    '  http.xff_ignored               token --ip 127.0.0.1 + spoofed X-Forwarded-For: 203.0.113.9 still gets 200 (header not trusted)',
+    '  http.forwarded_cannot_bypass_ip token --ip 203.0.113.0/24 from loopback + X-Forwarded-For: 203.0.113.9 -> 403 IP_NOT_ALLOWED',
     '  proto.initialize_legacy        echoes 2025-06-18, serverInfo fairyfly, no Mcp-Session-Id',
     '  proto.notification_202         notifications/initialized -> 202',
     '  proto.server_discover          stateless: supportedVersions incl. 2026-07-28, resultType complete',
@@ -96,19 +130,23 @@ $Plan = @(
     '  token.revoke_effective         revoke, then 401 TOKEN_REVOKED within 6 s',
     '  server.clean_stop              Ctrl+C: exit code 0 within 15 s',
     '  audit.*                        transport http, principal, remote_addr, era, denials recorded, no token string',
-    'server 2: mcp --http --allow-write (skipped with -SkipWriteMode), audit <name>-write.jsonl',
+    'server 2: mcp --http --no-tls --allow-write (skipped with -SkipWriteMode), audit <name>-write.jsonl',
     '  write.tools_list               21 tools incl. gui_element_fill (all-scope, non-read-only token)',
     '  write.ro_token_refused         read-only token: gui_element_fill -> READ_ONLY (nothing reaches SAP)',
     '  write.clean_stop / write.audit_no_token',
+    'server 3: mcp --http --no-tls --allow-ip 203.0.113.0/24, audit <name>-allowip.jsonl',
+    '  http.allow_ip_loopback_always  loopback still answers (200) although the allow-list names only 203.0.113.0/24',
+    '  allowip.clean_stop',
     'never pressed/filled: Save, Delete, Release, Stop, any field; no SAP credentials are used'
 )
 
 if ($DryRun) {
     Write-Host 'mcp_http_smoke.ps1 DRY RUN (no server is started, no token is created, SAP is not touched)'
     Write-Host ('Exe:       {0}  (exists: {1})' -f $Exe, (Test-Path -LiteralPath $Exe))
-    Write-Host ('Port:      {0}' -f $(if ($Port -gt 0) { $Port } else { 'a free port on 127.0.0.1' }))
+    Write-Host ('Port:      {0} (fixed; needs once, elevated: netsh http add urlacl url=http://127.0.0.1:{0}/mcp/ user=%USERDOMAIN%\%USERNAME%)' -f $Port)
     Write-Host ('AuditFile: {0}' -f $AuditFile)
     if (-not $SkipWriteMode) { Write-Host ('           {0}' -f $AuditWrite) }
+    Write-Host ('           {0}' -f $AuditAllowIp)
     Write-Host ('SkipWriteMode: {0}' -f [bool]$SkipWriteMode)
     Write-Host 'Plan:'
     foreach ($line in $Plan) {
@@ -118,6 +156,7 @@ if ($DryRun) {
     exit 0
 }
 if (-not (Test-Path -LiteralPath $Exe)) { Write-Host "fairyfly.exe not found: $Exe"; exit 1 }
+if ($Port -lt 1 -or $Port -gt 65535) { Write-Host "Invalid -Port $Port (http.sys needs a fixed port with a URL reservation)"; exit 2 }
 
 # Never let a system proxy intercept the loopback requests.
 [System.Net.WebRequest]::DefaultWebProxy = $null
@@ -188,21 +227,13 @@ function Remove-SmokeTokens {
 function Get-TokenHeader([string]$Short) { return @{ Authorization = ('Bearer ' + $script:Tokens[$Short].Secret) } }
 
 # ---- HTTP helpers --------------------------------------------------------------------------------------
-function Get-FreePort {
-    $l = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
-    $l.Start()
-    $p = ([System.Net.IPEndPoint]$l.LocalEndpoint).Port
-    $l.Stop()
-    return $p
-}
-
 function ConvertTo-BodyText($Content) {
     if ($null -eq $Content) { return '' }
     if ($Content -is [byte[]]) { return [Text.Encoding]::UTF8.GetString($Content) }
     return [string]$Content
 }
 
-function Send-Http([string]$Method, [string]$Path = '/mcp', $Body = $null, [hashtable]$Headers = @{},
+function Send-Http([string]$Method, [string]$Path = $A_Endpoint, $Body = $null, [hashtable]$Headers = @{},
                    [string]$ContentType = 'application/json', [int]$TimeoutSec = 30) {
     $p = @{ Uri = ('http://127.0.0.1:{0}{1}' -f $script:Port, $Path); Method = $Method; UseBasicParsing = $true
             TimeoutSec = $TimeoutSec; ErrorAction = 'Stop' }
@@ -302,7 +333,7 @@ function Start-HttpServer([string]$Extra, [string]$AuditPath, [string]$Tag) {
     "server:`r`n  transport: http`r`n  port: $($script:Port)`r`n" | Set-Content -LiteralPath $yaml -Encoding ASCII
     $out = Join-Path $TempDir "server-$Tag.out.log"
     $err = Join-Path $TempDir "server-$Tag.err.log"
-    $argLine = ('mcp --http --mcp-host 127.0.0.1 --mcp-port {0} -c "{1}" {2}' -f $script:Port, $yaml, $Extra).Trim()
+    $argLine = ('mcp --http {3} --mcp-host 127.0.0.1 --mcp-port {0} -c "{1}" {2}' -f $script:Port, $yaml, $Extra, $A_NoTlsFlag).Trim()
     $saved = @{}
     foreach ($n in @('FAIRYFLY_AUDIT', 'FAIRYFLY_READ_ONLY', 'FAIRYFLY_AUDIT_FILE')) { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
     try {
@@ -316,22 +347,22 @@ function Start-HttpServer([string]$Extra, [string]$AuditPath, [string]$Tag) {
     }
     $null = $proc.Handle   # keep the handle so ExitCode is available
     $srv = @{ Proc = $proc; Out = $out; Err = $err; Audit = $AuditPath; Stopped = $false; ExitCode = $null; Tag = $Tag }
-    # Wait until the port accepts connections (or the process died).
+    # Readiness = an HTTP request answered with 405 (GET /mcp), not a raw TCP connect: http.sys accepts TCP
+    # connections in the kernel before the process serves anything.
     $deadline = (Get-Date).AddSeconds(30)
     $ready = $false
     while ((Get-Date) -lt $deadline -and -not $proc.HasExited) {
         try {
-            $c = New-Object System.Net.Sockets.TcpClient
-            $c.Connect('127.0.0.1', $script:Port)
-            $c.Close()
-            $ready = $true
-            break
-        } catch { Start-Sleep -Milliseconds 200 }
+            $probe = Send-Http 'GET' $A_Endpoint $null @{} 'application/json' 3
+            if ($probe.Status -eq $A_ReadyStatus) { $ready = $true; break }
+        } catch { }
+        Start-Sleep -Milliseconds 200
     }
     if (-not $ready) {
         $why = (Read-SharedText $err)
+        if ($why -match $A_BindFailedRegex -and $why -match $A_NoReservationRe) { throw 'PREREQ_NO_URL_RESERVATION' }
         if ($why.Length -gt 300) { $why = $why.Substring(0, 300) }
-        throw "server '$Tag' did not start listening on 127.0.0.1:$($script:Port): $why"
+        throw "server '$Tag' did not answer HTTP $A_ReadyStatus on 127.0.0.1:$($script:Port): $why"
     }
     return $srv
 }
@@ -379,7 +410,8 @@ function Assert-NoTokenText([string]$Text, [string]$Where) {
 # ---- Run ------------------------------------------------------------------------------------------------
 $s1 = $null; $s2 = $null
 $exit = 0
-$script:Port = if ($Port -gt 0) { $Port } else { Get-FreePort }
+$s3 = $null
+$script:Port = $Port
 try {
     Write-Host ('== tokens: prefix {0} (created now, revoked and deleted at the end)' -f $Prefix)
     New-SmokeToken 'main'   @('--scope', 'session,connection,screen,transaction', '--read-only', '--expires', '1d')
@@ -388,6 +420,8 @@ try {
     New-SmokeToken 'rate'   @('--scope', 'session', '--rate', '3', '--read-only', '--expires', '1d')
     New-SmokeToken 'revoke' @('--scope', 'screen', '--read-only', '--expires', '1d')
     New-SmokeToken 'ro'     @('--scope', 'session,screen,element', '--read-only', '--expires', '1d')
+    New-SmokeToken 'ipok'   @('--scope', 'session', $A_TokenIpFlag, '127.0.0.1', '--read-only', '--expires', '1d')
+    New-SmokeToken 'ipnet'  @('--scope', 'session', $A_TokenIpFlag, '203.0.113.0/24', '--read-only', '--expires', '1d')
     # All-scope tokens: tools/list is filtered per token, so the full tool counts (20 read-only, 21 with write mode)
     # are only visible to a token that has every scope. 'allw' is not read-only (needed to see gui_element_fill in
     # the listing); the smoke never calls a write tool with it.
@@ -397,7 +431,7 @@ try {
     # ======================================================================================================
     # Server 1: read-only
     # ======================================================================================================
-    Write-Host ('== server 1: mcp --http (read-only) on 127.0.0.1:{0}, audit file {1}' -f $script:Port, $AuditFile)
+    Write-Host ('== server 1: mcp --http {2} (read-only) on 127.0.0.1:{0}, audit file {1}' -f $script:Port, $AuditFile, $A_NoTlsFlag)
     $s1 = Start-HttpServer '' $AuditFile 'ro'
 
     Check 'server.banner' {
@@ -405,8 +439,9 @@ try {
         $banner = ''
         while ((Get-Date) -lt $deadline) { $banner = Read-SharedText $s1.Err; if ($banner -match 'fairyfly MCP server \(HTTP\)') { break }; Start-Sleep -Milliseconds 200 }
         Assert-That ($banner -match 'fairyfly MCP server \(HTTP\)') 'posture banner not found on stderr'
-        Assert-That ($banner -match ('127\.0\.0\.1:{0}/mcp' -f $script:Port)) 'banner does not name the endpoint'
-        Assert-That ($banner -match 'read-only guard') 'banner does not say read-only'
+        Assert-That ($banner -match [regex]::Escape(($A_BannerEndpoint -f $script:Port))) 'banner does not name the endpoint (http://127.0.0.1:<port>/mcp)'
+        Assert-That ($banner -match $A_BannerPlain) 'banner does not say plain HTTP (loopback only)'
+        Assert-That ($banner -match $A_BannerReadOnly) 'banner does not say read-only'
     }
 
     # ---- HTTP-level rejections (no SAP needed) -------------------------------------------------------
@@ -434,6 +469,21 @@ try {
     Check 'http.other_path_404' {
         $r = Send-Http 'POST' '/other' (New-RpcBody 'ping') (Get-TokenHeader 'main')
         Assert-That ($r.Status -eq 404) "status is $($r.Status)"
+    }
+
+    # ---- no proxy trust: X-Forwarded-For is ignored, token --ip is checked against the real peer -----------
+    Check 'http.xff_ignored' {
+        # Token bound to 127.0.0.1 (the real peer): a spoofed forwarded header must not change the outcome.
+        $plain = Invoke-Mcp 'ipok' 'ping' $null
+        Assert-That ($plain.Status -eq 200) "ping without header: status $($plain.Status) $($plain.Json.error_code)"
+        $r = Invoke-Mcp 'ipok' 'ping' $null @{ $A_XffHeader = '203.0.113.9' }
+        Assert-That ($r.Status -eq 200) "spoofed $A_XffHeader changed the outcome: status $($r.Status) $($r.Json.error_code)"
+    }
+    Check 'http.forwarded_cannot_bypass_ip' {
+        # Token bound to 203.0.113.0/24: the real peer is loopback, the forged header claims an allowed address.
+        $r = Invoke-Mcp 'ipnet' 'ping' $null @{ $A_XffHeader = '203.0.113.9' }
+        Assert-That ($r.Status -eq 403) "status is $($r.Status) (expected 403: the forged header must not satisfy --ip)"
+        Assert-That ($r.Json.error_code -eq $A_ErrIpNotAllowed) "error_code is '$($r.Json.error_code)'"
     }
 
     # ---- protocol ---------------------------------------------------------------------------------------
@@ -647,7 +697,7 @@ try {
     # Server 2: --allow-write (only proves that a read-only token is refused; nothing reaches SAP)
     # ======================================================================================================
     if (-not $SkipWriteMode) {
-        Write-Host ('== server 2: mcp --http --allow-write on 127.0.0.1:{0}, audit file {1}' -f $script:Port, $AuditWrite)
+        Write-Host ('== server 2: mcp --http {2} --allow-write on 127.0.0.1:{0}, audit file {1}' -f $script:Port, $AuditWrite, $A_NoTlsFlag)
         $s2 = Start-HttpServer '--allow-write' $AuditWrite 'rw'
         Check 'write.banner' {
             $deadline = (Get-Date).AddSeconds(5)
@@ -679,9 +729,31 @@ try {
             Assert-That ($rec.Count -ge 1 -and $rec[0].error_code -eq 'READ_ONLY') 'no READ_ONLY audit record for gui_element_fill'
         }
     }
+
+    # ======================================================================================================
+    # Server 3: server-level --allow-ip that does not list loopback: loopback must still be answered
+    # ======================================================================================================
+    Write-Host ('== server 3: mcp --http {2} {3} 203.0.113.0/24 on 127.0.0.1:{0}, audit file {1}' -f $script:Port, $AuditAllowIp, $A_NoTlsFlag, $A_AllowIpFlag)
+    $s3 = Start-HttpServer ('{0} 203.0.113.0/24' -f $A_AllowIpFlag) $AuditAllowIp 'allowip'
+    Check 'http.allow_ip_loopback_always' {
+        $r = Invoke-Mcp 'main' 'ping' $null
+        Assert-That ($r.Status -eq 200) "loopback ping with --allow-ip 203.0.113.0/24: status $($r.Status) $($r.Json.error_code)"
+    }
+    $code3 = Stop-HttpServer $s3
+    Check 'allowip.clean_stop' { Assert-That ($code3 -eq 0) "exit code is $code3 (-1 = had to be killed)" }
+} catch {
+    if ($_.Exception.Message -eq 'PREREQ_NO_URL_RESERVATION') {
+        Write-Host ('PREREQUISITE MISSING: BIND_FAILED (no_url_reservation) - http.sys needs a URL reservation for port {0}.' -f $script:Port)
+        Write-Host 'Run once in an ELEVATED prompt, then rerun this script:'
+        Write-Host ('  netsh http add urlacl url=http://127.0.0.1:{0}/mcp/ user=%USERDOMAIN%\%USERNAME%' -f $script:Port)
+        $exit = 2
+    } else {
+        $script:Fail++
+        Write-Host ('FAIL smoke.aborted - {0}' -f $_.Exception.Message)
+    }
 } finally {
     # Never leave a server running, SAP on a side transaction, or a token behind.
-    foreach ($srv in @($s1, $s2)) {
+    foreach ($srv in @($s1, $s2, $s3)) {
         if ($null -ne $srv -and -not $srv.Stopped) { try { [void](Stop-HttpServer $srv) } catch { } }
     }
     try { Remove-SmokeTokens } catch { Write-Host 'WARNING: token cleanup failed; list them with: fairyfly mcp token list' }
@@ -690,6 +762,6 @@ try {
 
 Write-Host ''
 Write-Host ('Summary: {0} passed, {1} failed, {2} skipped' -f $script:Pass, $script:Fail, $script:Skip)
-if ($exit -eq 2) { Write-Host 'No SAP GUI session found: start SAP GUI, log on, and rerun.'; exit 2 }
+if ($exit -eq 2) { Write-Host 'Prerequisite missing (SAP GUI session, or the URL reservation above): fix it and rerun.'; exit 2 }
 if ($script:Fail -gt 0) { exit 1 }
 exit 0
