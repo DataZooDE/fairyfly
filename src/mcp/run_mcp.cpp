@@ -152,7 +152,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
         if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
             return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
-        // Bearer-token authentication (Credential Manager). The IIS setup stores the proxy secret as
+        // Bearer-token authentication (Credential Manager). The reverse-proxy secret is stored as
         // "fairyfly:fairyfly-mcp-proxy"; --insecure-no-auth bypasses the factory in make_http_authenticator.
         g_make_authenticator = [] {
             auth::AuthConfig config;

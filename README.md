@@ -4,7 +4,7 @@ fairyfly is a Windows command-line tool for automating SAP GUI through the SAP G
 
 ## Current CLI
 
-Since 0.2.0 the CLI is a noun/verb tree (see [docs/MIGRATION_0.2.md](docs/MIGRATION_0.2.md) for the old flat command names, which no longer exist):
+Since 0.2.0 the CLI is a noun/verb tree (see [docs/MIGRATION_CLI.md](docs/MIGRATION_CLI.md) for the old flat command names, which no longer exist):
 
 | Group | Commands |
 |---|---|

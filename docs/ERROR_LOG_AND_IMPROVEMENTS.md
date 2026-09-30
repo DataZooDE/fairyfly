@@ -1,6 +1,6 @@
 # Error Log & Foundational Improvements Register
 
-> Note (0.2.0): the CLI was restructured into noun/verb groups and the MCP tools were renamed. Entries below use the command names of their time (`tcode`, `click`, `fill`, `list`, `screen menu`, `send-key`, `serve`, `sap_*`) and are left as written; see [MIGRATION_0.2.md](MIGRATION_0.2.md) for the mapping to the current names.
+> Note (0.2.0): the CLI was restructured into noun/verb groups and the MCP tools were renamed. Entries below use the command names of their time (`tcode`, `click`, `fill`, `list`, `screen menu`, `send-key`, `serve`, `sap_*`) and are left as written; see [MIGRATION_CLI.md](MIGRATION_CLI.md) for the mapping to the current names.
 
 This is a historical record of errors and fixes encountered while testing Fairyfly against SAP GUI. A dated entry may describe a past limitation or an untested variant; it is not by itself a current bug or todo. The maintained list of concrete unfinished work is [OPEN_WORK.md](OPEN_WORK.md).
 

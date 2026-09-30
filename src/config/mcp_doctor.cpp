@@ -42,40 +42,6 @@ std::optional<int> count_active_tokens(auth::TokenStore& store) {
     }
 }
 
-IisState probe_iis_state(iis::IisHost& host, const std::string& site_name) {
-    IisState state;
-    try {
-        const iis::HostFacts facts = host.detect();
-        if (!facts.iis_installed) {
-            state.message = "IIS not installed (optional: only needed for a TLS reverse proxy)";
-            return state;
-        }
-        if (facts.admin_module.empty()) {
-            state.message = "IIS installed but no administration module available; site not checked";
-            return state;
-        }
-        const iis::SiteInfo site = host.get_site(site_name);
-        if (!site.exists) {
-            state.message = "IIS site '" + site_name + "' not configured (optional: 'fairyfly mcp iis setup')";
-            return state;
-        }
-        state.checked = true;
-        if (site.state == "Started") {
-            state.ok = true;
-            state.message = "IIS site '" + site_name + "' is started";
-        } else {
-            state.message = "IIS site '" + site_name + "' is " + (site.state.empty() ? std::string("not started") : site.state);
-        }
-    } catch (const iis::HostError& e) {
-        state.checked = false;
-        state.message = "IIS state unavailable (" + e.code + "); run 'fairyfly mcp iis status' elevated";
-    } catch (...) {
-        state.checked = false;
-        state.message = "IIS state unavailable";
-    }
-    return state;
-}
-
 std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& probes) {
     std::vector<DoctorCheck> out;
     const bool http = in.transport == "http";
@@ -200,16 +166,7 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
         }
     }
 
-    // 8. IIS
-    {
-        const IisState iis = probes.iis();
-        if (!iis.checked) out.push_back(check("iis", CheckStatus::Skip, iis.message.empty() ? "not checked" : iis.message));
-        else if (iis.ok) out.push_back(check("iis", CheckStatus::Pass, iis.message.empty() ? "IIS reverse proxy is configured" : iis.message));
-        else out.push_back(check("iis", CheckStatus::Warn, iis.message.empty() ? "IIS reverse proxy problem" : iis.message,
-                                 "Run 'fairyfly mcp iis status' (elevated) for details."));
-    }
-
-    // 9. autostart
+    // 8. autostart
     {
         const auto command = probes.autostart_command();
         if (!command) {
@@ -222,7 +179,7 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
         }
     }
 
-    // 10. tray
+    // 9. tray
     out.push_back(probes.tray_running() ? check("tray", CheckStatus::Pass, "tray is running")
                                         : check("tray", CheckStatus::Skip, "tray is not running"));
     return out;

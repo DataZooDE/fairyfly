@@ -23,7 +23,6 @@
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
 #include "include/commands/mcp_command.h"
-#include "include/commands/mcp_iis_command.h"
 #include "include/commands/cli_app.h"
 #include "include/mcp/run_mcp.h"
 #include "include/mcp/http_tray_runner.h"
@@ -291,7 +290,6 @@ namespace {
                 print_result();
                 return 1;
             }
-            if (mcp_iis_invoked()) break;  // `mcp iis ...` is an ordinary command: executed below via McpCommand::execute
             if (mcp_command->tools_invoked()) {
                 // Pure table output (no SAP access): plain text or Markdown, never JSON-wrapped.
                 std::cout << mcp::tool_table_text(mcp_command->tools_markdown()) << std::flush;

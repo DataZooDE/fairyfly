@@ -3,7 +3,6 @@
 #include <memory>
 
 #include "include/command_table.h"
-#include "include/commands/mcp_iis_command.h"
 
 namespace fairyfly {
 namespace commands {
@@ -51,14 +50,12 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
 
     tools_cmd_ = add_leaf(app, {"mcp", "tools"});
     tools_cmd_->add_flag("--markdown", tools_markdown_, "Print the tool table as Markdown");
-    register_mcp_iis_cli(*cmd_);
     setup_mcp_extras(*cmd_, extras_);
     return cmd_;
 }
 
 Result McpCommand::execute(cli::CommandHandler& handler) {
     (void)handler;
-    if (mcp_iis_invoked()) return mcp_iis_execute();
     // cli_entry.cpp calls mcp::run_mcp() for this command; reaching here means the registry
     // was executed directly, which is not a supported entry point.
     Result result;

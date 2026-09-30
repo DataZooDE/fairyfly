@@ -106,7 +106,7 @@ std::vector<ClientSnippet> build_client_configs(const ClientConfigOptions& o) {
                        "Requires Node.js (npx). The header value lives in an environment variable because mcp-remote on\n"
                        "Windows mishandles arguments that contain spaces (\"Bearer <token>\").\n"
                        "Replace the placeholder in \"env\" with your token; do not commit this file.\n"
-                       "Self-signed IIS certificate: set NODE_EXTRA_CA_CERTS to the exported .cer.",
+                       "Self-signed server certificate: set NODE_EXTRA_CA_CERTS to the exported .cer.",
                        claude_desktop_json(o)});
     }
     if (all || o.mcp_remote) {

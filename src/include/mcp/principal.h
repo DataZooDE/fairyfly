@@ -45,7 +45,7 @@ struct AuthRequest {
     std::string proxy_secret;       ///< "X-Fairyfly-Proxy-Secret" value
     std::string forwarded_for;      ///< "X-Forwarded-For" value
     std::string forwarded_proto;    ///< "X-Forwarded-Proto" value
-    std::string peer_addr;          ///< socket peer address (127.0.0.1 when IIS fronts us)
+    std::string peer_addr;          ///< socket peer address (127.0.0.1 when a reverse proxy fronts us)
 };
 
 /// Result of authenticating one request.

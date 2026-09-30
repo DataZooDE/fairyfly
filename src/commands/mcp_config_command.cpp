@@ -272,7 +272,7 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     x.client_config->add_option("--name", x.client.name, "Server name in the client (default fairyfly)");
     output_option(x.client_config, x.output);
 
-    x.doctor = mcp.add_subcommand("doctor", "Check the MCP server environment (config, port, SAP GUI, desktop, tokens, IIS, autostart, tray)");
+    x.doctor = mcp.add_subcommand("doctor", "Check the MCP server environment (config, port, SAP GUI, desktop, tokens, autostart, tray)");
     x.doctor->fallthrough();
     output_option(x.doctor, x.output);
 }

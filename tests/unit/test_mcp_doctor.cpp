@@ -15,7 +15,6 @@ struct FakeProbes : DoctorProbes {
     DesktopState desktop_state{1u, true};
     LockState lock = LockState::Active;
     std::optional<int> tokens = 2;
-    IisState iis_state{};
     std::optional<std::string> autostart;
     bool tray = false;
 
@@ -24,7 +23,6 @@ struct FakeProbes : DoctorProbes {
     DesktopState desktop() override { return desktop_state; }
     LockState lock_state() override { return lock; }
     std::optional<int> token_count() override { return tokens; }
-    IisState iis() override { return iis_state; }
     std::optional<std::string> autostart_command() override { return autostart; }
     bool tray_running() override { return tray; }
 };
@@ -50,7 +48,7 @@ const DoctorCheck& get(const std::vector<DoctorCheck>& checks, const std::string
 TEST_CASE("mcp doctor: healthy http setup passes", "[mcp_doctor]") {
     FakeProbes probes;
     const auto checks = run_mcp_doctor(http_input(), probes);
-    CHECK(checks.size() == 10);
+    CHECK(checks.size() == 9);
     CHECK(get(checks, "config").status == CheckStatus::Pass);
     CHECK(get(checks, "port").status == CheckStatus::Pass);
     CHECK(get(checks, "sap_scripting").status == CheckStatus::Pass);
@@ -58,7 +56,6 @@ TEST_CASE("mcp doctor: healthy http setup passes", "[mcp_doctor]") {
     CHECK(get(checks, "desktop").status == CheckStatus::Pass);
     CHECK(get(checks, "session_lock").status == CheckStatus::Pass);
     CHECK(get(checks, "tokens").status == CheckStatus::Pass);
-    CHECK(get(checks, "iis").status == CheckStatus::Skip);
     CHECK(get(checks, "autostart").status == CheckStatus::Skip);
     CHECK(get(checks, "tray").status == CheckStatus::Skip);
     CHECK(overall_status(checks) == "pass");
@@ -145,7 +142,7 @@ TEST_CASE("mcp doctor: desktop and lock state", "[mcp_doctor]") {
     CHECK(get(run_mcp_doctor(http_input(), probes), "session_lock").status == CheckStatus::Skip);
 }
 
-TEST_CASE("mcp doctor: tokens, IIS, autostart and tray", "[mcp_doctor]") {
+TEST_CASE("mcp doctor: tokens, autostart and tray", "[mcp_doctor]") {
     FakeProbes probes;
     probes.tokens = std::nullopt;   // default probe: unknown
     CHECK(get(run_mcp_doctor(http_input(), probes), "tokens").status == CheckStatus::Skip);
@@ -154,11 +151,6 @@ TEST_CASE("mcp doctor: tokens, IIS, autostart and tray", "[mcp_doctor]") {
     auto stdio = http_input();
     stdio.transport = "stdio";
     CHECK(get(run_mcp_doctor(stdio, probes), "tokens").status == CheckStatus::Pass);   // no HTTP, no 401 problem
-
-    probes.iis_state = {true, true, "site fairyfly on :8443"};
-    CHECK(get(run_mcp_doctor(http_input(), probes), "iis").status == CheckStatus::Pass);
-    probes.iis_state = {true, false, "URL Rewrite missing"};
-    CHECK(get(run_mcp_doctor(http_input(), probes), "iis").status == CheckStatus::Warn);
 
     probes.autostart = "\"C:\\fairyfly\\fairyfly.exe\" mcp --tray";
     CHECK(get(run_mcp_doctor(http_input(), probes), "autostart").status == CheckStatus::Pass);
@@ -187,43 +179,6 @@ TEST_CASE("mcp doctor: output formats", "[mcp_doctor]") {
 // ---- real probe functions with fake backends ---------------------------------------------------
 
 namespace {
-
-namespace fi = fairyfly::iis;
-
-struct ProbeIisHost final : fi::IisHost {
-    fi::HostFacts facts;
-    fi::SiteInfo site;
-    bool throw_on_detect = false;
-    int mutations = 0;
-
-    fi::HostFacts detect() override {
-        if (throw_on_detect) throw fi::HostError{"IIS_SCRIPT_FAILED", "boom"};
-        return facts;
-    }
-    fi::SiteInfo get_site(const std::string&) override { return site; }
-    fi::AppPoolInfo get_app_pool(const std::string&) override { return {}; }
-    std::optional<fi::CertInfo> find_certificate(const std::string&) override { return std::nullopt; }
-    std::optional<fi::CertInfo> find_self_signed(const std::string&) override { return std::nullopt; }
-    bool firewall_rule_exists(const std::string&) override { return false; }
-    bool tcp_reachable(const std::string&, int, int) override { return false; }
-    bool dir_exists(const std::string&) override { return false; }
-    std::optional<std::string> read_file(const std::string&) override { return std::nullopt; }
-    fi::Change create_dir(const std::string&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change write_file(const std::string&, const std::string&) override { ++mutations; return fi::Change::Unchanged; }
-    bool remove_file(const std::string&) override { ++mutations; return false; }
-    bool remove_dir_if_empty(const std::string&) override { ++mutations; return false; }
-    fi::CertInfo create_self_signed(const std::string&, int) override { ++mutations; return {}; }
-    fi::Change export_certificate(const std::string&, const std::string&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change ensure_app_pool(const std::string&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change ensure_site(const fi::SiteSpec&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change ensure_site_config_access(const std::string&, const std::vector<std::string>&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change restrict_acl(const std::string&, const std::string&) override { ++mutations; return fi::Change::Unchanged; }
-    fi::Change ensure_firewall_rule(const std::string&, int) override { ++mutations; return fi::Change::Unchanged; }
-    bool remove_firewall_rule(const std::string&) override { ++mutations; return false; }
-    bool remove_site(const std::string&) override { ++mutations; return false; }
-    bool remove_app_pool(const std::string&) override { ++mutations; return false; }
-    bool remove_certificate(const std::string&) override { ++mutations; return false; }
-};
 
 struct ThrowingBackend final : fairyfly::auth::SecretBackend {
     std::optional<std::string> get(const std::string&) override { throw std::runtime_error("denied"); }
@@ -264,53 +219,4 @@ TEST_CASE("mcp doctor: count_active_tokens skips revoked and expired tokens", "[
 TEST_CASE("mcp doctor: count_active_tokens is nullopt when the backend fails", "[mcp_doctor]") {
     fairyfly::auth::TokenStore store(std::make_shared<ThrowingBackend>());
     CHECK_FALSE(count_active_tokens(store).has_value());
-}
-
-TEST_CASE("mcp doctor: probe_iis_state is read-only and reports absence as info", "[mcp_doctor]") {
-    ProbeIisHost host;
-    SECTION("IIS not installed -> info skip") {
-        const IisState st = probe_iis_state(host);
-        CHECK_FALSE(st.checked);
-        CHECK(st.message.find("not installed") != std::string::npos);
-        FakeProbes probes;
-        probes.iis_state = st;
-        const auto checks = run_mcp_doctor(http_input(), probes);
-        CHECK(get(checks, "iis").status == CheckStatus::Skip);
-        CHECK(get(checks, "iis").message.find("not installed") != std::string::npos);
-    }
-    SECTION("IIS installed, site absent -> not configured") {
-        host.facts.iis_installed = true;
-        host.facts.admin_module = "WebAdministration";
-        const IisState st = probe_iis_state(host);
-        CHECK_FALSE(st.checked);
-        CHECK(st.message.find("not configured") != std::string::npos);
-    }
-    SECTION("site started -> ok") {
-        host.facts.iis_installed = true;
-        host.facts.admin_module = "WebAdministration";
-        host.site.exists = true;
-        host.site.state = "Started";
-        const IisState st = probe_iis_state(host);
-        CHECK(st.checked);
-        CHECK(st.ok);
-    }
-    SECTION("site stopped -> problem") {
-        host.facts.iis_installed = true;
-        host.facts.admin_module = "WebAdministration";
-        host.site.exists = true;
-        host.site.state = "Stopped";
-        const IisState st = probe_iis_state(host);
-        CHECK(st.checked);
-        CHECK_FALSE(st.ok);
-        FakeProbes probes;
-        probes.iis_state = st;
-        CHECK(get(run_mcp_doctor(http_input(), probes), "iis").status == CheckStatus::Warn);
-    }
-    SECTION("host error -> info skip, no throw") {
-        host.throw_on_detect = true;
-        const IisState st = probe_iis_state(host);
-        CHECK_FALSE(st.checked);
-        CHECK(st.message.find("IIS_SCRIPT_FAILED") != std::string::npos);
-    }
-    CHECK(host.mutations == 0);
 }

@@ -64,7 +64,7 @@ std::vector<KeySpec> build_specs() {
     add(k);
 
     k = make("server.host", ValueType::String, Value{std::string("127.0.0.1")},
-             "Listen address of the HTTP transport. Keep 127.0.0.1 and put IIS (TLS) in front");
+             "Listen address of the HTTP transport. Keep 127.0.0.1 and put a TLS-terminating reverse proxy in front");
     add(k);
     k = make("server.port", ValueType::Int, Value{8383LL}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
@@ -106,7 +106,7 @@ std::vector<KeySpec> build_specs() {
     k = make("auth.token_prefix", ValueType::String, Value{std::string("ffy")}, "Prefix of generated bearer tokens (2-8 lower-case letters/digits)");
     add(k);
     k = make("auth.proxy_secret_source", ValueType::String, Value{std::string("credential-manager")},
-             "Where the IIS proxy secret is read from. The secret itself never goes into this file");
+             "Where the reverse-proxy secret is read from. The secret itself never goes into this file");
     k.allowed = {"credential-manager"};
     add(k);
     return s;

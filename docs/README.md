@@ -6,4 +6,4 @@ The other files in this directory include a SAP GUI scripting reference and date
 
 The EPM generator output still needs a live comparison with a completed result; that exact check is tracked in [open work](OPEN_WORK.md). Its speculative analysis note and one-off capture probe were removed.
 
-Since 0.2.0 the CLI is a noun/verb tree and the MCP tools are named `gui_<noun>_<verb>`; see [MIGRATION_0.2.md](MIGRATION_0.2.md) for the old-to-new tables and [../CHANGELOG.md](../CHANGELOG.md).
+Since 0.2.0 the CLI is a noun/verb tree and the MCP tools are named `gui_<noun>_<verb>`; see [MIGRATION_CLI.md](MIGRATION_CLI.md) for the old-to-new tables and [../CHANGELOG.md](../CHANGELOG.md).

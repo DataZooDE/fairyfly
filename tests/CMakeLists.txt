@@ -31,7 +31,7 @@ add_executable(unit_tests
     unit/test_mcp_dispatcher.cpp
     unit/test_mcp_http.cpp
     unit/test_command_table.cpp
-    unit/test_iis.cpp
+    unit/test_setup_validators.cpp
     unit/test_auth.cpp
     unit/test_auth_policy.cpp
     unit/test_mcp_config.cpp
@@ -44,8 +44,6 @@ add_executable(unit_tests
     ../src/config.cpp
     ../src/session.cpp
 )
-
-target_compile_definitions(unit_tests PRIVATE FAIRYFLY_IIS_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/unit/golden/iis")
 
 # Small SAP-free child process used to verify cross-process cache locking.
 add_executable(connection_cache_worker EXCLUDE_FROM_ALL unit/connection_cache_worker.cpp)

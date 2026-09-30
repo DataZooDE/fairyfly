@@ -1,9 +1,9 @@
-#include "include/iis/validators.h"
+#include "include/setup/setup_validators.h"
 
 #include <algorithm>
 #include <cctype>
 
-namespace fairyfly::iis {
+namespace fairyfly::setup {
 namespace {
 
 bool is_alnum(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
@@ -119,50 +119,6 @@ std::optional<std::string> port_error(int value) {
     return std::nullopt;
 }
 
-std::optional<std::string> site_name_error(const std::string& value) {
-    if (value.empty() || value.size() > 63) return "site name must be 1-63 characters";
-    if (!is_alnum(value.front())) return "site name must start with a letter or digit";
-    for (char c : value) {
-        if (!is_alnum(c) && c != '.' && c != '_' && c != '-') return "site name may only contain letters, digits, '.', '_' and '-'";
-    }
-    return std::nullopt;
-}
-
-std::optional<std::string> site_path_error(const std::string& value) {
-    if (value.size() < 4 || value.size() > 200) return "site path must be an absolute path (4-200 characters)";
-    if (!is_alnum(value[0]) || is_digit(value[0]) || value[1] != ':' || value[2] != '\\')
-        return "site path must look like C:\\inetpub\\name";
-    for (size_t i = 3; i < value.size(); ++i) {
-        const char c = value[i];
-        if (!is_alnum(c) && c != ' ' && c != '_' && c != '.' && c != '-' && c != '\\') return "site path contains an unsafe character";
-    }
-    if (value.back() == '\\' || value.back() == ' ' || value.back() == '.') return "site path must not end with '\\', ' ' or '.'";
-    for (const auto& seg : split(value.substr(3), '\\')) {
-        if (seg.empty()) return "site path contains an empty segment";
-        if (seg == "." || seg == "..") return "site path must not contain '.' or '..' segments";
-    }
-    return std::nullopt;
-}
-
-std::optional<UpstreamParts> parse_upstream(const std::string& value) {
-    const std::string prefix = "http://";
-    if (value.compare(0, prefix.size(), prefix) != 0) return std::nullopt;
-    const std::string rest = value.substr(prefix.size());
-    const auto colon = rest.rfind(':');
-    if (colon == std::string::npos) return std::nullopt;
-    UpstreamParts parts;
-    parts.host = rest.substr(0, colon);
-    if (parts.host != "127.0.0.1" && parts.host != "localhost" && parts.host != "[::1]") return std::nullopt;
-    if (!parse_uint(rest.substr(colon + 1), 65535, parts.port) || parts.port < 1) return std::nullopt;
-    return parts;
-}
-
-std::optional<std::string> upstream_error(const std::string& value) {
-    if (!parse_upstream(value))
-        return "upstream must be http://127.0.0.1:PORT, http://localhost:PORT or http://[::1]:PORT (loopback only, no path)";
-    return std::nullopt;
-}
-
 std::optional<Ipv4Range> ipv4_range(const std::string& cidr) {
     if (cidr_error(cidr)) return std::nullopt;
     const auto slash = cidr.find('/');
@@ -181,4 +137,4 @@ std::optional<Ipv4Range> ipv4_range(const std::string& cidr) {
     return Ipv4Range{dotted(value), dotted(mask)};
 }
 
-} // namespace fairyfly::iis
+} // namespace fairyfly::setup

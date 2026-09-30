@@ -11,7 +11,6 @@
 #include "include/auth/secret_backend.h"
 #include "include/auth/token_store.h"
 #include "include/commands/mcp_extras.h"
-#include "include/iis/powershell_host.h"
 #include "include/config/mcp_doctor.h"
 #include "include/tray/tray_win32.h"
 
@@ -107,18 +106,6 @@ public:
             return count_active_tokens(store);
         } catch (...) {
             return std::nullopt;
-        }
-    }
-    // Read-only: IisHost::detect and get_site only (PowerShell query scripts, no changes).
-    IisState iis() override {
-        try {
-            auto runner = iis::make_windows_powershell_runner();
-            auto host = iis::make_powershell_host(*runner);
-            return probe_iis_state(*host);
-        } catch (...) {
-            IisState state;
-            state.message = "IIS state unavailable";
-            return state;
         }
     }
 
