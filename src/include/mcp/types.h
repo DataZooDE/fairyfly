@@ -143,6 +143,13 @@ struct ServeOptions {
     std::vector<std::string> cors_origins;   ///< --cors-origin: accepted Origin values ("" = none)
     bool insecure_no_auth = false;           ///< --insecure-no-auth: AllowAllAuthenticator
     bool sse = true;                         ///< --sse / --no-sse
+    // ---- http.sys listener (additive) ----
+    /// Serve HTTPS (TLS terminated in-kernel by http.sys with the certificate bound by `mcp setup`).
+    bool tls = false;
+    /// Client allow-list (IPv4/IPv6 addresses or CIDR blocks); loopback is always allowed. Empty = no restriction.
+    std::vector<std::string> allow_ip;
+    /// Permit plain HTTP on a non-loopback host (flag only; never read from the config file).
+    bool insecure_http = false;
 };
 
 /// How a tool renders its result.

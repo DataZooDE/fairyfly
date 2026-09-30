@@ -24,7 +24,7 @@ if(WIN32)
 endif()
 
 # Set the project name and version
-project(fairyfly VERSION 0.2.0 LANGUAGES CXX)
+project(fairyfly VERSION 2026.9.30 LANGUAGES CXX)
 
 # Require C++20
 set(CMAKE_CXX_STANDARD 20)
@@ -166,11 +166,9 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
     src/mcp/http_tray_runner.cpp
-    src/iis/validators.cpp
-    src/iis/web_config.cpp
-    src/iis/iis_service.cpp
-    src/iis/powershell_host.cpp
-    src/commands/mcp_iis_command.cpp
+    src/system/powershell_runner.cpp
+    src/system/cert_scripts.cpp
+    src/setup/setup_validators.cpp
     src/auth/crypto.cpp
     src/auth/ip.cpp
     src/auth/secret_backend.cpp
@@ -233,6 +231,9 @@ if(WIN32)
         advapi32
         bcrypt
         ws2_32
+        httpapi
+        crypt32
+        winhttp
         shell32
         ws2_32
         wtsapi32

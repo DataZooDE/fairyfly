@@ -207,7 +207,7 @@ std::vector<std::string> TokenAuthenticator::posture_warnings() const {
         warnings.push_back("the token store could not be read: every request will fail");
     }
     if (!proxy_secret())
-        warnings.push_back("proxy secret not set: X-Forwarded-* headers are ignored, so behind IIS every client appears as the "
+        warnings.push_back("proxy secret not set: X-Forwarded-* headers are ignored, so behind a reverse proxy every client appears as the "
                            "proxy address and token IP binding cannot work");
     return warnings;
 }

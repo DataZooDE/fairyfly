@@ -1,7 +1,7 @@
 #pragma once
 // Phase-4 additions of `fairyfly mcp`: -c/--config, --tray/--install-autostart/--remove-autostart and the
 // subcommands `config show|path|init|validate`, `client-config`, `doctor`. Kept out of mcp_command.cpp so
-// parallel phases (HTTP flags, token, iis) only need to touch single hook lines there.
+// parallel phases (HTTP flags, token) only need to touch single hook lines there.
 
 #include <CLI/CLI.hpp>
 #include <functional>

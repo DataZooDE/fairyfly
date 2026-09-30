@@ -8,7 +8,7 @@ namespace fairyfly {
 namespace commands {
 
 /// `fairyfly mcp`: starts the MCP server (stdio by default); `fairyfly mcp tools [--markdown]`
-/// prints the tool table. The `mcp` app has an OPTIONAL subcommand (later phases add token, iis,
+/// prints the tool table. The `mcp` app has an OPTIONAL subcommand (later phases add token,
 /// config, ...); without one the default action is to run the server. The run loop is started from
 /// cli_entry.cpp (mcp::run_mcp) because, like `batch`, it needs the shared handler and must copy
 /// the options before the registry is rebuilt.

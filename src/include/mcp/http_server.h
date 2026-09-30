@@ -1,7 +1,7 @@
 #pragma once
 // HTTP transport of `fairyfly mcp --http`: a thin cpp-httplib adapter around HttpEndpoint, the
 // CallExecutor main-thread loop, IServerControl and the posture banner. Plain HTTP only: TLS is the
-// reverse proxy's (IIS) job. Never writes to stdout.
+// reverse proxy's job. Never writes to stdout.
 
 #include <atomic>
 #include <functional>
@@ -43,6 +43,9 @@ struct HttpServerConfig {
     std::size_t max_queue = 16;
     int call_timeout_ms = 120000;
     int worker_threads = 16;
+    bool tls = false;                      ///< HTTPS binding (http.sys terminates TLS)
+    std::vector<std::string> allow_ip;     ///< client allow-list (addresses/CIDR); loopback always allowed; empty = all
+    bool insecure_http = false;            ///< allow plain HTTP on a non-loopback host (flag only)
 };
 
 class McpHttpServer : public IServerControl {

@@ -32,6 +32,7 @@ struct HttpRequest {
     HeaderMap headers;
     std::string body;
     std::string peer_addr;  ///< socket peer ("127.0.0.1")
+    bool tls = false;       ///< the request arrived over TLS (http.sys HTTPS binding)
 
     std::string header(const std::string& name) const {
         auto it = headers.find(name);
@@ -76,6 +77,8 @@ struct HttpEndpointOptions {
     bool sse = true;
     int keepalive_ms = 15000;                ///< ": keep-alive" comment interval on SSE streams
     int poll_ms = 100;                       ///< SSE / wait poll slice
+    /// Server-level client allow-list (addresses or CIDR blocks); loopback is always allowed; empty = allow all.
+    std::vector<std::string> allow_ip;
     ServerOptions server;                    ///< name/version/instructions
 };
 

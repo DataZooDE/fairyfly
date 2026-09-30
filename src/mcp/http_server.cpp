@@ -272,7 +272,7 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
     const bool loopback = is_loopback_bind(config_.host);
     lines.push_back("fairyfly MCP server (HTTP)");
     lines.push_back("  endpoint:       http://" + config_.host + ":" + std::to_string(impl_->bound ? impl_->bound_port : config_.port) +
-                    config_.endpoint.path + "   (plain HTTP: put TLS in front, e.g. IIS reverse proxy)");
+                    config_.endpoint.path + "   (plain HTTP: put TLS in front, e.g. a reverse proxy)");
     lines.push_back(std::string("  mode:           ") + (read_only_.load() ? "read-only guard (write tools hidden and refused)"
                                                                           : "WRITE MODE (state-changing tools enabled)") +
                     (config_.read_only_cap ? " [FAIRYFLY_READ_ONLY cap active]" : ""));
