@@ -110,7 +110,7 @@ $A_CerFile          = 'fairyfly-mcp-{HOST}.cer'                # in $A_LocalDir
 $A_ManifestFile     = 'mcp-setup.json'                          # in $A_LocalDir
 $A_CertMatch        = 'fairyfly'                                # subject / friendly name fragment of our certificate in LocalMachine\My
 # -- server
-$A_ServerArgs       = @('mcp', '--http', '--tls', '--mcp-host', '+', '--mcp-port', '{PORT}')   # + -c cfg [--allow-write|--allow-ip CIDR]
+$A_ServerArgs       = @('mcp', '--http', '--tls', '--mcp-host', '+', '--allowed-hosts', $Hostname, '--mcp-port', '{PORT}')   # + -c cfg [--allow-write|--allow-ip CIDR]
 $A_AllowIpFlag      = '--allow-ip'
 $A_WriteFlag        = '--allow-write'
 $A_ReadyStatus      = 405                                        # GET /mcp without token answers 405
