@@ -474,8 +474,10 @@ bool McpHttpServer::bind(std::string* error) {
     rc = ::HttpSetUrlGroupProperty(s.group, HttpServerTimeoutsProperty, &timeouts, sizeof(timeouts));
     if (rc != NO_ERROR) return fail("http_sys_error", "setting http.sys timeouts failed: " + win_error(rc));
 
-    // Also on the server session: connection-level timers that run before a request is routed to a URL group
-    // (partial headers) follow the session's limits. Not fatal when refused.
+    // Also on the server session. Measured (issue 'half-header'): neither call changes the lifetime of a socket that
+    // has sent only part of a header (or nothing): until a request is routed to the URL group, http.sys uses the
+    // machine-wide timers (netsh http show timeout, default 120 s). EntityBody/DrainEntityBody/MinSendRate do apply.
+    // Not fatal when refused.
     rc = ::HttpSetServerSessionProperty(s.session, HttpServerTimeoutsProperty, &timeouts, sizeof(timeouts));
     if (rc != NO_ERROR) spdlog::warn("HttpSetServerSessionProperty(timeouts) failed: {}", win_error(rc));
 

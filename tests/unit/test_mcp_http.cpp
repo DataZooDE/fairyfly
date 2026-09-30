@@ -1289,7 +1289,8 @@ TEST_CASE("Loopback http.sys: unauthenticated slow bodies cannot exhaust the wor
     CHECK(out.good_after == 200);
 }
 
-// The kernel (HeaderWait, 10 s) closes a connection that never completes its headers. Timing-sensitive.
+// Documents a limit, stays [!mayfail]: the per-URL-group HeaderWait (10 s) does NOT apply to a connection that has
+// not delivered a complete header; only the machine-wide http.sys timer (default 120 s) closes it (measured 125 s).
 TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][!mayfail]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
@@ -1307,6 +1308,28 @@ TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the ker
     CHECK(closed);
 }
 
+
+// A request whose headers are complete (and authenticated) but whose body never arrives: the URL group's
+// EntityBody timer (15 s) is what ends it. Measured, not assumed.
+TEST_CASE("Loopback http.sys: an unfinished body with a valid token is cut by the kernel", "[httpsys][loopback][loris]") {
+    FakeProvider provider;
+    McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    bool closed = false;
+    long long elapsed_ms = -1;
+    run_with_client(server, [&] {
+        fairyfly::test::RawHttpClient c;
+        if (!c.connect(kDevPort)) return;
+        c.send(std::string("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n") + kGoodAuth +
+               "Content-Length: 1000\r\n\r\n{");
+        const auto start = std::chrono::steady_clock::now();
+        closed = c.wait_closed(28000);
+        elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    }, 40);
+    INFO("unfinished body closed after " << elapsed_ms << " ms");
+    CHECK(closed);
+    CHECK(elapsed_ms < 25000);
+}
 
 TEST_CASE("Session core: initialize/notifications state machine is unchanged", "[mcp][http][session]") {
     FakeProvider provider;
