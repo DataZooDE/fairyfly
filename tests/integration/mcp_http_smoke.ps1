@@ -74,7 +74,7 @@ $A_NoTlsFlag        = '--no-tls'                 # plain HTTP on loopback (serve
 $A_AllowIpFlag      = '--allow-ip'               # server-level CIDR allow-list flag; loopback is always allowed
 $A_TokenIpFlag      = '--ip'                     # mcp token create --ip <CIDR|address>
 $A_ReadyStatus      = 405                        # readiness probe: GET /mcp answers 405 (method check before auth)
-$A_BannerEndpoint   = 'endpoint: http://127.0.0.1:{0}/mcp'   # {0} = port (regex-escaped by the script)
+$A_BannerEndpoint   = 'http://127.0.0.1:{0}/mcp'   # {0} = port (regex-escaped by the script)
 $A_BannerPlain      = 'plain HTTP \(loopback only\)'
 $A_BannerReadOnly   = 'read-only guard'
 $A_BindFailedRegex  = 'BIND_FAILED'              # stderr text when http.sys cannot register the prefix ...
