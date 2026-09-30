@@ -1,13 +1,14 @@
 // Remote MCP protocol core: HttpEndpoint (pure, no sockets), SSE framing, CallExecutor and a loopback
-// smoke test of the cpp-httplib adapter. No SAP, no COM; every wait is bounded.
+// smoke test of the http.sys adapter. No SAP, no COM; every wait is bounded.
 #include <catch2/catch_test_macros.hpp>
-
-#include <httplib.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -20,6 +21,7 @@
 #include "include/mcp/http_server.h"
 #include "include/mcp/json_rpc.h"
 #include "include/mcp/protocol_session.h"
+#include "support/raw_http_client.h"
 
 using namespace fairyfly::mcp;
 using namespace std::chrono_literals;
@@ -753,109 +755,339 @@ TEST_CASE("SSE: client disconnect sets the call's cancelled flag", "[mcp][http][
     CHECK(f.provider.saw_cancel.load());
 }
 
-// ---- IServerControl + loopback smoke ------------------------------------------------------------------------
+// ---- IServerControl + loopback (http.sys, fixed dev prefix) ------------------------------------------------
+//
+// These tests bind http://127.0.0.1:18383/mcp/ through the real http.sys adapter. http.sys needs a URL ACL for
+// every non-elevated listener, so the tests SKIP when the reservation is missing:
+//   netsh http add urlacl url=http://127.0.0.1:18383/mcp/ user=%USERDOMAIN%\%USERNAME%
 
-TEST_CASE("Loopback: cpp-httplib client against the real adapter", "[mcp][http][loopback]") {
-    FakeProvider provider;
+namespace {
+
+constexpr int kDevPort = 18383;
+
+HttpServerConfig dev_config() {
     HttpServerConfig config;
     config.host = "127.0.0.1";
-    config.port = 0;
-    config.endpoint.keepalive_ms = 5000;
+    config.port = kDevPort;
     config.endpoint.server.name = "fairyfly";
     config.endpoint.server.version = "1";
     config.read_only = true;
+    return config;
+}
+
+/// Binds or SKIPs (missing URL reservation / prefix in use); any other failure is a test failure.
+#define BIND_OR_SKIP(server)                                                                                                  \
+    do {                                                                                                                      \
+        std::string bind_error_;                                                                                              \
+        if (!(server).bind(&bind_error_)) {                                                                                   \
+            const std::string reason_ = (server).bind_error_reason();                                                         \
+            if (reason_ == "no_url_reservation" || reason_ == "prefix_registered")                                            \
+                SKIP("run once elevated: netsh http add urlacl url=http://127.0.0.1:18383/mcp/ user=%USERDOMAIN%\\%USERNAME%"); \
+            FAIL("bind failed (" << reason_ << "): " << bind_error_);                                                         \
+        }                                                                                                                     \
+    } while (0)
+
+/// This thread is the executor ("COM main") thread; `client` runs on a helper thread and the server is stopped when
+/// it returns. A guard thread stops the server after `guard_seconds` so a hang can never outlive the test.
+int run_with_client(McpHttpServer& server, std::function<void()> client, int guard_seconds = 60) {
+    std::atomic<bool> finished{false};
+    std::thread guard([&] {
+        for (int i = 0; i < guard_seconds * 10 && !finished; ++i) std::this_thread::sleep_for(100ms);
+        if (!finished) server.request_stop();
+    });
+    std::thread worker([&] {
+        try {
+            client();
+        } catch (...) {
+        }
+        server.request_stop();
+    });
+    const int code = server.run();
+    finished = true;
+    worker.join();
+    guard.join();
+    return code;
+}
+
+fairyfly::test::RawResponse post_json(const std::string& body, const std::string& extra = {}, const std::string& host = "127.0.0.1",
+                                      bool json_type = true, const std::string& path = "/mcp") {
+    fairyfly::test::RawResponse r;
+    fairyfly::test::RawHttpClient::exchange(kDevPort, fairyfly::test::RawHttpClient::post(path, body, extra, host, json_type), r);
+    return r;
+}
+
+const char* const kPing = R"({"jsonrpc":"2.0","id":1,"method":"ping"})";
+const char* const kGoodAuth = "Authorization: Bearer good\r\n";
+
+/// One tool that reports progress slowly (SSE frames must arrive while the call still runs).
+class StreamProvider : public ToolProvider {
+public:
+    std::vector<ToolDef> list_tools() const override {
+        ToolDef d;
+        d.name = "gui_stream";
+        d.title = "gui_stream";
+        d.description = "fake";
+        d.input_schema = json{{"type", "object"}};
+        return {d};
+    }
+    ToolResult call_tool(const std::string&, const json&, const CallContext& ctx) override {
+        for (int i = 1; i <= 3; ++i) {
+            std::this_thread::sleep_for(300ms);
+            if (ctx.report_progress) ctx.report_progress(i, 3, "step");
+        }
+        ToolResult r;
+        r.content = json::array({json{{"type", "text"}, {"text", "done"}}});
+        return r;
+    }
+};
+
+} // namespace
+
+TEST_CASE("http.sys bind refusals need no reservation", "[httpsys][bind]") {
+    FakeProvider provider;
+    {
+        HttpServerConfig config = dev_config();
+        config.port = 0;
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        std::string error;
+        CHECK_FALSE(server.bind(&error));
+        CHECK(server.bind_error_reason() == "invalid_prefix");
+        CHECK(error.find("ephemeral") != std::string::npos);
+        CHECK(server.run() == 2);
+    }
+    {
+        HttpServerConfig config = dev_config();
+        config.host = "0.0.0.0";
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        std::string error;
+        CHECK_FALSE(server.bind(&error));
+        CHECK(server.bind_error_reason() == "insecure_bind");
+        CHECK(error.find("--insecure-http") != std::string::npos);
+    }
+    {
+        HttpServerConfig config = dev_config();
+        config.host = "bad host";
+        config.tls = true;
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        CHECK_FALSE(server.bind());
+        CHECK(server.bind_error_reason() == "invalid_prefix");
+    }
+}
+
+TEST_CASE("http.sys: stop requested before run() returns immediately", "[httpsys][control]") {
+    FakeProvider provider;
+    McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
+    server.request_stop();
+    std::atomic<bool> returned{false};
+    int code = -1;
+    std::thread t([&] {
+        code = server.run();
+        returned = true;
+    });
+    for (int i = 0; i < 50 && !returned; ++i) std::this_thread::sleep_for(100ms);
+    const bool ok = returned.load();
+    if (!ok) {
+        server.request_stop();
+        std::this_thread::sleep_for(500ms);
+    }
+    t.join();
+    CHECK(ok);
+    CHECK(code == 0);
+    CHECK_FALSE(server.restart_requested());
+}
+
+TEST_CASE("Loopback http.sys: flow, auth, limits, control", "[httpsys][loopback]") {
+    FakeProvider provider;
+    HttpServerConfig config = dev_config();
+    config.endpoint.keepalive_ms = 5000;
     std::atomic<int> applied{-1};
-    McpHttpServer server(config, provider, std::make_unique<TokenAuth>(),
-                         [&applied](bool ro) { applied = ro ? 1 : 0; });
-    std::string error;
-    REQUIRE(server.bind(&error));
-    const int port = server.port();
-    REQUIRE(port > 0);
+    McpHttpServer server(config, provider, std::make_unique<TokenAuth>(), [&applied](bool ro) { applied = ro ? 1 : 0; });
+    BIND_OR_SKIP(server);
+    CHECK(server.port() == kDevPort);
+    CHECK(server.prefix() == "http://127.0.0.1:18383/mcp/");
 
     struct Outcome {
-        int ping = 0, unauth = 0, get = 0, wrong_host = 0, ctype = 0, sse_status = 0;
-        std::string list_body, sse_body, sse_ctype;
+        fairyfly::test::RawResponse ping, unauth, get, ctype, host, list, sse, other, slash, query;
         ServerStatus status_before, status_after;
     } out;
 
-    std::atomic<bool> finished{false};
-    // Hard bound: a hang can never outlive the test (30 s), and the guard is always joined.
-    std::thread guard([&] {
-        for (int i = 0; i < 300 && !finished; ++i) std::this_thread::sleep_for(100ms);
-        if (!finished) server.request_stop();
-    });
-    std::thread client([&] {
-        httplib::Client cli("127.0.0.1", port);
-        cli.set_connection_timeout(3, 0);
-        cli.set_read_timeout(10, 0);
-        const httplib::Headers auth{{"Authorization", "Bearer good"}};
-        // wait for the listener (run() starts it right after we begin)
-        for (int i = 0; i < 100; ++i) {
-            if (server.status().running) break;
-            std::this_thread::sleep_for(20ms);
-        }
+    const int exit_code = run_with_client(server, [&] {
+        for (int i = 0; i < 100 && !server.status().running; ++i) std::this_thread::sleep_for(20ms);
         out.status_before = server.status();
-        if (auto r = cli.Post("/mcp", auth, R"({"jsonrpc":"2.0","id":1,"method":"ping"})", "application/json")) out.ping = r->status;
-        if (auto r = cli.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"ping"})", "application/json")) out.unauth = r->status;
-        if (auto r = cli.Get("/mcp", auth)) out.get = r->status;
-        if (auto r = cli.Post("/mcp", auth, "x", "text/plain")) out.ctype = r->status;
-        {
-            httplib::Headers h = auth;
-            h.emplace("Host", "evil.example");
-            httplib::Client c2("127.0.0.1", port);
-            c2.set_read_timeout(5, 0);
-            if (auto r = c2.Post("/mcp", h, R"({"jsonrpc":"2.0","id":1,"method":"ping"})", "application/json")) out.wrong_host = r->status;
-        }
-        if (auto r = cli.Post("/mcp", auth,
-                              R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"protocolVersion":"2026-07-28"}}})",
-                              "application/json"))
-            out.list_body = r->body;
-        {
-            httplib::Headers h = auth;
-            h.emplace("Accept", "text/event-stream");
-            if (auto r = cli.Post("/mcp", h,
-                                  R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gui_a_tool","_meta":{"progressToken":"p1"}}})",
-                                  "application/json")) {
-                out.sse_status = r->status;
-                out.sse_body = r->body;
-                out.sse_ctype = r->get_header_value("Content-Type");
-            }
-        }
+        out.ping = post_json(kPing, kGoodAuth);
+        out.unauth = post_json(kPing);
+        fairyfly::test::RawHttpClient::exchange(kDevPort, "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n" + std::string(kGoodAuth) + "\r\n", out.get);
+        out.ctype = post_json("x", std::string(kGoodAuth) + "Content-Type: text/plain\r\n", "127.0.0.1", false);
+        out.host = post_json(kPing, kGoodAuth, "evil.example");
+        out.list = post_json(R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"protocolVersion":"2026-07-28"}}})", kGoodAuth);
+        out.sse = post_json(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gui_a_tool","_meta":{"progressToken":"p1"}}})",
+                            std::string(kGoodAuth) + "Accept: text/event-stream\r\n");
+        out.other = post_json(kPing, kGoodAuth, "127.0.0.1", true, "/mcp/other");
+        fairyfly::test::RawHttpClient::exchange(kDevPort, "GET /mcp/ HTTP/1.1\r\nHost: 127.0.0.1\r\n" + std::string(kGoodAuth) + "\r\n", out.slash);
+        fairyfly::test::RawHttpClient::exchange(kDevPort, "GET /mcp?x=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n" + std::string(kGoodAuth) + "\r\n", out.query);
         server.set_read_only(false);  // write mode is allowed (no env cap): applied on the main thread
         std::this_thread::sleep_for(200ms);
         out.status_after = server.status();
-        server.request_stop();
     });
 
-    const int exit_code = server.run();  // this (test) thread is the "main" thread
-    finished = true;
-    client.join();
-    guard.join();
-
     CHECK(exit_code == 0);
-    CHECK(out.ping == 200);
-    CHECK(out.unauth == 401);
-    CHECK(out.get == 405);
-    CHECK(out.ctype == 415);
-    CHECK(out.wrong_host == 403);
-    REQUIRE_FALSE(out.list_body.empty());
-    CHECK(json::parse(out.list_body)["result"]["resultType"] == "complete");
-    CHECK(out.sse_status == 200);
-    CHECK(out.sse_ctype.find("text/event-stream") != std::string::npos);
-    CHECK(out.sse_body.find("event: message") != std::string::npos);
-    CHECK(out.sse_body.find("notifications/progress") != std::string::npos);
+    CHECK(out.ping.status == 200);
+    CHECK(out.ping.body.find("\"result\"") != std::string::npos);
+    CHECK(out.ping.header("x-content-type-options") == "nosniff");
+    CHECK(out.unauth.status == 401);
+    CHECK(out.unauth.body.find("AUTH_REQUIRED") != std::string::npos);
+    CHECK(out.unauth.header("www-authenticate").find("Bearer") != std::string::npos);
+    CHECK(out.get.status == 405);
+    CHECK(out.ctype.status == 415);
+    CHECK(out.host.status == 403);
+    CHECK(out.host.body.find("HOST_NOT_ALLOWED") != std::string::npos);
+    CHECK(out.other.status == 404);
+    CHECK(out.other.body.find("NOT_FOUND") != std::string::npos);
+    CHECK(out.slash.status == 405);  // "/mcp/" reaches the endpoint as "/mcp"
+    CHECK(out.query.status == 405);
+    REQUIRE(out.list.status == 200);
+    CHECK(json::parse(out.list.body)["result"]["resultType"] == "complete");
+    CHECK(out.sse.status == 200);
+    CHECK(out.sse.header("content-type").find("text/event-stream") != std::string::npos);
+    CHECK(out.sse.body.find("event: message") != std::string::npos);
+    CHECK(out.sse.body.find("notifications/progress") != std::string::npos);
     CHECK(out.status_before.read_only);
     CHECK_FALSE(out.status_after.read_only);
     CHECK(applied.load() == 0);
     CHECK(out.status_after.calls_total >= 1);
-    CHECK(out.status_after.endpoint == "http://127.0.0.1:" + std::to_string(port) + "/mcp");
+    CHECK(out.status_after.endpoint == "http://127.0.0.1:18383/mcp");
     CHECK_FALSE(server.restart_requested());
+    CHECK_FALSE(server.status().running);
 }
 
-TEST_CASE("IServerControl: read-only cap, restart flag, posture banner", "[mcp][http][control]") {
+TEST_CASE("Loopback http.sys: oversized and malformed requests", "[httpsys][loopback]") {
+    FakeProvider provider;
+    HttpServerConfig config = dev_config();
+    config.endpoint.max_body_bytes = 4096;
+    McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    fairyfly::test::RawResponse too_big, chunked_big, bad_length, ok_small;
+    run_with_client(server, [&] {
+        // Content-Length above the cap: 413 without the body ever being sent
+        fairyfly::test::RawHttpClient::exchange(
+            kDevPort, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer good\r\n"
+                      "Content-Length: 100000\r\n\r\n", too_big);
+        // unknown length (chunked) beyond the cap: 413 from the running counter
+        {
+            fairyfly::test::RawHttpClient c;
+            if (c.connect(kDevPort)) {
+                c.send("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer good\r\n"
+                       "Transfer-Encoding: chunked\r\n\r\n");
+                const std::string piece(2048, 'a');
+                for (int i = 0; i < 4; ++i) {
+                    char size[16];
+                    std::snprintf(size, sizeof(size), "%zx\r\n", piece.size());
+                    if (!c.send(size + piece + "\r\n")) break;
+                }
+                c.send("0\r\n\r\n");
+                c.read_response(chunked_big, 5000);
+            }
+        }
+        fairyfly::test::RawHttpClient::exchange(
+            kDevPort, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nAuthorization: Bearer good\r\n"
+                      "Content-Length: 12abc\r\n\r\n", bad_length);
+        ok_small = post_json(kPing, kGoodAuth);
+    });
+    CHECK(too_big.status == 413);
+    CHECK(too_big.body.find("PAYLOAD_TOO_LARGE") != std::string::npos);
+    CHECK(chunked_big.status == 413);
+    CHECK((bad_length.status == 400 || bad_length.status == 0));  // http.sys itself may already reject it
+    CHECK(ok_small.status == 200);
+}
+
+TEST_CASE("Loopback http.sys: SSE frames arrive incrementally", "[httpsys][loopback][sse]") {
+    StreamProvider provider;
+    HttpServerConfig config = dev_config();
+    config.endpoint.keepalive_ms = 5000;
+    McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+
+    fairyfly::test::RawResponse head;
+    std::vector<std::pair<long long, std::string>> chunks;
+    bool saw_last = false;
+    run_with_client(server, [&] {
+        fairyfly::test::RawHttpClient c;
+        if (!c.connect(kDevPort)) return;
+        const std::string body = R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gui_stream","_meta":{"progressToken":"p"}}})";
+        const auto t0 = std::chrono::steady_clock::now();
+        c.send(fairyfly::test::RawHttpClient::post("/mcp", body, std::string(kGoodAuth) + "Accept: text/event-stream\r\n"));
+        if (!c.read_headers(head, 5000)) return;
+        while (true) {
+            std::string data;
+            bool last = false;
+            if (!c.read_chunk(data, last, 5000)) break;
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+            if (last) {
+                saw_last = true;
+                break;
+            }
+            chunks.emplace_back(ms, data);
+        }
+    });
+    REQUIRE(head.status == 200);
+    CHECK(head.header("content-type").find("text/event-stream") != std::string::npos);
+    CHECK(head.header("transfer-encoding").find("chunked") != std::string::npos);
+    CHECK(saw_last);
+    REQUIRE(chunks.size() >= 4);  // started, three progress frames, finished, final message: one chunk each
+    CHECK(chunks.front().first < 500);
+    CHECK(chunks.back().first - chunks.front().first >= 700);  // the frames were flushed while the call was running
+    std::string all;
+    for (const auto& c : chunks) all += c.second;
+    CHECK(all.find("notifications/progress") != std::string::npos);
+    CHECK(all.find("\"result\"") != std::string::npos);
+}
+
+TEST_CASE("Loopback http.sys: SSE client disconnect cancels the call", "[httpsys][loopback][sse]") {
+    FakeProvider provider;
+    HttpServerConfig config = dev_config();
+    config.endpoint.keepalive_ms = 200;
+    McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    run_with_client(server, [&] {
+        {
+            fairyfly::test::RawHttpClient c;
+            if (!c.connect(kDevPort)) return;
+            c.send(fairyfly::test::RawHttpClient::post(
+                "/mcp", R"({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"gui_wait_cancel"}})",
+                std::string(kGoodAuth) + "Accept: text/event-stream\r\n"));
+            fairyfly::test::RawResponse head;
+            c.read_headers(head, 5000);
+            std::this_thread::sleep_for(150ms);
+        }  // socket closed here
+        const auto until = std::chrono::steady_clock::now() + 2500ms;
+        while (!provider.saw_cancel && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(20ms);
+    });
+    CHECK(provider.saw_cancel.load());
+}
+
+TEST_CASE("Loopback http.sys: restart request and prefix collision", "[httpsys][loopback][control]") {
+    FakeProvider provider;
+    McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    {
+        McpHttpServer second(dev_config(), provider, std::make_unique<TokenAuth>());
+        std::string error;
+        CHECK_FALSE(second.bind(&error));
+        CHECK(second.bind_error_reason() == "prefix_registered");
+    }
+    std::thread stopper([&] {
+        std::this_thread::sleep_for(100ms);
+        server.request_restart();
+    });
+    CHECK(server.run() == 0);
+    stopper.join();
+    CHECK(server.restart_requested());
+    CHECK_FALSE(server.status().running);
+}
+
+TEST_CASE("IServerControl: read-only cap, posture banner", "[mcp][http][control]") {
     FakeProvider provider;
     HttpServerConfig config;
-    config.port = 0;
     config.read_only = true;
     config.read_only_cap = true;
     config.host = "0.0.0.0";
@@ -874,17 +1106,55 @@ TEST_CASE("IServerControl: read-only cap, restart flag, posture banner", "[mcp][
     CHECK(banner.find("stateless 2026-07-28") != std::string::npos);
     CHECK(banner.find("sse:") != std::string::npos);
     CHECK(banner.find("FAIRYFLY_READ_ONLY") != std::string::npos);
-
-    REQUIRE(server.bind());
-    std::thread stopper([&] {
-        std::this_thread::sleep_for(100ms);
-        server.request_restart();
-    });
-    CHECK(server.run() == 0);
-    stopper.join();
-    CHECK(server.restart_requested());
-    CHECK_FALSE(server.status().running);
+    CHECK(banner.find("client ip allow-list: any (loopback always allowed)") != std::string::npos);
+    for (const char* gone : {"IIS", "proxy", "Proxy", "reverse"}) CHECK(banner.find(gone) == std::string::npos);
 }
+
+TEST_CASE("posture banner and status are scheme-aware", "[mcp][http][banner]") {
+    FakeProvider provider;
+    const auto join = [](const std::vector<std::string>& lines) {
+        std::string s;
+        for (const auto& l : lines) s += l + "\n";
+        return s;
+    };
+    {
+        HttpServerConfig config;  // plain loopback default
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        const std::string banner = join(server.posture_lines());
+        CHECK(banner.find("endpoint:       http://127.0.0.1:8383/mcp") != std::string::npos);
+        CHECK(banner.find("plain HTTP (loopback only)") != std::string::npos);
+        CHECK(server.status().endpoint == "http://127.0.0.1:8383/mcp");
+    }
+    {
+        HttpServerConfig config;
+        config.tls = true;
+        config.host = "+";
+        config.port = 8443;
+        config.allow_ip = {"10.0.0.0/8", "192.168.1.5"};
+        config.endpoint.allowed_hosts = {"sap.example.com"};
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        const std::string banner = join(server.posture_lines());
+        CHECK(banner.find("endpoint:       https://sap.example.com:8443/mcp") != std::string::npos);
+        CHECK(banner.find("tls:            http.sys (certificate bound by 'fairyfly mcp setup')") != std::string::npos);
+        CHECK(banner.find("client ip allow-list: 10.0.0.0/8, 192.168.1.5") != std::string::npos);
+        CHECK(banner.find("reachable from the network: TLS on, tokens required") != std::string::npos);
+        CHECK(banner.find("consider --allow-ip") == std::string::npos);  // an allow-list is configured
+        CHECK(server.status().endpoint == "https://sap.example.com:8443/mcp");
+    }
+    {
+        HttpServerConfig config;
+        config.tls = true;
+        config.host = "+";
+        config.port = 8443;
+        McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
+        CHECK(server.status().endpoint == "https://+:8443/mcp");
+        CHECK(join(server.posture_lines()).find("consider --allow-ip") != std::string::npos);
+    }
+    CHECK(http_endpoint_url(false, "localhost", {}, 8383, "/mcp") == "http://127.0.0.1:8383/mcp");
+    CHECK(http_endpoint_url(true, "0.0.0.0", {}, 8443, "/mcp") == "https://+:8443/mcp");
+    CHECK(http_endpoint_url(true, "host.example", {"other"}, 8443, "/mcp") == "https://host.example:8443/mcp");
+}
+
 
 TEST_CASE("posture banner prints the insecure-auth warning once", "[mcp][http][banner]") {
     const auto count_auth_warnings = [](const std::vector<std::string>& lines) {
@@ -912,116 +1182,77 @@ TEST_CASE("posture banner prints the insecure-auth warning once", "[mcp][http][b
     CHECK(count_auth_warnings(with_silent.posture_lines()) == 1);
 }
 
-#ifdef _WIN32
-namespace {
-/// Opens a raw TCP connection to 127.0.0.1:port and sends `data` (no further bytes, no close).
-SOCKET raw_connect_send(int port, const std::string& data) {
-    SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return s;
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<u_short>(port));
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-        ::closesocket(s);
-        return INVALID_SOCKET;
-    }
-    ::send(s, data.data(), static_cast<int>(data.size()), 0);
-    return s;
-}
-} // namespace
-
-TEST_CASE("Loopback: unauthenticated slow bodies cannot exhaust the worker pool", "[mcp][http][loopback][loris]") {
+TEST_CASE("Loopback http.sys: unauthenticated slow bodies cannot exhaust the worker pool", "[httpsys][loopback][loris]") {
     FakeProvider provider;
-    HttpServerConfig config;
-    config.host = "127.0.0.1";
-    config.port = 0;
-    config.worker_threads = 4;  // the adapter keeps at least half of them out of reach of body-draining clients
-    config.endpoint.server.name = "fairyfly";
-    config.endpoint.server.version = "1";
+    HttpServerConfig config = dev_config();
+    config.worker_threads = 4;
     McpHttpServer server(config, provider, std::make_unique<TokenAuth>());
-    std::string error;
-    REQUIRE(server.bind(&error));
-    const int port = server.port();
+    BIND_OR_SKIP(server);
 
     struct Outcome {
         int loris_open = 0;
         int legit_status = 0;
         long long legit_ms = -1;
-        int bad_auth_ok = 0, bad_auth_total = 0;
-        int drained_401 = 0;
+        int bad_total = 0, bad_403 = 0, bad_body = 0;
         int good_after = 0;
     } out;
 
-    std::atomic<bool> finished{false};
-    std::thread guard([&] {
-        for (int i = 0; i < 300 && !finished; ++i) std::this_thread::sleep_for(100ms);
-        if (!finished) server.request_stop();
-    });
-    std::thread client([&] {
-        for (int i = 0; i < 100 && !server.status().running; ++i) std::this_thread::sleep_for(20ms);
-
-        // slow-loris: more sockets than workers, each announces a body but never sends it, none is authenticated
+    run_with_client(server, [&] {
+        // 12 sockets (more than workers): headers with Content-Length 1000 and no body, none authenticated
         const std::string headers = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
                                     "Content-Length: 1000\r\n\r\n";
-        std::vector<SOCKET> loris;
+        std::vector<std::unique_ptr<fairyfly::test::RawHttpClient>> loris;
         for (int i = 0; i < 12; ++i) {
-            SOCKET s = raw_connect_send(port, headers);
-            if (s != INVALID_SOCKET) loris.push_back(s);
+            auto c = std::make_unique<fairyfly::test::RawHttpClient>();
+            if (c->connect(kDevPort) && c->send(headers)) loris.push_back(std::move(c));
         }
         out.loris_open = static_cast<int>(loris.size());
         std::this_thread::sleep_for(300ms);
 
-        // a legitimate authenticated request is still answered promptly
-        {
-            httplib::Client cli("127.0.0.1", port);
-            cli.set_connection_timeout(3, 0);
-            cli.set_read_timeout(8, 0);
-            const auto start = std::chrono::steady_clock::now();
-            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer good"}},
-                                  R"({"jsonrpc":"2.0","id":1,"method":"ping"})", "application/json"))
-                out.legit_status = r->status;
-            out.legit_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-        }
-        // loris with a valid Content-Length but a wrong token is refused as well
-        for (SOCKET s : loris) ::closesocket(s);
+        const auto start = std::chrono::steady_clock::now();
+        const auto legit = post_json(kPing, kGoodAuth);
+        out.legit_status = legit.status;
+        out.legit_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        loris.clear();
 
-        // rejected requests that DO send their body must still receive the 401 (no connection reset)
+        // rejected requests that DO send their (unread) body still receive their JSON answer
         const std::string big(2048, 'x');
         for (int i = 0; i < 20; ++i) {
-            httplib::Client cli("127.0.0.1", port);
-            cli.set_connection_timeout(3, 0);
-            cli.set_read_timeout(5, 0);
-            ++out.bad_auth_total;
-            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer wrong"}}, big, "application/json")) {
-                if (r->status == 403) ++out.bad_auth_ok;  // the test authenticator answers 403 TOKEN_INVALID
-                if (r->body.find("TOKEN_INVALID") != std::string::npos) ++out.drained_401;
-            }
+            ++out.bad_total;
+            const auto r = post_json(big, "Authorization: Bearer wrong\r\n");
+            if (r.status == 403) ++out.bad_403;
+            if (r.body.find("TOKEN_INVALID") != std::string::npos) ++out.bad_body;
         }
-        {
-            httplib::Client cli("127.0.0.1", port);
-            if (auto r = cli.Post("/mcp", httplib::Headers{{"Authorization", "Bearer good"}},
-                                  R"({"jsonrpc":"2.0","id":2,"method":"ping"})", "application/json"))
-                out.good_after = r->status;
-        }
-        server.request_stop();
+        out.good_after = post_json(kPing, kGoodAuth).status;
     });
 
-    const int exit_code = server.run();
-    finished = true;
-    client.join();
-    guard.join();
-
-    CHECK(exit_code == 0);
     CHECK(out.loris_open == 12);
     CHECK(out.legit_status == 200);
     CHECK(out.legit_ms >= 0);
     CHECK(out.legit_ms < 3000);
-    CHECK(out.bad_auth_ok == out.bad_auth_total);
-    CHECK(out.drained_401 == out.bad_auth_total);
+    CHECK(out.bad_403 == out.bad_total);
+    CHECK(out.bad_body == out.bad_total);
     CHECK(out.good_after == 200);
 }
-#endif
+
+// The kernel (HeaderWait, 10 s) closes a connection that never completes its headers. Timing-sensitive.
+TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][!mayfail]") {
+    FakeProvider provider;
+    McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    bool closed = false;
+    int legit = 0;
+    run_with_client(server, [&] {
+        fairyfly::test::RawHttpClient c;
+        if (!c.connect(kDevPort)) return;
+        c.send("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n");  // no terminating blank line
+        legit = post_json(kPing, kGoodAuth).status;
+        closed = c.wait_closed(16000);
+    }, 40);
+    CHECK(legit == 200);
+    CHECK(closed);
+}
+
 
 TEST_CASE("Session core: initialize/notifications state machine is unchanged", "[mcp][http][session]") {
     FakeProvider provider;

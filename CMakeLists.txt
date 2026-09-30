@@ -67,7 +67,6 @@ find_package(PNG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
-find_package(httplib CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 
 # Platform-specific settings
@@ -180,7 +179,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/call_executor.cpp
     src/mcp/protocol_session.cpp
     src/mcp/http_endpoint.cpp
-    src/mcp/http_server.cpp
+    src/mcp/http_sys_mapping.cpp
+    src/mcp/http_sys_server.cpp
     src/mcp/http_auth.cpp
     src/config/mcp_config.cpp
     src/config/client_config.cpp
@@ -216,7 +216,6 @@ target_link_libraries(fairyfly_core PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog
     fmt::fmt
-    httplib::httplib
     yaml-cpp::yaml-cpp
 )
 
