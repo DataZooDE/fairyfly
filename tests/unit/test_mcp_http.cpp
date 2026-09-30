@@ -106,7 +106,7 @@ public:
             o.principal.name = "alice";
             o.principal.all_scopes = false;
             o.principal.scopes = {"screen"};
-            o.principal.remote_addr = r.forwarded_for.empty() ? r.peer_addr : r.forwarded_for;
+            o.principal.remote_addr = r.peer_addr;
             o.principal.authenticated = true;
             return o;
         }
@@ -306,6 +306,62 @@ TEST_CASE("HTTP Host and Origin checks", "[mcp][http]") {
     }
 }
 
+// ---- server-level IP allow-list ----------------------------------------------------------------------
+
+TEST_CASE("HTTP server allow-list: ADDRESS_NOT_ALLOWED matrix", "[mcp][http][allow_ip]") {
+    const auto status_for = [](const std::vector<std::string>& allow, const std::string& peer, const char* forwarded = nullptr) {
+        HttpEndpointOptions o;
+        o.allow_ip = allow;
+        Fixture f(5000, 16, o);
+        auto req = f.post(Fixture::rpc("ping"));
+        req.peer_addr = peer;
+        if (forwarded) req.headers["X-Forwarded-For"] = forwarded;
+        const auto res = f.endpoint.handle(req);
+        return std::make_pair(res.status, res.status == 200 ? std::string() : std::string(body_of(res)["error_code"]));
+    };
+    SECTION("an empty list allows any peer") {
+        CHECK(status_for({}, "203.0.113.5").first == 200);
+        CHECK(status_for({}, "garbage").first == 200);
+    }
+    SECTION("loopback always passes, IPv4 and IPv6 and IPv4-mapped") {
+        for (const char* peer : {"127.0.0.1", "127.9.9.9", "::1", "[::1]", "::ffff:127.0.0.1"})
+            CHECK(status_for({"192.0.2.0/24"}, peer).first == 200);
+    }
+    SECTION("a non-loopback peer must match a CIDR") {
+        const std::vector<std::string> allow = {"192.168.1.0/24", "fd00::/8"};
+        CHECK(status_for(allow, "192.168.1.77").first == 200);
+        CHECK(status_for(allow, "fd00::42").first == 200);
+        CHECK(status_for(allow, "::ffff:192.168.1.77").first == 200);   // IPv4-mapped peer matches the IPv4 CIDR
+        const auto denied = status_for(allow, "192.168.2.1");
+        CHECK(denied.first == 403);
+        CHECK(denied.second == "ADDRESS_NOT_ALLOWED");
+        CHECK(status_for(allow, "fe80::1").second == "ADDRESS_NOT_ALLOWED");
+    }
+    SECTION("a malformed or empty peer fails closed") {
+        CHECK(status_for({"0.0.0.0/0"}, "garbage").second == "ADDRESS_NOT_ALLOWED");
+        CHECK(status_for({"0.0.0.0/0"}, "").second == "ADDRESS_NOT_ALLOWED");
+    }
+    SECTION("X-Forwarded-For never widens the allow-list") {
+        CHECK(status_for({"192.0.2.0/24"}, "203.0.113.5", "192.0.2.10").second == "ADDRESS_NOT_ALLOWED");
+    }
+    SECTION("the check runs before Host, Origin, path, auth and body; it is counted as a denial") {
+        HttpEndpointOptions o;
+        o.allow_ip = {"192.0.2.0/24"};
+        Fixture f(5000, 16, o);
+        auto req = f.post(json(), false);
+        req.body = "{garbage";
+        req.path = "/elsewhere";
+        req.headers["Host"] = "evil.example";
+        req.peer_addr = "203.0.113.5";
+        const auto before = f.endpoint.calls_denied();
+        const auto res = f.endpoint.handle(req);
+        CHECK(res.status == 403);
+        CHECK(body_of(res)["error_code"] == "ADDRESS_NOT_ALLOWED");
+        CHECK(f.endpoint.calls_denied() == before + 1);
+        CHECK(f.auth.last.authorization.empty());   // the authenticator was never consulted
+    }
+}
+
 // ---- authentication seam -----------------------------------------------------------------------------
 
 TEST_CASE("HTTP authentication happens before the body is parsed", "[mcp][http][auth]") {
@@ -318,18 +374,16 @@ TEST_CASE("HTTP authentication happens before the body is parsed", "[mcp][http][
         CHECK(res.header("WWW-Authenticate") == "Bearer realm=\"test\"");
         CHECK(body_of(res)["error_code"] == "AUTH_REQUIRED");
     }
-    SECTION("invalid token is 403 and headers reach the authenticator") {
+    SECTION("invalid token is 403; only Authorization and the peer address reach the authenticator") {
         auto req = f.post(Fixture::rpc("ping"), false);
         req.headers["Authorization"] = "Bearer bad";
-        req.headers["X-Fairyfly-Proxy-Secret"] = "s3";
+        req.headers["X-Fairyfly-Proxy-Secret"] = "s3";   // no longer meaningful: ignored like any unknown header
         req.headers["X-Forwarded-For"] = "10.0.0.9";
         req.headers["X-Forwarded-Proto"] = "https";
         auto res = f.endpoint.handle(req);
         CHECK(res.status == 403);
         CHECK(body_of(res)["error_code"] == "TOKEN_INVALID");
-        CHECK(f.auth.last.proxy_secret == "s3");
-        CHECK(f.auth.last.forwarded_for == "10.0.0.9");
-        CHECK(f.auth.last.forwarded_proto == "https");
+        CHECK(f.auth.last.authorization == "Bearer bad");
         CHECK(f.auth.last.peer_addr == "127.0.0.1");
     }
     SECTION("the principal reaches the provider with era and transport") {
@@ -340,7 +394,7 @@ TEST_CASE("HTTP authentication happens before the body is parsed", "[mcp][http][
         std::lock_guard<std::mutex> lock(f.provider.m);
         CHECK(f.provider.last_principal.name == "alice");
         CHECK(f.provider.last_principal.authenticated);
-        CHECK(f.provider.last_principal.remote_addr == "10.1.1.1");
+        CHECK(f.provider.last_principal.remote_addr == "127.0.0.1");  // the peer; X-Forwarded-For is ignored
         CHECK(f.provider.last_era == ProtocolEra::Stateless);
         CHECK(f.provider.last_http);
         CHECK(f.provider.client_info["name"] == "tester");

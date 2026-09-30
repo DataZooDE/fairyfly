@@ -96,4 +96,9 @@ bool ip_allowed(const std::string& address, const std::vector<std::string>& rule
     return false;
 }
 
+bool ip_is_loopback(const std::string& address) {
+    static const std::vector<std::string> kLoopback = {"127.0.0.0/8", "::1"};
+    return ip_allowed(address, kLoopback);
+}
+
 } // namespace fairyfly::auth

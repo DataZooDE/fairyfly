@@ -29,6 +29,8 @@ const std::vector<FlagMap>& flag_map() {
         {"server.host", {"--mcp-host"}},
         {"server.port", {"--mcp-port", "--port"}},
         {"server.transport", {"--transport"}},
+        {"server.tls", {"--tls"}},
+        {"server.allow_ip", {"--allow-ip"}},
         {"server.sse", {"--sse"}},
         {"server.allowed_hosts", {"--allowed-hosts"}},
         {"server.cors_origins", {"--cors-origin"}},
@@ -267,7 +269,7 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     x.client_config->add_flag("--mcp-remote", x.client.mcp_remote, "mcp-remote command line");
     x.client_config->add_flag("--curl", x.client.curl, "curl smoke test for a Linux host");
     x.client_config->add_flag("--stdio", x.client.stdio, "Local stdio variant (fairyfly mcp)");
-    x.client_config->add_option("--url", x.client.url, "Server URL (default https://vm:8443/mcp)");
+    x.client_config->add_option("--url", x.client.url, "Server URL (default https://<host>:8443/mcp)");
     x.client_config->add_option("--token-env", x.client.token_env, "NAME of the environment variable that holds the token (default FAIRYFLY_TOKEN)");
     x.client_config->add_option("--name", x.client.name, "Server name in the client (default fairyfly)");
     output_option(x.client_config, x.output);

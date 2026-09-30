@@ -33,6 +33,10 @@ std::string claude_code_json(const ClientConfigOptions& o) {
     return root.dump(2) + "\n";
 }
 
+const char* kTrustNote =
+    "Certificate created by `fairyfly mcp setup --self-signed`: export it with `fairyfly mcp cert export` and trust it\n"
+    "on the client (curl --cacert, NODE_EXTRA_CA_CERTS, Windows certutil); see docs/MCP_SETUP.md.";
+
 const char* kAuthHeaderVar = "FAIRYFLY_AUTH_HEADER";
 
 std::string claude_desktop_json(const ClientConfigOptions& o) {
@@ -52,7 +56,7 @@ std::string mcp_remote_command(const ClientConfigOptions& o) {
 }
 
 std::string curl_smoke(const ClientConfigOptions& o) {
-    const std::string common = "curl -sS -X POST \"$URL\" \\\n"
+    const std::string common = "curl -sS --cacert fairyfly.cer -X POST \"$URL\" \\\n"
                                "  -H \"Authorization: Bearer $" + o.token_env + "\" \\\n"
                                "  -H \"Content-Type: application/json\" \\\n"
                                "  -H \"Accept: application/json, text/event-stream\" \\\n";
@@ -105,18 +109,19 @@ std::vector<ClientSnippet> build_client_configs(const ClientConfigOptions& o) {
         out.push_back({"claude-desktop", "Claude Desktop: claude_desktop_config.json via mcp-remote",
                        "Requires Node.js (npx). The header value lives in an environment variable because mcp-remote on\n"
                        "Windows mishandles arguments that contain spaces (\"Bearer <token>\").\n"
-                       "Replace the placeholder in \"env\" with your token; do not commit this file.\n"
-                       "Self-signed server certificate: set NODE_EXTRA_CA_CERTS to the exported .cer.",
+                       "Replace the placeholder in \"env\" with your token; do not commit this file.\n" +
+                       std::string(kTrustNote) + "\nNode/mcp-remote: NODE_EXTRA_CA_CERTS=<exported .pem>.",
                        claude_desktop_json(o)});
     }
     if (all || o.mcp_remote) {
         out.push_back({"mcp-remote", "mcp-remote on the command line",
-                       "Same env indirection as above (space-free --header argument).", mcp_remote_command(o)});
+                       "Same env indirection as above (space-free --header argument).\n" + std::string(kTrustNote),
+                       mcp_remote_command(o)});
     }
     if (all || o.curl) {
         out.push_back({"curl", "curl smoke test (Linux/macOS shell)",
-                       "Replace the placeholder with your token. Add -k (or --cacert fairyfly.cer) for a self-signed certificate.\n"
-                       "Expected: an initialize result, then the tool list.",
+                       "Replace the placeholder with your token. fairyfly.cer is the exported server certificate (never use -k).\n"
+                       "Expected: an initialize result, then the tool list.\n" + std::string(kTrustNote),
                        curl_smoke(o)});
     }
     if (all || o.stdio) {

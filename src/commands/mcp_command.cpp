@@ -28,9 +28,17 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
     cmd_->add_option("--transport", options_.transport, "Transport: stdio (default) or http (same as --http)")
         ->check(CLI::IsMember({"stdio", "http"}));
     cmd_->add_flag("--http", http_flag_,
-                   "Serve MCP over plain HTTP (POST /mcp) instead of stdio; TLS is the reverse proxy's job");
+                   "Serve MCP over HTTP or HTTPS (http.sys) instead of stdio");
     cmd_->add_option("--mcp-host", options_.host, "HTTP bind address (default 127.0.0.1)");
     cmd_->add_option("--mcp-port,--port", options_.port, "HTTP port (default 8383)");
+    cmd_->add_flag("--tls,!--no-tls", options_.tls,
+                   "HTTP only: serve HTTPS; http.sys terminates TLS with the certificate bound by 'fairyfly mcp setup'");
+    cmd_->add_option("--allow-ip", options_.allow_ip,
+                     "HTTP only: accept clients only from these addresses or CIDR blocks (comma separated; "
+                     "loopback is always allowed; default: any)")
+        ->delimiter(',');
+    cmd_->add_flag("--insecure-http", options_.insecure_http,
+                   "HTTP only: allow plain HTTP on a non-loopback host (dangerous; flag only, never from config)");
     cmd_->add_option("--allowed-hosts", options_.allowed_hosts,
                      "Extra Host header values accepted besides loopback (comma separated; DNS-rebinding defence)")
         ->delimiter(',');
