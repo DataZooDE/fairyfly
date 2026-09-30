@@ -133,7 +133,7 @@ Parameters: `-Exe`, `-Port` (default 18383, fixed), `-AuditFile` (write server u
 7. `token.create`, `mcp.initialize.curl|ps`, `mcp.tools_list.curl|ps`, `sap.gui_session_list`, `sap.gui_screen_read`, `sse.tools_call.h2|http1`, `audit.http_fields`, `audit.no_token_string`.
 8. `authz.scope_denied`, `authz.read_only_refused` (write-mode server, nothing reaches SAP), `token.revoke` (401 within 6 s).
 9. `ip.token_bound_refused`, `ip.xff_ignored`, `ip.forwarded_cannot_bypass`, `ip.server_allow_ip_loopback`, `ip.server_allow_ip_lan` (server `--allow-ip`, reached through the LAN address with `curl --resolve`).
-10. `pool.slow_bodies` (12 slow-body and 12 half-header TLS clients, SslStream with a thumbprint-pinned callback; a legitimate request stays under 3 s), `pool.half_header_closed`, `server.clean_stop` (Ctrl+Break, exit 0 within 15 s; also `.rw` and `.allowip`).
+10. `pool.slow_bodies` (12 slow-body and 12 half-header TLS clients, SslStream with a thumbprint-pinned callback; a legitimate request stays under 3 s), `pool.half_header_closed` (informational: prints how many half-header sockets are still open after 30 s, because http.sys closes them only at the machine-wide connection timer, about 120 s; a legitimate request must still be answered), `server.clean_stop` (Ctrl+Break, exit 0 within 15 s; also `.rw` and `.allowip`).
 11. `teardown.apply`, `teardown.idempotent` ("nothing - already removed."), `token.cleanup`, `doctor.after_teardown`: back to the initial state, no fairyfly certificate left in `LocalMachine\My`.
 12. `suites.unit_tests`, `suites.bigfox_regression`, `suites.mcp_smoke`, `suites.mcp_http_smoke`: all must be green (run these with the dev reservation for port 18383 in place; `-SkipSuites` skips them and reports SKIP).
 
