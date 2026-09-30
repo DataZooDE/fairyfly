@@ -1,6 +1,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <wincred.h>
 #include <wtsapi32.h>
 #include <wchar.h>
 
@@ -12,6 +13,9 @@
 #include "include/auth/token_store.h"
 #include "include/commands/mcp_extras.h"
 #include "include/config/mcp_doctor.h"
+#include "include/setup/setup_doctor.h"
+#include "include/setup/setup_hosts.h"
+#include "include/system/powershell_runner.h"
 #include "include/tray/tray_win32.h"
 
 namespace fairyfly {
@@ -109,6 +113,31 @@ public:
         }
     }
 
+    // Read-only collection of the http.sys setup facts (native queries; PowerShell only for a recorded firewall rule).
+    SetupFacts setup_facts(const SetupQuery& query) override {
+        try {
+            auto ps = sys::make_windows_powershell_runner();
+            auto http = setup::make_real_http_sys_config();
+            auto certs = setup::make_real_cert_store(*ps);
+            auto firewall = setup::make_real_firewall(*ps);
+            auto elevator = setup::make_real_elevator();
+            auto probe = setup::make_real_system_probe();
+            auto verify = setup::make_real_verify_host();
+            setup::Hosts hosts{*http, *certs, *firewall, *elevator, *probe, *verify};
+            return setup::collect_setup_facts(hosts, query);
+        } catch (const std::exception& e) {
+            spdlog::debug("setup facts unavailable: {}", e.what());
+            return {};
+        }
+    }
+
+    bool legacy_proxy_secret() override {
+        PCREDENTIALW credential = nullptr;
+        if (!CredReadW(L"fairyfly:fairyfly-mcp-proxy", CRED_TYPE_GENERIC, 0, &credential)) return false;
+        CredFree(credential);
+        return true;
+    }
+
     std::optional<std::string> autostart_command() override { return tray::make_win32_run_key()->get(tray::kAutostartValueName); }
     bool tray_running() override { return tray::make_win32_single_instance()->exists(); }
 
@@ -133,6 +162,11 @@ int run_mcp_doctor_command(McpExtras& x, const HandlerProvider& get_handler) {
     input.transport = std::get<std::string>(effective.at("server.transport").value);
     input.host = std::get<std::string>(effective.at("server.host").value);
     input.port = static_cast<int>(std::get<long long>(effective.at("server.port").value));
+    // server.tls / the first allowed host arrive with the http.sys listener (config keys of stream C); absent keys degrade gracefully.
+    if (const auto it = effective.find("server.tls"); it != effective.end())
+        if (const auto* value = std::get_if<bool>(&it->second.value)) input.tls = *value;
+    if (const auto it = effective.find("server.allowed_hosts"); it != effective.end())
+        if (const auto* list = std::get_if<std::vector<std::string>>(&it->second.value); list && !list->empty()) input.hostname = list->front();
 
     RealProbes probes(get_handler);
     const auto checks = run_mcp_doctor(input, probes);

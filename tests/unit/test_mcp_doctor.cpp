@@ -17,7 +17,11 @@ struct FakeProbes : DoctorProbes {
     std::optional<int> tokens = 2;
     std::optional<std::string> autostart;
     bool tray = false;
+    SetupFacts setup;
+    bool legacy_secret = false;
 
+    SetupFacts setup_facts(const SetupQuery&) override { return setup; }
+    bool legacy_proxy_secret() override { return legacy_secret; }
     PortState probe_port(const std::string&, int) override { return port; }
     SapState sap() override { return sap_state; }
     DesktopState desktop() override { return desktop_state; }
@@ -48,7 +52,10 @@ const DoctorCheck& get(const std::vector<DoctorCheck>& checks, const std::string
 TEST_CASE("mcp doctor: healthy http setup passes", "[mcp_doctor]") {
     FakeProbes probes;
     const auto checks = run_mcp_doctor(http_input(), probes);
-    CHECK(checks.size() == 9);
+    CHECK(checks.size() == 17);
+    // the setup checks skip when nothing was collected
+    for (const char* id : {"setup_manifest", "urlacl", "sslcert", "certificate", "firewall", "tls_handshake"}) CHECK(get(checks, id).status == CheckStatus::Skip);
+    CHECK(get(checks, "legacy_proxy_secret").status == CheckStatus::Pass);
     CHECK(get(checks, "config").status == CheckStatus::Pass);
     CHECK(get(checks, "port").status == CheckStatus::Pass);
     CHECK(get(checks, "sap_scripting").status == CheckStatus::Pass);
@@ -219,4 +226,187 @@ TEST_CASE("mcp doctor: count_active_tokens skips revoked and expired tokens", "[
 TEST_CASE("mcp doctor: count_active_tokens is nullopt when the backend fails", "[mcp_doctor]") {
     fairyfly::auth::TokenStore store(std::make_shared<ThrowingBackend>());
     CHECK_FALSE(count_active_tokens(store).has_value());
+}
+
+// ---- http.sys setup checks -----------------------------------------------------------------------------------------
+
+namespace {
+
+SetupFacts healthy_tls_facts() {
+    SetupFacts f;
+    f.available = true;
+    f.elevation = "standard_user";
+    f.manifest_present = true;
+    f.manifest_mode = "tls";
+    f.manifest_hostname = "sapbox";
+    f.manifest_port = 8443;
+    f.manifest_thumbprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    f.manifest_firewall_rule = "fairyfly MCP HTTPS 8443";
+    f.prefix = "https://+:8443/mcp/";
+    f.urlacl_known = f.urlacl_reserved = f.urlacl_covers_user = true;
+    f.ssl_known = f.ssl_v4 = f.ssl_v6 = true;
+    f.ssl_thumbprint = f.manifest_thumbprint;
+    f.cert_known = f.cert_found = f.cert_has_key = f.cert_san_ok = true;
+    f.cert_thumbprint = f.manifest_thumbprint;
+    f.now = 1800000000;
+    f.cert_not_after = f.now + 300LL * 86400;
+    f.firewall_known = f.firewall_exists = true;
+    f.port_listening = true;
+    f.tls_status = "ok";
+    f.tls_protocol = "TLS 1.3";
+    f.tls_thumbprint_match = true;
+    return f;
+}
+
+DoctorInput tls_input() {
+    auto in = http_input();
+    in.tls = true;
+    in.hostname = "sapbox";
+    in.port = 8443;
+    return in;
+}
+
+} // namespace
+
+TEST_CASE("mcp doctor: healthy https setup passes every http.sys check", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    const auto checks = run_mcp_doctor(tls_input(), probes);
+    for (const char* id : {"elevation", "setup_manifest", "urlacl", "sslcert", "certificate", "firewall", "tls_handshake", "legacy_proxy_secret"}) {
+        INFO(id);
+        CHECK(get(checks, id).status == CheckStatus::Pass);
+    }
+    // order: the new checks come right after the tokens check
+    size_t tokens = 0, elevation = 0;
+    for (size_t i = 0; i < checks.size(); ++i) {
+        if (checks[i].id == "tokens") tokens = i;
+        if (checks[i].id == "elevation") elevation = i;
+    }
+    CHECK(elevation == tokens + 1);
+}
+
+TEST_CASE("mcp doctor: fresh machine fails urlacl/sslcert/certificate with the setup remedy", "[mcp_doctor]") {
+    FakeProbes probes;
+    SetupFacts f;
+    f.available = true;
+    f.elevation = "standard_user";
+    f.manifest_path = "C:\\x\\mcp-setup.json";
+    f.prefix = "https://+:8443/mcp/";
+    f.urlacl_known = true;
+    f.ssl_known = true;
+    f.cert_known = true;
+    f.now = 1800000000;
+    probes.setup = f;
+    const auto checks = run_mcp_doctor(tls_input(), probes);
+    for (const char* id : {"urlacl", "sslcert", "certificate"}) {
+        INFO(id);
+        CHECK(get(checks, id).status == CheckStatus::Fail);
+        CHECK(get(checks, id).remediation.find("fairyfly mcp setup") != std::string::npos);
+    }
+    CHECK(get(checks, "setup_manifest").status == CheckStatus::Warn);
+    CHECK(get(checks, "firewall").status == CheckStatus::Skip);
+    CHECK(get(checks, "tls_handshake").status == CheckStatus::Skip);
+    CHECK(overall_status(checks) == "fail");
+}
+
+TEST_CASE("mcp doctor: loopback prefix needs no urlacl", "[mcp_doctor]") {
+    FakeProbes probes;
+    SetupFacts f;
+    f.available = true;
+    f.elevation = "standard_user";
+    f.prefix = "http://127.0.0.1:8383/mcp/";
+    f.urlacl_known = true;
+    probes.setup = f;
+    const auto checks = run_mcp_doctor(http_input(), probes);
+    CHECK(get(checks, "urlacl").status == CheckStatus::Pass);
+    CHECK(get(checks, "sslcert").status == CheckStatus::Skip);
+    CHECK(get(checks, "certificate").status == CheckStatus::Skip);
+}
+
+TEST_CASE("mcp doctor: certificate problems", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+
+    probes.setup.cert_not_after = probes.setup.now - 1;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "certificate").status == CheckStatus::Fail);
+    probes.setup = healthy_tls_facts();
+    probes.setup.cert_not_after = probes.setup.now + 10LL * 86400;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "certificate").status == CheckStatus::Warn);   // 30-day warning
+    probes.setup = healthy_tls_facts();
+    probes.setup.cert_has_key = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "certificate").status == CheckStatus::Fail);
+    probes.setup = healthy_tls_facts();
+    probes.setup.cert_san_ok = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "certificate").status == CheckStatus::Fail);
+    probes.setup = healthy_tls_facts();
+    probes.setup.cert_found = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "certificate").status == CheckStatus::Fail);
+}
+
+TEST_CASE("mcp doctor: sslcert, urlacl and firewall problems", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    probes.setup.urlacl_covers_user = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "urlacl").status == CheckStatus::Fail);
+    probes.setup = healthy_tls_facts();
+    probes.setup.ssl_v6 = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "sslcert").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.ssl_foreign = true;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "sslcert").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.ssl_thumbprint = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "sslcert").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.ssl_v4 = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "sslcert").status == CheckStatus::Fail);
+    probes.setup = healthy_tls_facts();
+    probes.setup.firewall_exists = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "firewall").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.manifest_firewall_rule.clear();
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "firewall").status == CheckStatus::Skip);
+    probes.setup = healthy_tls_facts();
+    probes.setup.urlacl_known = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "urlacl").status == CheckStatus::Skip);
+}
+
+TEST_CASE("mcp doctor: tls handshake", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    probes.setup.port_listening = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "tls_handshake").status == CheckStatus::Skip);
+    probes.setup = healthy_tls_facts();
+    probes.setup.tls_thumbprint_match = false;
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "tls_handshake").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.tls_protocol = "TLS 1.1";
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "tls_handshake").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.tls_status = "handshake_failed";
+    CHECK(get(run_mcp_doctor(tls_input(), probes), "tls_handshake").status == CheckStatus::Warn);
+    probes.setup = healthy_tls_facts();
+    probes.setup.tls_protocol = "TLS 1.2";
+    const auto ok = get(run_mcp_doctor(tls_input(), probes), "tls_handshake");
+    CHECK(ok.status == CheckStatus::Pass);
+    CHECK(ok.message.find("TLS 1.2") != std::string::npos);
+}
+
+TEST_CASE("mcp doctor: legacy proxy secret", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.legacy_secret = true;
+    const auto check = get(run_mcp_doctor(http_input(), probes), "legacy_proxy_secret");
+    CHECK(check.status == CheckStatus::Warn);
+    CHECK(check.remediation == "cmdkey /delete:fairyfly:fairyfly-mcp-proxy");
+}
+
+TEST_CASE("mcp doctor: stdio without a manifest skips the http.sys checks", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    probes.setup.manifest_present = false;
+    auto in = http_input();
+    in.transport = "stdio";
+    const auto checks = run_mcp_doctor(in, probes);
+    CHECK(get(checks, "urlacl").status == CheckStatus::Skip);
+    CHECK(get(checks, "certificate").status == CheckStatus::Skip);
 }
