@@ -877,7 +877,11 @@ void append_human(std::ostringstream& out, const std::vector<HumanItem>& human) 
 std::string render_plan_text(const Plan& plan, bool dry_run) {
     std::ostringstream out;
     out << "fairyfly mcp " << plan.operation << ": plan" << (plan.url.empty() ? "" : " for " + plan.url) << (dry_run ? " (dry run, nothing is changed)" : "") << "\n";
-    out << "elevation: " << elevation_text(plan.elevation) << "\n\nDiagnosis\n";
+    out << "elevation: "
+        << (!plan.needs_elevation && plan.elevation != ElevationType::Elevated
+                ? std::string("not needed for this plan (") + elevation_name(plan.elevation) + ")"
+                : elevation_text(plan.elevation))
+        << "\n\nDiagnosis\n";
     for (const auto& c : plan.diagnosis) out << "  [" << pad(c.status, 8) << "] " << pad(c.id, 15) << " " << c.detail << "\n";
     out << "\nPlan\n";
     append_steps(out, plan.steps);
