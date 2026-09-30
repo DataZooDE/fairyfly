@@ -9,6 +9,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "include/auth/crypto.h"
 #include "include/setup/setup_validators.h"
 
 namespace fairyfly::setup {
@@ -17,7 +18,7 @@ using nlohmann::json;
 
 namespace {
 
-const char* const kSetupKeys[] = {"server.transport", "server.tls", "server.host", "server.port", "server.allowed_hosts", "server.allow_ip"};
+const char* const kSetupKeys[] = {"server.tls", "server.host", "server.port", "server.allowed_hosts", "server.allow_ip"};
 
 std::string data_dir(SystemProbe& sys) { return join_path(sys.local_app_data(), "fairyfly"); }
 
@@ -222,6 +223,8 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
     }
     Diagnosis scratch;
     read_config(h.sys, d.config_path, scratch);
+    d.config_exists = scratch.config_exists;
+    if (const auto text = h.sys.read_file(d.config_path)) d.config_sha256 = auth::sha256_hex(*text);
     const auto tls = scratch.config_current.find("server.tls");
     d.config_says_tls = tls != scratch.config_current.end() && tls->second == "true";
     return d;
@@ -678,8 +681,11 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
         }
     }
     if (!any_failed && pending("config")) {
-        if (h.sys.write_file(plan.config_path, plan.config_yaml)) set_status("config", "created", plan.config_path);
-        else {
+        if (h.sys.write_file(plan.config_path, plan.config_yaml)) {
+            set_status("config", "created", plan.config_path);
+            // record the hash of the bytes actually on disk (teardown compares against it)
+            if (const auto written = h.sys.read_file(plan.config_path)) plan.manifest.config_sha256 = auth::sha256_hex(*written);
+        } else {
             set_status("config", "failed", "cannot write " + plan.config_path);
             any_failed = true;
             failure = "config: cannot write " + plan.config_path;
@@ -813,6 +819,14 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
             set_status("certificate_export", "failed", "cannot delete " + plan.teardown.cer_path);
             any_failed = true;
             failure = "certificate_export: cannot delete the file";
+        }
+    }
+    if (!any_failed && pending("config")) {
+        if (h.sys.remove_file(plan.teardown.config_path) || !h.sys.file_exists(plan.teardown.config_path)) set_status("config", "removed", plan.teardown.config_path);
+        else {
+            set_status("config", "failed", "cannot delete " + plan.teardown.config_path);
+            any_failed = true;
+            failure = "config: cannot delete the file";
         }
     }
     if (!any_failed && pending("manifest")) {

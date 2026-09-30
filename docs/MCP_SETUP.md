@@ -18,8 +18,8 @@ fairyfly mcp teardown                                                           
 | `sslcert` | binds the certificate to `0.0.0.0:PORT` and `[::]:PORT` (SHA-1 thumbprint, store `MY`, AppId `{8e2b5c3a-4d17-4f6a-b9c0-7a1d3e5f2b64}`, no client-certificate negotiation) | yes |
 | `firewall` | only with `--open-firewall`: inbound TCP rule `fairyfly MCP HTTPS <port>` | yes |
 | `certificate_export` | writes the public certificate to `%LOCALAPPDATA%\fairyfly\fairyfly-mcp-<host>.cer` for the clients | no |
-| `config` | writes a commented `mcp.yaml` (`server.transport: http`, `tls: true`, `host: '+'`, `port`, `allowed_hosts: [host]`, `allow_ip`) when the file does not exist. An existing file is never rewritten; differing keys are listed under "Left for a human" | no |
-| `manifest` | `%LOCALAPPDATA%\fairyfly\mcp-setup.json` (schema 1): what was created, for `teardown` and `doctor` | no |
+| `config` | writes a commented `mcp.yaml` (`tls: true`, `host: '+'`, `port`, `allowed_hosts: [host]`, `allow_ip`) when the file does not exist. It does not set `server.transport`: start the server explicitly with `fairyfly mcp --http` (or `--tray --http`), so a plain stdio `fairyfly mcp` is unaffected. An existing file is never rewritten; differing keys are listed under "Left for a human" | no |
+| `manifest` | `%LOCALAPPDATA%\fairyfly\mcp-setup.json` (schema 1): what was created (including `config_created` and `config_sha256` of the mcp.yaml text), for `teardown` and `doctor` | no |
 
 Only the four elevated steps run in the elevated process. `setup` computes the target account's SID before elevating and writes it into a plan file; the elevated child (`fairyfly mcp setup --apply-plan FILE --result-file FILE`, started once with `ShellExecute runas`) re-validates every field of the plan file, executes the steps and writes per-step results. The parent then exports the certificate, writes the config and manifest, and verifies. The plan file lives under `%LOCALAPPDATA%\fairyfly\run\` and is deleted afterwards.
 
@@ -94,7 +94,7 @@ New-NetFirewallRule -DisplayName 'fairyfly MCP HTTPS 8443' -Direction Inbound -A
 Export-Certificate -Cert $c -FilePath "$env:LOCALAPPDATA\fairyfly\fairyfly-mcp-sapbox.corp.example.cer" -Type CERT
 ```
 
-Then create `mcp.yaml` with the keys `server.transport: http`, `server.tls: true`, `server.host: '+'`, `server.port: 8443`, `server.allowed_hosts: [sapbox.corp.example]` (and `server.allow_ip: [...]`). Without the manifest, `teardown` needs `--hostname/--port`, or remove the objects with `netsh http delete sslcert ipport=...`, `netsh http delete urlacl url=...`, `Remove-NetFirewallRule` and `Remove-Item Cert:\LocalMachine\My\<thumbprint> -DeleteKey`.
+Then create `mcp.yaml` with the keys `server.tls: true`, `server.host: '+'`, `server.port: 8443`, `server.allowed_hosts: [sapbox.corp.example]` (and `server.allow_ip: [...]`). Without the manifest, `teardown` needs `--hostname/--port`, or remove the objects with `netsh http delete sslcert ipport=...`, `netsh http delete urlacl url=...`, `Remove-NetFirewallRule` and `Remove-Item Cert:\LocalMachine\My\<thumbprint> -DeleteKey`.
 
 ## Trusting the certificate on clients
 
@@ -126,7 +126,7 @@ Read-only and never elevated. The http.sys checks follow `tokens`; `fairyfly mcp
 
 ## Teardown
 
-`fairyfly mcp teardown` follows the manifest: it removes both TLS bindings (only when their AppId is fairyfly's), the URL reservation(s), the firewall rule (only when setup recorded one, not with `--keep-firewall`), the certificate and its private key (only when setup created it as `self-signed`, never a user-supplied thumbprint, not with `--keep-cert`), the exported `.cer` and finally the manifest. One UAC prompt. A second run prints `nothing - already removed.`. Without a manifest it needs `--hostname` and/or `--port` (`MANIFEST_MISSING`, exit 2, when fairyfly reservations exist on the default ports 8443/8383 but nothing identifies them; a clean machine is simply "nothing"). If `mcp.yaml` still says `tls: true` teardown lists that under "Left for a human". Clients keep trusting the old certificate until you remove it.
+`fairyfly mcp teardown` follows the manifest: it removes both TLS bindings (only when their AppId is fairyfly's), the URL reservation(s), the firewall rule (only when setup recorded one, not with `--keep-firewall`), the certificate and its private key (only when setup created it as `self-signed`, never a user-supplied thumbprint, not with `--keep-cert`), the exported `.cer`, the `mcp.yaml` (step `config`; only when setup created it and its sha256 still equals the `config_sha256` recorded in the manifest, so an edited file stays and is named under "Left for a human") and finally the manifest. One UAC prompt. A second run prints `nothing - already removed.`. Without a manifest it needs `--hostname` and/or `--port` (`MANIFEST_MISSING`, exit 2, when fairyfly reservations exist on the default ports 8443/8383 but nothing identifies them; a clean machine is simply "nothing"). If `mcp.yaml` still says `tls: true` teardown lists that under "Left for a human". Clients keep trusting the old certificate until you remove it.
 
 ## Development: `--no-tls` and the test reservation
 

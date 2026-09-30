@@ -182,7 +182,7 @@ $Plan = @(
     '   ip.server_allow_ip_lan        server --allow-ip 203.0.113.0/24: LAN address -> 403 ADDRESS_NOT_ALLOWED',
     '   ip.server_allow_ip_loopback   ... loopback still answers',
     '10 pool.slow_bodies              12 slow-body + 12 half-header TLS clients (SslStream, pinned): legit request < 3 s',
-    '   pool.half_header_closed       the kernel closes the half-header sockets',
+    '   pool.half_header_closed       INFO only: how many half-header sockets are still open after 30 s (the kernel closes them at the machine-wide timer); a legitimate request must still be answered',
     '   server.clean_stop (+ .rw, .allowip)   Ctrl+Break: exit 0 within 15 s',
     '   audit.*                       transport http, real remote_addr, principal, no token string',
     '11 teardown.apply                teardown --yes (ONE UAC PROMPT): urlacl, sslcert x2, cert+key, .cer, manifest gone',
@@ -224,6 +224,14 @@ function Check([string]$Name, [scriptblock]$Body, [switch]$Fatal) {
         if ($Fatal) { throw 'E2E_ABORT' }
     }
 }
+function Test-CurlHttp2 {
+    # curl.exe --version prints a "Features:" line; HTTP2 is listed only when built with nghttp2 / HTTP/2 support.
+    try {
+        $v = Invoke-Native 'curl.exe' @('--version') 15
+        return @(@($v.Out -split "`n" | Where-Object { $_ -match '^\s*Features:' }) -match '\bHTTP2\b').Count -gt 0
+    } catch { return $false }
+}
+function Info-Line([string]$Text) { Write-Host ('INFO {0}' -f $Text) }
 function Skip-Check([string]$Name, [string]$Reason) {
     $script:Skip++
     Write-Host ('SKIP {0} - {1}' -f $Name, $Reason)
@@ -637,6 +645,7 @@ $exit = 0
 $script:Servers = @()
 $script:SetupMayHaveRun = $false
 $script:TeardownDone = $false
+$savedMcpConfig = [Environment]::GetEnvironmentVariable('FAIRYFLY_MCP_CONFIG')
 $savedEnv = @{}
 foreach ($n in @('FAIRYFLY_AUDIT_FILE', 'FAIRYFLY_AUDIT', 'FAIRYFLY_READ_ONLY')) { $savedEnv[$n] = [Environment]::GetEnvironmentVariable($n) }
 
@@ -929,6 +938,10 @@ try {
         } else {
             foreach ($mode in @(@('h2', @('--http2', '-N')), @('http1', @('--http1.1', '-N')))) {
                 $label = $mode[0]; $flags = $mode[1]
+                if ($label -eq 'h2' -and -not (Test-CurlHttp2)) {
+                    Skip-Check 'sse.tools_call.h2' 'the installed curl.exe was built without HTTP/2 (curl --version lists no HTTP2 feature): SSE over HTTP/2 remains UNVERIFIED by this run; use a curl with HTTP2 support to check it'
+                    continue
+                }
                 Check ("sse.tools_call.$label") {
                     $body = New-RpcBody 'tools/call' @{ name = 'gui_screen_read'; arguments = @{ no_tabs = $true; only = 'fields'; max_rows = 3 } }
                     $h = Get-AuthHeader 'main'; $h['Accept'] = 'text/event-stream'
@@ -1024,7 +1037,11 @@ try {
                 }
                 Start-Sleep -Milliseconds 300
             }
-            Assert-That ($closed.Count -eq $hc.Count) "the kernel closed only $($closed.Count) of $($hc.Count) half-header sockets within 30 s"
+            # Informational (measured, see docs/MCP_REMOTE.md threat model): http.sys applies the per-URL-group HeaderWait only to
+            # requests it has routed; a socket with a PARTIAL header is closed by the machine-wide connection timer (default 120 s),
+            # so it normally stays open for this 30 s window. That costs a kernel connection, not a fairyfly worker.
+            Assert-That ($closed.Count -le $hc.Count) 'inconsistent socket bookkeeping'
+            Info-Line ("half-header sockets: {0} of {1} still open after 30 s, {2} closed by the kernel (expected: all open until the machine timer, ~120 s)" -f ($hc.Count - $closed.Count), $hc.Count, $closed.Count)
             $r = Invoke-Mcp 'main' 'ping' $null
             Assert-That ($r.Status -eq 200) "server unhealthy after the stall test: status $($r.Status)"
         }
@@ -1107,7 +1124,7 @@ try {
         Assert-That (-not $r.Out.Contains($Prefix)) "tokens with prefix $Prefix are still listed"
     }
     Write-Host 'A UAC prompt will appear now - please approve'
-    $script:TeardownResult = Invoke-FF (($A_TeardownArgs) + @('--yes', '--output', 'json')) 300
+    $script:TeardownResult = Invoke-FF (($A_TeardownArgs) + @('-c', $Cfg, '--yes', '--output', 'json')) 300
     Check 'teardown.apply' {
         $r = $script:TeardownResult
         Assert-That (-not $r.TimedOut) 'teardown timed out (UAC prompt not answered?)'
@@ -1116,7 +1133,7 @@ try {
         Assert-StateEmpty (Get-State) 'after teardown'
     }
     Check 'teardown.idempotent' {
-        $r = Invoke-FF (($A_TeardownArgs) + @('--yes', $A_NonInteractive)) 90
+        $r = Invoke-FF (($A_TeardownArgs) + @('-c', $Cfg, '--yes', $A_NonInteractive)) 90
         Assert-That ($r.Exit -eq 0) "exit code is $($r.Exit) (a second run must need no elevation): $($r.Err.Trim())"
         Assert-That ($r.Out.ToLowerInvariant().Contains($A_TextTeardownNothing)) "output lacks '$A_TextTeardownNothing'"
     }
@@ -1139,6 +1156,12 @@ try {
         foreach ($n in $suiteNames) { Skip-Check $n '-SkipSuites' }
     } else {
         Write-Host '== suites: unit tests and the other live suites (each must be green)'
+        # The child suites must not be influenced by a leftover default %LOCALAPPDATA%\fairyfly\mcp.yaml: point them at a private,
+        # comment-only config (all defaults). It is deliberately an EXISTING file: fairyfly treats an explicitly requested
+        # (-c or FAIRYFLY_MCP_CONFIG) but missing config file as CONFIG_NOT_FOUND (exit 2), which would fail the stdio suites.
+        $script:SuiteConfigPath = Join-Path $TempDir 'suites-neutral-mcp.yaml'
+        "# neutral configuration for the child suites of the e2e run: every setting keeps its default`r`n" | Set-Content -LiteralPath $script:SuiteConfigPath -Encoding ASCII
+        [Environment]::SetEnvironmentVariable('FAIRYFLY_MCP_CONFIG', $script:SuiteConfigPath)
         Check 'suites.unit_tests' {
             $ut = $null
             foreach ($c in @('build\Release\unit_tests.exe', 'build\bin\Release\unit_tests.exe', 'build\tests\Release\unit_tests.exe')) {
@@ -1180,6 +1203,7 @@ try {
     [Net.ServicePointManager]::ServerCertificateValidationCallback = $script:SavedCallback
     [Net.ServicePointManager]::SecurityProtocol = $script:SavedProtocol
     foreach ($n in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($n, $savedEnv[$n]) }
+    [Environment]::SetEnvironmentVariable('FAIRYFLY_MCP_CONFIG', $savedMcpConfig)
     try { Remove-Item -LiteralPath $TempDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
     if ($script:SetupMayHaveRun -and -not $script:TeardownDone) {
         Write-Host ''

@@ -54,8 +54,9 @@ unit tests; the real implementations are exercised by hidden manual tests
     fairyfly mcp --tray --remove-autostart
 
 Writes/removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `fairyfly-mcp`:
-`"C:\...\fairyfly.exe" mcp --tray [-c "<config>"]`. Put `server.transport: http` and the other server
-settings into the YAML, because the Run value only carries the config path (an explicit `-c` or
+`"C:\...\fairyfly.exe" mcp --tray [-c "<config>"]`. Add `server.transport: http` to that YAML yourself (`mcp setup`
+does not write it, so stdio use of the same file keeps working) together with the other server
+settings, because the Run value only carries the config path (an explicit `-c` or
 `FAIRYFLY_MCP_CONFIG` at install time is recorded; otherwise the default path is used at logon).
 
 Caveats:

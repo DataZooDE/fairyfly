@@ -77,9 +77,12 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
     if (!http) {
         out.push_back(check("port", CheckStatus::Skip, "stdio transport, no port used"));
     } else {
-        const std::string where = in.host + ":" + std::to_string(in.port);
+        // '+' / '*' / 0.0.0.0 are http.sys/bind wildcards, not addresses a socket can probe: use loopback.
+        const bool wildcard = in.host == "+" || in.host == "*" || in.host == "0.0.0.0" || in.host == "::" || in.host.empty();
+        const std::string probe_host = wildcard ? "127.0.0.1" : in.host;
+        const std::string where = probe_host + ":" + std::to_string(in.port);
         const bool tray = probes.tray_running();
-        switch (probes.probe_port(in.host, in.port)) {
+        switch (probes.probe_port(probe_host, in.port)) {
         case PortState::Free:
             out.push_back(check("port", CheckStatus::Pass, where + " is free"));
             break;
