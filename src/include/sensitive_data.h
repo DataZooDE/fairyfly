@@ -129,7 +129,11 @@ enum class StateExemption { Deny, Allow };
 
 // A value that plausibly is a state label ("Password set", "locked", "0", "01.10.2026"), not a secret: at most 40 characters
 // and not a random-looking token (no whitespace and at least three of lower, upper, digit, symbol and 8+ characters).
-inline bool looks_like_state_value(const std::string& value) {
+inline bool looks_like_state_value(const std::string& raw) {
+    // SAP pads the displayed text of a field to the field width: judge the text without the padding.
+    const auto first = raw.find_first_not_of(" \t\r\n");
+    const std::string value = first == std::string::npos ? std::string()
+        : raw.substr(first, raw.find_last_not_of(" \t\r\n") - first + 1);
     if (value.size() > 40) return false;
     if (value.size() < 8 || value.find_first_of(" \t") != std::string::npos) return true;
     bool lower = false, upper = false, digit = false, symbol = false;

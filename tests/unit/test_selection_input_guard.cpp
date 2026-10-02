@@ -118,3 +118,28 @@ TEST_CASE("selection guard: a screen change between the pre-call facts and the w
     empty.active = true;
     CHECK(evaluate_selection_input(plain_field(), empty).has_value());
 }
+
+TEST_CASE("display-only PASSWORD_EXT_PWD_STATE on the SU01 logon data tab is shown", "[sensitive][su01_state]") {
+    using namespace fairyfly::sap;
+    const std::string id = "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO/ssubMAINAREA:SAPLSUID_MAINTENANCE:1101/txtPASSWORD_EXT_PWD_STATE";
+    INFO("known=" << is_known_secret_field_name("txtPASSWORD_EXT_PWD_STATE")
+         << " state_name=" << is_credential_state_name("txtPASSWORD_EXT_PWD_STATE")
+         << " deny='" << sensitive_input_field_reason("GuiTextField", id, "", StateExemption::Deny) << "'"
+         << " allow='" << sensitive_input_field_reason("GuiTextField", id, "", StateExemption::Allow) << "'");
+    CHECK(sensitive_field_reason_for_display("GuiTextField", id, "", true, false, [] { return std::string("Production Password"); }).empty());
+    CHECK(sensitive_field_reason_for_display("GuiTextField", id, "", true, false, [] { return std::string(); }).empty());
+    CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "", true, true, [] { return std::string("x"); }).empty());
+}
+
+TEST_CASE("state values padded to the field width are still recognised", "[sensitive][su01_state]") {
+    using namespace fairyfly::sap;
+    const std::string padded = "Production Password" + std::string(120, ' ');
+    CHECK(looks_like_state_value(padded));
+    CHECK(looks_like_state_value("  locked  "));
+    CHECK_FALSE(looks_like_state_value(std::string(60, 'x')));
+    CHECK_FALSE(looks_like_state_value("aB3$kQ9!zT7#" + std::string(100, ' ')));  // random-looking token, even when padded
+    const std::string id = "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO/ssubMAINAREA:SAPLSUID_MAINTENANCE:1101/txtPASSWORD_EXT_PWD_STATE";
+    CHECK(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, false, [&] { return padded; }).empty());
+    CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, true, [&] { return padded; }).empty());
+    CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", false, false, [&] { return padded; }).empty());
+}
