@@ -74,6 +74,8 @@ powershell -NoProfile -File tests\integration\compare_builds.ps1 -OldExe old.exe
 
 For each of 18 read-only screens the script navigates once with `-NewExe`, then reads `screen read --no-tabs --max-rows 100 --output json` with both builds (best of 2 runs each), and prints Screen / OldMs / NewMs / OldEl / NewEl / OnlyOld / OnlyNew / OldKB / NewKB. The first 8 ids that differ are printed per screen. Exit code 1 if any element id differs, 2 if no SAP session. A screen whose navigation or read fails is reported as SKIP.
 
+`-FullCompare` additionally deep-compares, per screen, the parsed JSON of `data.elements` (matched by id), `data.hierarchy`, `data.tabs` and `data.status_bar` between the two builds after stripping `duration_ms` and timestamp fields (`timestamp`, `*_timestamp`, `*_at`). In this mode the read runs without `--no-tabs` so that `data.tabs` is populated (the tab elements then also count in the id sets). Each difference is printed as a path-level line (`elements[id=/app/...].text: OLD = "a" <> NEW = "b"`, up to 20 per screen) and the exit code is 1. Use it for output-identity gates, for example `-Screens ST22-list,SM37-joblist,SU01-display,SE16-TADIR,RZ11-detail,SM50 -FullCompare`. Without the switch the behaviour is unchanged.
+
 ## MCP smoke test (mcp_smoke.ps1)
 
 `tests\integration\mcp_smoke.ps1` is a PowerShell 5.1 script that spawns `fairyfly mcp`, speaks newline-delimited JSON-RPC to it and checks the MCP server end to end. It is not registered with CTest and not part of the Bigfox regression suite.

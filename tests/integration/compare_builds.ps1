@@ -8,6 +8,12 @@
   Screen / OldMs / NewMs / OldEl / NewEl / OnlyOld / OnlyNew / OldKB / NewKB.
   Prints the first 8 differing ids per screen. Exit code 1 if any id differs, 2 if no SAP session, else 0.
 
+  With -FullCompare each screen is additionally deep-compared: the parsed JSON of data.elements (matched by id),
+  data.hierarchy, data.tabs and data.status_bar must be identical between the builds after duration_ms and
+  timestamp fields (timestamp, *_timestamp, *_at) are stripped. The read then runs without --no-tabs so that
+  data.tabs is populated (this also adds the tab elements to the id sets). Every difference is printed as a
+  path-level diff (up to 20 per screen) and makes the exit code 1. Without the switch nothing changes.
+
   Prerequisites: logged-in Bigfox session /app/con[0]/ses[0] on SAP Easy Access, display authorizations.
   Only selection-screen search values are filled (TADIR, DEVELOPER, rdisp/wp_no_dia, '*', a date).
   Never presses Save/Delete/Release/Stop/Create/Change. Ends with `tcode /n`.
@@ -16,12 +22,14 @@
 .PARAMETER NewExe  Candidate fairyfly.exe (also used for navigation).
 .PARAMETER Screens Optional subset of screen names (see the list below; matching is case-insensitive).
 .PARAMETER DryRun  Print the navigation plan only.
+.PARAMETER FullCompare  Also deep-compare data.elements (by id), hierarchy, tabs and status_bar of both builds.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$OldExe,
     [Parameter(Mandatory = $true)][string]$NewExe,
     [string[]]$Screens = @(),
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$FullCompare
 )
 $ErrorActionPreference = 'Stop'
 $S = '/app/con[0]/ses[0]'
@@ -75,6 +83,100 @@ function Get-Ids($Json) {
     return @($ids | Sort-Object -Unique)
 }
 
+# --- -FullCompare helpers --------------------------------------------------------------------------------------
+# Volatile keys that legitimately differ between two runs of the same screen.
+function Test-VolatileKey([string]$Key) {
+    return ($Key -ceq 'duration_ms' -or $Key -ceq 'timestamp' -or $Key -clike '*_timestamp' -or $Key -clike '*_at')
+}
+
+# Deep copy of a ConvertFrom-Json tree as ordered dictionaries / object[] / scalars, without volatile keys.
+function Remove-VolatileFields($Node) {
+    if ($null -eq $Node) { return $null }
+    if ($Node -is [System.Management.Automation.PSCustomObject]) {
+        $d = [ordered]@{}
+        foreach ($p in $Node.PSObject.Properties) {
+            if (-not (Test-VolatileKey $p.Name)) { $d[$p.Name] = Remove-VolatileFields $p.Value }
+        }
+        return $d
+    }
+    if ($Node -is [System.Collections.IList]) {
+        $items = New-Object System.Collections.ArrayList
+        foreach ($i in $Node) { [void]$items.Add((Remove-VolatileFields $i)) }
+        return , ($items.ToArray())
+    }
+    return $Node
+}
+
+function Format-JsonValue($Node) {
+    $t = if ($null -eq $Node) { 'null' } else { ConvertTo-Json -InputObject $Node -Compress -Depth 20 }
+    if ($t.Length -gt 80) { $t = $t.Substring(0, 77) + '...' }
+    return $t
+}
+
+# Appends one readable line per difference ("path: old <> new") to $Out. Arrays whose items are all objects with
+# unique ids on both sides are matched by id (order-independent), other arrays by index.
+function Compare-JsonTree($Old, $New, [string]$Path, [System.Collections.IList]$Out) {
+    $oDict = $Old -is [System.Collections.IDictionary]; $nDict = $New -is [System.Collections.IDictionary]
+    $oArr = ($Old -is [object[]]); $nArr = ($New -is [object[]])
+    if ($oDict -and $nDict) {
+        $keys = @($Old.Keys) + @($New.Keys | Where-Object { -not $Old.Contains($_) })
+        foreach ($k in $keys) {
+            $p = if ($Path) { "$Path.$k" } else { [string]$k }
+            if (-not $New.Contains($k)) { [void]$Out.Add("${p}: only in OLD = $(Format-JsonValue $Old[$k])") }
+            elseif (-not $Old.Contains($k)) { [void]$Out.Add("${p}: only in NEW = $(Format-JsonValue $New[$k])") }
+            else { Compare-JsonTree $Old[$k] $New[$k] $p $Out }
+        }
+        return
+    }
+    if ($oArr -and $nArr) {
+        $keyed = $false
+        $oIds = @(); $nIds = @()
+        if ($Old.Count -gt 0 -and $New.Count -gt 0) {
+            $oIds = @($Old | ForEach-Object { if ($_ -is [System.Collections.IDictionary] -and $_.Contains('id') -and $null -ne $_['id']) { [string]$_['id'] } else { $null } })
+            $nIds = @($New | ForEach-Object { if ($_ -is [System.Collections.IDictionary] -and $_.Contains('id') -and $null -ne $_['id']) { [string]$_['id'] } else { $null } })
+            $keyed = (-not ($oIds -contains $null)) -and (-not ($nIds -contains $null)) -and
+                     (@($oIds | Sort-Object -Unique).Count -eq $oIds.Count) -and (@($nIds | Sort-Object -Unique).Count -eq $nIds.Count)
+        }
+        if ($keyed) {
+            for ($i = 0; $i -lt $Old.Count; $i++) {
+                $j = [array]::IndexOf($nIds, $oIds[$i])
+                $p = "$Path[id=$($oIds[$i])]"
+                if ($j -lt 0) { [void]$Out.Add("${p}: only in OLD") } else { Compare-JsonTree $Old[$i] $New[$j] $p $Out }
+            }
+            for ($j = 0; $j -lt $New.Count; $j++) {
+                if ([array]::IndexOf($oIds, $nIds[$j]) -lt 0) { [void]$Out.Add("$Path[id=$($nIds[$j])]: only in NEW") }
+            }
+            return
+        }
+        if ($Old.Count -ne $New.Count) { [void]$Out.Add("${Path}: length OLD=$($Old.Count) NEW=$($New.Count)") }
+        $n = [math]::Min($Old.Count, $New.Count)
+        for ($i = 0; $i -lt $n; $i++) { Compare-JsonTree $Old[$i] $New[$i] "$Path[$i]" $Out }
+        return
+    }
+    if ($oDict -or $nDict -or $oArr -or $nArr) {
+        [void]$Out.Add("${Path}: type differs, OLD = $(Format-JsonValue $Old) NEW = $(Format-JsonValue $New)")
+        return
+    }
+    # Scalars: compare as compact JSON so that 1 and "1" differ, but 1 and 1.0 from the same parser do not.
+    $a = Format-JsonValue $Old; $b = Format-JsonValue $New
+    if ($a -cne $b) { [void]$Out.Add("${Path}: OLD = $a <> NEW = $b") }
+}
+
+# The parts of a `screen read` result that -FullCompare checks, volatile fields removed, elements sorted by id.
+function Get-FullCompareView($Json) {
+    $view = [ordered]@{}
+    $data = if ($null -ne $Json) { $Json.data } else { $null }
+    foreach ($k in @('elements', 'hierarchy', 'tabs', 'status_bar')) {
+        $v = $null
+        if ($null -ne $data -and $data.PSObject.Properties[$k]) { $v = Remove-VolatileFields $data.$k }
+        if ($k -eq 'elements' -and $v -is [object[]]) {
+            $v = @($v | Sort-Object { if ($_ -is [System.Collections.IDictionary] -and $_.Contains('id')) { [string]$_['id'] } else { '' } }, { Format-JsonValue $_ })
+        }
+        $view[$k] = $v
+    }
+    return $view
+}
+
 # Navigation steps are argument arrays run with NewExe. Only selection-screen values are filled.
 $catalog = [ordered]@{
     'EasyAccess'      = @(, @('transaction', 'start', '/n'))
@@ -118,6 +220,7 @@ if (-not $DryRun) {
 
 $rows = New-Object System.Collections.ArrayList
 $diffs = @{}
+$fullDiffs = [ordered]@{}
 $anyDiff = $false
 try {
     foreach ($name in $names) {
@@ -134,6 +237,7 @@ try {
             continue
         }
         $readArgs = @('screen', 'read', '--no-tabs', '--max-rows', '100', '--output', 'json')
+        if ($FullCompare) { $readArgs = @('screen', 'read', '--max-rows', '100', '--output', 'json') }  # tabs are compared too
         $best = @{}
         foreach ($pair in @(@('Old', $OldExe), @('New', $NewExe))) {
             $runs = @(1..2 | ForEach-Object { Invoke-Build $pair[1] $readArgs })
@@ -150,6 +254,11 @@ try {
         $onlyOld = @($io | Where-Object { $idn -notcontains $_ })
         $onlyNew = @($idn | Where-Object { $io -notcontains $_ })
         if ($onlyOld.Count -or $onlyNew.Count) { $anyDiff = $true; $diffs[$name] = @{ Old = $onlyOld; New = $onlyNew } }
+        if ($FullCompare) {
+            $lines = New-Object System.Collections.ArrayList
+            Compare-JsonTree (Get-FullCompareView $o.Json) (Get-FullCompareView $n.Json) '' $lines
+            if ($lines.Count) { $anyDiff = $true; $fullDiffs[$name] = $lines }
+        }
         [void]$rows.Add([pscustomobject]@{
             Screen = $name; OldMs = $o.Ms; NewMs = $n.Ms; OldEl = $io.Count; NewEl = $idn.Count
             OnlyOld = $onlyOld.Count; OnlyNew = $onlyNew.Count
@@ -170,6 +279,17 @@ foreach ($k in $diffs.Keys) {
     if ($diffs[$k].Old.Count) { Write-Host ("  only in OLD: " + (($diffs[$k].Old | Select-Object -First 8) -join ', ')) }
     if ($diffs[$k].New.Count) { Write-Host ("  only in NEW: " + (($diffs[$k].New | Select-Object -First 8) -join ', ')) }
 }
-if ($anyDiff) { Write-Host 'RESULT: element ids differ between builds'; exit 1 }
+foreach ($k in $fullDiffs.Keys) {
+    $lines = $fullDiffs[$k]
+    Write-Host "FULLDIFF $k ($($lines.Count) differences)"
+    foreach ($l in ($lines | Select-Object -First 20)) { Write-Host "  $l" }
+    if ($lines.Count -gt 20) { Write-Host "  ... $($lines.Count - 20) more" }
+}
+if ($anyDiff) {
+    if ($diffs.Count) { Write-Host 'RESULT: element ids differ between builds' }
+    if ($fullDiffs.Count) { Write-Host 'RESULT: full compare (elements, hierarchy, tabs, status_bar) differs between builds' }
+    exit 1
+}
+if ($FullCompare) { Write-Host 'RESULT: element ids and full screen content (elements, hierarchy, tabs, status_bar) identical on all compared screens'; exit 0 }
 Write-Host 'RESULT: element-id sets identical on all compared screens'
 exit 0
