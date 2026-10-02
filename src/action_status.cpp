@@ -243,6 +243,12 @@ bool warning_needs_confirmation(const std::string& text) {
                                "mit enter", "enter dr\xC3\xBC" "cken", "enter druecken", "dr\xC3\xBC" "cken sie enter",
                                "druecken sie enter", "erneut enter", "enter erneut", "zum fortfahren", "enter zum"})
         if (has(needle)) return true;
+    // Question-style prompts ("Do you want to continue?", "Fortfahren? (J/N)"): the submission waits for an answer.
+    // Lower-cased substrings, deliberately broad ("sicher" also matches "Sicherheit"): a false positive only costs one
+    // verification, a missed prompt reports a pending submission as done.
+    for (const char* needle : {"do you want to", "would you like", "continue?", "(y/n)", "(j/n)", "are you sure",
+                               "m\xC3\xB6" "chten sie", "moechten sie", "wollen sie", "fortfahren", "trotzdem", "sicher", "weiter?"})
+        if (has(needle)) return true;
     return false;
 }
 
@@ -264,9 +270,10 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
     // Type W/I/S messages that do not read like a rejection are NOT failures: a click that ran and left "No short
     // dumps match the selection criteria" (W) or "No data found" (I/S) in the status bar succeeded. They are
     // reported on the success result as status_message (and warning:true for W), see attach_status_message().
-    // A FRESH warning that SAP wants confirmed with a second Enter ("Press ENTER to continue", "Bestätigen Sie ...") means
+    // A warning (also one whose text equals the message before the action: the submission may have produced it again; a
+    // stale identical message is an accepted false positive, the hint tells the caller to verify) that SAP wants confirmed with a second Enter ("Press ENTER to continue", "Bestätigen Sie ...") means
     // the intended submission did not complete yet: that is not a success. Every other W stays a success with warning:true.
-    if (after.type == "W" && !repeated && submitting_action && !rejection_text && warning_needs_confirmation(after.text)) {
+    if (after.type == "W" && submitting_action && !rejection_text && warning_needs_confirmation(after.text)) {
         Result result;
         result.status = Result::Status::Error;
         result.error["code"] = "ACTION_OUTCOME_UNVERIFIED";
@@ -275,7 +282,10 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
         result.error["element"] = element;
         result.error["needs_confirmation"] = true;
         result.error["reason"] = "SAP shows a warning that waits for confirmation; the submission did not complete";
-        result.error["hint"] = "SAP waits for confirmation: send Enter (gui_key_send enter) if intended";
+        result.error["hint"] = repeated
+            ? "SAP waits for confirmation (the message is identical to the one before the action: check the screen first), "
+              "then send Enter (gui_key_send enter) if intended"
+            : "SAP waits for confirmation: send Enter (gui_key_send enter) if intended";
         return result;
     }
     if (after.type != "E" && after.type != "A" && !rejection_text)
