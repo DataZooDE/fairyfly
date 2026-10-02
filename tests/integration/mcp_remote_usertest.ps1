@@ -66,6 +66,12 @@ function Run-Native([string]$File, [string[]]$Arguments, [int]$TimeoutSec = 120)
     return [pscustomobject]@{ Exit = $p.ExitCode; Out = $o.Result; Err = $e.Result }
 }
 function FF([string[]]$Arguments, [int]$TimeoutSec = 300) { return Run-Native $Exe $Arguments $TimeoutSec }
+function Send-RemoteText([string]$Text, [string]$Command) {
+    # Windows OpenSSH sometimes prints "close - IO is still pending on closed socket" to stderr when stdin closes; with
+    # $ErrorActionPreference = Stop that text would abort the script, so run it with Continue.
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $Text | & $Ssh -o BatchMode=yes $Dest $Command 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
+}
 function Remote([string]$Command, [int]$TimeoutSec = 60) { return Run-Native $Ssh @('-o', 'BatchMode=yes', $Dest, $Command) $TimeoutSec }
 
 $setupDone = $false; $server = $null; $tunnel = $null; $tokenNames = @(); $exit = 0; $summary = @()
@@ -129,8 +135,8 @@ echo "finished `$(date +%s)" >> '$RDir/$n.status'
 touch '$RDir/$n.done'
 "@
         $command = $command.Replace("`r`n", "`n") + "`n# end"
-        $mcpJson | & $Ssh -o BatchMode=yes $Dest "umask 077; cat > $RDir/mcp.json" 2>&1 | Out-Null
-        $command | & $Ssh -o BatchMode=yes $Dest "umask 077; cat > $RDir/$n.command; chmod 700 $RDir/$n.command" 2>&1 | Out-Null
+        Send-RemoteText $mcpJson "umask 077; cat > $RDir/mcp.json"
+        Send-RemoteText $command "umask 077; cat > $RDir/$n.command; chmod 700 $RDir/$n.command"
         # start every task from the SAP start screen so the tasks do not depend on each other
         [void](FF @('transaction', 'start', '/nS000', '--output', 'json') 60)
         $r = Remote "open -a Terminal $RDir/$n.command && echo opened" 30
@@ -185,6 +191,7 @@ finally {
         $r = FF @('mcp', 'teardown', '--hostname', $Hostname, '--port', "$Port", '-c', $Cfg, '--yes', '--output', 'json') 300
         if ($r.Exit -eq 0) { Write-Host 'teardown ok' } else { Write-Host "teardown FAILED (exit $($r.Exit)); run manually: $Exe mcp teardown --yes"; $exit = 1 }
     }
+    foreach ($f in 'audit.jsonl', 'server.err') { if (Test-Path (Join-Path $Temp $f)) { Copy-Item -LiteralPath (Join-Path $Temp $f) -Destination (Join-Path $OutDir ($f -replace '\.err$', '.err.txt')) -Force -ErrorAction SilentlyContinue } }
     Remove-Item -LiteralPath $Temp -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "results: $OutDir"
 }

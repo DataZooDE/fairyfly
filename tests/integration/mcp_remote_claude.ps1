@@ -64,6 +64,12 @@ function Run-Native([string]$File, [string[]]$Arguments, [int]$TimeoutSec = 120)
     return [pscustomobject]@{ Exit = $p.ExitCode; Out = $o.Result; Err = $e.Result }
 }
 function FF([string[]]$Arguments, [int]$TimeoutSec = 300) { return Run-Native $Exe $Arguments $TimeoutSec }
+function Send-RemoteText([string]$Text, [string]$Command) {
+    # Windows OpenSSH sometimes prints "close - IO is still pending on closed socket" to stderr when stdin closes; with
+    # $ErrorActionPreference = Stop that text would abort the script, so run it with Continue.
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $Text | & $Ssh -o BatchMode=yes $Dest $Command 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
+}
 function Remote([string]$Command, [int]$TimeoutSec = 60) { return Run-Native $Ssh @('-o', 'BatchMode=yes', $Dest, $Command) $TimeoutSec }
 
 $setupDone = $false; $server = $null; $tunnel = $null; $tokenCreated = $false; $exit = 0
@@ -125,8 +131,8 @@ echo "finished `$(date)" >> '$RDir/status.txt'
 touch '$RDir/done'
 "@
     $command = $command.Replace("`r`n", "`n")
-    $mcpJson | & $Ssh -o BatchMode=yes $Dest "umask 077; cat > $RDir/mcp.json" 2>&1 | Out-Null
-    ($command + "`n# end") | & $Ssh -o BatchMode=yes $Dest "umask 077; cat > $RDir/run.command; chmod 700 $RDir/run.command" 2>&1 | Out-Null
+    Send-RemoteText $mcpJson "umask 077; cat > $RDir/mcp.json"
+    Send-RemoteText ($command + "`n# end") "umask 077; cat > $RDir/run.command; chmod 700 $RDir/run.command"
     $r = Remote "ls $RDir" 30
     Write-Host ("remote files: " + (($r.Out -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ', '))
     $r = Remote "open -a Terminal $RDir/run.command && echo opened" 30
