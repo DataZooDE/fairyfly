@@ -146,3 +146,6 @@ docs/latex/
 
 # Markdown documentation exports (if generated)
 docs/*.txt
+
+# CTest output
+/Testing/

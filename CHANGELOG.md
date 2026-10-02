@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.09.30 (unreleased)
+## 2026.09.30 (2026-10-02)
 
 ### Added (release engineering)
 
