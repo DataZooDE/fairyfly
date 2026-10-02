@@ -6,6 +6,8 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Added
 
+- Remote MCP token option `--allow-selection-input` (needs `--tcode` and a read-only token; shown by `token list`, kept by `rotate`): the token may type into plain selection fields with `gui_element_fill`, but only on the initial screen of the transaction it started with `gui_transaction_start` (program and screen number recorded per token), never into grid cells, the command field or password/credential fields, and never commit (the read-only guard stays for every other action). New refusal codes `INPUT_NOT_ALLOWED`, `INPUT_SCREEN_DENIED`, `INPUT_TARGET_DENIED`; audit records of allowed fills carry `input_allowed: true` (never the value). SAP facts now also read `Info.Program` and `Info.ScreenNumber`.
+
 - Remote MCP listener on http.sys (the Windows HTTP Server API) with in-kernel TLS: `fairyfly mcp --http --tls` serves HTTPS on the certificate bound by setup; the server runs unelevated and holds no private key.
 - `fairyfly mcp setup` (certificate, URL ACL, TLS binding, optional firewall rule; self-elevates once; `--dry-run`, `--print-runbook`, `--yes`, verified by a real TLS round trip), `fairyfly mcp teardown` and `fairyfly mcp cert export`; `fairyfly mcp doctor` extended with elevation, URL ACL, TLS binding, certificate, firewall, port and TLS handshake checks.
 - Config keys `server.tls` and `server.allow_ip`; flags `--tls/--no-tls`, `--allow-ip` and the flag-only `--insecure-http`.
