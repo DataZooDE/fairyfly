@@ -84,6 +84,9 @@ public:
     virtual CerFileState cer_file_state(const std::string& thumbprint, const std::string& path, CerFormat format) = 0;
     /// Writes the public certificate; returns created | updated | unchanged.
     virtual std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) = 0;
+    /// Upper-case SHA-1 thumbprint of the certificate held by the DER or PEM file `path`; nullopt when the file is
+    /// missing or does not hold a certificate. Needs nothing from the store (the certificate may be gone already).
+    virtual std::optional<std::string> file_thumbprint(const std::string& path) = 0;
     /// Deletes the certificate and its private key; false when it was not there.
     virtual bool remove(const std::string& thumbprint) = 0;
 };

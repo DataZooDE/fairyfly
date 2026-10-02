@@ -162,6 +162,27 @@ public:
         return same ? CerFileState::Matches : CerFileState::Differs;
     }
 
+    std::optional<std::string> file_thumbprint(const std::string& path) override {
+        auto bytes = read_bytes(path);
+        if (!bytes || bytes->empty() || bytes->size() > 1024 * 1024) return std::nullopt;
+        // PEM text -> DER (CRYPT_STRING_BASE64_ANY also accepts bare base64; DER bytes are tried first)
+        PCCERT_CONTEXT ctx = CertCreateCertificateContext(X509_ASN_ENCODING, bytes->data(), static_cast<DWORD>(bytes->size()));
+        if (!ctx) {
+            DWORD der_size = 0;
+            if (!CryptStringToBinaryA(reinterpret_cast<const char*>(bytes->data()), static_cast<DWORD>(bytes->size()), CRYPT_STRING_BASE64HEADER, nullptr, &der_size, nullptr, nullptr) || der_size == 0)
+                return std::nullopt;
+            std::vector<unsigned char> der(der_size);
+            if (!CryptStringToBinaryA(reinterpret_cast<const char*>(bytes->data()), static_cast<DWORD>(bytes->size()), CRYPT_STRING_BASE64HEADER, der.data(), &der_size, nullptr, nullptr))
+                return std::nullopt;
+            ctx = CertCreateCertificateContext(X509_ASN_ENCODING, der.data(), der_size);
+            if (!ctx) return std::nullopt;
+        }
+        const std::string thumb = thumbprint_of(ctx);
+        CertFreeCertificateContext(ctx);
+        if (thumb.empty()) return std::nullopt;
+        return thumb;
+    }
+
     std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) override {
         const CerFileState state = cer_file_state(thumbprint, path, format);
         if (state == CerFileState::Matches) return "unchanged";

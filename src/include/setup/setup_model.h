@@ -211,6 +211,8 @@ struct TeardownDiagnosis {
     bool firewall_exists = false;
     CertInfo cert;                                ///< certificate named in the manifest
     bool cer_exists = false;
+    bool cer_matches = false;                     ///< the file at cer_path holds the certificate the manifest records
+    std::string cer_refusal;                      ///< non-empty: the manifest cer_path is not trusted (why)
     bool config_says_tls = false;
     bool config_exists = false;
     std::string config_sha256;                    ///< sha256 of the current file text (empty when missing/unreadable)

@@ -834,8 +834,14 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.teardown.cert_thumbprint = d.cert.thumbprint;
         p.steps.push_back(make_step("certificate", "Remove self-signed certificate and its key", "would_remove", d.cert.thumbprint, true));
     }
-    // certificate_export
-    if (d.cer_exists) {
+    // certificate_export: only the file at the path derived from the validated host name, holding the recorded certificate
+    if (!d.cer_refusal.empty()) {
+        p.steps.push_back(make_step("certificate_export", "Exported certificate", "skipped", d.cer_refusal + "; not deleted"));
+        p.human.push_back({"cer_path_untrusted", "Not deleted: " + d.cer_refusal + ". Delete the exported certificate yourself if you no longer need it."});
+    } else if (d.cer_exists && !d.cer_matches) {
+        p.steps.push_back(make_step("certificate_export", "Exported certificate", "skipped", d.cer_path + " does not hold the certificate setup recorded; left untouched"));
+        p.human.push_back({"cer_file_foreign", d.cer_path + " does not hold the certificate that setup exported (or no certificate was recorded); it was not deleted. Delete it yourself if you no longer need it."});
+    } else if (d.cer_exists) {
         p.teardown.cer_path = d.cer_path;
         p.steps.push_back(make_step("certificate_export", "Delete " + d.cer_path, "would_remove", "exported public certificate"));
     } else {

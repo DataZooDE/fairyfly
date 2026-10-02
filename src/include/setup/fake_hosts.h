@@ -175,6 +175,11 @@ struct FakeCertStore : CertStore {
         if (it == sys->files.end()) return CerFileState::Missing;
         return it->second == "cer:" + thumbprint ? CerFileState::Matches : CerFileState::Differs;
     }
+    std::optional<std::string> file_thumbprint(const std::string& path) override {
+        const auto it = sys->files.find(path);
+        if (it == sys->files.end() || it->second.rfind("cer:", 0) != 0) return std::nullopt;
+        return it->second.substr(4);
+    }
     std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) override {
         const auto state = cer_file_state(thumbprint, path, format);
         sys->files[path] = "cer:" + thumbprint;

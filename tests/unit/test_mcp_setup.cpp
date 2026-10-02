@@ -1392,3 +1392,74 @@ TEST_CASE("elevated teardown re-checks the SDDL before removing a reservation", 
     CHECK(execute_elevated_work(work, h)["steps"][0]["status"] == "removed");
     CHECK(r.m.http.urlacls.empty());
 }
+
+// ---- teardown: the exported certificate file ------------------------------------------------------------------------
+TEST_CASE("teardown deletes the exported .cer only at the derived path and only when it holds the recorded certificate", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    const std::string thumb = r.m.certs.certs[0].thumbprint;
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+
+    SECTION("happy path: the derived path holds the recorded certificate") {
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(kCerPath) == 0);
+    }
+    SECTION("a tampered manifest pointing at another file never deletes that file") {
+        const std::string victim = "C:\\Users\\jr\\Documents\\important.docx";
+        r.m.sys.files[victim] = "precious";
+        json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+        manifest["cer_path"] = victim;
+        r.m.sys.files[kManifestPath] = manifest.dump();
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(victim) == "precious");
+        CHECK(r.m.sys.files.count(kCerPath) == 1);      // the manifest path is untrusted: nothing is deleted
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_path_untrusted"));
+        CHECK(r.out.str().find("important.docx") != std::string::npos);
+    }
+    SECTION("a tampered manifest host name that is not a host name") {
+        json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+        manifest["hostname"] = "..\\..\\evil";
+        manifest["cer_path"] = "";
+        r.m.sys.files[kManifestPath] = manifest.dump();
+        const std::string other = "C:\\Users\\jr\\AppData\\Local\\fairyfly\\fairyfly-mcp-..\\..\\evil.cer";
+        r.m.sys.files[other] = "cer:" + thumb;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(other) == 1);
+        CHECK(has_human(r.out.str(), "cer_path_untrusted"));
+    }
+    SECTION("the file at the derived path holds another certificate") {
+        r.m.sys.files[kCerPath] = "cer:" + kThumb;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "cer:" + kThumb);
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("the file is not a certificate at all") {
+        r.m.sys.files[kCerPath] = "hello";
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "hello");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("the file is swapped after the plan was made: re-checked right before the delete") {
+        r.m.elevator.child = [&r](const ElevatedRequest& req) {
+            r.m.sys.files[kCerPath] = "swapped";
+            Hosts h = r.m.hosts();
+            return apply_plan_bytes(h, req.plan_text, args_of(req));
+        };
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "swapped");
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("without a manifest the file cannot be tied to a certificate: left for a human") {
+        r.m.sys.files.erase(kManifestPath);
+        t.hostname = kHost;
+        t.port = 8443;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(kCerPath) == 1);
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+}

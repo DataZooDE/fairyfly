@@ -63,6 +63,17 @@ void read_config(SystemProbe& sys, const std::string& path, Diagnosis& d) {
     }
 }
 
+/// True when the DER/PEM file holds exactly the certificate with this SHA-1 thumbprint (independent of the store).
+bool cer_file_holds(Hosts& h, const std::string& path, const std::string& thumbprint) {
+    if (thumbprint.empty() || thumbprint_error(thumbprint)) return false;
+    try {
+        const auto actual = h.certs.file_thumbprint(path);
+        return actual && normalize_thumbprint(*actual) == normalize_thumbprint(thumbprint);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 ErrorInfo host_error_info(const HostError& e) { return {e.code(), e.what(), 1}; }
 
 } // namespace
@@ -187,8 +198,21 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
         ports = {kDefaultTlsPort, kDefaultNoTlsPort};
     }
     const std::string dir = data_dir(h.sys);
-    d.cer_path = d.manifest && !d.manifest->cer_path.empty() ? d.manifest->cer_path : join_path(dir, cer_file_name(d.hostname));
-    d.cer_exists = h.sys.file_exists(d.cer_path);
+    // The manifest is user-writable: its cer_path is never used to delete anything. The export path is derived from the
+    // validated host name and the fairyfly data directory (the same rule setup uses).
+    if (const auto e = hostname_error(d.hostname)) {
+        d.cer_refusal = "the host name is not valid (" + *e + ")";
+    } else {
+        d.cer_path = join_path(dir, cer_file_name(d.hostname));
+        if (d.manifest && !d.manifest->cer_path.empty() && lower_ascii(d.manifest->cer_path) != lower_ascii(d.cer_path))
+            d.cer_refusal = "the manifest records the export path " + d.manifest->cer_path + " but setup writes " + d.cer_path;
+    }
+    if (d.cer_refusal.empty()) {
+        d.cer_exists = h.sys.file_exists(d.cer_path);
+        d.cer_matches = d.cer_exists && d.manifest && cer_file_holds(h, d.cer_path, d.manifest->thumbprint);
+    } else {
+        d.cer_path.clear();
+    }
     d.config_path = o.config_path.empty() ? join_path(dir, "mcp.yaml") : o.config_path;
     for (int port : ports) {
         for (const bool tls : {true, false}) {
@@ -902,7 +926,12 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
             if (s.id == id) return s.status == "would_remove";
         return false;
     };
-    if (!any_failed && pending("certificate_export")) {
+    std::vector<HumanItem> rep_human_extra;
+    if (!any_failed && pending("certificate_export") && !cer_file_holds(h, plan.teardown.cer_path, d.manifest ? d.manifest->thumbprint : std::string())) {
+        // the file changed between the plan and now (or never held the recorded certificate): never delete it
+        set_status("certificate_export", "skipped", plan.teardown.cer_path + " no longer holds the recorded certificate; left untouched");
+        rep_human_extra.push_back({"cer_file_foreign", plan.teardown.cer_path + " does not hold the certificate that setup exported; it was not deleted."});
+    } else if (!any_failed && pending("certificate_export")) {
         if (h.sys.remove_file(plan.teardown.cer_path) || !h.sys.file_exists(plan.teardown.cer_path)) set_status("certificate_export", "removed", plan.teardown.cer_path);
         else {
             set_status("certificate_export", "failed", "cannot delete " + plan.teardown.cer_path);
@@ -929,6 +958,7 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
     finalize_statuses(steps, any_failed);
     rep.steps = steps;
     rep.human = plan.human;
+    for (const auto& item : rep_human_extra) rep.human.push_back(item);
     if (any_failed) {
         rep.error = ErrorInfo{"STEP_FAILED", failure, 1};
         if (!o.json) *env.out << render_result_text(rep);
