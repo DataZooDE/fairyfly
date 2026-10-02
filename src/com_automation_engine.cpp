@@ -1486,6 +1486,18 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
     auto start = std::chrono::high_resolution_clock::now();
     Result result;
 
+    // Tabs activated for the read are put back on EVERY exit path (success, error result, exception): the guard records the
+    // previous tab before each selection and restores in its destructor if the code below unwinds.
+    ComGuiSessionPtr tab_session;
+    TabActivationGuard tab_guard([&tab_session](const std::string& page_id) {
+        if (!tab_session) return false;
+        auto page = find_element_if_present(tab_session, page_id);
+        if (!page) return false;
+        page->select();
+        tab_session->wait_for_completion(2000);
+        return true;
+    });
+
     try {
         if (!element.is_valid()) {
             result.status = Result::Status::Error;
@@ -1497,11 +1509,10 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         // Resolve @active to actual window ID
         ElementId resolved_element = resolve_element_path(element);
         auto session = ensure_session();
+        tab_session = session;
         auto elem = find_element_if_present(session, resolved_element.path);
 
         // The content of an inactive tab page does not exist for the scripting API: tell that apart from a bad id.
-        struct ActivatedTab { std::string tab_id; std::string tab_text; std::string previous_id; };
-        std::vector<ActivatedTab> activated;
         if (!elem) {
             if (!activate_tab) {
                 if (auto inactive = inactive_tab_error(session, resolved_element.path, true)) return *inactive;
@@ -1520,9 +1531,9 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
                     } catch (const std::exception&) {}
                     auto page = find_element_if_present(session, inactive->first.page_id);
                     if (!page) break;
+                    tab_guard.record(std::move(entry));  // recorded BEFORE selecting: a failing select is restored too
                     page->select();
                     session->wait_for_completion(2000);
-                    activated.push_back(std::move(entry));
                 }
                 elem = find_element_if_present(session, resolved_element.path);
             }
@@ -1548,26 +1559,6 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         }
         attach_status_bar(result, read_action_status(session));
 
-        if (!activated.empty()) {
-            // A read is observational: put the tabs back as they were (innermost first).
-            bool restored = true;
-            for (auto it = activated.rbegin(); it != activated.rend(); ++it) {
-                if (it->previous_id.empty()) { restored = false; continue; }
-                try {
-                    auto previous = find_element_if_present(session, it->previous_id);
-                    if (!previous) { restored = false; continue; }
-                    previous->select();
-                    session->wait_for_completion(2000);
-                } catch (const std::exception&) {
-                    restored = false;
-                }
-            }
-            json tabs = json::array();
-            for (const auto& entry : activated) tabs.push_back({{"tab_id", entry.tab_id}, {"tab_text", entry.tab_text}});
-            result.data["tabs_activated"] = tabs;
-            result.data["tabs_restored"] = restored;
-        }
-
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         spdlog::info("Read field {} (duration: {}ms)", resolved_element.path, result.duration.count());
@@ -1581,6 +1572,17 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         result.status = Result::Status::Error;
         result.error["code"] = "EXCEPTION";
         result.error["message"] = e.what();
+    }
+
+    // A read is observational: put the tabs back as they were (innermost first), whatever the read returned.
+    if (!tab_guard.entries().empty()) {
+        tab_guard.restore();
+        json tabs = json::array();
+        for (const auto& entry : tab_guard.entries()) tabs.push_back({{"tab_id", entry.tab_id}, {"tab_text", entry.tab_text}});
+        json& target = result.status == Result::Status::Success ? result.data : result.error;
+        target["tabs_activated"] = tabs;
+        target["tabs_restored"] = tab_guard.restored();
+        if (!tab_guard.restored()) target["restore_error"] = tab_guard.restore_error();
     }
 
     return result;

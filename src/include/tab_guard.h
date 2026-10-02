@@ -40,4 +40,40 @@ std::optional<Result> classify_element_on_inactive_tab(const std::string& elemen
 /// Tab name to hand to `screen read --tab` (the caption, or the page name without "tabp" when it has none).
 std::string tab_read_name(const TabPageRef& page, const TabPageState& state);
 
+/// A tab page that was activated for a read, and the page that was selected in the same strip before.
+struct ActivatedTab {
+    std::string tab_id;       ///< the page that was selected for the read
+    std::string tab_text;
+    std::string previous_id;  ///< the strip's previously selected page ("" = unknown: cannot be restored)
+};
+
+/// Scope guard for `--activate-tab`: every activation is recorded BEFORE the page is selected, and the previously selected
+/// pages are put back (innermost first) on every exit path: restore() explicitly, or the destructor when an exception
+/// unwound the read. A failing restore never throws; it is reported through restored() / restore_error().
+class TabActivationGuard {
+public:
+    /// Selects the page with this id; throws or returns false when that is not possible.
+    using SelectPage = std::function<bool(const std::string& page_id)>;
+    explicit TabActivationGuard(SelectPage select) : select_(std::move(select)) {}
+    TabActivationGuard(const TabActivationGuard&) = delete;
+    TabActivationGuard& operator=(const TabActivationGuard&) = delete;
+    ~TabActivationGuard() { restore(); }
+
+    /// Records an activation about to happen (call it BEFORE selecting the page).
+    void record(ActivatedTab entry) { entries_.push_back(std::move(entry)); pending_ = true; }
+    const std::vector<ActivatedTab>& entries() const { return entries_; }
+
+    /// Puts the previous tabs back, once. Returns restored().
+    bool restore();
+    bool restored() const { return restored_; }
+    const std::string& restore_error() const { return restore_error_; }
+
+private:
+    SelectPage select_;
+    std::vector<ActivatedTab> entries_;
+    bool pending_ = false;
+    bool restored_ = true;
+    std::string restore_error_;
+};
+
 } // namespace fairyfly::sap
