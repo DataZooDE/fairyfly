@@ -52,6 +52,9 @@ constexpr int MAX_RETRY_DELAY_MS = 500;
 /// Default wait interval for session operations in milliseconds
 constexpr int SESSION_WAIT_INTERVAL_MS = 100;
 
+/// Polling interval while a session reports Busy in milliseconds
+constexpr int SESSION_POLL_INTERVAL_MS = 20;
+
 /// Default polling interval for connection wait operations in milliseconds
 constexpr int CONNECTION_POLL_INTERVAL_MS = 500;
 

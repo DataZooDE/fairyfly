@@ -359,11 +359,6 @@ public:
     /// Wait for session to complete current operation
     void wait_for_completion(int timeout_ms = 30000);
 
-    /// Send virtual key to session (F3, F8, Enter, etc.)
-    /// Common keys: 0=Enter, 1=F1, 8=F8, 3=F3, 12=F12, etc.
-    /// Throws ComException if operation fails
-    void send_vkey(int vkey);
-
     /// Wait for element to appear with polling
     /// @param element_id Element path to wait for (e.g., "wnd[0]/usr/btn[99]")
     /// @param timeout_ms Maximum time to wait in milliseconds

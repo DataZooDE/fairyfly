@@ -680,7 +680,6 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         if (request.use_send_command) {
             // StartTransaction prepends "/n" itself, so "/nXYZ" must go via SendCommand.
             session->invoke_method_with_string(L"SendCommand", request.command);
-            std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
         } else {
             session->start_transaction(request.command);
         }

@@ -15,6 +15,7 @@
 #include "include/action_argument_checks.h"
 #include "include/sensitive_data.h"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <exception>
 #include <functional>
 #include <iostream>
@@ -2481,6 +2482,11 @@ public:
     int new_enum_calls = 0;
     int item_calls = 0;
     long count_override = -1;
+    // Scripted Busy: while busy_true_reads > 0 each Busy read returns true and decrements it,
+    // then false. -1 leaves Busy to the bools map. StartTransaction records its call time.
+    int busy_true_reads = -1;
+    int start_transaction_calls = 0;
+    std::chrono::steady_clock::time_point start_transaction_at{};
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2532,6 +2538,11 @@ public:
             if (on_select) on_select();
             return S_OK;
         }
+        if ((flags & DISPATCH_METHOD) && name == L"StartTransaction") {
+            ++start_transaction_calls;
+            start_transaction_at = std::chrono::steady_clock::now();
+            return S_OK;
+        }
         if ((flags & DISPATCH_METHOD) && name == L"FindById") {
             if (!result || !params || params->cArgs != 1 || params->rgvarg[0].vt != VT_BSTR)
                 return DISP_E_BADPARAMCOUNT;
@@ -2561,6 +2572,12 @@ public:
         if (name == L"Count") {
             result->vt = VT_I4;
             result->lVal = count_override >= 0 ? count_override : static_cast<long>(items.size());
+            return S_OK;
+        }
+        if (name == L"Busy" && busy_true_reads >= 0) {
+            result->vt = VT_BOOL;
+            result->boolVal = busy_true_reads > 0 ? VARIANT_TRUE : VARIANT_FALSE;
+            if (busy_true_reads > 0) --busy_true_reads;
             return S_OK;
         }
         if (auto d = dispatches.find(name); d != dispatches.end()) {
@@ -2681,6 +2698,58 @@ struct TabScene {
     ComGuiSessionPtr session_wrapper() { return ComGuiSession::create(IDispatchPtr(session)); }
 };
 } // namespace
+
+TEST_CASE("wait_for_completion checks Busy immediately and polls only while busy", "[com][session][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+
+    SECTION("an idle session costs exactly one Busy read and no sleep") {
+        node->busy_true_reads = 0;
+        const auto start = std::chrono::steady_clock::now();
+        session->wait_for_completion(500);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(node->reads[L"Busy"] == 1);
+        REQUIRE(elapsed < std::chrono::milliseconds(15));
+    }
+    SECTION("busy once then idle reads Busy twice and stays under 60 ms") {
+        node->busy_true_reads = 1;
+        const auto start = std::chrono::steady_clock::now();
+        session->wait_for_completion(500);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(node->reads[L"Busy"] == 2);
+        REQUIRE(elapsed < std::chrono::milliseconds(60));
+    }
+    SECTION("busy N times then idle reads N+1 times") {
+        node->busy_true_reads = 3;
+        session->wait_for_completion(500);
+        REQUIRE(node->reads[L"Busy"] == 4);
+    }
+    SECTION("an always busy session throws within the bound") {
+        node->bools[L"Busy"] = true;
+        const auto start = std::chrono::steady_clock::now();
+        REQUIRE_THROWS_AS(session->wait_for_completion(50), ComException);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(elapsed < std::chrono::milliseconds(150));
+    }
+}
+
+TEST_CASE("start_transaction returns right after the invoke without a settle sleep", "[com][session][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+
+    session->start_transaction("SM37");
+    const auto returned = std::chrono::steady_clock::now();
+    REQUIRE(node->start_transaction_calls == 1);
+    REQUIRE(returned - node->start_transaction_at < std::chrono::milliseconds(20));
+}
 
 TEST_CASE("read_tab selects, re-fetches the tab, restores, and reads grids inside it", "[screen][tabs][read_tab]") {
     ScopedDispatchCacheReset cache_reset;

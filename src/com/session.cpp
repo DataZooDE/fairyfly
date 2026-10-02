@@ -93,9 +93,6 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
 
         trace.mark_success();
         spdlog::info("Started transaction: {}", tcode);
-
-        // Brief wait for transaction to load
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
     } catch (const ComException&) {
         spdlog::error("Failed to start transaction '{}'", tcode);
         throw;
@@ -107,51 +104,17 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
 }
 
 void ComGuiSession::wait_for_completion(int timeout_ms) {
-    auto start = std::chrono::high_resolution_clock::now();
+    // StartTransaction/SendCommand are synchronous, so Busy is usually already false:
+    // check immediately and sleep only while the session is actually busy.
+    const auto start = std::chrono::steady_clock::now();
     while (is_busy()) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start
+            std::chrono::steady_clock::now() - start
         );
         if (elapsed.count() > timeout_ms) {
             throw ComException("Session timeout waiting for completion");
         }
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-    }
-}
-
-void ComGuiSession::send_vkey(int vkey) {
-    utils::TraceGuard trace("ComGuiSession::send_vkey");
-    if (!dispatch_) throw ComException("Null session");
-
-    try {
-        _bstr_t method("SendVKey");
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
-        if (FAILED(hr)) {
-            trace.mark_error(fmt::format("SendVKey method not found: 0x{:08X}", hr));
-            throw ComException("SendVKey method not found", hr);
-        }
-
-        _variant_t vkey_var(vkey);
-        DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
-        if (FAILED(hr)) {
-            trace.mark_error(fmt::format("SendVKey invoke failed: 0x{:08X}", hr));
-            throw ComException("Failed to send virtual key", hr);
-        }
-
-        trace.mark_success();
-        spdlog::debug("Sent virtual key: {}", vkey);
-
-        // Brief wait for server to process key
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-    } catch (const ComException&) {
-        throw;
-    } catch (const std::exception& e) {
-        trace.mark_error(e.what());
-        throw ComException(std::string("Exception in send_vkey: ") + e.what());
+        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_POLL_INTERVAL_MS));
     }
 }
 
