@@ -689,12 +689,19 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
 
         // SAP can set Transaction to the requested code while reporting that
         // startup failed in an information dialog instead of the status bar.
+        // The active window is fetched once here and reused for the post-action status read.
+        std::string active_window_id;
+        bool window_known = false;
         try {
             auto window = session->get_active_window();
-            if (window && window->get_id().find("wnd[1]") != std::string::npos) {
+            if (window) {
+                active_window_id = window->get_id();
+                window_known = true;
+            }
+            if (window && active_window_id.find("wnd[1]") != std::string::npos) {
                 auto message = session->find_element_by_id("wnd[1]/usr/txtMESSTXT1");
                 if (message) {
-                    if (auto rejection = classify_transaction_modal(window->get_id(),
+                    if (auto rejection = classify_transaction_modal(active_window_id,
                                                                      message->get_text(), expected_tcode)) {
                         rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::high_resolution_clock::now() - start);
@@ -707,7 +714,8 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         }
 
         // 2. Check for error or abort messages on statusbar
-        const ActionStatus post_status = read_action_status(session);
+        const ActionStatus post_status = window_known ? read_action_status(session, active_window_id)
+                                                      : read_action_status(session);
         const std::string post_sbar_type = post_status.type;
         const std::string post_sbar_text = post_status.text;
         if (!post_sbar_text.empty()) {
@@ -808,12 +816,15 @@ ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
     try {
         auto session = current_session_;
         if (!session) return snapshot;
+        bool window_known = false;
         if (auto window = session->get_active_window()) {
             snapshot.window_id = window->get_id();
+            window_known = true;
             try { snapshot.title = window->get_title(); } catch (const std::exception&) {}
         }
         try { snapshot.transaction = session->get_transaction_code(); } catch (const std::exception&) {}
-        snapshot.statusbar_text = read_action_status(session).text;
+        snapshot.statusbar_text = (window_known ? read_action_status(session, snapshot.window_id)
+                                                : read_action_status(session)).text;
     } catch (const std::exception&) {
         // A partially readable snapshot is still useful for change detection.
     }

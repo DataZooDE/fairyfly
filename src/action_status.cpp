@@ -97,11 +97,17 @@ bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStat
     try {
         auto bar = session->find_element_by_id(id);
         if (!bar) return false;
+        // A status bar's type is known: skip the Type read, and read Text directly (the
+        // element text accessor would add DisplayedText and Type round trips).
+        bar->prime_identity("", "GuiStatusbar");
         // SAP status text is free text and can echo credentials ("Password: x rejected"): mask it at the source.
-        out.text = redact_sensitive_response_text(bar->get_text());
+        out.text = redact_sensitive_response_text(bar->get_string_property(L"Text"));
         out.type = bar->get_property_string(L"MessageType");
-        try { out.message_id = bar->get_property_string(L"MessageId"); } catch (const std::exception&) {}
-        try { out.message_number = bar->get_property_string(L"MessageNumber"); } catch (const std::exception&) {}
+        // An empty bar has no message id or number to read.
+        if (!out.text.empty() || !out.type.empty()) {
+            try { out.message_id = bar->get_property_string(L"MessageId"); } catch (const std::exception&) {}
+            try { out.message_number = bar->get_property_string(L"MessageNumber"); } catch (const std::exception&) {}
+        }
         return true;
     } catch (const std::exception&) {
         // Some screens and modal dialogs do not expose a status bar.
@@ -116,14 +122,23 @@ ActionStatus read_action_status(const ComGuiSessionPtr& session) {
     // fall back to the main window's.
     try {
         auto window = session->get_active_window();
-        if (window) {
-            const int index = WindowId(window->get_id()).get_index();
-            if (index > 0) {
-                ActionStatus dialog;
-                if (read_bar(session, "wnd[" + std::to_string(index) + "]/sbar", dialog) &&
-                    !dialog.text.empty())
-                    return dialog;
-            }
+        if (window) return read_action_status(session, window->get_id());
+    } catch (const std::exception&) {
+    }
+    ActionStatus main;
+    read_bar(session, "wnd[0]/sbar", main);
+    return main;
+}
+
+ActionStatus read_action_status(const ComGuiSessionPtr& session, const std::string& active_window_id) {
+    // Same lookup for a caller that already knows the active window: saves the ActiveWindow and Id reads.
+    try {
+        const int index = WindowId(active_window_id).get_index();
+        if (index > 0) {
+            ActionStatus dialog;
+            if (read_bar(session, "wnd[" + std::to_string(index) + "]/sbar", dialog) &&
+                !dialog.text.empty())
+                return dialog;
         }
     } catch (const std::exception&) {
     }

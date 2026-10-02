@@ -1443,7 +1443,7 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.data["screen_id"] = window->get_id();
         result.data["title"] = window->get_title();
         result.data["transaction"] = session_->get_transaction_code();
-        attach_status_bar(result, read_action_status(session_));
+        attach_status_bar(result, read_action_status(session_, window->get_id()));
         result.data["elements"] = search.matches;
         result.data["element_count"] = search.matches.size();
         result.data["scanned_count"] = search.scanned;
@@ -1495,7 +1495,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         result.data["screen_id"] = window->get_id();
         result.data["title"] = window->get_title();
         result.data["transaction"] = session_->get_transaction_code();
-        attach_status_bar(result, read_action_status(session_));
+        attach_status_bar(result, read_action_status(session_, window->get_id()));
         result.data["child_count"] = window->get_child_count();
 
         if (include_structure) {
@@ -1765,7 +1765,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["screen_id"] = window_id;
         result.data["title"] = window->get_title();
         result.data["transaction"] = session_->get_transaction_code();
-        attach_status_bar(result, read_action_status(session_));
+        attach_status_bar(result, read_action_status(session_, window_id));
         result.data["child_count"] = window->get_child_count();
 
         ElementMetadataExtractor::clear_cache();

@@ -14,6 +14,7 @@
 #include "include/read_only_guard.h"
 #include "include/action_argument_checks.h"
 #include "include/sensitive_data.h"
+#include "include/action_status.h"
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <exception>
@@ -2749,6 +2750,96 @@ TEST_CASE("start_transaction returns right after the invoke without a settle sle
     const auto returned = std::chrono::steady_clock::now();
     REQUIRE(node->start_transaction_calls == 1);
     REQUIRE(returned - node->start_transaction_at < std::chrono::milliseconds(20));
+}
+
+namespace {
+// Session with a main window bar and a dialog bar, as FakeNode graph for status bar read counts.
+struct StatusBarScene {
+    FakeNode *session, *bar0, *bar1, *window0, *window1;
+    explicit StatusBarScene(const wchar_t* active_id) {
+        auto make = [](const wchar_t* type, const wchar_t* id) {
+            auto* node = new FakeNode();
+            node->strings[L"Type"] = type;
+            node->strings[L"Id"] = id;
+            return node;
+        };
+        session = make(L"GuiSession", L"/app/con[0]/ses[0]");
+        bar0 = make(L"GuiStatusbar", L"/app/con[0]/ses[0]/wnd[0]/sbar");
+        bar1 = make(L"GuiStatusbar", L"/app/con[0]/ses[0]/wnd[1]/sbar");
+        window0 = make(L"GuiMainWindow", L"/app/con[0]/ses[0]/wnd[0]");
+        window1 = make(L"GuiModalWindow", L"/app/con[0]/ses[0]/wnd[1]");
+        for (auto* bar : {bar0, bar1}) {
+            bar->strings[L"Text"] = L"";
+            bar->strings[L"MessageType"] = L"";
+        }
+        session->find_by_id[L"wnd[0]/sbar"] = bar0;
+        session->find_by_id[L"wnd[1]/sbar"] = bar1;
+        session->dispatches[L"ActiveWindow"] = std::wstring(active_id) == L"wnd[1]" ? window1 : window0;
+    }
+    ~StatusBarScene() { for (auto* node : {session, bar0, bar1, window0, window1}) node->Release(); }
+    ComGuiSessionPtr wrapper() { return ComGuiSession::create(IDispatchPtr(session)); }
+    static constexpr const char* kWnd0 = "/app/con[0]/ses[0]/wnd[0]";
+    static constexpr const char* kWnd1 = "/app/con[0]/ses[0]/wnd[1]";
+};
+} // namespace
+
+TEST_CASE("An empty status bar is read in three round trips", "[com][status][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[0]");
+    const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd0);
+    REQUIRE(status.text.empty());
+    REQUIRE(status.type.empty());
+    REQUIRE(scene.bar0->reads[L"Text"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageType"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageId"] == 0);
+    REQUIRE(scene.bar0->reads[L"MessageNumber"] == 0);
+    REQUIRE(scene.bar0->reads[L"Type"] == 0);
+    REQUIRE(scene.bar0->reads[L"DisplayedText"] == 0);
+    REQUIRE(scene.session->reads[L"ActiveWindow"] == 0);
+}
+
+TEST_CASE("A status bar message keeps its JSON and costs two extra reads", "[com][status][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[0]");
+    scene.bar0->strings[L"Text"] = L"Job log displayed";
+    scene.bar0->strings[L"MessageType"] = L"S";
+    scene.bar0->strings[L"MessageId"] = L"BL";
+    scene.bar0->strings[L"MessageNumber"] = L"001";
+    const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd0);
+    REQUIRE(status_bar_json(status) == json{{"text", "Job log displayed"}, {"message_type", "S"},
+                                            {"message_id", "BL"}, {"message_number", "001"}});
+    REQUIRE(scene.bar0->reads[L"Type"] == 0);
+    REQUIRE(scene.bar0->reads[L"DisplayedText"] == 0);
+    REQUIRE(scene.bar0->reads[L"MessageId"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageNumber"] == 1);
+}
+
+TEST_CASE("The dialog status bar wins when non-empty, otherwise the main bar is used", "[com][status]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[1]");
+    scene.bar0->strings[L"Text"] = L"Main message";
+    scene.bar0->strings[L"MessageType"] = L"I";
+
+    SECTION("empty dialog bar falls back to the main bar") {
+        const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(status.text == "Main message");
+        REQUIRE(status.type == "I");
+    }
+    SECTION("non-empty dialog bar is preferred") {
+        scene.bar1->strings[L"Text"] = L"Dialog message";
+        scene.bar1->strings[L"MessageType"] = L"E";
+        const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(status.text == "Dialog message");
+        REQUIRE(status.type == "E");
+        REQUIRE(scene.bar0->reads[L"Text"] == 0);
+    }
+    SECTION("the overload with a known window id never reads ActiveWindow, the plain call does") {
+        (void)read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(scene.session->reads[L"ActiveWindow"] == 0);
+        const auto status = read_action_status(scene.wrapper());
+        REQUIRE(scene.session->reads[L"ActiveWindow"] == 1);
+        REQUIRE(status.text == "Main message");
+    }
 }
 
 TEST_CASE("read_tab selects, re-fetches the tab, restores, and reads grids inside it", "[screen][tabs][read_tab]") {
