@@ -265,7 +265,10 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                 if (!probe_grid) {
                     std::string content;
                     try {
-                        const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"), 1);
+                        const int handle = elem->get_property_int(L"Handle");
+                        const auto page = (!kGateGenericHtmlProbe || handle_hosts_browser(handle))
+                            ? read_html_viewer_text(handle, HtmlReadBudget{0, 0})
+                            : HtmlViewerText{};
                         content = page.text;
                         if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
                     } catch (const std::exception&) {}
