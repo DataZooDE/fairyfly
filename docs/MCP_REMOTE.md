@@ -187,11 +187,47 @@ fairyfly serves both generations of the MCP HTTP transport on the same URL:
 | Session | none: no `Mcp-Session-Id` is ever minted, each request is served on its own | none |
 | Result extras | none | `resultType: "complete"`; `tools/list` adds `ttlMs: 30000` and `cacheScope: "private"` |
 
-A request without `initialize` and without a version header is treated as legacy, so `tools/list` and
+A request without `initialize` and without any version hint is treated as legacy, so `tools/list` and
 `tools/call` work directly (this is what the curl examples use). `tools/list` is sorted by tool name in HTTP.
-The `Mcp-Method` and `Mcp-Name` headers, when present, must match the body; the `_meta` key names of the
-2026-07-28 draft are accepted both plain and with the `io.modelcontextprotocol/` prefix (unverified against a
-final spec, see [OPEN_WORK.md](OPEN_WORK.md)).
+
+### Stateless era rules (MCP 2026-07-28)
+
+Verified against the published specification on 2026-10-02
+([transports/streamable-http](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
+and the changelog of that revision). Every POST is classified first:
+
+- **modern** when `params._meta` carries a protocol version `>= 2026-07-28` (key `io.modelcontextprotocol/protocolVersion`,
+  or the plain `protocolVersion`), or the method is `server/discover`, or the `MCP-Protocol-Version` header is `2026-07-28`;
+- **legacy** otherwise (`initialize` handshakes of 2025-06-18 and 2025-11-25, requests without any version hint): the
+  behaviour is unchanged, no standard header is required (the spec allows servers to serve older clients without
+  the header, and fairyfly extends that to its legacy clients).
+
+For a modern request, after authentication and before any tool or provider call:
+
+| Rule | Failure |
+|---|---|
+| `MCP-Protocol-Version` is present and equals the body's `_meta` protocol version (a body without one is accepted; the header alone then decides) | 400, JSON-RPC -32020, `Header missing: MCP-Protocol-Version` / `Header mismatch: MCP-Protocol-Version header value 'x' does not match body value 'y'` |
+| the version is one we serve (checked first, also for legacy requests that name one) | 400, JSON-RPC -32022, `error.data.supported` lists the versions |
+| `Mcp-Method` is present and equals the body `method` (case-sensitive value) | 400, -32020, `Header missing: Mcp-Method` / `Header mismatch: Mcp-Method header value ...` |
+| `tools/call`, `resources/read`, `prompts/get`: `Mcp-Name` is present and equals `params.name` (`params.uri` for `resources/read`) | 400, -32020, `Header missing: Mcp-Name` / `Header mismatch: Mcp-Name header value ...` |
+| unknown method, `ping` and `logging/setLevel` (both removed in this revision) | **404**, JSON-RPC -32601 |
+| `_meta` keys given in both spellings with different values (`protocolVersion`, `clientInfo`, `clientCapabilities`, `logLevel`) | 400, JSON-RPC -32602 |
+
+- Header names are case-insensitive, values case-sensitive. A value that is not plain ASCII is sent as
+  `=?base64?<base64 of UTF-8>?=`; fairyfly decodes that sentinel (strict: standard padded base64, the closing `?=` is
+  required) before comparing, and an invalid sentinel is a `-32020` mismatch. Values are shortened to 100 characters and
+  control characters are escaped in error messages.
+- The prefixed `_meta` keys (`io.modelcontextprotocol/protocolVersion`, `clientInfo`, `clientCapabilities`, `logLevel`)
+  are the spec's names; the plain spellings are still accepted and the prefixed one wins. The 400 bodies are always JSON-RPC
+  error objects (id echoed), which is what a probing client inspects to recognise a modern server; a client may probe
+  with a modern request first and fall back to `initialize` on any other answer.
+- Every modern result carries `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]` (`name`,
+  `version`); `tools/list` adds `ttlMs: 30000`, `cacheScope: "private"` and a deterministic order. `notifications/*` and
+  client responses are answered 202 with no body (the spec defines no header rules for them). `logging/setLevel` is
+  gone in this era, so no `notifications/message` is ever emitted.
+- GET and DELETE are 405 (`Mcp-Session-Id` and `Last-Event-ID` are ignored: no session, no resumption); an invalid
+  `Origin` is 403; SSE responses carry `X-Accel-Buffering: no` and `: keep-alive` comments; closing the response
+  stream cancels the call.
 
 ### HTTP status and error mapping
 
@@ -204,7 +240,9 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 | 200 | tool result / JSON-RPC error | including tool errors (`SCOPE_DENIED`, `READ_ONLY`, `TCODE_DENIED`, `SYSTEM_DENIED`, `SYSTEM_UNKNOWN`, `CONNECTION_DENIED`, `RATE_LIMITED`, `READ_ONLY_REFUSED`, `SERVER_BUSY`, `CALL_TIMEOUT`) |
 | 202 | none | a notification or a response was posted |
 | 400 | JSON-RPC -32700 / -32600 | body is not valid JSON / not a valid JSON-RPC message |
-| 400 | JSON-RPC **-32020** | `Mcp-Method` or `Mcp-Name` header does not match the body |
+| 400 | JSON-RPC **-32020** | modern request: `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header missing, invalid or not matching the body |
+| 400 | JSON-RPC **-32602** | `_meta` key given twice (prefixed and plain) with different values |
+| 404 | JSON-RPC **-32601** | modern request: unknown method, `ping`, `logging/setLevel` |
 | 400 | JSON-RPC **-32022** | unsupported protocol version; `error.data.supported` lists ours |
 | 401 | `AUTH_REQUIRED` | no bearer token, or no token exists on the server yet (with `WWW-Authenticate: Bearer realm="fairyfly"`) |
 | 401 | `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED` | malformed/unknown/wrong secret (deliberately not distinguishable), expired, revoked |
@@ -351,8 +389,8 @@ CA=(--cacert fairyfly.pem)             # self-signed: `fairyfly mcp cert export 
 
 # legacy handshake
 curl -sS "${CA[@]}" "${H[@]}" -X POST "$URL" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'
-# stateless discovery
-curl -sS "${CA[@]}" "${H[@]}" -X POST "$URL" -d '{"jsonrpc":"2.0","id":2,"method":"server/discover"}'
+# stateless discovery (a modern request needs the standard headers)
+curl -sS "${CA[@]}" "${H[@]}" -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' -X POST "$URL" -d '{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}'
 # list tools (sorted by name)
 curl -sS "${CA[@]}" "${H[@]}" -X POST "$URL" -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
 # a read call
@@ -432,7 +470,7 @@ Run these from the Linux client (not on the VM) against the real HTTPS endpoint 
 | 3 | same with `-H "Authorization: Bearer ffy_00000000_bad"` | 401 `TOKEN_INVALID` |
 | 4 | `curl -i "${CA[@]}" https://host:8443/other` | 404 (http.sys, no JSON body) |
 | 5 | TLS: `openssl s_client -connect host:8443 -servername host </dev/null` and `curl` without `--cacert` | negotiated TLS 1.2 or 1.3, the expected subject; without `--cacert` the documented failure for a self-signed certificate; plain HTTP on the TLS port is not answered with a 2xx |
-| 6 | `initialize` (legacy), then `server/discover` with `MCP-Protocol-Version: 2026-07-28` | both answer 200; discover lists `supportedVersions` |
+| 6 | `initialize` (legacy, no extra header), then `server/discover` with `MCP-Protocol-Version: 2026-07-28` and `Mcp-Method: server/discover`; a modern `tools/list` without those headers | the first two answer 200 (discover lists `supportedVersions`); the headerless modern request is 400 `-32020` |
 | 7 | `tools/list` | 200; tool names sorted; `gui_element_fill` present only when the server is in write mode |
 | 8 | `tools/call gui_screen_read` (token with `screen`) | 200, text starts with `SAP screen data (untrusted` |
 | 9 | `tools/call gui_transaction_start` with a token lacking `transaction` | tool error `SCOPE_DENIED` |

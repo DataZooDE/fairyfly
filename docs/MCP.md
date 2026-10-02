@@ -272,7 +272,7 @@ The file is append-only by convention, not tamper-proof.
 ## Known limits
 
 - One SAP session is used per call; calls are serialized, one at a time (queue of 16).
-- Two transports: stdio (this page) and HTTP or HTTPS `POST /mcp` (`mcp --http`, http.sys, tokens, tray: see [MCP_REMOTE.md](MCP_REMOTE.md)). The stdio server speaks the legacy handshake only (2024-11-05 to 2025-11-25) and answers `server/discover` with -32601; the HTTP server serves 2026-07-28 (stateless), 2025-11-25 and 2025-06-18.
+- Two transports: stdio (this page) and HTTP or HTTPS `POST /mcp` (`mcp --http`, http.sys, tokens, tray: see [MCP_REMOTE.md](MCP_REMOTE.md)). The stdio server speaks the legacy handshake only (2024-11-05 to 2025-11-25) and answers `server/discover` with -32601; the HTTP server serves 2026-07-28 (stateless: standard headers `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` enforced, unknown methods 404, `serverInfo` in result `_meta`; rules in [MCP_REMOTE.md](MCP_REMOTE.md#stateless-era-rules-mcp-2026-07-28), verified against the published spec on 2026-10-02), 2025-11-25 and 2025-06-18 (legacy, no headers required).
 - HTTP `tools/list` is filtered by the caller's token: only tools of the token's scopes are listed (and, for a read-only token, no write tools), still sorted by name. Calls outside the scope are refused with `SCOPE_DENIED` regardless of what was listed. Stdio has no tokens and lists everything the server mode allows.
 - Results are text or a PNG image; there are no MCP resources or prompts.
 - Verify against the source when in doubt: `src/mcp/`, `src/commands/mcp_command.cpp`, and `fairyfly mcp --help`.
