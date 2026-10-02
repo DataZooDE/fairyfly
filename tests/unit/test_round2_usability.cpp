@@ -4,6 +4,7 @@
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
 #include "include/cli_handler.h"
+#include "include/screenshot_handler.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -308,5 +309,91 @@ TEST_CASE("screen find Markdown shows the tooltip", "[tooltip][markdown][round2]
     CHECK(markdown.find("Tooltip: Display") != std::string::npos);
     const auto as_json = cli::format_output(result, cli::OutputFormat::Json);
     CHECK(as_json.find("\"tooltip\": \"Display\"") != std::string::npos);
+}
+
+// ---- Item 4: screenshot crop and scale ---------------------------------------------------------------
+
+TEST_CASE("crop is in native pixels and applied before scaling", "[screenshot][crop][round2]") {
+    cli::ScreenshotOptions options;
+    options.crop_x = 100;
+    options.crop_y = 50;
+    options.crop_width = 400;
+    options.crop_height = 200;
+    options.scale = "0.5";
+    const auto plan = ScreenshotHandler::plan_capture_geometry(1000, 800, options);
+    CHECK(plan.cropped);
+    CHECK(plan.crop_x == 100);
+    CHECK(plan.crop_width == 400);
+    CHECK(plan.output_width == 200);
+    CHECK(plan.output_height == 100);
+    const auto info = ScreenshotHandler::geometry_json(plan);
+    CHECK(info.at("native_size") == json({{"width", 1000}, {"height", 800}}));
+    CHECK(info.at("crop") == json({{"x", 100}, {"y", 50}, {"width", 400}, {"height", 200}}));
+    CHECK(info.at("output_size") == json({{"width", 200}, {"height", 100}}));
+    CHECK_FALSE(info.contains("crop_clamped"));
+}
+
+TEST_CASE("an integer scale is a target width of the cropped image", "[screenshot][crop][round2]") {
+    cli::ScreenshotOptions options;
+    options.crop_x = 0;
+    options.crop_y = 0;
+    options.crop_width = 600;
+    options.crop_height = 300;
+    options.scale = "300";
+    const auto plan = ScreenshotHandler::plan_capture_geometry(1000, 800, options);
+    CHECK(plan.output_width == 300);
+    CHECK(plan.output_height == 150);
+}
+
+TEST_CASE("without crop or scale the output is the native size", "[screenshot][crop][round2]") {
+    const auto plan = ScreenshotHandler::plan_capture_geometry(1280, 720, cli::ScreenshotOptions{});
+    CHECK_FALSE(plan.cropped);
+    CHECK(plan.output_width == 1280);
+    const auto info = ScreenshotHandler::geometry_json(plan);
+    CHECK_FALSE(info.contains("crop"));
+    CHECK(info.at("output_size") == json({{"width", 1280}, {"height", 720}}));
+}
+
+TEST_CASE("a crop completely outside the image is INVALID_ARGUMENT material with the native size", "[screenshot][crop][round2]") {
+    cli::ScreenshotOptions options;
+    options.crop_x = 1000;  // as if taken from a scaled-up picture
+    options.crop_y = 10;
+    options.crop_width = 100;
+    options.crop_height = 100;
+    try {
+        ScreenshotHandler::plan_capture_geometry(800, 600, options);
+        FAIL("expected std::invalid_argument");
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        CHECK(message.find("800x600") != std::string::npos);
+        CHECK(message.find("completely outside") != std::string::npos);
+        CHECK(message.find("native") != std::string::npos);
+    }
+    options.crop_x = 0;
+    options.crop_y = 600;
+    CHECK_THROWS_AS(ScreenshotHandler::plan_capture_geometry(800, 600, options), std::invalid_argument);
+}
+
+TEST_CASE("a crop that overhangs the image is clamped and says so", "[screenshot][crop][round2]") {
+    cli::ScreenshotOptions options;
+    options.crop_x = 700;
+    options.crop_y = 500;
+    options.crop_width = 300;
+    options.crop_height = 300;
+    const auto plan = ScreenshotHandler::plan_capture_geometry(800, 600, options);
+    CHECK(plan.crop_width == 100);
+    CHECK(plan.crop_height == 100);
+    CHECK(plan.crop_clamped);
+    CHECK(ScreenshotHandler::geometry_json(plan).at("crop_clamped") == true);
+}
+
+TEST_CASE("a scale that would produce an empty image is rejected", "[screenshot][crop][round2]") {
+    cli::ScreenshotOptions options;
+    options.crop_x = 0;
+    options.crop_y = 0;
+    options.crop_width = 10;
+    options.crop_height = 10;
+    options.scale = "0.01";
+    CHECK_THROWS_AS(ScreenshotHandler::plan_capture_geometry(800, 600, options), std::invalid_argument);
 }
 

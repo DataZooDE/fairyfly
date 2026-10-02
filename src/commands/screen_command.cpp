@@ -67,11 +67,13 @@ public:
         capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout");
         capture_cmd_->add_option("--format", screenshot_format_, "Output format: png, base64")
             ->check(CLI::IsMember({"png", "base64"}));
-        capture_cmd_->add_option("--scale", screenshot_scale_, "Scale factor (0.0-1.0) or width in pixels");
-        capture_cmd_->add_option("--x", screenshot_x_, "X position for subsection capture (pixels)");
-        capture_cmd_->add_option("--y", screenshot_y_, "Y position for subsection capture (pixels)");
-        capture_cmd_->add_option("--width", screenshot_width_, "Width for subsection capture (pixels)");
-        capture_cmd_->add_option("--height", screenshot_height_, "Height for subsection capture (pixels)");
+        capture_cmd_->add_option("--scale", screenshot_scale_,
+            "Scale factor (0.0-1.0) or width in pixels, applied AFTER the crop to the cropped image");
+        capture_cmd_->add_option("--x", screenshot_x_, "Crop X in NATIVE window pixels (never scaled; applied before --scale)");
+        capture_cmd_->add_option("--y", screenshot_y_, "Crop Y in NATIVE window pixels (never scaled; applied before --scale)");
+        capture_cmd_->add_option("--width", screenshot_width_, "Crop width in NATIVE window pixels (all four crop options together)");
+        capture_cmd_->add_option("--height", screenshot_height_, "Crop height in NATIVE window pixels (all four crop options together). "
+            "A crop completely outside the window is INVALID_ARGUMENT naming the native size; the result reports native_size, crop and output_size");
         capture_cmd_->add_flag("--show", screenshot_show_, "Display screenshot in window after capture");
         capture_cmd_->add_option("--connection", capture_conn_id_, "Connection ID to use");
 

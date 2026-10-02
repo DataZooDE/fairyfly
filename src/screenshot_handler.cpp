@@ -6,6 +6,7 @@
 #include "include/base64.h"
 #include "include/string_utils.h"
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fmt/format.h>
@@ -59,6 +60,59 @@ void ScreenshotHandler::parse_scale_parameter(const std::string& scale, int orig
         }
         new_height = static_cast<int>(orig_height * (new_width / static_cast<float>(orig_width)));
     }
+}
+
+CaptureGeometry ScreenshotHandler::plan_capture_geometry(int native_width, int native_height,
+                                                          const cli::ScreenshotOptions& opts) {
+    validate_subsection_complete(opts);
+    CaptureGeometry plan;
+    plan.native_width = native_width;
+    plan.native_height = native_height;
+    plan.output_width = native_width;
+    plan.output_height = native_height;
+    if (opts.crop_x.has_value()) {
+        const int x = opts.crop_x.value();
+        const int y = opts.crop_y.value();
+        const int width = opts.crop_width.value();
+        const int height = opts.crop_height.value();
+        if (x >= native_width || y >= native_height) {
+            throw std::invalid_argument(fmt::format(
+                "Crop rectangle x={} y={} width={} height={} lies completely outside the screenshot: the native "
+                "window size is {}x{} pixels (crop is always in native pixels and applied before scaling)",
+                x, y, width, height, native_width, native_height));
+        }
+        plan.cropped = true;
+        plan.crop_x = x;
+        plan.crop_y = y;
+        plan.crop_width = std::min(width, native_width - x);
+        plan.crop_height = std::min(height, native_height - y);
+        plan.crop_clamped = plan.crop_width != width || plan.crop_height != height;
+        plan.output_width = plan.crop_width;
+        plan.output_height = plan.crop_height;
+    }
+    if (!opts.scale.empty()) {
+        parse_scale_parameter(opts.scale, plan.output_width, plan.output_height, plan.output_width,
+                              plan.output_height);
+        if (plan.output_width < 1 || plan.output_height < 1) {
+            throw std::invalid_argument(fmt::format(
+                "Scale '{}' would shrink the {}x{} image to {}x{} pixels", opts.scale,
+                plan.cropped ? plan.crop_width : native_width, plan.cropped ? plan.crop_height : native_height,
+                plan.output_width, plan.output_height));
+        }
+    }
+    return plan;
+}
+
+json ScreenshotHandler::geometry_json(const CaptureGeometry& plan) {
+    json out;
+    out["native_size"] = {{"width", plan.native_width}, {"height", plan.native_height}};
+    if (plan.cropped) {
+        out["crop"] = {{"x", plan.crop_x}, {"y", plan.crop_y},
+                       {"width", plan.crop_width}, {"height", plan.crop_height}};
+        if (plan.crop_clamped) out["crop_clamped"] = true;
+    }
+    out["output_size"] = {{"width", plan.output_width}, {"height", plan.output_height}};
+    return out;
 }
 
 std::vector<uint8_t> ScreenshotHandler::extract_safearray_bytes(VARIANT& var) {
@@ -119,11 +173,13 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         std::string window_title = window->get_title();
 
         // Determine if we need CImg processing
+        // A crop always goes through the processing path: the rectangle is checked against the real native
+        // size there (SAP's own HardCopy subsection cannot report it and can silently produce a blank image).
         bool needs_processing = options.show ||
                                !options.scale.empty() ||
                                options.format == "base64" ||
                                options.output_file == "-" ||
-                               (options.crop_x.has_value() && (options.format == "base64" || options.output_file == "-"));
+                               options.crop_x.has_value();
 
         if (!needs_processing && !options.output_file.empty() && options.output_file != "-") {
             // Fast path: Direct HardCopy to file with subsection support
@@ -246,6 +302,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             spdlog::info("Screenshot saved directly to: {}", filename);
         } else {
             // Processing path: Use HardCopyToMemory + CImg
+            json capture_geometry = json::object();
             VARIANT image_type;
             VariantInit(&image_type);
             image_type.vt = VT_I4;
@@ -307,35 +364,20 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
 
             spdlog::debug("Loaded PNG into CImg: {}x{} pixels", img.width(), img.height());
 
-            // Apply cropping if requested
-            if (options.crop_x.has_value()) {
-                int x1 = options.crop_x.value();
-                int y1 = options.crop_y.value();
-                int x2 = x1 + options.crop_width.value() - 1;
-                int y2 = y1 + options.crop_height.value() - 1;
-
-                // Validate crop bounds
-                if (x1 < 0 || y1 < 0 || x2 < x1 || y2 < y1) {
-                    throw std::invalid_argument(
-                        fmt::format("Invalid crop bounds: ({},{}) to ({},{})", x1, y1, x2, y2));
-                }
-                if (x2 >= img.width() || y2 >= img.height()) {
-                    throw std::invalid_argument(
-                        fmt::format("Crop bounds exceed image dimensions: crop({},{}) to ({},{}) exceeds {}x{}",
-                                   x1, y1, x2, y2, img.width(), img.height()));
-                }
-
-                img.crop(x1, y1, x2, y2);
+            // Crop (native pixels) first, then scale: plan both before touching the image so a rectangle
+            // outside the screenshot is an error with the native size, never a blank image.
+            const CaptureGeometry geometry = plan_capture_geometry(img.width(), img.height(), options);
+            if (geometry.cropped) {
+                img.crop(geometry.crop_x, geometry.crop_y, geometry.crop_x + geometry.crop_width - 1,
+                         geometry.crop_y + geometry.crop_height - 1);
                 spdlog::debug("Cropped to: {}x{} pixels", img.width(), img.height());
             }
-
-            // Apply scaling if requested
             if (!options.scale.empty()) {
-                int new_width, new_height;
-                parse_scale_parameter(options.scale, img.width(), img.height(), new_width, new_height);
-                img.resize(new_width, new_height, -100, -100, constants::INTERPOLATION_LANCZOS);
-                spdlog::debug("Scaled to: {}x{} pixels", new_width, new_height);
+                img.resize(geometry.output_width, geometry.output_height, -100, -100,
+                           constants::INTERPOLATION_LANCZOS);
+                spdlog::debug("Scaled to: {}x{} pixels", geometry.output_width, geometry.output_height);
             }
+            capture_geometry = geometry_json(geometry);
 
             // Display if requested
             if (options.show) {
@@ -393,6 +435,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             }
 
             result.status = Result::Status::Success;
+            for (const auto& [key, value] : capture_geometry.items()) result.data[key] = value;
         }
 
         auto end = std::chrono::high_resolution_clock::now();

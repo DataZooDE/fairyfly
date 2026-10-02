@@ -1675,7 +1675,7 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
         for (auto& tab_data : screen_data["tabs_content"]) {
             if (!tab_data.is_object()) continue;
-            apply_screen_filters(tab_data, filters);
+            apply_screen_filters_impl(tab_data, filters);
             if (!tab_data.contains("suppressed")) continue;
             for (const char* key : {"grid_ids", "tree_ids"}) {
                 for (const auto& id : tab_data["suppressed"].value(key, json::array())) {
@@ -2186,6 +2186,8 @@ std::string format_output(const Result& result, OutputFormat format, bool verbos
                         oss << "  - Name: " << escape(match.value("name", "")) << "\n";
                     if (match.contains("text") && match["text"].is_string())
                         oss << "  - Text: " << escape(match["text"].get<std::string>()) << "\n";
+                    if (match.contains("tooltip") && match["tooltip"].is_string())
+                        oss << "  - Tooltip: " << escape(match["tooltip"].get<std::string>()) << "\n";
                 }
                 return oss.str();
             }

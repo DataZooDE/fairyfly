@@ -128,7 +128,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_screen_find` | Find controls by id/name/type (buttons, tabs and checkboxes also return `tooltip`) | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
 | `gui_element_get` | One element's properties/value (`list_nodes` for trees; buttons/tabs/checkboxes add `tooltip`; `ELEMENT_ON_INACTIVE_TAB` for an element on a tab that is not selected, `activate_tab` selects it for the read and restores the previous tab) | `element`, `list_nodes`, `activate_tab` | allowed | RO |
 | `gui_menu_list` | List the menu bar tree | `window` | allowed | RO |
-| `gui_screen_capture` | PNG screenshot as an image block | `scale` (number), `x`, `y`, `width`, `height` | allowed | RO |
+| `gui_screen_capture` | PNG screenshot as an image block; the crop (`x`, `y`, `width`, `height`) is always in native window pixels and applied before `scale`; the caption names the native size and the crop, a crop completely outside the window is INVALID_ARGUMENT with the native size | `scale` (number), `x`, `y`, `width`, `height` | allowed | RO |
 | `gui_credentials_list` | Names of stored credentials, never passwords | none | allowed | RO |
 | `gui_element_click` | Click a button, tab, checkbox, grid cell, tree node | `element`, `wait_for_window`, `row`, `column`, `doubleclick`, `node_key`, `tree_action` | state-changing controls refused (READ_ONLY_REFUSED) | D |
 | `gui_key_send` | Send Enter, F-keys, ctrl+s, raw VKey | `key`, `window` | only allowlisted keys | D |
