@@ -4,6 +4,7 @@
 #include "include/mcp/http_server.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <iostream>
@@ -218,9 +219,29 @@ private:
     bool failed_ = false;
 };
 
-enum class BodyResult { Ok, TooLarge, Error };
+enum class BodyResult { Ok, TooLarge, Error, Slow, Busy };
+
+// A caller with a valid token must not be able to pin every receive worker with a drip-fed upload: the kernel
+// EntityBody timer restarts whenever bytes arrive, so we bound the TOTAL time of one body and the number of
+// workers that may sit in body reads at the same time (the rest of the pool stays free for new requests).
+constexpr std::chrono::seconds kBodyTotalDeadline{20};
+constexpr int kMaxConcurrentBodyReaders = 8;
+std::atomic<int> g_body_readers{0};
+
+struct BodyReaderSlot {
+    bool acquired;
+    BodyReaderSlot() : acquired(g_body_readers.fetch_add(1) < kMaxConcurrentBodyReaders) {
+        if (!acquired) g_body_readers.fetch_sub(1);
+    }
+    ~BodyReaderSlot() { if (acquired) g_body_readers.fetch_sub(1); }
+    BodyReaderSlot(const BodyReaderSlot&) = delete;
+    BodyReaderSlot& operator=(const BodyReaderSlot&) = delete;
+};
 
 BodyResult read_body(const Conn& c, std::size_t cap, std::string& out) {
+    BodyReaderSlot slot;
+    if (!slot.acquired) return BodyResult::Busy;
+    const auto deadline = std::chrono::steady_clock::now() + kBodyTotalDeadline;
     std::vector<char> buf(kBodyReadChunk);
     while (true) {
         ULONG got = 0;
@@ -231,6 +252,7 @@ BodyResult read_body(const Conn& c, std::size_t cap, std::string& out) {
                 out.append(buf.data(), got);
             }
             if (rc == ERROR_HANDLE_EOF) return BodyResult::Ok;
+            if (std::chrono::steady_clock::now() > deadline) return BodyResult::Slow;
             continue;
         }
         return BodyResult::Error;
@@ -340,6 +362,10 @@ void McpHttpServer::Impl::handle_request(const HTTP_REQUEST& req) {
                 responded = true;
                 if (result == BodyResult::TooLarge)
                     send_response(conn, json_error(413, "PAYLOAD_TOO_LARGE", "request body too large"), true, false, false);
+                else if (result == BodyResult::Slow)
+                    send_response(conn, json_error(408, "REQUEST_TIMEOUT", "request body took too long"), true, false, false);
+                else if (result == BodyResult::Busy)
+                    send_response(conn, json_error(503, "BUSY", "too many uploads in progress, retry shortly"), true, false, false);
                 else
                     send_response(conn, json_error(400, "BAD_REQUEST", "request body could not be read"), true, false, false);
                 return;
