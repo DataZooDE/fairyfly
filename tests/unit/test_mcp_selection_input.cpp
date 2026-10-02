@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -36,6 +37,8 @@ audit::SapFacts facts_at(const std::string& tcode, const std::string& program, c
     audit::SapFacts f{"A4H", "001", "USER", tcode};
     f.program = program;
     f.screen_number = screen;
+    f.connection_id = 1;
+    f.session_identity = "ses-1";
     return f;
 }
 
@@ -60,6 +63,18 @@ struct Env {
     bool mode_hook = true;
     std::optional<audit::SapFacts> facts;
     std::function<Result(const Argv&)> on_call;
+    int auto_connection = 1;  // what automatic single-connection resolution picks when no connection is given
+    std::map<int, std::string> session_of;  // identity override per connection id (default "ses-<id>")
+
+    /// Like CommandHandler::audit_facts_for_connection: the facts carry the connection id the lookup really resolved.
+    std::optional<audit::SapFacts> facts_for(std::optional<int> c) {
+        if (!facts) return std::nullopt;
+        audit::SapFacts f = *facts;
+        const int id = c ? *c : auto_connection;
+        f.connection_id = id;
+        f.session_identity = session_of.count(id) ? session_of[id] : "ses-" + std::to_string(id);
+        return f;
+    }
 
     std::unique_ptr<CommandDispatcher> make(bool server_read_only = true) {
         Policy policy;
@@ -73,7 +88,7 @@ struct Env {
                 return on_call ? on_call(argv) : ok_res();
             },
             policy, [this](const McpCallRecord& r) { records.push_back(r); });
-        d->set_sap_facts_provider([this](std::optional<int>) { return facts; });
+        d->set_sap_facts_provider([this](std::optional<int> c) { return facts_for(c); });
         d->set_read_only_override([this](bool ro) { events.push_back(ro); });
         if (mode_hook)
             d->set_selection_input_override([this](bool on, const std::string& program, const std::string& screen) {
@@ -253,8 +268,10 @@ TEST_CASE("selection input: the record is bound to the connection of the start",
     env.calls.clear();
     CHECK(has_code(d->call_tool("gui_element_fill", other, ctx_for(p)), "INPUT_SCREEN_DENIED"));
     CHECK(env.calls.empty());
-    // an implicit connection is another target than the explicit 1 as well
+    // an implicit connection that resolves to another connection than the explicit 1 is another target as well
+    env.auto_connection = 2;
     CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    env.auto_connection = 1;
     // the same connection works (a denied call does not clear a record whose screen still matches)
     CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "SU01"}, {"connection", 1}}, ctx_for(p)).is_error);
     json same = fill();
@@ -637,4 +654,69 @@ TEST_CASE("selection input: audit records input_allowed, the INPUT_* codes, and 
     CHECK_FALSE(rows[3].contains("input_allowed"));
     CHECK(rows[3]["error_code"] == "INPUT_TARGET_DENIED");
     CHECK(all.find(typed) == std::string::npos);
+}
+
+TEST_CASE("selection input: an automatically resolved start binds typing to the connection it really used", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    // no connection argument, no sticky default: the lookup resolves the only cached connection (1)
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    env.calls.clear();
+    CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+
+    // the only cached connection becomes another one (B) that shows the same transaction/program/screen
+    env.auto_connection = 2;
+    env.calls.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK(env.calls.empty());
+    env.auto_connection = 1;
+
+    // same connection id, but re-attached to another SAP session: denied as well
+    env.session_of[1] = "ses-other";
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    env.session_of.clear();
+    CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+}
+
+TEST_CASE("selection input: the connection id of the start result wins over the pre-call guess", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    env.auto_connection = 3;
+    env.on_call = [&](const Argv& argv) {
+        if (argv[0] == "transaction") {
+            env.facts = facts_at("SU01", "SAPLSUU5", "100");
+            Result r = ok_res();
+            r.data = {{"connection_id", 3}};
+            return r;
+        }
+        return ok_res();
+    };
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+    json explicit_same = fill();
+    explicit_same["connection"] = 3;
+    CHECK_FALSE(d->call_tool("gui_element_fill", explicit_same, ctx_for(p)).is_error);
+    json explicit_other = fill();
+    explicit_other["connection"] = 4;
+    CHECK(has_code(d->call_tool("gui_element_fill", explicit_other, ctx_for(p)), "INPUT_SCREEN_DENIED"));
+}
+
+TEST_CASE("selection input: unknown connection or session identity on either side denies", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    // the lookup cannot tell the session (identity empty) -> unknown at fill time
+    env.session_of[1] = "";
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+
+    // unknown identity at start time records nothing
+    Env env2;
+    auto d2 = env2.make(true);
+    env2.session_of[1] = "";
+    CHECK_FALSE(start_su01(*d2, p).is_error);
+    env2.session_of.clear();
+    CHECK(has_code(d2->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
 }

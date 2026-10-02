@@ -72,10 +72,31 @@ TEST_CASE("A fresh confirmation W after a submitting action is not a success", "
         CHECK(result->error.at("message") == text);
         CHECK(result->error.at("needs_confirmation") == true);
         CHECK(result->error.at("hint").get<std::string>().find("gui_key_send enter") != std::string::npos);
-        // not a submitting action, or the same message was already there: no confirmation error
+        // not a submitting action: no confirmation error
         CHECK_FALSE(classify_action_status(before, after, button, false).has_value());
-        CHECK_FALSE(classify_action_status(after, after, button, true).has_value());
+        CHECK_FALSE(classify_action_status(after, after, button, false).has_value());
+        // the same text again after a submitting action may be the submission's own prompt: still unverified
+        auto repeated = classify_action_status(after, after, button, true);
+        REQUIRE(repeated.has_value());
+        CHECK(repeated->error.at("code") == "ACTION_OUTCOME_UNVERIFIED");
+        CHECK(repeated->error.at("needs_confirmation") == true);
+        CHECK(repeated->error.at("hint").get<std::string>().find("identical") != std::string::npos);
     }
+    // question-style prompts, EN and DE
+    for (const char* text : {"Do you want to continue?", "Would you like to save the changes", "Continue? (Y/N)", "Weiter? (J/N)",
+                             "Are you sure", "Möchten Sie fortfahren", "Wollen Sie die Daten sichern", "Trotzdem buchen",
+                             "Sind Sie sicher", "Moechten Sie speichern", "Fortfahren"}) {
+        INFO(text);
+        CHECK(warning_needs_confirmation(text));
+        auto result = classify_action_status({"", ""}, {text, "W"}, button, true);
+        REQUIRE(result.has_value());
+        CHECK(result->error.at("code") == "ACTION_OUTCOME_UNVERIFIED");
+        CHECK(result->error.at("needs_confirmation") == true);
+        CHECK_FALSE(classify_action_status({"", ""}, {text, "W"}, button, false).has_value());
+    }
+    // a repeated ST22-style warning stays a success (not a confirmation prompt)
+    const ActionStatus st22{"No short dumps match the selection criteria", "W"};
+    CHECK_FALSE(classify_action_status(st22, st22, button, true).has_value());
     // ordinary W (ST22 text) stays a success, E and A messages stay failures
     CHECK_FALSE(classify_action_status(before, {"No short dumps match the selection criteria", "W"}, button, true).has_value());
     auto error = classify_action_status(before, {"Enter a valid date", "E"}, button, true);

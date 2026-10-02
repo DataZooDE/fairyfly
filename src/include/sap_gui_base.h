@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <comdef.h>
 
+#include "include/property_read.h"
+
 namespace fairyfly {
 namespace sap {
 
@@ -50,6 +52,13 @@ protected:
 public:
     /// Get string property from COM object
     std::string get_string_property(const wchar_t* name) const;
+
+    /// STRICT reads (see property_read.h): a missing property is NotSupported, every other failure is Failed; nothing is
+    /// swallowed into an empty string. Booleans come back as "true"/"false".
+    PropertyRead read_string_property_strict(const wchar_t* name) const;
+    PropertyRead read_bool_property_strict(const wchar_t* name) const;
+    /// Text of a sub-object property (e.g. LeftLabel -> Text): NotSupported when the property is unknown or the object is Nothing.
+    PropertyRead read_object_text_strict(const wchar_t* object_property, const wchar_t* text_property) const;
 
     /// Get integer property from COM object
     int get_int_property(const wchar_t* name) const;
