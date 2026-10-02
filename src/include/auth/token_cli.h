@@ -22,6 +22,7 @@ struct TokenCliArgs {
     std::string expires;                  ///< --expires 30d | 2026-12-31
     bool read_only_flag = false;          ///< --read-only
     bool allow_navigation = false;        ///< --allow-navigation (needs --tcode)
+    bool allow_selection_input = false;   ///< --allow-selection-input (needs --tcode and a read-only token)
     bool yes = false;                     ///< --yes (confirms a wildcard scope, or a token delete)
 };
 

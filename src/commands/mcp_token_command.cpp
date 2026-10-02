@@ -32,6 +32,8 @@ public:
         create_->add_option("--tcode", args_.tcodes, "Allowed T-codes, e.g. SE16,SM* (globs allowed)")->delimiter(',');
         create_->add_flag("--allow-navigation", args_.allow_navigation,
                           "With --tcode: also allow gui_menu_select and navigating keys (F3, F12, ...); default is fail-closed");
+        create_->add_flag("--allow-selection-input", args_.allow_selection_input,
+                          "Read-only token with --tcode: may type into selection fields, but only on the initial screen of the transaction (no cells, no password fields, no commit)");
         create_->add_option("--connections", args_.connections,
                             "Allowed saved connections / SAP Logon entry names, e.g. DEV,QA* (globs allowed; no spaces)")->delimiter(',');
         create_->add_option("--ip", args_.ips, "Allowed client addresses or CIDR blocks")->delimiter(',');

@@ -2,7 +2,7 @@
 // Named bearer tokens for the remote MCP endpoint.
 //   token   = ffy_<id>_<secret>      id = 8 hex chars, secret = 32 CSPRNG bytes as base64url (43 chars)
 //   stored  = per token NAME one compact JSON metadata blob (short keys; id, name, sha256(secret), created, expires,
-//             scopes, sap_systems, tcodes, rate_per_minute, allowed_ips, read_only, revoked). A record that does not
+//             scopes, sap_systems, tcodes, rate_per_minute, allowed_ips, read_only, allow_selection_input, revoked). A record that does not
 //             fit one Credential Manager value is split over chunk entries NAME#1..n written BEFORE the head entry
 //             NAME (which holds count, length and sha256 of the payload). Old long-key single entries still load.
 // The secret itself is NEVER stored; it is returned once by create()/rotate().
@@ -44,6 +44,7 @@ struct TokenMeta {
     std::vector<std::string> allowed_ips;  ///< addresses or CIDR blocks; empty = any
     bool read_only = true;
     bool allow_navigation = false;         ///< only meaningful with tcodes: keeps gui_menu_select and navigating keys usable
+    bool allow_selection_input = false;    ///< read-only token with tcodes: may type into selection fields on the INITIAL screen of its transaction
     bool revoked = false;
 
     bool has_all_scopes() const;
@@ -69,6 +70,7 @@ struct NewToken {
     std::optional<TimePoint> expires;
     bool read_only = true;
     bool allow_navigation = false;         ///< --allow-navigation (needs tcodes)
+    bool allow_selection_input = false;    ///< --allow-selection-input (needs tcodes and read_only)
 };
 
 /// create()/rotate() result: the ONLY place the plain token exists.

@@ -1122,3 +1122,132 @@ TEST_CASE("auth: allow_navigation needs a T-code allowlist", "[auth][token][navi
     result = run_token_action(args, store);
     CHECK(result.data["tokens"][0]["allow_navigation"] == true);
 }
+
+// ---- allow_selection_input (typing on the initial screen for read-only tokens) -------------------
+TEST_CASE("auth: allow_selection_input round-trips, defaults to false, is listed and survives rotate", "[auth][token][selection-input]") {
+    Env env;
+    NewToken t;
+    t.scopes = {"screen", "element", "session"};
+    t.tcodes = {"SU01"};
+    t.read_only = true;
+    t.allow_selection_input = true;
+    const auto on = env.create("on", t);
+    t.allow_selection_input = false;
+    const auto off = env.create("off", t);
+
+    auto store = env.store();
+    const auto listed = store.list();
+    REQUIRE(listed.size() == 2);
+    CHECK(listed[1].allow_selection_input);
+    CHECK_FALSE(listed[0].allow_selection_input);
+    CHECK(listed[1].to_public_json()["allow_selection_input"] == true);
+    CHECK(listed[0].to_public_json()["allow_selection_input"] == false);
+    CHECK(listed[1].to_compact_json()["si"] == true);
+    CHECK_FALSE(listed[0].to_compact_json().contains("si"));
+
+    CHECK(env.auth->authenticate(request_with(on.token)).principal.allow_selection_input);
+    CHECK_FALSE(env.auth->authenticate(request_with(off.token)).principal.allow_selection_input);
+    const auto rotated = store.rotate("on");
+    CHECK(store.list()[1].allow_selection_input);
+    CHECK(env.auth->authenticate(request_with(rotated.token)).principal.allow_selection_input);
+}
+
+TEST_CASE("auth: allow_selection_input survives chunked storage, legacy records read as false, malformed value is unusable",
+          "[auth][token][selection-input][chunks]") {
+    Env env;
+    NewToken t = huge_token(200);
+    t.tcodes = {"SU01"};
+    t.read_only = true;
+    t.allow_selection_input = true;
+    const auto created = env.create("big", t);
+    CHECK(env.tokens->size() > 1);
+    auto store = env.store();
+    REQUIRE(store.list().size() == 1);
+    CHECK(store.list()[0].allow_selection_input);
+    CHECK(env.auth->authenticate(request_with(created.token)).principal.allow_selection_input);
+
+    Env legacy;
+    const auto old = legacy.create("old");
+    auto meta = legacy.store().list()[0];
+    meta.tcodes = {"SU01"};
+    auto stored = meta.to_stored_json();
+    stored.erase("allow_selection_input");
+    legacy.tokens->put("old", stored.dump());
+    REQUIRE(legacy.store().list().size() == 1);
+    CHECK_FALSE(legacy.store().list()[0].allow_selection_input);
+    auto compact = meta.to_compact_json();
+    compact.erase("si");
+    legacy.tokens->put("old", compact.dump());
+    CHECK_FALSE(legacy.store().list()[0].allow_selection_input);
+    CHECK(legacy.auth->authenticate(request_with(old.token)).ok);
+
+    // malformed value: the record is unusable (skipped), never silently "off"
+    compact["si"] = "yes";
+    legacy.tokens->put("old", compact.dump());
+    CHECK(legacy.store().list().empty());
+    CHECK_FALSE(legacy.auth->authenticate(request_with(old.token)).ok);
+    stored["allow_selection_input"] = 1;
+    legacy.tokens->put("old", stored.dump());
+    CHECK(legacy.store().list().empty());
+}
+
+TEST_CASE("auth: an allow_selection_input record without tcodes or read-only is inert in the principal", "[auth][token][selection-input]") {
+    Env env;
+    const auto created = env.create("hand");
+    auto meta = env.store().list()[0];
+    meta.allow_selection_input = true;  // hand-edited: no allowlist
+    env.tokens->put("hand", meta.to_compact_json().dump());
+    CHECK_FALSE(env.auth->authenticate(request_with(created.token)).principal.allow_selection_input);
+    meta.tcodes = {"SU01"};
+    meta.read_only = false;
+    env.tokens->put("hand", meta.to_compact_json().dump());
+    CHECK_FALSE(env.auth->authenticate(request_with(created.token)).principal.allow_selection_input);
+    meta.read_only = true;
+    env.tokens->put("hand", meta.to_compact_json().dump());
+    CHECK(env.auth->authenticate(request_with(created.token)).principal.allow_selection_input);
+}
+
+TEST_CASE("auth: allow_selection_input needs --tcode and a read-only token", "[auth][token][selection-input]") {
+    Env env;
+    auto store = env.store();
+    NewToken t;
+    t.name = "in";
+    t.scopes = {"screen", "element"};
+    t.allow_selection_input = true;
+    t.read_only = true;
+    try { store.create(t); FAIL("expected INVALID_ARGUMENT"); } catch (const AuthError& e) { CHECK(e.code() == "INVALID_ARGUMENT"); }
+    t.tcodes = {"SU01"};
+    t.read_only = false;
+    try { store.create(t); FAIL("expected INVALID_ARGUMENT"); } catch (const AuthError& e) { CHECK(e.code() == "INVALID_ARGUMENT"); }
+
+    TokenCliArgs args;
+    args.action = "create";
+    args.name = "in";
+    args.allow_selection_input = true;
+    args.read_only_flag = true;
+    auto result = run_token_action(args, store);  // no --tcode
+    CHECK(result.status == Result::Status::Error);
+    CHECK(result.error["code"] == "INVALID_ARGUMENT");
+    CHECK(result.error["message"].get<std::string>().find("--tcode") != std::string::npos);
+
+    args.tcodes = {"SU01"};
+    args.read_only_flag = false;
+    args.scopes = {"screen", "element"};  // explicit --scope without --read-only: not read-only
+    result = run_token_action(args, store);
+    CHECK(result.status == Result::Status::Error);
+    CHECK(result.error["code"] == "INVALID_ARGUMENT");
+    CHECK(store.list().empty());
+
+    args.scopes = {};  // default scopes are read-only
+    result = run_token_action(args, store);
+    REQUIRE(result.status == Result::Status::Success);
+    CHECK(result.data["allow_selection_input"] == true);
+    CHECK(result.data["read_only"] == true);
+    args.scopes = {"screen", "element"};
+    args.name = "in2";
+    args.read_only_flag = true;
+    REQUIRE(run_token_action(args, store).status == Result::Status::Success);
+    args.action = "list";
+    result = run_token_action(args, store);
+    CHECK(result.data["tokens"][0]["allow_selection_input"] == true);
+}

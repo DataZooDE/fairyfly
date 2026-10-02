@@ -746,6 +746,7 @@ TEST_CASE("cli: mcp token subcommands parse and do not start the server", "[auth
     CHECK(dry({"mcp", "token", "delete", "ci", "--yes"}).path == "mcp token delete");
     CHECK(dry({"mcp", "token", "create", "ci", "--tcode", "SE16", "--allow-navigation"}).ok);
     CHECK(dry({"mcp", "token", "create", "ci", "--tcode", "SE16", "--allow-navigation"}).path == "mcp token create");
+    CHECK(dry({"mcp", "token", "create", "ci", "--tcode", "SU01", "--read-only", "--allow-selection-input"}).ok);
     CHECK_FALSE(dry({"mcp", "token", "delete"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token", "create"}).ok);   // name is required
     CHECK_FALSE(dry({"mcp", "token"}).ok);             // a verb is required

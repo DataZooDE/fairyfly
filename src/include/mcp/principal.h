@@ -24,6 +24,7 @@ struct Principal {
     std::map<std::string, int> rate_families; ///< extra calls-per-minute budget per tool family (e.g. element=10); empty = none
     bool read_only = false;              ///< token can only narrow the server mode
     bool allow_navigation = false;       ///< with a T-code allowlist: menus and navigating keys stay usable (--allow-navigation)
+    bool allow_selection_input = false;  ///< read-only token with a T-code allowlist: may fill selection fields on the initial screen (--allow-selection-input)
     std::string remote_addr;             ///< client address: the socket peer address (forwarded headers are never trusted)
     bool authenticated = false;          ///< false for stdio and for --insecure-no-auth
 };
