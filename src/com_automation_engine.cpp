@@ -1260,12 +1260,25 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         // decision used the element id and the screen read before the call). Nothing is read from the field first.
         if (selection_input_policy_.active) {
             sap::SelectionInputProbe live;
-            try { live.type = elem->get_type(); } catch (const std::exception&) {}
             live.id = resolved_element.path;
-            try { live.name = elem->get_name(); } catch (const std::exception&) {}
-            try { live.label = elem->get_label(); } catch (const std::exception&) {}
-            try { live.tooltip = elem->get_tooltip(); } catch (const std::exception&) {}
-            try { live.changeable = elem->is_changeable(); live.changeable_known = true; } catch (const std::exception&) {}
+            // Strict reads: a failed read of Type/Id/Name/Changeable/label/tooltip refuses (it must not look like an empty value).
+            const ControlPropertyReader reader = [&](const std::string& property) -> PropertyRead {
+                const auto dot = property.find('.');
+                const std::wstring first = std::wstring(property.begin(), property.begin() + (dot == std::string::npos ? property.size() : dot));
+                if (dot != std::string::npos) {
+                    const std::wstring second(property.begin() + dot + 1, property.end());
+                    return elem->read_object_text_strict(first.c_str(), second.c_str());
+                }
+                if (property == "Changeable") return elem->read_bool_property_strict(first.c_str());
+                return elem->read_string_property_strict(first.c_str());
+            };
+            if (auto refusal = collect_selection_probe(reader, live)) {
+                result.status = Result::Status::Error;
+                result.error["code"] = refusal->code;
+                result.error["message"] = refusal->message;
+                result.error["element"] = resolved_element.path;
+                return result;
+            }
             const auto screen = read_facts_bounded(
                 [&] { return session->is_busy(); },
                 [&] {

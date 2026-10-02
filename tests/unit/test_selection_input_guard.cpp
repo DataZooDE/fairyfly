@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <map>
+
 #include "include/selection_input_guard.h"
 
 // Handler-level live validation for selection input (pure logic; the engine fills the probe from the real control).
@@ -142,4 +144,109 @@ TEST_CASE("state values padded to the field width are still recognised", "[sensi
     CHECK(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, false, [&] { return padded; }).empty());
     CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, true, [&] { return padded; }).empty());
     CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", false, false, [&] { return padded; }).empty());
+}
+
+// ---- strict collection of the live probe (fail closed on unreadable properties) --------------------------
+
+namespace {
+
+using Props = std::map<std::string, PropertyRead>;
+
+PropertyRead ok(const std::string& v) { return PropertyRead{PropertyStatus::Ok, v}; }
+PropertyRead unsupported() { return PropertyRead{PropertyStatus::NotSupported, ""}; }
+PropertyRead failed() { return PropertyRead{PropertyStatus::Failed, ""}; }
+
+/// A plain GuiCTextField as the scripting API reports it: Name/Tooltip present, no AccLabel, left label only.
+Props plain_props() {
+    return {{"Type", ok("GuiCTextField")}, {"Id", ok("/app/con[0]/ses[0]/wnd[0]/usr/ctxtUSR02-BNAME")},
+            {"Name", ok("USR02-BNAME")},   {"Changeable", ok("true")},
+            {"AccLabel", unsupported()},   {"LeftLabel.Text", ok("User")},
+            {"RightLabel.Text", unsupported()}, {"AccTooltip", unsupported()},
+            {"DefaultTooltip", unsupported()}, {"Tooltip", ok("")}};
+}
+
+std::optional<SelectionInputRefusal> collect(const Props& props, SelectionInputProbe& probe) {
+    return collect_selection_probe(
+        [&](const std::string& property) {
+            const auto it = props.find(property);
+            return it == props.end() ? unsupported() : it->second;
+        },
+        probe);
+}
+
+void place_on_initial_screen(SelectionInputProbe& probe) {
+    probe.id = "wnd[0]/usr/ctxtUSR02-BNAME";
+    probe.program = "SAPLSUU5";
+    probe.screen_number = "100";
+}
+
+}  // namespace
+
+TEST_CASE("selection guard: the plain selection field is collected and allowed (optional properties may be missing)",
+          "[selection-input][guard]") {
+    SelectionInputProbe probe;
+    CHECK_FALSE(collect(plain_props(), probe).has_value());
+    CHECK(probe.type == "GuiCTextField");
+    CHECK(probe.name == "USR02-BNAME");
+    CHECK(probe.label == "User");
+    CHECK(probe.tooltip.empty());
+    CHECK(probe.changeable_known);
+    CHECK(probe.changeable);
+    place_on_initial_screen(probe);
+    CHECK_FALSE(evaluate_selection_input(probe, policy()).has_value());
+
+    // no label object at all and an empty tooltip are harmless: empty strings, not errors
+    Props bare = plain_props();
+    bare["LeftLabel.Text"] = unsupported();
+    SelectionInputProbe bare_probe;
+    CHECK_FALSE(collect(bare, bare_probe).has_value());
+    CHECK(bare_probe.label.empty());
+}
+
+TEST_CASE("selection guard: a failed read of any property refuses and names it", "[selection-input][guard]") {
+    for (const char* property : {"Type", "Id", "Name", "Changeable", "AccLabel", "LeftLabel.Text", "RightLabel.Text",
+                                 "AccTooltip", "DefaultTooltip", "Tooltip"}) {
+        Props props = plain_props();
+        props[property] = failed();
+        SelectionInputProbe probe;
+        const auto refusal = collect(props, probe);
+        INFO(property);
+        REQUIRE(refusal.has_value());
+        CHECK(refusal->code == "INPUT_TARGET_DENIED");
+        CHECK(refusal->message.find(std::string("'") + property + "'") != std::string::npos);
+    }
+}
+
+TEST_CASE("selection guard: required properties must exist; a malformed Changeable refuses", "[selection-input][guard]") {
+    for (const char* property : {"Type", "Id", "Name", "Changeable"}) {
+        Props props = plain_props();
+        props[property] = unsupported();
+        SelectionInputProbe probe;
+        const auto refusal = collect(props, probe);
+        INFO(property);
+        REQUIRE(refusal.has_value());
+        CHECK(refusal->code == "INPUT_TARGET_DENIED");
+    }
+    Props props = plain_props();
+    props["Changeable"] = ok("maybe");
+    SelectionInputProbe probe;
+    CHECK(collect(props, probe).has_value());
+}
+
+TEST_CASE("selection guard: a credential hint in any collected label or tooltip still refuses", "[selection-input][guard]") {
+    Props props = plain_props();
+    props["LeftLabel.Text"] = ok("Password");
+    SelectionInputProbe probe;
+    REQUIRE_FALSE(collect(props, probe).has_value());
+    place_on_initial_screen(probe);
+    CHECK(code_of(probe) == "INPUT_TARGET_DENIED");
+
+    // a hint in a later label source is not hidden by an earlier non-empty one
+    Props both = plain_props();
+    both["AccLabel"] = ok("Value");
+    both["RightLabel.Text"] = ok("Password");
+    SelectionInputProbe both_probe;
+    REQUIRE_FALSE(collect(both, both_probe).has_value());
+    place_on_initial_screen(both_probe);
+    CHECK(code_of(both_probe) == "INPUT_TARGET_DENIED");
 }

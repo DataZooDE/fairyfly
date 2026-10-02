@@ -144,6 +144,78 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
     return "";
 }
 
+namespace {
+/// Gets `name` from `object` without swallowing anything: Ok + variant, NotSupported (unknown member), or Failed.
+PropertyStatus strict_property_get(const SapGuiObject& object, IDispatch* dispatch, const wchar_t* name, _variant_t& result) {
+    if (!dispatch) return PropertyStatus::Failed;
+    DISPID dispid;
+    const HRESULT lookup = object.resolve_dispid(name, &dispid);
+    if (lookup == DISP_E_UNKNOWNNAME || lookup == DISP_E_MEMBERNOTFOUND || lookup == TYPE_E_ELEMENTNOTFOUND)
+        return PropertyStatus::NotSupported;
+    if (FAILED(lookup)) return PropertyStatus::Failed;
+    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+    const HRESULT hr = dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
+                                        &no_params, &result, nullptr, nullptr);
+    return FAILED(hr) ? PropertyStatus::Failed : PropertyStatus::Ok;
+}
+}  // namespace
+
+PropertyRead SapGuiObject::read_string_property_strict(const wchar_t* name) const {
+    PropertyRead out;
+    try {
+        _variant_t result;
+        out.status = strict_property_get(*this, dispatch_, name, result);
+        if (out.status != PropertyStatus::Ok) return out;
+        if (result.vt == VT_BSTR) {
+            if (result.bstrVal) out.value = com::bstr_to_utf8(result.bstrVal);  // a null BSTR is the empty string
+            return out;
+        }
+        out.status = PropertyStatus::Failed;  // unexpected variant type
+    } catch (...) {
+        out = PropertyRead{};
+    }
+    return out;
+}
+
+PropertyRead SapGuiObject::read_bool_property_strict(const wchar_t* name) const {
+    PropertyRead out;
+    try {
+        _variant_t result;
+        out.status = strict_property_get(*this, dispatch_, name, result);
+        if (out.status != PropertyStatus::Ok) return out;
+        if (result.vt == VT_BOOL) {
+            out.value = result.boolVal != VARIANT_FALSE ? "true" : "false";
+            return out;
+        }
+        out.status = PropertyStatus::Failed;
+    } catch (...) {
+        out = PropertyRead{};
+    }
+    return out;
+}
+
+PropertyRead SapGuiObject::read_object_text_strict(const wchar_t* object_property, const wchar_t* text_property) const {
+    PropertyRead out;
+    try {
+        _variant_t result;
+        out.status = strict_property_get(*this, dispatch_, object_property, result);
+        if (out.status != PropertyStatus::Ok) return out;
+        if ((result.vt == VT_DISPATCH && !result.pdispVal) || result.vt == VT_EMPTY || result.vt == VT_NULL) {
+            out.status = PropertyStatus::NotSupported;  // Nothing: the control has no such object (no label)
+            return out;
+        }
+        if (result.vt != VT_DISPATCH) {
+            out.status = PropertyStatus::Failed;
+            return out;
+        }
+        SapGuiObject inner{IDispatchPtr(result.pdispVal)};
+        return inner.read_string_property_strict(text_property);
+    } catch (...) {
+        out = PropertyRead{};
+    }
+    return out;
+}
+
 int SapGuiObject::get_int_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_int_property");
 
