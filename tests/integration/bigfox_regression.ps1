@@ -40,7 +40,7 @@ if (-not $Exe) {
 if ($Iterations -lt 1) { $Iterations = 1 }
 
 # ---------------------------------------------------------------- constants
-$S = '/app/con[0]/ses[0]'
+$S = if ($env:FAIRYFLY_TEST_SESSION) { $env:FAIRYFLY_TEST_SESSION } else { '/app/con[0]/ses[0]' }   # override when a stale connection occupies con[0]
 $U = "$S/wnd[0]/usr"
 $script:Conn = ''
 $script:Iter = 0
