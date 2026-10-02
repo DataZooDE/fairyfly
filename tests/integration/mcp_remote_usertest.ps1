@@ -53,6 +53,7 @@ $Tasks = @(
     [pscustomobject]@{ Name = 'dumps'; Tcodes = 'ST22'; Prompt = 'TASK: are there ABAP short dumps (ST22) from today or yesterday? If yes: how many, which runtime errors, which programs and users, and the most likely cause of the most frequent one. If there are none, say so and show how you verified it.' },
     [pscustomobject]@{ Name = 'userinfo'; Tcodes = 'SU01,SU01D'; Prompt = 'TASK: show the master data of the user DEVELOPER (SU01 display): user type, validity period, lock status, assigned roles and profiles, last logon. NOTE: you may not be able to type into fields with a read-only token; if so, find out what is still possible (for example F4 value help or other reads), report what blocks you, and give the best partial answer.' }
 )
+$Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })   # powershell -File passes a comma list as ONE string
 if ($Only.Count -gt 0) { $Tasks = @($Tasks | Where-Object { $Only -contains $_.Name }) }
 
 function Run-Native([string]$File, [string[]]$Arguments, [int]$TimeoutSec = 120) {
