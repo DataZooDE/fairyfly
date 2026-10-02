@@ -723,6 +723,29 @@ TEST_CASE("Modern requests: standard headers are enforced after auth and before 
         modern.headers["MCP-Protocol-Version"] = "2025-11-25";
         CHECK(code_of(f.endpoint.handle(modern)) == kHeaderMismatch);
     }
+    SECTION("legacy: a served body version with a DIFFERENT, unsupported header version is 400 -32020 (not accepted)") {
+        const auto before = f.provider.calls;
+        auto req = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"protocolVersion", "2025-06-18"}}}}));
+        req.headers["MCP-Protocol-Version"] = "2099-01-01";
+        auto res = f.endpoint.handle(req);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        CHECK(body_of(res)["error"]["message"].get<std::string>().find("Header mismatch: MCP-Protocol-Version") == 0);
+        // the namespaced spelling is compared the same way
+        auto prefixed = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"io.modelcontextprotocol/protocolVersion", "2025-06-18"}}}}));
+        prefixed.headers["MCP-Protocol-Version"] = "2099-01-01";
+        CHECK(code_of(f.endpoint.handle(prefixed)) == kHeaderMismatch);
+        CHECK(f.provider.calls == before);  // neither reached the provider
+        // equal (surrounding whitespace of the header is trimmed): accepted
+        req.headers["MCP-Protocol-Version"] = " 2025-06-18 ";
+        CHECK(f.endpoint.handle(req).status == 200);
+        // an unsupported header alone keeps -32022
+        auto header_only = f.post(Fixture::rpc("tools/list"));
+        header_only.headers["MCP-Protocol-Version"] = "2099-01-01";
+        res = f.endpoint.handle(header_only);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kUnsupportedVersion);
+    }
     SECTION("notifications are 202 without a body, headers or not") {
         json note{{"jsonrpc", "2.0"}, {"method", "notifications/cancelled"}, {"params", json{{"_meta", Fixture::stateless_meta()}}}};
         const auto res = f.endpoint.handle(f.post(note));

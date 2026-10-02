@@ -507,6 +507,13 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                         hv == kStatelessVersion;
     const std::string version = !pv.empty() ? pv : hv;
 
+    // MCP-Protocol-Version header against the body's _meta version: in EVERY era, when both are present they must be
+    // byte-equal (after trimming). Checked before the version is validated, so a supported body version cannot hide behind a
+    // different (e.g. unsupported) header. An unsupported header alone keeps -32022 below.
+    if (!hv.empty() && !pv.empty() && pv != hv)
+        return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
+                                            "' does not match body value '" + shown(pv) + "'");
+
     // Unsupported version: 400 + -32022 listing what is served (modern probes read this to recognise the server).
     if (method != "initialize" && !version.empty()) {
         const auto& supported = supported_versions();
@@ -553,17 +560,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     };
     if (modern) {
         if (hv.empty()) return header_error(message.id, "Header missing: MCP-Protocol-Version");
-        if (!pv.empty() && pv != hv)
-            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
-                                                "' does not match body value '" + shown(pv) + "'");
         if (auto refused = check_method_name_headers(true)) return std::move(*refused);
     } else {
-        // Legacy: a served MCP-Protocol-Version header and a different served body version cannot both be right.
-        const auto& supported = supported_versions();
-        const auto served = [&](const std::string& v) { return std::find(supported.begin(), supported.end(), v) != supported.end(); };
-        if (!hv.empty() && !pv.empty() && pv != hv && served(hv) && served(pv))
-            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
-                                                "' does not match body value '" + shown(pv) + "'");
         if (auto refused = check_method_name_headers(false)) return std::move(*refused);
     }
 
