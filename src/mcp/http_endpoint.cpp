@@ -73,14 +73,97 @@ std::string strip_slash(std::string s) {
     return s;
 }
 
-/// params._meta[key], also accepting the "io.modelcontextprotocol/" namespaced spelling.
+constexpr const char* kMetaPrefix = "io.modelcontextprotocol/";
+
+/// params._meta[key]: the "io.modelcontextprotocol/" prefixed spelling (the spec's) wins over the plain one.
 json meta_value(const json& params, const char* key) {
     if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) return json();
     const json& meta = params["_meta"];
-    if (meta.contains(key)) return meta[key];
-    const std::string prefixed = std::string("io.modelcontextprotocol/") + key;
+    const std::string prefixed = std::string(kMetaPrefix) + key;
     if (meta.contains(prefixed)) return meta[prefixed];
+    if (meta.contains(key)) return meta[key];
     return json();
+}
+
+/// True when _meta carries both spellings of `key` with different values.
+bool meta_conflict(const json& params, const char* key) {
+    if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) return false;
+    const json& meta = params["_meta"];
+    const std::string prefixed = std::string(kMetaPrefix) + key;
+    return meta.contains(prefixed) && meta.contains(key) && meta[prefixed] != meta[key];
+}
+
+/// Header value for an error message: control characters escaped, at most 100 characters.
+std::string shown(const std::string& value) {
+    std::string out;
+    std::size_t count = 0;
+    for (unsigned char c : value) {
+        if (count >= 100) {
+            out += "...";
+            break;
+        }
+        if (c < 0x20 || c == 0x7f) {
+            static const char* hex = "0123456789abcdef";
+            out += "\\x";
+            out += hex[c >> 4];
+            out += hex[c & 15];
+        } else {
+            out += static_cast<char>(c);
+        }
+        ++count;
+    }
+    return out;
+}
+
+/// Strict standard base64 (padded, no whitespace). nullopt when malformed.
+std::optional<std::string> base64_decode(const std::string& in) {
+    if (in.size() % 4 != 0) return std::nullopt;
+    std::string out;
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    for (std::size_t i = 0; i < in.size(); i += 4) {
+        const bool last = i + 4 == in.size();
+        int pad = 0;
+        int v[4];
+        for (int k = 0; k < 4; ++k) {
+            const char c = in[i + k];
+            if (c == '=') {
+                if (!last || k < 2) return std::nullopt;
+                ++pad;
+                v[k] = 0;
+            } else {
+                if (pad > 0) return std::nullopt;
+                v[k] = val(c);
+                if (v[k] < 0) return std::nullopt;
+            }
+        }
+        const unsigned n = (v[0] << 18) | (v[1] << 12) | (v[2] << 6) | v[3];
+        out += static_cast<char>((n >> 16) & 0xff);
+        if (pad < 2) out += static_cast<char>((n >> 8) & 0xff);
+        if (pad < 1) out += static_cast<char>(n & 0xff);
+    }
+    return out;
+}
+
+/// Decodes the spec's "=?base64?<base64 of UTF-8>?=" header sentinel; any other value is returned unchanged.
+/// nullopt = starts like a sentinel but is malformed.
+std::optional<std::string> decode_header_value(const std::string& value) {
+    static const std::string open = "=?base64?";
+    static const std::string close = "?=";
+    if (value.compare(0, open.size(), open) != 0) return value;
+    if (value.size() < open.size() + close.size() || value.compare(value.size() - close.size(), close.size(), close) != 0)
+        return std::nullopt;
+    return base64_decode(value.substr(open.size(), value.size() - open.size() - close.size()));
+}
+
+HttpResponse header_error(const json& id, const std::string& message) {
+    return json_response(400, make_error(id, kHeaderMismatch, message));
 }
 
 bool is_stateless_version(const std::string& v) { return v == kStatelessVersion; }
@@ -100,13 +183,16 @@ std::string negotiate_http_version(const std::string& requested) {
 
 json http_capabilities() { return json{{"tools", json{{"listChanged", false}}}}; }
 
-json decorate_stateless(json message, const std::string& method) {
+json decorate_stateless(json message, const std::string& method, const json& server_info) {
     if (message.is_object() && message.contains("result") && message["result"].is_object()) {
-        message["result"]["resultType"] = "complete";
+        json& result = message["result"];
+        result["resultType"] = "complete";
         if (method == "tools/list") {
-            message["result"]["ttlMs"] = 30000;
-            message["result"]["cacheScope"] = "private";
+            result["ttlMs"] = 30000;
+            result["cacheScope"] = "private";
         }
+        if (!result.contains("_meta") || !result["_meta"].is_object()) result["_meta"] = json::object();
+        result["_meta"][std::string(kMetaPrefix) + "serverInfo"] = server_info;
     }
     return message;
 }
@@ -405,53 +491,85 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const std::string& method = message.method;
     const json& params = message.params;
 
-    // ---- Mcp-Method / Mcp-Name must match the body -------------------------------------------
-    const std::string h_method = trim(request.header("Mcp-Method"));
-    if (!h_method.empty() && h_method != method)
-        return json_response(400, make_error(message.id, kHeaderMismatch,
-                                             "Header mismatch: Mcp-Method '" + h_method + "' does not match body method '" + method + "'"));
-    const auto h_name_it = request.headers.find("Mcp-Name");
-    if (h_name_it != request.headers.end() && !trim(h_name_it->second).empty()) {
-        std::string body_name;
-        if (params.is_object() && params.contains("name") && params["name"].is_string())
-            body_name = params["name"].get<std::string>();
-        else if (params.is_object() && params.contains("uri") && params["uri"].is_string())
-            body_name = params["uri"].get<std::string>();
-        if (trim(h_name_it->second) != body_name)
-            return json_response(400, make_error(message.id, kHeaderMismatch,
-                                                 "Header mismatch: Mcp-Name '" + trim(h_name_it->second) +
-                                                     "' does not match the request"));
-    }
+    // ---- _meta spellings: prefixed (spec) and plain may both be present only when they agree --------
+    for (const char* key : {"protocolVersion", "clientInfo", "clientCapabilities", "logLevel"})
+        if (meta_conflict(params, key))
+            return json_response(400, make_error(message.id, kInvalidParams,
+                                                 std::string("Invalid params: _meta key '") + key + "' is given twice with different values"));
 
-    // ---- protocol era / version ---------------------------------------------------------------
+    // ---- classification: modern (2026-07-28 stateless) or legacy ------------------------------------
+    // Modern: params._meta protocolVersion (prefixed or plain key) >= 2026-07-28, or method server/discover, or
+    // the MCP-Protocol-Version header says 2026-07-28. Everything else is legacy and keeps the lenient behaviour.
     const json meta_version = meta_value(params, "protocolVersion");
     const std::string pv = meta_version.is_string() ? meta_version.get<std::string>() : std::string();
     const std::string hv = trim(request.header("MCP-Protocol-Version"));
+    const bool modern = (!pv.empty() && pv >= std::string(kStatelessVersion)) || method == "server/discover" ||
+                        hv == kStatelessVersion;
+    const std::string version = !pv.empty() ? pv : hv;
+
+    // Unsupported version: 400 + -32022 listing what is served (modern probes read this to recognise the server).
+    if (method != "initialize" && !version.empty()) {
+        const auto& supported = supported_versions();
+        if (std::find(supported.begin(), supported.end(), version) == supported.end())
+            return json_response(400, make_error(message.id, kUnsupportedVersion, "Unsupported protocol version: " + version,
+                                                 json{{"supported", supported_json()}, {"requested", version}}));
+    }
+
+    // ---- standard headers of a modern request: checked before any provider call --------------------
+    if (modern) {
+        if (hv.empty()) return header_error(message.id, "Header missing: MCP-Protocol-Version");
+        if (!pv.empty() && pv != hv)
+            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
+                                                "' does not match body value '" + shown(pv) + "'");
+        if (trim(request.header("Mcp-Method")).empty())
+            return header_error(message.id, "Header missing: Mcp-Method");
+        const std::string h_method = trim(request.header("Mcp-Method"));
+        if (h_method != method)
+            return header_error(message.id, "Header mismatch: Mcp-Method header value '" + shown(h_method) +
+                                                "' does not match body value '" + shown(method) + "'");
+        const bool named = method == "tools/call" || method == "resources/read" || method == "prompts/get";
+        if (named) {
+            std::string body_name;
+            bool have_body_name = false;
+            const char* key = method == "resources/read" ? "uri" : "name";
+            if (params.is_object() && params.contains(key) && params[key].is_string()) {
+                body_name = params[key].get<std::string>();
+                have_body_name = true;
+            }
+            const std::string raw = trim(request.header("Mcp-Name"));
+            if (raw.empty()) return header_error(message.id, "Header missing: Mcp-Name");
+            const auto decoded = decode_header_value(raw);
+            if (!decoded)
+                return header_error(message.id, "Header mismatch: Mcp-Name header value '" + shown(raw) +
+                                                    "' is not valid =?base64?...?= encoding");
+            // A body without a string name is left to the tool handler (INVALID_PARAMS).
+            if (have_body_name && *decoded != body_name)
+                return header_error(message.id, "Header mismatch: Mcp-Name header value '" + shown(*decoded) +
+                                                    "' does not match body value '" + shown(body_name) + "'");
+        }
+    }
+
+    // ---- protocol era ------------------------------------------------------------------------------
     ProtocolEra era = ProtocolEra::Legacy;
     if (method == "initialize") {
         // The era follows the negotiated version: a client asking for the stateless version gets a stateless
         // answer, everything else (including versions we do not know) the legacy one.
         const std::string requested = params.is_object() && params.contains("protocolVersion") && params["protocolVersion"].is_string()
                                           ? params["protocolVersion"].get<std::string>() : std::string();
-        era = negotiate_http_version(requested) == kStatelessVersion ? ProtocolEra::Stateless : ProtocolEra::Legacy;
-    } else {
-        const std::string version = !pv.empty() ? pv : hv;
-        if (!version.empty()) {
-            const auto& supported = supported_versions();
-            if (std::find(supported.begin(), supported.end(), version) == supported.end())
-                return json_response(400, make_error(message.id, kUnsupportedVersion,
-                                                     "Unsupported protocol version: " + version,
-                                                     json{{"supported", supported_json()}, {"requested", version}}));
-            if (is_stateless_version(version)) era = ProtocolEra::Stateless;
-        } else if (method == "server/discover") {
-            era = ProtocolEra::Stateless;
-        }
+        era = (negotiate_http_version(requested) == kStatelessVersion || modern) ? ProtocolEra::Stateless : ProtocolEra::Legacy;
+    } else if (modern || is_stateless_version(version)) {
+        era = ProtocolEra::Stateless;
     }
     const bool stateless = era == ProtocolEra::Stateless;
+    const json server_info{{"name", options_.server.name}, {"version", options_.server.version}};
     auto reply = [&](json msg) {
-        if (stateless) msg = decorate_stateless(std::move(msg), method);
+        if (stateless) msg = decorate_stateless(std::move(msg), method, server_info);
         return json_response(200, msg);
     };
+
+    // Modern era: ping and logging/setLevel were removed; any unknown method is HTTP 404.
+    if (modern && (method == "ping" || method == "logging/setLevel"))
+        return json_response(404, make_error(message.id, kMethodNotFound, "Method not found: " + method));
 
     // ---- methods answered without the main thread ---------------------------------------------
     if (method == "ping") return reply(make_result(message.id, json::object()));
@@ -474,7 +592,10 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
 
     const bool is_call = method == "tools/call";
-    if (method != "tools/list" && !is_call) return reply(make_error(message.id, kMethodNotFound, "Method not found: " + method));
+    if (method != "tools/list" && !is_call) {
+        if (modern) return json_response(404, make_error(message.id, kMethodNotFound, "Method not found: " + method));
+        return reply(make_error(message.id, kMethodNotFound, "Method not found: " + method));
+    }
 
     // ---- tool methods: main thread via the executor -------------------------------------------
     const json client_info = meta_value(params, "clientInfo");
@@ -492,14 +613,14 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     if (is_call) {
         const json id = message.id;
         if (params.is_object() && params.contains("name") && params["name"].is_string()) job.tool = params["name"].get<std::string>();
-        job.timeout_response = [id, stateless](const CallInfo& info) {
+        job.timeout_response = [id, stateless, server_info](const CallInfo& info) {
             json msg = make_result(id, busy_call_result("CALL_TIMEOUT", info));
-            return stateless ? decorate_stateless(std::move(msg), "tools/call") : msg;
+            return stateless ? decorate_stateless(std::move(msg), "tools/call", server_info) : msg;
         };
     }
     Pending pending{message.id, method, params};
     const bool want_progress = sse && !progress_token.is_null();
-    job.run = [this, pending, principal, era, stateless, client_info, progress_token, want_progress,
+    job.run = [this, pending, principal, era, stateless, server_info, client_info, progress_token, want_progress,
                waiter](CallState& state) -> json {
         json out;
         if (pending.method == "tools/list") {
@@ -528,7 +649,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
             out = call_tool_message(provider_, pending, std::move(ctx));
             if (want_progress) waiter->push_frame(progress_frame(progress_token, *last + 1.0, std::nullopt, "finished"));
         }
-        return stateless ? decorate_stateless(std::move(out), pending.method) : out;
+        return stateless ? decorate_stateless(std::move(out), pending.method, server_info) : out;
     };
 
     std::shared_ptr<CallState> state;

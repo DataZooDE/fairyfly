@@ -156,6 +156,16 @@ struct Fixture {
                     {"clientInfo", json{{"name", "tester"}, {"version", "1"}}},
                     {"capabilities", json::object()}};
     }
+    /// A modern (2026-07-28) POST with the standard headers the spec requires.
+    HttpRequest modern_post(const std::string& method, json params = json::object(), int id = 1) const {
+        if (!params.is_object()) params = json::object();
+        if (!params.contains("_meta")) params["_meta"] = stateless_meta();
+        HttpRequest r = post(rpc(method, params, id));
+        r.headers["MCP-Protocol-Version"] = "2026-07-28";
+        r.headers["Mcp-Method"] = method;
+        if (params.contains("name") && params["name"].is_string()) r.headers["Mcp-Name"] = params["name"].get<std::string>();
+        return r;
+    }
     static json rpc(const std::string& method, json params = json::object(), int id = 1) {
         return json{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", params}};
     }
@@ -389,7 +399,7 @@ TEST_CASE("HTTP authentication happens before the body is parsed", "[mcp][http][
         CHECK(f.auth.last.peer_addr == "127.0.0.1");
     }
     SECTION("the principal reaches the provider with era and transport") {
-        auto req = f.post(Fixture::rpc("tools/call", json{{"name", "gui_screen_read"}, {"_meta", Fixture::stateless_meta()}}));
+        auto req = f.modern_post("tools/call", json{{"name", "gui_screen_read"}});
         req.headers["X-Forwarded-For"] = "10.1.1.1";
         auto res = f.endpoint.handle(req);
         REQUIRE(res.status == 200);
@@ -439,7 +449,7 @@ TEST_CASE("HTTP authentication happens before the body is parsed", "[mcp][http][
 TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http][era]") {
     Fixture f;
     SECTION("server/discover") {
-        auto res = f.endpoint.handle(f.post(Fixture::rpc("server/discover", json{{"_meta", Fixture::stateless_meta()}})));
+        auto res = f.endpoint.handle(f.modern_post("server/discover"));
         REQUIRE(res.status == 200);
         const json result = body_of(res)["result"];
         CHECK(result["resultType"] == "complete");
@@ -448,13 +458,16 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
         CHECK(result["serverInfo"]["version"] == "9.9.9");
         CHECK(result["instructions"] == "be careful");
         CHECK(result["capabilities"].contains("tools"));
-        // discover works without _meta as well
-        CHECK(f.endpoint.handle(f.post(Fixture::rpc("server/discover"))).status == 200);
+        // discover works without _meta (the headers are still required)
+        auto bare = f.post(Fixture::rpc("server/discover"));
+        CHECK(f.endpoint.handle(bare).status == 400);
+        bare.headers["MCP-Protocol-Version"] = "2026-07-28";
+        bare.headers["Mcp-Method"] = "server/discover";
+        CHECK(f.endpoint.handle(bare).status == 200);
     }
     SECTION("tools/list is deterministic, sorted, and carries ttl/cache metadata") {
-        const json params{{"_meta", Fixture::stateless_meta()}};
-        auto a = f.endpoint.handle(f.post(Fixture::rpc("tools/list", params)));
-        auto b = f.endpoint.handle(f.post(Fixture::rpc("tools/list", params)));
+        auto a = f.endpoint.handle(f.modern_post("tools/list"));
+        auto b = f.endpoint.handle(f.modern_post("tools/list"));
         REQUIRE(a.status == 200);
         CHECK(a.body == b.body);
         const json result = body_of(a)["result"];
@@ -467,8 +480,7 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
         CHECK(names.size() == 5);
     }
     SECTION("tools/call result carries resultType complete") {
-        auto res = f.endpoint.handle(f.post(Fixture::rpc(
-            "tools/call", json{{"name", "gui_screen_read"}, {"arguments", json::object()}, {"_meta", Fixture::stateless_meta()}})));
+        auto res = f.endpoint.handle(f.modern_post("tools/call", json{{"name", "gui_screen_read"}, {"arguments", json::object()}}));
         REQUIRE(res.status == 200);
         const json result = body_of(res)["result"];
         CHECK(result["resultType"] == "complete");
@@ -476,16 +488,19 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
         CHECK(result["structuredContent"]["tool"] == "gui_screen_read");
     }
     SECTION("Mcp-Method / Mcp-Name mismatch is 400 with -32020") {
-        auto req = f.post(Fixture::rpc("tools/call", json{{"name", "gui_screen_read"}, {"_meta", Fixture::stateless_meta()}}));
+        auto req = f.modern_post("tools/call", json{{"name", "gui_screen_read"}});
         req.headers["Mcp-Method"] = "tools/list";
         auto res = f.endpoint.handle(req);
         CHECK(res.status == 400);
         CHECK(body_of(res)["error"]["code"] == kHeaderMismatch);
+        CHECK(body_of(res)["error"]["message"].get<std::string>().find("Mcp-Method") != std::string::npos);
         req.headers["Mcp-Method"] = "tools/call";
         req.headers["Mcp-Name"] = "gui_other";
         res = f.endpoint.handle(req);
         CHECK(res.status == 400);
         CHECK(body_of(res)["error"]["code"] == -32020);
+        CHECK(body_of(res)["error"]["message"] ==
+              "Header mismatch: Mcp-Name header value 'gui_other' does not match body value 'gui_screen_read'");
         req.headers["Mcp-Name"] = "gui_screen_read";
         CHECK(f.endpoint.handle(req).status == 200);
         {
@@ -507,8 +522,188 @@ TEST_CASE("Stateless era: discover, resultType, headers, versions", "[mcp][http]
     }
     SECTION("namespaced _meta keys are accepted") {
         json meta{{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}, {"io.modelcontextprotocol/clientInfo", json{{"name", "ns"}}}};
-        auto res = f.endpoint.handle(f.post(Fixture::rpc("tools/list", json{{"_meta", meta}})));
+        auto req = f.modern_post("tools/list", json{{"_meta", meta}});
+        auto res = f.endpoint.handle(req);
         CHECK(body_of(res)["result"]["resultType"] == "complete");
+        // the plain spelling is still accepted
+        json plain{{"protocolVersion", "2026-07-28"}};
+        res = f.endpoint.handle(f.modern_post("tools/list", json{{"_meta", plain}}));
+        CHECK(body_of(res)["result"]["resultType"] == "complete");
+    }
+}
+
+TEST_CASE("Modern requests: standard headers are enforced after auth and before any provider call", "[mcp][http][era][modern]") {
+    Fixture f;
+    const auto code_of = [](const HttpResponse& r) { return body_of(r)["error"]["code"].get<int>(); };
+    const auto message_of = [](const HttpResponse& r) { return body_of(r)["error"]["message"].get<std::string>(); };
+    const json call{{"name", "gui_screen_read"}};
+
+    SECTION("a fully headed modern request works and carries serverInfo in _meta") {
+        const auto res = f.endpoint.handle(f.modern_post("tools/call", call));
+        REQUIRE(res.status == 200);
+        const json result = body_of(res)["result"];
+        CHECK(result["resultType"] == "complete");
+        CHECK(result["_meta"]["io.modelcontextprotocol/serverInfo"] == json{{"name", "fairyfly"}, {"version", "9.9.9"}});
+        const auto list = body_of(f.endpoint.handle(f.modern_post("tools/list")))["result"];
+        CHECK(list["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "fairyfly");
+    }
+    SECTION("legacy results carry no serverInfo _meta") {
+        const auto res = body_of(f.endpoint.handle(f.post(Fixture::rpc("tools/list"))))["result"];
+        CHECK_FALSE(res.contains("_meta"));
+    }
+    SECTION("a modern request without any header is 400 -32020 naming the header") {
+        auto req = f.post(Fixture::rpc("tools/list", json{{"_meta", Fixture::stateless_meta()}}));
+        auto res = f.endpoint.handle(req);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        CHECK(message_of(res) == "Header missing: MCP-Protocol-Version");
+        CHECK(body_of(res)["id"] == 1);
+        CHECK(body_of(res)["jsonrpc"] == "2.0");
+    }
+    SECTION("missing Mcp-Method") {
+        auto req = f.modern_post("tools/list");
+        req.headers.erase("Mcp-Method");
+        const auto res = f.endpoint.handle(req);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        CHECK(message_of(res) == "Header missing: Mcp-Method");
+    }
+    SECTION("MCP-Protocol-Version header must equal the body value") {
+        auto req = f.modern_post("tools/list");
+        req.headers["MCP-Protocol-Version"] = "2025-11-25";
+        auto res = f.endpoint.handle(req);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        CHECK(message_of(res).find("MCP-Protocol-Version") != std::string::npos);
+        // the header alone selects modern too, and the body value must then agree
+        auto by_header = f.post(Fixture::rpc("tools/list"));
+        by_header.headers["MCP-Protocol-Version"] = "2026-07-28";
+        by_header.headers["Mcp-Method"] = "tools/list";
+        CHECK(f.endpoint.handle(by_header).status == 200);
+    }
+    SECTION("missing Mcp-Name on tools/call") {
+        auto req = f.modern_post("tools/call", call);
+        req.headers.erase("Mcp-Name");
+        const auto res = f.endpoint.handle(req);
+        CHECK(res.status == 400);
+        CHECK(message_of(res) == "Header missing: Mcp-Name");
+    }
+    SECTION("Mcp-Name: base64 sentinel is decoded before comparing") {
+        // "gui_screen_read" encoded
+        auto ok = f.modern_post("tools/call", call);
+        ok.headers["Mcp-Name"] = "=?base64?Z3VpX3NjcmVlbl9yZWFk?=";
+        CHECK(f.endpoint.handle(ok).status == 200);
+        // UTF-8 "gui_\xC3\xA4" = Z3VpX8Ok
+        auto utf = f.modern_post("tools/call", json{{"name", "gui_\xC3\xA4"}});
+        utf.headers["Mcp-Name"] = "=?base64?Z3VpX8Ok?=";
+        const auto res = f.endpoint.handle(utf);
+        CHECK(res.status == 200);  // header agreed; the unknown tool is a tool-level -32602 inside a 200
+        CHECK(body_of(res)["error"]["code"] == kInvalidParams);
+    }
+    SECTION("Mcp-Name: invalid or half-formed sentinels are HeaderMismatch") {
+        for (const char* bad : {"=?base64?!!!!?=", "=?base64?Z3VpX3NjcmVlbl9yZWFk", "=?base64?Z3VpX3NjcmVlbl9yZWF?=",
+                                "=?base64?Z3Vp=X3NjcmVlbl9yZWFk?="}) {
+            auto req = f.modern_post("tools/call", call);
+            req.headers["Mcp-Name"] = bad;
+            const auto res = f.endpoint.handle(req);
+            CHECK(res.status == 400);
+            CHECK(code_of(res) == kHeaderMismatch);
+        }
+    }
+    SECTION("header names are case-insensitive, values are case-sensitive") {
+        auto req = f.modern_post("tools/call", call);
+        req.headers.erase("Mcp-Name");
+        req.headers["mcp-name"] = "gui_screen_read";
+        CHECK(f.endpoint.handle(req).status == 200);
+        req.headers["mcp-name"] = "GUI_SCREEN_READ";
+        CHECK(f.endpoint.handle(req).status == 400);
+    }
+    SECTION("long and control-character values are shortened and escaped in the message") {
+        auto req = f.modern_post("tools/call", call);
+        req.headers["Mcp-Name"] = std::string(300, 'x');
+        auto msg = message_of(f.endpoint.handle(req));
+        CHECK(msg.size() < 300);
+        CHECK(msg.find("...") != std::string::npos);
+        req.headers["Mcp-Name"] = std::string("a\x01\x1b") + "b";
+        msg = message_of(f.endpoint.handle(req));
+        CHECK(msg.find("a\\x01\\x1bb") != std::string::npos);
+    }
+    SECTION("authentication comes first, the provider is never reached by a bad request") {
+        auto req = f.modern_post("tools/call", call);
+        req.headers.erase("Mcp-Method");
+        auto unauth = f.endpoint.handle([&] { auto r = req; r.headers.erase("Authorization"); return r; }());
+        CHECK(unauth.status == 401);
+        f.endpoint.handle(req);
+        std::lock_guard<std::mutex> lock(f.provider.m);
+        CHECK(f.provider.calls == 0);
+    }
+    SECTION("unknown method is 404 with -32601") {
+        const auto res = f.endpoint.handle(f.modern_post("resources/list"));
+        CHECK(res.status == 404);
+        CHECK(code_of(res) == kMethodNotFound);
+        // the header rules apply first
+        auto bad = f.modern_post("resources/list");
+        bad.headers["Mcp-Method"] = "tools/list";
+        CHECK(f.endpoint.handle(bad).status == 400);
+    }
+    SECTION("ping and logging/setLevel are gone in the modern era, kept in the legacy one") {
+        for (const char* method : {"ping", "logging/setLevel"}) {
+            const auto modern = f.endpoint.handle(f.modern_post(method, json{{"level", "debug"}}));
+            CHECK(modern.status == 404);
+            CHECK(code_of(modern) == kMethodNotFound);
+            CHECK(body_of(modern)["id"] == 1);
+        }
+        const auto legacy = f.endpoint.handle(f.post(Fixture::rpc("ping")));
+        CHECK(legacy.status == 200);
+        CHECK(body_of(legacy)["result"] == json::object());
+        auto legacy_header = f.post(Fixture::rpc("ping"));
+        legacy_header.headers["MCP-Protocol-Version"] = "2025-11-25";
+        CHECK(f.endpoint.handle(legacy_header).status == 200);
+    }
+    SECTION("legacy requests need no standard headers") {
+        CHECK(f.endpoint.handle(f.post(Fixture::rpc("initialize", json{{"protocolVersion", "2025-11-25"}}))).status == 200);
+        CHECK(f.endpoint.handle(f.post(Fixture::rpc("tools/list"))).status == 200);
+        CHECK(f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}))).status == 200);
+        CHECK(f.endpoint.handle(f.post(Fixture::rpc("resources/list"))).status == 200);  // legacy: -32601 inside a 200
+        auto legacy_meta = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"protocolVersion", "2025-11-25"}}}}));
+        CHECK(f.endpoint.handle(legacy_meta).status == 200);
+    }
+    SECTION("notifications are 202 without a body, headers or not") {
+        json note{{"jsonrpc", "2.0"}, {"method", "notifications/cancelled"}, {"params", json{{"_meta", Fixture::stateless_meta()}}}};
+        const auto res = f.endpoint.handle(f.post(note));
+        CHECK(res.status == 202);
+        CHECK(res.body.empty());
+    }
+    SECTION("prefixed and plain _meta keys that disagree are -32602 with HTTP 400") {
+        json meta{{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}, {"protocolVersion", "2025-11-25"}};
+        const auto res = f.endpoint.handle(f.modern_post("tools/list", json{{"_meta", meta}}));
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kInvalidParams);
+        json info{{"protocolVersion", "2026-07-28"},
+                  {"io.modelcontextprotocol/clientInfo", json{{"name", "a"}}},
+                  {"clientInfo", json{{"name", "b"}}}};
+        CHECK(code_of(f.endpoint.handle(f.modern_post("tools/list", json{{"_meta", info}}))) == kInvalidParams);
+        // equal values are fine, and the prefixed one wins when only that one is a valid version
+        json same{{"io.modelcontextprotocol/protocolVersion", "2026-07-28"}, {"protocolVersion", "2026-07-28"}};
+        CHECK(f.endpoint.handle(f.modern_post("tools/list", json{{"_meta", same}})).status == 200);
+    }
+    SECTION("every 400 body is a JSON-RPC error with a numeric code and the request id") {
+        std::vector<HttpResponse> bad;
+        auto a = f.modern_post("tools/list");
+        a.headers.erase("Mcp-Method");
+        bad.push_back(f.endpoint.handle(a));
+        json meta = Fixture::stateless_meta();
+        meta["protocolVersion"] = "2099-01-01";
+        bad.push_back(f.endpoint.handle(f.post(Fixture::rpc("tools/list", json{{"_meta", meta}}, 7))));
+        for (const auto& r : bad) {
+            REQUIRE(r.status == 400);
+            const json b = body_of(r);
+            CHECK(b["jsonrpc"] == "2.0");
+            CHECK(b["error"]["code"].is_number_integer());
+            CHECK(b.contains("id"));
+        }
+        CHECK(body_of(bad[1])["id"] == 7);
+        CHECK(body_of(bad[1])["error"]["data"]["supported"].is_array());
     }
 }
 
@@ -973,7 +1168,8 @@ TEST_CASE("Loopback http.sys: flow, auth, limits, control", "[httpsys][loopback]
         fairyfly::test::RawHttpClient::exchange(kDevPort, "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n" + std::string(kGoodAuth) + "\r\n", out.get);
         out.ctype = post_json("x", std::string(kGoodAuth) + "Content-Type: text/plain\r\n", "127.0.0.1", false);
         out.host = post_json(kPing, kGoodAuth, "evil.example");
-        out.list = post_json(R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"protocolVersion":"2026-07-28"}}})", kGoodAuth);
+        out.list = post_json(R"({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"protocolVersion":"2026-07-28"}}})",
+                             std::string(kGoodAuth) + "MCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/list\r\n");
         out.sse = post_json(R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gui_a_tool","_meta":{"progressToken":"p1"}}})",
                             std::string(kGoodAuth) + "Accept: text/event-stream\r\n");
         out.other = post_json(kPing, kGoodAuth, "127.0.0.1", true, "/mcp/other");
