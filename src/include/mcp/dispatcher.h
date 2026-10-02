@@ -52,6 +52,12 @@ public:
     /// is in write mode, and with the server value afterwards. Wire it to CommandHandler::set_read_only.
     using ReadOnlyOverride = std::function<void(bool read_only)>;
     void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
+    /// Reports a step (facts_pre, invoke, facts_post) that took longer than the slow-step threshold (default 2000 ms). The
+    /// default logs one spdlog warning; tests replace it.
+    using SlowStepReporter = std::function<void(const std::string& step, const std::string& tool,
+                                                const std::string& principal, long long elapsed_ms)>;
+    void set_slow_step_reporter(SlowStepReporter reporter) { slow_step_reporter_ = std::move(reporter); }
+    void set_slow_step_threshold(std::chrono::milliseconds threshold) { slow_step_threshold_ = threshold; }
     /// tools/list for one principal: hides tools outside its scopes and, for read-only tokens, write tools.
     std::vector<ToolDef> list_tools_for(const Principal& principal) const override;
     /// Connection remembered from the last successful gui_session_attach / gui_session_launch OF THIS PRINCIPAL
@@ -107,7 +113,17 @@ private:
     SapFactsProvider facts_provider_;
     SessionTargetResolver target_resolver_;
     ReadOnlyOverride read_only_override_;
+    SlowStepReporter slow_step_reporter_;
+    std::chrono::milliseconds slow_step_threshold_{2000};
+    /// Times one step of a call: stores the elapsed ms in `out_ms` and reports it when it exceeds the threshold.
+    void note_step(const char* step, const std::string& tool, const std::string& principal,
+                   std::chrono::steady_clock::time_point started, long long& out_ms) const;
 };
+
+/// "slow MCP step: step=<step> tool=<tool> principal=<token name> elapsed_ms=<n>": the warning logged for a step over the
+/// threshold. The principal is the token NAME, never the secret.
+std::string format_slow_step_message(const std::string& step, const std::string& tool, const std::string& principal,
+                                     long long elapsed_ms);
 
 /// Real Invoker: builds a private CLI::App, register_all_commands(), setup_all_commands, parses the
 /// argv (prefixed with a program name, no app.exit), then execute_active_command(get_handler()).

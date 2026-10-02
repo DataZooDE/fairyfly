@@ -46,6 +46,9 @@ struct AuditRecord {
     std::string transport;             ///< MCP: "stdio" | "http" (emitted only when non-empty)
     std::string era;                   ///< MCP: "legacy" | "stateless" (emitted only when non-empty)
     bool tcode_left_allowlist = false; ///< MCP: the transaction was outside the token's T-code allowlist after the call (emitted only when true)
+    long long facts_pre_ms = 0;        ///< MCP: duration of the pre-call SAP facts lookup (emitted only when > 0)
+    long long invoke_ms = 0;           ///< MCP: duration of the invocation itself (emitted only when > 0)
+    long long facts_post_ms = 0;       ///< MCP: duration of the post-call facts re-check (emitted only when > 0)
 };
 
 enum class Mode { Enabled, Disabled, Required };

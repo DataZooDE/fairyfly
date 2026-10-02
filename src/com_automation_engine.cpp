@@ -1,4 +1,5 @@
 #include "include/com_automation_engine.h"
+#include "include/session_facts.h"
 #include "include/action_status.h"
 #include "include/collection_id_lookup.h"
 #include "include/sensitive_data.h"
@@ -551,10 +552,20 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
         auto sess = find_session_by_id(session_id).second;
         if (!sess) return facts;
         if (!server_session_key.empty() && sess->get_server_session_key() != server_session_key) return facts;
-        facts.system = sess->get_system_name();
-        facts.client = sess->get_client();
-        facts.user = sess->get_user();
-        facts.transaction = sess->get_transaction_code();
+        bool timed_out = false;
+        facts = read_facts_bounded(
+            [&] { return sess->is_busy(); },
+            [&] {
+                audit::SapFacts read;
+                read.system = sess->get_system_name();
+                read.client = sess->get_client();
+                read.user = sess->get_user();
+                read.transaction = sess->get_transaction_code();
+                return read;
+            },
+            FactsBudget{}, FactsClock{}, &timed_out);
+        if (timed_out)
+            spdlog::warn("peek_session_facts: session {} stayed busy for 5 s, facts unknown", session_id);
     } catch (...) {
         return audit::SapFacts{};
     }

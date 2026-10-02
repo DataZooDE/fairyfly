@@ -142,6 +142,23 @@ const ToolSpec* CommandDispatcher::find_spec(const std::string& name) const {
     return nullptr;
 }
 
+std::string format_slow_step_message(const std::string& step, const std::string& tool, const std::string& principal,
+                                     long long elapsed_ms) {
+    return "slow MCP step: step=" + step + " tool=" + tool + " principal=" + principal + " elapsed_ms=" + std::to_string(elapsed_ms);
+}
+
+void CommandDispatcher::note_step(const char* step, const std::string& tool, const std::string& principal,
+                                  std::chrono::steady_clock::time_point started, long long& out_ms) const {
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    out_ms += std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    if (elapsed < slow_step_threshold_) return;
+    const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    try {
+        if (slow_step_reporter_) slow_step_reporter_(step, tool, principal, ms);
+        else spdlog::warn("{}", format_slow_step_message(step, tool, principal, ms));
+    } catch (...) {}
+}
+
 Result CommandDispatcher::invoke(const std::vector<std::string>& argv) {
     try {
         return invoker_(argv);
@@ -229,7 +246,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     {
         std::optional<std::string> current_system, current_tcode;
         if ((!principal.sap_systems.empty() || !principal.tcodes.empty()) && facts_provider_) {
-            if (auto facts = facts_provider_(record.connection); facts && facts->any()) {
+            const auto started = std::chrono::steady_clock::now();
+            std::optional<audit::SapFacts> facts;
+            try { facts = facts_provider_(record.connection); } catch (...) {}
+            note_step("facts_pre", name, principal.name, started, record.facts_pre_ms);
+            if (facts && facts->any()) {
                 if (!facts->system.empty()) current_system = facts->system + "/" + facts->client;
                 if (!facts->transaction.empty()) current_tcode = facts->transaction;
             }
@@ -358,7 +379,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
 
     // 5. invoke
+    const auto invoke_started = std::chrono::steady_clock::now();
     Result result = invoke(argv);
+    note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
 
     // 5a. tokens limited to named connections only see those in the three listings: filter the structured result
     // before anything is shaped, rendered or audited; an unexpected shape is an error, never unfiltered data.
@@ -373,9 +396,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     bool tcode_left = false;
     if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
         std::string after;
+        const auto facts_started = std::chrono::steady_clock::now();
         try {
             if (auto facts = facts_provider_(record.connection)) after = auth::normalize_tcode(facts->transaction);
         } catch (...) {}
+        note_step("facts_post", name, principal.name, facts_started, record.facts_post_ms);
         if (!after.empty()) {
             const bool allowed = std::any_of(principal.tcodes.begin(), principal.tcodes.end(),
                                              [&](const std::string& pat) { return auth::glob_match(pat, after); });
@@ -401,7 +426,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             try {
                 auto retry_argv = spec->build_argv(retry_args, effective);
                 record.argv = retry_argv;
+                const auto retry_started = std::chrono::steady_clock::now();
                 result = invoke(retry_argv);
+                note_step("invoke", name, principal.name, retry_started, record.invoke_ms);
             } catch (const std::exception&) {}
         }
         if (result.status == Result::Status::Success && image_payload_bytes(result) > policy_.max_image_bytes)

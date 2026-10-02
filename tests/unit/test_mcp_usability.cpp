@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <chrono>
 #include <future>
 #include <set>
@@ -8,11 +10,14 @@
 #include <string>
 #include <vector>
 
+#include "include/audit_log.h"
 #include "include/auth/authorize.h"
 #include "include/mcp/call_executor.h"
 #include "include/mcp/dispatcher.h"
+#include "include/mcp/mcp_audit.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
+#include "include/session_facts.h"
 #include "include/string_utils.h"
 #include "include/vkey.h"
 
@@ -424,4 +429,182 @@ TEST_CASE("Executor answers CALL_TIMEOUT and SERVER_BUSY with the running tool",
     CHECK_FALSE(executor.running_info().has_value());
     executor.request_stop();
     main_thread.join();
+}
+
+// ---- item 6: step timing and the bounded facts lookup ---------------------------------------------
+namespace {
+
+struct FakeClock {
+    std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+    int sleeps = 0;
+    fairyfly::sap::FactsClock clock() {
+        fairyfly::sap::FactsClock c;
+        c.now = [this] { return t; };
+        c.sleep = [this](std::chrono::milliseconds d) { t += d; ++sleeps; };
+        return c;
+    }
+};
+
+} // namespace
+
+TEST_CASE("read_facts_bounded: reads at once when the session is idle", "[mcp][usability][facts]") {
+    FakeClock fake;
+    bool timed_out = true;
+    int reads = 0;
+    const auto facts = fairyfly::sap::read_facts_bounded(
+        [] { return false; },
+        [&] { ++reads; return fairyfly::audit::SapFacts{"A4H", "001", "U", "STRUST"}; }, {}, fake.clock(), &timed_out);
+    CHECK(facts.system == "A4H");
+    CHECK(facts.transaction == "STRUST");
+    CHECK(reads == 1);
+    CHECK_FALSE(timed_out);
+    CHECK(fake.sleeps == 0);
+}
+
+TEST_CASE("read_facts_bounded: waits for a busy session, then reads", "[mcp][usability][facts]") {
+    FakeClock fake;
+    int polls = 0;
+    const auto facts = fairyfly::sap::read_facts_bounded(
+        [&] { return ++polls <= 3; }, [] { return fairyfly::audit::SapFacts{"A4H", "001", "U", "SM21"}; }, {}, fake.clock());
+    CHECK(facts.transaction == "SM21");
+    CHECK(fake.sleeps == 3);
+}
+
+TEST_CASE("read_facts_bounded: a session that stays busy gives empty facts after the budget", "[mcp][usability][facts]") {
+    FakeClock fake;
+    bool timed_out = false;
+    int reads = 0;
+    const auto start = fake.t;
+    const auto facts = fairyfly::sap::read_facts_bounded(
+        [] { return true; }, [&] { ++reads; return fairyfly::audit::SapFacts{"A4H", "001", "U", "SM21"}; },
+        fairyfly::sap::FactsBudget{std::chrono::milliseconds(5000), std::chrono::milliseconds(100)}, fake.clock(), &timed_out);
+    CHECK_FALSE(facts.any());
+    CHECK(timed_out);
+    CHECK(reads == 0);  // the properties are never touched while the GUI is busy
+    CHECK(fake.t - start >= std::chrono::milliseconds(5000));
+    CHECK(fake.t - start < std::chrono::milliseconds(5200));
+}
+
+TEST_CASE("read_facts_bounded: throwing seams never escape", "[mcp][usability][facts]") {
+    FakeClock fake;
+    // an unreadable Busy property counts as not busy
+    auto facts = fairyfly::sap::read_facts_bounded(
+        []() -> bool { throw std::runtime_error("busy"); }, [] { return fairyfly::audit::SapFacts{"A4H", "001", "U", "X"}; }, {},
+        fake.clock());
+    CHECK(facts.transaction == "X");
+    // a failing read means no facts
+    facts = fairyfly::sap::read_facts_bounded([] { return false; },
+                                              []() -> fairyfly::audit::SapFacts { throw std::runtime_error("com"); }, {}, fake.clock());
+    CHECK_FALSE(facts.any());
+}
+
+TEST_CASE("a lookup that gives up makes a token with an allowlist fail closed", "[mcp][usability][facts]") {
+    Principal p;
+    p.name = "strust";
+    p.all_scopes = true;
+    p.authenticated = true;
+    p.tcodes = {"STRUST"};
+    Policy policy;
+    policy.read_only = false;
+    CommandDispatcher dispatcher([](const Argv&) { return ok_result(); }, policy);
+    dispatcher.set_sap_facts_provider([](std::optional<int>) { return std::optional<fairyfly::audit::SapFacts>(); });  // gave up
+    CallContext ctx;
+    ctx.request_id = 1;
+    ctx.principal = p;
+    ctx.http = true;
+    const auto result = dispatcher.call_tool("gui_screen_read", json::object(), ctx);
+    CHECK(result.is_error);
+    CHECK(first_text(result).find("TCODE_DENIED") != std::string::npos);
+}
+
+TEST_CASE("slow steps are reported and timed in the audit record", "[mcp][usability][timing]") {
+    const auto file = std::filesystem::temp_directory_path() /
+                      ("ff_usab_audit_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".jsonl");
+    fairyfly::audit::AuditConfig config;
+    config.mode = fairyfly::audit::Mode::Enabled;
+    config.file = file;
+    fairyfly::audit::AuditSink sink(config);
+
+    Principal p;
+    p.name = "usertest-strust";
+    p.all_scopes = true;
+    p.authenticated = true;
+    p.tcodes = {"STRUST"};
+    Policy policy;
+    policy.read_only = false;
+
+    struct Slow { std::string step, tool, principal; long long ms; };
+    std::vector<Slow> reports;
+    CommandDispatcher dispatcher(
+        [](const Argv&) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            return ok_result();
+        },
+        policy, make_mcp_audit_hook(&sink, nullptr, false));
+    dispatcher.set_slow_step_threshold(std::chrono::milliseconds(30));
+    dispatcher.set_slow_step_reporter([&](const std::string& step, const std::string& tool, const std::string& principal, long long ms) {
+        reports.push_back({step, tool, principal, ms});
+    });
+    int lookups = 0;
+    dispatcher.set_sap_facts_provider([&](std::optional<int>) {
+        ++lookups;
+        std::this_thread::sleep_for(std::chrono::milliseconds(lookups == 1 ? 50 : 40));
+        return std::optional<fairyfly::audit::SapFacts>(fairyfly::audit::SapFacts{"A4H", "001", "U", "STRUST"});
+    });
+    CallContext ctx;
+    ctx.request_id = 1;
+    ctx.principal = p;
+    ctx.http = true;
+    CHECK_FALSE(dispatcher.call_tool("gui_transaction_start", {{"code", "STRUST"}}, ctx).is_error);
+
+    REQUIRE(reports.size() == 3);
+    CHECK(reports[0].step == "facts_pre");
+    CHECK(reports[1].step == "invoke");
+    CHECK(reports[2].step == "facts_post");
+    for (const auto& r : reports) {
+        CHECK(r.tool == "gui_transaction_start");
+        CHECK(r.principal == "usertest-strust");
+        CHECK(r.ms >= 30);
+    }
+
+    std::ifstream in(file);
+    std::string line;
+    REQUIRE(std::getline(in, line));
+    in.close();
+    std::filesystem::remove(file);
+    const auto row = json::parse(line);
+    CHECK(row["facts_pre_ms"].get<long long>() >= 40);
+    CHECK(row["invoke_ms"].get<long long>() >= 55);
+    CHECK(row["facts_post_ms"].get<long long>() >= 35);
+    CHECK(line.find("ffy_") == std::string::npos);
+
+    // formatted warning: step, tool, principal name, elapsed
+    const std::string text = format_slow_step_message("facts_post", "gui_transaction_start", "usertest-strust", 2100);
+    CHECK(text == "slow MCP step: step=facts_post tool=gui_transaction_start principal=usertest-strust elapsed_ms=2100");
+}
+
+TEST_CASE("steps under the threshold are not reported and zero timings are not audited", "[mcp][usability][timing]") {
+    fairyfly::audit::AuditRecord rec;
+    rec.source = "mcp";
+    rec.tool = "gui_screen_read";
+    const auto quiet = json::parse(fairyfly::audit::format_record(rec));
+    CHECK_FALSE(quiet.contains("facts_pre_ms"));
+    CHECK_FALSE(quiet.contains("invoke_ms"));
+    CHECK_FALSE(quiet.contains("facts_post_ms"));
+    rec.facts_pre_ms = 5;
+    rec.invoke_ms = 6;
+    rec.facts_post_ms = 7;
+    const auto timed = json::parse(fairyfly::audit::format_record(rec));
+    CHECK(timed["facts_pre_ms"] == 5);
+    CHECK(timed["invoke_ms"] == 6);
+    CHECK(timed["facts_post_ms"] == 7);
+
+    Policy policy;
+    std::vector<std::string> steps;
+    CommandDispatcher dispatcher([](const Argv&) { return ok_result(); }, policy);
+    dispatcher.set_slow_step_reporter([&](const std::string& step, const std::string&, const std::string&, long long) { steps.push_back(step); });
+    CallContext ctx;
+    ctx.request_id = 1;
+    CHECK_FALSE(dispatcher.call_tool("gui_doctor", json::object(), ctx).is_error);
+    CHECK(steps.empty());
 }

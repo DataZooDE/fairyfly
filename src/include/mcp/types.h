@@ -190,6 +190,11 @@ struct McpCallRecord {
     std::string transport = "stdio";   ///< "stdio" | "http"
     std::string era;                   ///< "legacy" | "stateless" | ""
     bool tcode_left_allowlist = false; ///< post-call re-check found the transaction outside the token's T-code allowlist
+    /// Step timing of the call (additive; 0 = step not run). facts_pre: SAP facts lookup before the authorization, invoke: the
+    /// CLI invocation, facts_post: the facts re-check after it. Audited only when > 0.
+    long long facts_pre_ms = 0;
+    long long invoke_ms = 0;
+    long long facts_post_ms = 0;
 };
 
 /// Receives one record per tools/call. Never throws.

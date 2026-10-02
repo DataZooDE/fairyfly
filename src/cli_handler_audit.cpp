@@ -1,6 +1,7 @@
 #include "include/cli_handler.h"
 #include "include/com_automation_engine.h"
 #include "include/connection_launcher.h"
+#include "include/session_facts.h"
 
 namespace fairyfly::cli {
 
@@ -11,10 +12,18 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
         if (!engine) return facts;
         auto session = engine->get_session();
         if (!session) return facts;
-        facts.system = session->get_system_name();
-        facts.client = session->get_client();
-        facts.user = session->get_user();
-        facts.transaction = session->get_transaction_code();
+        // The audit record of every call reads these: never wait long for a busy session (2 s), unknown facts are fine.
+        facts = sap::read_facts_bounded(
+            [&] { return session->is_busy(); },
+            [&] {
+                audit::SapFacts read;
+                read.system = session->get_system_name();
+                read.client = session->get_client();
+                read.user = session->get_user();
+                read.transaction = session->get_transaction_code();
+                return read;
+            },
+            sap::FactsBudget{std::chrono::milliseconds(2000), std::chrono::milliseconds(100)});
     } catch (...) {
     }
     return facts;
