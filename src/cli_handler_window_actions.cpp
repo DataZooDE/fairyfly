@@ -49,6 +49,15 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
     if (result.status == Result::Status::Success) {
         result.data["key"] = key;
         result.data["connection_id"] = conn_result.value.id;
+    } else if (*vkey >= 80 && *vkey <= 83 && result.error.value("code", std::string()) == "COM_ERROR") {
+        // Page up/down/top/bottom are rejected by SAP when the focus is in an ALV grid or other control that
+        // handles scrolling itself (observed on SM21): say so instead of a raw COM error.
+        const std::string detail = result.error.value("message", std::string());
+        result.error["code"] = "KEY_NOT_APPLICABLE";
+        result.error["message"] = "SAP rejected the page key '" + key + "' (VKey " + std::to_string(*vkey) +
+                                  ") on this screen: grids and other controls scroll themselves. " + detail;
+        result.error["hint"] = "to read further rows of a grid use `screen read --offset N` (MCP: gui_screen_read offset); "
+                               "page keys only work on classic list screens";
     }
     return result;
 }
