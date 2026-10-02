@@ -1256,6 +1256,36 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             return result;
         }
 
+        // Selection-input mode: validate the LIVE control and the live screen right before the write (the dispatcher's
+        // decision used the element id and the screen read before the call). Nothing is read from the field first.
+        if (selection_input_policy_.active) {
+            sap::SelectionInputProbe live;
+            try { live.type = elem->get_type(); } catch (const std::exception&) {}
+            live.id = resolved_element.path;
+            try { live.name = elem->get_name(); } catch (const std::exception&) {}
+            try { live.label = elem->get_label(); } catch (const std::exception&) {}
+            try { live.tooltip = elem->get_tooltip(); } catch (const std::exception&) {}
+            try { live.changeable = elem->is_changeable(); live.changeable_known = true; } catch (const std::exception&) {}
+            const auto screen = read_facts_bounded(
+                [&] { return session->is_busy(); },
+                [&] {
+                    audit::SapFacts read;
+                    read.program = session->get_program();
+                    read.screen_number = session->get_screen_number();
+                    return read;
+                },
+                FactsBudget{std::chrono::milliseconds(2000), std::chrono::milliseconds(100)});
+            live.program = screen.program;
+            live.screen_number = screen.screen_number;
+            if (auto refusal = evaluate_selection_input(live, selection_input_policy_)) {
+                result.status = Result::Status::Error;
+                result.error["code"] = refusal->code;
+                result.error["message"] = refusal->message;
+                result.error["element"] = resolved_element.path;
+                return result;
+            }
+        }
+
         // Probe the field first: the credential decision needs type, id and label before any text is read.
         FieldProbe probe;
         probe.type = elem->get_type();

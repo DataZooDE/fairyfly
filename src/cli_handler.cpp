@@ -1018,6 +1018,32 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
 
     const bool grid_requested = row.has_value() || !column.empty() || checkbox || commit;
     Result result;
+    // Selection-input mode: only a plain text field, validated live by the engine right before the write. The policy
+    // is cleared again on every exit path (RAII), so it can never leak into a later fill.
+    struct SelectionPolicyScope {
+        AutomationEngine& engine;
+        bool active = false;
+        ~SelectionPolicyScope() { if (active) { try { engine.set_selection_input_policy({}); } catch (...) {} } }
+    } selection_scope{*engine_};
+    if (selection_input_only_) {
+        if (grid_requested) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INPUT_TARGET_DENIED";
+            result.error["message"] = "typing is only allowed into plain selection fields, not into table or grid cells";
+            return result;
+        }
+        sap::SelectionInputPolicy policy;
+        policy.active = true;
+        policy.program = selection_program_;
+        policy.screen_number = selection_screen_;
+        selection_scope.active = true;
+        if (!engine_->set_selection_input_policy(policy)) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INPUT_TARGET_DENIED";
+            result.error["message"] = "the automation engine cannot validate the field before typing (fail closed)";
+            return result;
+        }
+    }
     if (grid_requested) {
         if (!row.has_value() || *row < 0 || column.empty()) {
             result.status = Result::Status::Error;

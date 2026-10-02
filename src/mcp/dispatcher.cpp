@@ -261,6 +261,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
     const Principal& principal = ctx.principal;
+    auth::InitialScreen selection_initial;  // the recorded initial screen an authorized selection-input fill may write on
     {
         std::optional<std::string> current_system, current_tcode;
         auth::SelectionInputContext input_context;
@@ -293,6 +294,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); },
                                                           &input_context);
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+        if (selection_input && input_context.initial) selection_initial = *input_context.initial;
         // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
         // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
@@ -365,6 +367,24 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     } read_only_scope(read_only_override_,
                       selection_input || (principal.read_only && !policy_.read_only),
                       selection_input ? false : true, policy_.read_only);
+
+    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
+    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
+    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
+    // would be unchecked, so the call is refused.
+    struct SelectionScope {
+        const SelectionInputOverride& hook;
+        bool active;
+        SelectionScope(const SelectionInputOverride& h, bool apply, const std::string& program, const std::string& screen)
+            : hook(h), active(apply && static_cast<bool>(h)) {
+            if (active) hook(true, program, screen);
+        }
+        ~SelectionScope() {
+            if (active) { try { hook(false, std::string(), std::string()); } catch (...) {} }
+        }
+    } selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
+    if (selection_input && !selection_input_override_)
+        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;

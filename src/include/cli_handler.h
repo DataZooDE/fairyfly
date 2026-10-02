@@ -77,6 +77,8 @@ private:
     std::unique_ptr<ConnectionManager> conn_mgr_;
     SessionId current_session_;
     bool read_only_ = false;  ///< --read-only guard: refuse state-changing actions
+    bool selection_input_only_ = false;  ///< see set_selection_input_only
+    std::string selection_program_, selection_screen_;
     bool batch_mode_ = false; ///< inside `batch`: stdin belongs to the batch file, no prompts
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
@@ -109,6 +111,17 @@ public:
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }
     bool read_only() const { return read_only_; }
+
+    /// Selection-input mode, set by the MCP dispatcher for ONE authorized gui_element_fill call (together with the lifted
+    /// read-only guard) and cleared afterwards on every path: handle_fill then refuses grid/table cells and lets the engine
+    /// validate the LIVE control (plain changeable text field, no credential id/name/label) and the live screen
+    /// (program + screen number must equal the recorded initial screen) right before the write.
+    void set_selection_input_only(bool on, std::string program = {}, std::string screen_number = {}) {
+        selection_input_only_ = on;
+        selection_program_ = on ? std::move(program) : std::string();
+        selection_screen_ = on ? std::move(screen_number) : std::string();
+    }
+    bool selection_input_only() const { return selection_input_only_; }
 
     /// Non-secret facts about the current SAP session for the audit trail (empty when none).
     audit::SapFacts audit_facts() const noexcept;
