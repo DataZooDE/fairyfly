@@ -17,6 +17,7 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Screen read
 
+- `element fill` result: `value` is the value read back from the control (max 200 characters; credential fields keep `[REDACTED: reason]` and `value_redacted: true`), new `field` object (`type`, `max_length`, `numerical`, `required`, `input_kind`, `format_hint`, `format_hint_source`, `value_normalized`, `format_warning`; never a rejection) and `status_bar` / `status_message` only when the bar changed during the fill (a stale message from the previous action is no longer echoed).
 - `screen read --offset N` / MCP `offset`: grid and table reads can start at any row; the table JSON gets `offset`, `returned`, `total`, `next_offset` and `exposed_rows`, trailing empty padding rows are trimmed (`empty_rows_trimmed`) and the Markdown header explains `Total Rows`, `Visible Rows (viewport)` and `Returned Rows`.
 - `--text-contains` filters the rows of grids and table controls (`rows_matched` / `rows_total`).
 - The `only` selectors report the grids and trees they dropped (`suppressed`, plus a Markdown note); new `--only-tables` / `only=tables`.

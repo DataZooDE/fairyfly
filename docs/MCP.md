@@ -137,7 +137,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_menu_select` | Select a menu item by text path | `path`, `window` | Save/Delete-style items refused | D |
 | `gui_session_disconnect` | Remove a saved connection | `connection`, `close_session` | `close_session=true` refused | D |
 | `gui_batch` | Up to 20 tool calls in one round trip | `items` (`tool`, `arguments`), `stop_on_error` | each item is checked like a normal call | D |
-| `gui_element_fill` | Enter or clear a field or grid cell | `element`, `value` or `clear`, `row`, `column`, `checkbox`, `commit` | hidden; a call returns TOOL_UNAVAILABLE_READ_ONLY | D |
+| `gui_element_fill` | Enter or clear a field or grid cell. The result echoes `value` as read back from the control (max 200 characters; `[REDACTED: reason]` for credential fields), a `field` object (`type`, `max_length`, `input_kind`, `format_hint`, `format_warning`) and a status bar only when it changed during the fill; `ELEMENT_ON_INACTIVE_TAB` for a field on a tab that is not selected | `element`, `value` or `clear`, `row`, `column`, `checkbox`, `commit` | hidden; a call returns TOOL_UNAVAILABLE_READ_ONLY | D |
 
 All tools take an optional `connection` (saved connection id) except the ones that do not need a session. Input schemas set `additionalProperties: false`: unknown arguments are rejected with INVALID_ARGUMENT.
 

@@ -44,6 +44,8 @@ For a control search without a full screen extraction, use `screen find --id-con
 
 Use `element fill <element-id> --clear` to empty a text field or TextEdit shell. This works in Windows PowerShell 5.1, which can omit an empty quoted positional argument when launching a native executable.
 
+`element fill` echoes the typed `value` as the control shows it (max 200 characters; `[REDACTED: reason]` for password and credential fields), reports a `field` object (`type`, `max_length`, `input_kind` date/time/numeric, `format_hint` such as `DD.MM.YYYY` or `unknown`, `format_warning` when the typed value has another date shape; nothing is rejected) and a status bar message only when it changed during the fill.
+
 `session disconnect --connection <id>` removes Fairyfly's saved connection while leaving SAP GUI open. Add `--close-session` to close that SAP GUI session before removing its saved connection.
 
 `session launch <connection>` uses native SAP GUI COM by default and never reads credentials. For a fresh logon screen, run `session login --connection <id>`; see "Credentials and login" below. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `session launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot (the child command line is only `-sysname=<name> -maxgui`); use `session login` or `session launch --login` for authentication afterward. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file (legacy plaintext credentials) stays ignored by Git; keep it private and migrate it as described below.

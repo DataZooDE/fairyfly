@@ -84,6 +84,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # Core library sources (shared between main executable and tests)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
+    src/field_fill_info.cpp
     src/read_only_guard.cpp
     src/cli_entry.cpp
     src/audit_log.cpp

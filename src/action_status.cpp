@@ -164,6 +164,11 @@ void attach_status_bar(Result& result, const ActionStatus& before, const ActionS
     }
 }
 
+void attach_fresh_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after) {
+    if (after.text == before.text && after.type == before.type) return;
+    attach_status_bar(result, before, after);
+}
+
 void attach_status_bar(Result& result, const ActionStatus& current) {
     if (current.text.empty()) return;
     json bar = status_bar_json(current);

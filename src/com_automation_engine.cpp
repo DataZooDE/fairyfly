@@ -1,6 +1,7 @@
 #include "include/com_automation_engine.h"
 #include "include/session_facts.h"
 #include "include/action_status.h"
+#include "include/field_fill_info.h"
 #include "include/collection_id_lookup.h"
 #include "include/sensitive_data.h"
 #include "include/html_viewer_reader.h"
@@ -1220,7 +1221,23 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             return result;
         }
 
-        // Set the text
+        // Probe the field first: the credential decision needs type, id and label before any text is read.
+        FieldProbe probe;
+        probe.type = elem->get_type();
+        probe.id = resolved_element.path;
+        try { probe.name = elem->get_name(); } catch (const std::exception&) {}
+        try { probe.label = elem->get_label(); } catch (const std::exception&) {}
+        const bool credential_field =
+            !sensitive_input_field_reason(probe.type, probe.id, probe.label).empty();
+        if (!credential_field) {
+            try { probe.text_before = elem->get_text(); } catch (const std::exception&) {}
+            try { probe.max_length = elem->get_property_int(L"MaxLength"); } catch (const std::exception&) {}
+            try { probe.numerical = elem->get_property_bool(L"Numerical"); } catch (const std::exception&) {}
+            try { probe.required = elem->get_property_bool(L"Required"); } catch (const std::exception&) {}
+        }
+
+        // Set the text. SetText is local to the GUI front end (no server round trip until Enter), so a status bar
+        // read right after it still shows the previous action's message: report it only when it changed.
         const auto before_status = read_action_status(session);
         const bool text_set = elem->set_text(value);
         const auto after_status = read_action_status(session);
@@ -1229,8 +1246,14 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             result.error["code"] = "ELEMENT_READ_ONLY";
             result.error["message"] = "Element is not changeable on the current SAP screen";
             result.error["element"] = resolved_element.path;
-            attach_status_bar(result, before_status, after_status);
+            attach_fresh_status_bar(result, before_status, after_status);
             return result;
+        }
+        if (!credential_field) {
+            try {
+                probe.text_after = elem->get_text();
+                probe.text_after_known = true;
+            } catch (const std::exception&) { /* echo the typed value instead */ }
         }
 
         result.status = Result::Status::Success;
@@ -1238,10 +1261,13 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         if (element.path != resolved_element.path) {
             result.data["element_requested"] = element.path;  // Show original @active path
         }
-        result.data["value"] = "[REDACTED]";
+        bool value_redacted = false;
+        result.data["value"] = fill_value_echo(probe, value, value_redacted);
+        if (value_redacted) result.data["value_redacted"] = true;
         result.data["action"] = "fill";
         result.data["window"] = resolved_element.get_window().id;
-        attach_status_bar(result, before_status, after_status);
+        result.data["field"] = build_fill_field_info(probe, value);
+        attach_fresh_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
