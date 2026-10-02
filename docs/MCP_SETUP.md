@@ -19,11 +19,18 @@ fairyfly mcp teardown                                                           
 | `firewall` | only with `--open-firewall`: inbound TCP rule `fairyfly MCP HTTPS <port>` | yes |
 | `certificate_export` | writes the public certificate to `%LOCALAPPDATA%\fairyfly\fairyfly-mcp-<host>.cer` for the clients | no |
 | `config` | writes a commented `mcp.yaml` (`tls: true`, `host: '+'`, `port`, `allowed_hosts: [host]`, `allow_ip`) when the file does not exist. It does not set `server.transport`: start the server explicitly with `fairyfly mcp --http` (or `--tray --http`), so a plain stdio `fairyfly mcp` is unaffected. An existing file is never rewritten; differing keys are listed under "Left for a human" | no |
-| `manifest` | `%LOCALAPPDATA%\fairyfly\mcp-setup.json` (schema 1): what was created (including `config_created` and `config_sha256` of the mcp.yaml text), for `teardown` and `doctor` | no |
+| `manifest` | `%LOCALAPPDATA%\fairyfly\mcp-setup.json` (schema 1): what was created (including `config_created` and `config_sha256` of the mcp.yaml text, and `urlacl_created`/`urlacl_sddl`), for `teardown` and `doctor` | no |
 
 Only the four elevated steps run in the elevated process. `setup` computes the target account's SID before elevating and writes it into a plan file; the elevated child (`fairyfly mcp setup --apply-plan FILE --result-file FILE`, started once with `ShellExecute runas`) re-validates every field of the plan file, executes the steps and writes per-step results. The parent then exports the certificate, writes the config and manifest, and verifies. The plan file lives under the per-user `%LOCALAPPDATA%\fairyfly\run\` (random name, created with `CREATE_NEW` and no write sharing, held open until the child exits) and is deleted afterwards. The child does not trust it by path: the exact plan bytes are bound to what the parent approved by `--plan-sha256 <hex>`, `--plan-nonce`, `--plan-parent-pid`, `--plan-sid` (setup) and `--plan-force-binding` on the elevated command line (visible in the UAC consent data). The child reads the file once, hashes those bytes and refuses with `INVALID_PLAN` (no change) on a hash, nonce, pid, SID or `force_binding` mismatch or when the plan is older than 10 minutes; it then parses the same in-memory bytes. The result goes to a randomly named file that the parent trusts only after a normal exit (0 or 1), at most 1 MiB, valid JSON and the echoed nonce.
 
 An SslBinding whose AppId is not fairyfly's belongs to somebody else. The `sslcert` step is then `blocked` (exit 1, `PLAN_BLOCKED`) unless you pass `--force-binding`; `teardown` never removes such a binding.
+
+### Teardown ownership rules
+
+`teardown` removes only what the manifest proves setup created, and re-checks it before every delete (the elevated child re-checks the URL reservation itself). Everything else is skipped and named under "Left for a human".
+
+- **URL reservation**: the manifest records `urlacl_created` (setup created the reservation, as opposed to finding one) and `urlacl_sddl` (the SDDL http.sys reported right after setup). Teardown removes the reservation only when `urlacl_created` is true and the current SDDL still equals `urlacl_sddl`. A reservation that existed before setup, that somebody changed afterwards, that belongs to a manifest written by an older version (no such fields), or that is found with `--hostname/--port` and no manifest, is left in place; the human item `urlacl_foreign` prints `netsh http delete urlacl url=<prefix>`.
+- **TLS binding**: removed only when its AppId is fairyfly's (unchanged rule).
 
 ### Verification (the last step)
 

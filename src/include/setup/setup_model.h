@@ -80,6 +80,8 @@ struct Manifest {
     std::string updated_at;
     bool config_created = false;          ///< setup created mcp.yaml (teardown may delete it while unmodified)
     std::string config_sha256;            ///< sha256 of the text setup wrote
+    std::string urlacl_sddl;              ///< SDDL of the URL reservation as setup left it (teardown removes only an unchanged one)
+    bool urlacl_created = false;          ///< setup created the reservation (false: it found an existing one)
 
     nlohmann::json to_json() const;
     static std::optional<Manifest> from_json(const nlohmann::json& j);
@@ -144,6 +146,7 @@ struct HumanItem {
 struct TeardownWork {
     std::vector<std::string> ipports;
     std::vector<std::string> prefixes;
+    std::map<std::string, std::string> urlacl_expected;   ///< prefix -> SDDL setup recorded; the child removes only an unchanged one
     std::string firewall_rule;
     std::string cert_thumbprint;
     std::string cer_path;
@@ -201,6 +204,7 @@ struct TeardownDiagnosis {
     std::string hostname;
     int port = 0;
     std::vector<std::string> urlacls;             ///< reserved candidate prefixes
+    std::map<std::string, std::string> urlacl_sddl;   ///< current SDDL per reserved prefix (absent when it could not be read)
     std::vector<std::string> ssl_ours;            ///< ipports bound with our AppId
     std::vector<std::string> ssl_foreign;         ///< ipports bound by somebody else (never touched)
     std::string firewall_rule;                    ///< the rule name to look at

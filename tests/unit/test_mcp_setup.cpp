@@ -1125,7 +1125,7 @@ TEST_CASE("teardown without a manifest", "[mcp_setup]") {
         CHECK(r.err.str().find("MANIFEST_MISSING") != std::string::npos);
         CHECK(r.m.http.urlacls.size() == 1);
     }
-    SECTION("--hostname/--port removes reservations and our bindings, never a foreign one, never a certificate") {
+    SECTION("--hostname/--port removes our bindings, never a foreign one, never a certificate, and (no ownership proof) leaves the reservation to a human") {
         r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
         r.m.http.bindings["0.0.0.0:8443"] = SslBinding{"0.0.0.0:8443", kThumb, normalize_app_id(kAppId), "MY"};
         r.m.http.bindings["[::]:8443"] = SslBinding{"[::]:8443", kThumb, "{11111111-2222-3333-4444-555555555555}", "MY"};
@@ -1133,13 +1133,16 @@ TEST_CASE("teardown without a manifest", "[mcp_setup]") {
         t.hostname = kHost;
         t.port = 8443;
         CHECK(r.teardown(t) == 0);
-        CHECK(r.m.http.urlacls.empty());
+        CHECK(r.m.http.urlacls.size() == 1);                // no manifest: nothing proves setup created it
+        CHECK(r.out.str().find("Not removed") != std::string::npos);
+        CHECK(r.out.str().find("netsh http delete urlacl url=" + kPrefix) != std::string::npos);
         CHECK(r.m.http.bindings.count("0.0.0.0:8443") == 0);
         CHECK(r.m.http.bindings.count("[::]:8443") == 1);   // foreign: untouched
         CHECK(r.m.certs.certs.size() == 1);
     }
     SECTION("dry run changes nothing") {
         r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
+        r.m.http.bindings["0.0.0.0:8443"] = SslBinding{"0.0.0.0:8443", kThumb, normalize_app_id(kAppId), "MY"};
         t.hostname = kHost;
         t.port = 8443;
         t.dry_run = true;
@@ -1266,4 +1269,126 @@ TEST_CASE("collect_setup_facts: fresh machine and after setup", "[mcp_setup]") {
     CHECK(f.tls_status == "ok");
     CHECK(f.tls_thumbprint_match);
     CHECK(f.tls_protocol == "TLS 1.3");
+}
+
+// ---- teardown: URL reservation ownership ----------------------------------------------------------------------------
+namespace {
+bool has_human(const std::string& json_text, const std::string& id) {
+    const json doc = json::parse(json_text);
+    for (const auto& h : doc["data"]["human"])
+        if (h["id"] == id) return true;
+    return false;
+}
+std::string step_status(const std::string& json_text, const std::string& id) {
+    const json doc = json::parse(json_text);
+    for (const auto& s : doc["data"]["steps"])
+        if (s["id"] == id) return s["status"];
+    return "";
+}
+} // namespace
+
+TEST_CASE("manifest records the urlacl SDDL and whether setup created the reservation", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->urlacl_created);
+    CHECK(m->urlacl_sddl == r.m.http.urlacls.at(kPrefix));
+    CHECK(json::parse(r.m.sys.files.at(kManifestPath))["schema"] == 1);
+    // older manifests load; absent fields mean "not created by setup"
+    json old = json::parse(r.m.sys.files.at(kManifestPath));
+    old.erase("urlacl_sddl");
+    old.erase("urlacl_created");
+    const auto legacy = Manifest::from_json(old);
+    REQUIRE(legacy.has_value());
+    CHECK_FALSE(legacy->urlacl_created);
+    CHECK(legacy->urlacl_sddl.empty());
+}
+
+TEST_CASE("teardown removes the reservation setup created", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.empty());
+    CHECK_FALSE(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("teardown leaves a pre-existing reservation alone and names it for a human", "[mcp_setup]") {
+    Rig r;
+    SECTION("reserved for somebody else before setup (SID added, but not created by setup)") {
+        r.m.http.urlacls[kPrefix] = sddl_for_sid("S-1-5-21-9-9-9-500");
+        REQUIRE(r.setup(Rig::self_signed()) == 0);
+        const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+        REQUIRE(m.has_value());
+        CHECK_FALSE(m->urlacl_created);
+    }
+    SECTION("already reserved for the user before setup") {
+        r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
+        REQUIRE(r.setup(Rig::self_signed()) == 0);
+    }
+    const auto sddl_before = r.m.http.urlacls.at(kPrefix);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(r.m.http.urlacls.at(kPrefix) == sddl_before);
+    CHECK(step_status(r.out.str(), "urlacl") == "skipped");
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+    CHECK(r.m.http.bindings.empty());                  // the rest of setup is still removed
+    CHECK(r.m.sys.files.count(kManifestPath) == 0);
+}
+
+TEST_CASE("teardown leaves a reservation whose SDDL changed after setup", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    r.m.http.urlacls[kPrefix] += "(A;;GX;;;BA)";
+    const std::string changed = r.m.http.urlacls.at(kPrefix);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.at(kPrefix) == changed);
+    CHECK(step_status(r.out.str(), "urlacl") == "skipped");
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("teardown with a manifest from before the ownership fields leaves the reservation", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    json old = json::parse(r.m.sys.files.at(kManifestPath));
+    old.erase("urlacl_sddl");
+    old.erase("urlacl_created");
+    r.m.sys.files[kManifestPath] = old.dump();
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("elevated teardown re-checks the SDDL before removing a reservation", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    Hosts h = r.m.hosts();
+    r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid) + "(A;;GX;;;BA)";
+    json work = {{"schema", 1}, {"operation", "teardown"}, {"ipports", json::array()}, {"prefixes", json::array({kPrefix})},
+                 {"urlacl_expected", {{kPrefix, sddl_for_sid(kSid)}}}, {"firewall_rule", ""}, {"cert_thumbprint", ""}, {"steps", json::array({"urlacl"})}};
+    json result = execute_elevated_work(work, h);
+    CHECK(result["ok"] == true);
+    CHECK(result["steps"][0]["status"] == "skipped");
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(r.m.http.calls.empty());
+    // a plan without any expected SDDL removes nothing either
+    work.erase("urlacl_expected");
+    CHECK(execute_elevated_work(work, h)["steps"][0]["status"] == "skipped");
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    // the recorded SDDL removes it
+    work["urlacl_expected"] = {{kPrefix, sddl_for_sid(kSid) + "(A;;GX;;;BA)"}};
+    CHECK(execute_elevated_work(work, h)["steps"][0]["status"] == "removed");
+    CHECK(r.m.http.urlacls.empty());
 }

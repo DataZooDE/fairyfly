@@ -196,7 +196,8 @@ json Manifest::to_json() const {
     return json{{"schema", schema}, {"mode", mode}, {"hostname", hostname}, {"port", port}, {"prefixes", prefixes},
                 {"ipports", ipports}, {"sid", sid}, {"user", user}, {"cert_mode", cert_mode}, {"thumbprint", thumbprint},
                 {"cer_path", cer_path}, {"firewall_rule", firewall_rule}, {"appid", appid}, {"created_at", created_at},
-                {"updated_at", updated_at}, {"config_created", config_created}, {"config_sha256", config_sha256}};
+                {"updated_at", updated_at}, {"config_created", config_created}, {"config_sha256", config_sha256},
+                {"urlacl_sddl", urlacl_sddl}, {"urlacl_created", urlacl_created}};
 }
 
 std::optional<Manifest> Manifest::from_json(const json& j) {
@@ -219,6 +220,8 @@ std::optional<Manifest> Manifest::from_json(const json& j) {
         m.updated_at = j.value("updated_at", "");
         m.config_created = j.value("config_created", false);
         m.config_sha256 = j.value("config_sha256", "");
+        m.urlacl_sddl = j.value("urlacl_sddl", "");
+        m.urlacl_created = j.value("urlacl_created", false);
         if ((m.mode != "tls" && m.mode != "no-tls") || m.port < 1 || m.port > 65535) return std::nullopt;
         return m;
     } catch (...) {
@@ -230,7 +233,7 @@ bool Manifest::same_setup(const Manifest& o) const {
     return mode == o.mode && hostname == o.hostname && port == o.port && prefixes == o.prefixes && ipports == o.ipports &&
            sid == o.sid && user == o.user && cert_mode == o.cert_mode && thumbprint == o.thumbprint && cer_path == o.cer_path &&
            firewall_rule == o.firewall_rule && appid == o.appid && config_created == o.config_created &&
-           config_sha256 == o.config_sha256;
+           config_sha256 == o.config_sha256 && urlacl_sddl == o.urlacl_sddl && urlacl_created == o.urlacl_created;
 }
 
 const StepItem* Plan::step(const std::string& id) const {
@@ -641,6 +644,24 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             m.config_created = true;
             m.config_sha256 = auth::sha256_hex(p.config_yaml);   // replaced by the hash of the bytes on disk after the write
         }
+        // URL reservation ownership: teardown removes the reservation only when setup created it and it is unchanged.
+        if (tls) {
+            const StepItem* us = p.step("urlacl");
+            const bool same_prefix = d.manifest && std::find(d.manifest->prefixes.begin(), d.manifest->prefixes.end(), d.prefix) != d.manifest->prefixes.end();
+            if (us && us->status == "would_create") {
+                m.urlacl_created = true;
+                m.urlacl_sddl = p.sddl;   // replaced by what http.sys reports after the change
+            } else if (us && us->status == "would_update") {
+                m.urlacl_created = same_prefix && d.manifest->urlacl_created && d.urlacl_sddl && *d.urlacl_sddl == d.manifest->urlacl_sddl;
+                m.urlacl_sddl = p.sddl;
+            } else if (same_prefix && !d.manifest->urlacl_sddl.empty()) {
+                m.urlacl_created = d.manifest->urlacl_created;   // an earlier record stays as it is; teardown compares it with the live SDDL
+                m.urlacl_sddl = d.manifest->urlacl_sddl;
+            } else {
+                m.urlacl_created = false;   // an existing reservation that setup found: never removed by teardown
+                m.urlacl_sddl = d.urlacl_sddl.value_or("");
+            }
+        }
         p.manifest = m;
         if (!d.manifest) {
             p.steps.push_back(make_step("manifest", "Record the setup in " + d.manifest_path, "would_create", "used by teardown and doctor"));
@@ -753,14 +774,37 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
     }
-    // urlacl
-    if (!d.urlacls.empty()) {
-        p.teardown.prefixes = d.urlacls;
-        std::string detail;
-        for (const auto& u : d.urlacls) detail += (detail.empty() ? "" : ", ") + u;
-        p.steps.push_back(make_step("urlacl", "Remove URL reservation(s)", "would_remove", detail, true));
-    } else {
-        p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
+    // urlacl: only a reservation that setup created and that still has the SDDL setup recorded
+    {
+        std::vector<std::string> foreign;
+        for (const auto& u : d.urlacls) {
+            bool ours = have_manifest && d.manifest->urlacl_created && !d.manifest->urlacl_sddl.empty() &&
+                        std::find(d.manifest->prefixes.begin(), d.manifest->prefixes.end(), u) != d.manifest->prefixes.end();
+            if (ours) {
+                const auto cur = d.urlacl_sddl.find(u);
+                if (cur != d.urlacl_sddl.end() && cur->second != d.manifest->urlacl_sddl) ours = false;   // changed since setup
+            }
+            if (ours) {
+                p.teardown.prefixes.push_back(u);
+                p.teardown.urlacl_expected[u] = d.manifest->urlacl_sddl;
+            } else {
+                foreign.push_back(u);
+            }
+        }
+        std::string removed_detail, foreign_detail;
+        for (const auto& u : p.teardown.prefixes) removed_detail += (removed_detail.empty() ? "" : ", ") + u;
+        for (const auto& u : foreign) foreign_detail += (foreign_detail.empty() ? "" : ", ") + u;
+        if (!p.teardown.prefixes.empty())
+            p.steps.push_back(make_step("urlacl", "Remove URL reservation(s)", "would_remove", removed_detail, true));
+        else if (!foreign.empty())
+            p.steps.push_back(make_step("urlacl", "URL reservation", "skipped", foreign_detail + ": not created by setup or changed since; left untouched"));
+        else
+            p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
+        if (!foreign.empty()) {
+            std::string text = "Not removed: the URL reservation(s) below were not created by 'mcp setup' or were changed since. Remove them yourself if you no longer need them:";
+            for (const auto& u : foreign) text += "\n    netsh http delete urlacl url=" + u;
+            p.human.push_back({"urlacl_foreign", text});
+        }
     }
     // firewall
     const bool recorded_rule = have_manifest && !d.manifest->firewall_rule.empty();

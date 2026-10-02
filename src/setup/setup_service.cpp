@@ -194,7 +194,10 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
         for (const bool tls : {true, false}) {
             const std::string prefix = url_prefix(tls, "", port);
             try {
-                if (h.http.query_urlacl(prefix) && std::find(d.urlacls.begin(), d.urlacls.end(), prefix) == d.urlacls.end()) d.urlacls.push_back(prefix);
+                if (const auto sddl = h.http.query_urlacl(prefix); sddl && std::find(d.urlacls.begin(), d.urlacls.end(), prefix) == d.urlacls.end()) {
+                    d.urlacls.push_back(prefix);
+                    d.urlacl_sddl[prefix] = *sddl;
+                }
             } catch (const HostError&) {
                 if (d.manifest && std::find(d.manifest->prefixes.begin(), d.manifest->prefixes.end(), prefix) != d.manifest->prefixes.end()) d.urlacls.push_back(prefix);
             }
@@ -254,6 +257,7 @@ json make_elevated_work(const Plan& p) {
     } else {
         w["ipports"] = p.teardown.ipports;
         w["prefixes"] = p.teardown.prefixes;
+        w["urlacl_expected"] = p.teardown.urlacl_expected;
         w["firewall_rule"] = p.teardown.firewall_rule;
         w["cert_thumbprint"] = p.teardown.cert_thumbprint;
     }
@@ -296,6 +300,11 @@ std::optional<std::string> validate_work(const json& w) {
                 static const std::regex re(R"(^(https://\+|http://127\.0\.0\.1):\d{1,5}/mcp/$)");
                 if (!std::regex_match(prefix.get<std::string>(), re)) return "prefix";
             }
+            if (w.contains("urlacl_expected")) {
+                if (!w["urlacl_expected"].is_object()) return "urlacl_expected";
+                for (const auto& [prefix, sddl] : w["urlacl_expected"].items())
+                    if (!sddl.is_string() || sddl.get<std::string>().size() > 4096) return "urlacl_expected";
+            }
             const std::string t = w.value("cert_thumbprint", "");
             if (!t.empty())
                 if (auto e = thumbprint_error(t)) return "thumbprint: " + *e;
@@ -322,6 +331,7 @@ json execute_setup_work(const json& w, Hosts& h) {
     const std::string prefix = url_prefix(tls, host, port);
     std::string failed;
     std::vector<std::string> bound;   // address families that ended up bound
+    std::string urlacl_sddl;          // SDDL after this run created/changed the reservation
     auto fail = [&](const std::string& id, const std::string& why) {
         steps.push_back(step_json(id, "failed", why));
         failed = id;
@@ -353,6 +363,11 @@ json execute_setup_work(const json& w, Hosts& h) {
                 const std::string sddl = merge_sddl(existing.value_or(""), sid);
                 if (existing) h.http.remove_urlacl(prefix);
                 h.http.add_urlacl(prefix, sddl);
+                try {   // what http.sys now reports is what teardown compares against later
+                    urlacl_sddl = h.http.query_urlacl(prefix).value_or(sddl);
+                } catch (const std::exception&) {
+                    urlacl_sddl = sddl;
+                }
                 steps.push_back(step_json("urlacl", existing ? "updated" : "created", prefix));
             }
         } catch (const std::exception& e) {
@@ -402,6 +417,7 @@ json execute_setup_work(const json& w, Hosts& h) {
     }
     json out{{"ok", failed.empty()}, {"steps", steps}, {"thumbprint", thumb}};
     if (!bound.empty()) out["bound_ipports"] = bound;
+    if (!urlacl_sddl.empty()) out["urlacl_sddl"] = urlacl_sddl;
     if (!failed.empty()) out["error"] = {{"code", "STEP_FAILED"}, {"message", "step " + failed + " failed"}};
     return out;
 }
@@ -429,10 +445,23 @@ json execute_teardown_work(const json& w, Hosts& h) {
     }
     if (wants(w, "urlacl") && failed.empty()) {
         try {
-            std::string detail;
-            for (const auto& j : w["prefixes"])
-                if (h.http.remove_urlacl(j.get<std::string>())) detail += (detail.empty() ? "" : ", ") + j.get<std::string>();
-            steps.push_back(step_json("urlacl", "removed", detail));
+            std::string detail, left;
+            const json expected = w.value("urlacl_expected", json::object());
+            for (const auto& j : w["prefixes"]) {
+                const std::string prefix = j.get<std::string>();
+                const auto current = h.http.query_urlacl(prefix);
+                if (!current) continue;   // already gone
+                // Re-checked here, with elevation: only the reservation setup created, with the SDDL it left.
+                const auto it = expected.find(prefix);
+                if (it == expected.end() || !it->is_string() || it->get<std::string>() != *current) {
+                    left += (left.empty() ? "" : ", ") + prefix;
+                    continue;
+                }
+                if (h.http.remove_urlacl(prefix)) detail += (detail.empty() ? "" : ", ") + prefix;
+            }
+            if (left.empty()) steps.push_back(step_json("urlacl", "removed", detail));
+            else if (detail.empty()) steps.push_back(step_json("urlacl", "skipped", left + ": changed since setup or not created by it; left untouched"));
+            else steps.push_back(step_json("urlacl", "removed", detail + "; left untouched (changed since setup): " + left));
         } catch (const std::exception& e) {
             fail("urlacl", e.what());
         }
@@ -752,6 +781,7 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     }
     if (!any_failed && pending("manifest")) {
         Manifest m = plan.manifest;
+        if (const std::string recorded = result.value("urlacl_sddl", std::string()); !recorded.empty()) m.urlacl_sddl = recorded;
         m.thumbprint = plan.tls && plan.cert_mode != CertMode::NoTls ? thumb : "";
         const std::string now = iso_utc(h.sys.now());
         if (m.created_at.empty()) m.created_at = now;
