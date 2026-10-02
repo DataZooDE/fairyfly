@@ -2396,6 +2396,47 @@ TEST_CASE("SapGuiCollection::for_each uses one _NewEnum and matches item order",
     third_child->Release();
 }
 
+TEST_CASE("enumerate_collection walks once and falls back to item(i)", "[com][perf][enum]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first_child = new TextFieldDispatch(L"GuiLabel", 22000, L"a");
+    auto* second_child = new TextFieldDispatch(L"GuiLabel", 22100, L"b");
+    auto* third_child = new TextFieldDispatch(L"GuiLabel", 22200, L"c");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 22300);
+    collection->child_items = {first_child, second_child, third_child};
+    collection->enumerable = true;
+    SapGuiCollection<ComGuiElement> children{IDispatchPtr(collection)};
+
+    const auto ids = [](const std::vector<ComGuiElementPtr>& items) {
+        std::vector<std::string> out;
+        for (const auto& item : items) out.push_back(item->get_id());
+        return out;
+    };
+
+    // One _NewEnum for the whole walk (item(i) would need one per index).
+    auto all = enumerate_collection(children, 10);
+    REQUIRE(ids(all) == std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(collection->new_enum_calls == 1);
+
+    // The limit cuts the walk short.
+    REQUIRE(ids(enumerate_collection(children, 2)) == std::vector<std::string>{"a", "b"});
+    REQUIRE(enumerate_collection(children, 0).empty());
+
+    // No enumerator: same items through Count/item(i).
+    collection->enumerable = false;
+    REQUIRE(ids(enumerate_collection(children, 10)) == std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(ids(enumerate_collection(children, 2)) == std::vector<std::string>{"a", "b"});
+
+    // An enumerator that fails midway: the partial prefix is discarded, nothing is duplicated.
+    collection->enumerable = true;
+    collection->enum_fail_after = 2;
+    REQUIRE(ids(enumerate_collection(children, 10)) == std::vector<std::string>{"a", "b", "c"});
+
+    collection->Release();
+    first_child->Release();
+    second_child->Release();
+    third_child->Release();
+}
+
 TEST_CASE("Label and tooltip values are unchanged by DISPID caching", "[com][perf]") {
     ScopedDispatchCacheReset cache_reset;
     for (int round = 0; round < 2; ++round) {

@@ -46,6 +46,13 @@ int trim_trailing_empty_rows(std::vector<std::vector<std::string>>& rows);
 /// trimmed: the control holds RowCount rows but only this many were readable).
 void annotate_row_window(json& table, int offset, int empty_rows_trimmed);
 
+/// Children of a collection in enumeration order from ONE IEnumVARIANT walk. `collection.item(i)` costs
+/// 4-5 round trips per index plus an O(i) Skip on the SAP side, so index loops over a collection are
+/// quadratic. Falls back to Count/item(i) when the enumerator is unavailable, fails midway or yields
+/// nothing. At most `limit` items.
+std::vector<ComGuiElementPtr> enumerate_collection(const SapGuiCollection<ComGuiElement>& collection,
+                                                    int limit);
+
 /// Read-only GuiGridView viewport position for validating scroll-dependent data.
 json extract_grid_viewport_metadata(ComGuiElementPtr grid);
 

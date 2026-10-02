@@ -1445,6 +1445,11 @@ static void collect_suppressed(const json& elements, const std::unordered_set<st
     }
 }
 
+bool screen_filters_need_grid_rows(const ScreenFilterOptions& filters)
+{
+    return !(filters.only_buttons || filters.only_fields || filters.only_editable || filters.only_f4_fields);
+}
+
 void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 {
     json all_elements = json::array();
@@ -1558,6 +1563,7 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
 
     engine_->set_probe_all(probe_all);
     engine_->set_row_offset(row_offset);
+    engine_->set_grid_rows_needed(screen_filters_need_grid_rows(filters));
     Result result;
     if (expand_tabs) {
         result = engine_->read_screen_with_tabs(skip_trees, max_rows, only_tab);

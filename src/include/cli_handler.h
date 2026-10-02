@@ -53,6 +53,11 @@ struct ScreenFilterOptions {
 
 void apply_screen_filters(nlohmann::json& screen_data, const ScreenFilterOptions& filters);
 
+/// Whether grid/table cells can reach the output under these filters. The only_buttons / only_fields /
+/// only_editable / only_f4_fields selectors never keep a grid (only its synthetic toolbar buttons), so
+/// reading its cells would be wasted COM round trips.
+bool screen_filters_need_grid_rows(const ScreenFilterOptions& filters);
+
 /// CLI command handler with integration to automation engine
 class CommandHandler {
 private:

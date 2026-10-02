@@ -362,3 +362,52 @@ TEST_CASE("secret-bearing fields stay redacted with a reason", "[privacy][redact
     redact_sensitive_header_rows(untitled);
     CHECK(is_redaction_marker(untitled["rows"][0][1].get<std::string>()));
 }
+
+// ---- Item 5: fewer COM round trips -----------------------------------------------------------
+
+TEST_CASE("grid cells are only read when a filter can keep a grid", "[screen][perf]") {
+    cli::ScreenFilterOptions none;
+    CHECK(cli::screen_filters_need_grid_rows(none));
+
+    cli::ScreenFilterOptions text;
+    text.text_contains = "x";
+    CHECK(cli::screen_filters_need_grid_rows(text));
+
+    cli::ScreenFilterOptions tables;
+    tables.only_tables = true;
+    CHECK(cli::screen_filters_need_grid_rows(tables));
+
+    for (auto member : {&cli::ScreenFilterOptions::only_buttons, &cli::ScreenFilterOptions::only_fields,
+                        &cli::ScreenFilterOptions::only_editable, &cli::ScreenFilterOptions::only_f4_fields}) {
+        cli::ScreenFilterOptions filters;
+        filters.*member = true;
+        CHECK_FALSE(cli::screen_filters_need_grid_rows(filters));
+    }
+}
+
+TEST_CASE("a zero row budget reads no grid cells", "[table][grid][perf]") {
+    const std::vector<std::string> columns{"A", "B"};
+    int reads = 0;
+    const auto rows = read_grid_rows(50, 2, 0, columns,
+                                     [&](int, const std::string&) { ++reads; return std::string("x"); }, 3);
+    CHECK(rows.empty());
+    CHECK(reads == 0);
+}
+
+TEST_CASE("a grid dropped by an only selector never needed its rows", "[screen][perf][filters]") {
+    // The data the reader skips is exactly what the filter discards: the result is identical.
+    const json grid = {{"id", "g"}, {"type", "GuiShell"}, {"subtype", "GridView"},
+                       {"table_data", {{"columns", json::array({"A"})}, {"rows", json::array()},
+                                       {"total_row_count", 5}}},
+                       {"toolbar_buttons", json::array({{{"id", "g/btn_X"}, {"type", "GuiButton"}}})}};
+    json with_rows = grid;
+    with_rows["table_data"]["rows"] = json::array({json::array({"1"}), json::array({"2"})});
+    json a = {{"elements", json::array({grid})}, {"element_count", 1}};
+    json b = {{"elements", json::array({with_rows})}, {"element_count", 1}};
+    cli::ScreenFilterOptions filters;
+    filters.only_buttons = true;
+    cli::apply_screen_filters(a, filters);
+    cli::apply_screen_filters(b, filters);
+    CHECK(a.at("elements") == b.at("elements"));
+    CHECK(a.at("elements").at(0).at("id") == "g/btn_X");
+}

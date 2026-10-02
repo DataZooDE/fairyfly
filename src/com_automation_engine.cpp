@@ -1813,6 +1813,7 @@ Result ComAutomationEngine::read_screen(bool include_structure, bool skip_trees,
 }
     screen_reader_->set_probe_all(probe_all_);
     screen_reader_->set_row_offset(row_offset_);
+    screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read(include_structure, skip_trees, max_rows);
         }
 
@@ -1831,6 +1832,7 @@ Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows,
 }
     screen_reader_->set_probe_all(probe_all_);
     screen_reader_->set_row_offset(row_offset_);
+    screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read_with_tabs(skip_trees, max_rows, only_tab);
 }
 

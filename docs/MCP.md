@@ -124,7 +124,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_session_launch` | Open a SAP Logon entry, optionally log on | `name`, `login`, `credential`, `multiple_logon`, `allow_sapshcut` | allowed; `multiple_logon=end` refused | D |
 | `gui_session_login` | Log on with the Credential Manager entry | `connection`, `credential`, `multiple_logon` | allowed; `multiple_logon=end` refused | D |
 | `gui_transaction_start` | Run a transaction code (`/nSM37`, `/n`) | `code` | allowed | not RO |
-| `gui_screen_read` | Read the screen (Markdown or JSON) | `tab`, `no_tabs`, `only`, `text_contains`, `id_contains`, `type`, `max_rows`, `compact`, `format` | allowed | RO |
+| `gui_screen_read` | Read the screen (Markdown or JSON) | `tab`, `no_tabs`, `only` (`buttons`, `fields`, `editable`, `f4_fields`, `tables`), `text_contains`, `id_contains`, `type`, `max_rows`, `offset`, `compact`, `format` | allowed | RO |
 | `gui_screen_find` | Find controls by id/name/type | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
 | `gui_element_get` | One element's properties/value (`list_nodes` for trees) | `element`, `list_nodes` | allowed | RO |
 | `gui_menu_list` | List the menu bar tree | `window` | allowed | RO |

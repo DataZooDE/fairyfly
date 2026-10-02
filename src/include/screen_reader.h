@@ -114,6 +114,10 @@ public:
     /// Opt in to exhaustive FindById probing of every container (legacy behavior).
     void set_probe_all(bool probe_all) { probe_all_ = probe_all; }
 
+    /// False when the caller's filter discards every grid and table (only buttons/fields/...):
+    /// their cells are then not read at all. Default true.
+    void set_grid_rows_needed(bool needed) { grid_rows_needed_ = needed; }
+
     /// First grid/table row to return (`--offset`); rows before it are skipped.
     void set_row_offset(int row_offset) { row_offset_ = row_offset < 0 ? 0 : row_offset; }
 
@@ -158,6 +162,7 @@ private:
     ComGuiSessionPtr session_;
     int max_rows_ = 20;
     int row_offset_ = 0;
+    bool grid_rows_needed_ = true;
     bool probe_all_ = false;
 
     /// Discover all UI elements from a window using recursive traversal

@@ -41,6 +41,32 @@ std::vector<std::vector<std::string>> read_grid_rows(
     return rows;
 }
 
+std::vector<ComGuiElementPtr> enumerate_collection(const SapGuiCollection<ComGuiElement>& collection,
+                                                    int limit) {
+    std::vector<ComGuiElementPtr> items;
+    if (limit <= 0) return items;
+    bool walked = false;
+    try {
+        walked = collection.for_each([&](const ComGuiElementPtr& child) {
+            if (static_cast<int>(items.size()) >= limit) return false;
+            items.push_back(child);
+            return true;
+        });
+    } catch (const std::exception&) {
+        walked = false;
+    }
+    if (walked && !items.empty()) return items;
+    // Discard a partial prefix of a failed walk, then index.
+    items.clear();
+    const int count = (std::min)(collection.count(), limit);
+    for (int i = 0; i < count; ++i) {
+        auto item = collection.item(i);
+        if (!item) break;
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
 namespace {
 bool cell_is_blank(const std::string& value) {
     return value.find_first_not_of(" \t\r\n") == std::string::npos;
@@ -172,8 +198,13 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
                                               DISPATCH_PROPERTYGET, &no_params, &count_val, nullptr, nullptr))) {
                         col_count = count_val.intVal;
                         SapGuiCollection<ComGuiElement> col_coll(cols);
+                        // One enumeration for all columns; a short walk falls back to item(c)
+                        // per index (a missing column then still yields "Col<c>").
+                        auto column_items = enumerate_collection(col_coll, col_count);
+                        const bool walked_all = static_cast<int>(column_items.size()) == col_count;
                         for (int c = 0; c < col_count; ++c) {
-                            auto col_elem = col_coll.item(c);
+                            auto col_elem = walked_all ? column_items[static_cast<size_t>(c)]
+                                                       : col_coll.item(c);
                             std::string title;
                             if (col_elem) {
                                 try { title = col_elem->get_property_string(L"Title"); } catch (...) {}

@@ -464,7 +464,8 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
 
         // Extract grid data using TableDataExtractor
         TableExtractionOptions options;
-        options.max_rows = max_rows_;
+        // Grids an `only` selector drops anyway need no cell reads (they cost the most COM calls).
+        options.max_rows = grid_rows_needed_ ? max_rows_ : 0;
         options.row_offset = row_offset_;
         options.include_headers = true;
 
@@ -1704,10 +1705,7 @@ void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStri
     info.id = strip->get_id();
     for (const auto& known : out) if (known.id == info.id) return;
     auto children = strip->children();
-    const int count = children.count();
-    for (int i = 0; i < count; ++i) {
-        auto tab = children.item(i);
-        if (!tab) break;
+    for (const auto& tab : enumerate_collection(children, children.count())) {
         json entry = {{"id", tab->get_id()}, {"type", "GuiTab"}, {"strip_id", info.id}};
         try { entry["text"] = tab->get_string_property(L"Text"); } catch (const std::exception&) {}
         info.tabs.push_back(std::move(entry));
@@ -1773,10 +1771,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             const int kMaxScanned = 200;
             auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
                 auto children = container->children();
-                const int count = std::min(children.count(), kMaxScanned);
-                for (int i = 0; i < count; ++i) {
-                    auto child = children.item(i);
-                    if (!child) break;
+                for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
                     const std::string type = child->get_type();
                     if (type == "GuiTabStrip") {
                         collect_tab_strip(child, strips);
