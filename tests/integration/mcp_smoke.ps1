@@ -87,7 +87,7 @@ $Plan = @(
     'server 2: mcp --allow-write (skipped with -SkipWriteMode)',
     '  write.tools_list               21 tools incl. gui_element_fill',
     '  write.attach / write.tcode_sm37',
-    '  write.fill_marker_redacted     fill job name = ZMCPSMOKE; not in response or audit; restore "*" and /n',
+    '  write.fill_echo_not_audited    fill job name = ZMCPSMOKE; echoed in the response (read back), never in the audit; restore "*" and /n',
     '  write.exit_and_audit',
     'server 3: mcp --allow-write with FAIRYFLY_READ_ONLY=1 (skipped with -SkipWriteMode)',
     '  cap.env_hard_cap               still 20 tools, no gui_element_fill; exit 0',
@@ -499,11 +499,12 @@ try {
             $script:Flags['Sm37'] = $true
         }
         try {
-            Check 'write.fill_marker_redacted' {
+            Check 'write.fill_echo_not_audited' {
                 $r = Invoke-Tool $s2 'gui_element_fill' @{ element = $JobNameId; value = $Marker }
                 Assert-That (-not (Test-ToolError $r)) ('fill failed: ' + (Get-ToolText $r))
                 $raw = $r | ConvertTo-Json -Depth 20 -Compress
-                Assert-That (-not $raw.Contains($Marker)) 'the fill value was echoed in the response'
+                # since 2026.10: a non-credential field echoes the value read back from the control; the audit trail must still never contain it (checked in write.exit_and_audit)
+                Assert-That ($raw.Contains($Marker)) 'the fill result should echo the value read back from the control'
             } 'Sm37'
         } finally {
             if ($script:Flags['Sm37']) {

@@ -2083,7 +2083,9 @@ nlohmann::json ComAutomationEngine::get_application_info() const
         }
         
         info["connections"] = connections_array;
-        for (const auto& [key, value] : server_time_fields().items()) info[key] = value;
+        // keep the json alive: iterating server_time_fields().items() would dangle (the temporary dies after the range-init)
+        const json server_clock = server_time_fields();
+        for (const auto& [key, value] : server_clock.items()) info[key] = value;
         info["server_time_summary"] = server_time_summary(info);
 
     } catch (const std::exception& e) {
