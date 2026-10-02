@@ -8,6 +8,7 @@
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
+#include "include/string_utils.h"
 #include "include/vkey.h"
 
 using namespace fairyfly::mcp;
@@ -231,4 +232,107 @@ TEST_CASE("gui_key_send builds the key argv and rejects unknown names", "[mcp][u
         CHECK(spec.def.description.find("pagedown") != std::string::npos);
         CHECK(spec.def.description.find("arrow") != std::string::npos);
     }
+}
+
+// ---- item 4: escaped tree keys, element aliases ----------------------------------------------------
+TEST_CASE("unescape_html_entities decodes the five entities in one pass", "[mcp][usability][tree]") {
+    using fairyfly::utils::unescape_html_entities;
+    CHECK(unescape_html_entities("PROG&lt;SYST&gt;") == "PROG<SYST>");
+    CHECK(unescape_html_entities("A &amp; B") == "A & B");
+    CHECK(unescape_html_entities("&quot;x&quot; &#39;y&#39; &apos;z&apos; &#x27;w&#x27;") == "\"x\" 'y' 'z' 'w'");
+    CHECK(unescape_html_entities("&amp;lt;") == "&lt;");           // never decoded twice
+    CHECK(unescape_html_entities("PROG<SYST>") == "PROG<SYST>");   // already literal
+    CHECK(unescape_html_entities("R&D & more &unknown; &") == "R&D & more &unknown; &");
+    CHECK(unescape_html_entities("") == "");
+    CHECK(unescape_html_entities("&lt") == "&lt");                 // no terminating ';'
+}
+
+namespace {
+
+const ToolSpec& catalog_spec(const std::string& name) {
+    static const std::vector<ToolSpec> specs = all_tool_specs();
+    for (const auto& s : specs)
+        if (s.def.name == name) return s;
+    FAIL("no tool " << name);
+    return specs.front();
+}
+
+Argv build(const std::string& tool, const json& args) { return catalog_spec(tool).build_argv(args, Policy{}); }
+
+bool contains(const Argv& argv, const std::string& item) {
+    for (const auto& a : argv)
+        if (a == item) return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("gui_element_click decodes HTML-escaped node keys and menu items", "[mcp][usability][tree]") {
+    const Argv argv = build("gui_element_click", {{"element", "wnd[0]/usr/cntlTREE/shellcont/shell"},
+                                                  {"node_key", "PROG&lt;SYST&gt;"},
+                                                  {"tree_action", "select"},
+                                                  {"menu_item", "A &amp; B"}});
+    CHECK(contains(argv, "PROG<SYST>"));
+    CHECK(contains(argv, "A & B"));
+    CHECK_FALSE(contains(argv, "PROG&lt;SYST&gt;"));
+    // a literal key is untouched
+    CHECK(contains(build("gui_element_click", {{"element", "wnd[0]/usr/t"}, {"node_key", "PROG<SYST>"}}), "PROG<SYST>"));
+    // menu paths
+    const Argv menu = build("gui_menu_select", {{"path", "Edit/Find &amp; Replace"}});
+    CHECK(contains(menu, "Edit/Find & Replace"));
+}
+
+TEST_CASE("gui_element_click/get/f4/fill accept id and element_id as aliases of element", "[mcp][usability][alias]") {
+    struct Case { const char* tool; json extra; const char* verb; };
+    const Case cases[] = {{"gui_element_click", json::object(), "click"},
+                          {"gui_element_get", json::object(), "get"},
+                          {"gui_element_f4", json::object(), "f4"},
+                          {"gui_element_fill", {{"value", "x"}}, "fill"}};
+    for (const auto& c : cases) {
+        INFO(c.tool);
+        for (const char* key : {"element", "element_id", "id"}) {
+            json args = c.extra;
+            args[key] = "wnd[0]/usr/txtA";
+            const Argv argv = build(c.tool, args);
+            CHECK(argv.at(0) == "element");
+            CHECK(argv.at(1) == c.verb);
+            CHECK(contains(argv, "wnd[0]/usr/txtA"));
+        }
+        // the same value twice is fine, different values are rejected, none is rejected
+        json same = c.extra;
+        same["element"] = "wnd[0]/usr/txtA";
+        same["id"] = "wnd[0]/usr/txtA";
+        CHECK_NOTHROW(build(c.tool, same));
+        json differ = c.extra;
+        differ["element"] = "wnd[0]/usr/txtA";
+        differ["element_id"] = "wnd[0]/usr/txtB";
+        CHECK_THROWS_AS(build(c.tool, differ), std::invalid_argument);
+        CHECK_THROWS_AS(build(c.tool, c.extra), std::invalid_argument);
+    }
+}
+
+TEST_CASE("the command field stays blocked for a fill through an element alias", "[mcp][usability][alias][auth]") {
+    Principal p;
+    p.name = "t";
+    p.all_scopes = true;
+    p.authenticated = true;
+    p.tcodes = {"SM21"};
+    Policy policy;
+    policy.read_only = false;
+    const ToolSpec& spec = catalog_spec("gui_element_fill");
+    for (const char* key : {"element", "id", "element_id"}) {
+        INFO(key);
+        json args = {{"value", "/nSE16"}};
+        args[key] = "wnd[0]/tbar[0]/okcd";
+        const auto d = auth::authorize_call(p, spec, spec.family, args, policy, std::nullopt, std::string("SM21"));
+        CHECK_FALSE(d.allowed);
+        CHECK(d.code == "TCODE_DENIED");
+    }
+}
+
+TEST_CASE("gui_element_click description explains select versus doubleclick", "[mcp][usability][tree]") {
+    const auto& d = catalog_spec("gui_element_click").def.description;
+    CHECK(d.find("select") != std::string::npos);
+    CHECK(d.find("does NOT refresh") != std::string::npos);
+    CHECK(d.find("doubleclick") != std::string::npos);
 }

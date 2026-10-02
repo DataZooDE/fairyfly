@@ -191,7 +191,7 @@ TEST_CASE("write catalog exposes gui_element_fill with correct annotations", "[m
     REQUIRE(fill.def.annotations["idempotentHint"] == true);
     REQUIRE(fill.def.description.find("Confirm with the user") != std::string::npos);
     REQUIRE(fill.def.description.find("gui_session_login") != std::string::npos);
-    REQUIRE(fill.def.input_schema["required"] == json::array({"element"}));
+    REQUIRE_FALSE(fill.def.input_schema.contains("required"));  // `element` or its aliases id / element_id: checked by the builder
     for (auto it = fill.def.input_schema["properties"].begin(); it != fill.def.input_schema["properties"].end(); ++it) {
         const std::string key = it.key();
         REQUIRE(key.find("pass") == std::string::npos);

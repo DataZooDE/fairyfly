@@ -22,8 +22,10 @@ bool bool_arg(const json& args, const char* key) {
     return v->get<bool>();
 }
 
-std::vector<std::string> build_fill_argv(const json& args, const Policy& policy) {
-    if (!args.is_object()) throw std::invalid_argument("arguments must be an object");
+std::vector<std::string> build_fill_argv(const json& raw_args, const Policy& policy) {
+    if (!raw_args.is_object()) throw std::invalid_argument("arguments must be an object");
+    json args = raw_args;
+    catalog::normalize_element_args(args);
 
     const json* element = find_arg(args, "element");
     if (!element || !element->is_string() || element->get<std::string>().empty())
@@ -111,15 +113,14 @@ ToolSpec make_fill_spec() {
     spec.def.input_schema = json{
         {"type", "object"},
         {"properties",
-         {{"element", {{"type", "string"}, {"description", "SAP element id from gui_screen_read, e.g. wnd[0]/usr/txtFIELD"}}},
+         catalog::with_element_aliases({{"element", {{"type", "string"}, {"description", "SAP element id from gui_screen_read, e.g. wnd[0]/usr/txtFIELD (aliases: id, element_id)"}}},
           {"value", {{"type", "string"}, {"description", "Text to enter (omit when clear is true). For checkbox cells: X/1/true or 0/false"}}},
           {"clear", {{"type", "boolean"}, {"description", "Empty the field instead of entering a value"}}},
           {"row", {{"type", "integer"}, {"minimum", 0}, {"description", "Zero-based GridView row (requires column)"}}},
           {"column", {{"type", "string"}, {"description", "GridView column id (requires row)"}}},
           {"checkbox", {{"type", "boolean"}, {"description", "Set a GridView checkbox cell (requires row and column)"}}},
           {"commit", {{"type", "boolean"}, {"description", "Notify SAP after the GridView cell change (requires row and column)"}}},
-          {"connection", {{"type", "integer"}, {"minimum", 0}, {"description", "Connection index; defaults to the server default"}}}}},
-        {"required", json::array({"element"})},
+          {"connection", {{"type", "integer"}, {"minimum", 0}, {"description", "Connection index; defaults to the server default"}}}})},
         {"additionalProperties", false}};
     spec.def.annotations = json{{"title", "Fill SAP field"},
                                 {"readOnlyHint", false},

@@ -137,9 +137,12 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                                                   "operator to create the token with --allow-navigation");
             }
         } else if (tool == "gui_element_fill") {
-            const std::string element = args.is_object() && args.contains("element") && args["element"].is_string()
-                                            ? args["element"].get<std::string>() : std::string();
-            if (is_okcd_element(element))
+            // `element` and its aliases `id` / `element_id`: all of them are checked, whichever the builder will use.
+            bool okcd = false;
+            for (const char* key : {"element", "element_id", "id"})
+                if (args.is_object() && args.contains(key) && args[key].is_string() && is_okcd_element(args[key].get<std::string>()))
+                    okcd = true;
+            if (okcd)
                 return refuse("TCODE_DENIED", "typing into the command field is blocked for tokens with a T-code allowlist; "
                                               "use gui_transaction_start");
         }

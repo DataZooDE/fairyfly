@@ -34,6 +34,12 @@ void validate_tool_arguments(const json& args, const json& schema);
 
 /// Helpers shared by the read and write catalogs.
 namespace catalog {
+/// Properties `id` and `element_id` (aliases of `element`) to merge into the schema of tools taking an element id.
+json element_alias_properties();
+/// Adds the alias properties to `properties` and returns the result.
+json with_element_aliases(json properties);
+/// Folds `id` / `element_id` into `element`; throws std::invalid_argument when several are given and differ.
+void normalize_element_args(json& args);
 /// Builds a JSON Schema object with additionalProperties:false.
 json make_schema(const json& properties, const std::vector<std::string>& required = {});
 /// The optional `connection` property schema.
