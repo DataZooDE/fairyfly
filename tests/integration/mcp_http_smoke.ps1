@@ -117,6 +117,7 @@ $Plan = @(
     '  proto.server_discover          stateless: supportedVersions incl. 2026-07-28, resultType complete',
     '  proto.unsupported_version_400  JSON-RPC -32022 with data.supported',
     '  proto.header_mismatch_400      JSON-RPC -32020',
+    '  proto.modern_headers_required  modern request without Mcp-Method -> 400 -32020; with headers 200 + _meta serverInfo; modern ping 404',
     '  proto.tools_list_sorted        all-scope token: 20 tools sorted by name, stable across calls, no gui_element_fill; stateless ttlMs',
     '  proto.tools_list_scope_filtered screen-only token lists only the 3 screen tools; read-only token lists no write tool',
     '  token.expiry_past_rejected     token create --expires <past> fails (INVALID_ARGUMENT); server-side expiry: SKIP',
@@ -501,7 +502,7 @@ try {
         Assert-That ($r.Status -eq 202) "status is $($r.Status)"
     }
     Check 'proto.server_discover' {
-        $r = Invoke-Mcp 'main' 'server/discover' @{}
+        $r = Invoke-Mcp 'main' 'server/discover' @{} @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'server/discover' }
         Assert-That ($r.Status -eq 200) "status is $($r.Status)"
         Assert-That (@($r.Json.result.supportedVersions) -contains '2026-07-28') 'supportedVersions lacks 2026-07-28'
         Assert-That ($r.Json.result.resultType -eq 'complete') "resultType is '$($r.Json.result.resultType)'"
@@ -514,9 +515,20 @@ try {
         Assert-That (@($r.Json.error.data.supported).Count -ge 2) 'error.data.supported is missing'
     }
     Check 'proto.header_mismatch_400' {
-        $r = Invoke-Mcp 'main' 'tools/list' @{} @{ 'Mcp-Method' = 'tools/call' }
+        $r = Invoke-Mcp 'main' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'tools/call' }
         Assert-That ($r.Status -eq 400) "status is $($r.Status)"
         Assert-That ((Get-RpcErrorCode $r) -eq -32020) "JSON-RPC code is $(Get-RpcErrorCode $r)"
+    }
+    Check 'proto.modern_headers_required' {
+        # a modern request (protocol header 2026-07-28) without Mcp-Method is 400 -32020; with it 200 and serverInfo in _meta
+        $r = Invoke-Mcp 'main' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28' }
+        Assert-That ($r.Status -eq 400) "status without Mcp-Method is $($r.Status)"
+        Assert-That ((Get-RpcErrorCode $r) -eq -32020) "JSON-RPC code is $(Get-RpcErrorCode $r)"
+        $ok = Invoke-Mcp 'main' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'tools/list' }
+        Assert-That ($ok.Status -eq 200) "status with headers is $($ok.Status)"
+        Assert-That ($ok.Json.result.'_meta'.'io.modelcontextprotocol/serverInfo'.name -eq 'fairyfly') '_meta serverInfo missing'
+        $p = Invoke-Mcp 'main' 'ping' $null @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'ping' }
+        Assert-That ($p.Status -eq 404) "modern ping status is $($p.Status), expected 404"
     }
     Check 'proto.tools_list_sorted' {
         $a = Invoke-Mcp 'all' 'tools/list' @{}
@@ -530,7 +542,7 @@ try {
         Assert-That (($sorted -join ',') -eq ($namesA -join ',')) 'tools/list is not sorted by name'
         Assert-That (-not ($namesA -contains 'gui_element_fill')) 'gui_element_fill is listed on a read-only server'
         foreach ($n in $namesA) { Assert-That ($n.StartsWith('gui_')) "tool '$n' does not start with gui_" }
-        $st = Invoke-Mcp 'all' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28' }
+        $st = Invoke-Mcp 'all' 'tools/list' @{} @{ 'MCP-Protocol-Version' = '2026-07-28'; 'Mcp-Method' = 'tools/list' }
         Assert-That ($st.Json.result.ttlMs -eq 30000) 'stateless tools/list has no ttlMs 30000'
         Assert-That ($st.Json.result.cacheScope -eq 'private') 'stateless tools/list has no cacheScope private'
     }

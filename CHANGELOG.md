@@ -4,6 +4,10 @@
 
 Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are retired.
 
+### Changed
+
+- Remote MCP, stateless era aligned with the published 2026-07-28 specification (verified 2026-10-02): a request is modern when `_meta` (prefixed `io.modelcontextprotocol/protocolVersion` or plain) says 2026-07-28 or later, the method is `server/discover` or the `MCP-Protocol-Version` header is 2026-07-28. Modern requests must carry `MCP-Protocol-Version` (equal to the body), `Mcp-Method` and, for `tools/call`/`resources/read`/`prompts/get`, `Mcp-Name` (with `=?base64?...?=` decoding); otherwise HTTP 400 with JSON-RPC -32020 naming the header, before any tool runs. Modern unknown methods, `ping` and `logging/setLevel` answer 404 with -32601; modern results carry `_meta["io.modelcontextprotocol/serverInfo"]`; prefixed and plain `_meta` keys that disagree are 400 -32602. Legacy (2025-06-18, 2025-11-25) requests are unchanged. Clients that sent 2026-07-28 requests without these headers now get 400.
+
 ### Added
 
 - Verb-level token scopes for the remote MCP endpoint: next to the family scope (`session`) a token can carry `<family>.<verb>` (`session.list`, `session.attach`, `screen.read`, `element.get`, ... one tool each; the valid verbs are generated from the command table, `gui_doctor` and `gui_batch` stay family-only). A call is allowed with the tool's family, its exact verb scope or `*`; `tools/list` and `gui_batch` items follow the same rule, `SCOPE_DENIED` now reads `token 'x' lacks scope 'session.disconnect' (or 'session')`. New error code `UNKNOWN_SCOPE` (unknown verb of a known family). The default scope of `mcp token create` is now `session.list,session.attach,connection.list,screen` (read-only), so a default token can no longer launch, log in or disconnect; existing tokens keep their family scopes unchanged. `--scope` input is case-insensitive.
