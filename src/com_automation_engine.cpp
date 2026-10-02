@@ -2,6 +2,7 @@
 #include "include/session_facts.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
+#include "include/tab_guard.h"
 #include "include/collection_id_lookup.h"
 #include "include/sensitive_data.h"
 #include "include/html_viewer_reader.h"
@@ -57,6 +58,37 @@ static ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session,
     } catch (const ComException& error) {
         if (!is_missing_element_error(error.what())) throw;
         return nullptr;
+    }
+}
+
+/// State of a tab page for the inactive-tab check: whether it exists, its caption and whether it is the strip's
+/// SelectedTab. Any COM failure reads as "unknown" (not found), so the check never turns into a new error.
+static TabPageLookup make_tab_lookup(const ComGuiSessionPtr& session) {
+    return [session](const TabPageRef& ref) {
+        TabPageState state;
+        try {
+            auto page = find_element_if_present(session, ref.page_id);
+            if (!page) return state;
+            state.found = true;
+            try { state.text = page->get_string_property(L"Text"); } catch (const std::exception&) {}
+            auto strip = find_element_if_present(session, ref.strip_id);
+            if (!strip) { state.found = false; return state; }
+            auto selected = strip->get_dispatch_property(L"SelectedTab");
+            state.selected = selected && ComGuiElement::create(selected)->get_id() == ref.page_id;
+        } catch (const std::exception&) {
+            state = TabPageState{};
+        }
+        return state;
+    };
+}
+
+/// ELEMENT_ON_INACTIVE_TAB when `path` is missing because a tab page above it is not selected.
+static std::optional<Result> inactive_tab_error(const ComGuiSessionPtr& session, const std::string& path,
+                                                bool offer_activate_tab) {
+    try {
+        return classify_element_on_inactive_tab(path, make_tab_lookup(session), offer_activate_tab);
+    } catch (const std::exception&) {
+        return std::nullopt;
     }
 }
 
@@ -807,6 +839,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         auto elem = find_element_if_present(session, resolved_element.path);
 
         if (!elem) {
+            if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_NOT_FOUND";
             result.error["message"] = "Element not found at path: " + resolved_element.path;
@@ -1177,6 +1210,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         auto elem = find_element_if_present(session, resolved_element.path);
 
         if (!elem) {
+            if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_NOT_FOUND";
             result.error["message"] = "Element not found at path: " + resolved_element.path;
@@ -1414,6 +1448,10 @@ json read_element_value(const ComGuiElementPtr& element) {
 }
 
 Result ComAutomationEngine::read_field(const ElementId& element) {
+    return read_field(element, false);
+}
+
+Result ComAutomationEngine::read_field(const ElementId& element, bool activate_tab) {
     auto start = std::chrono::high_resolution_clock::now();
     Result result;
 
@@ -1428,15 +1466,37 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
         // Resolve @active to actual window ID
         ElementId resolved_element = resolve_element_path(element);
         auto session = ensure_session();
-        auto elem = session->find_element_by_id(resolved_element.path);
+        auto elem = find_element_if_present(session, resolved_element.path);
 
+        // The content of an inactive tab page does not exist for the scripting API: tell that apart from a bad id.
+        struct ActivatedTab { std::string tab_id; std::string tab_text; std::string previous_id; };
+        std::vector<ActivatedTab> activated;
         if (!elem) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "Element not found";
-            result.error["element"] = resolved_element.path;
-            return result;
+            if (!activate_tab) {
+                if (auto inactive = inactive_tab_error(session, resolved_element.path, true)) return *inactive;
+            } else {
+                const auto lookup = make_tab_lookup(session);
+                for (int round = 0; round < 4; ++round) {  // nested tab strips: outermost page first
+                    auto inactive = find_inactive_tab_page(resolved_element.path, lookup);
+                    if (!inactive) break;
+                    ActivatedTab entry{inactive->first.page_id, inactive->second.text, ""};
+                    try {
+                        auto strip = find_element_if_present(session, inactive->first.strip_id);
+                        if (strip) {
+                            auto selected = strip->get_dispatch_property(L"SelectedTab");
+                            if (selected) entry.previous_id = ComGuiElement::create(selected)->get_id();
+                        }
+                    } catch (const std::exception&) {}
+                    auto page = find_element_if_present(session, inactive->first.page_id);
+                    if (!page) break;
+                    page->select();
+                    session->wait_for_completion(2000);
+                    activated.push_back(std::move(entry));
+                }
+                elem = find_element_if_present(session, resolved_element.path);
+            }
         }
+        if (!elem) throw ComException("Element not found: " + resolved_element.path);
 
         const std::string element_type = elem->get_type();
         result.data = read_element_value(elem);
@@ -1447,7 +1507,35 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
         }
         result.data["element_type"] = element_type;
         result.data["window"] = resolved_element.get_window().id;
+        if (type_shows_tooltip(element_type)) {
+            std::string tooltip, text;
+            try { tooltip = elem->get_tooltip(); } catch (const std::exception&) {}
+            if (!tooltip.empty()) {
+                try { text = elem->get_text(); } catch (const std::exception&) {}
+                attach_tooltip_fields(result.data, element_type, tooltip, text);
+            }
+        }
         attach_status_bar(result, read_action_status(session));
+
+        if (!activated.empty()) {
+            // A read is observational: put the tabs back as they were (innermost first).
+            bool restored = true;
+            for (auto it = activated.rbegin(); it != activated.rend(); ++it) {
+                if (it->previous_id.empty()) { restored = false; continue; }
+                try {
+                    auto previous = find_element_if_present(session, it->previous_id);
+                    if (!previous) { restored = false; continue; }
+                    previous->select();
+                    session->wait_for_completion(2000);
+                } catch (const std::exception&) {
+                    restored = false;
+                }
+            }
+            json tabs = json::array();
+            for (const auto& entry : activated) tabs.push_back({{"tab_id", entry.tab_id}, {"tab_text", entry.tab_text}});
+            result.data["tabs_activated"] = tabs;
+            result.data["tabs_restored"] = restored;
+        }
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -1962,6 +2050,9 @@ nlohmann::json ComAutomationEngine::get_application_info() const
                         sess_obj["alive"] = session->is_alive();
                         sess_obj["server_session_key_available"] =
                             !session->get_server_session_key().empty();
+                        // The scripting API has no server clock; see server_clock.h for the top-level fallback.
+                        sess_obj["server_time"] = nullptr;
+                        sess_obj["server_time_source"] = "unavailable";
 
                         try {
                             auto active_window = session->get_active_window();
@@ -1991,7 +2082,9 @@ nlohmann::json ComAutomationEngine::get_application_info() const
         }
         
         info["connections"] = connections_array;
-        
+        for (const auto& [key, value] : server_time_fields().items()) info[key] = value;
+        info["server_time_summary"] = server_time_summary(info);
+
     } catch (const std::exception& e) {
         info["error"] = e.what();
     }

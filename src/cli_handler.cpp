@@ -1038,7 +1038,8 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
     return result;
 }
 
-Result CommandHandler::handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes)
+Result CommandHandler::handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes,
+                                         bool activate_tab)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -1181,7 +1182,9 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
     // Regular field reading
     spdlog::info("Reading field: {} on connection {}", element_id, conn_result.value.id);
-    auto result = engine_->read_field(elem);
+    auto* com_read_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto result = (activate_tab && com_read_engine) ? com_read_engine->read_field(elem, true)
+                                                    : engine_->read_field(elem);
 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;

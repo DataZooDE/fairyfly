@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
+#include "include/tab_guard.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -189,5 +190,76 @@ TEST_CASE("an unchanged status bar after a fill is stale and omitted", "[fill][s
     failed.error = json::object();
     attach_fresh_status_bar(failed, stale, stale);
     CHECK_FALSE(failed.error.contains("status_bar"));
+}
+
+// ---- Item 2: inactive tabs ---------------------------------------------------------------------------
+
+TEST_CASE("tab pages are found in an element id", "[tabs][round2]") {
+    const auto pages = tab_pages_in_path("wnd[0]/usr/tabsTAB_STRIP/tabpTAB2/ssubSUB:SAPLXX:0100/txtFIELD");
+    REQUIRE(pages.size() == 1);
+    CHECK(pages[0].strip_id == "wnd[0]/usr/tabsTAB_STRIP");
+    CHECK(pages[0].page_id == "wnd[0]/usr/tabsTAB_STRIP/tabpTAB2");
+    CHECK(pages[0].page_name == "tabpTAB2");
+
+    const auto nested = tab_pages_in_path("wnd[0]/usr/tabsA/tabpP1/ssub/tabsB/tabpP2/txtX");
+    REQUIRE(nested.size() == 2);
+    CHECK(nested[0].page_id == "wnd[0]/usr/tabsA/tabpP1");
+    CHECK(nested[1].strip_id == "wnd[0]/usr/tabsA/tabpP1/ssub/tabsB");
+
+    CHECK(tab_pages_in_path("wnd[0]/usr/txtFIELD").empty());
+    CHECK(tab_pages_in_path("wnd[0]/usr/tabsTS/tabpP1").empty());   // the page itself is not "under" a page
+    CHECK(tab_pages_in_path("wnd[0]/usr/tabpP1/txtX").empty());     // a tabp segment needs a tabs strip before it
+}
+
+TEST_CASE("an element on an inactive tab gets ELEMENT_ON_INACTIVE_TAB", "[tabs][round2]") {
+    const std::string element = "wnd[0]/usr/tabsTS/tabpADDR/ssubSUB/txtADDR-CITY";
+    const TabPageLookup inactive = [](const TabPageRef& ref) {
+        TabPageState state;
+        state.found = true;
+        state.selected = ref.page_name == "tabpLOGON";
+        state.text = "Address";
+        return state;
+    };
+    auto result = classify_element_on_inactive_tab(element, inactive, true);
+    REQUIRE(result.has_value());
+    CHECK(result->status == Result::Status::Error);
+    CHECK(result->error.at("code") == "ELEMENT_ON_INACTIVE_TAB");
+    CHECK(result->error.at("tab_id") == "wnd[0]/usr/tabsTS/tabpADDR");
+    CHECK(result->error.at("tab_text") == "Address");
+    CHECK(result->error.at("element") == element);
+    const auto hint = result->error.at("hint").get<std::string>();
+    CHECK(hint.find("activate the tab first (gui_element_click on the tab)") != std::string::npos);
+    CHECK(hint.find("gui_screen_read tab=Address") != std::string::npos);
+    CHECK(result->error.at("suggestions").dump().find("--activate-tab") != std::string::npos);
+
+    auto no_activate = classify_element_on_inactive_tab(element, inactive, false);
+    REQUIRE(no_activate.has_value());
+    CHECK(no_activate->error.at("suggestions").dump().find("--activate-tab") == std::string::npos);
+}
+
+TEST_CASE("a missing element on the selected tab or outside tabs stays a plain miss", "[tabs][round2]") {
+    const TabPageLookup selected = [](const TabPageRef&) {
+        TabPageState state;
+        state.found = true;
+        state.selected = true;
+        return state;
+    };
+    CHECK_FALSE(classify_element_on_inactive_tab("wnd[0]/usr/tabsTS/tabpA/txtX", selected, true).has_value());
+    CHECK_FALSE(classify_element_on_inactive_tab("wnd[0]/usr/txtX", selected, true).has_value());
+    const TabPageLookup gone = [](const TabPageRef&) { return TabPageState{}; };
+    CHECK_FALSE(classify_element_on_inactive_tab("wnd[0]/usr/tabsTS/tabpA/txtX", gone, true).has_value());
+}
+
+TEST_CASE("the outermost inactive page of nested tab strips is reported", "[tabs][round2]") {
+    const TabPageLookup lookup = [](const TabPageRef& ref) {
+        TabPageState state;
+        state.found = true;
+        state.selected = ref.page_name == "tabpOUTER_OK";
+        state.text = ref.page_name;
+        return state;
+    };
+    auto inactive = find_inactive_tab_page("wnd[0]/usr/tabsA/tabpOUTER_OK/sub/tabsB/tabpINNER/txtX", lookup);
+    REQUIRE(inactive.has_value());
+    CHECK(inactive->first.page_name == "tabpINNER");
 }
 

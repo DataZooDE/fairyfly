@@ -20,12 +20,15 @@ public:
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
         cmd_->add_flag("--list-nodes", list_nodes_,
             "List all nodes in tree (only for tree elements)");
+        cmd_->add_flag("--activate-tab", activate_tab_,
+            "If the element is on an inactive tab page, select that tab, read the element and restore the previous tab "
+            "(without it: error ELEMENT_ON_INACTIVE_TAB)");
         add_output_option(cmd_, output_format_);
         return cmd_;
     }
 
     Result execute(cli::CommandHandler& handler) override {
-        return handler.handle_read_field(element_, conn_id_, list_nodes_);
+        return handler.handle_read_field(element_, conn_id_, list_nodes_, activate_tab_);
     }
 
     bool was_invoked() const override {
@@ -41,6 +44,7 @@ private:
     std::string element_;
     std::optional<int> conn_id_;
     bool list_nodes_ = false;  // Tree node listing flag
+    bool activate_tab_ = false;
     std::string output_format_;
 };
 

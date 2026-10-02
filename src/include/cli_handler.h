@@ -148,7 +148,8 @@ public:
                        std::optional<int> connection_id, std::optional<int> row = std::nullopt,
                        const std::string& column = "", bool checkbox = false, bool commit = false,
                        bool allow_fill = false);
-    Result handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes = false);
+    Result handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes = false,
+                             bool activate_tab = false);
     Result handle_press_f4(const std::string& element_id, std::optional<int> connection_id);
 
     // Screen operations
