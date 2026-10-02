@@ -13,6 +13,7 @@
 #include "include/vkey.h"
 #include "include/read_only_guard.h"
 #include "include/action_argument_checks.h"
+#include "include/sensitive_data.h"
 #include <nlohmann/json.hpp>
 #include <exception>
 #include <functional>
@@ -27,6 +28,9 @@
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
+
+// Redaction markers carry a reason: "[REDACTED: <reason>]".
+static bool is_redacted(const std::string& value) { return fairyfly::sap::is_redaction_marker(value); }
 
 namespace {
 // Minimal IEnumVARIANT over a list of dispatch pointers (for _NewEnum fakes).
@@ -995,7 +999,7 @@ TEST_CASE("Password field redaction uses the correct COM type", "[com][privacy]"
     auto* password_dispatch = new TextFieldDispatch(L"GuiPasswordField", 11);
     auto password = ComGuiElement::create(password_dispatch);
     password_dispatch->Release();
-    REQUIRE(password->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(password->get_text()));
     REQUIRE(password_dispatch->text_reads == 0);
 
     auto* ordinary_dispatch = new TextFieldDispatch(L"GuiTextField", 21);
@@ -1011,14 +1015,14 @@ TEST_CASE("Named ordinary input fields never read secret text", "[com][privacy]"
         L"GuiTextField", 41, L"wnd[0]/usr/txtS_API_KEY");
     auto named = ComGuiElement::create(named_dispatch);
     named_dispatch->Release();
-    REQUIRE(named->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(named->get_text()));
     REQUIRE(named_dispatch->text_reads == 0);
 
     auto* labeled_dispatch = new TextFieldDispatch(
         L"GuiTextField", 41, L"wnd[0]/usr/txtGENERIC", L"Client Secret");
     auto labeled = ComGuiElement::create(labeled_dispatch);
     labeled_dispatch->Release();
-    REQUIRE(labeled->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(labeled->get_text()));
     REQUIRE(labeled_dispatch->text_reads == 0);
 }
 
@@ -1033,7 +1037,7 @@ TEST_CASE("SAP assigned left label redacts a neutral input field", "[com][privac
     field_dispatch->Release();
 
     REQUIRE(field->get_label() == "Client Secret");
-    REQUIRE(field->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(field->get_text()));
     REQUIRE(field_dispatch->text_reads == 0);
     caption_dispatch->Release();
 }
@@ -1053,7 +1057,7 @@ TEST_CASE("Authorization object metadata remains readable", "[com][privacy]") {
         L"Authorization", L"", L"Bearer synthetic-secret");
     auto credential = ComGuiElement::create(credential_dispatch);
     credential_dispatch->Release();
-    REQUIRE(credential->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(credential->get_text()));
     REQUIRE(credential_dispatch->text_reads == 0);
 }
 
@@ -1071,7 +1075,7 @@ TEST_CASE("Authorization group metadata remains readable", "[com][privacy]") {
         L"Authorization", L"", L"Bearer synthetic-secret");
     auto credential = ComGuiElement::create(credential_dispatch);
     credential_dispatch->Release();
-    REQUIRE(credential->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(credential->get_text()));
 }
 
 TEST_CASE("Gateway header value follows its sibling credential name", "[com][privacy]") {
@@ -1087,7 +1091,7 @@ TEST_CASE("Gateway header value follows its sibling credential name", "[com][pri
         auto value = ComGuiElement::create(value_dispatch);
         value_dispatch->Release();
 
-        REQUIRE(value->get_text() == "[REDACTED]");
+        REQUIRE(is_redacted(value->get_text()));
         REQUIRE(value_dispatch->text_reads == 0);
 
         name_dispatch->Release();
@@ -1119,7 +1123,7 @@ TEST_CASE("Gateway header value follows its sibling credential name", "[com][pri
             L"GuiTextField", 10100, L"wnd[1]/usr/txtIP_HEADER_VALUE", L"", L"", L"synthetic-header-marker");
         auto value = ComGuiElement::create(value_dispatch);
         value_dispatch->Release();
-        REQUIRE(value->get_text() == "[REDACTED]");
+        REQUIRE(is_redacted(value->get_text()));
         REQUIRE(value_dispatch->text_reads == 0);
     }
 }
@@ -1137,7 +1141,7 @@ TEST_CASE("Generic named value field hides a credential value", "[com][privacy]"
     auto value = ComGuiElement::create(value_dispatch);
     value_dispatch->Release();
 
-    REQUIRE(value->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(value->get_text()));
     REQUIRE(value_dispatch->text_reads == 0);
 
     name_dispatch->Release();
@@ -1180,11 +1184,11 @@ TEST_CASE("Indexed table value uses the header name in the same row", "[com][pri
     ordinary_value->Release();
     field_value->Release();
 
-    REQUIRE(secret->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(secret->get_text()));
     CHECK(secret_value->text_reads == 0);
     REQUIRE(ordinary->get_text() == "application/json");
     CHECK(ordinary_value->text_reads == 1);
-    REQUIRE(field->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(field->get_text()));
     CHECK(field_value->text_reads == 0);
 
     secret_name->Release();
@@ -1208,7 +1212,7 @@ TEST_CASE("Generic keyed value field hides a credential value", "[com][privacy]"
     auto value = ComGuiElement::create(value_dispatch);
     value_dispatch->Release();
 
-    REQUIRE(value->get_text() == "[REDACTED]");
+    REQUIRE(is_redacted(value->get_text()));
     REQUIRE(value_dispatch->text_reads == 0);
 
     key_dispatch->Release();
@@ -1285,7 +1289,7 @@ TEST_CASE("Generic value field suppresses an unverified sibling", "[com][privacy
             L"GuiTextField", 11400, L"wnd[1]/usr/txtVALUE", L"", L"", L"synthetic-marker");
         auto value = ComGuiElement::create(value_dispatch);
         value_dispatch->Release();
-        REQUIRE(value->get_text() == "[REDACTED]");
+        REQUIRE(is_redacted(value->get_text()));
         REQUIRE(value_dispatch->text_reads == 0);
     }
     SECTION("FindById fails but the sibling exists in Children") {
@@ -1301,7 +1305,7 @@ TEST_CASE("Generic value field suppresses an unverified sibling", "[com][privacy
         auto value = ComGuiElement::create(value_dispatch);
         value_dispatch->Release();
 
-        REQUIRE(value->get_text() == "[REDACTED]");
+        REQUIRE(is_redacted(value->get_text()));
         REQUIRE(value_dispatch->text_reads == 0);
 
         name_dispatch->Release();
@@ -1336,7 +1340,7 @@ TEST_CASE("Direct report label read masks a credential value on its row", "[com]
     REQUIRE(parent->get_child(1));
     REQUIRE(parent->get_child(2));
     REQUIRE(parent->get_child(2)->get_id() == "wnd[0]/usr/lbl[0,3]");
-    REQUIRE(value->get_text_for_direct_read() == "[REDACTED]");
+    REQUIRE(is_redacted(value->get_text_for_direct_read()));
     REQUIRE(ordinary->get_text_for_direct_read() == "ordinary report text");
 
     name_dispatch->Release();
@@ -1358,7 +1362,7 @@ TEST_CASE("Direct report label read suppresses an unreadable sibling", "[com][pr
     auto value = ComGuiElement::create(value_dispatch);
     value_dispatch->Release();
 
-    REQUIRE(value->get_text_for_direct_read() == "[REDACTED]");
+    REQUIRE(is_redacted(value->get_text_for_direct_read()));
     REQUIRE(value_dispatch->text_reads == 0);
 
     unreadable_dispatch->Release();
@@ -2385,6 +2389,47 @@ TEST_CASE("SapGuiCollection::for_each uses one _NewEnum and matches item order",
     // A collection without _NewEnum reports that callers must fall back to item(i).
     collection->enumerable = false;
     REQUIRE_FALSE(children.for_each([&](const std::shared_ptr<ComGuiElement>&) {}));
+
+    collection->Release();
+    first_child->Release();
+    second_child->Release();
+    third_child->Release();
+}
+
+TEST_CASE("enumerate_collection walks once and falls back to item(i)", "[com][perf][enum]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first_child = new TextFieldDispatch(L"GuiLabel", 22000, L"a");
+    auto* second_child = new TextFieldDispatch(L"GuiLabel", 22100, L"b");
+    auto* third_child = new TextFieldDispatch(L"GuiLabel", 22200, L"c");
+    auto* collection = new TextFieldDispatch(L"GuiComponentCollection", 22300);
+    collection->child_items = {first_child, second_child, third_child};
+    collection->enumerable = true;
+    SapGuiCollection<ComGuiElement> children{IDispatchPtr(collection)};
+
+    const auto ids = [](const std::vector<ComGuiElementPtr>& items) {
+        std::vector<std::string> out;
+        for (const auto& item : items) out.push_back(item->get_id());
+        return out;
+    };
+
+    // One _NewEnum for the whole walk (item(i) would need one per index).
+    auto all = enumerate_collection(children, 10);
+    REQUIRE(ids(all) == std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(collection->new_enum_calls == 1);
+
+    // The limit cuts the walk short.
+    REQUIRE(ids(enumerate_collection(children, 2)) == std::vector<std::string>{"a", "b"});
+    REQUIRE(enumerate_collection(children, 0).empty());
+
+    // No enumerator: same items through Count/item(i).
+    collection->enumerable = false;
+    REQUIRE(ids(enumerate_collection(children, 10)) == std::vector<std::string>{"a", "b", "c"});
+    REQUIRE(ids(enumerate_collection(children, 2)) == std::vector<std::string>{"a", "b"});
+
+    // An enumerator that fails midway: the partial prefix is discarded, nothing is duplicated.
+    collection->enumerable = true;
+    collection->enum_fail_after = 2;
+    REQUIRE(ids(enumerate_collection(children, 10)) == std::vector<std::string>{"a", "b", "c"});
 
     collection->Release();
     first_child->Release();

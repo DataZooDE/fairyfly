@@ -15,11 +15,13 @@ TableDataExtractor::TableDataExtractor(TableExtractionOptions options)
 std::vector<std::vector<std::string>> read_grid_rows(
     int row_count, int col_count, int max_rows,
     const std::vector<std::string>& column_names,
-    const std::function<std::string(int, const std::string&)>& read_cell) {
+    const std::function<std::string(int, const std::string&)>& read_cell,
+    int row_offset) {
     std::vector<std::vector<std::string>> rows;
-    const int limit = (std::max)(0, (std::min)(row_count, max_rows));
-    rows.reserve(limit);
-    for (int row = 0; row < limit; ++row) {
+    const int first = (std::max)(0, row_offset);
+    const int limit = (std::max)(0, (std::min)(row_count, first + (std::max)(0, max_rows)));
+    rows.reserve((std::max)(0, limit - first));
+    for (int row = first; row < limit; ++row) {
         std::vector<std::string> values;
         values.reserve((std::max)(0, col_count));
         for (int col = 0; col < col_count; ++col) {
@@ -37,6 +39,62 @@ std::vector<std::vector<std::string>> read_grid_rows(
         rows.push_back(std::move(values));
     }
     return rows;
+}
+
+std::vector<ComGuiElementPtr> enumerate_collection(const SapGuiCollection<ComGuiElement>& collection,
+                                                    int limit) {
+    std::vector<ComGuiElementPtr> items;
+    if (limit <= 0) return items;
+    bool walked = false;
+    try {
+        walked = collection.for_each([&](const ComGuiElementPtr& child) {
+            if (static_cast<int>(items.size()) >= limit) return false;
+            items.push_back(child);
+            return true;
+        });
+    } catch (const std::exception&) {
+        walked = false;
+    }
+    if (walked && !items.empty()) return items;
+    // Discard a partial prefix of a failed walk, then index.
+    items.clear();
+    const int count = (std::min)(collection.count(), limit);
+    for (int i = 0; i < count; ++i) {
+        auto item = collection.item(i);
+        if (!item) break;
+        items.push_back(std::move(item));
+    }
+    return items;
+}
+
+namespace {
+bool cell_is_blank(const std::string& value) {
+    return value.find_first_not_of(" \t\r\n") == std::string::npos;
+}
+}  // namespace
+
+int trim_trailing_empty_rows(std::vector<std::vector<std::string>>& rows) {
+    size_t keep = rows.size();
+    while (keep > 0 && std::all_of(rows[keep - 1].begin(), rows[keep - 1].end(), cell_is_blank)) --keep;
+    const int trimmed = static_cast<int>(rows.size() - keep);
+    rows.resize(keep);
+    return trimmed;
+}
+
+void annotate_row_window(json& table, int offset, int empty_rows_trimmed) {
+    if (!table.is_object()) return;
+    const int returned = table.contains("rows") && table["rows"].is_array()
+        ? static_cast<int>(table["rows"].size()) : 0;
+    const int total = table.value("total_row_count", returned);
+    table["offset"] = offset;
+    table["returned"] = returned;
+    table["total"] = total;
+    table["empty_rows_trimmed"] = empty_rows_trimmed;
+    if (empty_rows_trimmed > 0) {
+        table["exposed_rows"] = offset + returned;
+    } else if (offset + returned < total) {
+        table["next_offset"] = offset + returned;
+    }
 }
 
 std::string recover_tree_node_text(
@@ -96,7 +154,10 @@ TableData TableDataExtractor::extract_grid_data(ComGuiElementPtr element) const 
         data.rows = read_grid_rows(row_count, col_count, options_.max_rows, column_names,
                                    [&](int row, const std::string& column) {
                                        return element->get_cell_value(row, column);
-                                   });
+                                   },
+                                   options_.row_offset);
+        data.row_offset = (std::max)(0, options_.row_offset);
+        data.empty_rows_trimmed = trim_trailing_empty_rows(data.rows);
 
         spdlog::info("Extracted {} rows × {} columns from grid", data.rows.size(), col_count);
 
@@ -137,8 +198,13 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
                                               DISPATCH_PROPERTYGET, &no_params, &count_val, nullptr, nullptr))) {
                         col_count = count_val.intVal;
                         SapGuiCollection<ComGuiElement> col_coll(cols);
+                        // One enumeration for all columns; a short walk falls back to item(c)
+                        // per index (a missing column then still yields "Col<c>").
+                        auto column_items = enumerate_collection(col_coll, col_count);
+                        const bool walked_all = static_cast<int>(column_items.size()) == col_count;
                         for (int c = 0; c < col_count; ++c) {
-                            auto col_elem = col_coll.item(c);
+                            auto col_elem = walked_all ? column_items[static_cast<size_t>(c)]
+                                                       : col_coll.item(c);
                             std::string title;
                             if (col_elem) {
                                 try { title = col_elem->get_property_string(L"Title"); } catch (...) {}
@@ -161,13 +227,15 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
         // Limit rows to extract
         // Note: For GuiTableControl, visible rows are directly accessible via GetCell
         int max_accessible_rows = visible_rows > 0 ? (std::min)(row_count, visible_rows) : row_count;
-        int rows_to_extract = (std::min)(max_accessible_rows, options_.max_rows);
+        const int first_row = (std::max)(0, options_.row_offset);
+        const int last_row = (std::min)(max_accessible_rows, first_row + options_.max_rows);
+        data.row_offset = first_row;
 
         DISPID cell_dispid;
         HRESULT hr_cell = get_dispid_via_typeinfo(element->get_dispatch(), L"GetCell", &cell_dispid);
 
         if (SUCCEEDED(hr_cell) && col_count > 0) {
-            for (int r = 0; r < rows_to_extract; ++r) {
+            for (int r = first_row; r < last_row; ++r) {
                 std::vector<std::string> row_data;
                 for (int c = 0; c < col_count; ++c) {
                     try {
@@ -202,6 +270,7 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
             }
         }
 
+        data.empty_rows_trimmed = trim_trailing_empty_rows(data.rows);
         spdlog::info("Extracted {} rows × {} columns from GuiTableControl", data.rows.size(), data.columns.size());
 
     } catch (const std::exception& e) {

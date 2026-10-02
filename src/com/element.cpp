@@ -41,20 +41,20 @@ std::string ComGuiElement::get_text_for_direct_read() const {
         const auto comma = id.find(',', label_pos + 5);
         const auto close = id.find(']', comma);
         if (comma == std::string::npos || close == std::string::npos)
-            return "[REDACTED]";
+            return redaction_marker(redaction_reason::unverified);
         const auto row = id.substr(comma + 1, close - comma - 1);
         auto parent_dispatch = get_dispatch_property(L"Parent");
-        if (!parent_dispatch) return "[REDACTED]";
+        if (!parent_dispatch) return redaction_marker(redaction_reason::unverified);
         auto parent = ComGuiElement::create(parent_dispatch);
         const int count = parent->get_child_count();
-        if (count <= 0 || count > 500) return "[REDACTED]";
+        if (count <= 0 || count > 500) return redaction_marker(redaction_reason::unverified);
 
         bool found = false;
         for (int index = 0; index < count; ++index) {
             auto sibling = parent->get_child(index);
-            if (!sibling) return "[REDACTED]";
+            if (!sibling) return redaction_marker(redaction_reason::unverified);
             const auto sibling_id = sibling->get_id();
-            if (sibling_id.empty()) return "[REDACTED]";
+            if (sibling_id.empty()) return redaction_marker(redaction_reason::unverified);
             const auto sibling_pos = sibling_id.rfind("/lbl[");
             if (sibling_pos == std::string::npos) continue;
             const auto sibling_comma = sibling_id.find(',', sibling_pos + 5);
@@ -64,18 +64,18 @@ std::string ComGuiElement::get_text_for_direct_read() const {
                                   sibling_close - sibling_comma - 1) != row) continue;
             if (sibling_id == id) found = true;
             if (contains_sensitive_data_name(sibling->get_string_property(L"Text")))
-                return "[REDACTED]";
+                return redaction_marker(redaction_reason::label_row);
         }
-        if (!found) return "[REDACTED]";
+        if (!found) return redaction_marker(redaction_reason::unverified);
     } catch (const std::exception&) {
-        return "[REDACTED]";
+        return redaction_marker(redaction_reason::unverified);
     }
     return get_text();
 }
 
 std::string ComGuiElement::get_text() const {
     const auto type = get_type();
-    if (type == "GuiPasswordField") return "[REDACTED]";
+    if (type == "GuiPasswordField") return redaction_marker(redaction_reason::password_field);
     // Name/value dialogs can give the value field a neutral ID and label.
     // Look for corresponding name/key fields under the same parent before
     // reading a VALUE field. Gateway's known header-value control fails
@@ -108,7 +108,7 @@ std::string ComGuiElement::get_text() const {
             std::array<bool, sibling_leaves.size()> sibling_found{};
             try {
                 auto parent = get_dispatch_property(L"Parent");
-                if (!parent) return "[REDACTED]";
+                if (!parent) return redaction_marker(redaction_reason::unverified);
                 bool needs_enumeration = !value_row.empty();
                 if (value_row.empty()) {
                     for (size_t index = 0; index < sibling_leaves.size(); ++index) {
@@ -122,8 +122,8 @@ std::string ComGuiElement::get_text() const {
                         const auto name = ComGuiElement::create(sibling_dispatch)
                             ->get_string_property(L"Text");
                         if (normalize_sensitive_name(name).empty() ||
-                            name == "[REDACTED]" || contains_sensitive_data_name(name))
-                            return "[REDACTED]";
+                            is_redaction_marker(name) || contains_sensitive_data_name(name))
+                            return redaction_marker(redaction_reason::paired_name);
                     }
                 }
                 if (needs_enumeration) {
@@ -132,12 +132,12 @@ std::string ComGuiElement::get_text() const {
                     // absence before allowing an ordinary VALUE field through.
                     auto parent_element = ComGuiElement::create(parent);
                     const int count = parent_element->get_child_count();
-                    if (count <= 0 || count > 200) return "[REDACTED]";
+                    if (count <= 0 || count > 200) return redaction_marker(redaction_reason::unverified);
                     for (int index = 0; index < count; ++index) {
                         auto child = parent_element->get_child(index);
-                        if (!child) return "[REDACTED]";
+                        if (!child) return redaction_marker(redaction_reason::unverified);
                         const auto child_id = child->get_id();
-                        if (child_id.empty()) return "[REDACTED]";
+                        if (child_id.empty()) return redaction_marker(redaction_reason::unverified);
                         const auto child_separator = child_id.find_last_of('/');
                         const auto child_leaf = child_id.substr(
                             child_separator == std::string::npos ? 0 : child_separator + 1);
@@ -149,20 +149,20 @@ std::string ComGuiElement::get_text() const {
                         sibling_found[static_cast<size_t>(match - sibling_leaves.begin())] = true;
                         const auto name = child->get_string_property(L"Text");
                         if (normalize_sensitive_name(name).empty() ||
-                            name == "[REDACTED]" || contains_sensitive_data_name(name))
-                            return "[REDACTED]";
+                            is_redaction_marker(name) || contains_sensitive_data_name(name))
+                            return redaction_marker(redaction_reason::paired_name);
                     }
                 }
-                if (known_header && !sibling_found[0]) return "[REDACTED]";
+                if (known_header && !sibling_found[0]) return redaction_marker(redaction_reason::unverified);
             } catch (const std::exception&) {
-                return "[REDACTED]";
+                return redaction_marker(redaction_reason::unverified);
             }
         }
     }
-    if ((type == "GuiTextField" || type == "GuiCTextField" ||
-         type == "GuiComboBox" || type == "GuiComboBoxControl") &&
-        is_sensitive_input_field(type, get_id(), get_label())) {
-        return "[REDACTED]";
+    if (type == "GuiTextField" || type == "GuiCTextField" ||
+        type == "GuiComboBox" || type == "GuiComboBoxControl") {
+        const auto reason = sensitive_input_field_reason(type, get_id(), get_label());
+        if (!reason.empty()) return redaction_marker(reason.c_str());
     }
 
     const auto filter_text = [&](const std::string& value) {

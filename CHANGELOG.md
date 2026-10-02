@@ -12,6 +12,14 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 - Server-level IP allow-list (`--allow-ip`, addresses or CIDR blocks, loopback always allowed): other peers get 403 `ADDRESS_NOT_ALLOWED` before anything else is checked.
 - `mcp client-config` prints https URLs and the certificate trust hints (curl `--cacert`, `NODE_EXTRA_CA_CERTS`, `certutil`).
 
+### Screen read
+
+- `screen read --offset N` / MCP `offset`: grid and table reads can start at any row; the table JSON gets `offset`, `returned`, `total`, `next_offset` and `exposed_rows`, trailing empty padding rows are trimmed (`empty_rows_trimmed`) and the Markdown header explains `Total Rows`, `Visible Rows (viewport)` and `Returned Rows`.
+- `--text-contains` filters the rows of grids and table controls (`rows_matched` / `rows_total`).
+- The `only` selectors report the grids and trees they dropped (`suppressed`, plus a Markdown note); new `--only-tables` / `only=tables`.
+- Redaction markers say why (`[REDACTED: field name matches password pattern]`); credential state flags such as `PASSWORD_EXT_PWD_STATE`, role names and profile names are no longer hidden for the words they contain.
+- Fewer COM round trips: grid cells are not read when an `only` selector discards all grids, table-control columns and `--tab` strip lookups use one enumeration instead of an index loop.
+
 ### Changed
 
 - cpp-httplib is removed; plain HTTP remains available on loopback for development and tests.

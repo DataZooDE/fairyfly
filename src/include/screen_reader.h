@@ -114,6 +114,13 @@ public:
     /// Opt in to exhaustive FindById probing of every container (legacy behavior).
     void set_probe_all(bool probe_all) { probe_all_ = probe_all; }
 
+    /// False when the caller's filter discards every grid and table (only buttons/fields/...):
+    /// their cells are then not read at all. Default true.
+    void set_grid_rows_needed(bool needed) { grid_rows_needed_ = needed; }
+
+    /// First grid/table row to return (`--offset`); rows before it are skipped.
+    void set_row_offset(int row_offset) { row_offset_ = row_offset < 0 ? 0 : row_offset; }
+
     /// Read screen with all tabs expanded
     /// When only_tab is non-empty, only the tab whose id equals it (or ends with it at a
     /// '/' boundary) is expanded; TAB_NOT_FOUND is returned when none matches.
@@ -143,7 +150,7 @@ public:
         const std::vector<std::tuple<int, int, std::string>>& cells);
 
     /// Limit returned positioned-label rows while retaining the full visible count.
-    static void limit_userarea_table_rows(json& table, int max_rows);
+    static void limit_userarea_table_rows(json& table, int max_rows, int offset = 0);
 
     /// Extract grid data from a GuiGridView/GuiTableControl using fresh COM pointer
     /// @param element Fresh COM pointer to grid element (obtained via session->find_element_by_id)
@@ -154,6 +161,8 @@ public:
 private:
     ComGuiSessionPtr session_;
     int max_rows_ = 20;
+    int row_offset_ = 0;
+    bool grid_rows_needed_ = true;
     bool probe_all_ = false;
 
     /// Discover all UI elements from a window using recursive traversal

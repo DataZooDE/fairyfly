@@ -36,6 +36,8 @@ private:
     std::unique_ptr<ScreenshotHandler> screenshot_handler_;
     std::unique_ptr<ScreenReader> screen_reader_;
     bool probe_all_ = false;
+    int row_offset_ = 0;
+    bool grid_rows_needed_ = true;
 
     // Helper to ensure connection exists
     ComGuiConnectionPtr ensure_connection();
@@ -101,6 +103,8 @@ public:
                                  const std::string& only_tab = "") override;
     Result find_screen(const ScreenFindOptions& query) override;
     void set_probe_all(bool probe_all) override { probe_all_ = probe_all; }
+    void set_row_offset(int row_offset) override { row_offset_ = row_offset < 0 ? 0 : row_offset; }
+    void set_grid_rows_needed(bool needed) override { grid_rows_needed_ = needed; }
     Result capture_screenshot(const cli::ScreenshotOptions& options) override;
 
     // Getters for testing/debugging

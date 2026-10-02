@@ -81,22 +81,139 @@ inline bool contains_sensitive_data_name(const std::string& value) {
            (name.size() >= 3 && name.compare(name.size() - 3, 3, "pwd") == 0);
 }
 
-inline bool is_sensitive_input_field(const std::string& type, const std::string& id,
-                                     const std::string& label) {
-    if (type == "GuiPasswordField") return true;
+// ---------------------------------------------------------------------------------------------
+// Redaction markers with a reason, and the narrowed secret-name classification used for screen
+// reads. `contains_sensitive_data_name` above stays the broad fail-closed test (ABAP source,
+// editor and API responses). Screen reads additionally need to show Basis data that merely has a
+// credential-sounding name: a state flag such as PASSWORD_EXT_PWD_STATE, a role or a profile.
+// ---------------------------------------------------------------------------------------------
+
+namespace redaction_reason {
+inline constexpr const char* password_field = "password input field";
+inline constexpr const char* password_name = "field name matches password pattern";
+inline constexpr const char* secret_name = "field name matches secret pattern";
+inline constexpr const char* paired_name = "paired name field is a credential";
+inline constexpr const char* label_row = "row label names a credential";
+inline constexpr const char* unverified = "could not verify that the field holds no credential";
+}  // namespace redaction_reason
+
+// "[REDACTED: <reason>]". The reason is a fixed phrase: it never names the matched pattern list
+// and never contains any part of the hidden value.
+inline std::string redaction_marker(const char* reason) {
+    return std::string("[REDACTED: ") + reason + "]";
+}
+
+// True for the bare "[REDACTED]" and for every "[REDACTED: ...]" marker.
+inline bool is_redaction_marker(const std::string& value) {
+    return value.rfind("[REDACTED", 0) == 0;
+}
+
+// Fields that hold a credential or its hash, compared after normalisation.
+inline bool is_known_secret_field_name(const std::string& name) {
+    if (is_sensitive_data_name(name)) return true;
+    const std::string key = normalize_sensitive_name(name);
+    for (const auto* known : {"bapipwd", "newpassword", "oldpassword", "confirmpassword",
+                              "repeatpassword", "codvn", "bcode", "passcode", "pwdsaltedhash",
+                              "passwordhash", "newpwd", "oldpwd"}) {
+        if (key == known) return true;
+    }
+    return false;
+}
+
+// A name that only reports the state of a credential (PASSWORD_EXT_PWD_STATE, PASSWORD_STATUS,
+// "Password last changed") carries no secret.
+inline bool is_credential_state_name(const std::string& name) {
+    const std::string key = normalize_sensitive_name(name);
+    for (const std::string suffix : {"state", "status", "flag", "indicator", "date", "time", "type",
+                                     "policy", "length", "lock", "locked", "attempts", "count",
+                                     "valid", "validity", "rule", "rules", "changed", "expired",
+                                     "expiry"}) {
+        if (key.size() > suffix.size() &&
+            key.compare(key.size() - suffix.size(), suffix.size(), suffix) == 0) return true;
+    }
+    return false;
+}
+
+inline bool contains_password_word(const std::string& name) {
+    const std::string key = normalize_sensitive_name(name);
+    for (const auto* word : {"password", "passwd", "passwort", "kennwort", "contrasena", "contrasea",
+                             "motdepasse", "senha", "wachtwoord", "passord", "adgangskode", "heslo",
+                             "salasana", "paroladordine"}) {
+        if (key.find(word) != std::string::npos) return true;
+    }
+    return contains_sensitive_utf8_name(name) ||
+           (key.size() >= 3 && key.compare(key.size() - 3, 3, "pwd") == 0);
+}
+
+// Why `name` identifies a credential-bearing field; empty when it does not. State flags are
+// exempt unless the name is one of the known credential fields themselves.
+inline std::string sensitive_name_reason(const std::string& name) {
+    const bool known = is_known_secret_field_name(name);
+    if (!known && !contains_sensitive_data_name(name)) return {};
+    if (!known && is_credential_state_name(name)) return {};
+    return contains_password_word(name) ? redaction_reason::password_name
+                                        : redaction_reason::secret_name;
+}
+
+// SAP technical object names (roles, profiles, programs): no blanks, underscores or namespaces.
+inline bool looks_like_technical_name(const std::string& value) {
+    if (value.empty() || value.find('_') == std::string::npos) return false;
+    return std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isalnum(c) != 0 || c == '_' || c == '/' || c == '.' || c == '$' || c == '*';
+    });
+}
+
+// Whether a grid or report cell names a credential, so its row has to be hidden. `scan_substrings`
+// additionally treats every caption that merely contains a credential word as a name: for grids
+// without business column titles (gateway NAME/VALUE lists) and for positioned report labels.
+// Cells of a grid with business column titles (ROLE, PROFILE, ...) only match when they are the
+// name itself ("Password"), a "Name: value" / "Name=value" pair or a header name such as
+// "X-Session-Token", so role and profile names are not hidden for their words.
+inline std::string sensitive_cell_reason(const std::string& cell, bool scan_substrings,
+                                         bool technical_names_too = false) {
+    if (cell.empty()) return {};
+    if (is_known_secret_field_name(cell)) return sensitive_name_reason(cell);
+    const auto pair_at = cell.find_first_of(":=");
+    if (pair_at != std::string::npos) {
+        const auto left = sensitive_name_reason(cell.substr(0, pair_at));
+        if (!left.empty()) return left;
+    }
+    const bool header_shaped = cell.find('-') != std::string::npos &&
+                               cell.find_first_of(" \t") == std::string::npos;
+    if (header_shaped) {
+        const auto reason = sensitive_name_reason(cell);
+        if (!reason.empty()) return reason;
+    }
+    if (scan_substrings && (technical_names_too || !looks_like_technical_name(cell)))
+        return sensitive_name_reason(cell);
+    return {};
+}
+
+inline std::string sensitive_input_field_reason(const std::string& type, const std::string& id,
+                                                const std::string& label) {
+    if (type == "GuiPasswordField") return redaction_reason::password_field;
     if (type != "GuiTextField" && type != "GuiCTextField" &&
-        type != "GuiComboBox" && type != "GuiComboBoxControl") return false;
+        type != "GuiComboBox" && type != "GuiComboBoxControl") return {};
 
     const auto last_separator = id.find_last_of('/');
     const std::string field_name = last_separator == std::string::npos
         ? id : id.substr(last_separator + 1);
-    if (contains_sensitive_data_name(field_name)) return true;
+    if (auto reason = sensitive_name_reason(field_name); !reason.empty()) return reason;
+    // USR02-CODVN style names: the part after the table prefix is the SAP field name.
+    const auto hyphen = field_name.find_last_of('-');
+    if (hyphen != std::string::npos && is_known_secret_field_name(field_name.substr(hyphen + 1)))
+        return sensitive_name_reason(field_name.substr(hyphen + 1));
     // SAP authorization objects and groups are access-control metadata, not
     // credential values. Keep technical field names authoritative.
     const auto normalized_label = normalize_sensitive_name(label);
     if (normalized_label == "authorizationobject" ||
-        normalized_label == "authorizationgroup") return false;
-    return contains_sensitive_data_name(label);
+        normalized_label == "authorizationgroup") return {};
+    return sensitive_name_reason(label);
+}
+
+inline bool is_sensitive_input_field(const std::string& type, const std::string& id,
+                                     const std::string& label) {
+    return !sensitive_input_field_reason(type, id, label).empty();
 }
 
 // Mask recognizable credential data in text editors and API responses.
@@ -112,13 +229,23 @@ void redact_sensitive_report_labels(nlohmann::json& elements);
 
 // SAP Gateway Client displays HTTP response headers as NAME/VALUE grid rows.
 // Keep the header name for diagnostics, but never export credential values.
+// Every redacted cell says why: "[REDACTED: <reason>]".
+inline bool is_generic_column_title(const std::string& title) {
+    if (title.empty()) return true;
+    const size_t prefix = title.rfind("Column", 0) == 0 ? 6 : title.rfind("Col", 0) == 0 ? 3 : 0;
+    return prefix > 0 && title.size() > prefix &&
+           std::all_of(title.begin() + static_cast<std::ptrdiff_t>(prefix), title.end(),
+                       [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
 inline void redact_sensitive_header_rows(nlohmann::json& table) {
     if (!table.is_object()) return;
     auto rows_it = table.find("rows");
     if (rows_it == table.end() || !rows_it->is_array()) return;
 
     int name_column = -1;
-    std::vector<size_t> sensitive_columns;
+    bool any_title = false;
+    std::vector<std::pair<size_t, std::string>> sensitive_columns;
     auto columns_it = table.find("columns");
     if (columns_it != table.end() && columns_it->is_array()) {
         const auto& columns = *columns_it;
@@ -127,39 +254,52 @@ inline void redact_sensitive_header_rows(nlohmann::json& table) {
             const auto title = columns[i].get<std::string>();
             const auto name = normalize_sensitive_name(title);
             if (name == "name" || name == "headername") name_column = static_cast<int>(i);
-            if (contains_sensitive_data_name(title)) sensitive_columns.push_back(i);
+            if (!is_generic_column_title(title)) any_title = true;
+            auto reason = sensitive_name_reason(title);
+            if (!reason.empty()) sensitive_columns.emplace_back(i, std::move(reason));
         }
     }
+    // A grid with business column titles (ROLE, PROFILE, ...) is not a NAME/VALUE list: its cell
+    // values are only hidden when they are a credential name themselves.
+    const bool business_grid = any_title && name_column < 0;
 
     for (auto& row : *rows_it) {
         if (!row.is_array()) continue;
-        for (size_t index : sensitive_columns) {
-            if (index < row.size()) row[index] = "[REDACTED]";
+        for (const auto& [index, reason] : sensitive_columns) {
+            if (index < row.size() && !(row[index].is_string() && row[index].get<std::string>().empty()))
+                row[index] = redaction_marker(reason.c_str());
         }
 
         size_t label_index = row.size();
+        std::string label_reason;
         if (name_column >= 0 && static_cast<size_t>(name_column) < row.size() &&
-            row[name_column].is_string() &&
-            contains_sensitive_data_name(row[name_column].get<std::string>())) {
-            label_index = static_cast<size_t>(name_column);
-        } else {
+            row[name_column].is_string()) {
+            label_reason = sensitive_cell_reason(row[name_column].get<std::string>(), true, true);
+            if (!label_reason.empty()) label_index = static_cast<size_t>(name_column);
+        }
+        if (label_index == row.size()) {
             // Some SAP grids expose no column titles, or localize the value title.
             for (size_t i = 0; i < row.size(); ++i) {
-                if (row[i].is_string() &&
-                    contains_sensitive_data_name(row[i].get<std::string>())) {
+                if (!row[i].is_string() || is_redaction_marker(row[i].get<std::string>())) continue;
+                label_reason = sensitive_cell_reason(row[i].get<std::string>(), !business_grid, true);
+                if (!label_reason.empty()) {
                     label_index = i;
                     break;
                 }
             }
         }
         if (label_index < row.size()) {
+            const auto marker = redaction_marker(redaction_reason::label_row);
             // Preserve only a credential name by itself. A cell such as
             // "Authorization: Bearer ..." contains the value as well.
             if (!is_sensitive_data_name(row[label_index].get<std::string>())) {
-                row[label_index] = "[REDACTED]";
+                row[label_index] = redaction_marker(label_reason.c_str());
             }
             for (size_t i = 0; i < row.size(); ++i) {
-                if (i != label_index) row[i] = "[REDACTED]";
+                if (i == label_index) continue;
+                if (row[i].is_string() && (row[i].get<std::string>().empty() ||
+                                           is_redaction_marker(row[i].get<std::string>()))) continue;
+                row[i] = marker;
             }
         }
     }

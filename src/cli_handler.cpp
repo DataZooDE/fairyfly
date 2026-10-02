@@ -1208,16 +1208,83 @@ static bool json_strings_contain(const json& value, const std::string& needle, i
     return false;
 }
 
-/// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
-static bool element_text_matches(const json& elem, const std::string& needle)
+/// The element's own text (labels, tooltip, text content), not its table or tree data.
+static bool element_own_text_matches(const json& elem, const std::string& needle)
 {
     for (const char* key : {"text", "tooltip", "label", "text_content"}) {
         if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
     }
+    return false;
+}
+
+/// Grid / table-control data object that carries a `rows` array, or nullptr.
+static json* table_rows_owner(json& elem)
+{
+    for (const char* key : {"table_data", "grid_data"}) {
+        if (elem.contains(key) && elem[key].is_object() && elem[key].contains("rows") &&
+            elem[key]["rows"].is_array())
+            return &elem[key];
+    }
+    return nullptr;
+}
+
+static size_t count_matching_rows(const json& rows, const std::string& needle)
+{
+    size_t matched = 0;
+    for (const auto& row : rows) {
+        if (json_strings_contain(row, needle)) ++matched;
+    }
+    return matched;
+}
+
+/// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
+static bool element_text_matches(const json& elem, const std::string& needle)
+{
+    if (element_own_text_matches(elem, needle)) return true;
     for (const char* key : {"table_data", "grid_data", "tree_data", "tree_nodes"}) {
         if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
     }
     return false;
+}
+
+/// `--text-contains` on a grid or table control keeps only the rows with a matching cell and reports
+/// `rows_matched` / `rows_total` (rows read, before filtering). When the element matched through its
+/// own text or a column title instead of a cell, its rows stay untouched.
+static void narrow_table_rows(json& elem, const std::string& needle)
+{
+    if (!elem.is_object() || element_own_text_matches(elem, needle)) return;
+    json* table = table_rows_owner(elem);
+    if (!table) return;
+    const json& rows = (*table)["rows"];
+    if (count_matching_rows(rows, needle) == 0) return;
+    json kept = json::array();
+    for (const auto& row : rows) {
+        if (json_strings_contain(row, needle)) kept.push_back(row);
+    }
+    (*table)["rows_total"] = rows.size();
+    (*table)["rows_matched"] = kept.size();
+    (*table)["rows"] = std::move(kept);
+}
+
+/// Grid, table control or positioned-label table (anything rendered as rows and columns).
+static bool element_is_table(const json& elem)
+{
+    if (!elem.is_object()) return false;
+    const std::string type = elem.value("type", "");
+    if (type == "GuiGridView" || type == "GuiTableControl") return true;
+    if (elem.value("subtype", "") == "GridView") return true;
+    for (const char* key : {"table_data", "grid_data"}) {
+        if (elem.contains(key) && elem[key].is_object()) return true;
+    }
+    return false;
+}
+
+static bool element_is_tree(const json& elem)
+{
+    if (!elem.is_object()) return false;
+    const std::string subtype = elem.value("subtype", "");
+    return elem.value("type", "") == "GuiTree" || subtype == "Tree" || subtype == "TableTreeControl" ||
+           elem.contains("tree_nodes") || elem.contains("tree_data");
 }
 
 /// Helper to check if an element matches filter criteria
@@ -1243,6 +1310,10 @@ static bool element_matches_filter(const json& elem, const ScreenFilterOptions& 
 
     if (filters.only_editable) {
         matches = matches && elem.value("changeable", false);
+    }
+
+    if (filters.only_tables) {
+        matches = matches && element_is_table(elem);
     }
 
     if (filters.only_f4_fields) {
@@ -1276,7 +1347,7 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
 
     // If no filters active, return all elements
     bool any_filter = filters.only_buttons || filters.only_fields || filters.only_editable ||
-                      filters.only_f4_fields || filters.text_contains.has_value() ||
+                      filters.only_f4_fields || filters.only_tables || filters.text_contains.has_value() ||
                       filters.id_contains.has_value() || filters.type_filter.has_value() ||
                       filters.first_match_only;
 
@@ -1301,6 +1372,8 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
             // Check if this element matches
             if (element_matches_filter(elem, filters)) {
                 filtered.push_back(elem);
+                if (filters.text_contains.has_value())
+                    narrow_table_rows(filtered.back(), lowercase_ascii(filters.text_contains.value()));
                 found_first = true;
 
                 // If first_match_only, stop immediately
@@ -1340,6 +1413,43 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
     return {filtered, filter_stats};
 }
 
+/// Name of the `only` selector in effect (MCP argument spelling), empty when none.
+static std::string only_selector_name(const ScreenFilterOptions& filters)
+{
+    if (filters.only_buttons) return "buttons";
+    if (filters.only_fields) return "fields";
+    if (filters.only_editable) return "editable";
+    if (filters.only_f4_fields) return "f4_fields";
+    if (filters.only_tables) return "tables";
+    return "";
+}
+
+/// Grids/trees that an `only` selector dropped: they would otherwise vanish without a trace.
+static void collect_suppressed(const json& elements, const std::unordered_set<std::string>& kept,
+                               json& suppressed, int depth = 0)
+{
+    if (!elements.is_array() || depth > 64) return;
+    for (const auto& elem : elements) {
+        if (!elem.is_object()) continue;
+        const std::string id = elem.value("id", "");
+        if (kept.count(id) == 0) {
+            const char* ids_key = element_is_table(elem) ? "grid_ids" : element_is_tree(elem) ? "tree_ids" : nullptr;
+            if (ids_key) {
+                auto& ids = suppressed[ids_key];
+                if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+            }
+        }
+        if (elem.contains("children")) collect_suppressed(elem["children"], kept, suppressed, depth + 1);
+        if (elem.contains("toolbar_buttons"))
+            collect_suppressed(elem["toolbar_buttons"], kept, suppressed, depth + 1);
+    }
+}
+
+bool screen_filters_need_grid_rows(const ScreenFilterOptions& filters)
+{
+    return !(filters.only_buttons || filters.only_fields || filters.only_editable || filters.only_f4_fields);
+}
+
 void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 {
     json all_elements = json::array();
@@ -1360,6 +1470,8 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
     auto [filtered, filter_stats] = filter_elements(all_elements, filters);
     if (!filter_stats.value("filter_applied", false)) return;
 
+    const std::string text_needle = filters.text_contains.has_value()
+        ? lowercase_ascii(filters.text_contains.value()) : std::string();
     json categorized = json::object();
     std::unordered_set<std::string> wanted_ids;
     std::unordered_set<std::string> assigned_ids;
@@ -1372,8 +1484,10 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
             for (const auto& element : elements) {
                 if (!element.is_object()) continue;
                 const std::string id = element.value("id", "");
-                if (wanted_ids.count(id) && assigned_ids.insert(id).second)
+                if (wanted_ids.count(id) && assigned_ids.insert(id).second) {
                     categorized[category].push_back(element);
+                    if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
+                }
             }
         }
     }
@@ -1390,22 +1504,53 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
                                type == "GuiTableControl" || type == "GuiGridView" ? "tables" :
                                type == "GuiToolbar" ? "toolbar" : "other";
         categorized[category].push_back(element);
+        if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
     }
     screen_data["elements"] = filtered;
     screen_data["element_count"] = filtered.size();
     screen_data["hierarchy"] = categorized;
     screen_data["filter_stats"] = filter_stats;
+
+    const std::string only_name = only_selector_name(filters);
+    json suppressed = {{"by", only_name}, {"grid_ids", json::array()}, {"tree_ids", json::array()}};
+    if (!only_name.empty()) collect_suppressed(all_elements, wanted_ids, suppressed);
+
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
         for (auto& tab_data : screen_data["tabs_content"]) {
-            if (tab_data.is_object()) apply_screen_filters(tab_data, filters);
+            if (!tab_data.is_object()) continue;
+            apply_screen_filters(tab_data, filters);
+            if (!tab_data.contains("suppressed")) continue;
+            for (const char* key : {"grid_ids", "tree_ids"}) {
+                for (const auto& id : tab_data["suppressed"].value(key, json::array())) {
+                    auto& ids = suppressed[key];
+                    if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+                }
+            }
         }
+    }
+    if (!suppressed["grid_ids"].empty() || !suppressed["tree_ids"].empty()) {
+        suppressed["grids"] = suppressed["grid_ids"].size();
+        suppressed["trees"] = suppressed["tree_ids"].size();
+        std::string note;
+        const auto describe = [&](const char* key, const char* noun) {
+            const size_t count = suppressed[key].size();
+            if (count == 0) return;
+            if (!note.empty()) note += "; ";
+            note += std::to_string(count) + " " + noun + "(s)";
+        };
+        describe("grid_ids", "grid");
+        describe("tree_ids", "tree");
+        note += " not included with only=" + only_name +
+                (suppressed["grid_ids"].empty() ? "; use no filter" : "; use only=tables or no filter");
+        suppressed["note"] = note;
+        screen_data["suppressed"] = suppressed;
     }
 }
 
 Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id,
                                            bool expand_tabs, const ScreenFilterOptions& filters,
                                            bool skip_trees, bool compact, int max_rows,
-                                           const std::string& only_tab, bool probe_all)
+                                           const std::string& only_tab, bool probe_all, int row_offset)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -1417,6 +1562,8 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
                  include_children, expand_tabs, skip_trees, conn_result.value.id);
 
     engine_->set_probe_all(probe_all);
+    engine_->set_row_offset(row_offset);
+    engine_->set_grid_rows_needed(screen_filters_need_grid_rows(filters));
     Result result;
     if (expand_tabs) {
         result = engine_->read_screen_with_tabs(skip_trees, max_rows, only_tab);

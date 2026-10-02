@@ -44,6 +44,7 @@ struct ScreenFilterOptions {
     bool only_fields = false;                 ///< Show only changeable GuiTextField, GuiCTextField, GuiPasswordField
     bool only_editable = false;               ///< Show only changeable=true fields
     bool only_f4_fields = false;              ///< Show only fields with has_f4_help=true
+    bool only_tables = false;                 ///< Show only grids / table controls (with their rows)
     std::optional<std::string> text_contains; ///< Filter by text/tooltip containing string (case-insensitive)
     std::optional<std::string> id_contains;   ///< Filter by element ID containing string
     std::optional<std::string> type_filter;   ///< Filter by exact element type
@@ -51,6 +52,11 @@ struct ScreenFilterOptions {
 };
 
 void apply_screen_filters(nlohmann::json& screen_data, const ScreenFilterOptions& filters);
+
+/// Whether grid/table cells can reach the output under these filters. The only_buttons / only_fields /
+/// only_editable / only_f4_fields selectors never keep a grid (only its synthetic toolbar buttons), so
+/// reading its cells would be wasted COM round trips.
+bool screen_filters_need_grid_rows(const ScreenFilterOptions& filters);
 
 /// CLI command handler with integration to automation engine
 class CommandHandler {
@@ -149,7 +155,8 @@ public:
     Result handle_screen_read(bool include_children, std::optional<int> connection_id, bool expand_tabs = false,
                              const ScreenFilterOptions& filters = {}, bool skip_trees = false,
                              bool compact = false, int max_rows = 20,
-                             const std::string& only_tab = "", bool probe_all = false);
+                             const std::string& only_tab = "", bool probe_all = false,
+                             int row_offset = 0);
     Result handle_screen_find(const sap::ScreenFindOptions& query,
                               std::optional<int> connection_id);
     Result handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options);

@@ -1452,7 +1452,8 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         metadata["name"] = elem->get_name();
 
         // Text content (available on most elements)
-        std::string text = type == "GuiPasswordField" ? "[REDACTED]" : elem->get_text();
+        std::string text = type == "GuiPasswordField"
+            ? redaction_marker(redaction_reason::password_field) : elem->get_text();
         metadata["text"] = text;
 
         // Interactive states - query for all elements (is_enabled handles missing property gracefully)
@@ -1811,6 +1812,8 @@ Result ComAutomationEngine::read_screen(bool include_structure, bool skip_trees,
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
+    screen_reader_->set_row_offset(row_offset_);
+    screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read(include_structure, skip_trees, max_rows);
         }
 
@@ -1828,6 +1831,8 @@ Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows,
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
+    screen_reader_->set_row_offset(row_offset_);
+    screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read_with_tabs(skip_trees, max_rows, only_tab);
 }
 

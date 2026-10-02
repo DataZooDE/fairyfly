@@ -64,6 +64,10 @@ public:
     virtual Result find_screen(const sap::ScreenFindOptions& query) = 0;
     /// Opt in to exhaustive FindById probing for subsequent screen reads/finds.
     virtual void set_probe_all(bool /*probe_all*/) {}
+    /// First grid/table row to return in subsequent screen reads (`screen read --offset`).
+    virtual void set_row_offset(int /*row_offset*/) {}
+    /// False: grid/table cells are not read (the caller's filter discards all tables).
+    virtual void set_grid_rows_needed(bool /*needed*/) {}
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
 
     // Enumeration and diagnostics

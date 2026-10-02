@@ -86,7 +86,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
         // Never read password fields into automatic screen output.
         std::string text;
         if (type == "GuiPasswordField") {
-            metadata["text"] = "[REDACTED]";
+            metadata["text"] = redaction_marker(redaction_reason::password_field);
         } else {
             try {
                 text = elem->get_text();

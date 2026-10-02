@@ -464,7 +464,9 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
 
         // Extract grid data using TableDataExtractor
         TableExtractionOptions options;
-        options.max_rows = max_rows_;
+        // Grids an `only` selector drops anyway need no cell reads (they cost the most COM calls).
+        options.max_rows = grid_rows_needed_ ? max_rows_ : 0;
+        options.row_offset = row_offset_;
         options.include_headers = true;
 
         TableDataExtractor extractor(options);
@@ -483,6 +485,7 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
             table_json["total_row_count"] = grid_data.total_row_count;
             table_json["visible_row_count"] = grid_data.visible_row_count;
             redact_sensitive_header_rows(table_json);
+            annotate_row_window(table_json, grid_data.row_offset, grid_data.empty_rows_trimmed);
             if (type != "GuiTableControl") {
                 const auto viewport = extract_grid_viewport_metadata(element);
                 table_json.update(viewport);
@@ -523,12 +526,15 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
     return grid_element;
 }
 
-void ScreenReader::limit_userarea_table_rows(json& table, int max_rows) {
+void ScreenReader::limit_userarea_table_rows(json& table, int max_rows, int offset) {
     auto& rows = table.at("rows");
+    const auto skip = std::min(rows.size(), static_cast<size_t>(std::max(0, offset)));
+    if (skip > 0) rows.erase(rows.begin(), rows.begin() + static_cast<json::difference_type>(skip));
     const auto limit = static_cast<size_t>(std::max(0, max_rows));
     if (rows.size() > limit) {
         rows.erase(rows.begin() + static_cast<json::difference_type>(limit), rows.end());
     }
+    annotate_row_window(table, static_cast<int>(skip), 0);
 }
 
 json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const std::string& elem_id,
@@ -642,7 +648,7 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
         table_json["visible_row_count"] = data_rows.size();
         table_json["column_count"] = header_array.size();
         redact_sensitive_header_rows(table_json);
-        limit_userarea_table_rows(table_json, max_rows_);
+        limit_userarea_table_rows(table_json, max_rows_, row_offset_);
 
         grid_element["table_data"] = table_json;
 
@@ -1699,10 +1705,7 @@ void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStri
     info.id = strip->get_id();
     for (const auto& known : out) if (known.id == info.id) return;
     auto children = strip->children();
-    const int count = children.count();
-    for (int i = 0; i < count; ++i) {
-        auto tab = children.item(i);
-        if (!tab) break;
+    for (const auto& tab : enumerate_collection(children, children.count())) {
         json entry = {{"id", tab->get_id()}, {"type", "GuiTab"}, {"strip_id", info.id}};
         try { entry["text"] = tab->get_string_property(L"Text"); } catch (const std::exception&) {}
         info.tabs.push_back(std::move(entry));
@@ -1768,10 +1771,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             const int kMaxScanned = 200;
             auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
                 auto children = container->children();
-                const int count = std::min(children.count(), kMaxScanned);
-                for (int i = 0; i < count; ++i) {
-                    auto child = children.item(i);
-                    if (!child) break;
+                for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
                     const std::string type = child->get_type();
                     if (type == "GuiTabStrip") {
                         collect_tab_strip(child, strips);
