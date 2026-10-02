@@ -126,8 +126,9 @@ std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principa
                     "is allowed ONLY on the initial screen of the transaction you opened with gui_transaction_start (before any "
                     "navigation; start the transaction again to get back to it) and ONLY into selection fields. Table or grid cells "
                     "(row/column), checkboxes, the command field and password fields are refused, and nothing is saved or posted. "
-                    "Execute the selection with gui_key_send (F8 or Enter). Values are echoed nowhere: results and audit logs do not "
-                    "contain them. Give exactly one of value or clear.";
+                    "Enter and F8 EXECUTE the selection (gui_key_send): the operator allowed this token only transactions whose "
+                    "execution is read-only. The result echoes the value read back from the control, except for credential "
+                    "fields; audit logs never contain the value. Give exactly one of value or clear.";
                 if (defs.back().input_schema.is_object() && defs.back().input_schema.contains("properties"))
                     for (const char* key : {"row", "column", "checkbox", "commit"}) defs.back().input_schema["properties"].erase(key);
             }

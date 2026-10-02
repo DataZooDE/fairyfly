@@ -404,6 +404,13 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 
 ## Operations
 
+- **`--allow-selection-input` and execution (read this before choosing `--tcode`)**: typing a selection is only half of the
+  job; Enter or F8 on the initial screen EXECUTES it (the key policy allows both, by design). The T-code allowlist of a token
+  created with `--allow-selection-input` must therefore contain only transactions whose execution is read-only (selection
+  screens of reports that do not update data). fairyfly cannot know what a custom report or a Z-transaction does behind F8;
+  the answer to "F8 can run a report that writes" is exactly this rule, and it is already true for every read-only token with
+  an allowlist (Enter/F8 are allowed keys for them too). The fill result echoes the value read back from the control, except
+  for credential fields; audit records never contain the typed value.
 - **Rotate**: `fairyfly mcp token rotate NAME` prints a new secret and the old one stops working at once.
   A running server sees changes made by another process within 5 seconds.
 - **Revoke**: `fairyfly mcp token revoke NAME`. The record stays (marked revoked) in the Credential Manager entry

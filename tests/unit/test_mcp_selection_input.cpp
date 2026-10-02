@@ -577,6 +577,9 @@ TEST_CASE("selection input: tools/list shows the narrowed fill tool only to such
     const ToolDef* wm_fill = find(wm, "gui_element_fill");
     REQUIRE(wm_fill);
     CHECK(wm_fill->description.find("initial screen") != std::string::npos);
+    CHECK(wm_fill->description.find("echoed nowhere") == std::string::npos);
+    CHECK(wm_fill->description.find("value read back from the control, except for credential fields") != std::string::npos);
+    CHECK(wm_fill->description.find("EXECUTE") != std::string::npos);
 }
 
 TEST_CASE("selection input: audit records input_allowed, the INPUT_* codes, and never the typed value", "[mcp][selection-input][audit]") {
