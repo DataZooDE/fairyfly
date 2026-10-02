@@ -491,8 +491,9 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     job.deliver = [waiter](const json& msg) { waiter->finish(msg); };
     if (is_call) {
         const json id = message.id;
-        job.timeout_response = [id, stateless] {
-            json msg = make_result(id, text_result("CALL_TIMEOUT: the SAP call is still running; retry after it completes", true));
+        if (params.is_object() && params.contains("name") && params["name"].is_string()) job.tool = params["name"].get<std::string>();
+        job.timeout_response = [id, stateless](const CallInfo& info) {
+            json msg = make_result(id, busy_call_result("CALL_TIMEOUT", info));
             return stateless ? decorate_stateless(std::move(msg), "tools/call") : msg;
         };
     }
@@ -535,7 +536,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     case SubmitResult::Queued:
         break;
     case SubmitResult::Busy:
-        return reply(make_result(message.id, text_result("SERVER_BUSY: a previous SAP call is still running; retry shortly", true)));
+        return reply(make_result(message.id, busy_call_result("SERVER_BUSY", executor_.running_info().value_or(CallInfo{}))));
     case SubmitResult::QueueFull: {
         HttpResponse r = json_response(503, make_error(message.id, kServerBusy, "server busy", json{{"retry", true}}));
         r.set_header("Retry-After", "1");

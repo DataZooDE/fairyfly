@@ -13,11 +13,30 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 
 #include "include/mcp/types.h"
 
 namespace fairyfly::mcp {
+
+/// What the executor is running (or was, when it timed out): handed to the CALL_TIMEOUT / SERVER_BUSY answers so the
+/// model learns which tool blocks the session and for how long.
+struct CallInfo {
+    std::string tool;          ///< MCP tool name of the running call ("" when unknown)
+    long long elapsed_ms = 0;  ///< time since the call started on the main thread
+    int timeout_ms = 0;        ///< the soft per-call timeout
+};
+
+/// Hint for the model when to ask again: min(5000, remaining soft timeout), at least 500 ms; a call that is already
+/// past its soft timeout cannot be predicted, so 5000.
+long long retry_after_ms_hint(const CallInfo& info);
+
+/// The tools/call result for CALL_TIMEOUT (`code` "CALL_TIMEOUT") or SERVER_BUSY: isError true, a text block that starts
+/// with the code and names the running tool, its elapsed seconds and retry_after_ms, plus structuredContent
+/// {status:"error", error:{code, message, running_tool, elapsed_ms, timeout_ms, retry_after_ms}} (additive).
+json busy_call_result(const std::string& code, const CallInfo& info);
 
 /// Shared state of one job. `responded` is the single arbiter of "who answers": the main thread
 /// (normal completion), the watchdog (timeout) or a canceller (which claims it without sending
@@ -28,8 +47,10 @@ struct CallState {
     bool responded = false;
     bool timed_out = false;
     std::chrono::steady_clock::time_point deadline;
+    std::chrono::steady_clock::time_point started;  ///< when the main thread began the call
+    std::string tool;                               ///< MCP tool name (for the busy answers)
     std::function<void(const json&)> deliver;  ///< receives the JSON-RPC message; null json = dropped
-    std::function<json()> timeout_response;    ///< answer sent by the watchdog when `timed`
+    std::function<json(const CallInfo&)> timeout_response;  ///< answer sent by the watchdog when `timed`
 };
 
 struct ExecJob {
@@ -38,7 +59,8 @@ struct ExecJob {
     /// Runs on the main thread. Returns the JSON-RPC message to deliver, or null for "no response".
     std::function<json(CallState&)> run;
     std::function<void(const json&)> deliver;
-    std::function<json()> timeout_response;
+    std::function<json(const CallInfo&)> timeout_response;
+    std::string tool;     ///< MCP tool name of a tools/call (for the busy answers)
 };
 
 enum class SubmitResult { Queued, QueueFull, Busy };
@@ -70,6 +92,8 @@ public:
     void request_stop();
     bool stopping() const { return stop_.load(); }
     std::size_t queued() const;
+    /// The timed call that is running right now (or whose soft timeout passed while it still runs); nullopt when idle.
+    std::optional<CallInfo> running_info() const;
 
 private:
     void watchdog_loop();

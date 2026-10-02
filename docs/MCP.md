@@ -236,8 +236,8 @@ The file is append-only by convention, not tamper-proof.
 | Client reports invalid JSON or the connection drops | Something else wrote to stdout. Only fairyfly's own output may go there; use `FFLYLOG_LEVEL` for stderr logging and do not wrap the exe in a script that echoes. |
 | NO_SESSIONS / `gui_doctor` fails | SAP GUI is not running or scripting is disabled. Start SAP GUI and log on, or use `gui_session_launch` with `login=true`. |
 | First call after login is slow | SAP GUI is still settling; later calls are quick. Raise `MCP_TOOL_TIMEOUT` if needed. |
-| `CALL_TIMEOUT` | The soft limit passed while SAP was still busy. The call cannot be interrupted inside COM and finishes in the background; retry after it completes. |
-| `SERVER_BUSY` | Either a timed-out call is still running or more than 16 requests are queued. Wait and retry. |
+| `CALL_TIMEOUT` | The soft limit passed while SAP was still busy. The call cannot be interrupted inside COM and finishes in the background; do not repeat it, wait and read the screen. The error text names the running tool and its elapsed seconds; `structuredContent.error` carries `running_tool`, `elapsed_ms`, `timeout_ms` and `retry_after_ms` (min(5000, remaining soft timeout), 5000 once past it). |
+| `SERVER_BUSY` | Either a timed-out call is still running or more than 16 requests are queued. In the first case (a tool result with `isError`) the text and `structuredContent.error` name the running tool (`running_tool`, `elapsed_ms`, `retry_after_ms`); wait that long and retry. The queue-full case is the JSON-RPC error -32000 (HTTP 503, `Retry-After: 1`). |
 | LOGON_NOT_COMPLETED with `multiple_logon_dialog` | The user is already logged on. Retry with `multiple_logon=keep` (or `terminate`); `end` needs write mode. |
 | READ_ONLY_REFUSED | Expected in read-only mode. Restart with `mcp --allow-write` only if the user wants that. |
 | RATE_LIMITED | More than 120 calls a minute; combine steps with `gui_batch` or raise `--max-calls-per-minute`. |

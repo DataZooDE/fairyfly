@@ -1,10 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <future>
 #include <set>
+#include <thread>
 #include <string>
 #include <vector>
 
 #include "include/auth/authorize.h"
+#include "include/mcp/call_executor.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
@@ -335,4 +340,88 @@ TEST_CASE("gui_element_click description explains select versus doubleclick", "[
     CHECK(d.find("select") != std::string::npos);
     CHECK(d.find("does NOT refresh") != std::string::npos);
     CHECK(d.find("doubleclick") != std::string::npos);
+}
+
+// ---- item 5: busy answers name the running tool ---------------------------------------------------
+TEST_CASE("busy_call_result names the tool, elapsed seconds and retry_after_ms", "[mcp][usability][busy]") {
+    CallInfo info;
+    info.tool = "gui_screen_read";
+    info.elapsed_ms = 121500;
+    info.timeout_ms = 120000;
+    const json timeout = busy_call_result("CALL_TIMEOUT", info);
+    CHECK(timeout["isError"] == true);
+    const std::string text = timeout["content"][0]["text"].get<std::string>();
+    CHECK(text.rfind("CALL_TIMEOUT:", 0) == 0);
+    CHECK(text.find("gui_screen_read") != std::string::npos);
+    CHECK(text.find("121 s") != std::string::npos);
+    CHECK(text.find("5000") != std::string::npos);
+    const json& error = timeout["structuredContent"]["error"];
+    CHECK(error["code"] == "CALL_TIMEOUT");
+    CHECK(error["running_tool"] == "gui_screen_read");
+    CHECK(error["elapsed_ms"] == 121500);
+    CHECK(error["retry_after_ms"] == 5000);
+
+    const json busy = busy_call_result("SERVER_BUSY", info);
+    CHECK(busy["content"][0]["text"].get<std::string>().rfind("SERVER_BUSY:", 0) == 0);
+    CHECK(busy["content"][0]["text"].get<std::string>().find("gui_screen_read") != std::string::npos);
+    CHECK(busy["structuredContent"]["error"]["code"] == "SERVER_BUSY");
+
+    // unknown tool still produces a usable message
+    CHECK(busy_call_result("SERVER_BUSY", CallInfo{})["content"][0]["text"].get<std::string>().find("a SAP call") != std::string::npos);
+}
+
+TEST_CASE("retry_after_ms_hint is min(5000, remaining soft timeout), at least 500", "[mcp][usability][busy]") {
+    CHECK(retry_after_ms_hint({"t", 0, 120000}) == 5000);
+    CHECK(retry_after_ms_hint({"t", 118000, 120000}) == 2000);
+    CHECK(retry_after_ms_hint({"t", 119900, 120000}) == 500);
+    CHECK(retry_after_ms_hint({"t", 130000, 120000}) == 5000);  // already past the soft timeout
+}
+
+TEST_CASE("Executor answers CALL_TIMEOUT and SERVER_BUSY with the running tool", "[mcp][usability][busy]") {
+    CallExecutor executor(4, 80);
+    std::thread main_thread([&] { executor.run(); });
+
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::promise<json> answer;
+    auto answered = answer.get_future();
+    ExecJob job;
+    job.id = 1;
+    job.timed = true;
+    job.tool = "gui_transaction_start";
+    job.deliver = [&](const json& message) {
+        try { answer.set_value(message); } catch (...) {}
+    };
+    job.timeout_response = [](const CallInfo& info) { return json{{"result", busy_call_result("CALL_TIMEOUT", info)}}; };
+    job.run = [released](CallState&) {
+        released.wait();
+        return json();
+    };
+    REQUIRE(executor.submit(std::move(job)) == SubmitResult::Queued);
+
+    REQUIRE(answered.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    const json timeout = answered.get();
+    CHECK(timeout["result"]["structuredContent"]["error"]["running_tool"] == "gui_transaction_start");
+    CHECK(timeout["result"]["structuredContent"]["error"]["elapsed_ms"].get<long long>() >= 80);
+    CHECK(timeout["result"]["structuredContent"]["error"]["timeout_ms"] == 80);
+
+    // a second timed call is refused while the first is still running; the running tool is known
+    ExecJob second;
+    second.id = 2;
+    second.timed = true;
+    second.run = [](CallState&) { return json(); };
+    CHECK(executor.submit(std::move(second)) == SubmitResult::Busy);
+    const auto info = executor.running_info();
+    REQUIRE(info.has_value());
+    CHECK(info->tool == "gui_transaction_start");
+    CHECK(info->elapsed_ms >= 80);
+    const json busy = busy_call_result("SERVER_BUSY", *info);
+    CHECK(busy["structuredContent"]["error"]["running_tool"] == "gui_transaction_start");
+    CHECK(busy["structuredContent"]["error"]["retry_after_ms"] == 5000);
+
+    release.set_value();
+    for (int i = 0; i < 200 && executor.running_info(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    CHECK_FALSE(executor.running_info().has_value());
+    executor.request_stop();
+    main_thread.join();
 }
