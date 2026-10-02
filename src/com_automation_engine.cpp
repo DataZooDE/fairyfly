@@ -561,6 +561,8 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
                 read.client = sess->get_client();
                 read.user = sess->get_user();
                 read.transaction = sess->get_transaction_code();
+                read.program = sess->get_program();
+                read.screen_number = sess->get_screen_number();
                 return read;
             },
             FactsBudget{}, FactsClock{}, &timed_out);

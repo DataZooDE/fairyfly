@@ -21,6 +21,8 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
                 read.client = session->get_client();
                 read.user = session->get_user();
                 read.transaction = session->get_transaction_code();
+                read.program = session->get_program();
+                read.screen_number = session->get_screen_number();
                 return read;
             },
             sap::FactsBudget{std::chrono::milliseconds(2000), std::chrono::milliseconds(100)});

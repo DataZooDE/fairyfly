@@ -273,6 +273,27 @@ std::string ComGuiSession::get_client() const {
     }
 }
 
+std::string ComGuiSession::get_program() const {
+    try {
+        auto info = get_dispatch_property(L"Info");
+        if (!info) return "";
+        return SapGuiObject(info).get_string_property(L"Program");
+    } catch (...) {
+        return "";
+    }
+}
+
+std::string ComGuiSession::get_screen_number() const {
+    try {
+        auto info = get_dispatch_property(L"Info");
+        if (!info) return "";
+        const int number = SapGuiObject(info).get_int_property(L"ScreenNumber");
+        return number > 0 ? std::to_string(number) : std::string();  // 0 = not readable
+    } catch (...) {
+        return "";
+    }
+}
+
 std::string ComGuiSession::get_server_session_key() const {
     try {
         auto info = get_dispatch_property(L"Info");
