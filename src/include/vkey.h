@@ -3,22 +3,49 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <cstddef>
 #include <string>
 #include <exception>
 
 namespace fairyfly::sap {
 
+/// Named keys with their SAP GUI VKey numbers (SendVKey). The spellings are compared after lower-casing and
+/// removing blanks, '_' and '-', so "Page_Down", "page-down" and "PAGEDOWN" are the same key. SAP GUI scripting
+/// has VKeys for Enter, F1-F12, Shift/Ctrl combinations and the page keys; it has none for the arrow keys or Tab
+/// (those are not sent through SendVKey), so they are not accepted.
+/// VKey 80 = Ctrl+Page Up (first page), 81 = Page Up, 82 = Page Down, 83 = Ctrl+Page Down (last page).
+struct NamedKey {
+    const char* name;  ///< canonical spelling, also the first one listed in messages
+    int vkey;
+};
+inline const NamedKey* named_key_table(std::size_t& count) {
+    static const NamedKey table[] = {
+        {"enter", 0},       {"return", 0},
+        {"pageup", 81},     {"pgup", 81},
+        {"pagedown", 82},   {"pgdn", 82},   {"pgdown", 82},
+        {"pagetop", 80},    {"pgtop", 80},  {"firstpage", 80},  {"ctrl+pageup", 80},   {"ctrl+pgup", 80},
+        {"pagebottom", 83}, {"pgbottom", 83}, {"lastpage", 83}, {"ctrl+pagedown", 83}, {"ctrl+pgdn", 83},
+    };
+    count = sizeof(table) / sizeof(table[0]);
+    return table;
+}
+
+/// Human-readable list of the accepted key names for error messages and tool descriptions.
+inline std::string supported_key_names_text() {
+    return "enter, f1..f12, shift+f1..shift+f12, pageup (pgup, page_up), pagedown (pgdn, page_down), pagetop "
+           "(ctrl+pageup), pagebottom (ctrl+pagedown), or a raw SAP VKey number 0-99; names ignore case, blanks, '_' and '-'";
+}
+
 /// Translate a key name into a SAP GUI virtual key number.
-/// Accepts "enter" (0), "f1".."f12" (1..12), "shift+f1".."shift+f12" (13..24)
-/// or a raw integer 0..99. Case-insensitive; surrounding blanks are ignored.
+/// Accepts "enter" (0), "f1".."f12" (1..12), "shift+f1".."shift+f12" (13..24), the page keys by name
+/// (see named_key_table) or a raw integer 0..99. Case-insensitive; blanks, '_' and '-' inside names are ignored.
 /// Returns nullopt for anything else.
 inline std::optional<int> parse_vkey(const std::string& text) {
-    std::string key;
+    std::string key;     // lower-cased, blanks removed (numbers are judged on this form: "-1" stays invalid)
     for (unsigned char c : text) {
         if (!std::isspace(c)) key.push_back(static_cast<char>(std::tolower(c)));
     }
     if (key.empty()) return std::nullopt;
-    if (key == "enter") return 0;
 
     if (std::all_of(key.begin(), key.end(),
                     [](unsigned char c) { return std::isdigit(c) != 0; })) {
@@ -26,11 +53,24 @@ inline std::optional<int> parse_vkey(const std::string& text) {
         return std::stoi(key);
     }
 
+    std::string name;    // additionally without '_' and '-'
+    for (char c : key)
+        if (c != '_' && c != '-') name.push_back(c);
+    if (name.empty()) return std::nullopt;
+
+    std::size_t count = 0;
+    const NamedKey* table = named_key_table(count);
+    for (std::size_t i = 0; i < count; ++i)
+        if (name == table[i].name) return table[i].vkey;
+
     int base = 0;
-    std::string function_key = key;
-    if (key.rfind("shift+", 0) == 0) {
+    std::string function_key = name;
+    if (name.rfind("shift+", 0) == 0) {
         base = 12;
-        function_key = key.substr(6);
+        function_key = name.substr(6);
+    } else if (name.rfind("shift", 0) == 0 && name.size() > 5 && name[5] == 'f') {
+        base = 12;  // "shift_f4", "shift-f4"
+        function_key = name.substr(5);
     }
     if (function_key.size() >= 2 && function_key.size() <= 3 && function_key[0] == 'f' &&
         std::all_of(function_key.begin() + 1, function_key.end(),

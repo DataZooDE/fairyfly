@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "include/command_table.h"
+#include "include/vkey.h"
 
 namespace fairyfly::mcp {
 
@@ -510,16 +511,21 @@ std::vector<ToolSpec> read_tool_specs() {
     // gui_key_send -----------------------------------------------------------------------------
     specs.push_back(make_spec(
         "gui_key_send", "Send a key to SAP",
-        "Sends a key to a SAP window: enter, f1..f12, shift+f4, ctrl+s, ... or a raw SAP VKey number. Keys such as "
-        "ctrl+s (save) or shift+f2 (delete) change SAP data: confirm with the user first. The read-only guard "
-        "refuses state-changing keys when the server is read-only.",
-        make_schema({{"key", str_min("Key name (enter, f3, f8, shift+f4, ...) or raw VKey number.")},
+        "Sends a key to a SAP window. Key names (case-insensitive; blanks, '_' and '-' ignored): enter, f1..f12, "
+        "shift+f1..shift+f12, pageup (pgup, page_up), pagedown (pgdn, page_down), pagetop (ctrl+pageup), pagebottom "
+        "(ctrl+pagedown), or a raw SAP VKey number 0-99 (e.g. 11 = ctrl+s save). There are no VKeys for the arrow keys or Tab. "
+        "Keys such as 11 (save) or shift+f2 (delete) change SAP data: confirm with the user first. The read-only guard "
+        "refuses state-changing keys when the server is read-only; a token with a T-code allowlist may only send enter, "
+        "f4, f8 and the page keys (pageup, pagedown, pagetop, pagebottom). Unknown names give INVALID_ARGUMENT.",
+        make_schema({{"key", str_min("Key name (enter, f3, f8, shift+f4, pagedown, ...) or raw VKey number.")},
                      {"window", str_min("Target window: @active (default) or wnd[N].")},
                      {"connection", conn}}, {"key"}),
         annotations("Send a key to SAP", false, true, false), ToolOutput::Json,
         [](const json& a, const Policy& p) {
             const std::string key = get_str(a, "key");
             require_positional("key", key);
+            if (!sap::parse_vkey(key))
+                throw std::invalid_argument("unknown key '" + key + "'; supported key names: " + sap::supported_key_names_text());
             Argv argv{"key", "send", key};
             if (a.contains("window")) push_option(argv, "--window", get_str(a, "window"));
             push_connection(argv, a, p);

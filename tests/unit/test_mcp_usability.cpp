@@ -4,12 +4,15 @@
 #include <string>
 #include <vector>
 
+#include "include/auth/authorize.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
+#include "include/vkey.h"
 
 using namespace fairyfly::mcp;
 using fairyfly::Result;
+namespace auth = fairyfly::auth;
 using Argv = std::vector<std::string>;
 
 namespace {
@@ -139,4 +142,93 @@ TEST_CASE("A click result with a benign warning is shaped as success with the me
     REQUIRE(result.structured.has_value());
     CHECK((*result.structured)["data"]["status_message"]["type"] == "W");
     CHECK((*result.structured)["data"]["warning"] == true);
+}
+
+// ---- item 3: key names ---------------------------------------------------------------------------
+TEST_CASE("parse_vkey accepts named page keys and tolerant spellings", "[mcp][usability][vkey]") {
+    using fairyfly::sap::parse_vkey;
+    struct Row { const char* text; int vkey; };
+    const Row rows[] = {
+        {"enter", 0}, {"Enter", 0}, {" ENTER ", 0}, {"return", 0},
+        {"pageup", 81}, {"page_up", 81}, {"Page-Up", 81}, {"page up", 81}, {"PgUp", 81},
+        {"pagedown", 82}, {"page_down", 82}, {"PAGE DOWN", 82}, {"pgdn", 82}, {"pgdown", 82},
+        {"pagetop", 80}, {"page_top", 80}, {"ctrl+pageup", 80}, {"Ctrl+PgUp", 80}, {"firstpage", 80},
+        {"pagebottom", 83}, {"page_bottom", 83}, {"ctrl+pagedown", 83}, {"lastpage", 83},
+        {"f1", 1}, {"F8", 8}, {"f12", 12}, {"shift+f1", 13}, {"Shift+F12", 24}, {"shift_f4", 16}, {"shift-f4", 16},
+        {"0", 0}, {"15", 15}, {"82", 82}, {"99", 99},
+    };
+    for (const auto& row : rows) {
+        INFO(row.text);
+        REQUIRE(parse_vkey(row.text).has_value());
+        CHECK(*parse_vkey(row.text) == row.vkey);
+    }
+    for (const char* bad : {"", "tab", "up", "down", "left", "arrow_down", "f13", "f22", "f0", "100", "-1", "shift+enter",
+                            "pagedownx", "ctrl+s", "banana", "_", "--"}) {
+        INFO(bad);
+        CHECK_FALSE(parse_vkey(bad).has_value());
+    }
+}
+
+TEST_CASE("T-code allowlist key policy: spellings, messages, unknown names", "[mcp][usability][vkey][auth]") {
+    Principal p;
+    p.name = "t";
+    p.all_scopes = true;
+    p.authenticated = true;
+    p.tcodes = {"SM21"};
+    Policy policy;
+    policy.read_only = false;
+    const auto spec = [] {
+        for (const auto& s : all_tool_specs())
+            if (s.def.name == "gui_key_send") return s;
+        return ToolSpec{};
+    }();
+    auto decide = [&](const std::string& key) {
+        return auth::authorize_call(p, spec, spec.family, json{{"key", key}}, policy, std::nullopt, std::string("SM21"));
+    };
+
+    for (const char* key : {"pagedown", "page_down", "PageDown", "pgdn", "pageup", "page_up", "pagetop", "pagebottom",
+                            "ctrl+pagedown", "enter", "f4", "F8", "82"})
+        CHECK(decide(key).allowed);
+
+    // a known but navigating key is a policy denial that lists the exact accepted spellings
+    const auto f3 = decide("f3");
+    CHECK_FALSE(f3.allowed);
+    CHECK(f3.code == "TCODE_DENIED");
+    for (const char* spelling : {"enter", "f4", "f8", "pagedown", "page_down", "pgdn", "pageup", "pagetop", "pagebottom"})
+        CHECK(f3.message.find(spelling) != std::string::npos);
+
+    // every spelling printed in the denial message really is accepted
+    const std::string spellings = auth::tcode_safe_key_spellings();
+    for (const char* name : {"enter", "f4", "f8", "pageup", "page_up", "pgup", "pagedown", "page_down", "pgdn", "pagetop",
+                             "ctrl+pageup", "pagebottom", "ctrl+pagedown"}) {
+        INFO(name);
+        CHECK(spellings.find(name) != std::string::npos);
+        CHECK(auth::tcode_safe_key(name));
+    }
+
+    // an unknown name is INVALID_ARGUMENT with the supported names, not TCODE_DENIED
+    for (const char* key : {"f22", "tab", "arrow_down", "bogus"}) {
+        INFO(key);
+        const auto d = decide(key);
+        CHECK_FALSE(d.allowed);
+        CHECK(d.code == "INVALID_ARGUMENT");
+        CHECK(d.message.find("pagedown") != std::string::npos);
+        CHECK(d.message.find(key) != std::string::npos);
+    }
+}
+
+TEST_CASE("gui_key_send builds the key argv and rejects unknown names", "[mcp][usability][vkey]") {
+    for (const auto& spec : all_tool_specs()) {
+        if (spec.def.name != "gui_key_send") continue;
+        Policy policy;
+        CHECK(spec.build_argv(json{{"key", "page_down"}}, policy) == Argv{"key", "send", "page_down"});
+        try {
+            spec.build_argv(json{{"key", "f22"}}, policy);
+            FAIL("expected invalid_argument");
+        } catch (const std::invalid_argument& e) {
+            CHECK(std::string(e.what()).find("pagedown") != std::string::npos);
+        }
+        CHECK(spec.def.description.find("pagedown") != std::string::npos);
+        CHECK(spec.def.description.find("arrow") != std::string::npos);
+    }
 }

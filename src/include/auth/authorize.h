@@ -23,10 +23,13 @@ std::string normalize_tcode(const std::string& code);
 bool acts_on_screen(const std::string& family);
 
 /// Keys gui_key_send may use for a token with a T-code allowlist that was NOT created with --allow-navigation:
-/// Enter (0), F4 (4), F8 (8) and the page keys (raw 80-83). Everything else (F3 back, F12 cancel, Shift+F3 exit,
+/// Enter (0), F4 (4), F8 (8) and the page keys (VKeys 80 Ctrl+PageUp/page top, 81 PageUp, 82 PageDown, 83 Ctrl+PageDown/page bottom; named pageup, pagedown, pagetop, pagebottom or raw numbers). Everything else (F3 back, F12 cancel, Shift+F3 exit,
 /// F5/F6/F7, Ctrl+... and unparsable input) can leave the transaction and is refused. Accepts every spelling of
 /// the key parser (enter, f4, F8, "80", ...).
 bool tcode_safe_key(const std::string& key);
+
+/// The exact spellings of the keys tcode_safe_key accepts, as listed in the denial message.
+std::string tcode_safe_key_spellings();
 
 /// True when `element_id` is the SAP command field (".../okcd", e.g. wnd[0]/tbar[0]/okcd).
 bool is_okcd_element(const std::string& element_id);
