@@ -41,6 +41,8 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Security
 
+- Redaction: the "credential state name" exemption (`PASSWORD_EXT_PWD_STATE`, `Password status`, ...) now applies to input fields only when the field is known to be display-only, is not a password field and its value looks like a state label; a changeable or unknown-changeability field with such a name (and every fill echo) stays redacted. Display-only state fields (SU01 display) are still shown; labels, grid and report cells keep the exemption.
+
 - Remote MCP over HTTP: `Mcp-Method` / `Mcp-Name` headers that are present are now validated against the body for legacy (2025-xx) requests too (400 + -32020, no provider call), and an `MCP-Protocol-Version` header naming a served version that differs from the body `_meta` protocol version is rejected in every era. Absent headers stay accepted on legacy requests.
 
 - Documentation and tool texts: the `gui_element_fill` descriptions no longer claim that values are echoed nowhere (the result echoes the value read back, except for credential fields); `mcp token create --help`, docs/MCP.md and docs/MCP_REMOTE.md state that Enter/F8 EXECUTE a selection, so a token with `--allow-selection-input` must only list transactions whose execution is read-only.

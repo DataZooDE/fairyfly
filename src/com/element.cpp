@@ -161,7 +161,16 @@ std::string ComGuiElement::get_text() const {
     }
     if (type == "GuiTextField" || type == "GuiCTextField" ||
         type == "GuiComboBox" || type == "GuiComboBoxControl") {
-        const auto reason = sensitive_input_field_reason(type, get_id(), get_label());
+        // A name that merely reports a credential's state (PASSWORD_EXT_PWD_STATE) is shown only for a field that is KNOWN
+        // to be display-only and whose value looks like a state label; changeable or unknown changeability stays redacted.
+        bool changeable_known = false, changeable = false;
+        try { changeable = get_bool_property(L"Changeable"); changeable_known = true; } catch (const std::exception&) {}
+        const auto reason = sensitive_field_reason_for_display(
+            type, get_id(), get_label(), changeable_known, changeable, [&] {
+                std::string shown = get_string_property(L"DisplayedText");
+                if (shown.empty()) shown = get_string_property(L"Text");
+                return shown;
+            });
         if (!reason.empty()) return redaction_marker(reason.c_str());
     }
 
