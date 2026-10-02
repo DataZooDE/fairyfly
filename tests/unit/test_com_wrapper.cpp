@@ -138,6 +138,9 @@ public:
     bool visible_fails = false;
     bool visible_value = true;
     size_t enum_fail_after = static_cast<size_t>(-1);
+    // Type property reads that fail with DISP_E_MEMBERNOTFOUND before succeeding (a type whose object
+    // rejects the universal Type DISPID once).
+    int type_invoke_failures = 0;
     bool has_row_count = false;  // grid-like GuiShell: RowCount exists (tree-like: unknown name)
     // GuiShell toolbar buttons {id, text, tooltip}; ButtonCount/GetButton* exist only when non-empty.
     std::vector<std::array<const wchar_t*, 3>> shell_buttons;
@@ -278,6 +281,10 @@ public:
             selected_tree_nodes.emplace_back(params->rgvarg[0].bstrVal);
             tree_selection_calls.push_back("SelectNode");
             return S_OK;
+        }
+        if (id == type_id_ && type_invoke_failures > 0) {
+            --type_invoke_failures;
+            return DISP_E_MEMBERNOTFOUND;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
         if (id == type_id_ + 38 && (flags & DISPATCH_PROPERTYGET)) {
@@ -2212,6 +2219,100 @@ TEST_CASE("Unknown member DISPID misses are cached per type", "[com][perf]") {
     REQUIRE(second_fake->name_lookups[L"AccTooltip"] == 1);
 }
 
+TEST_CASE("Universal Type DISPID skips the typeinfo lookup for validated types", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_type() == "GuiTextField");
+    REQUIRE(second_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(first_element->get_dispatch())->name_lookups[L"Type"] == 1);
+    // The second wrapper of a validated type reads Type through the universal DISPID: no lookup.
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Type"] == 0);
+}
+
+TEST_CASE("A differing Type DISPID disables the universal Type path", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* text = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* button = new TextFieldDispatch(L"GuiButton", 7100);
+    auto* text_again = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto text_element = ComGuiElement::create(text);
+    auto button_element = ComGuiElement::create(button);
+    auto text_again_element = ComGuiElement::create(text_again);
+    text->Release();
+    button->Release();
+    text_again->Release();
+
+    REQUIRE(text_element->get_type() == "GuiTextField");
+    REQUIRE(button_element->get_type() == "GuiButton");
+    // The button's own typeinfo DISPID disagreed with the universal one, so the shortcut is off
+    // and even an already validated type is looked up again.
+    REQUIRE(text_again_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(text_again_element->get_dispatch())->name_lookups[L"Type"] == 1);
+}
+
+TEST_CASE("A member-not-found universal Type read falls back without disabling", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* text = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* box = new TextFieldDispatch(L"GuiBox", 7000);
+    box->type_invoke_failures = 1;
+    auto* text_again = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* box_again = new TextFieldDispatch(L"GuiBox", 7000);
+    auto text_element = ComGuiElement::create(text);
+    auto box_element = ComGuiElement::create(box);
+    auto text_again_element = ComGuiElement::create(text_again);
+    auto box_again_element = ComGuiElement::create(box_again);
+    text->Release();
+    box->Release();
+    text_again->Release();
+    box_again->Release();
+
+    REQUIRE(text_element->get_type() == "GuiTextField");
+    REQUIRE(box_element->get_type() == "GuiBox");
+    REQUIRE(static_cast<TextFieldDispatch*>(box_element->get_dispatch())->name_lookups[L"Type"] == 1);
+    // Not disabled: the validated types are served by the universal DISPID.
+    REQUIRE(text_again_element->get_type() == "GuiTextField");
+    REQUIRE(box_again_element->get_type() == "GuiBox");
+    REQUIRE(static_cast<TextFieldDispatch*>(text_again_element->get_dispatch())->name_lookups[L"Type"] == 0);
+    REQUIRE(static_cast<TextFieldDispatch*>(box_again_element->get_dispatch())->name_lookups[L"Type"] == 0);
+}
+
+TEST_CASE("The first property read on a fresh wrapper resolves through its Type", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000, L"", L"", L"", L"abc");
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000, L"", L"", L"", L"def");
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_string_property(L"Text") == "abc");
+    REQUIRE(second_element->get_string_property(L"Text") == "def");
+    auto* second_fake = static_cast<TextFieldDispatch*>(second_element->get_dispatch());
+    REQUIRE(second_fake->name_lookups[L"Type"] == 0);
+    REQUIRE(second_fake->name_lookups[L"Text"] == 0);
+    REQUIRE(second_element->get_type() == "GuiTextField");
+}
+
+TEST_CASE("clear_dispid_cache resets the universal Type DISPID state", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_type() == "GuiTextField");
+    SapGuiObject::clear_dispid_cache();
+    REQUIRE(second_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Type"] == 1);
+}
+
 TEST_CASE("Shell member misses are not cached across GuiShell subtypes", "[com][perf][err142]") {
     ScopedDispatchCacheReset cache_reset;
     // Same COM Type string "GuiShell" for both: a tree-like shell without RowCount and a
@@ -2800,7 +2901,10 @@ TEST_CASE("Positioned label cells are read with one Text property and no Type or
     auto result = reader.read(true);
     REQUIRE(result.status == Result::Status::Success);
     for (auto* label : labels) {
-        REQUIRE(label->reads[L"Type"] == 0);   // implied by /lbl[ prefix, then carried to Phase 3
+        // The label type is implied by the /lbl[ prefix and primed for the cell read and Phase 3. Fresh
+        // enumeration wrappers read Type once through the universal DISPID (cheaper than the typeinfo
+        // lookup their Id read used to cost), so the count is bounded by those wrappers, not zero.
+        REQUIRE(label->reads[L"Type"] <= 2);
         REQUIRE(label->reads[L"Text"] >= 1);
         // Only the Phase 3 metadata extraction may read DisplayedText; the cell read must not.
         REQUIRE(label->reads[L"DisplayedText"] <= 1);
@@ -2900,7 +3004,7 @@ TEST_CASE("Container and userarea traversal enumerates once and matches the item
         fast_usr_items = fast.scene.usr_children->item_calls;
         fast_container_items = fast.container_children->item_calls;
         for (auto* cell : fast.cells) {
-            REQUIRE(cell->reads[L"Type"] == 0);
+            REQUIRE(cell->reads[L"Type"] <= 2);   // enumeration wrappers read Type via the universal DISPID
             REQUIRE(cell->reads[L"Text"] >= 1);
         }
     }
