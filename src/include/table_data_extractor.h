@@ -14,6 +14,7 @@ using json = nlohmann::json;
 /// Configuration for table/tree data extraction
 struct TableExtractionOptions {
     int max_rows = 20;           // Maximum rows to extract from tables
+    int row_offset = 0;          // Index of the first row to return (`--offset`)
     int max_tree_depth = 10;     // Maximum depth for tree traversal
     bool include_headers = true; // Extract column headers
     bool include_invisible = false; // Include invisible columns/rows
@@ -23,15 +24,27 @@ struct TableExtractionOptions {
 struct TableData {
     std::vector<std::string> columns;
     std::vector<std::vector<std::string>> rows;
-    int total_row_count = 0;
-    int visible_row_count = 0;
+    int total_row_count = 0;    // RowCount of the control
+    int visible_row_count = 0;  // VisibleRowCount: rows the control shows in its viewport (not rows read)
+    int row_offset = 0;         // index of the first returned row
+    int empty_rows_trimmed = 0; // trailing all-empty (padding) rows removed from `rows`
 };
 
 /// Read a bounded grid using a column order resolved once for the whole grid.
 std::vector<std::vector<std::string>> read_grid_rows(
     int row_count, int col_count, int max_rows,
     const std::vector<std::string>& column_names,
-    const std::function<std::string(int, const std::string&)>& read_cell);
+    const std::function<std::string(int, const std::string&)>& read_cell,
+    int row_offset = 0);
+
+/// Remove trailing rows whose cells are all empty (SAP grids pad their row window with them).
+/// Returns how many rows were removed. Empty rows between data rows are kept.
+int trim_trailing_empty_rows(std::vector<std::vector<std::string>>& rows);
+
+/// Add the row-window keys to a serialized table: `offset`, `returned`, `total` (= total_row_count),
+/// `empty_rows_trimmed`, `next_offset` (when more real rows follow) and `exposed_rows` (when padding was
+/// trimmed: the control holds RowCount rows but only this many were readable).
+void annotate_row_window(json& table, int offset, int empty_rows_trimmed);
 
 /// Read-only GuiGridView viewport position for validating scroll-dependent data.
 json extract_grid_viewport_metadata(ComGuiElementPtr grid);

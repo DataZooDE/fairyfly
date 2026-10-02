@@ -465,6 +465,7 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
         // Extract grid data using TableDataExtractor
         TableExtractionOptions options;
         options.max_rows = max_rows_;
+        options.row_offset = row_offset_;
         options.include_headers = true;
 
         TableDataExtractor extractor(options);
@@ -483,6 +484,7 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
             table_json["total_row_count"] = grid_data.total_row_count;
             table_json["visible_row_count"] = grid_data.visible_row_count;
             redact_sensitive_header_rows(table_json);
+            annotate_row_window(table_json, grid_data.row_offset, grid_data.empty_rows_trimmed);
             if (type != "GuiTableControl") {
                 const auto viewport = extract_grid_viewport_metadata(element);
                 table_json.update(viewport);
@@ -523,12 +525,15 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
     return grid_element;
 }
 
-void ScreenReader::limit_userarea_table_rows(json& table, int max_rows) {
+void ScreenReader::limit_userarea_table_rows(json& table, int max_rows, int offset) {
     auto& rows = table.at("rows");
+    const auto skip = std::min(rows.size(), static_cast<size_t>(std::max(0, offset)));
+    if (skip > 0) rows.erase(rows.begin(), rows.begin() + static_cast<json::difference_type>(skip));
     const auto limit = static_cast<size_t>(std::max(0, max_rows));
     if (rows.size() > limit) {
         rows.erase(rows.begin() + static_cast<json::difference_type>(limit), rows.end());
     }
+    annotate_row_window(table, static_cast<int>(skip), 0);
 }
 
 json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const std::string& elem_id,
@@ -642,7 +647,7 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
         table_json["visible_row_count"] = data_rows.size();
         table_json["column_count"] = header_array.size();
         redact_sensitive_header_rows(table_json);
-        limit_userarea_table_rows(table_json, max_rows_);
+        limit_userarea_table_rows(table_json, max_rows_, row_offset_);
 
         grid_element["table_data"] = table_json;
 

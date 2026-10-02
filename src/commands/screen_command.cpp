@@ -32,6 +32,9 @@ public:
         read_cmd_->add_flag("--compact", compact_, "Compact output. markdown: hide IDs, collapse empty fields. json/toon: hierarchy and per-tab elements become id arrays, empty/null/false element fields omitted");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
             ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
+        read_cmd_->add_option("--offset", row_offset_,
+            "Index of the first grid/table row to return (default 0); the output reports next_offset when more rows follow")
+            ->check(CLI::Range(0, 1000000));
         read_cmd_->add_option("--connection", read_conn_id_, "Connection ID to use");
         read_cmd_->add_option("--output", read_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
@@ -91,7 +94,7 @@ public:
             }
 
             return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
-                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_);
+                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_, row_offset_);
         }
         else if (*find_cmd_) {
             sap::ScreenFindOptions query;
@@ -152,6 +155,7 @@ private:
     bool compact_ = false;
     bool probe_all_ = false;
     int max_rows_ = constants::MAX_TABLE_ROWS;
+    int row_offset_ = 0;
     std::optional<int> read_conn_id_;
     std::string read_output_format_;
 

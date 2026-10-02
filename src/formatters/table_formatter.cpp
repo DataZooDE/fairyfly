@@ -44,11 +44,22 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
     int total_rows = table_data.value("total_row_count", 0);
     int visible_rows = table_data.value("visible_row_count", 0);
 
+    // Total Rows: rows in the control. Visible Rows: rows the control shows in its own viewport (SAP
+    // VisibleRowCount; says nothing about how many rows were read). Returned Rows: rows listed below.
     if (total_rows > 0) {
         oss << "| **Total Rows** | " << total_rows << " |\n";
     }
     if (visible_rows > 0) {
-        oss << "| **Visible Rows** | " << visible_rows << " |\n";
+        oss << "| **Visible Rows (viewport)** | " << visible_rows << " |\n";
+    }
+    if (table_data.contains("returned") && table_data["returned"].is_number_integer()) {
+        oss << "| **Returned Rows** | " << table_data["returned"].get<int>() << " |\n";
+        const int offset = table_data.value("offset", 0);
+        if (offset > 0) oss << "| **Offset** | " << offset << " |\n";
+    }
+    if (table_data.contains("rows_matched") && table_data["rows_matched"].is_number_integer()) {
+        oss << "| **Rows Matched** | " << table_data["rows_matched"].get<int>() << " of "
+            << table_data.value("rows_total", 0) << " |\n";
     }
     oss << "\n";
 
@@ -156,9 +167,23 @@ void TableFormatter::format_table_data(
 
     oss << "\n";
 
-    // Show truncation note if applicable
+    // Say what part of the control the rows above are.
     int total_rows = table_data.value("total_row_count", 0);
-    if (total_rows > row_count) {
+    if (table_data.contains("returned")) {
+        const int offset = table_data.value("offset", 0);
+        const int trimmed = table_data.value("empty_rows_trimmed", 0);
+        if (table_data.contains("next_offset")) {
+            oss << "_Showing rows " << offset << "-" << (offset + row_count - 1) << " of " << total_rows
+                << "; more rows: offset=" << table_data["next_offset"].get<int>() << " (--offset "
+                << table_data["next_offset"].get<int>() << ")_\n\n";
+        } else if (trimmed > 0) {
+            oss << "_The control exposes " << table_data.value("exposed_rows", offset + row_count)
+                << " of " << total_rows << " rows (" << trimmed << " empty padding row(s) trimmed)_\n\n";
+        } else if (offset > 0) {
+            oss << "_Showing rows " << offset << "-" << (offset + row_count - 1) << " of " << total_rows
+                << "_\n\n";
+        }
+    } else if (total_rows > row_count) {
         oss << "_Showing " << row_count << " of " << total_rows << " rows_\n\n";
     }
 }

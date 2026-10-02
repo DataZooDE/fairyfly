@@ -150,7 +150,8 @@ public:
     Result handle_screen_read(bool include_children, std::optional<int> connection_id, bool expand_tabs = false,
                              const ScreenFilterOptions& filters = {}, bool skip_trees = false,
                              bool compact = false, int max_rows = 20,
-                             const std::string& only_tab = "", bool probe_all = false);
+                             const std::string& only_tab = "", bool probe_all = false,
+                             int row_offset = 0);
     Result handle_screen_find(const sap::ScreenFindOptions& query,
                               std::optional<int> connection_id);
     Result handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options);
