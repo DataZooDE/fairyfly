@@ -203,9 +203,9 @@ $names = @($catalog.Keys)
 if ($Screens.Count -gt 0) {
     $Screens = @($Screens | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
     $sel = @()
-    foreach ($s in $Screens) {
-        $m = @($names | Where-Object { $_ -ieq $s })
-        if ($m.Count -eq 0) { Write-Host "Unknown screen '$s'. Known: $($names -join ', ')"; exit 2 }
+    foreach ($want in $Screens) {   # not $s: PowerShell variables are case-insensitive and $S is the session id
+        $m = @($names | Where-Object { $_ -ieq $want })
+        if ($m.Count -eq 0) { Write-Host "Unknown screen '$want'. Known: $($names -join ', ')"; exit 2 }
         $sel += $m[0]
     }
     $names = $sel
