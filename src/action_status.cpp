@@ -222,6 +222,30 @@ bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot&
            before.statusbar_text != after.statusbar_text;
 }
 
+bool warning_needs_confirmation(const std::string& text) {
+    std::string lower = text;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    const auto has = [&](const char* needle) { return lower.find(needle) != std::string::npos; };
+    // English: "Press ENTER to continue", "Confirm ...", "Choose Enter again", "Enter to confirm".
+    for (const char* needle : {"press enter", "press 'enter'", "press the enter", "hit enter", "enter to continue",
+                               "enter to confirm", "enter again", "again enter", "continue with enter", "to continue",
+                               "confirmation required", "please confirm", "to confirm"})
+        if (has(needle)) return true;
+    // "Confirm ..." at the start, or the word "confirm" (not "confirmed"/"confirmation of an existing document").
+    for (std::size_t at = lower.find("confirm"); at != std::string::npos; at = lower.find("confirm", at + 1)) {
+        const std::string rest = lower.substr(at + 7);
+        const bool word_start = at == 0 || !std::isalpha(static_cast<unsigned char>(lower[at - 1]));
+        if (word_start && rest.rfind("ed", 0) != 0 && rest.rfind("ation", 0) != 0) return true;
+    }
+    // German: "Bestätigen Sie ...", "weiter mit Enter", "Enter drücken", "mit Enter bestätigen", "erneut Enter".
+    for (const char* needle : {"best\xC3\xA4tigen", "bestaetigen", "best\xC3\xA4tigung erforderlich", "weiter mit enter",
+                               "mit enter", "enter dr\xC3\xBC" "cken", "enter druecken", "dr\xC3\xBC" "cken sie enter",
+                               "druecken sie enter", "erneut enter", "enter erneut", "zum fortfahren", "enter zum"})
+        if (has(needle)) return true;
+    return false;
+}
+
 std::optional<Result> classify_action_status(const ActionStatus& before,
                                              const ActionStatus& after,
                                              const std::string& element,
@@ -240,7 +264,20 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
     // Type W/I/S messages that do not read like a rejection are NOT failures: a click that ran and left "No short
     // dumps match the selection criteria" (W) or "No data found" (I/S) in the status bar succeeded. They are
     // reported on the success result as status_message (and warning:true for W), see attach_status_message().
-    // A warning that SAP wants confirmed cannot be told apart from an ordinary one, so the caller sees the text.
+    // A FRESH warning that SAP wants confirmed with a second Enter ("Press ENTER to continue", "Bestätigen Sie ...") means
+    // the intended submission did not complete yet: that is not a success. Every other W stays a success with warning:true.
+    if (after.type == "W" && !repeated && submitting_action && !rejection_text && warning_needs_confirmation(after.text)) {
+        Result result;
+        result.status = Result::Status::Error;
+        result.error["code"] = "ACTION_OUTCOME_UNVERIFIED";
+        result.error["message"] = after.text;
+        result.error["message_type"] = after.type;
+        result.error["element"] = element;
+        result.error["needs_confirmation"] = true;
+        result.error["reason"] = "SAP shows a warning that waits for confirmation; the submission did not complete";
+        result.error["hint"] = "SAP waits for confirmation: send Enter (gui_key_send enter) if intended";
+        return result;
+    }
     if (after.type != "E" && after.type != "A" && !rejection_text)
         return std::nullopt;
 

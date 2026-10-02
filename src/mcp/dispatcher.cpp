@@ -126,8 +126,9 @@ std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principa
                     "is allowed ONLY on the initial screen of the transaction you opened with gui_transaction_start (before any "
                     "navigation; start the transaction again to get back to it) and ONLY into selection fields. Table or grid cells "
                     "(row/column), checkboxes, the command field and password fields are refused, and nothing is saved or posted. "
-                    "Execute the selection with gui_key_send (F8 or Enter). Values are echoed nowhere: results and audit logs do not "
-                    "contain them. Give exactly one of value or clear.";
+                    "Enter and F8 EXECUTE the selection (gui_key_send): the operator allowed this token only transactions whose "
+                    "execution is read-only. The result echoes the value read back from the control, except for credential "
+                    "fields; audit logs never contain the value. Give exactly one of value or clear.";
                 if (defs.back().input_schema.is_object() && defs.back().input_schema.contains("properties"))
                     for (const char* key : {"row", "column", "checkbox", "commit"}) defs.back().input_schema["properties"].erase(key);
             }
@@ -261,6 +262,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
     const Principal& principal = ctx.principal;
+    auth::InitialScreen selection_initial;  // the recorded initial screen an authorized selection-input fill may write on
     {
         std::optional<std::string> current_system, current_tcode;
         auth::SelectionInputContext input_context;
@@ -276,11 +278,24 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 input_context.screen_number = facts->screen_number;
             }
         }
-        if (principal.allow_selection_input) input_context.initial = initial_screen(principal_key(principal));
+        if (principal.allow_selection_input) {
+            input_context.initial = initial_screen(principal_key(principal));
+            input_context.connection = record.connection;
+            // Any call that observes another (or an unknown) screen than the recorded one ends the typing window for good:
+            // coming back to the initial screen later needs a new gui_transaction_start.
+            if (input_context.initial && facts_provider_ && name != "gui_transaction_start" &&
+                (!current_tcode || auth::normalize_tcode(*current_tcode) != input_context.initial->transaction ||
+                 input_context.program != input_context.initial->program ||
+                 input_context.screen_number != input_context.initial->screen_number)) {
+                set_initial_screen(principal_key(principal), std::nullopt);
+                input_context.initial.reset();
+            }
+        }
         const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); },
                                                           &input_context);
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+        if (selection_input && input_context.initial) selection_initial = *input_context.initial;
         // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
         // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
@@ -353,6 +368,24 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     } read_only_scope(read_only_override_,
                       selection_input || (principal.read_only && !policy_.read_only),
                       selection_input ? false : true, policy_.read_only);
+
+    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
+    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
+    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
+    // would be unchecked, so the call is refused.
+    struct SelectionScope {
+        const SelectionInputOverride& hook;
+        bool active;
+        SelectionScope(const SelectionInputOverride& h, bool apply, const std::string& program, const std::string& screen)
+            : hook(h), active(apply && static_cast<bool>(h)) {
+            if (active) hook(true, program, screen);
+        }
+        ~SelectionScope() {
+            if (active) { try { hook(false, std::string(), std::string()); } catch (...) {} }
+        }
+    } selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
+    if (selection_input && !selection_input_override_)
+        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
@@ -447,9 +480,19 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
                 // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
                 if (principal.allow_selection_input) {
-                    auth::InitialScreen screen{after, after_program, after_screen};
+                    auth::InitialScreen screen{after, after_program, after_screen, record.connection};
                     set_initial_screen(principal_key(principal), screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
                 }
+            }
+        }
+        // Typing is only possible right after gui_transaction_start until the first navigation: any later call whose
+        // post-call facts are uncertain (empty) or show another transaction/program/screen clears the record, so returning
+        // to the initial screen later does NOT re-enable typing until gui_transaction_start runs again.
+        if (principal.allow_selection_input && name != "gui_transaction_start") {
+            if (auto rec = initial_screen(principal_key(principal)); rec) {
+                if (after.empty() || after_program.empty() || after_screen.empty() || after != rec->transaction ||
+                    after_program != rec->program || after_screen != rec->screen_number)
+                    set_initial_screen(principal_key(principal), std::nullopt);
             }
         }
     }

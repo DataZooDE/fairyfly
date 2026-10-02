@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -120,6 +121,27 @@ inline bool is_known_secret_field_name(const std::string& name) {
     return false;
 }
 
+// Whether the "state flag" exemption below may apply. It is granted ONLY to display data that cannot be typed into
+// (labels, grid/report cells and column titles, a field known to be NOT changeable). Everything else, a changeable or
+// unknown-changeability input field, a fill target, an id check, keeps the default Deny (fail closed): a changeable field
+// named PASSWORD_STATE could hold a real value.
+enum class StateExemption { Deny, Allow };
+
+// A value that plausibly is a state label ("Password set", "locked", "0", "01.10.2026"), not a secret: at most 40 characters
+// and not a random-looking token (no whitespace and at least three of lower, upper, digit, symbol and 8+ characters).
+inline bool looks_like_state_value(const std::string& value) {
+    if (value.size() > 40) return false;
+    if (value.size() < 8 || value.find_first_of(" \t") != std::string::npos) return true;
+    bool lower = false, upper = false, digit = false, symbol = false;
+    for (const unsigned char c : value) {
+        if (std::islower(c)) lower = true;
+        else if (std::isupper(c)) upper = true;
+        else if (std::isdigit(c)) digit = true;
+        else symbol = true;
+    }
+    return static_cast<int>(lower) + upper + digit + symbol < 3;
+}
+
 // A name that only reports the state of a credential (PASSWORD_EXT_PWD_STATE, PASSWORD_STATUS,
 // "Password last changed") carries no secret.
 inline bool is_credential_state_name(const std::string& name) {
@@ -147,10 +169,10 @@ inline bool contains_password_word(const std::string& name) {
 
 // Why `name` identifies a credential-bearing field; empty when it does not. State flags are
 // exempt unless the name is one of the known credential fields themselves.
-inline std::string sensitive_name_reason(const std::string& name) {
+inline std::string sensitive_name_reason(const std::string& name, StateExemption state = StateExemption::Deny) {
     const bool known = is_known_secret_field_name(name);
     if (!known && !contains_sensitive_data_name(name)) return {};
-    if (!known && is_credential_state_name(name)) return {};
+    if (!known && state == StateExemption::Allow && is_credential_state_name(name)) return {};
     return contains_password_word(name) ? redaction_reason::password_name
                                         : redaction_reason::secret_name;
 }
@@ -172,25 +194,26 @@ inline bool looks_like_technical_name(const std::string& value) {
 inline std::string sensitive_cell_reason(const std::string& cell, bool scan_substrings,
                                          bool technical_names_too = false) {
     if (cell.empty()) return {};
-    if (is_known_secret_field_name(cell)) return sensitive_name_reason(cell);
+    if (is_known_secret_field_name(cell)) return sensitive_name_reason(cell, StateExemption::Allow);
     const auto pair_at = cell.find_first_of(":=");
     if (pair_at != std::string::npos) {
-        const auto left = sensitive_name_reason(cell.substr(0, pair_at));
+        const auto left = sensitive_name_reason(cell.substr(0, pair_at), StateExemption::Allow);
         if (!left.empty()) return left;
     }
     const bool header_shaped = cell.find('-') != std::string::npos &&
                                cell.find_first_of(" \t") == std::string::npos;
     if (header_shaped) {
-        const auto reason = sensitive_name_reason(cell);
+        const auto reason = sensitive_name_reason(cell, StateExemption::Allow);
         if (!reason.empty()) return reason;
     }
     if (scan_substrings && (technical_names_too || !looks_like_technical_name(cell)))
-        return sensitive_name_reason(cell);
+        return sensitive_name_reason(cell, StateExemption::Allow);
     return {};
 }
 
 inline std::string sensitive_input_field_reason(const std::string& type, const std::string& id,
-                                                const std::string& label) {
+                                                const std::string& label,
+                                                StateExemption state = StateExemption::Deny) {
     if (type == "GuiPasswordField") return redaction_reason::password_field;
     if (type != "GuiTextField" && type != "GuiCTextField" &&
         type != "GuiComboBox" && type != "GuiComboBoxControl") return {};
@@ -198,22 +221,40 @@ inline std::string sensitive_input_field_reason(const std::string& type, const s
     const auto last_separator = id.find_last_of('/');
     const std::string field_name = last_separator == std::string::npos
         ? id : id.substr(last_separator + 1);
-    if (auto reason = sensitive_name_reason(field_name); !reason.empty()) return reason;
+    if (auto reason = sensitive_name_reason(field_name, state); !reason.empty()) return reason;
     // USR02-CODVN style names: the part after the table prefix is the SAP field name.
     const auto hyphen = field_name.find_last_of('-');
     if (hyphen != std::string::npos && is_known_secret_field_name(field_name.substr(hyphen + 1)))
-        return sensitive_name_reason(field_name.substr(hyphen + 1));
+        return sensitive_name_reason(field_name.substr(hyphen + 1), state);
     // SAP authorization objects and groups are access-control metadata, not
     // credential values. Keep technical field names authoritative.
     const auto normalized_label = normalize_sensitive_name(label);
     if (normalized_label == "authorizationobject" ||
         normalized_label == "authorizationgroup") return {};
-    return sensitive_name_reason(label);
+    return sensitive_name_reason(label, state);
 }
 
 inline bool is_sensitive_input_field(const std::string& type, const std::string& id,
-                                     const std::string& label) {
-    return !sensitive_input_field_reason(type, id, label).empty();
+                                     const std::string& label,
+                                     StateExemption state = StateExemption::Deny) {
+    return !sensitive_input_field_reason(type, id, label, state).empty();
+}
+
+// Reason for a field whose changeability and current value are known to the caller (screen reads, get_text). The state-flag
+// exemption applies only when the field is KNOWN to be display-only (changeable_known && !changeable), is not a
+// GuiPasswordField and its value looks like a state label; unknown changeability redacts (fail closed).
+// `value` may be empty when the caller has not read it yet: it is then asked for through `read_value` (only when needed).
+inline std::string sensitive_field_reason_for_display(const std::string& type, const std::string& id,
+                                                      const std::string& label, bool changeable_known, bool changeable,
+                                                      const std::function<std::string()>& read_value) {
+    auto reason = sensitive_input_field_reason(type, id, label, StateExemption::Deny);
+    if (reason.empty() || type == "GuiPasswordField") return reason;
+    if (!changeable_known || changeable) return reason;
+    if (!sensitive_input_field_reason(type, id, label, StateExemption::Allow).empty()) return reason;  // not just a state name
+    std::string value;
+    try { value = read_value ? read_value() : std::string(); } catch (...) { return reason; }
+    if (!looks_like_state_value(value)) return reason;
+    return {};
 }
 
 // Mask recognizable credential data in text editors and API responses.
@@ -255,7 +296,7 @@ inline void redact_sensitive_header_rows(nlohmann::json& table) {
             const auto name = normalize_sensitive_name(title);
             if (name == "name" || name == "headername") name_column = static_cast<int>(i);
             if (!is_generic_column_title(title)) any_title = true;
-            auto reason = sensitive_name_reason(title);
+            auto reason = sensitive_name_reason(title, StateExemption::Allow);
             if (!reason.empty()) sensitive_columns.emplace_back(i, std::move(reason));
         }
     }

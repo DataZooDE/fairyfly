@@ -35,6 +35,33 @@ std::optional<std::pair<TabPageRef, TabPageState>> find_inactive_tab_page(const 
     return std::nullopt;
 }
 
+bool TabActivationGuard::restore() {
+    if (!pending_) return restored_;
+    pending_ = false;
+    restored_ = true;
+    for (auto it = entries_.rbegin(); it != entries_.rend(); ++it) {
+        if (it->previous_id.empty()) {
+            restored_ = false;
+            if (restore_error_.empty())
+                restore_error_ = "the previously selected tab of the strip of " + it->tab_id + " is unknown";
+            continue;
+        }
+        try {
+            if (!select_ || !select_(it->previous_id)) {
+                restored_ = false;
+                if (restore_error_.empty()) restore_error_ = "the previous tab " + it->previous_id + " could not be found";
+            }
+        } catch (const std::exception& e) {
+            restored_ = false;
+            if (restore_error_.empty()) restore_error_ = std::string("selecting the previous tab failed: ") + e.what();
+        } catch (...) {
+            restored_ = false;
+            if (restore_error_.empty()) restore_error_ = "selecting the previous tab failed";
+        }
+    }
+    return restored_;
+}
+
 std::string tab_read_name(const TabPageRef& page, const TabPageState& state) {
     if (!state.text.empty()) return state.text;
     return page.page_name.size() > 4 ? page.page_name.substr(4) : page.page_name;

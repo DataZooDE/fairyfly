@@ -56,6 +56,8 @@ struct Env {
     std::vector<Argv> calls;
     std::vector<McpCallRecord> records;
     std::vector<bool> events;  // read-only override events
+    std::vector<std::string> mode_events;  // selection-input mode events ("on:program/screen", "off:/")
+    bool mode_hook = true;
     std::optional<audit::SapFacts> facts;
     std::function<Result(const Argv&)> on_call;
 
@@ -73,6 +75,10 @@ struct Env {
             policy, [this](const McpCallRecord& r) { records.push_back(r); });
         d->set_sap_facts_provider([this](std::optional<int>) { return facts; });
         d->set_read_only_override([this](bool ro) { events.push_back(ro); });
+        if (mode_hook)
+            d->set_selection_input_override([this](bool on, const std::string& program, const std::string& screen) {
+                mode_events.push_back(std::string(on ? "on:" : "off:") + program + "/" + screen);
+            });
         return d;
     }
 };
@@ -202,9 +208,58 @@ TEST_CASE("selection input: typing is refused after navigating away from the ini
     // same screen number in another program is another screen
     env.facts = facts_at("SU01", "SAPMSUU5", "100");
     CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
-    // back on the initial screen: allowed again
+    // back on the initial screen: still denied, typing needs a new gui_transaction_start
     env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK_FALSE(start_su01(*d, p).is_error);
     CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+}
+
+TEST_CASE("selection input: navigating away and back does not re-enable typing", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    // a key call moves to another screen; the post-call facts clear the record
+    env.on_call = [&](const Argv&) { env.facts = facts_at("SU01", "SAPLSUU5", "200"); return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    // F3 returns to the initial screen: the record is gone anyway
+    env.on_call = [&](const Argv&) { env.facts = facts_at("SU01", "SAPLSUU5", "100"); return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "f8"}}, ctx_for(p)).is_error);
+    env.calls.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK(env.calls.empty());
+}
+
+TEST_CASE("selection input: empty post-call facts clear the record", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    env.on_call = [&](const Argv&) { env.facts = std::nullopt; return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    env.on_call = nullptr;
+    env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+}
+
+TEST_CASE("selection input: the record is bound to the connection of the start", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "SU01"}, {"connection", 1}}, ctx_for(p)).is_error);
+    json other = fill();
+    other["connection"] = 2;
+    env.calls.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", other, ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK(env.calls.empty());
+    // an implicit connection is another target than the explicit 1 as well
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    // the same connection works (a denied call does not clear a record whose screen still matches)
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "SU01"}, {"connection", 1}}, ctx_for(p)).is_error);
+    json same = fill();
+    same["connection"] = 1;
+    CHECK_FALSE(d->call_tool("gui_element_fill", same, ctx_for(p)).is_error);
 }
 
 TEST_CASE("selection input: no recorded initial screen or unknown screen facts deny", "[mcp][selection-input]") {
@@ -370,6 +425,65 @@ TEST_CASE("selection input: gui_batch items follow the same rules", "[mcp][selec
     CHECK(has_code(d->call_tool("gui_batch", {{"items", items}}, ctx_for(plain)), "READ_ONLY"));
 }
 
+TEST_CASE("selection input: the handler mode is set for the fill call only and restored on every path", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    CHECK(env.mode_events.empty());  // the start does not switch the mode
+    CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+    REQUIRE(env.mode_events.size() == 2);
+    CHECK(env.mode_events[0] == "on:SAPLSUU5/100");  // the recorded initial screen is what the handler enforces
+    CHECK(env.mode_events[1] == "off:/");
+
+    // a refusal before the call never switches it
+    env.mode_events.clear();
+    env.facts = facts_at("SU01", "SAPLSUU5", "200");
+    CHECK(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+    CHECK(env.mode_events.empty());
+
+    // reads never switch it
+    env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    CHECK_FALSE(d->call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    CHECK(env.mode_events.empty());
+
+    // an exception inside the invocation (also what a CALL_TIMEOUT unwinding looks like) restores it
+    env.on_call = [](const Argv&) -> Result { throw std::runtime_error("boom"); };
+    CHECK(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+    REQUIRE(env.mode_events.size() == 2);
+    CHECK(env.mode_events[1] == "off:/");
+
+    // an error result restores it too
+    env.mode_events.clear();
+    env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    env.on_call = [](const Argv&) {
+        Result r;
+        r.status = Result::Status::Error;
+        r.error = {{"code", "INPUT_SCREEN_DENIED"}, {"message", "screen changed"}};
+        return r;
+    };
+    // the earlier exception call changed nothing in the record: the screen still matches
+    const auto r = d->call_tool("gui_element_fill", fill(), ctx_for(p));
+    CHECK(r.is_error);
+    REQUIRE(env.mode_events.size() == 2);
+    CHECK(env.mode_events[1] == "off:/");
+}
+
+TEST_CASE("selection input: without a handler mode hook the fill is refused (fail closed)", "[mcp][selection-input]") {
+    Env env;
+    env.mode_hook = false;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    env.calls.clear();
+    env.events.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_TARGET_DENIED"));
+    CHECK(env.calls.empty());
+    // the lifted guard (if it was lifted at all) is restored
+    if (!env.events.empty()) CHECK(env.events.back() == true);
+}
+
 TEST_CASE("selection input: the read-only override is restored when the invocation throws", "[mcp][selection-input]") {
     Env env;
     auto d = env.make(true);
@@ -463,6 +577,9 @@ TEST_CASE("selection input: tools/list shows the narrowed fill tool only to such
     const ToolDef* wm_fill = find(wm, "gui_element_fill");
     REQUIRE(wm_fill);
     CHECK(wm_fill->description.find("initial screen") != std::string::npos);
+    CHECK(wm_fill->description.find("echoed nowhere") == std::string::npos);
+    CHECK(wm_fill->description.find("value read back from the control, except for credential fields") != std::string::npos);
+    CHECK(wm_fill->description.find("EXECUTE") != std::string::npos);
 }
 
 TEST_CASE("selection input: audit records input_allowed, the INPUT_* codes, and never the typed value", "[mcp][selection-input][audit]") {
@@ -485,6 +602,7 @@ TEST_CASE("selection input: audit records input_allowed, the INPUT_* codes, and 
         policy, make_mcp_audit_hook(&sink, nullptr, true));
     d.set_sap_facts_provider([&](std::optional<int>) { return env.facts; });
     d.set_read_only_override([](bool) {});
+    d.set_selection_input_override([](bool, const std::string&, const std::string&) {});
     const Principal p = ro_token("basis");
     const std::string typed = "zz-typed-value-4711";
 

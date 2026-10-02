@@ -52,6 +52,10 @@ public:
     /// is in write mode, and with the server value afterwards. Wire it to CommandHandler::set_read_only.
     using ReadOnlyOverride = std::function<void(bool read_only)>;
     void set_read_only_override(ReadOnlyOverride hook) { read_only_override_ = std::move(hook); }
+    /// Selection-input mode of the handler for ONE authorized gui_element_fill call: (true, program, screen) before the call,
+    /// (false, "", "") afterwards on every path. Set together with the lifted read-only guard.
+    using SelectionInputOverride = std::function<void(bool on, const std::string& program, const std::string& screen_number)>;
+    void set_selection_input_override(SelectionInputOverride hook) { selection_input_override_ = std::move(hook); }
     /// Reports a step (facts_pre, invoke, facts_post) that took longer than the slow-step threshold (default 2000 ms). The
     /// default logs one spdlog warning; tests replace it.
     using SlowStepReporter = std::function<void(const std::string& step, const std::string& tool,
@@ -126,6 +130,7 @@ private:
     SapFactsProvider facts_provider_;
     SessionTargetResolver target_resolver_;
     ReadOnlyOverride read_only_override_;
+    SelectionInputOverride selection_input_override_;
     SlowStepReporter slow_step_reporter_;
     std::chrono::milliseconds slow_step_threshold_{2000};
     /// Times one step of a call: stores the elapsed ms in `out_ms` and reports it when it exceeds the threshold.

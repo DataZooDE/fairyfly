@@ -194,6 +194,9 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
                 return target;
             });
             dispatcher->set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
+            dispatcher->set_selection_input_override([lazy_handler](bool on, const std::string& program, const std::string& screen) {
+                lazy_handler().set_selection_input_only(on, program, screen);
+            });
             return dispatcher;
         };
         http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };

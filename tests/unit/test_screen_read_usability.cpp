@@ -325,10 +325,44 @@ TEST_CASE("credential state flags, roles and profiles are not redacted", "[priva
         CHECK(elements[0]["text"] == "Role");
         CHECK(elements[1]["text"] == "Z_PASSWORD_RESET_ADMIN");
     }
-    SECTION("input fields named after a state are readable") {
-        CHECK_FALSE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE", ""));
-        CHECK_FALSE(is_sensitive_input_field("GuiCTextField", "wnd[0]/usr/txtGENERIC", "Password status"));
-        CHECK_FALSE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtGENERIC", "Password last changed"));
+    SECTION("read-only fields named after a state are readable") {
+        const auto display = [](const char* type, const char* id, const char* label, bool known, bool changeable,
+                                const char* value) {
+            return sensitive_field_reason_for_display(type, id, label, known, changeable, [=] { return std::string(value); });
+        };
+        CHECK(display("GuiTextField", "wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE", "", true, false, "Password set").empty());
+        CHECK(display("GuiCTextField", "wnd[0]/usr/txtGENERIC", "Password status", true, false, "locked").empty());
+        CHECK(display("GuiTextField", "wnd[0]/usr/txtGENERIC", "Password last changed", true, false, "01.10.2026").empty());
+        CHECK(display("GuiTextField", "wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE", "", true, false, "").empty());
+    }
+    SECTION("a changeable or unknown-changeability field named after a state stays redacted (fail closed)") {
+        const auto display = [](bool known, bool changeable) {
+            return sensitive_field_reason_for_display("GuiTextField", "wnd[0]/usr/txtPASSWORD_STATE", "", known, changeable,
+                                                      [] { return std::string("ok"); });
+        };
+        CHECK_FALSE(display(true, true).empty());
+        CHECK_FALSE(display(false, false).empty());
+        CHECK_FALSE(display(false, true).empty());
+        // the id/label predicates alone (fills, authorization, selection input) never exempt a state name
+        CHECK(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE", ""));
+        CHECK(is_sensitive_input_field("GuiCTextField", "wnd[0]/usr/txtGENERIC", "Password status"));
+    }
+    SECTION("a password field is never exempt, and a secret-looking value is not a state label") {
+        CHECK_FALSE(sensitive_field_reason_for_display("GuiPasswordField", "wnd[0]/usr/pwdPASSWORD_STATE", "", true, false,
+                                                       [] { return std::string("set"); }).empty());
+        CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", "wnd[0]/usr/txtPASSWORD_STATE", "", true, false,
+                                                       [] { return std::string("aB3$xY9!kLm2Qw"); }).empty());
+        CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", "wnd[0]/usr/txtPASSWORD_STATE", "", true, false,
+                                                       [] { return std::string(41, 'x'); }).empty());
+        // a reader that throws fails closed
+        CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", "wnd[0]/usr/txtPASSWORD_STATE", "", true, false,
+                                                       []() -> std::string { throw std::runtime_error("x"); }).empty());
+        // a real password name stays redacted even when read-only
+        CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", "wnd[0]/usr/txtPASSWORD", "", true, false,
+                                                       [] { return std::string("x"); }).empty());
+        CHECK(looks_like_state_value("Password set"));
+        CHECK(looks_like_state_value("0"));
+        CHECK_FALSE(looks_like_state_value("aB3$xY9!kLm2Qw"));
     }
 }
 

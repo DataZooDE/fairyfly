@@ -540,3 +540,78 @@ TEST_CASE("UTC offsets are formatted with sign and minutes", "[session][clock][r
     CHECK(format_utc_offset(-300) == "-05:00");
     CHECK(server_time_fields().at("server_time_source") == "unavailable");
 }
+
+// ---- activate_tab: the previous tabs are restored on every exit path --------------------------------
+
+namespace {
+// What the engine does around a read, with lambdas as the GUI: the selected page of one strip is a string.
+struct FakeStrip {
+    std::string selected = "tabs/tabpA";
+    std::vector<std::string> selects;
+};
+}  // namespace
+
+TEST_CASE("TabActivationGuard restores the previous tab when the read throws after the select", "[tabs][activate-tab][round4]") {
+    FakeStrip strip;
+    bool threw = false;
+    try {
+        TabActivationGuard guard([&](const std::string& id) { strip.selects.push_back(id); strip.selected = id; return true; });
+        guard.record({"tabs/tabpB", "Logon data", strip.selected});  // recorded BEFORE selecting
+        strip.selected = "tabs/tabpB";
+        throw std::runtime_error("read failed");
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(strip.selected == "tabs/tabpA");  // the destructor restored it while the exception unwound
+    REQUIRE(strip.selects.size() == 1);
+}
+
+TEST_CASE("TabActivationGuard restores a tab whose own select threw (recorded first)", "[tabs][activate-tab][round4]") {
+    FakeStrip strip;
+    TabActivationGuard guard([&](const std::string& id) { strip.selects.push_back(id); strip.selected = id; return true; });
+    guard.record({"tabs/tabpB", "B", "tabs/tabpA"});
+    CHECK(guard.restore());
+    CHECK(strip.selected == "tabs/tabpA");
+    CHECK(guard.restored());
+    CHECK(guard.restore_error().empty());
+    // idempotent: a second restore (and the destructor) selects nothing more
+    guard.restore();
+    CHECK(strip.selects.size() == 1);
+}
+
+TEST_CASE("TabActivationGuard restores innermost first and reports a failing restore", "[tabs][activate-tab][round4]") {
+    std::vector<std::string> order;
+    TabActivationGuard guard([&](const std::string& id) {
+        order.push_back(id);
+        if (id == "outer/tabpPrev") throw std::runtime_error("COM went away");
+        return true;
+    });
+    guard.record({"outer/tabpNew", "Outer", "outer/tabpPrev"});
+    guard.record({"outer/tabpNew/inner/tabpNew2", "Inner", "outer/tabpNew/inner/tabpPrev2"});
+    CHECK_FALSE(guard.restore());
+    REQUIRE(order.size() == 2);
+    CHECK(order[0] == "outer/tabpNew/inner/tabpPrev2");  // innermost first
+    CHECK(order[1] == "outer/tabpPrev");
+    CHECK_FALSE(guard.restored());
+    CHECK(guard.restore_error().find("COM went away") != std::string::npos);
+}
+
+TEST_CASE("TabActivationGuard cannot restore an unknown previous tab or a page that is gone", "[tabs][activate-tab][round4]") {
+    {
+        TabActivationGuard guard([](const std::string&) { return true; });
+        guard.record({"tabs/tabpB", "B", ""});
+        CHECK_FALSE(guard.restore());
+        CHECK_FALSE(guard.restore_error().empty());
+    }
+    {
+        TabActivationGuard guard([](const std::string&) { return false; });  // page not found
+        guard.record({"tabs/tabpB", "B", "tabs/tabpA"});
+        CHECK_FALSE(guard.restore());
+        CHECK(guard.restore_error().find("could not be found") != std::string::npos);
+    }
+    {
+        TabActivationGuard idle([](const std::string&) -> bool { throw std::runtime_error("never called"); });
+        CHECK(idle.restore());  // nothing was activated: nothing to restore
+    }
+}

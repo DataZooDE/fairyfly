@@ -1026,6 +1026,16 @@ TEST_CASE("Named ordinary input fields never read secret text", "[com][privacy]"
     REQUIRE(labeled_dispatch->text_reads == 0);
 }
 
+TEST_CASE("A changeable input field named after a credential state is still redacted without reading it", "[com][privacy]") {
+    ScopedDispatchCacheReset cache_reset;
+    // the fake reports Changeable = true: PASSWORD_STATE could hold a real value
+    auto* state_dispatch = new TextFieldDispatch(L"GuiTextField", 41, L"wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE");
+    auto state = ComGuiElement::create(state_dispatch);
+    state_dispatch->Release();
+    REQUIRE(is_redacted(state->get_text()));
+    REQUIRE(state_dispatch->text_reads == 0);
+}
+
 TEST_CASE("SAP assigned left label redacts a neutral input field", "[com][privacy]") {
     ScopedDispatchCacheReset cache_reset;
     auto* caption_dispatch = new TextFieldDispatch(

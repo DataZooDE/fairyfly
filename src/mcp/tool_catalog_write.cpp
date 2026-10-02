@@ -108,8 +108,8 @@ ToolSpec make_fill_spec() {
         "Changes a value in the live SAP GUI: enters text into an input field, clears it, or edits a "
         "GridView cell (row + column; checkbox toggles a checkbox cell, commit notifies SAP after the change). "
         "Confirm with the user before changing values. Never put passwords or other secrets into fill values "
-        "(use gui_session_login for authentication). Filled values are echoed nowhere: results and audit logs do not "
-        "contain them, so read the screen afterwards to verify. Give exactly one of value or clear.";
+        "(use gui_session_login for authentication). The result echoes the value read back from the control, "
+        "except for credential fields (shown redacted); audit logs never contain the value. Give exactly one of value or clear.";
     spec.def.input_schema = json{
         {"type", "object"},
         {"properties",

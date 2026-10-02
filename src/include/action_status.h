@@ -33,6 +33,10 @@ void attach_status_bar(Result& result, const ActionStatus& before, const ActionS
 /// (typing into a field), where a re-read right after the call would otherwise echo the previous message.
 void attach_fresh_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after);
 
+/// True when a (type W) status text asks the user to confirm with a second Enter ("Press ENTER to continue", "Confirm ...",
+/// "Bestätigen Sie ...", "weiter mit Enter", EN/DE). Pure; "No short dumps match the selection criteria" is false.
+bool warning_needs_confirmation(const std::string& text);
+
 /// Single-snapshot variant (no change detection) for read-only commands.
 void attach_status_bar(Result& result, const ActionStatus& current);
 

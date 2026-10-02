@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include "selection_input_guard.h"
 #include <memory>
 
 namespace fairyfly {
@@ -68,6 +69,10 @@ public:
     virtual void set_row_offset(int /*row_offset*/) {}
     /// False: grid/table cells are not read (the caller's filter discards all tables).
     virtual void set_grid_rows_needed(bool /*needed*/) {}
+    /// Selection-input mode (see selection_input_guard.h): while active, fill_field validates the live control and the
+    /// current screen right before writing and refuses with INPUT_TARGET_DENIED / INPUT_SCREEN_DENIED. Engines that cannot
+    /// validate return false and the caller must refuse the fill (fail closed).
+    virtual bool set_selection_input_policy(const sap::SelectionInputPolicy& /*policy*/) { return false; }
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
 
     // Enumeration and diagnostics

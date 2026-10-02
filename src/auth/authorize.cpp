@@ -107,6 +107,9 @@ PolicyDecision check_selection_input(const mcp::Principal& principal, const json
     if (input->initial->transaction != open || input->initial->program != input->program ||
         input->initial->screen_number != input->screen_number)
         return refuse("INPUT_SCREEN_DENIED", deny_text);
+    if (input->initial->connection != input->connection)
+        return refuse("INPUT_SCREEN_DENIED", "typing is only allowed on the connection where gui_transaction_start opened the "
+                                             "transaction; start it again on this connection with gui_transaction_start");
     return PolicyDecision{};
 }
 
