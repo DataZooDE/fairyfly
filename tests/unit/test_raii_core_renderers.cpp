@@ -31,15 +31,9 @@ TEST_CASE("Action status classifies SAP rejections", "[status][actions]") {
 
     const ActionStatus warning{"Check entries before continuing", "W"};
     REQUIRE_FALSE(classify_action_status(before, warning, "wnd[0]/usr/field").has_value());
-    auto pending = classify_action_status(before, warning, "wnd[0]/tbar[0]/btn[11]", true);
-    REQUIRE(pending.has_value());
-    REQUIRE(pending->error.at("code") == "ACTION_OUTCOME_UNVERIFIED");
-    REQUIRE(pending->error.at("message_type") == "W");
-    auto repeated_warning = classify_action_status(warning, warning,
-                                                   "wnd[0]/tbar[0]/btn[11]", true);
-    REQUIRE(repeated_warning.has_value());
-    REQUIRE(repeated_warning->error.at("code") == "ACTION_OUTCOME_UNVERIFIED");
-    REQUIRE(repeated_warning->error.at("message_type") == "W");
+    // A warning after a submitting click is a message, not a failure (see "benign status messages" below).
+    REQUIRE_FALSE(classify_action_status(before, warning, "wnd[0]/tbar[0]/btn[11]", true).has_value());
+    REQUIRE_FALSE(classify_action_status(warning, warning, "wnd[0]/tbar[0]/btn[11]", true).has_value());
     auto denied_warning = classify_action_status(before, {"Not authorized", "W"},
                                                  "wnd[0]/tbar[0]/btn[11]", true);
     REQUIRE(denied_warning.has_value());
@@ -48,6 +42,41 @@ TEST_CASE("Action status classifies SAP rejections", "[status][actions]") {
         {"Line cannot be selected", "S"}, "wnd[2]/usr/lbl[2,2]", true);
     REQUIRE(rejected_list_header.has_value());
     REQUIRE(rejected_list_header->error.at("code") == "ACTION_FAILED");
+}
+
+TEST_CASE("Benign W/I/S status messages after a click are success with the message", "[status][actions]") {
+    const ActionStatus before{"", ""};
+    const std::string button = "wnd[0]/usr/btnTODAY";
+    for (const char* type : {"W", "I", "S"}) {
+        INFO(type);
+        const ActionStatus after{"No short dumps match the selection criteria", type};
+        REQUIRE_FALSE(classify_action_status(before, after, button, true).has_value());
+        REQUIRE_FALSE(classify_action_status(before, after, button, false).has_value());
+
+        Result result;
+        result.status = Result::Status::Success;
+        attach_status_bar(result, before, after);
+        REQUIRE(result.data["status_message"]["type"] == type);
+        REQUIRE(result.data["status_message"]["text"] == "No short dumps match the selection criteria");
+        REQUIRE(result.data.contains("warning") == (std::string(type) == "W"));
+        if (std::string(type) == "W") REQUIRE(result.data["warning"] == true);
+    }
+    // a W message that was already there before the click is not flagged as a new warning
+    Result stale;
+    stale.status = Result::Status::Success;
+    attach_status_bar(stale, {"Old warning", "W"}, {"Old warning", "W"});
+    REQUIRE(stale.data["status_message"]["text"] == "Old warning");
+    REQUIRE_FALSE(stale.data.contains("warning"));
+
+    // E and A still fail, with distinct codes
+    auto error = classify_action_status(before, {"Entry is invalid", "E"}, button, true);
+    REQUIRE(error.has_value());
+    REQUIRE(error->error.at("code") == "ACTION_FAILED");
+    auto aborted = classify_action_status(before, {"Terminated", "A"}, button, true);
+    REQUIRE(aborted.has_value());
+    REQUIRE(aborted->error.at("code") == "ACTION_ABORTED");
+    // a W that reads like a rejection still fails
+    REQUIRE(classify_action_status(before, {"Not authorized for this", "W"}, button, true).has_value());
 }
 
 TEST_CASE("Positioned list hotspots use focus and F2", "[actions][labels]") {

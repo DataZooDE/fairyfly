@@ -120,3 +120,23 @@ TEST_CASE("shape_result adapts hints for Markdown screen results", "[mcp][usabil
     const auto shaped = shape_result(res, spec, policy, "", &visible);
     CHECK(first_text(shaped).find("element fill") == std::string::npos);
 }
+
+// ---- item 2: benign status messages reach the model as success ---------------------------------
+TEST_CASE("A click result with a benign warning is shaped as success with the message", "[mcp][usability][status]") {
+    Policy policy;
+    CommandDispatcher dispatcher(
+        [](const Argv&) {
+            return ok_result({{"action", "click"},
+                              {"status_message", {{"type", "W"}, {"text", "No short dumps match the selection criteria"}}},
+                              {"warning", true}});
+        },
+        policy);
+    CallContext ctx;
+    ctx.request_id = 1;
+    const auto result = dispatcher.call_tool("gui_element_click", {{"element", "wnd[0]/usr/btnTODAY"}}, ctx);
+    CHECK_FALSE(result.is_error);
+    CHECK(first_text(result).find("No short dumps match") != std::string::npos);
+    REQUIRE(result.structured.has_value());
+    CHECK((*result.structured)["data"]["status_message"]["type"] == "W");
+    CHECK((*result.structured)["data"]["warning"] == true);
+}

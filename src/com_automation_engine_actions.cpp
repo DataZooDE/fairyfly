@@ -30,10 +30,7 @@ bool apply_status_outcome(Result& result, const ActionStatus& before, const Acti
         result = *rejection;
         return true;
     }
-    if ((after.text != before.text || after.type != before.type) &&
-        !after.text.empty() && after.type == "W") {
-        result.data["warning"] = after.text;
-    }
+    attach_status_message(result.data, before, after);
     return false;
 }
 

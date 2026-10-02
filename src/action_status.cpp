@@ -143,11 +143,20 @@ json status_bar_json(const ActionStatus& status, const ActionStatus* before) {
     return out;
 }
 
+void attach_status_message(json& data, const ActionStatus& before, const ActionStatus& after) {
+    if (after.text.empty()) return;
+    if (!data.is_object()) data = json::object();
+    data["status_message"] = {{"type", after.type}, {"text", after.text}};
+    // A repeated message may be left over from an earlier action: only a new warning is flagged.
+    if (after.type == "W" && (after.text != before.text || after.type != before.type)) data["warning"] = true;
+}
+
 void attach_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after) {
     if (after.text.empty()) return;
     json bar = status_bar_json(after, &before);
     if (result.status == Result::Status::Success) {
         if (!result.data.is_object()) result.data = json::object();
+        attach_status_message(result.data, before, after);
         result.data["status_bar"] = bar;
     } else if (result.status == Result::Status::Error) {
         if (!result.error.is_object()) result.error = json::object();
@@ -223,18 +232,10 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
                                 lower.find("not authorized") != std::string::npos ||
                                 lower.find("cannot be selected") != std::string::npos ||
                                 lower.find("not possible in read-only mode") != std::string::npos;
-    if (after.type == "W" && submitting_action && !rejection_text) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "ACTION_OUTCOME_UNVERIFIED";
-        result.error["message"] = after.text;
-        result.error["message_type"] = after.type;
-        result.error["element"] = element;
-        result.error["reason"] = repeated
-            ? "The same SAP warning was present before and after the action"
-            : "SAP warning may require confirmation before the action completes";
-        return result;
-    }
+    // Type W/I/S messages that do not read like a rejection are NOT failures: a click that ran and left "No short
+    // dumps match the selection criteria" (W) or "No data found" (I/S) in the status bar succeeded. They are
+    // reported on the success result as status_message (and warning:true for W), see attach_status_message().
+    // A warning that SAP wants confirmed cannot be told apart from an ordinary one, so the caller sees the text.
     if (after.type != "E" && after.type != "A" && !rejection_text)
         return std::nullopt;
 

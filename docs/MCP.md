@@ -223,6 +223,7 @@ The file is append-only by convention, not tamper-proof.
 
 - Policy-aware texts: tool descriptions in `tools/list` only mention tools the caller can call. A read-only server or token never reads about `gui_element_fill`; descriptions are built per principal by `describe_for` (conditional `{?tool:text}` markers in the catalog).
 - Result hints: Markdown screen results contain CLI usage hints printed by the formatter (`fairyfly element click '<id>' ...`). The server rewrites them to tool-call form (`gui_element_click(element="<id>", row=0, column="...")`) and removes hints for tools the caller cannot call (an `element fill` hint disappears in read-only mode, together with its comment line and any code block left empty).
+- Status messages: a click, key, menu or transaction action that ran and left an informational, success or warning message in the status bar (for example ST22 `Today` with "No short dumps match the selection criteria") is a success. The result contains `status_message {type, text}` and, for a new type-W message, `warning: true`. Only type E and A messages (and texts such as "does not exist" or "not authorized") fail, with `ACTION_FAILED` / `ACTION_ABORTED`. `ACTION_OUTCOME_UNVERIFIED` is kept for a rejection text that was already there before the action.
 
 ## Troubleshooting
 

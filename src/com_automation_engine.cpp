@@ -681,7 +681,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                     return result;
                 }
             } else if (is_new_message && post_sbar_type == "W") {
-                result.data["warning"] = post_sbar_text;
+                attach_status_message(result.data, prev_status, post_status);
             } else if (is_new_message) {
                 result.data["statusbar"] = post_sbar_text;
             }
@@ -912,11 +912,6 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
                 return *unchanged;
             }
         }
-        if ((after_status.text != before_status.text || after_status.type != before_status.type) &&
-            !after_status.text.empty() && after_status.type == "W") {
-            result.data["warning"] = after_status.text;
-        }
-
         result.status = Result::Status::Success;
         result.data["element"] = resolved_element.path;
         if (element.path != resolved_element.path) {
