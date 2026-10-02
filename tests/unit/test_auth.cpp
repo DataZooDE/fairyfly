@@ -752,7 +752,7 @@ TEST_CASE("auth: token CLI create defaults, output and confirmation", "[auth][cl
     args.name = "default-token";
     auto result = run_token_action(args, store);
     REQUIRE(result.status == Result::Status::Success);
-    CHECK(result.data["scopes"] == nlohmann::json::array({"session", "connection", "screen"}));
+    CHECK(result.data["scopes"] == nlohmann::json::array({"session.list", "session.attach", "connection.list", "screen"}));
     CHECK(result.data["read_only"] == true);
     const std::string token = result.data["token"];
     CHECK(parse_token(token));

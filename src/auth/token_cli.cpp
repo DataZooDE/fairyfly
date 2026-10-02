@@ -26,7 +26,7 @@ json created_json(const CreatedToken& created, const char* note) {
 } // namespace
 
 const std::vector<std::string>& default_token_scopes() {
-    static const std::vector<std::string> scopes = {"session", "connection", "screen"};
+    static const std::vector<std::string> scopes = {"session.list", "session.attach", "connection.list", "screen"};
     return scopes;
 }
 
@@ -89,7 +89,7 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
                     return failure("INVALID_ARGUMENT", "--rate-family limits must be 1..1000000 calls per minute");
                 request.rate_families[entry.substr(0, eq)] = static_cast<int>(limit);
             }
-            if (std::find(request.scopes.begin(), request.scopes.end(), "*") != request.scopes.end() && !args.yes)
+            if (std::any_of(request.scopes.begin(), request.scopes.end(), [](const std::string& s) { return s == "*"; }) && !args.yes)
                 return failure("CONFIRMATION_REQUIRED",
                                "a token with scope '*' can use every tool family; repeat with --yes to confirm");
             if (!args.expires.empty()) {

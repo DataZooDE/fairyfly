@@ -1,4 +1,5 @@
 #include "include/auth/token_store.h"
+#include "include/auth/scopes.h"
 
 #include <algorithm>
 #include <cctype>
@@ -78,15 +79,9 @@ void validate(const NewToken& request) {
     if (!valid_token_name(request.name))
         throw AuthError("INVALID_ARGUMENT", "token name must be 1-64 characters of letters, digits, '.', '_' or '-'");
     if (request.scopes.empty()) throw AuthError("INVALID_ARGUMENT", "a token needs at least one scope");
+    for (const auto& scope : request.scopes)
+        if (const auto problem = validate_scope(normalize_scope(scope))) throw AuthError(problem->code, problem->message);
     const auto families = command_table::families();
-    for (const auto& scope : request.scopes) {
-        if (scope == "*") continue;
-        if (std::find(families.begin(), families.end(), scope) == families.end()) {
-            std::string known;
-            for (const auto& f : families) known += (known.empty() ? "" : ", ") + f;
-            throw AuthError("UNKNOWN_FAMILY", "unknown scope '" + scope + "' (families: " + known + ", or *)");
-        }
-    }
     for (const auto& s : request.sap_systems)
         if (!valid_pattern(s, "*?/_-$")) throw AuthError("INVALID_ARGUMENT", "invalid SAP system pattern '" + s + "' (use SID/CLIENT, globs allowed)");
     for (const auto& t : request.tcodes)
@@ -473,7 +468,7 @@ CreatedToken TokenStore::create(const NewToken& request) {
     meta.name = request.name;
     meta.created = clock_();
     meta.expires = request.expires;
-    meta.scopes = request.scopes;
+    for (const auto& scope : request.scopes) meta.scopes.push_back(normalize_scope(scope));
     meta.sap_systems = request.sap_systems;
     meta.tcodes = request.tcodes;
     meta.connections = request.connections;

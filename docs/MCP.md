@@ -177,14 +177,32 @@ All tools take an optional `connection` (saved connection id) except the ones th
 Remote (HTTP) access is authenticated with named bearer tokens. The stdio server is unaffected: its implicit local principal (`stdio`) has every scope and no restrictions.
 
 ~~~text
-fairyfly mcp token create NAME [--scope screen,element] [--system A4H/001,QAS/*] [--tcode SE16,SM*] [--connections DEV*,QAS]
+fairyfly mcp token create NAME [--scope screen,session.list,element.get] [--system A4H/001,QAS/*] [--tcode SE16,SM*] [--connections DEV*,QAS]
                                [--rate N] [--rate-family element=10,key=10] [--ip 10.0.0.0/8,203.0.113.9] [--expires 30d|2026-12-31]
                                [--allow-navigation] [--allow-selection-input] [--read-only] [--yes] [--output json|markdown|toon]
 fairyfly mcp token list | revoke NAME | rotate NAME | delete NAME --yes
 ~~~
 
 - A token looks like `ffy_<id>_<secret>` and is printed once by `create` and `rotate`. Only its SHA-256 and the restrictions are stored, as one Windows Credential Manager entry `fairyfly-mcp:<name>`. `list` never shows hashes or secrets. Lost token: `rotate` (the old secret stops working at once).
-- Without `--scope` a token gets `session,connection,screen` and is read-only. `--scope *` needs `--yes`. Scopes are the tool families (the noun of the tool name): session, connection, screen, menu, element, key, popup, transaction, credentials, system, batch. `gui_batch` needs the `batch` scope and every item is authorized like a standalone call.
+- Without `--scope` a token gets `session.list,session.attach,connection.list,screen` and is read-only (it cannot launch, log in or disconnect, and does not see those tools). `--scope *` needs `--yes`.
+- A scope is `<family>` (every tool of the family, the noun of the tool name), `<family>.<verb>` (exactly one tool; the verb is the last element of its CLI path) or `*`. A call is allowed when the token has the tool's family, its exact `<family>.<verb>` or `*`; `tools/list` shows exactly the allowed tools, `gui_batch` needs the `batch` scope and every item is authorized by the same rule. Scopes are case-insensitive on input and stored lower-case; family plus one of its verbs is allowed and listed as given. Unknown family: `UNKNOWN_FAMILY`; unknown verb of a known family (or a verb of `system`/`batch`): `UNKNOWN_SCOPE` with the valid verbs. Refusals read `token 'x' lacks scope 'session.disconnect' (or 'session')` (`SCOPE_DENIED`). Existing family-scope tokens keep their meaning; there is no migration. The table below is generated from the command table (a unit test keeps it in sync); `gui_doctor` (`system`) and `gui_batch` (`batch`) have family scopes only.
+
+<!-- scope-table:begin -->
+| Family scope | Verb scopes (one tool each) |
+|---|---|
+| `session` | `session.list`, `session.attach`, `session.launch`, `session.login`, `session.disconnect` |
+| `connection` | `connection.list` |
+| `screen` | `screen.read`, `screen.find`, `screen.capture` |
+| `menu` | `menu.list`, `menu.select` |
+| `element` | `element.get`, `element.click`, `element.fill`, `element.f4` |
+| `key` | `key.send` |
+| `popup` | `popup.close` |
+| `transaction` | `transaction.start` |
+| `credentials` | `credentials.list` |
+| `system` | none (family scope only) |
+| `batch` | none (family scope only) |
+<!-- scope-table:end -->
+
 - A token only narrows the server mode: the effective mode is read-only when the server or the token is read-only (token refusal code `READ_ONLY`; the server's own refusals keep `TOOL_UNAVAILABLE_READ_ONLY`). `FAIRYFLY_READ_ONLY=1` still wins.
 - `--system` limits calls to SAP systems `SID/CLIENT` (globs; `A4H` alone means any client). The system is looked up, read-only and without attaching or switching anything, for the connection the call will really use (the `connection` argument, else the server default, else the sticky connection from the last attach/launch, else the single saved connection); it is never taken from whichever session happens to be attached. When it cannot be established (no such connection, several saved connections and none chosen, session gone) the call is refused with `SYSTEM_UNKNOWN`; the calls that choose or end a session are checked against their own target instead of the current one: `gui_session_launch` (the SAP Logon entry name; see "Launching under `--system`" below), `gui_session_login` and `gui_session_disconnect --close-session` (the saved connection), and `gui_session_attach` (the session to attach, also when it is chosen automatically). The lookup is read-only and never contacts SAP. When the target system cannot be determined the call is refused `SYSTEM_UNKNOWN` (fail closed; a token with `--system` can launch only entries vouched for by `--connections`, see below, otherwise start it on the desktop and attach), otherwise `SYSTEM_DENIED`. A plain `gui_session_disconnect` (the SAP session stays open), `gui_session_list`, `gui_connection_list`, `gui_credentials_list`, `system` tools and `gui_batch` itself are not system-checked (residual: the listings show every saved connection). Every `gui_batch` item is checked against its own connection when it runs.
 - `--rate N` is the calls-per-minute budget of the token (0 = the server default `max_calls_per_minute`, which every token gets separately). `--rate-family element=10,key=10` adds a stricter per-family budget (families as for `--scope`; 1..1000000): a call over its family budget is refused `RATE_LIMITED` with the family in the message and never reaches SAP. Every `gui_batch` item counts against its family and the overall budget; a family-refused call has already used one call of the overall budget. There is no server-wide per-family option.

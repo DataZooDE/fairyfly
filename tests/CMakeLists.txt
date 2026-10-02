@@ -36,6 +36,7 @@ add_executable(unit_tests
     unit/test_setup_validators.cpp
     unit/test_auth.cpp
     unit/test_auth_policy.cpp
+    unit/test_auth_scopes.cpp
     unit/test_mcp_config.cpp
     unit/test_mcp_client_config.cpp
     unit/test_mcp_doctor.cpp

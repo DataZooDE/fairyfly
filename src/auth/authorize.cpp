@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstring>
 
+#include "include/auth/scopes.h"
 #include "include/mcp/policy.h"
 #include "include/vkey.h"
 #include "include/mcp/tool_catalog.h"
@@ -31,8 +32,8 @@ PolicyDecision refuse(const char* code, std::string message) {
     return d;
 }
 
-bool has_scope(const mcp::Principal& p, const std::string& family) {
-    return p.all_scopes || (!family.empty() && p.scopes.count(family) > 0);
+bool has_scope(const mcp::Principal& p, const std::string& family, const std::string& tool) {
+    return scopes_allow(p.scopes, p.all_scopes, family, tool);
 }
 
 bool system_exempt(const std::string& family, const std::string& tool) {
@@ -116,8 +117,8 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                               const SpecLookup& lookup, int depth, const SelectionInputContext* input) {
     const std::string& tool = spec.def.name;
 
-    if (!has_scope(principal, family))
-        return refuse("SCOPE_DENIED", "token '" + principal.name + "' has no access to the '" + family + "' tool family");
+    if (!has_scope(principal, family, tool))
+        return refuse("SCOPE_DENIED", "token '" + principal.name + "' lacks scope " + missing_scope_hint(family, tool));
 
     // Selection input: a read-only token (or server) with allow_selection_input may fill plain fields of the initial screen.
     // This replaces the read-only refusal for gui_element_fill only; every other rule below still applies.
@@ -484,11 +485,11 @@ bool selection_input_path(const mcp::Principal& principal, const std::string& to
 
 bool selection_input_tool_visible(const mcp::Principal& principal, const mcp::ToolSpec& spec) {
     return spec.def.name == "gui_element_fill" && principal.allow_selection_input && principal.read_only &&
-           !principal.tcodes.empty() && has_scope(principal, spec.family);
+           !principal.tcodes.empty() && has_scope(principal, spec.family, spec.def.name);
 }
 
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec) {
-    if (!has_scope(principal, spec.family)) return false;
+    if (!has_scope(principal, spec.family, spec.def.name)) return false;
     if (principal.read_only && spec.write_tool) return false;
     return true;
 }

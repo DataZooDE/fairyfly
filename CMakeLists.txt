@@ -183,6 +183,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/auth/secret_backend.cpp
     src/auth/token_store.cpp
     src/auth/authenticator.cpp
+    src/auth/scopes.cpp
     src/auth/authorize.cpp
     src/auth/token_cli.cpp
     src/commands/mcp_token_command.cpp

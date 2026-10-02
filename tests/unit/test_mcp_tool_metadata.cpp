@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "include/auth/authorize.h"
+#include "include/auth/scopes.h"
 #include "include/command_table.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/tool_catalog.h"
@@ -189,4 +190,33 @@ TEST_CASE("tool metadata: read-only principals and read-only lists never expose 
     for (const auto& def : write_mode.list_tools_for(token_ro)) token_listed.insert(def.name);
     for (const auto& name : write_names) CHECK(token_listed.count(name) == 0);
     for (const auto& name : read_names) CHECK(token_listed.count(name) == 1);
+}
+
+TEST_CASE("tool metadata: every tool resolves to a valid verb scope (doctor and batch are family-only)", "[mcp][metadata][auth]") {
+    const auto verbs = auth::verb_scopes();
+    for (const auto& spec : all_tool_specs()) {
+        INFO("tool " << spec.def.name);
+        const std::string verb = auth::verb_scope_of_tool(spec.def.name);
+        if (spec.def.name == "gui_doctor" || spec.def.name == "gui_batch") {
+            CHECK(verb.empty());
+            CHECK_FALSE(auth::validate_scope(spec.family));
+            continue;
+        }
+        REQUIRE_FALSE(verb.empty());
+        CHECK_FALSE(auth::validate_scope(verb));
+        CHECK(std::find(verbs.begin(), verbs.end(), verb) != verbs.end());
+        // a principal holding only that verb scope may use this tool
+        CHECK(auth::tool_allowed_for(scoped({verb}), spec));
+    }
+}
+
+TEST_CASE("tool metadata: docs/MCP.md scope table is generated from the command table", "[mcp][metadata][docs][auth]") {
+    const std::string text = read_docs_mcp();
+    const std::string begin_marker = "<!-- scope-table:begin -->\n";
+    const std::string end_marker = "<!-- scope-table:end -->";
+    const auto begin = text.find(begin_marker);
+    const auto end = text.find(end_marker);
+    REQUIRE(begin != std::string::npos);
+    REQUIRE(end != std::string::npos);
+    CHECK(text.substr(begin + begin_marker.size(), end - begin - begin_marker.size()) == auth::scope_table_markdown());
 }
