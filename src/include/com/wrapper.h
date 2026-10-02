@@ -383,6 +383,12 @@ public:
     /// SAP client (GuiSessionInfo.Client), empty when unavailable.
     std::string get_client() const;
 
+    /// ABAP program of the current screen (GuiSessionInfo.Program), empty when unavailable.
+    std::string get_program() const;
+
+    /// Dynpro number of the current screen (GuiSessionInfo.ScreenNumber) as text; empty when unavailable or 0.
+    std::string get_screen_number() const;
+
     /// Backend session identity when SAP exposes GuiSessionInfo.
     /// Combines SystemSessionId and SessionNumber; empty when unavailable.
     std::string get_server_session_key() const;

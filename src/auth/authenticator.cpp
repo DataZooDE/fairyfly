@@ -128,6 +128,8 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
     ok.principal.rate_families = meta->rate_families;
     ok.principal.read_only = meta->read_only;
     ok.principal.allow_navigation = meta->allow_navigation;
+    // The option only exists for read-only tokens with a T-code allowlist; a hand-edited record without them is inert.
+    ok.principal.allow_selection_input = meta->allow_selection_input && meta->read_only && !meta->tcodes.empty();
     ok.principal.remote_addr = client_address;
     ok.principal.authenticated = true;
     return ok;

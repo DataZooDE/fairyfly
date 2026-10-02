@@ -44,6 +44,7 @@ add_executable(unit_tests
     unit/test_mcp_tray_runner.cpp
     unit/test_mcp_tool_metadata.cpp
     unit/test_mcp_usability.cpp
+    unit/test_mcp_selection_input.cpp
     unit/test_tray_win32_manual.cpp
     ../src/config.cpp
     ../src/session.cpp

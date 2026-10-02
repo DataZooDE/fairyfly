@@ -95,6 +95,10 @@ void validate(const NewToken& request) {
         if (!valid_pattern(c, "*?_-.$/")) throw AuthError("INVALID_ARGUMENT", "invalid connection name pattern '" + c + "' (letters, digits and * ? _ - . $ /; no spaces)");
     for (const auto& ip : request.allowed_ips)
         if (!parse_ip_rule(ip)) throw AuthError("INVALID_IP", "invalid IP address or CIDR block '" + ip + "'");
+    if (request.allow_selection_input && request.tcodes.empty())
+        throw AuthError("INVALID_ARGUMENT", "--allow-selection-input requires --tcode (a T-code allowlist)");
+    if (request.allow_selection_input && !request.read_only)
+        throw AuthError("INVALID_ARGUMENT", "--allow-selection-input only makes sense for read-only tokens (add --read-only)");
     if (request.allow_navigation && request.tcodes.empty())
         throw AuthError("INVALID_ARGUMENT", "--allow-navigation only makes sense together with --tcode (tokens without a T-code allowlist are not restricted)");
     if (request.rate_per_minute < 0) throw AuthError("INVALID_ARGUMENT", "rate must be >= 0");
@@ -133,6 +137,7 @@ json TokenMeta::to_public_json() const {
               {"allowed_ips", allowed_ips},
               {"read_only", read_only},
               {"allow_navigation", allow_navigation},
+              {"allow_selection_input", allow_selection_input},
               {"revoked", revoked}};
     if (expires) j["expires"] = format_iso_utc(*expires);
     return j;
@@ -158,6 +163,7 @@ json TokenMeta::to_compact_json() const {
     if (!rate_families.empty()) j["f"] = rate_families;
     if (!allowed_ips.empty()) j["p"] = allowed_ips;
     if (allow_navigation) j["a"] = true;
+    if (allow_selection_input) j["si"] = true;
     if (revoked) j["x"] = true;
     return j;
 }
@@ -186,6 +192,7 @@ json expand_compact(const json& c) {
     if (c.contains("f")) j["rate_families"] = c["f"];
     if (c.contains("o")) j["read_only"] = c["o"];
     if (c.contains("a")) j["allow_navigation"] = c["a"];
+    if (c.contains("si")) j["allow_selection_input"] = c["si"];
     if (c.contains("x")) j["revoked"] = c["x"];
     return j;
 }
@@ -241,6 +248,10 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     }
     m.read_only = j.contains("read_only") && j["read_only"].is_boolean() ? j["read_only"].get<bool>() : true;
     m.allow_navigation = j.contains("allow_navigation") && j["allow_navigation"].is_boolean() && j["allow_navigation"].get<bool>();
+    if (j.contains("allow_selection_input")) {
+        if (!j["allow_selection_input"].is_boolean()) return std::nullopt;  // malformed: unusable, never silently "off"
+        m.allow_selection_input = j["allow_selection_input"].get<bool>();
+    }
     m.revoked = j.contains("revoked") && j["revoked"].is_boolean() ? j["revoked"].get<bool>() : false;
     return m;
 }
@@ -471,6 +482,7 @@ CreatedToken TokenStore::create(const NewToken& request) {
     meta.allowed_ips = request.allowed_ips;
     meta.read_only = request.read_only;
     meta.allow_navigation = request.allow_navigation;
+    meta.allow_selection_input = request.allow_selection_input;
     // The id must be unique among stored tokens.
     for (int attempt = 0; attempt < 8; ++attempt) {
         CreatedToken created = issue(meta);

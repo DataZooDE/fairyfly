@@ -109,6 +109,19 @@ private:
     }
     mutable std::mutex tcode_mutex_;
     std::set<std::string> tcode_left_;
+    /// Per principal (principal_key): the screen reached by its last successful gui_transaction_start that ended in an
+    /// allowlisted transaction. Only recorded for principals with allow_selection_input (selection-input rule).
+    std::optional<auth::InitialScreen> initial_screen(const std::string& key) const {
+        std::lock_guard<std::mutex> lock(tcode_mutex_);
+        const auto it = initial_screen_.find(key);
+        return it == initial_screen_.end() ? std::nullopt : std::optional<auth::InitialScreen>(it->second);
+    }
+    void set_initial_screen(const std::string& key, const std::optional<auth::InitialScreen>& screen) {
+        std::lock_guard<std::mutex> lock(tcode_mutex_);
+        if (screen) initial_screen_[key] = *screen;
+        else initial_screen_.erase(key);
+    }
+    std::map<std::string, auth::InitialScreen> initial_screen_;
     KeyedRateLimiter keyed_limiter_;
     SapFactsProvider facts_provider_;
     SessionTargetResolver target_resolver_;

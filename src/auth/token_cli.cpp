@@ -67,6 +67,11 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             if (args.allow_navigation && request.tcodes.empty())
                 return failure("INVALID_ARGUMENT", "--allow-navigation only makes sense together with --tcode");
             request.allow_navigation = args.allow_navigation;
+            if (args.allow_selection_input && request.tcodes.empty())
+                return failure("INVALID_ARGUMENT", "--allow-selection-input requires --tcode (a T-code allowlist)");
+            if (args.allow_selection_input && !request.read_only)
+                return failure("INVALID_ARGUMENT", "--allow-selection-input only makes sense for read-only tokens (add --read-only; a token with write scopes is not read-only otherwise)");
+            request.allow_selection_input = args.allow_selection_input;
             request.allowed_ips = split_list(args.ips);
             request.rate_per_minute = args.rate;
             for (const auto& entry : split_list(args.rate_families)) {

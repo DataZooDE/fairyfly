@@ -94,7 +94,9 @@ CommandDispatcher::CommandDispatcher(Invoker invoker, Policy policy, AuditHook h
 std::set<std::string> CommandDispatcher::visible_tool_names(const Principal* principal) const {
     std::set<std::string> names;
     for (const auto& spec : specs_)
-        if (tool_visible(spec, policy_) && (!principal || auth::tool_allowed_for(*principal, spec))) names.insert(spec.def.name);
+        if ((principal && auth::selection_input_tool_visible(*principal, spec)) ||
+            (tool_visible(spec, policy_) && (!principal || auth::tool_allowed_for(*principal, spec))))
+            names.insert(spec.def.name);
     return names;
 }
 
@@ -116,6 +118,19 @@ std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principa
         if (visible.count(spec.def.name)) {
             defs.push_back(spec.def);
             defs.back().description = describe_for(spec, visible);
+            // A read-only token with allow_selection_input sees the narrowed fill tool: no cells, initial screen only.
+            if (auth::selection_input_path(principal, spec.def.name, policy_) && auth::selection_input_tool_visible(principal, spec)) {
+                defs.back().title = "Type into SAP selection field";
+                defs.back().description =
+                    "Types a value into a plain input (selection) field of the SAP screen, or clears it. This token is read-only: typing "
+                    "is allowed ONLY on the initial screen of the transaction you opened with gui_transaction_start (before any "
+                    "navigation; start the transaction again to get back to it) and ONLY into selection fields. Table or grid cells "
+                    "(row/column), checkboxes, the command field and password fields are refused, and nothing is saved or posted. "
+                    "Execute the selection with gui_key_send (F8 or Enter). Values are echoed nowhere: results and audit logs do not "
+                    "contain them. Give exactly one of value or clear.";
+                if (defs.back().input_schema.is_object() && defs.back().input_schema.contains("properties"))
+                    for (const char* key : {"row", "column", "checkbox", "commit"}) defs.back().input_schema["properties"].erase(key);
+            }
         }
     return defs;
 }
@@ -236,7 +251,10 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     else record.connection = policy_.default_connection ? policy_.default_connection : sticky_connection(principal_key(ctx.principal));
 
     // 2. policy
-    const PolicyDecision decision = check_call(*spec, args, policy_);
+    // gui_element_fill of a principal with allow_selection_input is decided by auth::authorize_call (INPUT_* rules) instead of
+    // the blanket read-only refusal; every other tool keeps check_call.
+    const bool selection_input = auth::selection_input_path(ctx.principal, name, policy_);
+    const PolicyDecision decision = selection_input ? PolicyDecision{} : check_call(*spec, args, policy_);
     if (!decision.allowed)
         return fail(decision.code.empty() ? "REFUSED" : decision.code,
                     decision.message.empty() ? "call refused by policy" : decision.message);
@@ -245,6 +263,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     const Principal& principal = ctx.principal;
     {
         std::optional<std::string> current_system, current_tcode;
+        auth::SelectionInputContext input_context;
         if ((!principal.sap_systems.empty() || !principal.tcodes.empty()) && facts_provider_) {
             const auto started = std::chrono::steady_clock::now();
             std::optional<audit::SapFacts> facts;
@@ -253,10 +272,14 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (facts && facts->any()) {
                 if (!facts->system.empty()) current_system = facts->system + "/" + facts->client;
                 if (!facts->transaction.empty()) current_tcode = facts->transaction;
+                input_context.program = facts->program;
+                input_context.screen_number = facts->screen_number;
             }
         }
+        if (principal.allow_selection_input) input_context.initial = initial_screen(principal_key(principal));
         const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
-                                                          current_tcode, [this](const std::string& n) { return find_spec(n); });
+                                                          current_tcode, [this](const std::string& n) { return find_spec(n); },
+                                                          &input_context);
         if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
         // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
@@ -313,19 +336,23 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                         "wait a few seconds and retry");
     }
 
-    // A read-only token narrows the server mode for this call only (restored afterwards).
+    // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
+    // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
+    // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
     struct ReadOnlyScope {
         const ReadOnlyOverride& hook;
         bool server_value;
         bool active;
-        ReadOnlyScope(const ReadOnlyOverride& h, bool narrow, bool server)
-            : hook(h), server_value(server), active(narrow && static_cast<bool>(h)) {
-            if (active) hook(true);
+        ReadOnlyScope(const ReadOnlyOverride& h, bool apply, bool value, bool server)
+            : hook(h), server_value(server), active(apply && static_cast<bool>(h)) {
+            if (active) hook(value);
         }
         ~ReadOnlyScope() {
             if (active) { try { hook(server_value); } catch (...) {} }
         }
-    } read_only_scope(read_only_override_, principal.read_only && !policy_.read_only, policy_.read_only);
+    } read_only_scope(read_only_override_,
+                      selection_input || (principal.read_only && !policy_.read_only),
+                      selection_input ? false : true, policy_.read_only);
 
     // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
     Policy effective = policy_;
@@ -379,6 +406,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
 
     // 5. invoke
+    if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
     const auto invoke_started = std::chrono::steady_clock::now();
     Result result = invoke(argv);
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
@@ -396,9 +424,14 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     bool tcode_left = false;
     if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
         std::string after;
+        std::string after_program, after_screen;
         const auto facts_started = std::chrono::steady_clock::now();
         try {
-            if (auto facts = facts_provider_(record.connection)) after = auth::normalize_tcode(facts->transaction);
+            if (auto facts = facts_provider_(record.connection)) {
+                after = auth::normalize_tcode(facts->transaction);
+                after_program = facts->program;
+                after_screen = facts->screen_number;
+            }
         } catch (...) {}
         note_step("facts_post", name, principal.name, facts_started, record.facts_post_ms);
         if (!after.empty()) {
@@ -408,8 +441,15 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 tcode_left = true;
                 set_tcode_blocked(principal_key(principal), true);
                 record.tcode_left_allowlist = true;
+                if (principal.allow_selection_input) set_initial_screen(principal_key(principal), std::nullopt);
             } else if (name == "gui_transaction_start" && result.status == Result::Status::Success) {
                 set_tcode_blocked(principal_key(principal), false);
+                // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
+                // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
+                if (principal.allow_selection_input) {
+                    auth::InitialScreen screen{after, after_program, after_screen};
+                    set_initial_screen(principal_key(principal), screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
+                }
             }
         }
     }
