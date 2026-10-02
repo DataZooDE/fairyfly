@@ -67,6 +67,25 @@ bool san_matches(const std::vector<std::string>& dns_names, const std::string& h
 }
 
 std::string firewall_rule_name(int port) { return "fairyfly MCP HTTPS " + std::to_string(port); }
+std::string firewall_internal_name(int port, const std::string& suffix) { return "fairyfly-mcp-https-" + std::to_string(port) + "-" + suffix; }
+bool firewall_name_ok(const std::string& name, int* port) {
+    static const std::string prefix = "fairyfly-mcp-https-";
+    if (name.rfind(prefix, 0) != 0) return false;
+    const size_t dash = name.find('-', prefix.size());
+    if (dash == std::string::npos || dash == prefix.size() || dash - prefix.size() > 5) return false;
+    int value = 0;
+    for (size_t i = prefix.size(); i < dash; ++i) {
+        if (name[i] < '0' || name[i] > '9') return false;
+        value = value * 10 + (name[i] - '0');
+    }
+    if (value < 1 || value > 65535) return false;
+    const std::string suffix = name.substr(dash + 1);
+    if (suffix.size() != 8) return false;
+    for (const char c : suffix)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    if (port) *port = value;
+    return true;
+}
 std::string cer_file_name(const std::string& hostname) { return "fairyfly-mcp-" + hostname + ".cer"; }
 
 std::string join_path(const std::string& dir, const std::string& leaf) {
@@ -195,7 +214,7 @@ std::optional<ErrorInfo> validate_teardown_options(TeardownOptions& o) {
 json Manifest::to_json() const {
     return json{{"schema", schema}, {"mode", mode}, {"hostname", hostname}, {"port", port}, {"prefixes", prefixes},
                 {"ipports", ipports}, {"sid", sid}, {"user", user}, {"cert_mode", cert_mode}, {"thumbprint", thumbprint},
-                {"cer_path", cer_path}, {"firewall_rule", firewall_rule}, {"appid", appid}, {"created_at", created_at},
+                {"cer_path", cer_path}, {"firewall_rule", firewall_rule}, {"firewall_rule_name", firewall_rule_name}, {"appid", appid}, {"created_at", created_at},
                 {"updated_at", updated_at}, {"config_created", config_created}, {"config_sha256", config_sha256},
                 {"urlacl_sddl", urlacl_sddl}, {"urlacl_created", urlacl_created}};
 }
@@ -215,6 +234,7 @@ std::optional<Manifest> Manifest::from_json(const json& j) {
         m.thumbprint = j.value("thumbprint", "");
         m.cer_path = j.value("cer_path", "");
         m.firewall_rule = j.value("firewall_rule", "");
+        m.firewall_rule_name = j.value("firewall_rule_name", "");
         m.appid = j.value("appid", "");
         m.created_at = j.value("created_at", "");
         m.updated_at = j.value("updated_at", "");
@@ -232,7 +252,7 @@ std::optional<Manifest> Manifest::from_json(const json& j) {
 bool Manifest::same_setup(const Manifest& o) const {
     return mode == o.mode && hostname == o.hostname && port == o.port && prefixes == o.prefixes && ipports == o.ipports &&
            sid == o.sid && user == o.user && cert_mode == o.cert_mode && thumbprint == o.thumbprint && cer_path == o.cer_path &&
-           firewall_rule == o.firewall_rule && appid == o.appid && config_created == o.config_created &&
+           firewall_rule == o.firewall_rule && firewall_rule_name == o.firewall_rule_name && appid == o.appid && config_created == o.config_created &&
            config_sha256 == o.config_sha256 && urlacl_sddl == o.urlacl_sddl && urlacl_created == o.urlacl_created;
 }
 
@@ -416,7 +436,8 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     p.cer_path = d.cer_path;
     p.manifest_path = d.manifest_path;
     p.config_path = d.config_path;
-    p.firewall_rule = firewall_rule_name(d.port);
+    p.firewall_display = firewall_rule_name(d.port);
+    p.firewall_rule = d.firewall_name;
 
     if (!d.identity_error.empty()) {
         p.error = ErrorInfo{"USER_NOT_FOUND", d.identity_error, 2};
@@ -568,14 +589,20 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     if (!tls) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--no-tls: loopback only"));
     } else if (!o.open_firewall) {
-        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_rule, "skipped", "--open-firewall not given"));
+        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "skipped", "--open-firewall not given"));
         p.diagnosis.push_back({"firewall", "skip", "not requested"});
     } else if (d.firewall_exists) {
-        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_rule, "unchanged", "rule exists"));
-        p.diagnosis.push_back({"firewall", "ok", "rule '" + p.firewall_rule + "' exists"});
+        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "unchanged", "rule " + p.firewall_rule + " exists"));
+        p.diagnosis.push_back({"firewall", "ok", "rule '" + p.firewall_display + "' (" + p.firewall_rule + ") exists"});
+    } else if (d.firewall_display_foreign) {
+        // Not ours: never claimed, never duplicated, never removed by teardown.
+        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "skipped", "a rule with this name already exists and was not created by fairyfly; left untouched"));
+        p.diagnosis.push_back({"firewall", "info", "a rule named '" + p.firewall_display + "' exists and was not created by fairyfly setup"});
+        p.human.push_back({"firewall_foreign", "A firewall rule named '" + p.firewall_display + "' already exists and was not created by 'mcp setup', so it was neither changed nor duplicated. Check that it allows inbound TCP " +
+                                                   std::to_string(d.port) + ", or remove/rename it and run setup with --open-firewall again."});
     } else {
-        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_rule, "would_create", "inbound TCP " + std::to_string(d.port), true));
-        p.diagnosis.push_back({"firewall", "missing", "rule '" + p.firewall_rule + "' does not exist"});
+        p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "would_create", "inbound TCP " + std::to_string(d.port) + " (rule name " + p.firewall_rule + ")", true));
+        p.diagnosis.push_back({"firewall", "missing", "rule '" + p.firewall_display + "' does not exist"});
     }
 
     // ---- certificate_export ----
@@ -638,7 +665,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         m.cert_mode = !tls ? "none" : (o.cert_mode == CertMode::SelfSigned ? "self-signed" : "thumbprint");
         m.thumbprint = cert_thumb;
         m.cer_path = tls ? d.cer_path : "";
-        m.firewall_rule = tls && o.open_firewall ? p.firewall_rule : "";
+        {
+            const bool ours = tls && o.open_firewall && !d.firewall_display_foreign && !p.firewall_rule.empty();
+            m.firewall_rule = ours ? p.firewall_display : "";
+            m.firewall_rule_name = ours ? p.firewall_rule : "";
+        }
         m.appid = tls ? normalize_app_id(kAppId) : "";
         if (const StepItem* cs = p.step("config"); cs && cs->status == "would_create") {
             m.config_created = true;
@@ -668,7 +699,10 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         } else {
             Manifest cur = *d.manifest;
             // A firewall rule created by an earlier run stays recorded even when this run did not ask for it.
-            if (m.firewall_rule.empty()) p.manifest.firewall_rule = cur.firewall_rule;
+            if (m.firewall_rule.empty()) {
+                p.manifest.firewall_rule = cur.firewall_rule;
+                p.manifest.firewall_rule_name = cur.firewall_rule_name;
+            }
             p.manifest.created_at = cur.created_at;
             // The config file recorded by an earlier run stays recorded unless this run creates a fresh one.
             if (!p.manifest.config_created) {
@@ -714,7 +748,7 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         p.human.push_back({"dns", "Make '" + d.hostname + "' resolve to this machine on every client (DNS record, or a hosts file entry)."});
         if (!o.open_firewall)
             p.human.push_back({"firewall", "Open inbound TCP " + std::to_string(d.port) + " in the firewall for the clients, e.g.: netsh advfirewall firewall add rule name=\"" +
-                                               p.firewall_rule + "\" dir=in action=allow protocol=TCP localport=" + std::to_string(d.port) + " (or re-run setup with --open-firewall)."});
+                                               p.firewall_display + "\" dir=in action=allow protocol=TCP localport=" + std::to_string(d.port) + " (or re-run setup with --open-firewall)."});
     }
     if (d.tls_probe.status == "ok" && !d.tls_probe.protocol.empty() && (d.tls_probe.protocol == "TLS 1.0" || d.tls_probe.protocol == "TLS 1.1" || d.tls_probe.protocol.rfind("SSL", 0) == 0))
         p.human.push_back({"schannel", "The server negotiated " + d.tls_probe.protocol + ": raise the machine's Schannel policy to TLS 1.2 or newer (registry SCHANNEL\\Protocols)."});
@@ -806,17 +840,22 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
             p.human.push_back({"urlacl_foreign", text});
         }
     }
-    // firewall
-    const bool recorded_rule = have_manifest && !d.manifest->firewall_rule.empty();
+    // firewall: only the rule whose unique internal Name the manifest records (never by display name)
     if (o.keep_firewall) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--keep-firewall"));
-    } else if (have_manifest && !recorded_rule) {
-        p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "setup did not create one"));
-    } else if (d.firewall_exists) {
+    } else if (!have_manifest) {
+        p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "no manifest: nothing shows that a rule was created by setup"));
+    } else if (!d.firewall_rule.empty() && d.firewall_exists) {
         p.teardown.firewall_rule = d.firewall_rule;
         p.steps.push_back(make_step("firewall", "Remove firewall rule " + d.firewall_rule, "would_remove", "inbound TCP " + std::to_string(d.port), true));
+    } else if (!d.firewall_rule.empty()) {
+        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "rule " + d.firewall_rule + " is already gone"));
+    } else if (!d.firewall_legacy_display.empty()) {
+        p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "recorded by display name only (older setup); cannot tell it is the one setup created"));
+        p.human.push_back({"firewall_legacy", "The manifest records a firewall rule by display name only ('" + d.firewall_legacy_display +
+                                                   "'). It was not removed because that name could belong to somebody else's rule. If it is yours: Remove-NetFirewallRule -DisplayName '" + d.firewall_legacy_display + "'"});
     } else {
-        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
+        p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "setup did not create one"));
     }
     // certificate
     if (o.keep_cert) {

@@ -197,24 +197,33 @@ struct FakeCertStore : CertStore {
 };
 
 struct FakeFirewall : Firewall {
+    struct Rule {
+        std::string display;
+        int port = 0;
+    };
     explicit FakeFirewall(FakeElevator& e) : elevator(e) {}
     FakeElevator& elevator;
-    std::map<std::string, int> rules;
+    std::map<std::string, Rule> rules;               ///< internal Name -> rule
     std::vector<std::string> calls;
-    bool exists(const std::string& rule_name) override { return rules.count(rule_name) != 0; }
-    std::string ensure(const std::string& rule_name, int port) override {
+    bool exists(const std::string& name) override { return rules.count(name) != 0; }
+    bool display_name_exists(const std::string& display_name) override {
+        for (const auto& [name, rule] : rules)
+            if (rule.display == display_name) return true;
+        return false;
+    }
+    std::string ensure(const std::string& name, const std::string& display_name, int port) override {
         if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_ensure " + rule_name);
-        const auto it = rules.find(rule_name);
-        if (it == rules.end()) { rules[rule_name] = port; return "created"; }
-        if (it->second == port) return "unchanged";
-        it->second = port;
+        calls.push_back("firewall_ensure " + name);
+        const auto it = rules.find(name);
+        if (it == rules.end()) { rules[name] = Rule{display_name, port}; return "created"; }
+        if (it->second.port == port) return "unchanged";
+        it->second.port = port;
         return "updated";
     }
-    bool remove(const std::string& rule_name) override {
+    bool remove(const std::string& name) override {
         if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_remove " + rule_name);
-        return rules.erase(rule_name) > 0;
+        calls.push_back("firewall_remove " + name);
+        return rules.erase(name) > 0;
     }
 };
 

@@ -92,13 +92,19 @@ public:
 };
 
 // ---- firewall ------------------------------------------------------------------------------------
+/// Rules are identified by their internal Name ("fairyfly-mcp-https-<port>-<8 hex>", unique per setup run), never by the
+/// human-readable display name, so setup and teardown only ever touch a rule fairyfly itself created.
 class Firewall {
 public:
     virtual ~Firewall() = default;
-    virtual bool exists(const std::string& rule_name) = 0;
-    /// Inbound TCP allow rule; returns created | updated | unchanged.
-    virtual std::string ensure(const std::string& rule_name, int port) = 0;
-    virtual bool remove(const std::string& rule_name) = 0;
+    /// A rule with this internal Name exists.
+    virtual bool exists(const std::string& name) = 0;
+    /// A rule with this DisplayName exists (whoever created it).
+    virtual bool display_name_exists(const std::string& display_name) = 0;
+    /// Inbound TCP allow rule identified by `name`; created when no rule has this Name (an existing rule with the same
+    /// display name is not touched). Returns created | updated | unchanged.
+    virtual std::string ensure(const std::string& name, const std::string& display_name, int port) = 0;
+    virtual bool remove(const std::string& name) = 0;
 };
 
 // ---- elevation ------------------------------------------------------------------------------------

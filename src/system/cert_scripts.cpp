@@ -67,15 +67,21 @@ if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -DeleteKey; O
 else { Out-Json ([ordered]@{ removed = $false }) }
 )PS";
 
+// Rules are addressed by their internal Name only (validated, never a wildcard); the display name is for humans.
 const std::string kFirewallExists = std::string(kPsPreamble) + R"PS(
-$r = Get-NetFirewallRule -DisplayName $p.rule_name -ErrorAction SilentlyContinue
+$r = Get-NetFirewallRule -Name $p.name -ErrorAction SilentlyContinue
+Out-Json ([ordered]@{ exists = ($null -ne $r) })
+)PS";
+
+const std::string kFirewallDisplayExists = std::string(kPsPreamble) + R"PS(
+$r = Get-NetFirewallRule -DisplayName $p.display_name -ErrorAction SilentlyContinue
 Out-Json ([ordered]@{ exists = ($null -ne $r) })
 )PS";
 
 const std::string kFirewallEnsure = std::string(kPsPreamble) + R"PS(
-$r = Get-NetFirewallRule -DisplayName $p.rule_name -ErrorAction SilentlyContinue
+$r = Get-NetFirewallRule -Name $p.name -ErrorAction SilentlyContinue
 if ($null -eq $r) {
-  New-NetFirewallRule -DisplayName $p.rule_name -Direction Inbound -Action Allow -Protocol TCP -LocalPort ([int]$p.port) -Profile Any | Out-Null
+  New-NetFirewallRule -Name $p.name -DisplayName $p.display_name -Direction Inbound -Action Allow -Protocol TCP -LocalPort ([int]$p.port) -Profile Any | Out-Null
   Out-Json ([ordered]@{ change = 'created' })
 } else {
   $pf = $r | Get-NetFirewallPortFilter
@@ -85,7 +91,7 @@ if ($null -eq $r) {
 )PS";
 
 const std::string kFirewallRemove = std::string(kPsPreamble) + R"PS(
-$r = Get-NetFirewallRule -DisplayName $p.rule_name -ErrorAction SilentlyContinue
+$r = Get-NetFirewallRule -Name $p.name -ErrorAction SilentlyContinue
 if ($null -eq $r) { Out-Json ([ordered]@{ removed = $false }) }
 else { $r | Remove-NetFirewallRule; Out-Json ([ordered]@{ removed = $true }) }
 )PS";
@@ -104,10 +110,12 @@ std::string export_cert_params(const std::string& thumbprint, const std::string&
 
 std::string remove_cert_params(const std::string& thumbprint) { return json{{"thumbprint", thumbprint}}.dump(); }
 
-std::string firewall_rule_params(const std::string& rule_name) { return json{{"rule_name", rule_name}}.dump(); }
+std::string firewall_name_params(const std::string& name) { return json{{"name", name}}.dump(); }
 
-std::string firewall_ensure_params(const std::string& rule_name, int port) {
-    return json{{"rule_name", rule_name}, {"port", port}}.dump();
+std::string firewall_display_params(const std::string& display_name) { return json{{"display_name", display_name}}.dump(); }
+
+std::string firewall_ensure_params(const std::string& name, const std::string& display_name, int port) {
+    return json{{"name", name}, {"display_name", display_name}, {"port", port}}.dump();
 }
 
 const std::vector<std::pair<std::string, std::string>>& script_catalog() {
@@ -118,6 +126,7 @@ const std::vector<std::pair<std::string, std::string>>& script_catalog() {
         {"export_cert", kExportCert},
         {"remove_cert", kRemoveCert},
         {"firewall_exists", kFirewallExists},
+        {"firewall_display_exists", kFirewallDisplayExists},
         {"firewall_ensure", kFirewallEnsure},
         {"firewall_remove", kFirewallRemove},
     };

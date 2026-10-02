@@ -14,29 +14,39 @@ class RealFirewall : public Firewall {
 public:
     explicit RealFirewall(sys::PowerShellRunner& runner) : ps_(runner) {}
 
-    bool exists(const std::string& rule_name) override {
-        check(rule_name);
-        return run(sys::kFirewallExists, sys::firewall_rule_params(rule_name)).value("exists", false);
+    bool exists(const std::string& name) override {
+        check_name(name);
+        return run(sys::kFirewallExists, sys::firewall_name_params(name)).value("exists", false);
     }
-    std::string ensure(const std::string& rule_name, int port) override {
-        check(rule_name);
+    bool display_name_exists(const std::string& display_name) override {
+        check_display(display_name);
+        return run(sys::kFirewallDisplayExists, sys::firewall_display_params(display_name)).value("exists", false);
+    }
+    std::string ensure(const std::string& name, const std::string& display_name, int port) override {
+        check_name(name);
+        check_display(display_name);
         if (const auto e = port_error(port)) throw HostError("INVALID_ARGUMENT", *e);
-        if (rule_name != firewall_rule_name(port)) throw HostError("INVALID_ARGUMENT", "rule name does not match the port");
-        return run(sys::kFirewallEnsure, sys::firewall_ensure_params(rule_name, port)).value("change", "unchanged");
+        int name_port = 0;
+        if (!firewall_name_ok(name, &name_port) || name_port != port || display_name != firewall_rule_name(port))
+            throw HostError("INVALID_ARGUMENT", "rule name does not match the port");
+        return run(sys::kFirewallEnsure, sys::firewall_ensure_params(name, display_name, port)).value("change", "unchanged");
     }
-    bool remove(const std::string& rule_name) override {
-        check(rule_name);
-        return run(sys::kFirewallRemove, sys::firewall_rule_params(rule_name)).value("removed", false);
+    bool remove(const std::string& name) override {
+        check_name(name);
+        return run(sys::kFirewallRemove, sys::firewall_name_params(name)).value("removed", false);
     }
 
 private:
-    static void check(const std::string& rule_name) {
-        // Only the fixed "fairyfly MCP HTTPS <port>" names are ever handled.
+    // Only the names fairyfly generates are ever handled ("fairyfly-mcp-https-<port>-<8 hex>", "fairyfly MCP HTTPS <port>").
+    static void check_name(const std::string& name) {
+        if (!firewall_name_ok(name)) throw HostError("INVALID_ARGUMENT", "unexpected firewall rule name");
+    }
+    static void check_display(const std::string& display_name) {
         static const std::string prefix = "fairyfly MCP HTTPS ";
-        if (rule_name.rfind(prefix, 0) != 0 || rule_name.size() == prefix.size() || rule_name.size() > prefix.size() + 5)
-            throw HostError("INVALID_ARGUMENT", "unexpected firewall rule name");
-        for (size_t i = prefix.size(); i < rule_name.size(); ++i)
-            if (rule_name[i] < '0' || rule_name[i] > '9') throw HostError("INVALID_ARGUMENT", "unexpected firewall rule name");
+        if (display_name.rfind(prefix, 0) != 0 || display_name.size() == prefix.size() || display_name.size() > prefix.size() + 5)
+            throw HostError("INVALID_ARGUMENT", "unexpected firewall display name");
+        for (size_t i = prefix.size(); i < display_name.size(); ++i)
+            if (display_name[i] < '0' || display_name[i] > '9') throw HostError("INVALID_ARGUMENT", "unexpected firewall display name");
     }
     nlohmann::json run(const std::string& script, const std::string& params) {
         try {

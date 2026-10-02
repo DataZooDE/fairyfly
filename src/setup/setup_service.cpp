@@ -164,10 +164,24 @@ Diagnosis diagnose(Hosts& h, const Options& o) {
         }
     }
     if (d.tls && o.open_firewall) {
+        // Identified by the unique internal Name recorded by setup; a rule that only shares the display name is not ours.
+        std::string recorded;
+        if (d.manifest && d.manifest->port == d.port && !d.manifest->firewall_rule_name.empty()) {
+            int name_port = 0;
+            if (firewall_name_ok(d.manifest->firewall_rule_name, &name_port) && name_port == d.port) recorded = d.manifest->firewall_rule_name;
+        }
         try {
-            d.firewall_exists = h.firewall.exists(firewall_rule_name(d.port));
+            if (!recorded.empty() && h.firewall.exists(recorded)) {
+                d.firewall_exists = true;
+                d.firewall_name = recorded;
+            } else {
+                d.firewall_name = firewall_internal_name(d.port, auth::random_hex(auth::random_bytes, 4));
+                d.firewall_display_foreign = h.firewall.display_name_exists(firewall_rule_name(d.port));
+            }
         } catch (const std::exception&) {
             d.firewall_exists = false;
+            d.firewall_display_foreign = false;
+            if (d.firewall_name.empty()) d.firewall_name = firewall_internal_name(d.port, auth::random_hex(auth::random_bytes, 4));
         }
     }
     d.port_listening = h.sys.tcp_listening("127.0.0.1", d.port);
@@ -233,13 +247,18 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
                 if (d.manifest && std::find(d.manifest->ipports.begin(), d.manifest->ipports.end(), ipport) != d.manifest->ipports.end()) d.ssl_ours.push_back(ipport);
             }
         }
-        if (d.firewall_rule.empty() || port == d.port) d.firewall_rule = firewall_rule_name(port);
-        try {
-            if (h.firewall.exists(firewall_rule_name(port))) {
-                d.firewall_exists = true;
-                d.firewall_rule = firewall_rule_name(port);
+    }
+    // firewall: only the rule the manifest records by its unique internal Name
+    if (d.manifest) {
+        if (firewall_name_ok(d.manifest->firewall_rule_name)) {
+            d.firewall_rule = d.manifest->firewall_rule_name;
+            try {
+                d.firewall_exists = h.firewall.exists(d.firewall_rule);
+            } catch (const std::exception&) {
+                d.firewall_exists = true;   // cannot tell without elevation: the elevated child removes by Name only if it is there
             }
-        } catch (const std::exception&) {
+        } else if (!d.manifest->firewall_rule.empty()) {
+            d.firewall_legacy_display = d.manifest->firewall_rule;
         }
     }
     if (d.manifest && !d.manifest->thumbprint.empty()) {
@@ -278,6 +297,7 @@ json make_elevated_work(const Plan& p) {
         w["replace_urlacl"] = p.replace_urlacl;
         w["force_binding"] = p.force_binding;
         w["firewall_rule"] = p.open_firewall ? p.firewall_rule : "";
+        w["firewall_display"] = p.open_firewall ? p.firewall_display : "";
     } else {
         w["ipports"] = p.teardown.ipports;
         w["prefixes"] = p.teardown.prefixes;
@@ -302,9 +322,10 @@ std::optional<std::string> validate_work(const json& w) {
     if (!w.contains("steps") || !w["steps"].is_array()) return "steps missing";
     for (const auto& s : w["steps"])
         if (!s.is_string() || !known.count(s.get<std::string>())) return "unknown step";
-    auto rule_ok = [](const std::string& rule) {
+    auto rule_ok = [](const std::string& rule) { return rule.empty() || firewall_name_ok(rule); };
+    auto display_ok = [](const std::string& display) {
         static const std::regex re(R"(^fairyfly MCP HTTPS \d{1,5}$)");
-        return rule.empty() || std::regex_match(rule, re);
+        return display.empty() || std::regex_match(display, re);
     };
     try {
         if (op == "setup") {
@@ -315,6 +336,12 @@ std::optional<std::string> validate_work(const json& w) {
                 if (auto e = thumbprint_error(t)) return "thumbprint: " + *e;
             if (!sid_ok(w.at("sid").get<std::string>())) return "sid is not a SID";
             if (!rule_ok(w.value("firewall_rule", ""))) return "firewall rule name";
+            if (!display_ok(w.value("firewall_display", ""))) return "firewall display name";
+            if (!w.value("firewall_rule", "").empty()) {
+                int name_port = 0;
+                firewall_name_ok(w.value("firewall_rule", ""), &name_port);
+                if (name_port != w.at("port").get<int>() || w.value("firewall_display", "") != firewall_rule_name(name_port)) return "firewall rule does not match the port";
+            }
         } else {
             for (const auto& ip : w.at("ipports")) {
                 int port = 0;
@@ -356,6 +383,7 @@ json execute_setup_work(const json& w, Hosts& h) {
     std::string failed;
     std::vector<std::string> bound;   // address families that ended up bound
     std::string urlacl_sddl;          // SDDL after this run created/changed the reservation
+    bool firewall_created = false;    // the firewall rule (by internal Name) is in place and ours
     auto fail = [&](const std::string& id, const std::string& why) {
         steps.push_back(step_json(id, "failed", why));
         failed = id;
@@ -433,8 +461,17 @@ json execute_setup_work(const json& w, Hosts& h) {
     // firewall
     if (wants(w, "firewall") && failed.empty()) {
         try {
-            const std::string change = h.firewall.ensure(w.value("firewall_rule", ""), port);
-            steps.push_back(step_json("firewall", change, w.value("firewall_rule", "")));
+            const std::string name = w.value("firewall_rule", "");
+            const std::string display = w.value("firewall_display", "");
+            if (name.empty()) throw HostError("INVALID_PLAN", "no firewall rule name");
+            if (!h.firewall.exists(name) && h.firewall.display_name_exists(display)) {
+                // somebody created a rule with this display name in the meantime: never claim it, never add a second one
+                steps.push_back(step_json("firewall", "skipped", "a rule named '" + display + "' already exists and was not created by fairyfly; left untouched"));
+            } else {
+                const std::string change = h.firewall.ensure(name, display, port);
+                steps.push_back(step_json("firewall", change, name));
+                firewall_created = true;
+            }
         } catch (const std::exception& e) {
             fail("firewall", e.what());
         }
@@ -442,6 +479,7 @@ json execute_setup_work(const json& w, Hosts& h) {
     json out{{"ok", failed.empty()}, {"steps", steps}, {"thumbprint", thumb}};
     if (!bound.empty()) out["bound_ipports"] = bound;
     if (!urlacl_sddl.empty()) out["urlacl_sddl"] = urlacl_sddl;
+    if (firewall_created) out["firewall_rule"] = w.value("firewall_rule", "");
     if (!failed.empty()) out["error"] = {{"code", "STEP_FAILED"}, {"message", "step " + failed + " failed"}};
     return out;
 }
@@ -805,6 +843,14 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     }
     if (!any_failed && pending("manifest")) {
         Manifest m = plan.manifest;
+        if (const StepItem* planned = plan.step("firewall"); planned && planned->status == "would_create" && result.value("firewall_rule", std::string()) != plan.firewall_rule) {
+            m.firewall_rule.clear();   // the rule was not created by this run (someone else's rule appeared): do not claim it
+            m.firewall_rule_name.clear();
+            if (const auto previous = load_manifest(h.sys, plan.manifest_path); previous) {
+                m.firewall_rule = previous->firewall_rule;
+                m.firewall_rule_name = previous->firewall_rule_name;
+            }
+        }
         if (const std::string recorded = result.value("urlacl_sddl", std::string()); !recorded.empty()) m.urlacl_sddl = recorded;
         m.thumbprint = plan.tls && plan.cert_mode != CertMode::NoTls ? thumb : "";
         const std::string now = iso_utc(h.sys.now());

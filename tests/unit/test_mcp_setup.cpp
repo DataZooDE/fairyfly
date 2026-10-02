@@ -225,7 +225,10 @@ TEST_CASE("script catalog: constant PowerShell without user-input interpolation"
     // parameters travel as JSON only, and round-trip exactly
     CHECK(json::parse(find_self_signed_params(evil))["hostname"] == evil);
     CHECK(json::parse(export_cert_params(evil, evil))["path"] == evil);
-    CHECK(json::parse(firewall_ensure_params(evil, 8443))["rule_name"] == evil);
+    CHECK(json::parse(firewall_ensure_params(evil, evil, 8443))["name"] == evil);
+    CHECK(json::parse(firewall_ensure_params(evil, evil, 8443))["display_name"] == evil);
+    CHECK(json::parse(firewall_name_params(evil))["name"] == evil);
+    CHECK(json::parse(firewall_display_params(evil))["display_name"] == evil);
     for (const auto& [name, script] : script_catalog()) {
         INFO(name);
         CHECK(script.find(evil) == std::string::npos);
@@ -242,7 +245,7 @@ TEST_CASE("script catalog: constant PowerShell without user-input interpolation"
     }
     // building a script twice with different inputs yields the identical text
     CHECK(kFindSelfSigned == kFindSelfSigned);
-    CHECK(script_catalog().size() == 8);
+    CHECK(script_catalog().size() == 9);
 }
 
 // ---- plan matrix -------------------------------------------------------------------------------------------------
@@ -958,7 +961,9 @@ TEST_CASE("teardown removes exactly what setup created", "[mcp_setup]") {
     o.open_firewall = true;
     REQUIRE(r.setup(o) == 0);
     const std::string thumb = r.m.certs.certs[0].thumbprint;
-    REQUIRE(r.m.firewall.rules.count("fairyfly MCP HTTPS 8443") == 1);
+    REQUIRE(r.m.firewall.rules.size() == 1);
+    CHECK(r.m.firewall.rules.begin()->second.display == "fairyfly MCP HTTPS 8443");
+    CHECK(firewall_name_ok(r.m.firewall.rules.begin()->first));
     // a foreign binding on another port and an unrelated certificate stay
     r.m.http.bindings["0.0.0.0:9999"] = SslBinding{"0.0.0.0:9999", kThumb, "{11111111-2222-3333-4444-555555555555}", "MY"};
     r.m.certs.certs.push_back(good_cert(kThumb, "other.example"));
@@ -1462,4 +1467,139 @@ TEST_CASE("teardown deletes the exported .cer only at the derived path and only 
         CHECK(r.m.sys.files.count(kCerPath) == 1);
         CHECK(has_human(r.out.str(), "cer_file_foreign"));
     }
+}
+
+// ---- firewall rule ownership ----------------------------------------------------------------------------------------
+TEST_CASE("firewall rule names: unique internal Name, human display name", "[mcp_setup]") {
+    CHECK(firewall_internal_name(8443, "0a1b2c3d") == "fairyfly-mcp-https-8443-0a1b2c3d");
+    int port = 0;
+    CHECK(firewall_name_ok("fairyfly-mcp-https-8443-0a1b2c3d", &port));
+    CHECK(port == 8443);
+    for (const char* bad : {"fairyfly MCP HTTPS 8443", "fairyfly-mcp-https-8443", "fairyfly-mcp-https-8443-0A1B2C3D", "fairyfly-mcp-https-0-0a1b2c3d",
+                            "fairyfly-mcp-https-99999-0a1b2c3d", "fairyfly-mcp-https-8443-0a1b2c3", "fairyfly-mcp-https-8443-0a1b2c3d*", "*", "",
+                            "fairyfly-mcp-https-84a3-0a1b2c3d"})
+        CHECK_FALSE(firewall_name_ok(bad));
+}
+
+TEST_CASE("setup --open-firewall creates a uniquely named rule and records the Name", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    REQUIRE(r.m.firewall.rules.size() == 1);
+    const std::string name = r.m.firewall.rules.begin()->first;
+    CHECK(firewall_name_ok(name));
+    CHECK(name != "fairyfly MCP HTTPS 8443");
+    CHECK(r.m.firewall.rules.begin()->second.display == "fairyfly MCP HTTPS 8443");
+    CHECK(r.m.firewall.rules.begin()->second.port == 8443);
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->firewall_rule_name == name);
+    CHECK(m->firewall_rule == "fairyfly MCP HTTPS 8443");
+    // a second run recognises its own rule and does nothing
+    const auto calls = r.m.firewall.calls.size();
+    CHECK(r.setup(o) == 0);
+    CHECK(r.out.str() == "nothing - already set up.\n");
+    CHECK(r.m.firewall.calls.size() == calls);
+    CHECK(r.m.firewall.rules.size() == 1);
+}
+
+TEST_CASE("setup: a pre-existing rule with the same display name is not claimed or duplicated", "[mcp_setup]") {
+    Rig r;
+    r.m.firewall.rules["Custom-Admin-Rule"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    o.json = true;
+    REQUIRE(r.setup(o) == 0);
+    CHECK(r.m.firewall.rules.size() == 1);   // no second rule
+    CHECK(r.m.firewall.calls.empty());
+    CHECK(step_status(r.out.str(), "firewall") == "skipped");
+    CHECK(has_human(r.out.str(), "firewall_foreign"));
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->firewall_rule.empty());
+    CHECK(m->firewall_rule_name.empty());
+    // and teardown never removes it
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count("Custom-Admin-Rule") == 1);
+}
+
+TEST_CASE("teardown removes the firewall rule by its recorded Name only", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    const std::string ours = r.m.firewall.rules.begin()->first;
+    // a human-made rule with the same display name appears later
+    r.m.firewall.rules["Hand-Made"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count(ours) == 0);
+    CHECK(r.m.firewall.rules.count("Hand-Made") == 1);
+    REQUIRE(r.m.firewall.calls.size() >= 1);
+    CHECK(r.m.firewall.calls.back() == "firewall_remove " + ours);
+}
+
+TEST_CASE("teardown: a manifest that only knows the display name (older setup) removes no firewall rule", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+    manifest.erase("firewall_rule_name");
+    r.m.sys.files[kManifestPath] = manifest.dump();
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.size() == 1);
+    CHECK(step_status(r.out.str(), "firewall") == "skipped");
+    CHECK(has_human(r.out.str(), "firewall_legacy"));
+}
+
+TEST_CASE("teardown: a tampered manifest Name outside the fairyfly pattern is never used", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    r.m.firewall.rules["Core Networking - DNS (UDP-Out)"] = FakeFirewall::Rule{"Core Networking - DNS (UDP-Out)", 53};
+    json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+    manifest["firewall_rule_name"] = "Core Networking - DNS (UDP-Out)";
+    r.m.sys.files[kManifestPath] = manifest.dump();
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count("Core Networking - DNS (UDP-Out)") == 1);
+}
+
+TEST_CASE("elevated child validates firewall names and never claims a foreign display name", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    Hosts h = r.m.hosts();
+    json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
+                 {"thumbprint", ""}, {"create_cert", false}, {"valid_days", 730}, {"steps", json::array({"firewall"})},
+                 {"firewall_rule", "fairyfly-mcp-https-8443-0a1b2c3d"}, {"firewall_display", "fairyfly MCP HTTPS 8443"}};
+    for (const auto& [field, value] : std::vector<std::pair<std::string, json>>{
+             {"firewall_rule", "fairyfly MCP HTTPS 8443"}, {"firewall_rule", "fairyfly-mcp-https-9999-0a1b2c3d"}, {"firewall_display", "evil"},
+             {"firewall_display", "fairyfly MCP HTTPS 9999"}}) {
+        json bad = plan;
+        bad[field] = value;
+        INFO(field << "=" << value.dump());
+        CHECK(execute_elevated_work(bad, h)["error"]["code"] == "INVALID_PLAN");
+    }
+    CHECK(r.m.firewall.calls.empty());
+    // somebody else's rule with the display name appeared after the plan was made
+    r.m.firewall.rules["Other"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    const json result = execute_elevated_work(plan, h);
+    CHECK(result["ok"] == true);
+    CHECK(result["steps"][0]["status"] == "skipped");
+    CHECK_FALSE(result.contains("firewall_rule"));
+    CHECK(r.m.firewall.rules.size() == 1);
+    // without that rule it is created under the unique Name
+    r.m.firewall.rules.clear();
+    CHECK(execute_elevated_work(plan, h)["steps"][0]["status"] == "created");
+    CHECK(r.m.firewall.rules.count("fairyfly-mcp-https-8443-0a1b2c3d") == 1);
 }

@@ -74,7 +74,8 @@ struct Manifest {
     std::string cert_mode;                ///< self-signed | thumbprint | none
     std::string thumbprint;
     std::string cer_path;
-    std::string firewall_rule;            ///< empty = no rule created
+    std::string firewall_rule;            ///< display name of the rule setup created ("fairyfly MCP HTTPS <port>"); empty = none
+    std::string firewall_rule_name;       ///< its unique internal Name ("fairyfly-mcp-https-<port>-<8 hex>"); teardown removes by this only
     std::string appid;
     std::string created_at;
     std::string updated_at;
@@ -110,7 +111,9 @@ struct Diagnosis {
     std::map<std::string, std::optional<SslBinding>> ssl;     ///< per ipport
     CertInfo cert;                        ///< the certificate that would be used (by thumbprint or self-signed name)
     CerState cer = CerState::Missing;
-    bool firewall_exists = false;
+    bool firewall_exists = false;         ///< the rule setup recorded (by internal Name) exists
+    bool firewall_display_foreign = false; ///< a rule with the display name exists that setup did not create
+    std::string firewall_name;            ///< internal Name to use: the recorded one, else a fresh unique one
     bool port_listening = false;
     bool config_exists = false;
     bool config_unreadable = false;
@@ -181,7 +184,8 @@ struct Plan {
     bool replace_urlacl = false;
     bool force_binding = false;
     bool open_firewall = false;
-    std::string firewall_rule;
+    std::string firewall_rule;            ///< internal Name of the rule (existing recorded one or a fresh unique one)
+    std::string firewall_display;         ///< display name for humans
     std::string cer_path;
     std::string manifest_path;
     std::string config_path;
@@ -207,7 +211,8 @@ struct TeardownDiagnosis {
     std::map<std::string, std::string> urlacl_sddl;   ///< current SDDL per reserved prefix (absent when it could not be read)
     std::vector<std::string> ssl_ours;            ///< ipports bound with our AppId
     std::vector<std::string> ssl_foreign;         ///< ipports bound by somebody else (never touched)
-    std::string firewall_rule;                    ///< the rule name to look at
+    std::string firewall_rule;                    ///< internal Name recorded in the manifest (empty when none/invalid)
+    std::string firewall_legacy_display;          ///< display name recorded by an older setup without an internal Name
     bool firewall_exists = false;
     CertInfo cert;                                ///< certificate named in the manifest
     bool cer_exists = false;
@@ -233,7 +238,9 @@ std::string sddl_for_sid(const std::string& sid);                           ///<
 bool sddl_covers_sid(const std::string& sddl, const std::string& sid);
 std::string merge_sddl(const std::string& existing, const std::string& sid);
 bool san_matches(const std::vector<std::string>& dns_names, const std::string& hostname);
-std::string firewall_rule_name(int port);                                   ///< fairyfly MCP HTTPS <port>
+std::string firewall_rule_name(int port);                                   ///< display name: fairyfly MCP HTTPS <port>
+std::string firewall_internal_name(int port, const std::string& suffix);    ///< fairyfly-mcp-https-<port>-<suffix>
+bool firewall_name_ok(const std::string& name, int* port = nullptr);       ///< fairyfly-mcp-https-<port>-<8 lower-case hex>
 std::string cer_file_name(const std::string& hostname);                     ///< fairyfly-mcp-<host>.cer
 std::string join_path(const std::string& dir, const std::string& leaf);
 std::string iso_utc(long long unix_seconds);
