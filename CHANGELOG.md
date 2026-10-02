@@ -41,6 +41,7 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Security
 
+- Selection input (`--allow-selection-input`) hardening: the recorded initial screen is bound to the connection of the `gui_transaction_start` as well (a fill on another connection is `INPUT_SCREEN_DENIED`) and is cleared by the first later call of the token whose facts are empty or show another screen, so typing is only possible between the start and the first navigation (returning with F3 no longer re-enables it).
 - Remote MCP T-code allowlist hardening: for a token with `--tcode`, `gui_menu_select` is denied and `gui_key_send` accepts only enter, f4, f8 and the page keys unless the token was created with the new `--allow-navigation` (only valid with `--tcode`, shown by `token list`). After every screen-acting call the transaction is read again; a token that ended outside its allowlist gets `tcode_left_allowlist` in the result (and the audit record) and its next screen call is denied until an allowed `gui_transaction_start` succeeds. Tokens without `--tcode` are unchanged.
 
 ## 0.2.0

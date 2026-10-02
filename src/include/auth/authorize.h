@@ -39,6 +39,7 @@ struct InitialScreen {
     std::string transaction;     ///< normalized T-code that was open after the start
     std::string program;         ///< Info.Program
     std::string screen_number;   ///< Info.ScreenNumber
+    std::optional<int> connection; ///< connection the start targeted (explicit, sticky or default); typing must target the same one
     bool known() const { return !transaction.empty() && !program.empty() && !screen_number.empty(); }
 };
 
@@ -46,6 +47,7 @@ struct InitialScreen {
 struct SelectionInputContext {
     std::string program;                  ///< pre-call facts: current Info.Program ("" = unknown)
     std::string screen_number;            ///< pre-call facts: current Info.ScreenNumber ("" = unknown)
+    std::optional<int> connection;        ///< connection this fill targets (explicit, sticky or default as the dispatcher resolves it)
     std::optional<InitialScreen> initial; ///< recorded by the principal's last successful gui_transaction_start
 };
 
@@ -79,7 +81,7 @@ using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_na
 ///    attach the session or start another transaction.
 ///  - selection input (principal.allow_selection_input, see selection_input_path): gui_element_fill on a read-only token/
 ///    server is allowed ONLY when the token has a T-code allowlist, the open transaction is allowlisted, the current
-///    (program, screen number) equals `input.initial` exactly (unknown = deny) and the target is a plain input field
+///    (program, screen number) and the connection equal `input.initial` exactly (unknown = deny) and the target is a plain input field
 ///    (no row/column/checkbox/commit, not the command field, not a password/credential field). Refusals:
 ///    INPUT_NOT_ALLOWED (option set but no T-code allowlist), INPUT_SCREEN_DENIED, INPUT_TARGET_DENIED; an open
 ///    transaction outside the allowlist keeps TCODE_DENIED. For gui_batch items only the static target rules run here

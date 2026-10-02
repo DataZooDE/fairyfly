@@ -276,7 +276,19 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 input_context.screen_number = facts->screen_number;
             }
         }
-        if (principal.allow_selection_input) input_context.initial = initial_screen(principal_key(principal));
+        if (principal.allow_selection_input) {
+            input_context.initial = initial_screen(principal_key(principal));
+            input_context.connection = record.connection;
+            // Any call that observes another (or an unknown) screen than the recorded one ends the typing window for good:
+            // coming back to the initial screen later needs a new gui_transaction_start.
+            if (input_context.initial && facts_provider_ && name != "gui_transaction_start" &&
+                (!current_tcode || auth::normalize_tcode(*current_tcode) != input_context.initial->transaction ||
+                 input_context.program != input_context.initial->program ||
+                 input_context.screen_number != input_context.initial->screen_number)) {
+                set_initial_screen(principal_key(principal), std::nullopt);
+                input_context.initial.reset();
+            }
+        }
         const PolicyDecision authz = auth::authorize_call(principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); },
                                                           &input_context);
@@ -447,9 +459,19 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
                 // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
                 if (principal.allow_selection_input) {
-                    auth::InitialScreen screen{after, after_program, after_screen};
+                    auth::InitialScreen screen{after, after_program, after_screen, record.connection};
                     set_initial_screen(principal_key(principal), screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
                 }
+            }
+        }
+        // Typing is only possible right after gui_transaction_start until the first navigation: any later call whose
+        // post-call facts are uncertain (empty) or show another transaction/program/screen clears the record, so returning
+        // to the initial screen later does NOT re-enable typing until gui_transaction_start runs again.
+        if (principal.allow_selection_input && name != "gui_transaction_start") {
+            if (auto rec = initial_screen(principal_key(principal)); rec) {
+                if (after.empty() || after_program.empty() || after_screen.empty() || after != rec->transaction ||
+                    after_program != rec->program || after_screen != rec->screen_number)
+                    set_initial_screen(principal_key(principal), std::nullopt);
             }
         }
     }

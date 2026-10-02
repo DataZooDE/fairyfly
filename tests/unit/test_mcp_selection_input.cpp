@@ -202,9 +202,58 @@ TEST_CASE("selection input: typing is refused after navigating away from the ini
     // same screen number in another program is another screen
     env.facts = facts_at("SU01", "SAPMSUU5", "100");
     CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
-    // back on the initial screen: allowed again
+    // back on the initial screen: still denied, typing needs a new gui_transaction_start
     env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK_FALSE(start_su01(*d, p).is_error);
     CHECK_FALSE(d->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+}
+
+TEST_CASE("selection input: navigating away and back does not re-enable typing", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    // a key call moves to another screen; the post-call facts clear the record
+    env.on_call = [&](const Argv&) { env.facts = facts_at("SU01", "SAPLSUU5", "200"); return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    // F3 returns to the initial screen: the record is gone anyway
+    env.on_call = [&](const Argv&) { env.facts = facts_at("SU01", "SAPLSUU5", "100"); return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "f8"}}, ctx_for(p)).is_error);
+    env.calls.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK(env.calls.empty());
+}
+
+TEST_CASE("selection input: empty post-call facts clear the record", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(start_su01(*d, p).is_error);
+    env.on_call = [&](const Argv&) { env.facts = std::nullopt; return ok_res(); };
+    CHECK_FALSE(d->call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
+    env.on_call = nullptr;
+    env.facts = facts_at("SU01", "SAPLSUU5", "100");
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+}
+
+TEST_CASE("selection input: the record is bound to the connection of the start", "[mcp][selection-input]") {
+    Env env;
+    auto d = env.make(true);
+    const Principal p = ro_token("basis");
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "SU01"}, {"connection", 1}}, ctx_for(p)).is_error);
+    json other = fill();
+    other["connection"] = 2;
+    env.calls.clear();
+    CHECK(has_code(d->call_tool("gui_element_fill", other, ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    CHECK(env.calls.empty());
+    // an implicit connection is another target than the explicit 1 as well
+    CHECK(has_code(d->call_tool("gui_element_fill", fill(), ctx_for(p)), "INPUT_SCREEN_DENIED"));
+    // the same connection works (a denied call does not clear a record whose screen still matches)
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "SU01"}, {"connection", 1}}, ctx_for(p)).is_error);
+    json same = fill();
+    same["connection"] = 1;
+    CHECK_FALSE(d->call_tool("gui_element_fill", same, ctx_for(p)).is_error);
 }
 
 TEST_CASE("selection input: no recorded initial screen or unknown screen facts deny", "[mcp][selection-input]") {
