@@ -43,15 +43,15 @@ $RDir = "/tmp/ffusertest-$Stamp"
 $Rand = [Guid]::NewGuid().ToString('N').Substring(0, 6)
 
 $Preamble = "You are a SAP Basis administrator's assistant. You are connected to a fairyfly MCP server that drives a LIVE SAP GUI session of a test system (A4H, client 001). " +
-            "Your token is READ-ONLY and restricted to the transactions needed for this task. Use ONLY the fairyfly tools. Never change, create, delete, release, lock, unlock or save anything and never press Save. " +
+            "Your token is READ-ONLY and restricted to the transactions needed for this task. Use ONLY the fairyfly tools. Never change, create, delete, release, lock, unlock or save anything and never press Save. Some tokens may type into selection fields (gui_element_fill) ONLY on the initial screen of the transaction: after you navigate away typing is refused, so restart the transaction with gui_transaction_start to type again. " +
             "If something you need is impossible with these tools, say so plainly instead of improvising. Work efficiently: prefer targeted reads (tab, only, text_contains, max_rows) over dumping whole screens. "
 $Postamble = " FINISH with two sections. (1) RESULT: the answer for the administrator, compact. (2) TOOL EXPERIENCE: be candid and specific, as in a bug report: every tool error or retry (with the error code), calls that were slow or returned too much or too little data, confusing or inconsistent output, things you wanted to do but could not with the available tools or the read-only restriction, anything that wasted steps, and a rating 1-5 of how practical this tool set is for this task."
 $Tasks = @(
     [pscustomobject]@{ Name = 'strust'; Tcodes = 'STRUST'; Prompt = 'TASK: list all certificates registered in STRUST (every PSE node, each certificate with subject and validity end) and point out expired or soon-expiring ones.' },
     [pscustomobject]@{ Name = 'sessions'; Tcodes = 'SM04,SM50,SM51'; Prompt = 'TASK: who is logged on right now (SM04: users, terminals, types) and what are the work processes doing (SM50: type, status, program, user, runtime)? Also say how many application servers are active (SM51). Flag anything unusual (long-running work processes, many sessions of one user).' },
-    [pscustomobject]@{ Name = 'syslog'; Tcodes = 'SM21'; Prompt = 'TASK: review the system log (SM21) for today and the last hours: how many entries, which message classes/problem classes dominate, any errors or warnings an administrator should look at, and which users/programs/processes are involved. Use the selection defaults if you cannot change them.' },
-    [pscustomobject]@{ Name = 'dumps'; Tcodes = 'ST22'; Prompt = 'TASK: are there ABAP short dumps (ST22) from today or yesterday? If yes: how many, which runtime errors, which programs and users, and the most likely cause of the most frequent one. If there are none, say so and show how you verified it.' },
-    [pscustomobject]@{ Name = 'userinfo'; Tcodes = 'SU01,SU01D'; Prompt = 'TASK: show the master data of the user DEVELOPER (SU01 display): user type, validity period, lock status, assigned roles and profiles, last logon. NOTE: you may not be able to type into fields with a read-only token; if so, find out what is still possible (for example F4 value help or other reads), report what blocks you, and give the best partial answer.' }
+    [pscustomobject]@{ Name = 'syslog'; Tcodes = 'SM21'; AllowInput = $true; Prompt = 'TASK: review the system log (SM21) for the last 2 hours: how many entries, which message classes/problem classes dominate, any errors or warnings an administrator should look at, and which users/programs/processes are involved. Narrow the selection on the initial screen (time range) before executing.' },
+    [pscustomobject]@{ Name = 'dumps'; Tcodes = 'ST22'; AllowInput = $true; Prompt = 'TASK: are there ABAP short dumps (ST22) from today or yesterday? If yes: how many, which runtime errors, which programs and users, and the most likely cause of the most frequent one. If there are none, say so and show how you verified it.' },
+    [pscustomobject]@{ Name = 'userinfo'; Tcodes = 'SU01,SU01D'; AllowInput = $true; Prompt = 'TASK: show the master data of the user DEVELOPER (SU01 display): user type, validity period, lock status, assigned roles and profiles, last logon. Type the user name on the SU01 start screen (typing is allowed there), then use the display function.' }
 )
 $Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })   # powershell -File passes a comma list as ONE string
 if ($Only.Count -gt 0) { $Tasks = @($Tasks | Where-Object { $Only -contains $_.Name }) }
@@ -98,7 +98,9 @@ try {
     $tokens = @{}
     foreach ($t in $Tasks) {
         $name = "ffut-$Rand-$($t.Name)"
-        $r = FF @('mcp', 'token', 'create', $name, '--scope', 'session,screen,element,transaction,popup,key', '--read-only', '--tcode', $t.Tcodes, '--system', 'A4H/001', '--expires', '1d', '--output', 'json') 60
+        $tokArgs = @('mcp', 'token', 'create', $name, '--scope', 'session,screen,element,transaction,popup,key', '--read-only', '--tcode', $t.Tcodes, '--system', 'A4H/001', '--expires', '1d', '--output', 'json')
+        if ($t.PSObject.Properties.Name -contains 'AllowInput' -and $t.AllowInput) { $tokArgs += '--allow-selection-input' }
+        $r = FF $tokArgs 60
         $tj = $null; try { $tj = $r.Out | ConvertFrom-Json } catch { }
         if ($null -eq $tj -or -not $tj.data.token) { throw "token create failed for $($t.Name): $($r.Out.Substring(0, [Math]::Min(300, $r.Out.Length)))" }
         $tokenNames += $name; $tokens[$t.Name] = [string]$tj.data.token
