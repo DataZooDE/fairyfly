@@ -87,7 +87,7 @@ jobs:
           & "build/Release/fairyfly.exe" --version
           & "build/Release/fairyfly.exe" --help
 
-          # Code signing metadata (SignPath Foundation): product name = project name, product version = fairyfly --version
+          # Code signing metadata: product name = project name, product version = fairyfly --version
           $info = (Get-Item "build/Release/fairyfly.exe").VersionInfo
           $reported = (& "build/Release/fairyfly.exe" --version | Out-String).Trim()
           if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)', expected 'fairyfly'"; exit 1 }

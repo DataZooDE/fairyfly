@@ -1,7 +1,7 @@
 # Third-party software
 
-fairyfly is released under the [MIT License](LICENSE). It is built from its own source code together with the
-open-source libraries below (installed with vcpkg, linked statically). There are no proprietary components;
+fairyfly is licensed under the [Business Source License 1.1](LICENSE). It is built from its own source code together with the
+open-source libraries below (installed with vcpkg, linked statically). There are no proprietary third-party components;
 the only non-open-source parts are Windows system libraries (SAP GUI Scripting is driven through the COM
 interface of the SAP GUI installed on the user's machine, nothing of SAP is shipped).
 

@@ -149,31 +149,24 @@ credentials, and every token, scope and read-only restriction of the MCP server 
 
 ## License
 
-fairyfly is open source under the [MIT License](LICENSE). The third-party libraries it is built with, and their
-licences, are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are accepted under the same
-license.
+fairyfly is licensed under the [Business Source License 1.1](LICENSE) (licensor: DataZoo GmbH), the same terms as
+[DataZooDE/erpl](https://github.com/DataZooDE/erpl): you may copy, modify, redistribute and make production use of
+the work, except that it may not be offered to third parties on a hosted or embedded basis; five years after the
+first publication the code changes to the MPL 2.0. The third-party libraries it is built with, and their licences,
+are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## Code signing policy
+## Code signing
 
-Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
-[SignPath Foundation](https://signpath.org/).
+Windows release builds of `fairyfly.exe` are produced from this repository's source by the GitHub Actions workflow
+[`release.yml`](.github/workflows/release.yml) on a GitHub-hosted runner, from a version tag (`vYYYY.MM.DD`), and are
+published with a `SHA256SUMS` file; verify a download with `Get-FileHash fairyfly.exe` against it. Releases are
+Authenticode-signed when a signing certificate is configured for the repository (see [docs/SIGNING.md](docs/SIGNING.md)):
+then `signtool verify /pa /v fairyfly.exe` (or the file's Properties > Digital Signatures tab) shows the publisher.
+The product name is `fairyfly` and the product version is the calendar version of the release (for example `2026.09.30`),
+identical in the file's version information, in `fairyfly --version` and in the release tag.
 
-Windows binaries (`fairyfly.exe`) are signed only when they were built from this repository's source code by the
-GitHub Actions workflow [`release.yml`](.github/workflows/release.yml) on a GitHub-hosted runner, from a version tag
-(`vYYYY.MM.DD`); third-party binaries are never signed. How to verify a download: `signtool verify /pa /v fairyfly.exe`
-(or the file's Properties > Digital Signatures tab) and compare the SHA-256 with `SHA256SUMS`. The product name is
-`fairyfly` and the product version is the calendar version of the release (for example `2026.09.30`), identical in
-the file's version information, in `fairyfly --version` and in the release tag.
-
-Team roles (see [docs/SIGNING.md](docs/SIGNING.md) for how the roles are enforced):
-
-- **Authors / committers** (trusted to change the code): [@jrosskopf](https://github.com/jrosskopf)
-- **Reviewers** (review changes of non-committers, build scripts and CI configuration): [@jrosskopf](https://github.com/jrosskopf)
-- **Approvers** (approve signing requests in SignPath): [@jrosskopf](https://github.com/jrosskopf)
-
-Privacy policy: This program will not transfer any information to other networked systems unless specifically
-requested by the user or the person installing or operating it. fairyfly has no telemetry. It only talks to the SAP
-GUI on the same machine and, when the user starts `fairyfly mcp --http`, to the MCP clients that connect to the
-address and port the user configured; credentials are stored only in the Windows Credential Manager and are never
-written to logs or the audit trail.
-
+Privacy: this program will not transfer any information to other networked systems unless specifically requested by
+the user or the person installing or operating it. fairyfly has no telemetry. It only talks to the SAP GUI on the same
+machine and, when the user starts `fairyfly mcp --http`, to the MCP clients that connect to the address and port the
+user configured; credentials are stored only in the Windows Credential Manager and are never written to logs or the
+audit trail.

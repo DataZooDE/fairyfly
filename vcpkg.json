@@ -3,7 +3,7 @@
   "version": "2026.9.30",
   "description": "LLM-powered SAP GUI automation CLI tool",
   "homepage": "https://github.com/DataZooDE/fairyfly",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "dependencies": [
     "cli11",
     "cimg",

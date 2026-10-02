@@ -1,4 +1,4 @@
-# Reviewers for build scripts, CI configuration and signing (SignPath Foundation: CI/build configuration is code-reviewed)
+# Reviewers for build scripts, CI configuration and signing
 /.github/       @jrosskopf
 /CMakeLists.txt @jrosskopf
 /vcpkg.json     @jrosskopf

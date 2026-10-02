@@ -1,67 +1,60 @@
-# Code signing (SignPath Foundation)
+# Code signing
 
-fairyfly applies for **free code signing from the [SignPath Foundation](https://signpath.org/)** (open-source program).
-Then the Windows UAC prompt of `fairyfly mcp setup` shows "Verified publisher: SignPath Foundation" instead of
-"Unknown". Conditions: <https://signpath.org/terms.html>. This page tracks how each condition is met and what
-a maintainer still has to do. (Alternatives: Azure Artifact Signing, about 10 USD/month, shows your own legal
-name; a self-signed certificate only helps on machines that trust it.)
+`fairyfly.exe` is not signed yet. Unsigned, the Windows UAC prompt of `fairyfly mcp setup` says
+"Verified publisher: Unknown". With an Authenticode signature that chains to a certificate Windows trusts, it shows the
+publisher name instead.
 
-## Conditions and status
+## Which route
 
-| SignPath condition | How fairyfly meets it | Status |
-|---|---|---|
-| OSI-approved licence, no commercial dual licensing | [MIT `LICENSE`](../LICENSE) | done |
-| No proprietary components (system libraries excepted) | [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md): BSD-3, MIT, PNG, CeCILL-C, BSL (tests only) | done |
-| Only binaries built from its own source, built verifiably | [`release.yml`](../.github/workflows/release.yml): GitHub-hosted runner, tag checkout, unit tests, SignPath origin verification via the GitHub artifact | done |
-| Public source repository, team owns it | `DataZooDE/fairyfly` is public | done |
-| Product name = project name, product version consistent | `src/version_info.rc.in`: `ProductName fairyfly`, `ProductVersion` = `fairyfly --version`; checked in `build.yml` and `release.yml` | done |
-| "Code signing policy" section with attribution, roles, privacy statement | README, section "Code signing policy" (exact attribution and privacy wording) | done |
-| Functionality described on the download page | README, section "Download" | done |
-| Roles Author / Reviewer / Approver | listed in the README; `.github/CODEOWNERS` makes the maintainer the required reviewer of CI, build and signing files | done (add team members when they join) |
-| Build scripts and CI configuration are code-reviewed | `CODEOWNERS` plus branch protection on `main` (require a pull request and a code-owner review) | **maintainer: enable branch protection** |
-| Multi-factor authentication for the repository and for SignPath | GitHub: require 2FA for the organization (Settings > Authentication security); SignPath: enable MFA for every user | **maintainer** |
-| Project released in the form to be signed | publish a first release (an unsigned one is fine): `git tag v2026.09.30 && git push origin v2026.09.30` (the tag must equal `fairyfly --version`) | **maintainer** |
-| Verifiable reputation (executables) | judged by SignPath (stars, users, history); not controllable from the code | open |
+fairyfly is licensed under the **Business Source License 1.1** (see [LICENSE](../LICENSE), same terms as DataZooDE/erpl).
+That licence is **not OSI-approved**, so the free **SignPath Foundation** programme for open-source projects
+(<https://signpath.org/terms.html>: OSI-approved licence, no commercial restrictions) is **not available**. Remaining options:
 
-## Applying
+| Option | Cost | Publisher shown in UAC | Notes |
+|---|---|---|---|
+| **Azure Artifact Signing** (formerly Trusted Signing) | about 10 USD/month (Basic) | the validated legal name, for example `DataZoo GmbH` | needs a paid Azure subscription and identity validation of the legal entity (organizations in the EU are supported); recommended |
+| OV/EV code-signing certificate from a CA | roughly 200-500 EUR/year, hardware token or cloud HSM required since 2023 | the certificate subject | EV additionally removes SmartScreen warnings for downloads |
+| Self-signed certificate | free | your own name, **only on machines that trust the certificate** | for local testing only, never distribute |
 
-1. Make sure the table above has no open maintainer items, then publish the first release (below).
-2. Apply at <https://signpath.org/apply>: project name `fairyfly`, repository URL, release URL, licence MIT,
-   a description (SAP GUI automation CLI and MCP server for the user's own SAP session), the roles above.
-3. After approval SignPath issues an organization id, the project slug, the signing policy slug and an API token.
-   Create in the GitHub repository: secret `SIGNPATH_API_TOKEN`, variable `SIGNPATH_ORGANIZATION_ID`. The workflow
-   uses the project slug `fairyfly` and the signing policy slug `release-signing`: use these slugs when SignPath
-   asks, or change them in `release.yml`.
-4. In SignPath create the artifact configuration for the GitHub artifact (a zip with `fairyfly.exe`):
+## Azure Artifact Signing: what is needed
 
-   ```xml
-   <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
-     <zip-file>
-       <pe-file path="fairyfly.exe">
-         <authenticode-sign/>
-       </pe-file>
-     </zip-file>
-   </artifact-configuration>
-   ```
-
-   and set the metadata restrictions of the signing policy: `ProductName` must be `fairyfly` and
-   `ProductVersion` must match the release (the workflow already checks both against the tag).
-5. Restrict the signing policy to the origin `DataZooDE/fairyfly`, workflow `release.yml`, tag builds.
-
-The workflow was written from the SignPath GitHub action documentation but could not be run before approval: the
-exact input names and the artifact configuration may need small corrections when SignPath sends the onboarding data.
+1. Paid Azure subscription (free, trial and sponsored subscriptions are not supported).
+2. Create an **Artifact Signing account** in a supported region (portal or `az`), then complete **identity validation**
+   for the organization: legal entity name exactly as in the commercial register (DataZoo GmbH), plus the documents the
+   portal asks for; plan a few business days.
+3. Create a **certificate profile** of type *Public Trust* (this is what makes the publisher verified).
+4. Create an Entra app registration (service principal) for CI and assign it the role
+   *Artifact Signing Certificate Profile Signer* (formerly *Trusted Signing Certificate Profile Signer*) on the profile.
+5. In the GitHub repository set the **variables** `AZURE_SIGNING_TENANT_ID`, `AZURE_SIGNING_CLIENT_ID`,
+   `AZURE_SIGNING_ENDPOINT` (the regional endpoint of the account), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`,
+   and the **secret** `AZURE_SIGNING_CLIENT_SECRET`.
 
 ## Releasing
 
 1. Bump the calendar version in `src/include/version.h`, `CMakeLists.txt` (`project(... VERSION Y.M.D)`) and
-   `vcpkg.json`, update `CHANGELOG.md`, merge through a reviewed pull request.
-2. `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`. `release.yml` builds, tests, checks that the tag equals the
-   product version, signs through SignPath when `SIGNPATH_API_TOKEN` exists (the approver confirms the request in
-   SignPath) and creates the GitHub release with `fairyfly.exe` and `SHA256SUMS`. Without the secret the release is unsigned.
+   `vcpkg.json`, update `CHANGELOG.md`, merge through a reviewed pull request (`.github/CODEOWNERS` lists the reviewer
+   of CI, build and signing files).
+2. `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD`. [`release.yml`](../.github/workflows/release.yml) builds from the
+   tag on a GitHub-hosted runner, runs the unit tests, checks that the tag equals `fairyfly --version` and the
+   executable's `ProductVersion` (and that `ProductName` is `fairyfly`), signs with Azure Artifact Signing when
+   `AZURE_SIGNING_CLIENT_SECRET` exists, verifies the signature with `signtool verify /pa`, and creates the GitHub release
+   with `fairyfly.exe` and `SHA256SUMS`. Without the secret the release is published unsigned.
 3. Verify a download: `signtool verify /pa /v fairyfly.exe` and `Get-FileHash fairyfly.exe` against `SHA256SUMS`.
+
+The signing step was written from the documentation of the Azure signing action and could not be run before the Azure
+account exists: the exact input names may need small corrections.
+
+## Local test with a self-signed certificate (this machine only)
+
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=fairyfly local test" -CertStoreLocation Cert:\CurrentUser\My
+# trust it (elevated): the UAC prompt shows the name only on machines that trust the certificate
+Export-Certificate -Cert $cert -FilePath fairyfly-test.cer
+certutil -addstore Root fairyfly-test.cer ; certutil -addstore TrustedPublisher fairyfly-test.cer
+signtool sign /fd SHA256 /sha1 $cert.Thumbprint build\Release\fairyfly.exe
+```
 
 ## Notes
 
-- The signature is created for the build artifact only; rebuilding locally produces an unsigned binary.
-- SmartScreen reputation of a newly signed file still builds up over downloads.
-- `SignPath Foundation` is the publisher name in the UAC prompt: that is how the free program works.
+- A signature belongs to one build: rebuilding locally produces an unsigned binary again.
+- SmartScreen reputation of a newly signed file builds up over downloads; EV certificates avoid the wait.

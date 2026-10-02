@@ -265,8 +265,8 @@ endif()
 if(WIN32)
     # Tray icon resources (assets/icons via src/tray/fairyfly.rc)
     enable_language(RC)
-    # Version information (ProductName "fairyfly", calendar version) embedded in fairyfly.exe: required for code signing
-    # by the SignPath Foundation (product name = project name, product version consistent across builds).
+    # Version information (ProductName "fairyfly", calendar version) embedded in fairyfly.exe: used for code signing
+    # (product name = project name, product version consistent across builds).
     set(FAIRYFLY_VER_MAJOR ${PROJECT_VERSION_MAJOR})
     set(FAIRYFLY_VER_MINOR ${PROJECT_VERSION_MINOR})
     set(FAIRYFLY_VER_PATCH ${PROJECT_VERSION_PATCH})

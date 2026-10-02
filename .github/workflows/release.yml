@@ -1,9 +1,9 @@
 name: Release fairyfly
 
-# Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with the SignPath
-# Foundation (free OSS code signing, see docs/SIGNING.md) and publishes it with SHA256SUMS.
-# Tag format: vYYYY.MM.DD (calendar version = ProductVersion of fairyfly.exe). Without SignPath secrets the
-# release is published unsigned.
+# Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with Azure Artifact
+# Signing (see docs/SIGNING.md) and publishes it with SHA256SUMS.
+# Tag format: vYYYY.MM.DD (calendar version = ProductVersion of fairyfly.exe). Without the Azure signing secrets
+# the release is published unsigned.
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       signing: ${{ steps.cfg.outputs.signing }}
     env:
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      AZURE_SIGNING_CLIENT_SECRET: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
     steps:
     - name: Checkout the tagged source
       uses: actions/checkout@v4
@@ -82,30 +82,48 @@ jobs:
     - name: Signing configured?
       id: cfg
       run: |
-        if ($env:SIGNPATH_API_TOKEN) { "signing=true" >> $env:GITHUB_OUTPUT } else { "signing=false" >> $env:GITHUB_OUTPUT }
+        if ($env:AZURE_SIGNING_CLIENT_SECRET) { "signing=true" >> $env:GITHUB_OUTPUT } else { "signing=false" >> $env:GITHUB_OUTPUT }
       shell: pwsh
 
   sign:
     needs: build
     if: needs.build.outputs.signing == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     steps:
-    - name: Submit the signing request to SignPath
-      uses: signpath/github-action-submit-signing-request@v1
+    - name: Download the unsigned build
+      uses: actions/download-artifact@v4
       with:
-        api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
-        organization-id: '${{ vars.SIGNPATH_ORGANIZATION_ID }}'
-        project-slug: 'fairyfly'
-        signing-policy-slug: 'release-signing'
-        github-artifact-id: '${{ needs.build.outputs.artifact-id }}'
-        wait-for-completion: true
-        output-artifact-directory: 'signed'
+        name: fairyfly-unsigned
+        path: unsigned
+
+    - name: Sign fairyfly.exe with Azure Artifact Signing
+      # Inputs follow the azure/trusted-signing-action documentation (the service was renamed to Artifact Signing);
+      # check them against the current action when the Azure account exists.
+      uses: azure/trusted-signing-action@v0
+      with:
+        azure-tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+        azure-client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files-folder: unsigned
+        files-folder-filter: exe
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+
+    - name: Verify the signature
+      run: |
+        $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName | Select-Object -Last 1).FullName
+        & $signtool verify /pa /v unsigned\fairyfly.exe
+      shell: pwsh
 
     - name: Upload the signed fairyfly.exe
       uses: actions/upload-artifact@v4
       with:
         name: fairyfly-signed
-        path: signed
+        path: unsigned/fairyfly.exe
         if-no-files-found: error
 
   release:
@@ -130,6 +148,6 @@ jobs:
         cd dist
         sha256sum fairyfly.exe > SHA256SUMS
         cat SHA256SUMS
-        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Signed with the SignPath Foundation certificate."; else SIGNNOTE="Not code-signed."; fi
+        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed (Azure Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
         NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64. ${SIGNNOTE} See the README (Code signing policy) for how to verify."
         gh release create "$RELEASE_TAG" fairyfly.exe SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"

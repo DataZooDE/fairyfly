@@ -2,13 +2,11 @@
 
 ## 2026.09.30 (unreleased)
 
-### Added (release engineering, SignPath Foundation conditions)
+### Added (release engineering)
 
-- MIT `LICENSE`, `THIRD_PARTY_NOTICES.md`, README sections "Download", "License" and "Code signing policy" (attribution, roles, privacy statement).
+- `LICENSE`: Business Source License 1.1 (licensor DataZoo GmbH, same terms as DataZooDE/erpl), `THIRD_PARTY_NOTICES.md`, README sections "Download", "License" and "Code signing" (including a privacy statement).
 - Version information resource in `fairyfly.exe` (`ProductName fairyfly`, `ProductVersion` equal to `fairyfly --version`), checked in CI.
-- `release.yml`: tag-triggered build, optional SignPath signing, GitHub release with `SHA256SUMS`; `docs/SIGNING.md`; `.github/CODEOWNERS`.
-
-Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are retired.
+- `release.yml`: tag-triggered build and test, optional Azure Artifact Signing, GitHub release with `SHA256SUMS`; `docs/SIGNING.md` (the free SignPath Foundation programme is not available for a non-OSI licence); `.github/CODEOWNERS`.
 
 ### Changed
 
