@@ -213,6 +213,10 @@ For a modern request, after authentication and before any tool or provider call:
 | unknown method, `ping` and `logging/setLevel` (both removed in this revision) | **404**, JSON-RPC -32601 |
 | `_meta` keys given in both spellings with different values (`protocolVersion`, `clientInfo`, `clientCapabilities`, `logLevel`) | 400, JSON-RPC -32602 |
 
+- **Every era**: a legacy request is executed all the same, so headers that are PRESENT are validated for it too: `Mcp-Method`
+  and `Mcp-Name` (with the same base64 sentinel decoding) must agree with the body, and an `MCP-Protocol-Version` header that
+  names a served version must equal a served body `_meta` protocol version (either spelling); otherwise 400 + -32020 and no
+  provider call. Absent headers stay accepted on legacy requests.
 - Header names are case-insensitive, values case-sensitive. A value that is not plain ASCII is sent as
   `=?base64?<base64 of UTF-8>?=`; fairyfly decodes that sentinel (strict: standard padded base64, the closing `?=` is
   required) before comparing, and an invalid sentinel is a `-32020` mismatch. Values are shortened to 100 characters and
@@ -240,7 +244,7 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 | 200 | tool result / JSON-RPC error | including tool errors (`SCOPE_DENIED`, `READ_ONLY`, `TCODE_DENIED`, `SYSTEM_DENIED`, `SYSTEM_UNKNOWN`, `CONNECTION_DENIED`, `RATE_LIMITED`, `READ_ONLY_REFUSED`, `SERVER_BUSY`, `CALL_TIMEOUT`) |
 | 202 | none | a notification or a response was posted |
 | 400 | JSON-RPC -32700 / -32600 | body is not valid JSON / not a valid JSON-RPC message |
-| 400 | JSON-RPC **-32020** | modern request: `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header missing, invalid or not matching the body |
+| 400 | JSON-RPC **-32020** | modern request: `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header missing, invalid or not matching the body; any era: such a header present but not matching the body |
 | 400 | JSON-RPC **-32602** | `_meta` key given twice (prefixed and plain) with different values |
 | 404 | JSON-RPC **-32601** | modern request: unknown method, `ping`, `logging/setLevel` |
 | 400 | JSON-RPC **-32022** | unsupported protocol version; `error.data.supported` lists ours |

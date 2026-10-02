@@ -668,6 +668,61 @@ TEST_CASE("Modern requests: standard headers are enforced after auth and before 
         auto legacy_meta = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"protocolVersion", "2025-11-25"}}}}));
         CHECK(f.endpoint.handle(legacy_meta).status == 200);
     }
+    SECTION("legacy requests: present Mcp-Method / Mcp-Name must agree with the body, absent ones are accepted") {
+        const int before = f.provider.calls;
+        // mismatching Mcp-Method on a legacy tools/call: 400 + -32020, the provider is never called
+        auto wrong_method = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+        wrong_method.headers["Mcp-Method"] = "tools/list";
+        auto res = f.endpoint.handle(wrong_method);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        // mismatching Mcp-Name
+        auto wrong_name = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+        wrong_name.headers["Mcp-Method"] = "tools/call";
+        wrong_name.headers["Mcp-Name"] = "gui_screen_read";
+        res = f.endpoint.handle(wrong_name);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        CHECK(body_of(res)["error"]["message"].get<std::string>().find("Mcp-Name") != std::string::npos);
+        // a Mcp-Name alone (no Mcp-Method) is checked too
+        auto name_only = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+        name_only.headers["Mcp-Name"] = "gui_screen_read";
+        CHECK(f.endpoint.handle(name_only).status == 400);
+        // the base64 sentinel decodes: "gui_a_tool" = Z3VpX2FfdG9vbA==
+        auto sentinel = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+        sentinel.headers["Mcp-Method"] = "tools/call";
+        sentinel.headers["Mcp-Name"] = "=?base64?Z3VpX2FfdG9vbA==?=";
+        CHECK(f.endpoint.handle(sentinel).status == 200);
+        CHECK(f.provider.calls == before + 1);  // only the sentinel request got through
+        // matching headers are accepted, absent headers too
+        auto matching = f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}));
+        matching.headers["Mcp-Method"] = "tools/call";
+        matching.headers["Mcp-Name"] = "gui_a_tool";
+        CHECK(f.endpoint.handle(matching).status == 200);
+        CHECK(f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}))).status == 200);
+        CHECK(f.provider.calls == before + 3);
+        // a mismatching Mcp-Method on other legacy methods is rejected as well
+        auto list = f.post(Fixture::rpc("tools/list"));
+        list.headers["Mcp-Method"] = "tools/call";
+        CHECK(f.endpoint.handle(list).status == 400);
+    }
+    SECTION("legacy: a served header version that differs from the served body version is 400 -32020 in every era") {
+        auto legacy = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"protocolVersion", "2025-11-25"}}}}));
+        legacy.headers["MCP-Protocol-Version"] = "2025-06-18";
+        auto res = f.endpoint.handle(legacy);
+        CHECK(res.status == 400);
+        CHECK(code_of(res) == kHeaderMismatch);
+        // equal: fine; header only or body only: fine
+        legacy.headers["MCP-Protocol-Version"] = "2025-11-25";
+        CHECK(f.endpoint.handle(legacy).status == 200);
+        auto header_only = f.post(Fixture::rpc("tools/list"));
+        header_only.headers["MCP-Protocol-Version"] = "2025-06-18";
+        CHECK(f.endpoint.handle(header_only).status == 200);
+        // a modern body with a legacy header is still the modern mismatch
+        auto modern = f.modern_post("tools/list");
+        modern.headers["MCP-Protocol-Version"] = "2025-11-25";
+        CHECK(code_of(f.endpoint.handle(modern)) == kHeaderMismatch);
+    }
     SECTION("notifications are 202 without a body, headers or not") {
         json note{{"jsonrpc", "2.0"}, {"method", "notifications/cancelled"}, {"params", json{{"_meta", Fixture::stateless_meta()}}}};
         const auto res = f.endpoint.handle(f.post(note));

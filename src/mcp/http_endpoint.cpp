@@ -516,17 +516,16 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
 
     // ---- standard headers of a modern request: checked before any provider call --------------------
-    if (modern) {
-        if (hv.empty()) return header_error(message.id, "Header missing: MCP-Protocol-Version");
-        if (!pv.empty() && pv != hv)
-            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
-                                                "' does not match body value '" + shown(pv) + "'");
-        if (trim(request.header("Mcp-Method")).empty())
-            return header_error(message.id, "Header missing: Mcp-Method");
+    // Mcp-Method / Mcp-Name against the body: REQUIRED for a modern request, and in EVERY era a header that is present
+    // must agree with the body (a legacy request is executed all the same). Absent headers stay accepted on legacy requests.
+    const auto check_method_name_headers = [&](bool required) -> std::optional<HttpResponse> {
         const std::string h_method = trim(request.header("Mcp-Method"));
-        if (h_method != method)
+        if (h_method.empty()) {
+            if (required) return header_error(message.id, "Header missing: Mcp-Method");
+        } else if (h_method != method) {
             return header_error(message.id, "Header mismatch: Mcp-Method header value '" + shown(h_method) +
                                                 "' does not match body value '" + shown(method) + "'");
+        }
         const bool named = method == "tools/call" || method == "resources/read" || method == "prompts/get";
         if (named) {
             std::string body_name;
@@ -537,7 +536,10 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                 have_body_name = true;
             }
             const std::string raw = trim(request.header("Mcp-Name"));
-            if (raw.empty()) return header_error(message.id, "Header missing: Mcp-Name");
+            if (raw.empty()) {
+                if (required) return header_error(message.id, "Header missing: Mcp-Name");
+                return std::nullopt;
+            }
             const auto decoded = decode_header_value(raw);
             if (!decoded)
                 return header_error(message.id, "Header mismatch: Mcp-Name header value '" + shown(raw) +
@@ -547,6 +549,22 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                 return header_error(message.id, "Header mismatch: Mcp-Name header value '" + shown(*decoded) +
                                                     "' does not match body value '" + shown(body_name) + "'");
         }
+        return std::nullopt;
+    };
+    if (modern) {
+        if (hv.empty()) return header_error(message.id, "Header missing: MCP-Protocol-Version");
+        if (!pv.empty() && pv != hv)
+            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
+                                                "' does not match body value '" + shown(pv) + "'");
+        if (auto refused = check_method_name_headers(true)) return std::move(*refused);
+    } else {
+        // Legacy: a served MCP-Protocol-Version header and a different served body version cannot both be right.
+        const auto& supported = supported_versions();
+        const auto served = [&](const std::string& v) { return std::find(supported.begin(), supported.end(), v) != supported.end(); };
+        if (!hv.empty() && !pv.empty() && pv != hv && served(hv) && served(pv))
+            return header_error(message.id, "Header mismatch: MCP-Protocol-Version header value '" + shown(hv) +
+                                                "' does not match body value '" + shown(pv) + "'");
+        if (auto refused = check_method_name_headers(false)) return std::move(*refused);
     }
 
     // ---- protocol era ------------------------------------------------------------------------------
