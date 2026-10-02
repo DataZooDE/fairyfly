@@ -23,6 +23,16 @@ const std::string kManifestPath = kLad + "\\fairyfly\\mcp-setup.json";
 const std::string kConfigPath = kLad + "\\fairyfly\\mcp.yaml";
 const std::string kCerPath = kLad + "\\fairyfly\\fairyfly-mcp-" + kHost + ".cer";
 
+ApplyArgs args_of(const ElevatedRequest& req) {
+    ApplyArgs a;
+    a.sha256 = req.plan_sha256;
+    a.nonce = req.nonce;
+    a.sid = req.sid;
+    a.parent_pid = req.parent_pid;
+    a.force_binding = req.force_binding;
+    return a;
+}
+
 struct Rig {
     FakeMachine m;
     std::ostringstream out, err;
@@ -31,9 +41,9 @@ struct Rig {
     Rig() {
         env.out = &out;
         env.err = &err;
-        m.elevator.child = [this](const json& plan) {
+        m.elevator.child = [this](const ElevatedRequest& req) {
             Hosts h = m.hosts();
-            return execute_elevated_work(plan, h);
+            return apply_plan_bytes(h, req.plan_text, args_of(req));
         };
     }
 
@@ -215,7 +225,10 @@ TEST_CASE("script catalog: constant PowerShell without user-input interpolation"
     // parameters travel as JSON only, and round-trip exactly
     CHECK(json::parse(find_self_signed_params(evil))["hostname"] == evil);
     CHECK(json::parse(export_cert_params(evil, evil))["path"] == evil);
-    CHECK(json::parse(firewall_ensure_params(evil, 8443))["rule_name"] == evil);
+    CHECK(json::parse(firewall_ensure_params(evil, evil, 8443))["name"] == evil);
+    CHECK(json::parse(firewall_ensure_params(evil, evil, 8443))["display_name"] == evil);
+    CHECK(json::parse(firewall_name_params(evil))["name"] == evil);
+    CHECK(json::parse(firewall_display_params(evil))["display_name"] == evil);
     for (const auto& [name, script] : script_catalog()) {
         INFO(name);
         CHECK(script.find(evil) == std::string::npos);
@@ -232,7 +245,7 @@ TEST_CASE("script catalog: constant PowerShell without user-input interpolation"
     }
     // building a script twice with different inputs yields the identical text
     CHECK(kFindSelfSigned == kFindSelfSigned);
-    CHECK(script_catalog().size() == 8);
+    CHECK(script_catalog().size() == 9);
 }
 
 // ---- plan matrix -------------------------------------------------------------------------------------------------
@@ -785,20 +798,160 @@ TEST_CASE("execute_elevated_work re-validates a tampered plan file", "[mcp_setup
     CHECK(r.m.certs.calls.size() == 1);
 }
 
-TEST_CASE("run_apply_plan reads the plan file and writes the result file", "[mcp_setup]") {
+namespace {
+// A request exactly as the unelevated parent would build it for a setup plan.
+ElevatedRequest make_request(Rig& r, const json& extra = json::object(), bool force = false) {
+    json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
+                 {"thumbprint", ""}, {"create_cert", true}, {"valid_days", 730}, {"steps", json::array({"certificate", "urlacl"})}, {"firewall_rule", ""},
+                 {"force_binding", force}, {"nonce", "abcdef0123456789abcdef0123456789"}, {"parent_pid", 4242}, {"created_at", r.m.sys.now()}};
+    for (const auto& [k, v] : extra.items()) plan[k] = v;
+    ElevatedRequest req;
+    req.plan_text = plan.dump();
+    req.plan_sha256 = fairyfly::auth::sha256_hex(req.plan_text);
+    req.nonce = "abcdef0123456789abcdef0123456789";
+    req.sid = kSid;
+    req.parent_pid = 4242;
+    req.force_binding = force;
+    return req;
+}
+
+void check_refused(Rig& r, const ElevatedRequest& req, const ApplyArgs& args) {
+    Hosts h = r.m.hosts();
+    const json result = apply_plan_bytes(h, req.plan_text, args);
+    CHECK(result["ok"] == false);
+    CHECK(result["error"]["code"] == "INVALID_PLAN");
+    CHECK(r.m.certs.calls.empty());
+    CHECK(r.m.http.calls.empty());
+    CHECK(r.m.firewall.calls.empty());
+}
+} // namespace
+
+TEST_CASE("run_apply_plan reads the plan file once and writes the result file", "[mcp_setup]") {
     Rig r;
     r.m.elevator.type = ElevationType::Elevated;
     Hosts h = r.m.hosts();
-    const json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
-                       {"thumbprint", ""}, {"create_cert", true}, {"valid_days", 730}, {"steps", json::array({"certificate", "urlacl"})}, {"firewall_rule", ""}};
-    r.m.sys.files["C:\\plan.json"] = plan.dump();
-    CHECK(run_apply_plan(h, "C:\\plan.json", "C:\\result.json") == 0);
+    const ElevatedRequest req = make_request(r);
+    r.m.sys.files["C:\\plan.json"] = req.plan_text;
+    CHECK(run_apply_plan(h, "C:\\plan.json", "C:\\result.json", args_of(req)) == 0);
     const json result = json::parse(r.m.sys.files.at("C:\\result.json"));
     CHECK(result["ok"] == true);
+    CHECK(result["nonce"] == req.nonce);
     CHECK(result["steps"].size() == 2);
     CHECK(r.m.http.urlacls.count(kPrefix) == 1);
-    CHECK(run_apply_plan(h, "C:\\missing.json", "C:\\result2.json") == 1);
+    CHECK(run_apply_plan(h, "C:\\missing.json", "C:\\result2.json", args_of(req)) == 1);
     CHECK(json::parse(r.m.sys.files.at("C:\\result2.json"))["ok"] == false);
+}
+
+TEST_CASE("elevated child: a plan changed after approval is refused with INVALID_PLAN and no host call", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    ElevatedRequest req = make_request(r);
+    const ApplyArgs approved = args_of(req);
+    SECTION("tampered bytes (another SID gets the reservation)") {
+        json plan = json::parse(req.plan_text);
+        plan["sid"] = "S-1-5-21-9-9-9-500";
+        const std::string tampered = plan.dump();
+        Hosts h = r.m.hosts();
+        const json result = apply_plan_bytes(h, tampered, approved);
+        CHECK(result["error"]["code"] == "INVALID_PLAN");
+        CHECK(result["error"]["message"].get<std::string>().find("SHA-256") != std::string::npos);
+        CHECK(r.m.http.calls.empty());
+        CHECK(r.m.certs.calls.empty());
+    }
+    SECTION("tampered bytes that keep the length") {
+        std::string tampered = req.plan_text;
+        const auto pos = tampered.find("8443");
+        REQUIRE(pos != std::string::npos);
+        tampered[pos] = '9';
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, tampered, approved)["error"]["code"] == "INVALID_PLAN");
+        CHECK(r.m.http.calls.empty());
+    }
+    SECTION("the hash on the command line is missing or malformed") {
+        ApplyArgs a = approved;
+        a.sha256 = "";
+        check_refused(r, req, a);
+        a.sha256 = std::string(64, 'Z');
+        check_refused(r, req, a);
+        a.sha256 = std::string(64, '0');
+        check_refused(r, req, a);
+    }
+    SECTION("the SID on the command line differs from the plan's SID") {
+        ApplyArgs a = approved;
+        a.sid = "S-1-5-21-9-9-9-500";
+        check_refused(r, req, a);
+    }
+    SECTION("wrong nonce") {
+        ApplyArgs a = approved;
+        a.nonce = "ffffffffffffffffffffffffffffffff";
+        check_refused(r, req, a);
+    }
+    SECTION("wrong parent pid") {
+        ApplyArgs a = approved;
+        a.parent_pid = 1;
+        check_refused(r, req, a);
+    }
+    SECTION("stale plan (older than 10 minutes) and a plan from the future") {
+        const ElevatedRequest stale = make_request(r, json{{"created_at", r.m.sys.now() - 601}});
+        check_refused(r, stale, args_of(stale));
+        const ElevatedRequest future = make_request(r, json{{"created_at", r.m.sys.now() + 3600}});
+        check_refused(r, future, args_of(future));
+        const ElevatedRequest fresh = make_request(r, json{{"created_at", r.m.sys.now() - 590}});
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, fresh.plan_text, args_of(fresh))["ok"] == true);
+    }
+    SECTION("force_binding smuggled into the plan without the parent's flag") {
+        const ElevatedRequest smuggled = make_request(r, json::object(), true);
+        ApplyArgs a = args_of(smuggled);
+        a.force_binding = false;
+        check_refused(r, smuggled, a);
+        a.force_binding = true;
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, smuggled.plan_text, a)["ok"] == true);
+    }
+    SECTION("oversized plan") {
+        ElevatedRequest big = req;
+        big.plan_text += std::string(kMaxPlanBytes, ' ');
+        big.plan_sha256 = fairyfly::auth::sha256_hex(big.plan_text);
+        check_refused(r, big, args_of(big));
+    }
+    SECTION("garbage that matches its own hash is still not a plan") {
+        ElevatedRequest junk = req;
+        junk.plan_text = "not json";
+        junk.plan_sha256 = fairyfly::auth::sha256_hex(junk.plan_text);
+        check_refused(r, junk, args_of(junk));
+    }
+    SECTION("happy path is unchanged and the result echoes the nonce") {
+        Hosts h = r.m.hosts();
+        const json result = apply_plan_bytes(h, req.plan_text, approved);
+        CHECK(result["ok"] == true);
+        CHECK(result["nonce"] == approved.nonce);
+        CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    }
+}
+
+TEST_CASE("setup: the parent binds the plan (hash, nonce, pid, time, SID) and rejects a foreign result", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    REQUIRE(r.m.elevator.requests_seen.size() == 1);
+    const ElevatedRequest& req = r.m.elevator.requests_seen[0];
+    CHECK(req.plan_sha256 == fairyfly::auth::sha256_hex(req.plan_text));
+    CHECK(req.plan_sha256.size() == 64);
+    CHECK(req.nonce.size() == 32);
+    CHECK(req.sid == kSid);
+    CHECK(req.parent_pid == 4242);
+    CHECK_FALSE(req.force_binding);
+    const json plan = json::parse(req.plan_text);
+    CHECK(plan["nonce"] == req.nonce);
+    CHECK(plan["parent_pid"] == 4242);
+    CHECK(plan["created_at"] == r.m.sys.now());
+
+    // a child that answers with a result of another request is not believed
+    Rig r2;
+    r2.m.elevator.child = [](const ElevatedRequest&) { return json{{"ok", true}, {"steps", json::array()}, {"nonce", "other"}}; };
+    CHECK(r2.setup(Rig::self_signed()) == 1);
+    CHECK(r2.err.str().find("ELEVATION_FAILED") != std::string::npos);
+    CHECK(r2.m.sys.files.count(kManifestPath) == 0);
 }
 
 // ---- teardown ------------------------------------------------------------------------------------------------------
@@ -808,7 +961,9 @@ TEST_CASE("teardown removes exactly what setup created", "[mcp_setup]") {
     o.open_firewall = true;
     REQUIRE(r.setup(o) == 0);
     const std::string thumb = r.m.certs.certs[0].thumbprint;
-    REQUIRE(r.m.firewall.rules.count("fairyfly MCP HTTPS 8443") == 1);
+    REQUIRE(r.m.firewall.rules.size() == 1);
+    CHECK(r.m.firewall.rules.begin()->second.display == "fairyfly MCP HTTPS 8443");
+    CHECK(firewall_name_ok(r.m.firewall.rules.begin()->first));
     // a foreign binding on another port and an unrelated certificate stay
     r.m.http.bindings["0.0.0.0:9999"] = SslBinding{"0.0.0.0:9999", kThumb, "{11111111-2222-3333-4444-555555555555}", "MY"};
     r.m.certs.certs.push_back(good_cert(kThumb, "other.example"));
@@ -975,7 +1130,7 @@ TEST_CASE("teardown without a manifest", "[mcp_setup]") {
         CHECK(r.err.str().find("MANIFEST_MISSING") != std::string::npos);
         CHECK(r.m.http.urlacls.size() == 1);
     }
-    SECTION("--hostname/--port removes reservations and our bindings, never a foreign one, never a certificate") {
+    SECTION("--hostname/--port removes our bindings, never a foreign one, never a certificate, and (no ownership proof) leaves the reservation to a human") {
         r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
         r.m.http.bindings["0.0.0.0:8443"] = SslBinding{"0.0.0.0:8443", kThumb, normalize_app_id(kAppId), "MY"};
         r.m.http.bindings["[::]:8443"] = SslBinding{"[::]:8443", kThumb, "{11111111-2222-3333-4444-555555555555}", "MY"};
@@ -983,13 +1138,16 @@ TEST_CASE("teardown without a manifest", "[mcp_setup]") {
         t.hostname = kHost;
         t.port = 8443;
         CHECK(r.teardown(t) == 0);
-        CHECK(r.m.http.urlacls.empty());
+        CHECK(r.m.http.urlacls.size() == 1);                // no manifest: nothing proves setup created it
+        CHECK(r.out.str().find("Not removed") != std::string::npos);
+        CHECK(r.out.str().find("netsh http delete urlacl url=" + kPrefix) != std::string::npos);
         CHECK(r.m.http.bindings.count("0.0.0.0:8443") == 0);
         CHECK(r.m.http.bindings.count("[::]:8443") == 1);   // foreign: untouched
         CHECK(r.m.certs.certs.size() == 1);
     }
     SECTION("dry run changes nothing") {
         r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
+        r.m.http.bindings["0.0.0.0:8443"] = SslBinding{"0.0.0.0:8443", kThumb, normalize_app_id(kAppId), "MY"};
         t.hostname = kHost;
         t.port = 8443;
         t.dry_run = true;
@@ -1116,4 +1274,385 @@ TEST_CASE("collect_setup_facts: fresh machine and after setup", "[mcp_setup]") {
     CHECK(f.tls_status == "ok");
     CHECK(f.tls_thumbprint_match);
     CHECK(f.tls_protocol == "TLS 1.3");
+}
+
+// ---- teardown: URL reservation ownership ----------------------------------------------------------------------------
+namespace {
+bool has_human(const std::string& json_text, const std::string& id) {
+    const json doc = json::parse(json_text);
+    for (const auto& h : doc["data"]["human"])
+        if (h["id"] == id) return true;
+    return false;
+}
+std::string step_status(const std::string& json_text, const std::string& id) {
+    const json doc = json::parse(json_text);
+    for (const auto& s : doc["data"]["steps"])
+        if (s["id"] == id) return s["status"];
+    return "";
+}
+} // namespace
+
+TEST_CASE("manifest records the urlacl SDDL and whether setup created the reservation", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->urlacl_created);
+    CHECK(m->urlacl_sddl == r.m.http.urlacls.at(kPrefix));
+    CHECK(json::parse(r.m.sys.files.at(kManifestPath))["schema"] == 1);
+    // older manifests load; absent fields mean "not created by setup"
+    json old = json::parse(r.m.sys.files.at(kManifestPath));
+    old.erase("urlacl_sddl");
+    old.erase("urlacl_created");
+    const auto legacy = Manifest::from_json(old);
+    REQUIRE(legacy.has_value());
+    CHECK_FALSE(legacy->urlacl_created);
+    CHECK(legacy->urlacl_sddl.empty());
+}
+
+TEST_CASE("teardown removes the reservation setup created", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.empty());
+    CHECK_FALSE(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("teardown leaves a pre-existing reservation alone and names it for a human", "[mcp_setup]") {
+    Rig r;
+    SECTION("reserved for somebody else before setup (SID added, but not created by setup)") {
+        r.m.http.urlacls[kPrefix] = sddl_for_sid("S-1-5-21-9-9-9-500");
+        REQUIRE(r.setup(Rig::self_signed()) == 0);
+        const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+        REQUIRE(m.has_value());
+        CHECK_FALSE(m->urlacl_created);
+    }
+    SECTION("already reserved for the user before setup") {
+        r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid);
+        REQUIRE(r.setup(Rig::self_signed()) == 0);
+    }
+    const auto sddl_before = r.m.http.urlacls.at(kPrefix);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(r.m.http.urlacls.at(kPrefix) == sddl_before);
+    CHECK(step_status(r.out.str(), "urlacl") == "skipped");
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+    CHECK(r.m.http.bindings.empty());                  // the rest of setup is still removed
+    CHECK(r.m.sys.files.count(kManifestPath) == 0);
+}
+
+TEST_CASE("teardown leaves a reservation whose SDDL changed after setup", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    r.m.http.urlacls[kPrefix] += "(A;;GX;;;BA)";
+    const std::string changed = r.m.http.urlacls.at(kPrefix);
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.at(kPrefix) == changed);
+    CHECK(step_status(r.out.str(), "urlacl") == "skipped");
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("teardown with a manifest from before the ownership fields leaves the reservation", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    json old = json::parse(r.m.sys.files.at(kManifestPath));
+    old.erase("urlacl_sddl");
+    old.erase("urlacl_created");
+    r.m.sys.files[kManifestPath] = old.dump();
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(has_human(r.out.str(), "urlacl_foreign"));
+}
+
+TEST_CASE("elevated teardown re-checks the SDDL before removing a reservation", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    Hosts h = r.m.hosts();
+    r.m.http.urlacls[kPrefix] = sddl_for_sid(kSid) + "(A;;GX;;;BA)";
+    json work = {{"schema", 1}, {"operation", "teardown"}, {"ipports", json::array()}, {"prefixes", json::array({kPrefix})},
+                 {"urlacl_expected", {{kPrefix, sddl_for_sid(kSid)}}}, {"firewall_rule", ""}, {"cert_thumbprint", ""}, {"steps", json::array({"urlacl"})}};
+    json result = execute_elevated_work(work, h);
+    CHECK(result["ok"] == true);
+    CHECK(result["steps"][0]["status"] == "skipped");
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    CHECK(r.m.http.calls.empty());
+    // a plan without any expected SDDL removes nothing either
+    work.erase("urlacl_expected");
+    CHECK(execute_elevated_work(work, h)["steps"][0]["status"] == "skipped");
+    CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    // the recorded SDDL removes it
+    work["urlacl_expected"] = {{kPrefix, sddl_for_sid(kSid) + "(A;;GX;;;BA)"}};
+    CHECK(execute_elevated_work(work, h)["steps"][0]["status"] == "removed");
+    CHECK(r.m.http.urlacls.empty());
+}
+
+// ---- teardown: the exported certificate file ------------------------------------------------------------------------
+TEST_CASE("teardown deletes the exported .cer only at the derived path and only when it holds the recorded certificate", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    const std::string thumb = r.m.certs.certs[0].thumbprint;
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+
+    SECTION("happy path: the derived path holds the recorded certificate") {
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(kCerPath) == 0);
+    }
+    SECTION("a tampered manifest pointing at another file never deletes that file") {
+        const std::string victim = "C:\\Users\\jr\\Documents\\important.docx";
+        r.m.sys.files[victim] = "precious";
+        json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+        manifest["cer_path"] = victim;
+        r.m.sys.files[kManifestPath] = manifest.dump();
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(victim) == "precious");
+        CHECK(r.m.sys.files.count(kCerPath) == 1);      // the manifest path is untrusted: nothing is deleted
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_path_untrusted"));
+        CHECK(r.out.str().find("important.docx") != std::string::npos);
+    }
+    SECTION("a tampered manifest host name that is not a host name") {
+        json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+        manifest["hostname"] = "..\\..\\evil";
+        manifest["cer_path"] = "";
+        r.m.sys.files[kManifestPath] = manifest.dump();
+        const std::string other = "C:\\Users\\jr\\AppData\\Local\\fairyfly\\fairyfly-mcp-..\\..\\evil.cer";
+        r.m.sys.files[other] = "cer:" + thumb;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(other) == 1);
+        CHECK(has_human(r.out.str(), "cer_path_untrusted"));
+    }
+    SECTION("the file at the derived path holds another certificate") {
+        r.m.sys.files[kCerPath] = "cer:" + kThumb;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "cer:" + kThumb);
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("the file is not a certificate at all") {
+        r.m.sys.files[kCerPath] = "hello";
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "hello");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("the file is swapped after the plan was made: re-checked right before the delete") {
+        r.m.elevator.child = [&r](const ElevatedRequest& req) {
+            r.m.sys.files[kCerPath] = "swapped";
+            Hosts h = r.m.hosts();
+            return apply_plan_bytes(h, req.plan_text, args_of(req));
+        };
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.at(kCerPath) == "swapped");
+        CHECK(step_status(r.out.str(), "certificate_export") == "skipped");
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+    SECTION("without a manifest the file cannot be tied to a certificate: left for a human") {
+        r.m.sys.files.erase(kManifestPath);
+        t.hostname = kHost;
+        t.port = 8443;
+        REQUIRE(r.teardown(t) == 0);
+        CHECK(r.m.sys.files.count(kCerPath) == 1);
+        CHECK(has_human(r.out.str(), "cer_file_foreign"));
+    }
+}
+
+// ---- firewall rule ownership ----------------------------------------------------------------------------------------
+TEST_CASE("firewall rule names: unique internal Name, human display name", "[mcp_setup]") {
+    CHECK(firewall_internal_name(8443, "0a1b2c3d") == "fairyfly-mcp-https-8443-0a1b2c3d");
+    int port = 0;
+    CHECK(firewall_name_ok("fairyfly-mcp-https-8443-0a1b2c3d", &port));
+    CHECK(port == 8443);
+    for (const char* bad : {"fairyfly MCP HTTPS 8443", "fairyfly-mcp-https-8443", "fairyfly-mcp-https-8443-0A1B2C3D", "fairyfly-mcp-https-0-0a1b2c3d",
+                            "fairyfly-mcp-https-99999-0a1b2c3d", "fairyfly-mcp-https-8443-0a1b2c3", "fairyfly-mcp-https-8443-0a1b2c3d*", "*", "",
+                            "fairyfly-mcp-https-84a3-0a1b2c3d"})
+        CHECK_FALSE(firewall_name_ok(bad));
+}
+
+TEST_CASE("setup --open-firewall creates a uniquely named rule and records the Name", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    REQUIRE(r.m.firewall.rules.size() == 1);
+    const std::string name = r.m.firewall.rules.begin()->first;
+    CHECK(firewall_name_ok(name));
+    CHECK(name != "fairyfly MCP HTTPS 8443");
+    CHECK(r.m.firewall.rules.begin()->second.display == "fairyfly MCP HTTPS 8443");
+    CHECK(r.m.firewall.rules.begin()->second.port == 8443);
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->firewall_rule_name == name);
+    CHECK(m->firewall_rule == "fairyfly MCP HTTPS 8443");
+    // a second run recognises its own rule and does nothing
+    const auto calls = r.m.firewall.calls.size();
+    CHECK(r.setup(o) == 0);
+    CHECK(r.out.str() == "nothing - already set up.\n");
+    CHECK(r.m.firewall.calls.size() == calls);
+    CHECK(r.m.firewall.rules.size() == 1);
+}
+
+TEST_CASE("setup: a pre-existing rule with the same display name is not claimed or duplicated", "[mcp_setup]") {
+    Rig r;
+    r.m.firewall.rules["Custom-Admin-Rule"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    o.json = true;
+    REQUIRE(r.setup(o) == 0);
+    CHECK(r.m.firewall.rules.size() == 1);   // no second rule
+    CHECK(r.m.firewall.calls.empty());
+    CHECK(step_status(r.out.str(), "firewall") == "skipped");
+    CHECK(has_human(r.out.str(), "firewall_foreign"));
+    const auto m = Manifest::from_json(json::parse(r.m.sys.files.at(kManifestPath)));
+    REQUIRE(m.has_value());
+    CHECK(m->firewall_rule.empty());
+    CHECK(m->firewall_rule_name.empty());
+    // and teardown never removes it
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count("Custom-Admin-Rule") == 1);
+}
+
+TEST_CASE("teardown removes the firewall rule by its recorded Name only", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    const std::string ours = r.m.firewall.rules.begin()->first;
+    // a human-made rule with the same display name appears later
+    r.m.firewall.rules["Hand-Made"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count(ours) == 0);
+    CHECK(r.m.firewall.rules.count("Hand-Made") == 1);
+    REQUIRE(r.m.firewall.calls.size() >= 1);
+    CHECK(r.m.firewall.calls.back() == "firewall_remove " + ours);
+}
+
+TEST_CASE("teardown: a manifest that only knows the display name (older setup) removes no firewall rule", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+    manifest.erase("firewall_rule_name");
+    r.m.sys.files[kManifestPath] = manifest.dump();
+    TeardownOptions t;
+    t.yes = true;
+    t.json = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.size() == 1);
+    CHECK(step_status(r.out.str(), "firewall") == "skipped");
+    CHECK(has_human(r.out.str(), "firewall_legacy"));
+}
+
+TEST_CASE("teardown: a tampered manifest Name outside the fairyfly pattern is never used", "[mcp_setup]") {
+    Rig r;
+    Options o = Rig::self_signed();
+    o.open_firewall = true;
+    REQUIRE(r.setup(o) == 0);
+    r.m.firewall.rules["Core Networking - DNS (UDP-Out)"] = FakeFirewall::Rule{"Core Networking - DNS (UDP-Out)", 53};
+    json manifest = json::parse(r.m.sys.files.at(kManifestPath));
+    manifest["firewall_rule_name"] = "Core Networking - DNS (UDP-Out)";
+    r.m.sys.files[kManifestPath] = manifest.dump();
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.m.firewall.rules.count("Core Networking - DNS (UDP-Out)") == 1);
+}
+
+TEST_CASE("elevated child validates firewall names and never claims a foreign display name", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    Hosts h = r.m.hosts();
+    json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
+                 {"thumbprint", ""}, {"create_cert", false}, {"valid_days", 730}, {"steps", json::array({"firewall"})},
+                 {"firewall_rule", "fairyfly-mcp-https-8443-0a1b2c3d"}, {"firewall_display", "fairyfly MCP HTTPS 8443"}};
+    for (const auto& [field, value] : std::vector<std::pair<std::string, json>>{
+             {"firewall_rule", "fairyfly MCP HTTPS 8443"}, {"firewall_rule", "fairyfly-mcp-https-9999-0a1b2c3d"}, {"firewall_display", "evil"},
+             {"firewall_display", "fairyfly MCP HTTPS 9999"}}) {
+        json bad = plan;
+        bad[field] = value;
+        INFO(field << "=" << value.dump());
+        CHECK(execute_elevated_work(bad, h)["error"]["code"] == "INVALID_PLAN");
+    }
+    CHECK(r.m.firewall.calls.empty());
+    // somebody else's rule with the display name appeared after the plan was made
+    r.m.firewall.rules["Other"] = FakeFirewall::Rule{"fairyfly MCP HTTPS 8443", 8443};
+    const json result = execute_elevated_work(plan, h);
+    CHECK(result["ok"] == true);
+    CHECK(result["steps"][0]["status"] == "skipped");
+    CHECK_FALSE(result.contains("firewall_rule"));
+    CHECK(r.m.firewall.rules.size() == 1);
+    // without that rule it is created under the unique Name
+    r.m.firewall.rules.clear();
+    CHECK(execute_elevated_work(plan, h)["steps"][0]["status"] == "created");
+    CHECK(r.m.firewall.rules.count("fairyfly-mcp-https-8443-0a1b2c3d") == 1);
+}
+
+// ---- certificate names and the verify name check ----------------------------------------------------------------------
+TEST_CASE("certificate_names: the CN counts only when there is no SAN extension", "[mcp_setup]") {
+    // no SAN extension: the CN is the name
+    CHECK(certificate_names(false, {}, "sapbox.corp.example") == std::vector<std::string>{"sapbox.corp.example"});
+    // a SAN extension with DNS names: the CN is ignored
+    CHECK(certificate_names(true, {"other.example"}, "sapbox.corp.example") == std::vector<std::string>{"other.example"});
+    // a SAN extension with only other name types (IP, e-mail ...): no DNS name at all, no CN fallback
+    const auto none = certificate_names(true, {}, "sapbox.corp.example");
+    CHECK(none.empty());
+    CHECK_FALSE(san_matches(none, "sapbox.corp.example"));
+    CHECK(san_matches(certificate_names(false, {}, "sapbox.corp.example"), "sapbox.corp.example"));
+    CHECK_FALSE(san_matches(certificate_names(true, {"other.example"}, "sapbox.corp.example"), "sapbox.corp.example"));
+    // and a certificate whose names are empty is a WrongSan problem
+    CertInfo c = good_cert(kThumb);
+    c.dns_names = none;
+    const auto problems = cert_problems(c, kHost, 1800000000);
+    CHECK(std::find(problems.begin(), problems.end(), CertProblem::WrongSan) != problems.end());
+}
+
+TEST_CASE("verify output reports name_match separately from thumbprint_match", "[mcp_setup]") {
+    SECTION("normal run: both match, additive JSON field") {
+        Rig r;
+        Options o = Rig::self_signed();
+        o.json = true;
+        REQUIRE(r.setup(o) == 0);
+        const json doc = json::parse(r.out.str());
+        CHECK(doc["data"]["verify"]["thumbprint_match"] == true);
+        CHECK(doc["data"]["verify"]["name_match"] == true);
+        CHECK_FALSE(has_human(r.out.str(), "name_mismatch"));
+    }
+    SECTION("a thumbprint-pinned success does not hide a name mismatch") {
+        Rig r;
+        r.m.verify.on_round_trip = [&r] { r.m.certs.certs[0].dns_names = {"somebody-else.example"}; };
+        Options o = Rig::self_signed();
+        o.json = true;
+        REQUIRE(r.setup(o) == 0);
+        const json doc = json::parse(r.out.str());
+        CHECK(doc["data"]["verify"]["status"] == "ok");
+        CHECK(doc["data"]["verify"]["thumbprint_match"] == true);
+        CHECK(doc["data"]["verify"]["name_match"] == false);
+        CHECK(has_human(r.out.str(), "name_mismatch"));
+    }
+    SECTION("text rendering shows it as a warning") {
+        Report rep;
+        rep.hostname = kHost;
+        rep.verify = VerifyOut{"ok", "TLS 1.3", 401, true, "", false};
+        const std::string text = render_result_text(rep);
+        CHECK(text.find("thumbprint matches") != std::string::npos);
+        CHECK(text.find("name does NOT match") != std::string::npos);
+        CHECK(report_to_json(rep)["data"]["verify"]["name_match"] == false);
+    }
 }

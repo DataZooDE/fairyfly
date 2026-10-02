@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "include/auth/crypto.h"
 #include "include/setup/setup_hosts.h"
 #include "win_util.h"
 
@@ -120,25 +121,42 @@ public:
         return text;
     }
 
-    ElevatedRun run_elevated(const nlohmann::json& plan) override {
+    long long process_id() override { return static_cast<long long>(GetCurrentProcessId()); }
+
+    ElevatedRun run_elevated(const ElevatedRequest& request) override {
         ElevatedRun run;
         namespace fs = std::filesystem;
+        // %LOCALAPPDATA% is per user. The files are named randomly by this (unelevated) process.
         const fs::path dir = win::to_path(local_app_data_dir()) / "fairyfly" / "run";
         std::error_code ec;
         fs::create_directories(dir, ec);
-        const std::string stem = std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64());
+        const std::string stem = auth::random_hex(auth::random_bytes, 16);
         const fs::path plan_file = dir / ("plan-" + stem + ".json");
         const fs::path result_file = dir / ("result-" + stem + ".json");
+        // CREATE_NEW (never an existing file or link target), FILE_SHARE_READ only: while this handle stays open
+        // nobody can open the file for writing, truncate it or replace it. The child additionally verifies the SHA-256.
+        HANDLE plan_handle = CreateFileW(plan_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (plan_handle == INVALID_HANDLE_VALUE) {
+            run.error = "cannot create the plan file " + plan_file.string() + ": " + error_text(GetLastError());
+            return run;
+        }
         {
-            std::ofstream out(plan_file, std::ios::binary | std::ios::trunc);
-            out << plan.dump();
-            if (!out) {
+            DWORD written = 0;
+            const bool ok = WriteFile(plan_handle, request.plan_text.data(), static_cast<DWORD>(request.plan_text.size()), &written, nullptr) &&
+                            written == request.plan_text.size() && FlushFileBuffers(plan_handle);
+            if (!ok) {
                 run.error = "cannot write the plan file " + plan_file.string();
+                CloseHandle(plan_handle);
+                fs::remove(plan_file, ec);
                 return run;
             }
         }
         const std::string exe = exe_path();
-        const std::wstring params = L"mcp setup --apply-plan \"" + plan_file.wstring() + L"\" --result-file \"" + result_file.wstring() + L"\"";
+        std::wstring params = L"mcp setup --apply-plan \"" + plan_file.wstring() + L"\" --result-file \"" + result_file.wstring() +
+                              L"\" --plan-sha256 " + widen(request.plan_sha256) + L" --plan-nonce " + widen(request.nonce) +
+                              L" --plan-parent-pid " + std::to_wstring(request.parent_pid);
+        if (!request.sid.empty()) params += L" --plan-sid " + widen(request.sid);
+        if (request.force_binding) params += L" --plan-force-binding";
         const std::wstring wexe = widen(exe);
         const std::wstring wdir = win::to_path(exe).parent_path().wstring();
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -156,10 +174,12 @@ public:
         if (!started) {
             if (start_error == ERROR_CANCELLED) run.declined = true;
             else run.error = error_text(start_error);
+            CloseHandle(plan_handle);
             fs::remove(plan_file, ec);
             return run;
         }
         run.launched = true;
+        bool exited = false;
         if (info.hProcess) {
             const DWORD wait = WaitForSingleObject(info.hProcess, 10 * 60 * 1000);
             DWORD code = 0;
@@ -168,18 +188,34 @@ public:
                 run.error = "the elevated process timed out";
             } else if (GetExitCodeProcess(info.hProcess, &code)) {
                 run.exit_code = static_cast<int>(code);
+                exited = true;
             }
             CloseHandle(info.hProcess);
         }
-        std::ifstream in(result_file, std::ios::binary);
-        if (in) {
-            std::stringstream ss;
-            ss << in.rdbuf();
-            try {
-                run.result = nlohmann::json::parse(ss.str());
-            } catch (const std::exception&) {
-                run.error = "unreadable result file";
+        CloseHandle(plan_handle);
+        // The result file is only trusted after a normal exit (0 = done, 1 = a step or the plan check failed), capped in size, and
+        // it must parse as a JSON object (the service additionally requires the request's nonce in it).
+        if (exited && (run.exit_code == 0 || run.exit_code == 1)) {
+            constexpr std::uintmax_t kMaxResultBytes = 1024 * 1024;
+            const std::uintmax_t size = fs::file_size(result_file, ec);
+            if (!ec && size <= kMaxResultBytes) {
+                std::ifstream in(result_file, std::ios::binary);
+                if (in) {
+                    std::stringstream ss;
+                    ss << in.rdbuf();
+                    try {
+                        const nlohmann::json parsed = nlohmann::json::parse(ss.str());
+                        if (parsed.is_object()) run.result = parsed;
+                        else run.error = "unreadable result file";
+                    } catch (const std::exception&) {
+                        run.error = "unreadable result file";
+                    }
+                }
+            } else if (!ec) {
+                run.error = "the result file is too large";
             }
+        } else if (run.error.empty()) {
+            run.error = "the elevated process ended abnormally";
         }
         fs::remove(plan_file, ec);
         fs::remove(result_file, ec);

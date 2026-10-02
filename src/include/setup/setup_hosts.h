@@ -84,18 +84,27 @@ public:
     virtual CerFileState cer_file_state(const std::string& thumbprint, const std::string& path, CerFormat format) = 0;
     /// Writes the public certificate; returns created | updated | unchanged.
     virtual std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) = 0;
+    /// Upper-case SHA-1 thumbprint of the certificate held by the DER or PEM file `path`; nullopt when the file is
+    /// missing or does not hold a certificate. Needs nothing from the store (the certificate may be gone already).
+    virtual std::optional<std::string> file_thumbprint(const std::string& path) = 0;
     /// Deletes the certificate and its private key; false when it was not there.
     virtual bool remove(const std::string& thumbprint) = 0;
 };
 
 // ---- firewall ------------------------------------------------------------------------------------
+/// Rules are identified by their internal Name ("fairyfly-mcp-https-<port>-<8 hex>", unique per setup run), never by the
+/// human-readable display name, so setup and teardown only ever touch a rule fairyfly itself created.
 class Firewall {
 public:
     virtual ~Firewall() = default;
-    virtual bool exists(const std::string& rule_name) = 0;
-    /// Inbound TCP allow rule; returns created | updated | unchanged.
-    virtual std::string ensure(const std::string& rule_name, int port) = 0;
-    virtual bool remove(const std::string& rule_name) = 0;
+    /// A rule with this internal Name exists.
+    virtual bool exists(const std::string& name) = 0;
+    /// A rule with this DisplayName exists (whoever created it).
+    virtual bool display_name_exists(const std::string& display_name) = 0;
+    /// Inbound TCP allow rule identified by `name`; created when no rule has this Name (an existing rule with the same
+    /// display name is not touched). Returns created | updated | unchanged.
+    virtual std::string ensure(const std::string& name, const std::string& display_name, int port) = 0;
+    virtual bool remove(const std::string& name) = 0;
 };
 
 // ---- elevation ------------------------------------------------------------------------------------
@@ -110,6 +119,18 @@ struct ElevatedRun {
     std::string error;
 };
 
+/// What the unelevated parent hands to the elevated child. The child receives the plan as a FILE, but only the
+/// parent-approved bytes are accepted: `plan_sha256` (and the other claims) travel on the elevated command line,
+/// which the UAC consent dialog shows and an unelevated process cannot change.
+struct ElevatedRequest {
+    std::string plan_text;                ///< exact bytes of the plan (JSON text)
+    std::string plan_sha256;              ///< lower-case SHA-256 hex of plan_text
+    std::string nonce;                    ///< random; also embedded in the plan and echoed in the result
+    std::string sid;                      ///< SID the plan claims (setup); empty for teardown
+    long long parent_pid = 0;             ///< pid of the requesting process; also embedded in the plan
+    bool force_binding = false;           ///< the parent approved --force-binding
+};
+
 class Elevator {
 public:
     virtual ~Elevator() = default;
@@ -118,9 +139,11 @@ public:
     virtual std::string current_user_sid() = 0;
     virtual std::string current_user_name() = 0;                                 ///< DOMAIN\user
     virtual std::optional<std::string> resolve_user_sid(const std::string& user) = 0;
-    /// Runs `<exe> mcp setup --apply-plan <planfile> --result-file <resultfile>` elevated (one UAC prompt):
-    /// the plan is written to a file, the child writes its per-step results to the result file.
-    virtual ElevatedRun run_elevated(const nlohmann::json& plan) = 0;
+    virtual long long process_id() = 0;
+    /// Runs `<exe> mcp setup --apply-plan <planfile> --result-file <resultfile> --plan-sha256 ...` elevated (one UAC
+    /// prompt): the plan bytes are written to a fresh file (CREATE_NEW, no write sharing, held open while the child
+    /// runs), the child writes its per-step results to a randomly named result file.
+    virtual ElevatedRun run_elevated(const ElevatedRequest& request) = 0;
 };
 
 // ---- system probes --------------------------------------------------------------------------------

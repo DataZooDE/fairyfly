@@ -19,8 +19,10 @@ struct FakeElevator : Elevator {
     std::map<std::string, std::string> known_users;      ///< user -> SID
     bool decline = false;                                ///< the user cancels the UAC prompt
     int child_exit_code = 0;
-    std::vector<nlohmann::json> plans_seen;              ///< plans handed to run_elevated
-    std::function<nlohmann::json(const nlohmann::json&)> child;   ///< runs the plan (the elevated child)
+    long long pid = 4242;
+    std::vector<nlohmann::json> plans_seen;              ///< plans handed to run_elevated (parsed plan_text)
+    std::vector<ElevatedRequest> requests_seen;          ///< the full requests
+    std::function<nlohmann::json(const ElevatedRequest&)> child;   ///< the elevated child: gets exactly what the command line + file would carry
 
     bool is_elevated() override { return elevated_child_running || type == ElevationType::Elevated; }
     ElevationType elevation_type() override { return is_elevated() ? ElevationType::Elevated : type; }
@@ -31,8 +33,10 @@ struct FakeElevator : Elevator {
         if (it == known_users.end()) return std::nullopt;
         return it->second;
     }
-    ElevatedRun run_elevated(const nlohmann::json& plan) override {
-        plans_seen.push_back(plan);
+    long long process_id() override { return pid; }
+    ElevatedRun run_elevated(const ElevatedRequest& request) override {
+        requests_seen.push_back(request);
+        plans_seen.push_back(nlohmann::json::parse(request.plan_text, nullptr, false));
         ElevatedRun run;
         if (decline) {
             run.declined = true;
@@ -41,7 +45,7 @@ struct FakeElevator : Elevator {
         run.launched = true;
         elevated_child_running = true;
         try {
-            if (child) run.result = child(plan);
+            if (child) run.result = child(request);
         } catch (...) {
             elevated_child_running = false;
             throw;
@@ -171,6 +175,11 @@ struct FakeCertStore : CertStore {
         if (it == sys->files.end()) return CerFileState::Missing;
         return it->second == "cer:" + thumbprint ? CerFileState::Matches : CerFileState::Differs;
     }
+    std::optional<std::string> file_thumbprint(const std::string& path) override {
+        const auto it = sys->files.find(path);
+        if (it == sys->files.end() || it->second.rfind("cer:", 0) != 0) return std::nullopt;
+        return it->second.substr(4);
+    }
     std::string export_cer(const std::string& thumbprint, const std::string& path, CerFormat format) override {
         const auto state = cer_file_state(thumbprint, path, format);
         sys->files[path] = "cer:" + thumbprint;
@@ -188,32 +197,43 @@ struct FakeCertStore : CertStore {
 };
 
 struct FakeFirewall : Firewall {
+    struct Rule {
+        std::string display;
+        int port = 0;
+    };
     explicit FakeFirewall(FakeElevator& e) : elevator(e) {}
     FakeElevator& elevator;
-    std::map<std::string, int> rules;
+    std::map<std::string, Rule> rules;               ///< internal Name -> rule
     std::vector<std::string> calls;
-    bool exists(const std::string& rule_name) override { return rules.count(rule_name) != 0; }
-    std::string ensure(const std::string& rule_name, int port) override {
+    bool exists(const std::string& name) override { return rules.count(name) != 0; }
+    bool display_name_exists(const std::string& display_name) override {
+        for (const auto& [name, rule] : rules)
+            if (rule.display == display_name) return true;
+        return false;
+    }
+    std::string ensure(const std::string& name, const std::string& display_name, int port) override {
         if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_ensure " + rule_name);
-        const auto it = rules.find(rule_name);
-        if (it == rules.end()) { rules[rule_name] = port; return "created"; }
-        if (it->second == port) return "unchanged";
-        it->second = port;
+        calls.push_back("firewall_ensure " + name);
+        const auto it = rules.find(name);
+        if (it == rules.end()) { rules[name] = Rule{display_name, port}; return "created"; }
+        if (it->second.port == port) return "unchanged";
+        it->second.port = port;
         return "updated";
     }
-    bool remove(const std::string& rule_name) override {
+    bool remove(const std::string& name) override {
         if (!elevator.is_elevated()) throw HostError("ACCESS_DENIED", "Access is denied (elevation required)");
-        calls.push_back("firewall_remove " + rule_name);
-        return rules.erase(rule_name) > 0;
+        calls.push_back("firewall_remove " + name);
+        return rules.erase(name) > 0;
     }
 };
 
 struct FakeVerify : VerifyHost {
     VerifyResult result{"ok", "TLS 1.3", 401, true, ""};
     std::vector<VerifyRequest> requests;
+    std::function<void()> on_round_trip;             ///< lets a test change the machine while the probe runs
     VerifyResult round_trip(const VerifyRequest& request) override {
         requests.push_back(request);
+        if (on_round_trip) on_round_trip();
         VerifyResult out = result;
         if (out.status == "ok") out.thumbprint_match = out.thumbprint_match && (!request.tls || !request.expected_thumbprint.empty());
         return out;

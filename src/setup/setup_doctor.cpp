@@ -74,7 +74,10 @@ config::SetupFacts collect_setup_facts(Hosts& h, const config::SetupQuery& q) {
     // firewall: only the rule setup recorded
     if (!f.manifest_firewall_rule.empty()) {
         try {
-            f.firewall_exists = h.firewall.exists(f.manifest_firewall_rule);
+            // by the unique internal Name; an older manifest only has the display name
+            f.firewall_exists = manifest && !manifest->firewall_rule_name.empty() && firewall_name_ok(manifest->firewall_rule_name)
+                                    ? h.firewall.exists(manifest->firewall_rule_name)
+                                    : h.firewall.display_name_exists(f.manifest_firewall_rule);
             f.firewall_known = true;
         } catch (const std::exception&) {
             f.firewall_known = false;

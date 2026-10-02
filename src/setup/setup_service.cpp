@@ -63,6 +63,17 @@ void read_config(SystemProbe& sys, const std::string& path, Diagnosis& d) {
     }
 }
 
+/// True when the DER/PEM file holds exactly the certificate with this SHA-1 thumbprint (independent of the store).
+bool cer_file_holds(Hosts& h, const std::string& path, const std::string& thumbprint) {
+    if (thumbprint.empty() || thumbprint_error(thumbprint)) return false;
+    try {
+        const auto actual = h.certs.file_thumbprint(path);
+        return actual && normalize_thumbprint(*actual) == normalize_thumbprint(thumbprint);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 ErrorInfo host_error_info(const HostError& e) { return {e.code(), e.what(), 1}; }
 
 } // namespace
@@ -153,10 +164,24 @@ Diagnosis diagnose(Hosts& h, const Options& o) {
         }
     }
     if (d.tls && o.open_firewall) {
+        // Identified by the unique internal Name recorded by setup; a rule that only shares the display name is not ours.
+        std::string recorded;
+        if (d.manifest && d.manifest->port == d.port && !d.manifest->firewall_rule_name.empty()) {
+            int name_port = 0;
+            if (firewall_name_ok(d.manifest->firewall_rule_name, &name_port) && name_port == d.port) recorded = d.manifest->firewall_rule_name;
+        }
         try {
-            d.firewall_exists = h.firewall.exists(firewall_rule_name(d.port));
+            if (!recorded.empty() && h.firewall.exists(recorded)) {
+                d.firewall_exists = true;
+                d.firewall_name = recorded;
+            } else {
+                d.firewall_name = firewall_internal_name(d.port, auth::random_hex(auth::random_bytes, 4));
+                d.firewall_display_foreign = h.firewall.display_name_exists(firewall_rule_name(d.port));
+            }
         } catch (const std::exception&) {
             d.firewall_exists = false;
+            d.firewall_display_foreign = false;
+            if (d.firewall_name.empty()) d.firewall_name = firewall_internal_name(d.port, auth::random_hex(auth::random_bytes, 4));
         }
     }
     d.port_listening = h.sys.tcp_listening("127.0.0.1", d.port);
@@ -187,14 +212,30 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
         ports = {kDefaultTlsPort, kDefaultNoTlsPort};
     }
     const std::string dir = data_dir(h.sys);
-    d.cer_path = d.manifest && !d.manifest->cer_path.empty() ? d.manifest->cer_path : join_path(dir, cer_file_name(d.hostname));
-    d.cer_exists = h.sys.file_exists(d.cer_path);
+    // The manifest is user-writable: its cer_path is never used to delete anything. The export path is derived from the
+    // validated host name and the fairyfly data directory (the same rule setup uses).
+    if (const auto e = hostname_error(d.hostname)) {
+        d.cer_refusal = "the host name is not valid (" + *e + ")";
+    } else {
+        d.cer_path = join_path(dir, cer_file_name(d.hostname));
+        if (d.manifest && !d.manifest->cer_path.empty() && lower_ascii(d.manifest->cer_path) != lower_ascii(d.cer_path))
+            d.cer_refusal = "the manifest records the export path " + d.manifest->cer_path + " but setup writes " + d.cer_path;
+    }
+    if (d.cer_refusal.empty()) {
+        d.cer_exists = h.sys.file_exists(d.cer_path);
+        d.cer_matches = d.cer_exists && d.manifest && cer_file_holds(h, d.cer_path, d.manifest->thumbprint);
+    } else {
+        d.cer_path.clear();
+    }
     d.config_path = o.config_path.empty() ? join_path(dir, "mcp.yaml") : o.config_path;
     for (int port : ports) {
         for (const bool tls : {true, false}) {
             const std::string prefix = url_prefix(tls, "", port);
             try {
-                if (h.http.query_urlacl(prefix) && std::find(d.urlacls.begin(), d.urlacls.end(), prefix) == d.urlacls.end()) d.urlacls.push_back(prefix);
+                if (const auto sddl = h.http.query_urlacl(prefix); sddl && std::find(d.urlacls.begin(), d.urlacls.end(), prefix) == d.urlacls.end()) {
+                    d.urlacls.push_back(prefix);
+                    d.urlacl_sddl[prefix] = *sddl;
+                }
             } catch (const HostError&) {
                 if (d.manifest && std::find(d.manifest->prefixes.begin(), d.manifest->prefixes.end(), prefix) != d.manifest->prefixes.end()) d.urlacls.push_back(prefix);
             }
@@ -206,13 +247,18 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
                 if (d.manifest && std::find(d.manifest->ipports.begin(), d.manifest->ipports.end(), ipport) != d.manifest->ipports.end()) d.ssl_ours.push_back(ipport);
             }
         }
-        if (d.firewall_rule.empty() || port == d.port) d.firewall_rule = firewall_rule_name(port);
-        try {
-            if (h.firewall.exists(firewall_rule_name(port))) {
-                d.firewall_exists = true;
-                d.firewall_rule = firewall_rule_name(port);
+    }
+    // firewall: only the rule the manifest records by its unique internal Name
+    if (d.manifest) {
+        if (firewall_name_ok(d.manifest->firewall_rule_name)) {
+            d.firewall_rule = d.manifest->firewall_rule_name;
+            try {
+                d.firewall_exists = h.firewall.exists(d.firewall_rule);
+            } catch (const std::exception&) {
+                d.firewall_exists = true;   // cannot tell without elevation: the elevated child removes by Name only if it is there
             }
-        } catch (const std::exception&) {
+        } else if (!d.manifest->firewall_rule.empty()) {
+            d.firewall_legacy_display = d.manifest->firewall_rule;
         }
     }
     if (d.manifest && !d.manifest->thumbprint.empty()) {
@@ -251,9 +297,11 @@ json make_elevated_work(const Plan& p) {
         w["replace_urlacl"] = p.replace_urlacl;
         w["force_binding"] = p.force_binding;
         w["firewall_rule"] = p.open_firewall ? p.firewall_rule : "";
+        w["firewall_display"] = p.open_firewall ? p.firewall_display : "";
     } else {
         w["ipports"] = p.teardown.ipports;
         w["prefixes"] = p.teardown.prefixes;
+        w["urlacl_expected"] = p.teardown.urlacl_expected;
         w["firewall_rule"] = p.teardown.firewall_rule;
         w["cert_thumbprint"] = p.teardown.cert_thumbprint;
     }
@@ -274,9 +322,10 @@ std::optional<std::string> validate_work(const json& w) {
     if (!w.contains("steps") || !w["steps"].is_array()) return "steps missing";
     for (const auto& s : w["steps"])
         if (!s.is_string() || !known.count(s.get<std::string>())) return "unknown step";
-    auto rule_ok = [](const std::string& rule) {
+    auto rule_ok = [](const std::string& rule) { return rule.empty() || firewall_name_ok(rule); };
+    auto display_ok = [](const std::string& display) {
         static const std::regex re(R"(^fairyfly MCP HTTPS \d{1,5}$)");
-        return rule.empty() || std::regex_match(rule, re);
+        return display.empty() || std::regex_match(display, re);
     };
     try {
         if (op == "setup") {
@@ -287,6 +336,12 @@ std::optional<std::string> validate_work(const json& w) {
                 if (auto e = thumbprint_error(t)) return "thumbprint: " + *e;
             if (!sid_ok(w.at("sid").get<std::string>())) return "sid is not a SID";
             if (!rule_ok(w.value("firewall_rule", ""))) return "firewall rule name";
+            if (!display_ok(w.value("firewall_display", ""))) return "firewall display name";
+            if (!w.value("firewall_rule", "").empty()) {
+                int name_port = 0;
+                firewall_name_ok(w.value("firewall_rule", ""), &name_port);
+                if (name_port != w.at("port").get<int>() || w.value("firewall_display", "") != firewall_rule_name(name_port)) return "firewall rule does not match the port";
+            }
         } else {
             for (const auto& ip : w.at("ipports")) {
                 int port = 0;
@@ -295,6 +350,11 @@ std::optional<std::string> validate_work(const json& w) {
             for (const auto& prefix : w.at("prefixes")) {
                 static const std::regex re(R"(^(https://\+|http://127\.0\.0\.1):\d{1,5}/mcp/$)");
                 if (!std::regex_match(prefix.get<std::string>(), re)) return "prefix";
+            }
+            if (w.contains("urlacl_expected")) {
+                if (!w["urlacl_expected"].is_object()) return "urlacl_expected";
+                for (const auto& [prefix, sddl] : w["urlacl_expected"].items())
+                    if (!sddl.is_string() || sddl.get<std::string>().size() > 4096) return "urlacl_expected";
             }
             const std::string t = w.value("cert_thumbprint", "");
             if (!t.empty())
@@ -322,6 +382,8 @@ json execute_setup_work(const json& w, Hosts& h) {
     const std::string prefix = url_prefix(tls, host, port);
     std::string failed;
     std::vector<std::string> bound;   // address families that ended up bound
+    std::string urlacl_sddl;          // SDDL after this run created/changed the reservation
+    bool firewall_created = false;    // the firewall rule (by internal Name) is in place and ours
     auto fail = [&](const std::string& id, const std::string& why) {
         steps.push_back(step_json(id, "failed", why));
         failed = id;
@@ -353,6 +415,11 @@ json execute_setup_work(const json& w, Hosts& h) {
                 const std::string sddl = merge_sddl(existing.value_or(""), sid);
                 if (existing) h.http.remove_urlacl(prefix);
                 h.http.add_urlacl(prefix, sddl);
+                try {   // what http.sys now reports is what teardown compares against later
+                    urlacl_sddl = h.http.query_urlacl(prefix).value_or(sddl);
+                } catch (const std::exception&) {
+                    urlacl_sddl = sddl;
+                }
                 steps.push_back(step_json("urlacl", existing ? "updated" : "created", prefix));
             }
         } catch (const std::exception& e) {
@@ -394,14 +461,25 @@ json execute_setup_work(const json& w, Hosts& h) {
     // firewall
     if (wants(w, "firewall") && failed.empty()) {
         try {
-            const std::string change = h.firewall.ensure(w.value("firewall_rule", ""), port);
-            steps.push_back(step_json("firewall", change, w.value("firewall_rule", "")));
+            const std::string name = w.value("firewall_rule", "");
+            const std::string display = w.value("firewall_display", "");
+            if (name.empty()) throw HostError("INVALID_PLAN", "no firewall rule name");
+            if (!h.firewall.exists(name) && h.firewall.display_name_exists(display)) {
+                // somebody created a rule with this display name in the meantime: never claim it, never add a second one
+                steps.push_back(step_json("firewall", "skipped", "a rule named '" + display + "' already exists and was not created by fairyfly; left untouched"));
+            } else {
+                const std::string change = h.firewall.ensure(name, display, port);
+                steps.push_back(step_json("firewall", change, name));
+                firewall_created = true;
+            }
         } catch (const std::exception& e) {
             fail("firewall", e.what());
         }
     }
     json out{{"ok", failed.empty()}, {"steps", steps}, {"thumbprint", thumb}};
     if (!bound.empty()) out["bound_ipports"] = bound;
+    if (!urlacl_sddl.empty()) out["urlacl_sddl"] = urlacl_sddl;
+    if (firewall_created) out["firewall_rule"] = w.value("firewall_rule", "");
     if (!failed.empty()) out["error"] = {{"code", "STEP_FAILED"}, {"message", "step " + failed + " failed"}};
     return out;
 }
@@ -429,10 +507,23 @@ json execute_teardown_work(const json& w, Hosts& h) {
     }
     if (wants(w, "urlacl") && failed.empty()) {
         try {
-            std::string detail;
-            for (const auto& j : w["prefixes"])
-                if (h.http.remove_urlacl(j.get<std::string>())) detail += (detail.empty() ? "" : ", ") + j.get<std::string>();
-            steps.push_back(step_json("urlacl", "removed", detail));
+            std::string detail, left;
+            const json expected = w.value("urlacl_expected", json::object());
+            for (const auto& j : w["prefixes"]) {
+                const std::string prefix = j.get<std::string>();
+                const auto current = h.http.query_urlacl(prefix);
+                if (!current) continue;   // already gone
+                // Re-checked here, with elevation: only the reservation setup created, with the SDDL it left.
+                const auto it = expected.find(prefix);
+                if (it == expected.end() || !it->is_string() || it->get<std::string>() != *current) {
+                    left += (left.empty() ? "" : ", ") + prefix;
+                    continue;
+                }
+                if (h.http.remove_urlacl(prefix)) detail += (detail.empty() ? "" : ", ") + prefix;
+            }
+            if (left.empty()) steps.push_back(step_json("urlacl", "removed", detail));
+            else if (detail.empty()) steps.push_back(step_json("urlacl", "skipped", left + ": changed since setup or not created by it; left untouched"));
+            else steps.push_back(step_json("urlacl", "removed", detail + "; left untouched (changed since setup): " + left));
         } catch (const std::exception& e) {
             fail("urlacl", e.what());
         }
@@ -475,18 +566,60 @@ json execute_elevated_work(const json& work, Hosts& hosts) {
     }
 }
 
-int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file) {
+namespace {
+
+json invalid_plan(const std::string& why) {
+    return json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", why}}}};
+}
+
+bool lower_hex64(const std::string& s) {
+    if (s.size() != 64) return false;
+    for (const char c : s)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    return true;
+}
+
+json apply_checked(Hosts& hosts, const std::string& bytes, const ApplyArgs& args) {
+    if (bytes.size() > kMaxPlanBytes) return invalid_plan("plan file too large");
+    if (!lower_hex64(args.sha256) || args.nonce.empty()) return invalid_plan("the plan was not approved by the requesting process");
+    // 1. the bytes are exactly what the unelevated parent wrote and put on the elevated command line
+    if (!auth::constant_time_equal(auth::sha256_hex(bytes), args.sha256)) return invalid_plan("plan file does not match the approved SHA-256 (changed after approval)");
+    // 2. parse the SAME bytes (no second read of the file)
+    json plan;
+    try {
+        plan = json::parse(bytes);
+    } catch (const std::exception&) {
+        return invalid_plan("plan is not valid JSON");
+    }
+    if (!plan.is_object()) return invalid_plan("malformed plan");
+    // 3. the plan belongs to this request and is fresh
+    if (plan.value("nonce", std::string()) != args.nonce) return invalid_plan("plan nonce does not match the request");
+    if (plan.value("parent_pid", 0LL) != args.parent_pid) return invalid_plan("plan parent pid does not match the request");
+    const long long age = hosts.sys.now() - plan.value("created_at", 0LL);
+    if (age > kPlanMaxAgeSeconds || age < -60) return invalid_plan("plan is stale");
+    // 4. claims on the command line: the SID the parent resolved and the consent for --force-binding
+    if (plan.value("sid", std::string()) != args.sid) return invalid_plan("plan SID does not match the approved SID");
+    if (plan.value("force_binding", false) && !args.force_binding) return invalid_plan("force_binding was not approved by the requesting process");
+    return execute_elevated_work(plan, hosts);
+}
+
+} // namespace
+
+json apply_plan_bytes(Hosts& hosts, const std::string& plan_bytes, const ApplyArgs& args) {
     json result;
     try {
-        const auto text = hosts.sys.read_file(plan_file);
-        if (!text) {
-            result = json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", "plan file unreadable"}}}};
-        } else {
-            result = execute_elevated_work(json::parse(*text), hosts);
-        }
+        result = apply_checked(hosts, plan_bytes, args);
     } catch (const std::exception& e) {
-        result = json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", e.what()}}}};
+        result = invalid_plan(e.what());
     }
+    result["nonce"] = args.nonce;
+    return result;
+}
+
+int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file, const ApplyArgs& args) {
+    json result;
+    const auto text = hosts.sys.read_file(plan_file);   // the one and only read
+    result = text ? apply_plan_bytes(hosts, *text, args) : json{{"ok", false}, {"steps", json::array()}, {"nonce", args.nonce}, {"error", {{"code", "INVALID_PLAN"}, {"message", "plan file unreadable"}}}};
     hosts.sys.write_file(result_file, result.dump());
     return result.value("ok", false) ? 0 : 1;
 }
@@ -529,7 +662,20 @@ bool run_elevated_part(Hosts& h, const Plan& plan, json* result, ErrorInfo* erro
         *result = execute_elevated_work(work, h);
         return true;
     }
-    const ElevatedRun run = h.elevator.run_elevated(work);
+    // Bind the plan to what this process approved: exact bytes + SHA-256 (on the elevated command line), nonce, pid, time.
+    const std::string nonce = auth::random_hex(auth::random_bytes, 16);
+    json bound = work;
+    bound["nonce"] = nonce;
+    bound["parent_pid"] = h.elevator.process_id();
+    bound["created_at"] = h.sys.now();
+    ElevatedRequest request;
+    request.plan_text = bound.dump();
+    request.plan_sha256 = auth::sha256_hex(request.plan_text);
+    request.nonce = nonce;
+    request.sid = work.value("sid", std::string());
+    request.parent_pid = h.elevator.process_id();
+    request.force_binding = work.value("force_binding", false);
+    const ElevatedRun run = h.elevator.run_elevated(request);
     if (run.declined) {
         *error = {"ELEVATION_DECLINED", "The UAC prompt was declined; nothing was changed.", 1};
         return false;
@@ -537,6 +683,10 @@ bool run_elevated_part(Hosts& h, const Plan& plan, json* result, ErrorInfo* erro
     if (!run.launched || run.result.is_null() || !run.result.is_object()) {
         *error = {"ELEVATION_FAILED", "The elevated process did not report a result" + (run.error.empty() ? "" : ": " + run.error) +
                                           " (exit code " + std::to_string(run.exit_code) + ")", 1};
+        return false;
+    }
+    if (run.result.value("nonce", std::string()) != nonce) {
+        *error = {"ELEVATION_FAILED", "The elevated process reported a result that does not belong to this request (exit code " + std::to_string(run.exit_code) + ")", 1};
         return false;
     }
     *result = run.result;
@@ -693,6 +843,15 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     }
     if (!any_failed && pending("manifest")) {
         Manifest m = plan.manifest;
+        if (const StepItem* planned = plan.step("firewall"); planned && planned->status == "would_create" && result.value("firewall_rule", std::string()) != plan.firewall_rule) {
+            m.firewall_rule.clear();   // the rule was not created by this run (someone else's rule appeared): do not claim it
+            m.firewall_rule_name.clear();
+            if (const auto previous = load_manifest(h.sys, plan.manifest_path); previous) {
+                m.firewall_rule = previous->firewall_rule;
+                m.firewall_rule_name = previous->firewall_rule_name;
+            }
+        }
+        if (const std::string recorded = result.value("urlacl_sddl", std::string()); !recorded.empty()) m.urlacl_sddl = recorded;
         m.thumbprint = plan.tls && plan.cert_mode != CertMode::NoTls ? thumb : "";
         const std::string now = iso_utc(h.sys.now());
         if (m.created_at.empty()) m.created_at = now;
@@ -731,7 +890,17 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
         } else {
             VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
             const VerifyResult vr = h.verify.round_trip(req);
-            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail};
+            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
+            if (plan.tls && vr.status != "skipped") {
+                // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
+                // checked separately, against the SAN of the pinned certificate.
+                try {
+                    const CertInfo bound = h.certs.find_by_thumbprint(thumb);
+                    vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
+                } catch (const std::exception&) {
+                    vo.name_match = false;
+                }
+            }
             if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
                 vo.status = "failed";
                 vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
@@ -741,6 +910,10 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     }
     rep.verify = vo;
     rep.human = plan.human;
+    if (plan.tls && vo.status != "skipped" && !vo.name_match)
+        rep.human.push_back({"name_mismatch", "The certificate does not cover the host name '" + plan.hostname +
+                                                  "' in its subject alternative names: the verification above is pinned by thumbprint, but clients that validate the name will refuse it. "
+                                                  "Use a certificate whose SAN lists this host name (or a self-signed one from 'mcp setup --self-signed')."});
     if (vo.status == "ok" && old_protocol(vo.protocol))
         rep.human.push_back({"schannel", "The server negotiated " + vo.protocol + ": raise the machine's Schannel policy to TLS 1.2 or newer (registry SCHANNEL\\Protocols)."});
     rep.next_steps = plan.next_steps;
@@ -813,7 +986,12 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
             if (s.id == id) return s.status == "would_remove";
         return false;
     };
-    if (!any_failed && pending("certificate_export")) {
+    std::vector<HumanItem> rep_human_extra;
+    if (!any_failed && pending("certificate_export") && !cer_file_holds(h, plan.teardown.cer_path, d.manifest ? d.manifest->thumbprint : std::string())) {
+        // the file changed between the plan and now (or never held the recorded certificate): never delete it
+        set_status("certificate_export", "skipped", plan.teardown.cer_path + " no longer holds the recorded certificate; left untouched");
+        rep_human_extra.push_back({"cer_file_foreign", plan.teardown.cer_path + " does not hold the certificate that setup exported; it was not deleted."});
+    } else if (!any_failed && pending("certificate_export")) {
         if (h.sys.remove_file(plan.teardown.cer_path) || !h.sys.file_exists(plan.teardown.cer_path)) set_status("certificate_export", "removed", plan.teardown.cer_path);
         else {
             set_status("certificate_export", "failed", "cannot delete " + plan.teardown.cer_path);
@@ -840,6 +1018,7 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
     finalize_statuses(steps, any_failed);
     rep.steps = steps;
     rep.human = plan.human;
+    for (const auto& item : rep_human_extra) rep.human.push_back(item);
     if (any_failed) {
         rep.error = ErrorInfo{"STEP_FAILED", failure, 1};
         if (!o.json) *env.out << render_result_text(rep);

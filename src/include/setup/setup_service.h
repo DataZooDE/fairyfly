@@ -48,9 +48,23 @@ nlohmann::json make_elevated_work(const Plan& plan);
 /// Executes an elevated work file against `hosts` (in process when already elevated, or as the child). Re-validates
 /// every field; never trusts the file. Returns {"ok":bool,"steps":[{id,status,detail}],"thumbprint":"...","error":{...}}.
 nlohmann::json execute_elevated_work(const nlohmann::json& work, Hosts& hosts);
-/// Entry of `mcp setup --apply-plan FILE --result-file FILE`: reads the plan, executes it, writes the result. Exit code
-/// 0 when every step succeeded, 1 otherwise.
-int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file);
+/// What the elevated child was told on its command line (the parent's claims about the plan it approved).
+struct ApplyArgs {
+    std::string sha256;                   ///< --plan-sha256
+    std::string nonce;                    ///< --plan-nonce
+    std::string sid;                      ///< --plan-sid (setup)
+    long long parent_pid = 0;             ///< --plan-parent-pid
+    bool force_binding = false;           ///< --plan-force-binding
+};
+inline constexpr std::size_t kMaxPlanBytes = 1024 * 1024;
+inline constexpr long long kPlanMaxAgeSeconds = 600;
+/// Verifies the plan BYTES against the parent's claims (size cap, SHA-256, nonce, parent pid, age, SID, force_binding)
+/// and only then parses and executes them: from the same in-memory bytes, with no second read. A mismatch yields
+/// {"ok":false,"error":{"code":"INVALID_PLAN"}} and no host call. The result carries the nonce.
+nlohmann::json apply_plan_bytes(Hosts& hosts, const std::string& plan_bytes, const ApplyArgs& args);
+/// Entry of `mcp setup --apply-plan FILE --result-file FILE --plan-sha256 ...`: reads the plan file ONCE, applies it
+/// through apply_plan_bytes, writes the result. Exit code 0 when every step succeeded, 1 otherwise.
+int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file, const ApplyArgs& args);
 
 /// Reads %LOCALAPPDATA%\fairyfly\mcp-setup.json (or `path`). nullopt when absent; `unreadable` set when present but bad.
 std::optional<Manifest> load_manifest(SystemProbe& sys, const std::string& path, bool* unreadable = nullptr);

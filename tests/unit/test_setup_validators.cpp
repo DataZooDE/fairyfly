@@ -83,7 +83,7 @@ public:
 
 TEST_CASE("certificate and firewall scripts are constant and carry no interpolation", "[setup][ps]") {
     const auto& catalog = sys::script_catalog();
-    REQUIRE(catalog.size() == 8);
+    REQUIRE(catalog.size() == 9);
     std::set<std::string> texts;
     for (const auto& [name, text] : catalog) {
         INFO(name);
@@ -123,7 +123,7 @@ TEST_CASE("PowerShell runner helper passes input only as JSON params and maps fa
     runner.next = sys::PsResult{};
     runner.next.timed_out = true;
     try {
-        sys::run_json_script(runner, sys::kFirewallExists, sys::firewall_rule_params("rule"));
+        sys::run_json_script(runner, sys::kFirewallExists, sys::firewall_name_params("fairyfly-mcp-https-8443-0a1b2c3d"));
         FAIL("expected PowerShellError");
     } catch (const sys::PowerShellError& e) {
         CHECK(e.code == "PS_SCRIPT_TIMEOUT");
