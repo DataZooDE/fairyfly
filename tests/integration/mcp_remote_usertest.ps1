@@ -98,7 +98,7 @@ try {
     $tokens = @{}
     foreach ($t in $Tasks) {
         $name = "ffut-$Rand-$($t.Name)"
-        $tokArgs = @('mcp', 'token', 'create', $name, '--scope', 'session,screen,element,transaction,popup,key', '--read-only', '--tcode', $t.Tcodes, '--system', 'A4H/001', '--expires', '1d', '--output', 'json')
+        $tokArgs = @('mcp', 'token', 'create', $name, '--scope', 'session.list,session.attach,screen,element,transaction,popup,key,menu.list', '--read-only', '--tcode', $t.Tcodes, '--system', 'A4H/001', '--expires', '1d', '--output', 'json')
         if ($t.PSObject.Properties.Name -contains 'AllowInput' -and $t.AllowInput) { $tokArgs += '--allow-selection-input' }
         $r = FF $tokArgs 60
         $tj = $null; try { $tj = $r.Out | ConvertFrom-Json } catch { }

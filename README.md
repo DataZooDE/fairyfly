@@ -92,7 +92,7 @@ Every invocation, and every line inside `batch`, appends one JSON record to `%LO
 
 ~~~powershell
 claude mcp add fairyfly -- C:\path\to\fairyfly.exe mcp                      # local, stdio
-fairyfly mcp token create linux-reader --scope session,connection,screen   # remote: create a token (shown once)
+fairyfly mcp token create linux-reader --scope session.list,session.attach,screen   # remote: create a token (shown once)
 fairyfly mcp --http                                                          # remote: serve on 127.0.0.1:8383
 ~~~
 

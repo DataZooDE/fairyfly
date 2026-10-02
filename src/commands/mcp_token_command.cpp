@@ -1,5 +1,6 @@
 #include "include/commands/command_base.h"
 
+#include "include/auth/scopes.h"
 #include "include/auth/secret_backend.h"
 #include "include/auth/token_cli.h"
 #include "include/auth/token_store.h"
@@ -26,7 +27,7 @@ public:
         create_->fallthrough();
         create_->add_option("name", args_.name, "Token name (letters, digits, . _ -)")->required();
         create_->add_option("--scope", args_.scopes,
-                            "Tool families the token may use, comma separated (default: session,connection,screen; * = all)")
+                            fairyfly::auth::scope_help_text())
             ->delimiter(',');
         create_->add_option("--system", args_.systems, "Allowed SAP systems SID/CLIENT, e.g. A4H/001 (globs allowed)")->delimiter(',');
         create_->add_option("--tcode", args_.tcodes, "Allowed T-codes, e.g. SE16,SM* (globs allowed)")->delimiter(',');

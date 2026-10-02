@@ -94,8 +94,8 @@ try {
     $r = FF @('mcp', 'cert', 'export', '--format', 'pem', '--out', $Pem, '--output', 'json') 60
     if ($r.Exit -ne 0 -or -not (Test-Path $Pem)) { throw "cert export failed: $($r.Out)" }
 
-    $tokArgs = @('mcp', 'token', 'create', $TokenName, '--scope', 'session,screen,element,transaction,popup,key', '--read-only', '--expires', '1d', '--output', 'json')
-    if (-not $NoAllowlist) { $tokArgs = @('mcp', 'token', 'create', $TokenName, '--scope', 'session,screen,element,transaction,popup,key', '--read-only', '--tcode', $Tcode, '--system', 'A4H/001', '--expires', '1d', '--output', 'json') }
+    $tokArgs = @('mcp', 'token', 'create', $TokenName, '--scope', 'session.list,session.attach,screen,element,transaction,popup,key,menu.list', '--read-only', '--expires', '1d', '--output', 'json')
+    if (-not $NoAllowlist) { $tokArgs = @('mcp', 'token', 'create', $TokenName, '--scope', 'session.list,session.attach,screen,element,transaction,popup,key,menu.list', '--read-only', '--tcode', $Tcode, '--system', 'A4H/001', '--expires', '1d', '--output', 'json') }
     $r = FF $tokArgs 60
     $tj = $null; try { $tj = $r.Out | ConvertFrom-Json } catch { }
     if ($null -eq $tj -or -not $tj.data.token) { throw "token create failed: $($r.Out.Substring(0, [Math]::Min(300, $r.Out.Length)))" }
