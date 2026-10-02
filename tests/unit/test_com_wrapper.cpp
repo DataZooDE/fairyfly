@@ -141,6 +141,8 @@ public:
     // Type property reads that fail with DISP_E_MEMBERNOTFOUND before succeeding (a type whose object
     // rejects the universal Type DISPID once).
     int type_invoke_failures = 0;
+    int changeable_reads = 0;
+    bool displayed_text_missing = false;  // DisplayedText is an unknown member (like on a GuiShell)
     bool has_row_count = false;  // grid-like GuiShell: RowCount exists (tree-like: unknown name)
     // GuiShell toolbar buttons {id, text, tooltip}; ButtonCount/GetButton* exist only when non-empty.
     std::vector<std::array<const wchar_t*, 3>> shell_buttons;
@@ -172,7 +174,10 @@ public:
         if (!names || !ids || count != 1) return E_INVALIDARG;
         ++name_lookups[names[0]];
         if (std::wcscmp(names[0], L"Type") == 0) *ids = type_id_;
-        else if (std::wcscmp(names[0], L"DisplayedText") == 0) *ids = type_id_ + 1;
+        else if (std::wcscmp(names[0], L"DisplayedText") == 0) {
+            if (displayed_text_missing) return DISP_E_UNKNOWNNAME;
+            *ids = type_id_ + 1;
+        }
         else if (std::wcscmp(names[0], L"Text") == 0) *ids = type_id_ + 2;
         else if (std::wcscmp(names[0], L"Id") == 0) *ids = type_id_ + 3;
         else if (std::wcscmp(names[0], L"AccLabel") == 0) *ids = type_id_ + 4;
@@ -426,6 +431,7 @@ public:
             result->boolVal = visible_value ? VARIANT_TRUE : VARIANT_FALSE;
             return S_OK;
         }
+        if (id == type_id_ + 29) ++changeable_reads;
         if (id >= type_id_ + 27 && id <= type_id_ + 29) {
             result->vt = VT_BOOL;
             result->boolVal = id == type_id_ + 27 && !selected ? VARIANT_FALSE : VARIANT_TRUE;
@@ -2357,6 +2363,60 @@ TEST_CASE("Enumeration failure mid-way falls back to indexed children without du
     a->Release();
     b->Release();
     c->Release();
+}
+
+TEST_CASE("get_text and is_changeable share one Changeable read per wrapper", "[com][perf][changeable]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiTextField", 33000, L"wnd[0]/usr/txtFIELD", L"", L"", L"abc");
+    auto element = ComGuiElement::create(dispatch);
+    dispatch->Release();
+
+    REQUIRE(element->get_text() == "abc");
+    REQUIRE(element->is_changeable());
+    REQUIRE(element->is_changeable());
+    REQUIRE(static_cast<TextFieldDispatch*>(element->get_dispatch())->changeable_reads == 1);
+
+    // The memo is per wrapper: a new wrapper reads Changeable itself.
+    auto* other = new TextFieldDispatch(L"GuiTextField", 33000, L"wnd[0]/usr/txtOTHER", L"", L"", L"abc");
+    auto other_element = ComGuiElement::create(other);
+    other->Release();
+    REQUIRE(other_element->is_changeable());
+    REQUIRE(static_cast<TextFieldDispatch*>(other_element->get_dispatch())->changeable_reads == 1);
+}
+
+TEST_CASE("DisplayedText misses are cached for GuiShell but other shell misses are not", "[com][perf][shell]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiShell", 34000, L"wnd[0]/usr/shell1", L"", L"Toolbar", L"");
+    auto* second = new TextFieldDispatch(L"GuiShell", 34000, L"wnd[0]/usr/shell2", L"", L"Tree", L"");
+    first->displayed_text_missing = true;
+    second->displayed_text_missing = true;
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    first_element->get_text();
+    second_element->get_text();
+    REQUIRE(static_cast<TextFieldDispatch*>(first_element->get_dispatch())->name_lookups[L"DisplayedText"] == 1);
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"DisplayedText"] == 0);
+    // Members outside the allowlist stay uncached across GuiShell subtypes (see RowCount test).
+    REQUIRE(first_element->get_property_int(L"RowCount") == 0);
+    REQUIRE(second_element->get_property_int(L"RowCount") == 0);
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"RowCount"] == 1);
+}
+
+TEST_CASE("ElementMetadataExtractor output for a text field is unchanged", "[com][metadata][golden]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiTextField", 35000, L"/app/con[0]/ses[0]/wnd[0]/usr/txtFIELD",
+                                           L"Field label", L"", L"abc");
+    auto element = ComGuiElement::create(dispatch);
+    dispatch->Release();
+    const auto metadata = ElementMetadataExtractor::extract(element);
+    // Golden: the memoised Changeable read and the shell negative cache must not change the output.
+    REQUIRE(metadata.dump() ==
+            R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,)"
+            R"("id":"/app/con[0]/ses[0]/wnd[0]/usr/txtFIELD","label":"Field label","name":"",)"
+            R"("text":"abc","type":"GuiTextField","visible":true})");
 }
 
 TEST_CASE("for_each reports a failed enumeration so callers fall back", "[com][perf][enum]") {

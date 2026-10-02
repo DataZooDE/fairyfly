@@ -29,6 +29,12 @@ static bool s_universal_type_known = false;
 static bool s_universal_type_disabled = false;
 static std::unordered_set<std::string> s_validated_type_names;
 
+// GuiShell members that no shell subtype exposes (grid, tree, toolbar, HTML viewer, calendar, ...).
+// Only these may be negatively cached for the shared "GuiShell" Type string.
+static bool is_shell_member_always_absent(const wchar_t* name) {
+    return std::wcscmp(name, L"DisplayedText") == 0;
+}
+
 static bool is_cacheable_dispid_miss(HRESULT hr) {
     return hr == DISP_E_UNKNOWNNAME || hr == DISP_E_MEMBERNOTFOUND ||
            hr == TYPE_E_ELEMENTNOTFOUND;
@@ -105,7 +111,9 @@ HRESULT SapGuiObject::resolve_dispid_ex(const wchar_t* name, DISPID* dispid, boo
         // GridView only). A miss on one shell must not poison the others, so shells are never
         // negatively cached. Other types (GuiTextField, GuiButton, GuiCustomControl,
         // GuiContainerShell, ...) have a fixed interface per Type string and stay cached.
-        if (!type_name.empty() && type_name != "GuiShell") {
+        // Exception: an explicit allowlist of members no shell subtype has (DisplayedText is a
+        // text-field member; get_text probes it on every element).
+        if (!type_name.empty() && (type_name != "GuiShell" || is_shell_member_always_absent(name))) {
             s_type_dispid_miss_cache[type_name][name] = hr;
         }
     }
