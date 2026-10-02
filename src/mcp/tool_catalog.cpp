@@ -260,7 +260,10 @@ std::vector<ToolSpec> read_tool_specs() {
     specs.push_back(make_spec(
         "gui_session_list", "List SAP GUI sessions",
         "Lists every open SAP GUI connection, its sessions (session_id, busy/alive state, active window title) "
-        "and transaction context. Use it to find the session_id for gui_session_attach. Read-only.",
+        "and transaction context. Use it to find the session_id for gui_session_attach. The SAP server clock is NOT "
+        "readable through the scripting API: each session has server_time=null / server_time_source=\"unavailable\" and the "
+        "result carries server_time_summary plus client_time (the PC clock, a stand-in only): do not assume it equals "
+        "the SAP server time for relative-time filters. Read-only.",
         make_schema(json::object()), annotations("List SAP GUI sessions", true, false, true), ToolOutput::Json,
         [](const json&, const Policy&) { return Argv{"session", "list"}; }, true));
 
@@ -284,7 +287,8 @@ std::vector<ToolSpec> read_tool_specs() {
         "Attaches fairyfly to an already open SAP GUI session and saves it as a connection. `session_id` comes "
         "from gui_session_list; when omitted and exactly one session is open it is chosen automatically, otherwise "
         "a MULTIPLE_SESSIONS error lists the candidates. The attached connection becomes the default for later "
-        "calls that omit `connection`.",
+        "calls that omit `connection`. The result reports server_time (null: the scripting API has no server clock, "
+        "server_time_source=\"unavailable\"), server_time_summary and client_time (PC clock, not the server's).",
         make_schema({{"session_id", str_min("Exact SAP GUI session id from gui_session_list (e.g. /app/con[0]/ses[0]).")}}),
         annotations("Attach to a SAP GUI session", false, false, true), ToolOutput::Json,
         [](const json& a, const Policy&) {

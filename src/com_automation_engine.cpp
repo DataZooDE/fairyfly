@@ -3,6 +3,7 @@
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
+#include "include/server_clock.h"
 #include "include/collection_id_lookup.h"
 #include "include/sensitive_data.h"
 #include "include/html_viewer_reader.h"

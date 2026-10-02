@@ -118,9 +118,9 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | Tool | Purpose | Key arguments | Read-only mode | Annotations |
 |---|---|---|---|---|
 | `gui_doctor` | Environment diagnostics | none | allowed | RO |
-| `gui_session_list` | List open SAP GUI sessions | none | allowed | RO |
+| `gui_session_list` | List open SAP GUI sessions; per session `server_time: null` / `server_time_source: "unavailable"` (the scripting API has no server clock), plus `server_time_summary`, `client_time`, `client_utc_offset` (PC clock, a stand-in only) | none | allowed | RO |
 | `gui_connection_list` | List saved fairyfly connection list | `cleanup` | allowed | not RO (cleanup deletes local files) |
-| `gui_session_attach` | Attach to a running session, becomes the default connection | `session_id` (optional when only one session is open) | allowed | not RO |
+| `gui_session_attach` | Attach to a running session, becomes the default connection (result carries the same `server_time*` / `client_time` fields as the list) | `session_id` (optional when only one session is open) | allowed | not RO |
 | `gui_session_launch` | Open a SAP Logon entry, optionally log on | `name`, `login`, `credential`, `multiple_logon`, `allow_sapshcut` | allowed; `multiple_logon=end` refused | D |
 | `gui_session_login` | Log on with the Credential Manager entry | `connection`, `credential`, `multiple_logon` | allowed; `multiple_logon=end` refused | D |
 | `gui_transaction_start` | Run a transaction code (`/nSM37`, `/n`) | `code` | allowed | not RO |

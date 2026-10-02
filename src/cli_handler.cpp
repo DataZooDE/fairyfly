@@ -4,6 +4,7 @@
 #include "include/sensitive_data.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
+#include "include/server_clock.h"
 #include "include/action_argument_checks.h"
 #include "include/login_flow.h"
 #include "include/credential_resolver.h"
@@ -238,6 +239,11 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
         result.data["pruned_stale"] = conn_mgr_->prune_other_entries_for_path(
             conn, engine_->current_server_session_key());  // live key re-read right before pruning
         result.data["message"] = fmt::format("Attached to SAP GUI session (connection: {})", conn.id);
+        {
+            const json clock = sap::server_time_fields();
+            for (const auto& [key, value] : clock.items()) result.data[key] = value;
+            result.data["server_time_summary"] = sap::server_time_summary(clock);
+        }
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
     } else {

@@ -6,6 +6,7 @@
 #include "include/cli_handler.h"
 #include "include/screenshot_handler.h"
 #include "include/formatters/screen_markdown_formatter.h"
+#include "include/server_clock.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -518,3 +519,24 @@ TEST_CASE("without text_contains no tab fields are added", "[screen][filters][ta
     CHECK_FALSE(data.contains("text_filter_note"));
 }
 
+// ---- Item 6: server clock ----------------------------------------------------------------------------
+
+TEST_CASE("the server clock is reported as unavailable with a labelled PC fallback", "[session][clock][round2]") {
+    const auto at = std::chrono::system_clock::time_point{std::chrono::seconds{1790000000}};  // 2026-09-21T14:13:20Z
+    const auto fields = server_time_fields_at(at, 120);
+    CHECK(fields.at("server_time").is_null());
+    CHECK(fields.at("server_time_source") == "unavailable");
+    CHECK(fields.at("client_time") == "2026-09-21T16:13:20+02:00");
+    CHECK(fields.at("client_utc_offset") == "+02:00");
+    CHECK(fields.at("server_time_note").get<std::string>().find("not the SAP server's") != std::string::npos);
+    const auto summary = server_time_summary(fields);
+    CHECK(summary.find("SAP server time: unavailable") != std::string::npos);
+    CHECK(summary.find("2026-09-21T16:13:20+02:00") != std::string::npos);
+}
+
+TEST_CASE("UTC offsets are formatted with sign and minutes", "[session][clock][round2]") {
+    CHECK(format_utc_offset(0) == "+00:00");
+    CHECK(format_utc_offset(330) == "+05:30");
+    CHECK(format_utc_offset(-300) == "-05:00");
+    CHECK(server_time_fields().at("server_time_source") == "unavailable");
+}
