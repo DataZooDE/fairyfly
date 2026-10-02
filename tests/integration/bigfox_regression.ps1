@@ -289,7 +289,9 @@ function Invoke-Suite {
     Run-Check 'ST22.list_today' {
         Require-Chain @('attach')
         [void](Go '/nST22')
-        Assert-Ok (Invoke-FF @('element', 'click', "$U/btnTODAY")) 'click btnTODAY'
+        $clickToday = Invoke-FF @('element', 'click', "$U/btnTODAY")
+        if (-not $DryRun -and (($clickToday | Out-String) -match 'No short dumps')) { Skip 'no dumps today' }
+        Assert-Ok $clickToday 'click btnTODAY'
         $r = Invoke-FF @('screen', 'read', '--no-tabs', '--max-rows', '5', '--output', 'json')
         Assert-Ok $r 'screen read'
         $g = @(Get-Tables $r.Json) | Where-Object { $_.id -eq $grid } | Select-Object -First 1

@@ -1162,6 +1162,12 @@ try {
         $script:SuiteConfigPath = Join-Path $TempDir 'suites-neutral-mcp.yaml'
         "# neutral configuration for the child suites of the e2e run: every setting keeps its default`r`n" | Set-Content -LiteralPath $script:SuiteConfigPath -Encoding ASCII
         [Environment]::SetEnvironmentVariable('FAIRYFLY_MCP_CONFIG', $script:SuiteConfigPath)
+        # A stale empty connection can push the live session off /app/con[0]: tell bigfox_regression where it really is.
+        try {
+            $sl = (& $Exe session list --output json 2>$null | Out-String) | ConvertFrom-Json
+            $firstSes = @($sl.data.connections | ForEach-Object { $_.sessions } | Where-Object { $_ } | ForEach-Object { $_.session_id }) | Select-Object -First 1
+            if ($firstSes) { [Environment]::SetEnvironmentVariable('FAIRYFLY_TEST_SESSION', [string]$firstSes) }
+        } catch { }
         Check 'suites.unit_tests' {
             $ut = $null
             foreach ($c in @('build\Release\unit_tests.exe', 'build\bin\Release\unit_tests.exe', 'build\tests\Release\unit_tests.exe')) {
