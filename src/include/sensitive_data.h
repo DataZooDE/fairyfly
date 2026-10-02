@@ -127,23 +127,71 @@ inline bool is_known_secret_field_name(const std::string& name) {
 // named PASSWORD_STATE could hold a real value.
 enum class StateExemption { Deny, Allow };
 
-// A value that plausibly is a state label ("Password set", "locked", "0", "01.10.2026"), not a secret: at most 40 characters
-// and not a random-looking token (no whitespace and at least three of lower, upper, digit, symbol and 8+ characters).
+// The vocabulary of state labels shown by display-only credential-state fields (SU01 "Production Password", "locked", ...).
+// ONE place, lower-case, letters/digits only (umlauts are folded to ae/oe/ue/ss before the lookup). A value is a state
+// label only when EVERY word of it is listed here (or the whole value is a number/date/time, or empty): an opaque short
+// token such as "Tr0ub4d" is not, even though it is short, so it stays redacted. Extend this table to recognise more states.
+inline const std::vector<std::string>& state_label_vocabulary() {
+    static const std::vector<std::string> words = {
+        "initial", "productive", "production", "produktiv", "set", "reset", "not", "no", "yes", "ja", "nein", "locked", "unlocked",
+        "lock", "gesperrt", "entsperrt", "active", "inactive", "aktiv", "inaktiv", "disabled", "enabled", "deactivated",
+        "activated", "valid", "invalid", "gueltig", "expired", "abgelaufen", "none", "keine", "empty", "blank", "leer",
+        "password", "passwort", "pwd", "status", "state", "changed", "geaendert", "required", "erforderlich", "user",
+        "system", "technical", "dialog", "service", "reference", "communication", "default", "standard", "ok", "error",
+        "warning", "internal", "external", "local", "central", "true", "false", "on", "off", "x", "single", "multiple",
+        "ldap", "saml", "snc", "x509", "kerberos", "mixed", "preferred", "only", "allowed", "forbidden", "optional",
+        "mandatory", "up", "to", "date", "last", "first", "logon", "login", "never", "since"};
+    return words;
+}
+
+// A value that plausibly is a state label, not a secret (ALLOWLIST, fail closed): after trimming the padding SAP adds
+// to the field width, it is (a) empty, (b) at most 24 characters of digits and date/time separators ("0", "01.10.2026",
+// "12:30:00"), or (c) at most 60 characters whose words (split on whitespace, '_' and '-', case-insensitive) are all in
+// state_label_vocabulary(). Everything else, including short opaque tokens, is not a state label.
 inline bool looks_like_state_value(const std::string& raw) {
     // SAP pads the displayed text of a field to the field width: judge the text without the padding.
     const auto first = raw.find_first_not_of(" \t\r\n");
-    const std::string value = first == std::string::npos ? std::string()
-        : raw.substr(first, raw.find_last_not_of(" \t\r\n") - first + 1);
-    if (value.size() > 40) return false;
-    if (value.size() < 8 || value.find_first_of(" \t") != std::string::npos) return true;
-    bool lower = false, upper = false, digit = false, symbol = false;
-    for (const unsigned char c : value) {
-        if (std::islower(c)) lower = true;
-        else if (std::isupper(c)) upper = true;
-        else if (std::isdigit(c)) digit = true;
-        else symbol = true;
+    if (first == std::string::npos) return true;
+    const std::string value = raw.substr(first, raw.find_last_not_of(" \t\r\n") - first + 1);
+    if (value.size() > 60) return false;
+    if (value.size() <= 24 &&
+        std::all_of(value.begin(), value.end(), [](unsigned char c) {
+            return std::isdigit(c) || c == '.' || c == '-' || c == '/' || c == ':' || c == ' ';
+        }))
+        return true;
+    // Fold German umlauts (UTF-8) so "gültig" / "geändert" match their vocabulary spelling.
+    std::string folded;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(value[i]);
+        if (c == 0xC3 && i + 1 < value.size()) {
+            const unsigned char d = static_cast<unsigned char>(value[i + 1]);
+            const char* repl = (d == 0xA4 || d == 0x84) ? "ae" : (d == 0xB6 || d == 0x96) ? "oe"
+                             : (d == 0xBC || d == 0x9C) ? "ue" : d == 0x9F ? "ss" : nullptr;
+            if (repl) { folded += repl; ++i; continue; }
+        }
+        folded += static_cast<char>(c);
     }
-    return static_cast<int>(lower) + upper + digit + symbol < 3;
+    const auto& vocabulary = state_label_vocabulary();
+    std::string word;
+    bool any = false;
+    const auto flush = [&]() {
+        if (word.empty()) return true;
+        any = true;
+        const bool known = std::find(vocabulary.begin(), vocabulary.end(), word) != vocabulary.end();
+        word.clear();
+        return known;
+    };
+    for (const unsigned char c : folded) {
+        if (std::isspace(c) || c == '_' || c == '-') {
+            if (!flush()) return false;
+        } else if (std::isalnum(c)) {
+            word += static_cast<char>(std::tolower(c));
+        } else {
+            return false;  // any other symbol: not a plain state label
+        }
+    }
+    if (!flush()) return false;
+    return any;
 }
 
 // A name that only reports the state of a credential (PASSWORD_EXT_PWD_STATE, PASSWORD_STATUS,

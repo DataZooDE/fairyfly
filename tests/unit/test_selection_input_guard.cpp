@@ -146,6 +146,52 @@ TEST_CASE("state values padded to the field width are still recognised", "[sensi
     CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", false, false, [&] { return padded; }).empty());
 }
 
+TEST_CASE("state values: an allowlist of state words, not a length heuristic", "[sensitive][su01_state]") {
+    using namespace fairyfly::sap;
+    const std::string pad(100, ' ');
+    // allowlisted values, also padded to the field width
+    for (const char* value : {"Production Password", "Initial", "Password set", "locked", "Not set", "gesperrt", "G\xC3\xBC" "ltig",
+                              "Passwort ge" "\xC3\xA4" "ndert", "Nein", "Inaktiv", "valid_password", "Single x509", "Password Status"}) {
+        INFO(value);
+        CHECK(looks_like_state_value(value));
+        CHECK(looks_like_state_value(std::string(value) + pad));
+        CHECK(looks_like_state_value(pad + value));
+    }
+    // empty, digits, dates, times
+    for (const char* value : {"", "   ", "0", "1", "01.10.2026", "2026-10-02", "12:30:00", "01.10.2026 12:30:00"}) {
+        INFO(value);
+        CHECK(looks_like_state_value(value));
+        CHECK(looks_like_state_value(std::string(value) + pad));
+    }
+    // a short opaque token / a 7-character secret is NOT a state label (it used to be: < 8 characters)
+    for (const char* value : {"Tr0ub4d", "abc123", "Sommer1", "geheim", "Pa$$w0r", "hunter2", "xyz", "Password1"}) {
+        INFO(value);
+        CHECK_FALSE(looks_like_state_value(value));
+        CHECK_FALSE(looks_like_state_value(std::string(value) + pad));
+    }
+    // a state word next to a secret, or a secret with whitespace, is not a state label
+    CHECK_FALSE(looks_like_state_value("Password Tr0ub4d"));
+    CHECK_FALSE(looks_like_state_value("not set hunter2"));
+    CHECK_FALSE(looks_like_state_value("correct horse battery"));
+    // digits only is fine up to 24 characters, never more; other symbols are not a state label
+    CHECK_FALSE(looks_like_state_value(std::string(25, '1')));
+    CHECK_FALSE(looks_like_state_value("Password!"));
+    CHECK_FALSE(looks_like_state_value("set;"));
+    // at most 60 characters in total
+    std::string long_state;
+    while (long_state.size() <= 60) long_state += "password set ";
+    CHECK_FALSE(looks_like_state_value(long_state));
+
+    // the SU01 display field stays visible; a 7-character secret in the same display-only field is redacted
+    const std::string id = "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO/ssubMAINAREA:SAPLSUID_MAINTENANCE:1101/txtPASSWORD_EXT_PWD_STATE";
+    CHECK(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, false,
+                                             [&] { return std::string("Production Password") + pad; }).empty());
+    CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, false,
+                                                   [&] { return std::string("Tr0ub4d") + pad; }).empty());
+    CHECK_FALSE(sensitive_field_reason_for_display("GuiTextField", id, "Password Status", true, false,
+                                                   [&] { return std::string("hunter2"); }).empty());
+}
+
 // ---- strict collection of the live probe (fail closed on unreadable properties) --------------------------
 
 namespace {
