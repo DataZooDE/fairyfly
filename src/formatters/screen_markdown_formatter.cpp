@@ -73,6 +73,12 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         }
     }
 
+    // An `only` selector may have dropped grids/trees: say so instead of returning nothing silently.
+    if (data.contains("suppressed") && data["suppressed"].is_object()) {
+        const std::string note = data["suppressed"].value("note", "");
+        if (!note.empty()) oss << "_" << note << "_\n\n";
+    }
+
     // Check if we have hierarchy data
     if (!data.contains("hierarchy")) {
         oss << "_No screen structure available_\n";

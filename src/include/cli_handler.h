@@ -44,6 +44,7 @@ struct ScreenFilterOptions {
     bool only_fields = false;                 ///< Show only changeable GuiTextField, GuiCTextField, GuiPasswordField
     bool only_editable = false;               ///< Show only changeable=true fields
     bool only_f4_fields = false;              ///< Show only fields with has_f4_help=true
+    bool only_tables = false;                 ///< Show only grids / table controls (with their rows)
     std::optional<std::string> text_contains; ///< Filter by text/tooltip containing string (case-insensitive)
     std::optional<std::string> id_contains;   ///< Filter by element ID containing string
     std::optional<std::string> type_filter;   ///< Filter by exact element type

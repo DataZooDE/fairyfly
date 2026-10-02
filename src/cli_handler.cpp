@@ -1220,6 +1220,27 @@ static bool element_text_matches(const json& elem, const std::string& needle)
     return false;
 }
 
+/// Grid, table control or positioned-label table (anything rendered as rows and columns).
+static bool element_is_table(const json& elem)
+{
+    if (!elem.is_object()) return false;
+    const std::string type = elem.value("type", "");
+    if (type == "GuiGridView" || type == "GuiTableControl") return true;
+    if (elem.value("subtype", "") == "GridView") return true;
+    for (const char* key : {"table_data", "grid_data"}) {
+        if (elem.contains(key) && elem[key].is_object()) return true;
+    }
+    return false;
+}
+
+static bool element_is_tree(const json& elem)
+{
+    if (!elem.is_object()) return false;
+    const std::string subtype = elem.value("subtype", "");
+    return elem.value("type", "") == "GuiTree" || subtype == "Tree" || subtype == "TableTreeControl" ||
+           elem.contains("tree_nodes") || elem.contains("tree_data");
+}
+
 /// Helper to check if an element matches filter criteria
 static bool element_matches_filter(const json& elem, const ScreenFilterOptions& filters)
 {
@@ -1243,6 +1264,10 @@ static bool element_matches_filter(const json& elem, const ScreenFilterOptions& 
 
     if (filters.only_editable) {
         matches = matches && elem.value("changeable", false);
+    }
+
+    if (filters.only_tables) {
+        matches = matches && element_is_table(elem);
     }
 
     if (filters.only_f4_fields) {
@@ -1276,7 +1301,7 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
 
     // If no filters active, return all elements
     bool any_filter = filters.only_buttons || filters.only_fields || filters.only_editable ||
-                      filters.only_f4_fields || filters.text_contains.has_value() ||
+                      filters.only_f4_fields || filters.only_tables || filters.text_contains.has_value() ||
                       filters.id_contains.has_value() || filters.type_filter.has_value() ||
                       filters.first_match_only;
 
@@ -1340,6 +1365,38 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
     return {filtered, filter_stats};
 }
 
+/// Name of the `only` selector in effect (MCP argument spelling), empty when none.
+static std::string only_selector_name(const ScreenFilterOptions& filters)
+{
+    if (filters.only_buttons) return "buttons";
+    if (filters.only_fields) return "fields";
+    if (filters.only_editable) return "editable";
+    if (filters.only_f4_fields) return "f4_fields";
+    if (filters.only_tables) return "tables";
+    return "";
+}
+
+/// Grids/trees that an `only` selector dropped: they would otherwise vanish without a trace.
+static void collect_suppressed(const json& elements, const std::unordered_set<std::string>& kept,
+                               json& suppressed, int depth = 0)
+{
+    if (!elements.is_array() || depth > 64) return;
+    for (const auto& elem : elements) {
+        if (!elem.is_object()) continue;
+        const std::string id = elem.value("id", "");
+        if (kept.count(id) == 0) {
+            const char* ids_key = element_is_table(elem) ? "grid_ids" : element_is_tree(elem) ? "tree_ids" : nullptr;
+            if (ids_key) {
+                auto& ids = suppressed[ids_key];
+                if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+            }
+        }
+        if (elem.contains("children")) collect_suppressed(elem["children"], kept, suppressed, depth + 1);
+        if (elem.contains("toolbar_buttons"))
+            collect_suppressed(elem["toolbar_buttons"], kept, suppressed, depth + 1);
+    }
+}
+
 void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 {
     json all_elements = json::array();
@@ -1395,10 +1452,40 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
     screen_data["element_count"] = filtered.size();
     screen_data["hierarchy"] = categorized;
     screen_data["filter_stats"] = filter_stats;
+
+    const std::string only_name = only_selector_name(filters);
+    json suppressed = {{"by", only_name}, {"grid_ids", json::array()}, {"tree_ids", json::array()}};
+    if (!only_name.empty()) collect_suppressed(all_elements, wanted_ids, suppressed);
+
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
         for (auto& tab_data : screen_data["tabs_content"]) {
-            if (tab_data.is_object()) apply_screen_filters(tab_data, filters);
+            if (!tab_data.is_object()) continue;
+            apply_screen_filters(tab_data, filters);
+            if (!tab_data.contains("suppressed")) continue;
+            for (const char* key : {"grid_ids", "tree_ids"}) {
+                for (const auto& id : tab_data["suppressed"].value(key, json::array())) {
+                    auto& ids = suppressed[key];
+                    if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+                }
+            }
         }
+    }
+    if (!suppressed["grid_ids"].empty() || !suppressed["tree_ids"].empty()) {
+        suppressed["grids"] = suppressed["grid_ids"].size();
+        suppressed["trees"] = suppressed["tree_ids"].size();
+        std::string note;
+        const auto describe = [&](const char* key, const char* noun) {
+            const size_t count = suppressed[key].size();
+            if (count == 0) return;
+            if (!note.empty()) note += "; ";
+            note += std::to_string(count) + " " + noun + "(s)";
+        };
+        describe("grid_ids", "grid");
+        describe("tree_ids", "tree");
+        note += " not included with only=" + only_name +
+                (suppressed["grid_ids"].empty() ? "; use no filter" : "; use only=tables or no filter");
+        suppressed["note"] = note;
+        screen_data["suppressed"] = suppressed;
     }
 }
 
