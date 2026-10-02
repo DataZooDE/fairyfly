@@ -1452,7 +1452,8 @@ static json extract_element_metadata(ComGuiElementPtr elem, int depth = 0) {
         metadata["name"] = elem->get_name();
 
         // Text content (available on most elements)
-        std::string text = type == "GuiPasswordField" ? "[REDACTED]" : elem->get_text();
+        std::string text = type == "GuiPasswordField"
+            ? redaction_marker(redaction_reason::password_field) : elem->get_text();
         metadata["text"] = text;
 
         // Interactive states - query for all elements (is_enabled handles missing property gracefully)

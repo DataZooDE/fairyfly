@@ -269,3 +269,96 @@ TEST_CASE("text_contains filters object rows and leaves rows alone on a title ma
         CHECK(data.at("elements").at(0).at("id") == "l");
     }
 }
+
+// ---- Item 4: redaction says why and spares non-secret Basis data ------------------------------
+
+TEST_CASE("redaction markers carry a fixed reason", "[privacy][redaction]") {
+    json table = {{"columns", json::array({"USER", "PASSWORD"})},
+                  {"rows", json::array({json::array({"alice", "private-password"})})}};
+    redact_sensitive_header_rows(table);
+    CHECK(table["rows"][0][0] == "alice");
+    CHECK(table["rows"][0][1] == "[REDACTED: field name matches password pattern]");
+
+    json secret = {{"columns", json::array({"NAME", "VALUE"})},
+                   {"rows", json::array({json::array({"X-Session-Token", "private-value"})})}};
+    redact_sensitive_header_rows(secret);
+    CHECK(secret["rows"][0][0] == "X-Session-Token");
+    CHECK(secret["rows"][0][1] == "[REDACTED: row label names a credential]");
+
+    json columns = {{"columns", json::array({"API_KEY"})},
+                    {"rows", json::array({json::array({"private-key"})})}};
+    redact_sensitive_header_rows(columns);
+    CHECK(columns["rows"][0][0] == "[REDACTED: field name matches secret pattern]");
+
+    // The reason never contains the value or the pattern list.
+    const auto text = table.dump() + secret.dump() + columns.dump();
+    CHECK(text.find("private") == std::string::npos);
+    CHECK(text.find("apikey") == std::string::npos);
+    CHECK(is_redaction_marker("[REDACTED]"));
+    CHECK(is_redaction_marker("[REDACTED: password input field]"));
+    CHECK_FALSE(is_redaction_marker("ordinary"));
+}
+
+TEST_CASE("credential state flags, roles and profiles are not redacted", "[privacy][redaction]") {
+    json table = {
+        {"columns", json::array({"BNAME", "PASSWORD_EXT_PWD_STATE", "AGR_NAME", "PROFILE"})},
+        {"rows", json::array({
+            json::array({"ALICE", "1", "Z_PASSWORD_RESET_ADMIN", "SAP_BC_SECRET_STORE"}),
+            json::array({"BOB", "0", "Z_TOKEN_OPERATOR", "T_TOKEN_PROFILE"})})}};
+    const auto before = table;
+    redact_sensitive_header_rows(table);
+    CHECK(table == before);
+
+    SECTION("role description with a credential word stays readable in a titled grid") {
+        json roles = {{"columns", json::array({"AGR_NAME", "TEXT"})},
+                      {"rows", json::array({json::array({"Z_PW_ROLE", "Password administration"})})}};
+        const auto roles_before = roles;
+        redact_sensitive_header_rows(roles);
+        CHECK(roles == roles_before);
+    }
+    SECTION("technical names in an untitled report keep their row") {
+        json elements = json::array({
+            {{"id", "wnd[0]/usr/lbl[0,0]"}, {"type", "GuiLabel"}, {"text", "Role"}, {"grid_row", 0}},
+            {{"id", "wnd[0]/usr/lbl[30,0]"}, {"type", "GuiLabel"}, {"text", "Z_PASSWORD_RESET_ADMIN"},
+             {"grid_row", 0}}});
+        redact_sensitive_report_labels(elements);
+        CHECK(elements[0]["text"] == "Role");
+        CHECK(elements[1]["text"] == "Z_PASSWORD_RESET_ADMIN");
+    }
+    SECTION("input fields named after a state are readable") {
+        CHECK_FALSE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtPASSWORD_EXT_PWD_STATE", ""));
+        CHECK_FALSE(is_sensitive_input_field("GuiCTextField", "wnd[0]/usr/txtGENERIC", "Password status"));
+        CHECK_FALSE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtGENERIC", "Password last changed"));
+    }
+}
+
+TEST_CASE("secret-bearing fields stay redacted with a reason", "[privacy][redaction]") {
+    CHECK(sensitive_input_field_reason("GuiPasswordField", "wnd[0]/usr/pwdRSYST-BCODE", "") ==
+          "password input field");
+    for (const char* field : {"wnd[0]/usr/txtBAPIPWD", "wnd[0]/usr/ctxtPASSWORD", "wnd[0]/usr/txtNEW_PASSWORD",
+                              "wnd[0]/usr/txtUSR02-CODVN", "wnd[0]/usr/txtMY_PASSWORD_FIELD"}) {
+        INFO(field);
+        CHECK_FALSE(sensitive_input_field_reason("GuiTextField", field, "").empty());
+    }
+    CHECK(sensitive_input_field_reason("GuiTextField", "wnd[0]/usr/txtPASSWORD", "") ==
+          "field name matches password pattern");
+    CHECK(sensitive_input_field_reason("GuiTextField", "wnd[0]/usr/txtS_TOKEN", "") ==
+          "field name matches secret pattern");
+    CHECK(sensitive_input_field_reason("GuiTextField", "wnd[0]/usr/txtGENERIC", "Initial password") ==
+          "field name matches password pattern");
+    // Authorization metadata is not a credential.
+    CHECK(sensitive_input_field_reason("GuiCTextField", "wnd[0]/usr/ctxtX", "Authorization Object").empty());
+
+    // Cells that are a credential name by themselves still hide their row in a business grid.
+    json grid = {{"columns", json::array({"FIELD", "CONTENT"})},
+                 {"rows", json::array({json::array({"Password", "private-value"}),
+                                       json::array({"Description", "visible"})})}};
+    redact_sensitive_header_rows(grid);
+    CHECK(grid["rows"][0][1] == "[REDACTED: row label names a credential]");
+    CHECK(grid["rows"][1][1] == "visible");
+
+    // Untitled grids fail closed for any cell that contains a credential word.
+    json untitled = {{"rows", json::array({json::array({"Z_CLIENT_SECRET", "private-value"})})}};
+    redact_sensitive_header_rows(untitled);
+    CHECK(is_redaction_marker(untitled["rows"][0][1].get<std::string>()));
+}

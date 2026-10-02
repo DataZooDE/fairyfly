@@ -164,13 +164,16 @@ void redact_sensitive_report_labels(nlohmann::json& elements) {
     for (const auto& [key, indices] : rows) {
         bool sensitive = false;
         for (const auto index : indices) {
-            if (contains_sensitive_data_name(elements[index]["text"].get<std::string>())) {
+            // Captions that merely contain a credential word count; technical object names
+            // (roles, profiles) in the value column do not.
+            if (!sensitive_cell_reason(elements[index]["text"].get<std::string>(), true).empty()) {
                 sensitive = true;
                 break;
             }
         }
         if (sensitive) {
-            for (const auto index : indices) elements[index]["text"] = "[REDACTED]";
+            const auto marker = redaction_marker(redaction_reason::label_row);
+            for (const auto index : indices) elements[index]["text"] = marker;
         }
     }
 }

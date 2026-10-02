@@ -12,6 +12,9 @@
 using namespace fairyfly;
 using namespace fairyfly::sap;
 
+// Redaction markers carry a reason: "[REDACTED: <reason>]".
+static bool is_redacted(const std::string& value) { return fairyfly::sap::is_redaction_marker(value); }
+
 TEST_CASE("ABAP editor bypasses tree extraction", "[screen][editor]") {
     REQUIRE(classify_shell_extraction("GridView") == ShellExtractionKind::Grid);
     REQUIRE(classify_shell_extraction("AbapEditor") == ShellExtractionKind::Metadata);
@@ -416,8 +419,8 @@ TEST_CASE("Positioned report labels do not expose named credentials", "[screen][
          {"text", "STRING_OFFSET_TOO_LARGE"}, {"grid_row", 1}, {"grid_col", 30}}
     });
     redact_sensitive_report_labels(elements);
-    REQUIRE(elements[0]["text"] == "[REDACTED]");
-    REQUIRE(elements[1]["text"] == "[REDACTED]");
+    REQUIRE(is_redacted(elements[0]["text"]));
+    REQUIRE(is_redacted(elements[1]["text"]));
     REQUIRE(elements[2]["text"] == "Runtime Errors");
     REQUIRE(elements[3]["text"] == "STRING_OFFSET_TOO_LARGE");
 }
@@ -436,9 +439,9 @@ TEST_CASE("Gateway response header credentials are redacted", "[screen][privacy]
     redact_sensitive_header_rows(table);
 
     REQUIRE(table["rows"][0][1] == "application/xml");
-    REQUIRE(table["rows"][1][1] == "[REDACTED]");
-    REQUIRE(table["rows"][2][1] == "[REDACTED]");
-    REQUIRE(table["rows"][3][1] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][1][1]));
+    REQUIRE(is_redacted(table["rows"][2][1]));
+    REQUIRE(is_redacted(table["rows"][3][1]));
 }
 
 TEST_CASE("Inline credential values in grid labels are redacted", "[screen][privacy]") {
@@ -453,12 +456,12 @@ TEST_CASE("Inline credential values in grid labels are redacted", "[screen][priv
 
     redact_sensitive_header_rows(table);
 
-    REQUIRE(table["rows"][0][0] == "[REDACTED]");
-    REQUIRE(table["rows"][0][1] == "[REDACTED]");
-    REQUIRE(table["rows"][1][0] == "[REDACTED]");
-    REQUIRE(table["rows"][1][1] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][0][0]));
+    REQUIRE(is_redacted(table["rows"][0][1]));
+    REQUIRE(is_redacted(table["rows"][1][0]));
+    REQUIRE(is_redacted(table["rows"][1][1]));
     REQUIRE(table["rows"][2][0] == "X-Session-Token");
-    REQUIRE(table["rows"][2][1] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][2][1]));
 }
 
 TEST_CASE("Credential columns are redacted without hiding ordinary grid data", "[screen][privacy]") {
@@ -472,8 +475,8 @@ TEST_CASE("Credential columns are redacted without hiding ordinary grid data", "
     redact_sensitive_header_rows(table);
 
     REQUIRE(table["rows"][0][0] == "alice");
-    REQUIRE(table["rows"][0][1] == "[REDACTED]");
-    REQUIRE(table["rows"][0][2] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][0][1]));
+    REQUIRE(is_redacted(table["rows"][0][2]));
     REQUIRE(table["rows"][0][3] == "Basis operator");
     REQUIRE(is_sensitive_data_name("X-CSRF-Token"));
     REQUIRE_FALSE(is_sensitive_data_name("DESCRIPTION"));
@@ -488,8 +491,8 @@ TEST_CASE("Header row redaction tolerates localized and missing column metadata"
     };
     redact_sensitive_header_rows(localized);
     REQUIRE(localized["rows"][0][0] == "Authorization");
-    REQUIRE(localized["rows"][0][1] == "[REDACTED]");
-    REQUIRE(localized["rows"][0][2] == "[REDACTED]");
+    REQUIRE(is_redacted(localized["rows"][0][1]));
+    REQUIRE(is_redacted(localized["rows"][0][2]));
 
     nlohmann::json punctuated = {
         {"columns", nlohmann::json::array({"Header-Name", "Header-Value"})},
@@ -498,7 +501,7 @@ TEST_CASE("Header row redaction tolerates localized and missing column metadata"
         })}
     };
     redact_sensitive_header_rows(punctuated);
-    REQUIRE(punctuated["rows"][0][1] == "[REDACTED]");
+    REQUIRE(is_redacted(punctuated["rows"][0][1]));
 
     nlohmann::json no_columns = {
         {"rows", nlohmann::json::array({
@@ -507,7 +510,7 @@ TEST_CASE("Header row redaction tolerates localized and missing column metadata"
     };
     redact_sensitive_header_rows(no_columns);
     REQUIRE_FALSE(no_columns.contains("columns"));
-    REQUIRE(no_columns["rows"][0][1] == "[REDACTED]");
+    REQUIRE(is_redacted(no_columns["rows"][0][1]));
 }
 
 TEST_CASE("Compound credential names are redacted in headers and columns", "[screen][privacy]") {
@@ -521,12 +524,12 @@ TEST_CASE("Compound credential names are redacted in headers and columns", "[scr
     };
     redact_sensitive_header_rows(table);
     REQUIRE(table["rows"][0][0] == "X-Session-Token");
-    REQUIRE(table["rows"][0][1] == "[REDACTED]");
-    REQUIRE(table["rows"][0][2] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][0][1]));
+    REQUIRE(is_redacted(table["rows"][0][2]));
     REQUIRE(table["rows"][1][1] == "application/json");
-    REQUIRE(table["rows"][1][2] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][1][2]));
     REQUIRE(table["rows"][2][0] == "X-CSRF-Token");
-    REQUIRE(table["rows"][2][1] == "[REDACTED]");
+    REQUIRE(is_redacted(table["rows"][2][1]));
     REQUIRE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtGENERIC", "My Secret Key"));
     REQUIRE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtS_TOKEN", ""));
     REQUIRE(is_sensitive_input_field("GuiTextField", "wnd[0]/usr/txtGENERIC", "Kennwort"));
