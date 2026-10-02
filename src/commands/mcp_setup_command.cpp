@@ -31,6 +31,7 @@ struct SetupCli {
     std::string output = "text";
     std::string apply_plan;
     std::string result_file;
+    ApplyArgs apply_args;                 ///< --plan-sha256 / --plan-nonce / --plan-sid / --plan-parent-pid / --plan-force-binding
     std::string cert_out;
     std::string cert_format = "der";
     std::string cert_hostname;
@@ -123,6 +124,11 @@ void setup_mcp_setup_commands(CLI::App& mcp, McpExtras& x) {
     output(s.setup);
     s.setup->add_option("--apply-plan", s.apply_plan, "(internal) run an elevated plan file")->group("");
     s.setup->add_option("--result-file", s.result_file, "(internal) result file of --apply-plan")->group("");
+    s.setup->add_option("--plan-sha256", s.apply_args.sha256, "(internal) SHA-256 of the plan the requesting process approved")->group("");
+    s.setup->add_option("--plan-nonce", s.apply_args.nonce, "(internal) nonce of the plan")->group("");
+    s.setup->add_option("--plan-sid", s.apply_args.sid, "(internal) SID the plan was approved for")->group("");
+    s.setup->add_option("--plan-parent-pid", s.apply_args.parent_pid, "(internal) pid of the requesting process")->group("");
+    s.setup->add_flag("--plan-force-binding", s.apply_args.force_binding, "(internal) --force-binding was approved")->group("");
 
     s.teardown = mcp.add_subcommand("teardown", "Remove what 'mcp setup' created (manifest driven, idempotent, one UAC prompt)");
     s.teardown->fallthrough();
@@ -161,7 +167,7 @@ std::optional<int> run_mcp_setup_commands(McpExtras& x, const GlobalOptions& glo
         if (!s.apply_plan.empty()) {
             if (env.read_only) return report_error("text", "READ_ONLY", "FAIRYFLY_READ_ONLY is set: refusing to apply a plan", 2);
             if (s.result_file.empty()) return report_error("text", "INVALID_ARGUMENT", "--apply-plan needs --result-file", 2);
-            return run_apply_plan(hosts, s.apply_plan, s.result_file);
+            return run_apply_plan(hosts, s.apply_plan, s.result_file, s.apply_args);
         }
         Options o = s.options;
         o.json = json;

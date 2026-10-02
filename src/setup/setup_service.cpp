@@ -475,18 +475,60 @@ json execute_elevated_work(const json& work, Hosts& hosts) {
     }
 }
 
-int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file) {
+namespace {
+
+json invalid_plan(const std::string& why) {
+    return json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", why}}}};
+}
+
+bool lower_hex64(const std::string& s) {
+    if (s.size() != 64) return false;
+    for (const char c : s)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    return true;
+}
+
+json apply_checked(Hosts& hosts, const std::string& bytes, const ApplyArgs& args) {
+    if (bytes.size() > kMaxPlanBytes) return invalid_plan("plan file too large");
+    if (!lower_hex64(args.sha256) || args.nonce.empty()) return invalid_plan("the plan was not approved by the requesting process");
+    // 1. the bytes are exactly what the unelevated parent wrote and put on the elevated command line
+    if (!auth::constant_time_equal(auth::sha256_hex(bytes), args.sha256)) return invalid_plan("plan file does not match the approved SHA-256 (changed after approval)");
+    // 2. parse the SAME bytes (no second read of the file)
+    json plan;
+    try {
+        plan = json::parse(bytes);
+    } catch (const std::exception&) {
+        return invalid_plan("plan is not valid JSON");
+    }
+    if (!plan.is_object()) return invalid_plan("malformed plan");
+    // 3. the plan belongs to this request and is fresh
+    if (plan.value("nonce", std::string()) != args.nonce) return invalid_plan("plan nonce does not match the request");
+    if (plan.value("parent_pid", 0LL) != args.parent_pid) return invalid_plan("plan parent pid does not match the request");
+    const long long age = hosts.sys.now() - plan.value("created_at", 0LL);
+    if (age > kPlanMaxAgeSeconds || age < -60) return invalid_plan("plan is stale");
+    // 4. claims on the command line: the SID the parent resolved and the consent for --force-binding
+    if (plan.value("sid", std::string()) != args.sid) return invalid_plan("plan SID does not match the approved SID");
+    if (plan.value("force_binding", false) && !args.force_binding) return invalid_plan("force_binding was not approved by the requesting process");
+    return execute_elevated_work(plan, hosts);
+}
+
+} // namespace
+
+json apply_plan_bytes(Hosts& hosts, const std::string& plan_bytes, const ApplyArgs& args) {
     json result;
     try {
-        const auto text = hosts.sys.read_file(plan_file);
-        if (!text) {
-            result = json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", "plan file unreadable"}}}};
-        } else {
-            result = execute_elevated_work(json::parse(*text), hosts);
-        }
+        result = apply_checked(hosts, plan_bytes, args);
     } catch (const std::exception& e) {
-        result = json{{"ok", false}, {"steps", json::array()}, {"error", {{"code", "INVALID_PLAN"}, {"message", e.what()}}}};
+        result = invalid_plan(e.what());
     }
+    result["nonce"] = args.nonce;
+    return result;
+}
+
+int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file, const ApplyArgs& args) {
+    json result;
+    const auto text = hosts.sys.read_file(plan_file);   // the one and only read
+    result = text ? apply_plan_bytes(hosts, *text, args) : json{{"ok", false}, {"steps", json::array()}, {"nonce", args.nonce}, {"error", {{"code", "INVALID_PLAN"}, {"message", "plan file unreadable"}}}};
     hosts.sys.write_file(result_file, result.dump());
     return result.value("ok", false) ? 0 : 1;
 }
@@ -529,7 +571,20 @@ bool run_elevated_part(Hosts& h, const Plan& plan, json* result, ErrorInfo* erro
         *result = execute_elevated_work(work, h);
         return true;
     }
-    const ElevatedRun run = h.elevator.run_elevated(work);
+    // Bind the plan to what this process approved: exact bytes + SHA-256 (on the elevated command line), nonce, pid, time.
+    const std::string nonce = auth::random_hex(auth::random_bytes, 16);
+    json bound = work;
+    bound["nonce"] = nonce;
+    bound["parent_pid"] = h.elevator.process_id();
+    bound["created_at"] = h.sys.now();
+    ElevatedRequest request;
+    request.plan_text = bound.dump();
+    request.plan_sha256 = auth::sha256_hex(request.plan_text);
+    request.nonce = nonce;
+    request.sid = work.value("sid", std::string());
+    request.parent_pid = h.elevator.process_id();
+    request.force_binding = work.value("force_binding", false);
+    const ElevatedRun run = h.elevator.run_elevated(request);
     if (run.declined) {
         *error = {"ELEVATION_DECLINED", "The UAC prompt was declined; nothing was changed.", 1};
         return false;
@@ -537,6 +592,10 @@ bool run_elevated_part(Hosts& h, const Plan& plan, json* result, ErrorInfo* erro
     if (!run.launched || run.result.is_null() || !run.result.is_object()) {
         *error = {"ELEVATION_FAILED", "The elevated process did not report a result" + (run.error.empty() ? "" : ": " + run.error) +
                                           " (exit code " + std::to_string(run.exit_code) + ")", 1};
+        return false;
+    }
+    if (run.result.value("nonce", std::string()) != nonce) {
+        *error = {"ELEVATION_FAILED", "The elevated process reported a result that does not belong to this request (exit code " + std::to_string(run.exit_code) + ")", 1};
         return false;
     }
     *result = run.result;

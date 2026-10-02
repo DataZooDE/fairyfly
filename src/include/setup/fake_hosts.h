@@ -19,8 +19,10 @@ struct FakeElevator : Elevator {
     std::map<std::string, std::string> known_users;      ///< user -> SID
     bool decline = false;                                ///< the user cancels the UAC prompt
     int child_exit_code = 0;
-    std::vector<nlohmann::json> plans_seen;              ///< plans handed to run_elevated
-    std::function<nlohmann::json(const nlohmann::json&)> child;   ///< runs the plan (the elevated child)
+    long long pid = 4242;
+    std::vector<nlohmann::json> plans_seen;              ///< plans handed to run_elevated (parsed plan_text)
+    std::vector<ElevatedRequest> requests_seen;          ///< the full requests
+    std::function<nlohmann::json(const ElevatedRequest&)> child;   ///< the elevated child: gets exactly what the command line + file would carry
 
     bool is_elevated() override { return elevated_child_running || type == ElevationType::Elevated; }
     ElevationType elevation_type() override { return is_elevated() ? ElevationType::Elevated : type; }
@@ -31,8 +33,10 @@ struct FakeElevator : Elevator {
         if (it == known_users.end()) return std::nullopt;
         return it->second;
     }
-    ElevatedRun run_elevated(const nlohmann::json& plan) override {
-        plans_seen.push_back(plan);
+    long long process_id() override { return pid; }
+    ElevatedRun run_elevated(const ElevatedRequest& request) override {
+        requests_seen.push_back(request);
+        plans_seen.push_back(nlohmann::json::parse(request.plan_text, nullptr, false));
         ElevatedRun run;
         if (decline) {
             run.declined = true;
@@ -41,7 +45,7 @@ struct FakeElevator : Elevator {
         run.launched = true;
         elevated_child_running = true;
         try {
-            if (child) run.result = child(plan);
+            if (child) run.result = child(request);
         } catch (...) {
             elevated_child_running = false;
             throw;

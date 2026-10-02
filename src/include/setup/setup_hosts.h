@@ -110,6 +110,18 @@ struct ElevatedRun {
     std::string error;
 };
 
+/// What the unelevated parent hands to the elevated child. The child receives the plan as a FILE, but only the
+/// parent-approved bytes are accepted: `plan_sha256` (and the other claims) travel on the elevated command line,
+/// which the UAC consent dialog shows and an unelevated process cannot change.
+struct ElevatedRequest {
+    std::string plan_text;                ///< exact bytes of the plan (JSON text)
+    std::string plan_sha256;              ///< lower-case SHA-256 hex of plan_text
+    std::string nonce;                    ///< random; also embedded in the plan and echoed in the result
+    std::string sid;                      ///< SID the plan claims (setup); empty for teardown
+    long long parent_pid = 0;             ///< pid of the requesting process; also embedded in the plan
+    bool force_binding = false;           ///< the parent approved --force-binding
+};
+
 class Elevator {
 public:
     virtual ~Elevator() = default;
@@ -118,9 +130,11 @@ public:
     virtual std::string current_user_sid() = 0;
     virtual std::string current_user_name() = 0;                                 ///< DOMAIN\user
     virtual std::optional<std::string> resolve_user_sid(const std::string& user) = 0;
-    /// Runs `<exe> mcp setup --apply-plan <planfile> --result-file <resultfile>` elevated (one UAC prompt):
-    /// the plan is written to a file, the child writes its per-step results to the result file.
-    virtual ElevatedRun run_elevated(const nlohmann::json& plan) = 0;
+    virtual long long process_id() = 0;
+    /// Runs `<exe> mcp setup --apply-plan <planfile> --result-file <resultfile> --plan-sha256 ...` elevated (one UAC
+    /// prompt): the plan bytes are written to a fresh file (CREATE_NEW, no write sharing, held open while the child
+    /// runs), the child writes its per-step results to a randomly named result file.
+    virtual ElevatedRun run_elevated(const ElevatedRequest& request) = 0;
 };
 
 // ---- system probes --------------------------------------------------------------------------------

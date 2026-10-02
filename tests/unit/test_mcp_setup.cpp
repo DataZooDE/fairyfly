@@ -23,6 +23,16 @@ const std::string kManifestPath = kLad + "\\fairyfly\\mcp-setup.json";
 const std::string kConfigPath = kLad + "\\fairyfly\\mcp.yaml";
 const std::string kCerPath = kLad + "\\fairyfly\\fairyfly-mcp-" + kHost + ".cer";
 
+ApplyArgs args_of(const ElevatedRequest& req) {
+    ApplyArgs a;
+    a.sha256 = req.plan_sha256;
+    a.nonce = req.nonce;
+    a.sid = req.sid;
+    a.parent_pid = req.parent_pid;
+    a.force_binding = req.force_binding;
+    return a;
+}
+
 struct Rig {
     FakeMachine m;
     std::ostringstream out, err;
@@ -31,9 +41,9 @@ struct Rig {
     Rig() {
         env.out = &out;
         env.err = &err;
-        m.elevator.child = [this](const json& plan) {
+        m.elevator.child = [this](const ElevatedRequest& req) {
             Hosts h = m.hosts();
-            return execute_elevated_work(plan, h);
+            return apply_plan_bytes(h, req.plan_text, args_of(req));
         };
     }
 
@@ -785,20 +795,160 @@ TEST_CASE("execute_elevated_work re-validates a tampered plan file", "[mcp_setup
     CHECK(r.m.certs.calls.size() == 1);
 }
 
-TEST_CASE("run_apply_plan reads the plan file and writes the result file", "[mcp_setup]") {
+namespace {
+// A request exactly as the unelevated parent would build it for a setup plan.
+ElevatedRequest make_request(Rig& r, const json& extra = json::object(), bool force = false) {
+    json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
+                 {"thumbprint", ""}, {"create_cert", true}, {"valid_days", 730}, {"steps", json::array({"certificate", "urlacl"})}, {"firewall_rule", ""},
+                 {"force_binding", force}, {"nonce", "abcdef0123456789abcdef0123456789"}, {"parent_pid", 4242}, {"created_at", r.m.sys.now()}};
+    for (const auto& [k, v] : extra.items()) plan[k] = v;
+    ElevatedRequest req;
+    req.plan_text = plan.dump();
+    req.plan_sha256 = fairyfly::auth::sha256_hex(req.plan_text);
+    req.nonce = "abcdef0123456789abcdef0123456789";
+    req.sid = kSid;
+    req.parent_pid = 4242;
+    req.force_binding = force;
+    return req;
+}
+
+void check_refused(Rig& r, const ElevatedRequest& req, const ApplyArgs& args) {
+    Hosts h = r.m.hosts();
+    const json result = apply_plan_bytes(h, req.plan_text, args);
+    CHECK(result["ok"] == false);
+    CHECK(result["error"]["code"] == "INVALID_PLAN");
+    CHECK(r.m.certs.calls.empty());
+    CHECK(r.m.http.calls.empty());
+    CHECK(r.m.firewall.calls.empty());
+}
+} // namespace
+
+TEST_CASE("run_apply_plan reads the plan file once and writes the result file", "[mcp_setup]") {
     Rig r;
     r.m.elevator.type = ElevationType::Elevated;
     Hosts h = r.m.hosts();
-    const json plan = {{"schema", 1}, {"operation", "setup"}, {"hostname", kHost}, {"port", 8443}, {"tls", true}, {"sid", kSid},
-                       {"thumbprint", ""}, {"create_cert", true}, {"valid_days", 730}, {"steps", json::array({"certificate", "urlacl"})}, {"firewall_rule", ""}};
-    r.m.sys.files["C:\\plan.json"] = plan.dump();
-    CHECK(run_apply_plan(h, "C:\\plan.json", "C:\\result.json") == 0);
+    const ElevatedRequest req = make_request(r);
+    r.m.sys.files["C:\\plan.json"] = req.plan_text;
+    CHECK(run_apply_plan(h, "C:\\plan.json", "C:\\result.json", args_of(req)) == 0);
     const json result = json::parse(r.m.sys.files.at("C:\\result.json"));
     CHECK(result["ok"] == true);
+    CHECK(result["nonce"] == req.nonce);
     CHECK(result["steps"].size() == 2);
     CHECK(r.m.http.urlacls.count(kPrefix) == 1);
-    CHECK(run_apply_plan(h, "C:\\missing.json", "C:\\result2.json") == 1);
+    CHECK(run_apply_plan(h, "C:\\missing.json", "C:\\result2.json", args_of(req)) == 1);
     CHECK(json::parse(r.m.sys.files.at("C:\\result2.json"))["ok"] == false);
+}
+
+TEST_CASE("elevated child: a plan changed after approval is refused with INVALID_PLAN and no host call", "[mcp_setup]") {
+    Rig r;
+    r.m.elevator.type = ElevationType::Elevated;
+    ElevatedRequest req = make_request(r);
+    const ApplyArgs approved = args_of(req);
+    SECTION("tampered bytes (another SID gets the reservation)") {
+        json plan = json::parse(req.plan_text);
+        plan["sid"] = "S-1-5-21-9-9-9-500";
+        const std::string tampered = plan.dump();
+        Hosts h = r.m.hosts();
+        const json result = apply_plan_bytes(h, tampered, approved);
+        CHECK(result["error"]["code"] == "INVALID_PLAN");
+        CHECK(result["error"]["message"].get<std::string>().find("SHA-256") != std::string::npos);
+        CHECK(r.m.http.calls.empty());
+        CHECK(r.m.certs.calls.empty());
+    }
+    SECTION("tampered bytes that keep the length") {
+        std::string tampered = req.plan_text;
+        const auto pos = tampered.find("8443");
+        REQUIRE(pos != std::string::npos);
+        tampered[pos] = '9';
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, tampered, approved)["error"]["code"] == "INVALID_PLAN");
+        CHECK(r.m.http.calls.empty());
+    }
+    SECTION("the hash on the command line is missing or malformed") {
+        ApplyArgs a = approved;
+        a.sha256 = "";
+        check_refused(r, req, a);
+        a.sha256 = std::string(64, 'Z');
+        check_refused(r, req, a);
+        a.sha256 = std::string(64, '0');
+        check_refused(r, req, a);
+    }
+    SECTION("the SID on the command line differs from the plan's SID") {
+        ApplyArgs a = approved;
+        a.sid = "S-1-5-21-9-9-9-500";
+        check_refused(r, req, a);
+    }
+    SECTION("wrong nonce") {
+        ApplyArgs a = approved;
+        a.nonce = "ffffffffffffffffffffffffffffffff";
+        check_refused(r, req, a);
+    }
+    SECTION("wrong parent pid") {
+        ApplyArgs a = approved;
+        a.parent_pid = 1;
+        check_refused(r, req, a);
+    }
+    SECTION("stale plan (older than 10 minutes) and a plan from the future") {
+        const ElevatedRequest stale = make_request(r, json{{"created_at", r.m.sys.now() - 601}});
+        check_refused(r, stale, args_of(stale));
+        const ElevatedRequest future = make_request(r, json{{"created_at", r.m.sys.now() + 3600}});
+        check_refused(r, future, args_of(future));
+        const ElevatedRequest fresh = make_request(r, json{{"created_at", r.m.sys.now() - 590}});
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, fresh.plan_text, args_of(fresh))["ok"] == true);
+    }
+    SECTION("force_binding smuggled into the plan without the parent's flag") {
+        const ElevatedRequest smuggled = make_request(r, json::object(), true);
+        ApplyArgs a = args_of(smuggled);
+        a.force_binding = false;
+        check_refused(r, smuggled, a);
+        a.force_binding = true;
+        Hosts h = r.m.hosts();
+        CHECK(apply_plan_bytes(h, smuggled.plan_text, a)["ok"] == true);
+    }
+    SECTION("oversized plan") {
+        ElevatedRequest big = req;
+        big.plan_text += std::string(kMaxPlanBytes, ' ');
+        big.plan_sha256 = fairyfly::auth::sha256_hex(big.plan_text);
+        check_refused(r, big, args_of(big));
+    }
+    SECTION("garbage that matches its own hash is still not a plan") {
+        ElevatedRequest junk = req;
+        junk.plan_text = "not json";
+        junk.plan_sha256 = fairyfly::auth::sha256_hex(junk.plan_text);
+        check_refused(r, junk, args_of(junk));
+    }
+    SECTION("happy path is unchanged and the result echoes the nonce") {
+        Hosts h = r.m.hosts();
+        const json result = apply_plan_bytes(h, req.plan_text, approved);
+        CHECK(result["ok"] == true);
+        CHECK(result["nonce"] == approved.nonce);
+        CHECK(r.m.http.urlacls.count(kPrefix) == 1);
+    }
+}
+
+TEST_CASE("setup: the parent binds the plan (hash, nonce, pid, time, SID) and rejects a foreign result", "[mcp_setup]") {
+    Rig r;
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    REQUIRE(r.m.elevator.requests_seen.size() == 1);
+    const ElevatedRequest& req = r.m.elevator.requests_seen[0];
+    CHECK(req.plan_sha256 == fairyfly::auth::sha256_hex(req.plan_text));
+    CHECK(req.plan_sha256.size() == 64);
+    CHECK(req.nonce.size() == 32);
+    CHECK(req.sid == kSid);
+    CHECK(req.parent_pid == 4242);
+    CHECK_FALSE(req.force_binding);
+    const json plan = json::parse(req.plan_text);
+    CHECK(plan["nonce"] == req.nonce);
+    CHECK(plan["parent_pid"] == 4242);
+    CHECK(plan["created_at"] == r.m.sys.now());
+
+    // a child that answers with a result of another request is not believed
+    Rig r2;
+    r2.m.elevator.child = [](const ElevatedRequest&) { return json{{"ok", true}, {"steps", json::array()}, {"nonce", "other"}}; };
+    CHECK(r2.setup(Rig::self_signed()) == 1);
+    CHECK(r2.err.str().find("ELEVATION_FAILED") != std::string::npos);
+    CHECK(r2.m.sys.files.count(kManifestPath) == 0);
 }
 
 // ---- teardown ------------------------------------------------------------------------------------------------------
