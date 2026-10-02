@@ -19,6 +19,11 @@ struct SapFacts {
     std::string transaction;
     std::string program;        ///< Info.Program of the current screen (empty when unknown); used for the initial-screen rule, not audited
     std::string screen_number;  ///< Info.ScreenNumber as text (empty when unknown)
+    /// Connection file id the lookup ACTUALLY resolved (also through automatic single-connection resolution); not audited.
+    std::optional<int> connection_id;
+    /// Identity of the live session behind that connection (session path + server session key + cache generation; empty
+    /// when unknown); used to bind the selection-input record to one session, never audited or shown.
+    std::string session_identity;
 
     bool any() const {
         return !system.empty() || !client.empty() || !user.empty() || !transaction.empty();

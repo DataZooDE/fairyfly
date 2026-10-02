@@ -37,7 +37,13 @@ audit::SapFacts CommandHandler::audit_facts_for_connection(std::optional<int> co
         if (!engine || !conn_mgr_) return {};
         const auto resolved = conn_mgr_->resolve_connection(connection);
         if (resolved.status != ResultT<Connection>::Status::Success) return {};
-        return engine->peek_session_facts(resolved.value.session_id, resolved.value.server_session_key);
+        audit::SapFacts facts = engine->peek_session_facts(resolved.value.session_id, resolved.value.server_session_key);
+        if (!facts.any()) return facts;
+        facts.connection_id = resolved.value.id;
+        if (!resolved.value.session_id.empty())
+            facts.session_identity = resolved.value.session_id + "|" + resolved.value.server_session_key + "|" +
+                                     resolved.value.cache_generation;
+        return facts;
     } catch (...) {
         return {};
     }

@@ -39,15 +39,20 @@ struct InitialScreen {
     std::string transaction;     ///< normalized T-code that was open after the start
     std::string program;         ///< Info.Program
     std::string screen_number;   ///< Info.ScreenNumber
-    std::optional<int> connection; ///< connection the start targeted (explicit, sticky or default); typing must target the same one
-    bool known() const { return !transaction.empty() && !program.empty() && !screen_number.empty(); }
+    std::optional<int> connection; ///< connection id the start ACTUALLY used (from its result / the facts lookup, also when resolved automatically)
+    std::string session_identity;  ///< identity of the live session behind it (SapFacts::session_identity)
+    /// A record is only usable when the connection AND the session it belongs to are known (unknown = never typed on).
+    bool known() const {
+        return !transaction.empty() && !program.empty() && !screen_number.empty() && connection.has_value() && !session_identity.empty();
+    }
 };
 
 /// What the dispatcher knows about the screen at the time of the call (the selection-input rule only).
 struct SelectionInputContext {
     std::string program;                  ///< pre-call facts: current Info.Program ("" = unknown)
     std::string screen_number;            ///< pre-call facts: current Info.ScreenNumber ("" = unknown)
-    std::optional<int> connection;        ///< connection this fill targets (explicit, sticky or default as the dispatcher resolves it)
+    std::optional<int> connection;        ///< connection this fill targets (explicit, sticky, else the id the facts lookup resolved)
+    std::string session_identity;         ///< identity of the live session of that connection ("" = unknown)
     std::optional<InitialScreen> initial; ///< recorded by the principal's last successful gui_transaction_start
 };
 

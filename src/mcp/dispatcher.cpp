@@ -276,11 +276,18 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 if (!facts->transaction.empty()) current_tcode = facts->transaction;
                 input_context.program = facts->program;
                 input_context.screen_number = facts->screen_number;
+                input_context.session_identity = facts->session_identity;
+                // The connection this call acts on: explicit/sticky/default, else the id the facts lookup resolved
+                // (automatic single-connection resolution). Two different answers = unknown.
+                if (facts->connection_id && record.connection && *facts->connection_id != *record.connection)
+                    input_context.session_identity.clear();
+                else if (!record.connection)
+                    input_context.connection = facts->connection_id;
             }
         }
         if (principal.allow_selection_input) {
             input_context.initial = initial_screen(principal_key(principal));
-            input_context.connection = record.connection;
+            if (record.connection) input_context.connection = record.connection;
             // Any call that observes another (or an unknown) screen than the recorded one ends the typing window for good:
             // coming back to the initial screen later needs a new gui_transaction_start.
             if (input_context.initial && facts_provider_ && name != "gui_transaction_start" &&
@@ -457,15 +464,26 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     bool tcode_left = false;
     if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
         std::string after;
-        std::string after_program, after_screen;
+        std::string after_program, after_screen, after_identity;
+        std::optional<int> after_connection;
+        // The connection the call ACTUALLY used (its result carries it), not the one resolved before the call: an automatic
+        // single-connection resolution leaves record.connection empty.
+        std::optional<int> used_connection = record.connection;
+        if (result.status == Result::Status::Success && result.data.is_object() && result.data.contains("connection_id"))
+            if (auto id = int_from_json(result.data["connection_id"])) used_connection = id;
         const auto facts_started = std::chrono::steady_clock::now();
         try {
-            if (auto facts = facts_provider_(record.connection)) {
+            if (auto facts = facts_provider_(used_connection)) {
                 after = auth::normalize_tcode(facts->transaction);
                 after_program = facts->program;
                 after_screen = facts->screen_number;
+                after_identity = facts->session_identity;
+                after_connection = facts->connection_id;
             }
         } catch (...) {}
+        // Both sources must agree; whichever is available names the connection, none = unknown (no typing).
+        if (used_connection && after_connection && *used_connection != *after_connection) used_connection.reset();
+        else if (!used_connection) used_connection = after_connection;
         note_step("facts_post", name, principal.name, facts_started, record.facts_post_ms);
         if (!after.empty()) {
             const bool allowed = std::any_of(principal.tcodes.begin(), principal.tcodes.end(),
@@ -480,7 +498,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
                 // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
                 if (principal.allow_selection_input) {
-                    auth::InitialScreen screen{after, after_program, after_screen, record.connection};
+                    auth::InitialScreen screen{after, after_program, after_screen, used_connection, after_identity};
                     set_initial_screen(principal_key(principal), screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
                 }
             }
