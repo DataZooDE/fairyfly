@@ -44,6 +44,49 @@ TEST_CASE("Action status classifies SAP rejections", "[status][actions]") {
     REQUIRE(rejected_list_header->error.at("code") == "ACTION_FAILED");
 }
 
+TEST_CASE("warning_needs_confirmation recognises EN/DE confirm-with-Enter prompts only", "[status][actions]") {
+    for (const char* text : {"Press ENTER to continue", "Press Enter to confirm the entry", "Confirm the deletion of the document",
+                             "Please confirm", "Choose Enter again to save", "Bestätigen Sie die Eingabe mit Enter",
+                             "Weiter mit Enter", "Zum Fortfahren Enter drücken", "Bitte bestaetigen", "Erneut Enter drücken"}) {
+        INFO(text);
+        CHECK(warning_needs_confirmation(text));
+    }
+    for (const char* text : {"No short dumps match the selection criteria", "Check entries before continuing",
+                             "Document 4711 confirmed", "Keine Kurzdumps zur Selektion vorhanden", "Data saved", "",
+                             "Confirmation of delivery exists"}) {
+        INFO(text);
+        CHECK_FALSE(warning_needs_confirmation(text));
+    }
+}
+
+TEST_CASE("A fresh confirmation W after a submitting action is not a success", "[status][actions]") {
+    const ActionStatus before{"", ""};
+    const std::string button = "wnd[0]/tbar[1]/btn[8]";
+    for (const char* text : {"Press ENTER to continue", "Bestätigen Sie die Eingabe mit Enter"}) {
+        INFO(text);
+        const ActionStatus after{text, "W"};
+        auto result = classify_action_status(before, after, button, true);
+        REQUIRE(result.has_value());
+        CHECK(result->status == Result::Status::Error);
+        CHECK(result->error.at("code") == "ACTION_OUTCOME_UNVERIFIED");
+        CHECK(result->error.at("message") == text);
+        CHECK(result->error.at("needs_confirmation") == true);
+        CHECK(result->error.at("hint").get<std::string>().find("gui_key_send enter") != std::string::npos);
+        // not a submitting action, or the same message was already there: no confirmation error
+        CHECK_FALSE(classify_action_status(before, after, button, false).has_value());
+        CHECK_FALSE(classify_action_status(after, after, button, true).has_value());
+    }
+    // ordinary W (ST22 text) stays a success, E and A messages stay failures
+    CHECK_FALSE(classify_action_status(before, {"No short dumps match the selection criteria", "W"}, button, true).has_value());
+    auto error = classify_action_status(before, {"Enter a valid date", "E"}, button, true);
+    REQUIRE(error.has_value());
+    CHECK(error->error.at("code") == "ACTION_FAILED");
+    CHECK_FALSE(error->error.contains("needs_confirmation"));
+    auto abort = classify_action_status(before, {"Press ENTER to continue", "A"}, button, true);
+    REQUIRE(abort.has_value());
+    CHECK(abort->error.at("code") == "ACTION_ABORTED");
+}
+
 TEST_CASE("Benign W/I/S status messages after a click are success with the message", "[status][actions]") {
     const ActionStatus before{"", ""};
     const std::string button = "wnd[0]/usr/btnTODAY";

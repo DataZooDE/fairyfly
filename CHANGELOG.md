@@ -41,6 +41,8 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Security
 
+- Action status: a fresh type-W status message that asks for confirmation (EN/DE: "Press ENTER to continue", "Confirm ...", "Bestätigen Sie ...", "weiter mit Enter") after a submitting action is no longer reported as success; the result is an `ACTION_OUTCOME_UNVERIFIED` error with the message, `needs_confirmation: true` and a hint to send Enter if intended. Other W messages stay success with `warning: true`.
+
 - Redaction: the "credential state name" exemption (`PASSWORD_EXT_PWD_STATE`, `Password status`, ...) now applies to input fields only when the field is known to be display-only, is not a password field and its value looks like a state label; a changeable or unknown-changeability field with such a name (and every fill echo) stays redacted. Display-only state fields (SU01 display) are still shown; labels, grid and report cells keep the exemption.
 
 - Remote MCP over HTTP: `Mcp-Method` / `Mcp-Name` headers that are present are now validated against the body for legacy (2025-xx) requests too (400 + -32020, no provider call), and an `MCP-Protocol-Version` header naming a served version that differs from the body `_meta` protocol version is rejected in every era. Absent headers stay accepted on legacy requests.
