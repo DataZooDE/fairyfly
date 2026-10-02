@@ -7,6 +7,7 @@
 #include "include/mcp/policy.h"
 #include "include/vkey.h"
 #include "include/mcp/tool_catalog.h"
+#include "include/sensitive_data.h"
 
 namespace fairyfly::auth {
 
@@ -53,17 +54,81 @@ bool system_allowed(const std::vector<std::string>& patterns, const std::string&
     return false;
 }
 
+bool present(const json& args, const char* key) {
+    return args.is_object() && args.contains(key) && !args[key].is_null();
+}
+
+/// Selection-input rules for gui_element_fill (see authorize.h). `full` = also the screen rules (top-level calls).
+PolicyDecision check_selection_input(const mcp::Principal& principal, const json& args, bool full,
+                                     const std::optional<std::string>& current_tcode, const SelectionInputContext* input) {
+    if (principal.tcodes.empty())
+        return refuse("INPUT_NOT_ALLOWED", "typing for read-only tokens needs a T-code allowlist; token '" + principal.name +
+                                           "' has none (create it with --tcode ... --allow-selection-input)");
+
+    // Target: a plain input field only. Cells, checkboxes, the command field and credential fields are never allowed.
+    for (const char* key : {"row", "column", "checkbox", "commit"})
+        if (present(args, key))
+            return refuse("INPUT_TARGET_DENIED", "typing is only allowed into plain selection fields of the initial screen, not "
+                                                 "into table or grid cells (row/column/checkbox/commit)");
+    bool any_element = false;
+    for (const char* key : {"element", "element_id", "id"}) {
+        if (!args.is_object() || !args.contains(key) || args[key].is_null()) continue;
+        if (!args[key].is_string())
+            return refuse("INPUT_TARGET_DENIED", "the element id must be a string");
+        any_element = true;
+        const std::string id = args[key].get<std::string>();
+        if (is_okcd_element(id))
+            return refuse("INPUT_TARGET_DENIED", "typing into the command field is not allowed; use gui_transaction_start");
+        const auto slash = id.find_last_of('/');
+        std::string leaf = slash == std::string::npos ? id : id.substr(slash + 1);
+        std::string leaf_lower = lower(leaf);
+        const bool pwd_type = leaf_lower.compare(0, 3, "pwd") == 0;  // GuiPasswordField ids start with pwd
+        if (pwd_type || !sap::sensitive_input_field_reason("GuiTextField", id, "").empty() ||
+            sap::contains_sensitive_data_name(id))
+            return refuse("INPUT_TARGET_DENIED", "typing into password or credential fields is never allowed");
+    }
+    if (!any_element) return refuse("INPUT_TARGET_DENIED", "the element id is required");
+    if (!full) return PolicyDecision{};
+
+    // The open transaction must be allowlisted (same message family as the general rule).
+    const std::string open = current_tcode ? normalize_tcode(*current_tcode) : std::string();
+    if (open.empty())
+        return refuse("TCODE_DENIED", "the open SAP transaction is not known and the token is limited to specific "
+                                      "transactions; start an allowed one with gui_transaction_start");
+    if (!matches_any(principal.tcodes, open))
+        return refuse("TCODE_DENIED", "token '" + principal.name + "' is not allowed to act in transaction " + open);
+
+    // Initial screen: the (program, screen number) reached by the last successful gui_transaction_start, before any navigation.
+    const std::string deny_text = "typing is only allowed on the initial screen of the transaction; start it again with "
+                                  "gui_transaction_start";
+    if (!input || !input->initial || !input->initial->known() || input->program.empty() || input->screen_number.empty())
+        return refuse("INPUT_SCREEN_DENIED", deny_text);
+    if (input->initial->transaction != open || input->initial->program != input->program ||
+        input->initial->screen_number != input->screen_number)
+        return refuse("INPUT_SCREEN_DENIED", deny_text);
+    return PolicyDecision{};
+}
+
 PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                               const json& args, const mcp::Policy& server_policy,
                               const std::optional<std::string>& current_system,
                               const std::optional<std::string>& current_tcode, bool check_system,
-                              const SpecLookup& lookup, int depth) {
+                              const SpecLookup& lookup, int depth, const SelectionInputContext* input) {
     const std::string& tool = spec.def.name;
 
     if (!has_scope(principal, family))
         return refuse("SCOPE_DENIED", "token '" + principal.name + "' has no access to the '" + family + "' tool family");
 
-    if (principal.read_only || server_policy.read_only) {
+    // Selection input: a read-only token (or server) with allow_selection_input may fill plain fields of the initial screen.
+    // This replaces the read-only refusal for gui_element_fill only; every other rule below still applies.
+    bool input_allowed = false;
+    if (selection_input_path(principal, tool, server_policy)) {
+        auto decision = check_selection_input(principal, args, check_system, current_tcode, input);
+        if (!decision.allowed) return decision;
+        input_allowed = true;
+    }
+
+    if (!input_allowed && (principal.read_only || server_policy.read_only)) {
         mcp::Policy narrowed = server_policy;
         narrowed.read_only = true;
         const auto decision = mcp::check_call(spec, args, narrowed, [](const char*) { return std::string(); });
@@ -164,7 +229,7 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
             if (!item_spec || name == "gui_batch") continue;  // unknown / nested: rejected by the dispatcher
             const json item_args = item.contains("arguments") ? item["arguments"] : json::object();
             auto decision = authorize_impl(principal, *item_spec, item_spec->family, item_args, server_policy, current_system,
-                                           current_tcode, false, lookup, depth + 1);
+                                           current_tcode, false, lookup, depth + 1, input);
             if (!decision.allowed) {
                 decision.message = "batch item " + std::to_string(index) + " (" + name + "): " + decision.message;
                 return decision;
@@ -242,8 +307,8 @@ bool is_okcd_element(const std::string& element_id) {
 mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                                    const mcp::json& args, const mcp::Policy& server_policy,
                                    std::optional<std::string> current_system, std::optional<std::string> current_tcode,
-                                   const SpecLookup& lookup) {
-    return authorize_impl(principal, spec, family, args, server_policy, current_system, current_tcode, true, lookup, 0);
+                                   const SpecLookup& lookup, const SelectionInputContext* input) {
+    return authorize_impl(principal, spec, family, args, server_policy, current_system, current_tcode, true, lookup, 0, input);
 }
 
 namespace {
@@ -411,6 +476,15 @@ bool filter_listing_for_connections(const mcp::Principal& principal, const std::
 int rate_family_limit(const mcp::Principal& principal, const std::string& family) {
     const auto it = principal.rate_families.find(family);
     return it == principal.rate_families.end() || it->second < 1 ? 0 : it->second;
+}
+
+bool selection_input_path(const mcp::Principal& principal, const std::string& tool, const mcp::Policy& server_policy) {
+    return tool == "gui_element_fill" && principal.allow_selection_input && (principal.read_only || server_policy.read_only);
+}
+
+bool selection_input_tool_visible(const mcp::Principal& principal, const mcp::ToolSpec& spec) {
+    return spec.def.name == "gui_element_fill" && principal.allow_selection_input && principal.read_only &&
+           !principal.tcodes.empty() && has_scope(principal, spec.family);
 }
 
 bool tool_allowed_for(const mcp::Principal& principal, const mcp::ToolSpec& spec) {

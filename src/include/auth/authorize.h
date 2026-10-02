@@ -34,6 +34,28 @@ std::string tcode_safe_key_spellings();
 /// True when `element_id` is the SAP command field (".../okcd", e.g. wnd[0]/tbar[0]/okcd).
 bool is_okcd_element(const std::string& element_id);
 
+/// The screen a token's last successful gui_transaction_start ended on (selection-input rule).
+struct InitialScreen {
+    std::string transaction;     ///< normalized T-code that was open after the start
+    std::string program;         ///< Info.Program
+    std::string screen_number;   ///< Info.ScreenNumber
+    bool known() const { return !transaction.empty() && !program.empty() && !screen_number.empty(); }
+};
+
+/// What the dispatcher knows about the screen at the time of the call (the selection-input rule only).
+struct SelectionInputContext {
+    std::string program;                  ///< pre-call facts: current Info.Program ("" = unknown)
+    std::string screen_number;            ///< pre-call facts: current Info.ScreenNumber ("" = unknown)
+    std::optional<InitialScreen> initial; ///< recorded by the principal's last successful gui_transaction_start
+};
+
+/// True when `tool` is gui_element_fill, the principal has allow_selection_input and either the token or the server is
+/// read-only: the call then takes the selection-input path (the read-only refusal is replaced by the INPUT_* rules).
+bool selection_input_path(const mcp::Principal& principal, const std::string& tool, const mcp::Policy& server_policy);
+
+/// Whether tools/list shows gui_element_fill to a read-only principal with allow_selection_input (scope + T-code allowlist).
+bool selection_input_tool_visible(const mcp::Principal& principal, const mcp::ToolSpec& spec);
+
 /// Looks up a tool by name (used for gui_batch items). Empty = the built-in catalog.
 using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_name)>;
 
@@ -55,10 +77,17 @@ using SpecLookup = std::function<const mcp::ToolSpec*(const std::string& tool_na
 ///  - gui_batch: every item is checked with the static rules (scope, read-only, T-code names); the system rule and the
 ///    current-transaction rule are applied per item by the dispatcher at execution time because an earlier item may
 ///    attach the session or start another transaction.
+///  - selection input (principal.allow_selection_input, see selection_input_path): gui_element_fill on a read-only token/
+///    server is allowed ONLY when the token has a T-code allowlist, the open transaction is allowlisted, the current
+///    (program, screen number) equals `input.initial` exactly (unknown = deny) and the target is a plain input field
+///    (no row/column/checkbox/commit, not the command field, not a password/credential field). Refusals:
+///    INPUT_NOT_ALLOWED (option set but no T-code allowlist), INPUT_SCREEN_DENIED, INPUT_TARGET_DENIED; an open
+///    transaction outside the allowlist keeps TCODE_DENIED. For gui_batch items only the static target rules run here
+///    (the screen rule is applied per item by the dispatcher).
 mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                                    const mcp::json& args, const mcp::Policy& server_policy,
                                    std::optional<std::string> current_system, std::optional<std::string> current_tcode,
-                                   const SpecLookup& lookup = {});
+                                   const SpecLookup& lookup = {}, const SelectionInputContext* input = nullptr);
 
 /// What a session/connection-targeting call is about to act on, as far as it could be determined WITHOUT contacting
 /// SAP (saved connection files, the live session's own metadata). Empty fields mean "not determinable".
