@@ -238,6 +238,9 @@ std::string sddl_for_sid(const std::string& sid);                           ///<
 bool sddl_covers_sid(const std::string& sddl, const std::string& sid);
 std::string merge_sddl(const std::string& existing, const std::string& sid);
 bool san_matches(const std::vector<std::string>& dns_names, const std::string& hostname);
+/// The names a certificate answers to for client name validation: its SAN DNS names; the subject CN ONLY when the
+/// certificate has no SAN extension at all (a SAN extension without DNS names means "no DNS name", not "use the CN").
+std::vector<std::string> certificate_names(bool has_san_extension, const std::vector<std::string>& san_dns_names, const std::string& common_name);
 std::string firewall_rule_name(int port);                                   ///< display name: fairyfly MCP HTTPS <port>
 std::string firewall_internal_name(int port, const std::string& suffix);    ///< fairyfly-mcp-https-<port>-<suffix>
 bool firewall_name_ok(const std::string& name, int* port = nullptr);       ///< fairyfly-mcp-https-<port>-<8 lower-case hex>
@@ -270,8 +273,9 @@ struct VerifyOut {
     std::string status;                   ///< ok | failed | skipped
     std::string protocol;
     int http_status = 0;
-    bool thumbprint_match = false;
+    bool thumbprint_match = false;        ///< the presented certificate is the bound one (the WinHTTP probe is pinned by thumbprint)
     std::string detail;
+    bool name_match = true;               ///< ordinary client name validation: the host name is covered by the certificate's SAN (own check)
 };
 
 struct Report {

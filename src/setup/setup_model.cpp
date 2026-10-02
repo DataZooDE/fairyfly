@@ -66,6 +66,12 @@ bool san_matches(const std::vector<std::string>& dns_names, const std::string& h
     return false;
 }
 
+std::vector<std::string> certificate_names(bool has_san_extension, const std::vector<std::string>& san_dns_names, const std::string& common_name) {
+    std::vector<std::string> names = san_dns_names;
+    if (!has_san_extension && !common_name.empty()) names.push_back(common_name);
+    return names;
+}
+
 std::string firewall_rule_name(int port) { return "fairyfly MCP HTTPS " + std::to_string(port); }
 std::string firewall_internal_name(int port, const std::string& suffix) { return "fairyfly-mcp-https-" + std::to_string(port) + "-" + suffix; }
 bool firewall_name_ok(const std::string& name, int* port) {
@@ -956,7 +962,7 @@ json report_to_json(const Report& r) {
         for (const auto& h : r.human) data["human"].push_back({{"id", h.id}, {"text", h.text}});
         if (r.verify)
             data["verify"] = {{"status", r.verify->status}, {"protocol", r.verify->protocol}, {"http_status", r.verify->http_status},
-                              {"thumbprint_match", r.verify->thumbprint_match}, {"detail", r.verify->detail}};
+                              {"thumbprint_match", r.verify->thumbprint_match}, {"name_match", r.verify->name_match}, {"detail", r.verify->detail}};
         data["next_steps"] = r.next_steps;
         if (!r.runbook.empty()) data["runbook"] = r.runbook;
         out["data"] = data;
@@ -1011,7 +1017,10 @@ std::string render_result_text(const Report& r) {
         out << "\nVerify: " << r.verify->status;
         if (!r.verify->protocol.empty()) out << ", " << r.verify->protocol;
         if (r.verify->http_status) out << ", HTTP " << r.verify->http_status;
-        if (r.verify->status == "ok" || r.verify->status == "failed") out << ", thumbprint " << (r.verify->thumbprint_match ? "matches" : "does not match");
+        if (r.verify->status == "ok" || r.verify->status == "failed") {
+            out << ", thumbprint " << (r.verify->thumbprint_match ? "matches" : "does not match");
+            out << ", name " << (r.verify->name_match ? "matches" : "does NOT match");
+        }
         if (!r.verify->detail.empty()) out << " (" << r.verify->detail << ")";
         out << "\n";
     }

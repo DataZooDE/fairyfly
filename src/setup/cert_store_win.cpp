@@ -10,6 +10,7 @@
 #include <iterator>
 
 #include "include/setup/setup_hosts.h"
+#include "include/setup/setup_model.h"
 #include "include/setup/setup_validators.h"
 #include "include/system/cert_scripts.h"
 #include "include/system/powershell_runner.h"
@@ -64,7 +65,8 @@ CertInfo describe(PCCERT_CONTEXT ctx) {
     size = 0;
     c.has_private_key = CertGetCertificateContextProperty(ctx, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &size) && size > 0;
     c.not_after = filetime_to_unix(ctx->pCertInfo->NotAfter);
-    // SAN DNS names; the CN only when there is no SAN extension.
+    // SAN DNS names; the CN only when there is no SAN extension at all (certificate_names).
+    std::vector<std::string> san_dns;
     PCERT_EXTENSION ext = CertFindExtension(szOID_SUBJECT_ALT_NAME2, ctx->pCertInfo->cExtension, ctx->pCertInfo->rgExtension);
     if (ext) {
         PCERT_ALT_NAME_INFO info = nullptr;
@@ -73,11 +75,11 @@ CertInfo describe(PCCERT_CONTEXT ctx) {
                                 CRYPT_DECODE_ALLOC_FLAG, nullptr, &info, &info_size) && info) {
             for (DWORD i = 0; i < info->cAltEntry; ++i)
                 if (info->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME && info->rgAltEntry[i].pwszDNSName)
-                    c.dns_names.push_back(narrow(info->rgAltEntry[i].pwszDNSName));
+                    san_dns.push_back(narrow(info->rgAltEntry[i].pwszDNSName));
             LocalFree(info);
         }
     }
-    if (c.dns_names.empty()) c.dns_names.push_back(narrow(subject));
+    c.dns_names = certificate_names(ext != nullptr, san_dns, narrow(subject));
     return c;
 }
 

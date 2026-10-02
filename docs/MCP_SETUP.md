@@ -36,7 +36,7 @@ An SslBinding whose AppId is not fairyfly's belongs to somebody else. The `sslce
 
 ### Verification (the last step)
 
-After applying, setup re-diagnoses the machine and proves the listener works: an unauthenticated `POST /mcp` must answer `401 AUTH_REQUIRED` with a `WWW-Authenticate` header, over TLS whose certificate SHA-1 equals the bound thumbprint (a thumbprint-pinned WinHTTP client: any chain error is ignored only because the pin is checked, and no credential is ever sent). The negotiated protocol is reported; below TLS 1.2 it adds a "Left for a human" item. The round trip binds a deny-all in-process server on the real prefix for about two seconds, or talks to the already running server (tray) when the port is served. Failure exits 1 with `VERIFY_FAILED`.
+After applying, setup re-diagnoses the machine and proves the listener works: an unauthenticated `POST /mcp` must answer `401 AUTH_REQUIRED` with a `WWW-Authenticate` header, over TLS whose certificate SHA-1 equals the bound thumbprint (a thumbprint-pinned WinHTTP client: any chain error is ignored only because the pin is checked, and no credential is ever sent). The probe is deliberately pinned: it ignores certificate-name errors because the thumbprint pin already proves it is talking to the bound certificate, so `verify.thumbprint_match` says nothing about names. `verify.name_match` (additive JSON field) reports separately whether ordinary client name validation would pass: our own SAN check of the pinned certificate against the host name. A `false` is shown as a warning (`name does NOT match` plus the human item `name_mismatch`) even when the verification itself is `ok`. The negotiated protocol is reported; below TLS 1.2 it adds a "Left for a human" item. The round trip binds a deny-all in-process server on the real prefix for about two seconds, or talks to the already running server (tray) when the port is served. Failure exits 1 with `VERIFY_FAILED`.
 
 ## Flags
 
@@ -78,7 +78,7 @@ fairyfly mcp cert export [--out PATH] [--format der|pem] [--hostname H] [--port 
     "diagnosis": [{"id": "urlacl", "status": "missing", "detail": "..."}],
     "steps": [{"id": "certificate", "title": "...", "status": "created", "detail": "...", "elevated": true}],
     "human": [{"id": "trust_certificate", "text": "..."}],
-    "verify": {"status": "ok", "protocol": "TLS 1.3", "http_status": 401, "thumbprint_match": true, "detail": ""},
+    "verify": {"status": "ok", "protocol": "TLS 1.3", "http_status": 401, "thumbprint_match": true, "name_match": true, "detail": ""},
     "next_steps": ["fairyfly mcp token create NAME ..."]
   },
   "error": {"code": "VERIFY_FAILED", "message": "..."}
@@ -127,7 +127,7 @@ Read-only and never elevated. The http.sys checks follow `tokens`; `fairyfly mcp
 | `setup_manifest` | setup recorded in `mcp-setup.json` | `fairyfly mcp setup ...` |
 | `urlacl` | reservation of the effective prefix covers the current user (loopback prefixes need none on this Windows build: PASS) | `fairyfly mcp setup ...` |
 | `sslcert` | bound on `0.0.0.0:PORT` (and `[::]`), AppId ours, matches the installed certificate; SKIP in `--no-tls` mode | `fairyfly mcp setup ...` |
-| `certificate` | in `LocalMachine\My`, private key, not expired (WARN below 30 days), SAN matches the host | re-run setup / `teardown` then `setup` |
+| `certificate` | in `LocalMachine\My`, private key, not expired (WARN below 30 days), SAN matches the host (the subject CN is used only for a certificate without any SAN extension; a SAN extension with no DNS names matches nothing) | re-run setup / `teardown` then `setup` |
 | `firewall` | only when the manifest recorded a rule | `fairyfly mcp setup ... --open-firewall` |
 | `port` | free, or served (by the tray) | |
 | `tls_handshake` | only when something listens: pinned handshake, protocol, thumbprint match; WARN on mismatch or below TLS 1.2 | rebind / Schannel policy |

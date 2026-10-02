@@ -15,7 +15,8 @@ function Cert-Json($c) {
   $names = @()
   if ($c.DnsNameList) { foreach ($n in $c.DnsNameList) { $names += $n.Unicode } }
   $cn = $c.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
-  if ($cn) { $names += $cn }
+  $hasSan = @($c.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' }).Count -gt 0
+  if ($cn -and -not $hasSan) { $names += $cn }
   [ordered]@{
     thumbprint = $c.Thumbprint.ToUpper()
     subject = $c.Subject

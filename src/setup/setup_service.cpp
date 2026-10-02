@@ -890,7 +890,17 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
         } else {
             VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
             const VerifyResult vr = h.verify.round_trip(req);
-            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail};
+            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
+            if (plan.tls && vr.status != "skipped") {
+                // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
+                // checked separately, against the SAN of the pinned certificate.
+                try {
+                    const CertInfo bound = h.certs.find_by_thumbprint(thumb);
+                    vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
+                } catch (const std::exception&) {
+                    vo.name_match = false;
+                }
+            }
             if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
                 vo.status = "failed";
                 vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
@@ -900,6 +910,10 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     }
     rep.verify = vo;
     rep.human = plan.human;
+    if (plan.tls && vo.status != "skipped" && !vo.name_match)
+        rep.human.push_back({"name_mismatch", "The certificate does not cover the host name '" + plan.hostname +
+                                                  "' in its subject alternative names: the verification above is pinned by thumbprint, but clients that validate the name will refuse it. "
+                                                  "Use a certificate whose SAN lists this host name (or a self-signed one from 'mcp setup --self-signed')."});
     if (vo.status == "ok" && old_protocol(vo.protocol))
         rep.human.push_back({"schannel", "The server negotiated " + vo.protocol + ": raise the machine's Schannel policy to TLS 1.2 or newer (registry SCHANNEL\\Protocols)."});
     rep.next_steps = plan.next_steps;

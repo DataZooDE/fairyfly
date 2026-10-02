@@ -230,8 +230,10 @@ struct FakeFirewall : Firewall {
 struct FakeVerify : VerifyHost {
     VerifyResult result{"ok", "TLS 1.3", 401, true, ""};
     std::vector<VerifyRequest> requests;
+    std::function<void()> on_round_trip;             ///< lets a test change the machine while the probe runs
     VerifyResult round_trip(const VerifyRequest& request) override {
         requests.push_back(request);
+        if (on_round_trip) on_round_trip();
         VerifyResult out = result;
         if (out.status == "ok") out.thumbprint_match = out.thumbprint_match && (!request.tls || !request.expected_thumbprint.empty());
         return out;

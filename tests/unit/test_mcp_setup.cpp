@@ -1603,3 +1603,56 @@ TEST_CASE("elevated child validates firewall names and never claims a foreign di
     CHECK(execute_elevated_work(plan, h)["steps"][0]["status"] == "created");
     CHECK(r.m.firewall.rules.count("fairyfly-mcp-https-8443-0a1b2c3d") == 1);
 }
+
+// ---- certificate names and the verify name check ----------------------------------------------------------------------
+TEST_CASE("certificate_names: the CN counts only when there is no SAN extension", "[mcp_setup]") {
+    // no SAN extension: the CN is the name
+    CHECK(certificate_names(false, {}, "sapbox.corp.example") == std::vector<std::string>{"sapbox.corp.example"});
+    // a SAN extension with DNS names: the CN is ignored
+    CHECK(certificate_names(true, {"other.example"}, "sapbox.corp.example") == std::vector<std::string>{"other.example"});
+    // a SAN extension with only other name types (IP, e-mail ...): no DNS name at all, no CN fallback
+    const auto none = certificate_names(true, {}, "sapbox.corp.example");
+    CHECK(none.empty());
+    CHECK_FALSE(san_matches(none, "sapbox.corp.example"));
+    CHECK(san_matches(certificate_names(false, {}, "sapbox.corp.example"), "sapbox.corp.example"));
+    CHECK_FALSE(san_matches(certificate_names(true, {"other.example"}, "sapbox.corp.example"), "sapbox.corp.example"));
+    // and a certificate whose names are empty is a WrongSan problem
+    CertInfo c = good_cert(kThumb);
+    c.dns_names = none;
+    const auto problems = cert_problems(c, kHost, 1800000000);
+    CHECK(std::find(problems.begin(), problems.end(), CertProblem::WrongSan) != problems.end());
+}
+
+TEST_CASE("verify output reports name_match separately from thumbprint_match", "[mcp_setup]") {
+    SECTION("normal run: both match, additive JSON field") {
+        Rig r;
+        Options o = Rig::self_signed();
+        o.json = true;
+        REQUIRE(r.setup(o) == 0);
+        const json doc = json::parse(r.out.str());
+        CHECK(doc["data"]["verify"]["thumbprint_match"] == true);
+        CHECK(doc["data"]["verify"]["name_match"] == true);
+        CHECK_FALSE(has_human(r.out.str(), "name_mismatch"));
+    }
+    SECTION("a thumbprint-pinned success does not hide a name mismatch") {
+        Rig r;
+        r.m.verify.on_round_trip = [&r] { r.m.certs.certs[0].dns_names = {"somebody-else.example"}; };
+        Options o = Rig::self_signed();
+        o.json = true;
+        REQUIRE(r.setup(o) == 0);
+        const json doc = json::parse(r.out.str());
+        CHECK(doc["data"]["verify"]["status"] == "ok");
+        CHECK(doc["data"]["verify"]["thumbprint_match"] == true);
+        CHECK(doc["data"]["verify"]["name_match"] == false);
+        CHECK(has_human(r.out.str(), "name_mismatch"));
+    }
+    SECTION("text rendering shows it as a warning") {
+        Report rep;
+        rep.hostname = kHost;
+        rep.verify = VerifyOut{"ok", "TLS 1.3", 401, true, "", false};
+        const std::string text = render_result_text(rep);
+        CHECK(text.find("thumbprint matches") != std::string::npos);
+        CHECK(text.find("name does NOT match") != std::string::npos);
+        CHECK(report_to_json(rep)["data"]["verify"]["name_match"] == false);
+    }
+}
