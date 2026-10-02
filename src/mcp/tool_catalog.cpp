@@ -496,14 +496,17 @@ std::vector<ToolSpec> read_tool_specs() {
         "gui_screen_capture", "Capture a SAP screenshot",
         "Captures a PNG screenshot of the SAP window and returns it as an image. Images are expensive: prefer "
         "gui_screen_read / gui_screen_find, and use `scale` (0.0-1.0, or a width in pixels) or a crop "
-        "(x, y, width, height) to shrink it. If the image exceeds the server's size cap it is retried once at half "
+        "(x, y, width, height) to shrink it. The crop is ALWAYS in native window pixels and is applied BEFORE `scale` "
+        "(the scale then shrinks the cropped image); the text block names the native size, the crop used and the "
+        "output size. A crop completely outside the window is INVALID_ARGUMENT with the native size. If the image "
+        "exceeds the server's size cap it is retried once at half "
         "scale, otherwise IMAGE_TOO_LARGE is returned. Read-only.",
         make_schema({{"scale", {{"type", "number"}, {"minimum", 0.01}, {"maximum", 8000},
-                                {"description", "Scale factor (0.01-1.0) or target width in pixels (>1)."}}},
-                     {"x", integer("Crop X position in pixels.", 0, 20000)},
-                     {"y", integer("Crop Y position in pixels.", 0, 20000)},
-                     {"width", integer("Crop width in pixels.", 1, 20000)},
-                     {"height", integer("Crop height in pixels.", 1, 20000)},
+                                {"description", "Scale factor (0.01-1.0) or target width in pixels (>1); applied after the crop."}}},
+                     {"x", integer("Crop X in native window pixels (not affected by scale).", 0, 20000)},
+                     {"y", integer("Crop Y in native window pixels (not affected by scale).", 0, 20000)},
+                     {"width", integer("Crop width in native window pixels.", 1, 20000)},
+                     {"height", integer("Crop height in native window pixels.", 1, 20000)},
                      {"connection", conn}}),
         annotations("Capture a SAP screenshot", true, false, true), ToolOutput::Image,
         [](const json& a, const Policy& p) {

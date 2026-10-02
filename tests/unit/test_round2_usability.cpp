@@ -3,6 +3,7 @@
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
+#include "include/cli_handler.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -261,5 +262,51 @@ TEST_CASE("the outermost inactive page of nested tab strips is reported", "[tabs
     auto inactive = find_inactive_tab_page("wnd[0]/usr/tabsA/tabpOUTER_OK/sub/tabsB/tabpINNER/txtX", lookup);
     REQUIRE(inactive.has_value());
     CHECK(inactive->first.page_name == "tabpINNER");
+}
+
+// ---- Item 3: tooltips --------------------------------------------------------------------------------
+
+TEST_CASE("icon buttons report their tooltip in get and find results", "[tooltip][round2]") {
+    json get = {{"value", ""}, {"element_type", "GuiButton"}};
+    attach_tooltip_fields(get, "GuiButton", "Display <-> Change", "");
+    CHECK(get.at("tooltip") == "Display <-> Change");
+    CHECK_FALSE(get.contains("text"));  // empty text stays absent
+
+    json labelled = {{"value", "Save"}};
+    attach_tooltip_fields(labelled, "GuiButton", "Save (Ctrl+S)", "Save");
+    CHECK(labelled.at("tooltip") == "Save (Ctrl+S)");
+    CHECK(labelled.at("value") == "Save");
+    CHECK_FALSE(labelled.contains("text"));  // same as value: not repeated
+
+    json differs = {{"value", "Save"}};
+    attach_tooltip_fields(differs, "GuiButton", "Save (Ctrl+S)", "Save as");
+    CHECK(differs.at("text") == "Save as");
+
+    json found = {{"id", "wnd[0]/tbar[1]/btn[5]"}, {"type", "GuiButton"}, {"text", ""}};
+    attach_tooltip_fields(found, "GuiButton", "Delete", "");
+    CHECK(found.at("tooltip") == "Delete");
+}
+
+TEST_CASE("tooltips stay absent when empty or for other control types", "[tooltip][round2]") {
+    json data = {{"value", "x"}};
+    attach_tooltip_fields(data, "GuiButton", "", "");
+    CHECK_FALSE(data.contains("tooltip"));
+    attach_tooltip_fields(data, "GuiTextField", "Some help", "");
+    CHECK_FALSE(data.contains("tooltip"));
+    CHECK(type_shows_tooltip("GuiTab"));
+    CHECK_FALSE(type_shows_tooltip("GuiLabel"));
+}
+
+TEST_CASE("screen find Markdown shows the tooltip", "[tooltip][markdown][round2]") {
+    Result result;
+    result.status = Result::Status::Success;
+    result.data = {{"screen_id", "wnd[0]"}, {"title", "SU01"}, {"scanned_count", 10},
+                   {"match_limit_reached", false}, {"scan_limit_reached", false},
+                   {"elements", json::array({{{"id", "wnd[0]/tbar[1]/btn[8]"}, {"type", "GuiButton"},
+                                              {"name", "btn[8]"}, {"text", ""}, {"tooltip", "Display"}}})}};
+    const auto markdown = cli::format_output(result, cli::OutputFormat::Markdown);
+    CHECK(markdown.find("Tooltip: Display") != std::string::npos);
+    const auto as_json = cli::format_output(result, cli::OutputFormat::Json);
+    CHECK(as_json.find("\"tooltip\": \"Display\"") != std::string::npos);
 }
 

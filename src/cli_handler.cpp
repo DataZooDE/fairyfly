@@ -1457,7 +1457,157 @@ bool screen_filters_need_grid_rows(const ScreenFilterOptions& filters)
     return !(filters.only_buttons || filters.only_fields || filters.only_editable || filters.only_f4_fields);
 }
 
+static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptions& filters);
+
+/// Display name of a tab: its caption, else the id's last segment without the "tabp" prefix.
+static std::string tab_display_name(const std::string& id, const std::string& text)
+{
+    if (!text.empty()) return text;
+    const auto slash = id.rfind('/');
+    std::string last = slash == std::string::npos ? id : id.substr(slash + 1);
+    if (last.rfind("tabp", 0) == 0 && last.size() > 4) last = last.substr(4);
+    return last;
+}
+
+static void collect_tab_headers(const json& node, std::map<std::string, std::string>& tabs, int depth = 0)
+{
+    if (depth > 64) return;
+    if (node.is_array()) {
+        for (const auto& item : node) collect_tab_headers(item, tabs, depth + 1);
+        return;
+    }
+    if (!node.is_object()) return;
+    if (node.value("type", "") == "GuiTab") {
+        const std::string id = node.value("id", "");
+        if (!id.empty()) {
+            auto& text = tabs[id];
+            if (text.empty()) text = node.value("text", "");
+        }
+    }
+    for (const char* key : {"children", "toolbar_buttons"}) {
+        if (node.contains(key)) collect_tab_headers(node[key], tabs, depth + 1);
+    }
+}
+
+json describe_tab_coverage(const json& screen_data)
+{
+    std::map<std::string, std::string> headers;  // id -> caption, ordered by id (= strip order for tabp ids)
+    std::vector<std::string> order;
+    const auto remember_order = [&](const json& list) {
+        if (!list.is_array()) return;
+        for (const auto& item : list)
+            if (item.is_object() && item.value("type", "") == "GuiTab") {
+                const std::string id = item.value("id", "");
+                if (!id.empty() && std::find(order.begin(), order.end(), id) == order.end()) order.push_back(id);
+            }
+    };
+    if (screen_data.contains("elements")) collect_tab_headers(screen_data["elements"], headers);
+    if (screen_data.contains("hierarchy")) {
+        const auto& hierarchy = screen_data["hierarchy"];
+        collect_tab_headers(hierarchy, headers);
+        if (hierarchy.is_object())
+            for (const auto& [category, list] : hierarchy.items()) remember_order(list);
+    }
+    if (screen_data.contains("elements")) remember_order(screen_data["elements"]);
+    // Strips list their pages by id only in some reads.
+    if (screen_data.contains("hierarchy") && screen_data["hierarchy"].is_object() &&
+        screen_data["hierarchy"].contains("tabs") && screen_data["hierarchy"]["tabs"].is_array()) {
+        for (const auto& entry : screen_data["hierarchy"]["tabs"]) {
+            if (!entry.is_object() || entry.value("type", "") != "GuiTabStrip" || !entry.contains("children") ||
+                !entry["children"].is_array())
+                continue;
+            for (const auto& child : entry["children"])
+                if (child.is_string()) {
+                    headers.emplace(child.get<std::string>(), "");
+                    if (std::find(order.begin(), order.end(), child.get<std::string>()) == order.end())
+                        order.push_back(child.get<std::string>());
+                }
+        }
+    }
+    json searched = json::array();
+    std::set<std::string> handled;
+    if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
+        for (const auto& tab : screen_data["tabs_content"]) {
+            if (!tab.is_object()) continue;
+            const std::string id = tab.value("tab_id", "");
+            searched.push_back(tab_display_name(id, tab.value("tab_name", "")));
+            handled.insert(id);
+            headers.emplace(id, tab.value("tab_name", ""));
+            if (std::find(order.begin(), order.end(), id) == order.end()) order.push_back(id);
+        }
+    }
+    json skipped = json::array();
+    if (screen_data.contains("tabs_failed") && screen_data["tabs_failed"].is_array()) {
+        for (const auto& tab : screen_data["tabs_failed"]) {
+            if (!tab.is_object()) continue;
+            const std::string id = tab.value("tab_id", "");
+            skipped.push_back({{"tab_id", id}, {"tab_name", tab_display_name(id, tab.value("tab_name", ""))},
+                               {"reason", tab.value("reason", "error")}});
+            handled.insert(id);
+        }
+    }
+    const bool expanded = screen_data.value("tabs_expanded", false);
+    // With --tab only the requested tab is read; without it nothing was expanded (--no-tabs).
+    const bool single_tab = expanded && screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array() &&
+                            screen_data["tabs_content"].size() < order.size();
+    for (const auto& id : order) {
+        if (handled.count(id)) continue;
+        skipped.push_back({{"tab_id", id}, {"tab_name", tab_display_name(id, headers[id])},
+                           {"reason", expanded && single_tab ? "not_requested" : "not_expanded"}});
+    }
+    if (order.empty() && searched.empty() && skipped.empty()) return json::object();
+    return {{"searched", searched}, {"skipped", skipped}};
+}
+
+static std::string join_names(const json& names)
+{
+    std::string out;
+    for (const auto& name : names) {
+        if (!out.empty()) out += ", ";
+        out += name.get<std::string>();
+    }
+    return out;
+}
+
+void annotate_text_filter_coverage(json& screen_data, const json& coverage, size_t matches)
+{
+    if (!coverage.is_object() || coverage.empty()) return;
+    const json& searched = coverage["searched"];
+    const json& skipped = coverage["skipped"];
+    screen_data["tabs_searched"] = searched;
+    if (!skipped.empty()) screen_data["tabs_skipped"] = skipped;
+
+    json not_expanded = json::array();
+    json failed = json::array();
+    for (const auto& tab : skipped) {
+        const std::string reason = tab.value("reason", "");
+        (reason == "not_expanded" || reason == "not_requested" ? not_expanded : failed)
+            .push_back(tab.value("tab_name", ""));
+    }
+    if (matches > 0 && skipped.empty()) return;
+    std::string note;
+    if (matches == 0)
+        note = searched.empty() ? "0 matches on the visible screen" : "0 matches in tabs [" + join_names(searched) + "]";
+    else
+        note = searched.empty() ? "Searched the visible screen" : "Searched tabs [" + join_names(searched) + "]";
+    if (!not_expanded.empty()) note += "; tabs not expanded: [" + join_names(not_expanded) + "] (use tab=...)";
+    if (!failed.empty()) note += "; tabs that could not be read: [" + join_names(failed) + "]";
+    screen_data["text_filter_note"] = note;
+}
+
 void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
+{
+    const json coverage = filters.text_contains.has_value() ? describe_tab_coverage(screen_data) : json::object();
+    apply_screen_filters_impl(screen_data, filters);
+    if (coverage.empty()) return;
+    size_t matches = screen_data.value("element_count", static_cast<size_t>(0));
+    if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array())
+        for (const auto& tab : screen_data["tabs_content"])
+            if (tab.is_object()) matches += tab.value("element_count", static_cast<size_t>(0));
+    annotate_text_filter_coverage(screen_data, coverage, matches);
+}
+
+static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptions& filters)
 {
     json all_elements = json::array();
     if (screen_data.contains("elements") && screen_data["elements"].is_array()) {

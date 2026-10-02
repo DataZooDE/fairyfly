@@ -179,4 +179,18 @@ json build_fill_field_info(const FieldProbe& probe, const std::string& typed) {
     return info;
 }
 
+bool type_shows_tooltip(const std::string& type) {
+    return type == "GuiButton" || type == "GuiTab" || type == "GuiCheckBox" || type == "GuiRadioButton";
+}
+
+void attach_tooltip_fields(json& data, const std::string& type, const std::string& tooltip,
+                           const std::string& text) {
+    if (!type_shows_tooltip(type) || tooltip.empty() || !data.is_object()) return;
+    data["tooltip"] = tooltip;
+    const std::string reported = data.contains("value") && data["value"].is_string()
+        ? data["value"].get<std::string>()
+        : data.contains("text") && data["text"].is_string() ? data["text"].get<std::string>() : std::string();
+    if (!text.empty() && text != reported) data["text"] = text;
+}
+
 } // namespace fairyfly::sap

@@ -125,7 +125,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_session_login` | Log on with the Credential Manager entry | `connection`, `credential`, `multiple_logon` | allowed; `multiple_logon=end` refused | D |
 | `gui_transaction_start` | Run a transaction code (`/nSM37`, `/n`) | `code` | allowed | not RO |
 | `gui_screen_read` | Read the screen (Markdown or JSON) | `tab`, `no_tabs`, `only` (`buttons`, `fields`, `editable`, `f4_fields`, `tables`), `text_contains`, `id_contains`, `type`, `max_rows`, `offset`, `compact`, `format` | allowed | RO |
-| `gui_screen_find` | Find controls by id/name/type | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
+| `gui_screen_find` | Find controls by id/name/type (buttons, tabs and checkboxes also return `tooltip`) | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
 | `gui_element_get` | One element's properties/value (`list_nodes` for trees; buttons/tabs/checkboxes add `tooltip`; `ELEMENT_ON_INACTIVE_TAB` for an element on a tab that is not selected, `activate_tab` selects it for the read and restores the previous tab) | `element`, `list_nodes`, `activate_tab` | allowed | RO |
 | `gui_menu_list` | List the menu bar tree | `window` | allowed | RO |
 | `gui_screen_capture` | PNG screenshot as an image block | `scale` (number), `x`, `y`, `width`, `height` | allowed | RO |

@@ -40,4 +40,12 @@ std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, b
 /// format_warning. For credential fields nothing but the type is reported.
 json build_fill_field_info(const FieldProbe& probe, const std::string& typed);
 
+/// Controls whose caption is often an icon: element get / screen find read their tooltip as `screen read` does.
+bool type_shows_tooltip(const std::string& type);
+
+/// Adds data["tooltip"] when non-empty (absent otherwise) and, when `text` is non-empty and differs from the
+/// already reported data["value"] (get) / data["text"] (find), data["text"] as well. No-op for other types.
+void attach_tooltip_fields(json& data, const std::string& type, const std::string& tooltip,
+                           const std::string& text);
+
 } // namespace fairyfly::sap
