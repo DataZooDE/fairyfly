@@ -73,6 +73,8 @@ private:
                        const CallContext& ctx, std::string* code_out);
     Result invoke(const std::vector<std::string>& argv);
     const ToolSpec* find_spec(const std::string& name) const;
+    /// Names of the tools a caller can call (server policy and, when given, the principal's scopes / read-only flag).
+    std::set<std::string> visible_tool_names(const Principal* principal) const;
 
     Invoker invoker_;
     Policy policy_;

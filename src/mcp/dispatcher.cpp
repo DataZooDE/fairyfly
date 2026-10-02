@@ -91,17 +91,32 @@ CommandDispatcher::CommandDispatcher(Invoker invoker, Policy policy, AuditHook h
     rate_gate_ = [this](std::chrono::steady_clock::time_point now) { return limiter_.allow(now); };
 }
 
+std::set<std::string> CommandDispatcher::visible_tool_names(const Principal* principal) const {
+    std::set<std::string> names;
+    for (const auto& spec : specs_)
+        if (tool_visible(spec, policy_) && (!principal || auth::tool_allowed_for(*principal, spec))) names.insert(spec.def.name);
+    return names;
+}
+
 std::vector<ToolDef> CommandDispatcher::list_tools() const {
+    const auto visible = visible_tool_names(nullptr);
     std::vector<ToolDef> defs;
     for (const auto& spec : specs_)
-        if (tool_visible(spec, policy_)) defs.push_back(spec.def);
+        if (visible.count(spec.def.name)) {
+            defs.push_back(spec.def);
+            defs.back().description = describe_for(spec, visible);
+        }
     return defs;
 }
 
 std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principal) const {
+    const auto visible = visible_tool_names(&principal);
     std::vector<ToolDef> defs;
     for (const auto& spec : specs_)
-        if (tool_visible(spec, policy_) && auth::tool_allowed_for(principal, spec)) defs.push_back(spec.def);
+        if (visible.count(spec.def.name)) {
+            defs.push_back(spec.def);
+            defs.back().description = describe_for(spec, visible);
+        }
     return defs;
 }
 
@@ -304,7 +319,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                                  principal.name + "'");
         if (listed.status != Result::Status::Success) {
             code = result_error_code(listed);
-            return shape_result(listed, *spec, policy_, "");
+            return shape_result(listed, *spec, policy_, "", nullptr);
         }
         json sessions = json::array();
         const json& conns = listed.data.is_object() && listed.data.contains("connections") ? listed.data["connections"] : json::array();
@@ -406,7 +421,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
     std::optional<int> connection = record.connection;
     const std::string header = kScreenDataTools.count(name) ? make_untrusted_header(result, connection) : std::string();
-    ToolResult shaped = shape_result(result, shaped_spec, policy_, header);
+    const std::set<std::string> visible_now = visible_tool_names(&principal);
+    ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
     if (result.status != Result::Status::Success) code = result_error_code(result);
     else if (result.data.is_object() && result.data.contains("connection_id")) {
         if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;

@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 #include <string>
 #include <vector>
 #include "include/mcp/types.h"
@@ -19,6 +20,12 @@ std::vector<ToolSpec> retain_families(std::vector<ToolSpec> specs, const std::ve
 /// name, family, CLI command, write flag and title. `markdown` selects a pipe table; otherwise aligned
 /// plain text. `specs` empty = all_tool_specs(). Pure function, no process spawn, no SAP access.
 std::string tool_table_text(bool markdown, const std::vector<ToolSpec>& specs = {});
+
+/// Model-facing description of `spec` for a caller who can call exactly the tools in `visible_tool_names`.
+/// Catalog descriptions mark optional references to other tools as `{?tool_name:text}`: the text is kept
+/// (without the marker) when that tool is visible and dropped otherwise, so a read-only token is never
+/// told to use gui_element_fill. Pure function; text without markers is returned unchanged.
+std::string describe_for(const ToolSpec& spec, const std::set<std::string>& visible_tool_names);
 
 /// Validates `args` against the subset of JSON Schema used by the catalog (type, enum, minimum,
 /// maximum, minLength, minItems, maxItems, properties, required, additionalProperties, items).

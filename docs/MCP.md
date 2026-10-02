@@ -219,6 +219,11 @@ The file is append-only by convention, not tamper-proof.
 - Pass `connection` to target another saved connection. `gui_connection_list` and `gui_session_list` show what exists.
 - `gui_session_attach` without `session_id` attaches automatically when exactly one session is open; with several it fails with MULTIPLE_SESSIONS and lists them, so call it again with a `session_id` from `gui_session_list`.
 
+## What the model sees
+
+- Policy-aware texts: tool descriptions in `tools/list` only mention tools the caller can call. A read-only server or token never reads about `gui_element_fill`; descriptions are built per principal by `describe_for` (conditional `{?tool:text}` markers in the catalog).
+- Result hints: Markdown screen results contain CLI usage hints printed by the formatter (`fairyfly element click '<id>' ...`). The server rewrites them to tool-call form (`gui_element_click(element="<id>", row=0, column="...")`) and removes hints for tools the caller cannot call (an `element fill` hint disappears in read-only mode, together with its comment line and any code block left empty).
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
