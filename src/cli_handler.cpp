@@ -1,4 +1,5 @@
 #include "include/cli_handler.h"
+#include "include/string_utils.h"
 #include "include/read_only_guard.h"
 #include "include/sensitive_data.h"
 #include "include/com_automation_engine.h"
@@ -669,10 +670,13 @@ Result CommandHandler::handle_transaction(const std::string& tcode, std::optiona
 
 Result CommandHandler::handle_click(const std::string& element_id, std::optional<int> connection_id,
                                      bool wait_for_window, int timeout_ms,
-                                     const std::string& node_key, const std::string& tree_action,
-                                     const std::string& menu_item, std::optional<int> row,
+                                     const std::string& node_key_raw, const std::string& tree_action,
+                                     const std::string& menu_item_raw, std::optional<int> row,
                                      const std::string& column, bool doubleclick)
 {
+    // Tool-call transports may deliver "PROG&lt;SYST&gt;" for the key "PROG<SYST>".
+    const std::string node_key = utils::unescape_html_entities(node_key_raw);
+    const std::string menu_item = utils::unescape_html_entities(menu_item_raw);
     if (auto invalid = sap::check_doubleclick_options(doubleclick, row, column)) return *invalid;
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);

@@ -1,5 +1,6 @@
 #include "include/mcp/call_executor.h"
 
+#include <algorithm>
 #include <exception>
 
 #include <spdlog/spdlog.h>
@@ -10,11 +11,49 @@ namespace fairyfly::mcp {
 
 using Clock = std::chrono::steady_clock;
 
+namespace {
+CallInfo info_of(const CallState& state, int timeout_ms) {
+    CallInfo info;
+    info.tool = state.tool;
+    info.timeout_ms = timeout_ms;
+    info.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - state.started).count();
+    return info;
+}
+} // namespace
+
+long long retry_after_ms_hint(const CallInfo& info) {
+    const long long remaining = static_cast<long long>(info.timeout_ms) - info.elapsed_ms;
+    if (remaining <= 0) return 5000;
+    return std::max<long long>(500, std::min<long long>(5000, remaining));
+}
+
+json busy_call_result(const std::string& code, const CallInfo& info) {
+    const long long retry = retry_after_ms_hint(info);
+    const long long seconds = info.elapsed_ms / 1000;
+    const std::string tool = info.tool.empty() ? std::string("a SAP call") : info.tool;
+    std::string message;
+    if (code == "CALL_TIMEOUT")
+        message = "the SAP call " + tool + " is still running after " + std::to_string(seconds) +
+                  " s; it cannot be interrupted and finishes in the background. Do not repeat it: wait about " +
+                  std::to_string(retry) + " ms (retry_after_ms) and read the screen, or retry then.";
+    else
+        message = "the previous SAP call " + tool + " is still running (" + std::to_string(seconds) +
+                  " s so far) and the session serves one call at a time. Retry in about " + std::to_string(retry) +
+                  " ms (retry_after_ms).";
+    json error = {{"code", code}, {"message", message}, {"running_tool", info.tool}, {"elapsed_ms", info.elapsed_ms},
+                  {"timeout_ms", info.timeout_ms}, {"retry_after_ms", retry}};
+    json result = {{"content", json::array({json{{"type", "text"}, {"text", code + ": " + message}}})},
+                   {"structuredContent", json{{"status", "error"}, {"error", error}}},
+                   {"isError", true}};
+    return result;
+}
+
 SubmitResult CallExecutor::submit(ExecJob job, std::shared_ptr<CallState>* state_out) {
     auto state = std::make_shared<CallState>();
     state->id = job.id;
     state->deliver = job.deliver;
     state->timeout_response = job.timeout_response;
+    state->tool = job.tool;
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (job.timed && running_ && running_->timed_out) return SubmitResult::Busy;
@@ -74,6 +113,12 @@ void CallExecutor::cancel(const std::shared_ptr<CallState>& state) {
     }
 }
 
+std::optional<CallInfo> CallExecutor::running_info() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!running_) return std::nullopt;
+    return info_of(*running_, call_timeout_ms_);
+}
+
 std::size_t CallExecutor::queued() const {
     std::lock_guard<std::mutex> lock(mu_);
     return queue_.size();
@@ -102,7 +147,7 @@ void CallExecutor::watchdog_loop() {
         }
         state->timed_out = true;
         state->responded = true;
-        json response = state->timeout_response ? state->timeout_response() : json();
+        json response = state->timeout_response ? state->timeout_response(info_of(*state, call_timeout_ms_)) : json();
         auto deliver = state->deliver;
         lock.unlock();
         if (deliver && !response.is_null()) {
@@ -136,7 +181,8 @@ void CallExecutor::run() {
             item = std::move(queue_.front());
             queue_.pop_front();
             if (item.job.timed) {
-                item.state->deadline = Clock::now() + std::chrono::milliseconds(call_timeout_ms_);
+                item.state->started = Clock::now();
+                item.state->deadline = item.state->started + std::chrono::milliseconds(call_timeout_ms_);
                 running_ = item.state;
             }
         }

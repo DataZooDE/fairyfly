@@ -90,9 +90,9 @@ private:
         job.deliver = [this](const json& message) { send(message); };
         if (timed) {
             const json id = pending.id;
-            job.timeout_response = [id] {
-                return make_result(id, text_result("CALL_TIMEOUT: the SAP call is still running; retry after it completes", true));
-            };
+            if (pending.params.is_object() && pending.params.contains("name") && pending.params["name"].is_string())
+                job.tool = pending.params["name"].get<std::string>();
+            job.timeout_response = [id](const CallInfo& info) { return make_result(id, busy_call_result("CALL_TIMEOUT", info)); };
         }
         job.run = [this, pending = std::move(pending)](CallState& state) {
             return session_.process(pending, [&state] { return state.cancelled.load(); });
@@ -103,7 +103,7 @@ private:
             return;
         case SubmitResult::Busy:
             // The main thread is still stuck in the call that timed out.
-            send(make_result(id, text_result("SERVER_BUSY: a previous SAP call is still running; retry shortly", true)));
+            send(make_result(id, busy_call_result("SERVER_BUSY", executor_.running_info().value_or(CallInfo{}))));
             return;
         case SubmitResult::QueueFull:
             if (is_request) send(make_error(id, kServerBusy, "server busy", json{{"retry", true}}));

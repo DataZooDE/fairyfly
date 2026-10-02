@@ -1379,12 +1379,17 @@ TEST_CASE("authorize: menu selection and navigating keys are denied with a T-cod
         INFO(key);
         CHECK(decide(p, "gui_key_send", {{"key", key}}, false, std::nullopt, "SE16").allowed);
     }
-    for (const char* key : {"f1", "f3", "F12", "f5", "f7", "shift+f3", "shift+f4", "3", "12", "15", "1", "bogus"}) {
+    for (const char* key : {"f1", "f3", "F12", "f5", "f7", "shift+f3", "shift+f4", "3", "12", "15", "1"}) {
         INFO(key);
         d = decide(p, "gui_key_send", {{"key", key}}, false, std::nullopt, "SE16");
         CHECK_FALSE(d.allowed);
         CHECK(d.code == "TCODE_DENIED");
     }
+    // an unknown key name is a bad argument, not a policy denial, and lists the supported names
+    d = decide(p, "gui_key_send", {{"key", "bogus"}}, false, std::nullopt, "SE16");
+    CHECK_FALSE(d.allowed);
+    CHECK(d.code == "INVALID_ARGUMENT");
+    CHECK(d.message.find("pagedown") != std::string::npos);
     CHECK(auth::tcode_safe_key(" f8 "));
     CHECK_FALSE(auth::tcode_safe_key("ctrl+/"));
 

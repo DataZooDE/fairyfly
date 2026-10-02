@@ -16,7 +16,7 @@ inline std::optional<Result> check_vkey_argument(const std::string& key) {
     result.error["code"] = "INVALID_VKEY";
     result.error["message"] = fmt::format("Unknown key '{}'", key);
     result.error["suggestions"] = nlohmann::json::array({
-        "Use enter, f1..f12, shift+f1..shift+f12, or a raw SAP VKey number (0-99)"});
+        "Supported keys: " + supported_key_names_text()});
     return result;
 }
 

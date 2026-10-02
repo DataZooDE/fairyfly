@@ -50,6 +50,9 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.transport = rec.transport;
             out.era = rec.era;
             out.tcode_left_allowlist = rec.tcode_left_allowlist;
+            out.facts_pre_ms = rec.facts_pre_ms;
+            out.invoke_ms = rec.invoke_ms;
+            out.facts_post_ms = rec.facts_post_ms;
             record_result(sink->append(out));
         } catch (const std::exception& e) {
             record_result(false);

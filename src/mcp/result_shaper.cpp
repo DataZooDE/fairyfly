@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <regex>
+#include <sstream>
 
 #include "include/cli_handler.h"
 
@@ -173,6 +175,56 @@ void attach_structured(ToolResult& out, const Result& result, const ToolSpec& sp
 
 } // namespace
 
+std::string adapt_cli_hints(const std::string& text, const std::set<std::string>& visible_tools) {
+    if (text.find("fairyfly element ") == std::string::npos) return text;
+    static const std::regex hint(R"(fairyfly element (click|fill|get) '([^']*)'([^`\n]*))");
+    static const std::regex row_re(R"(--row (\S+))");
+    static const std::regex col_re(R"(--column '([^']*)')");
+    static const std::regex value_re(R"(^\s*'([^']*)')");
+
+    std::vector<std::string> out;
+    std::istringstream in(text);
+    std::string line;
+    bool changed = false;
+    while (std::getline(in, line)) {
+        std::smatch m;
+        if (!std::regex_search(line, m, hint)) { out.push_back(line); continue; }
+        changed = true;
+        const std::string verb = m[1], id = m[2], rest = m[3];
+        const std::string tool = "gui_element_" + verb;
+        std::smatch rm, cm, vm;
+        const bool has_row = std::regex_search(rest, rm, row_re);
+        const bool has_col = std::regex_search(rest, cm, col_re);
+        const bool callable = visible_tools.count(tool) > 0 && !(verb == "get" && (has_row || has_col));
+        if (!callable) {
+            if (!out.empty() && !out.back().empty() && out.back()[0] == '#') out.pop_back();
+            continue;
+        }
+        std::string call = tool + "(element=\"" + id + "\"";
+        if (verb == "fill" && std::regex_search(rest, vm, value_re)) call += ", value=\"" + vm[1].str() + "\"";
+        if (has_row) call += ", row=" + rm[1].str();
+        if (has_col) call += ", column=\"" + cm[1].str() + "\"";
+        if (rest.find("--doubleclick") != std::string::npos) call += ", doubleclick=true";
+        call += ")";
+        out.push_back(line.substr(0, static_cast<std::size_t>(m.position(0))) + call +
+                      line.substr(static_cast<std::size_t>(m.position(0) + m.length(0))));
+    }
+    if (!changed) return text;
+
+    std::string joined;
+    bool prev_blank = false;
+    for (const auto& l : out) {
+        const bool blank = l.find_first_not_of(" \t\r") == std::string::npos;
+        if (blank && prev_blank) continue;
+        prev_blank = blank;
+        joined += l + "\n";
+    }
+    static const std::regex empty_block(R"((\*\*Usage Examples:\*\*\n)?```[a-z]*\n(?:[ \t]*\n)*```\n*)");
+    joined = std::regex_replace(joined, empty_block, "");
+    if (!text.empty() && text.back() != '\n' && !joined.empty() && joined.back() == '\n') joined.pop_back();
+    return joined;
+}
+
 std::size_t image_payload_bytes(const Result& result) { return decoded_size(screenshot_base64(result)); }
 
 std::string make_untrusted_header(const Result& result, const std::optional<int>& connection) {
@@ -199,7 +251,7 @@ std::string make_untrusted_header(const Result& result, const std::optional<int>
 }
 
 ToolResult shape_result(const Result& result, const ToolSpec& spec, const Policy& policy,
-                        const std::string& untrusted_header) {
+                        const std::string& untrusted_header, const std::set<std::string>* visible_tools) {
     ToolResult out;
     const std::size_t cap = policy.max_result_chars;
 
@@ -242,6 +294,7 @@ ToolResult shape_result(const Result& result, const ToolSpec& spec, const Policy
             json doc = result.to_json();
             body = truncate_json(doc, body_budget);
         } else {
+            if (visible_tools) body = adapt_cli_hints(body, *visible_tools);
             body = truncate_markdown(body, body_budget);
         }
     } else {

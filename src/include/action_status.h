@@ -19,6 +19,11 @@ struct ActionStatus {
 /// a previous status is supplied.
 json status_bar_json(const ActionStatus& status, const ActionStatus* before = nullptr);
 
+/// Success-side view of a status message: data["status_message"] = {type, text}, plus data["warning"] = true when a
+/// NEW type-W message appeared. Benign W/I/S messages after an action that otherwise worked are not errors
+/// (classify_action_status ignores them); this is how the caller still sees them. No-op for empty text.
+void attach_status_message(json& data, const ActionStatus& before, const ActionStatus& after);
+
 /// Attach the status bar message to result.data["status_bar"] on success and
 /// result.error["status_bar"] on error. No-op when the message is empty.
 void attach_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after);

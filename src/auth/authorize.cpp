@@ -118,10 +118,12 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
         } else if (!principal.allow_navigation && tool == "gui_key_send") {
             const std::string key = args.is_object() && args.contains("key") && args["key"].is_string()
                                         ? args["key"].get<std::string>() : std::string();
+            if (!sap::parse_vkey(key))
+                return refuse("INVALID_ARGUMENT", "unknown key '" + key + "'; supported key names: " + sap::supported_key_names_text());
             if (!tcode_safe_key(key))
                 return refuse("TCODE_DENIED", "key '" + key + "' can leave the transaction and is denied for tokens with a T-code "
-                                              "allowlist (allowed: enter, f4, f8, page keys); ask the operator to create the "
-                                              "token with --allow-navigation");
+                                              "allowlist. Allowed keys: " + tcode_safe_key_spellings() + "; ask the operator to "
+                                              "create the token with --allow-navigation");
         } else if (!principal.allow_navigation && tool == "gui_popup_close") {
             // The popup's own default (F12 = cancel, only ever sent to the popup window) stays usable; any other VKey
             // must be a navigation-safe one (Shift+F3 = 15 would exit the transaction).
@@ -131,13 +133,16 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                                   (v.get<long long>() == 12 || tcode_safe_key(std::to_string(v.get<long long>())));
                 if (!safe)
                     return refuse("TCODE_DENIED", "gui_popup_close vkey " + v.dump() + " can leave the transaction and is denied for "
-                                                  "tokens with a T-code allowlist (allowed: 12 (default), 0, 4, 8, 80-83); ask the "
+                                                  "tokens with a T-code allowlist (allowed: 12 (default), 0, 4, 8, 80-83, see gui_key_send for the names); ask the "
                                                   "operator to create the token with --allow-navigation");
             }
         } else if (tool == "gui_element_fill") {
-            const std::string element = args.is_object() && args.contains("element") && args["element"].is_string()
-                                            ? args["element"].get<std::string>() : std::string();
-            if (is_okcd_element(element))
+            // `element` and its aliases `id` / `element_id`: all of them are checked, whichever the builder will use.
+            bool okcd = false;
+            for (const char* key : {"element", "element_id", "id"})
+                if (args.is_object() && args.contains(key) && args[key].is_string() && is_okcd_element(args[key].get<std::string>()))
+                    okcd = true;
+            if (okcd)
                 return refuse("TCODE_DENIED", "typing into the command field is blocked for tokens with a T-code allowlist; "
                                               "use gui_transaction_start");
         }
@@ -208,6 +213,11 @@ std::string normalize_tcode(const std::string& raw) {
 
 bool acts_on_screen(const std::string& family) {
     return family == "screen" || family == "element" || family == "key" || family == "popup" || family == "menu";
+}
+
+std::string tcode_safe_key_spellings() {
+    return "enter, f4, f8, pageup (page_up, pgup), pagedown (page_down, pgdn), pagetop (ctrl+pageup), "
+           "pagebottom (ctrl+pagedown), or the raw VKeys 0, 4, 8, 80, 81, 82, 83 (case, blanks, '_' and '-' are ignored)";
 }
 
 bool tcode_safe_key(const std::string& key) {

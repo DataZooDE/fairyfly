@@ -1,4 +1,5 @@
 #pragma once
+#include <set>
 #include <string>
 #include <vector>
 #include "include/mcp/types.h"
@@ -20,6 +21,12 @@ std::vector<ToolSpec> retain_families(std::vector<ToolSpec> specs, const std::ve
 /// plain text. `specs` empty = all_tool_specs(). Pure function, no process spawn, no SAP access.
 std::string tool_table_text(bool markdown, const std::vector<ToolSpec>& specs = {});
 
+/// Model-facing description of `spec` for a caller who can call exactly the tools in `visible_tool_names`.
+/// Catalog descriptions mark optional references to other tools as `{?tool_name:text}`: the text is kept
+/// (without the marker) when that tool is visible and dropped otherwise, so a read-only token is never
+/// told to use gui_element_fill. Pure function; text without markers is returned unchanged.
+std::string describe_for(const ToolSpec& spec, const std::set<std::string>& visible_tool_names);
+
 /// Validates `args` against the subset of JSON Schema used by the catalog (type, enum, minimum,
 /// maximum, minLength, minItems, maxItems, properties, required, additionalProperties, items).
 /// Throws std::invalid_argument with a model-readable message. Shared by all catalog builders.
@@ -27,6 +34,12 @@ void validate_tool_arguments(const json& args, const json& schema);
 
 /// Helpers shared by the read and write catalogs.
 namespace catalog {
+/// Properties `id` and `element_id` (aliases of `element`) to merge into the schema of tools taking an element id.
+json element_alias_properties();
+/// Adds the alias properties to `properties` and returns the result.
+json with_element_aliases(json properties);
+/// Folds `id` / `element_id` into `element`; throws std::invalid_argument when several are given and differ.
+void normalize_element_args(json& args);
 /// Builds a JSON Schema object with additionalProperties:false.
 json make_schema(const json& properties, const std::vector<std::string>& required = {});
 /// The optional `connection` property schema.
