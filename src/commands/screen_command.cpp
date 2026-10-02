@@ -45,7 +45,7 @@ public:
         read_cmd_->add_flag("--only-editable", filters_.only_editable, "Show only changeable fields");
         read_cmd_->add_flag("--only-f4-fields", filters_.only_f4_fields, "Show only fields with F4 search help");
         read_cmd_->add_flag("--only-tables", filters_.only_tables, "Show only grids and table controls (with their rows)");
-        read_cmd_->add_option("--text-contains", filter_text_contains_, "Filter by text/tooltip containing string (case-insensitive)");
+        read_cmd_->add_option("--text-contains", filter_text_contains_, "Filter by text/tooltip containing string (case-insensitive); grids and table controls keep only the rows with a matching cell");
         read_cmd_->add_option("--id-contains", filter_id_contains_, "Filter by element ID containing string");
         read_cmd_->add_option("--type", filter_type_, "Filter by exact element type");
         read_cmd_->add_flag("--first", filters_.first_match_only, "Return only first matching element");

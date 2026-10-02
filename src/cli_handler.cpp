@@ -1208,16 +1208,62 @@ static bool json_strings_contain(const json& value, const std::string& needle, i
     return false;
 }
 
-/// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
-static bool element_text_matches(const json& elem, const std::string& needle)
+/// The element's own text (labels, tooltip, text content), not its table or tree data.
+static bool element_own_text_matches(const json& elem, const std::string& needle)
 {
     for (const char* key : {"text", "tooltip", "label", "text_content"}) {
         if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
     }
+    return false;
+}
+
+/// Grid / table-control data object that carries a `rows` array, or nullptr.
+static json* table_rows_owner(json& elem)
+{
+    for (const char* key : {"table_data", "grid_data"}) {
+        if (elem.contains(key) && elem[key].is_object() && elem[key].contains("rows") &&
+            elem[key]["rows"].is_array())
+            return &elem[key];
+    }
+    return nullptr;
+}
+
+static size_t count_matching_rows(const json& rows, const std::string& needle)
+{
+    size_t matched = 0;
+    for (const auto& row : rows) {
+        if (json_strings_contain(row, needle)) ++matched;
+    }
+    return matched;
+}
+
+/// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
+static bool element_text_matches(const json& elem, const std::string& needle)
+{
+    if (element_own_text_matches(elem, needle)) return true;
     for (const char* key : {"table_data", "grid_data", "tree_data", "tree_nodes"}) {
         if (elem.contains(key) && json_strings_contain(elem[key], needle)) return true;
     }
     return false;
+}
+
+/// `--text-contains` on a grid or table control keeps only the rows with a matching cell and reports
+/// `rows_matched` / `rows_total` (rows read, before filtering). When the element matched through its
+/// own text or a column title instead of a cell, its rows stay untouched.
+static void narrow_table_rows(json& elem, const std::string& needle)
+{
+    if (!elem.is_object() || element_own_text_matches(elem, needle)) return;
+    json* table = table_rows_owner(elem);
+    if (!table) return;
+    const json& rows = (*table)["rows"];
+    if (count_matching_rows(rows, needle) == 0) return;
+    json kept = json::array();
+    for (const auto& row : rows) {
+        if (json_strings_contain(row, needle)) kept.push_back(row);
+    }
+    (*table)["rows_total"] = rows.size();
+    (*table)["rows_matched"] = kept.size();
+    (*table)["rows"] = std::move(kept);
 }
 
 /// Grid, table control or positioned-label table (anything rendered as rows and columns).
@@ -1326,6 +1372,8 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
             // Check if this element matches
             if (element_matches_filter(elem, filters)) {
                 filtered.push_back(elem);
+                if (filters.text_contains.has_value())
+                    narrow_table_rows(filtered.back(), lowercase_ascii(filters.text_contains.value()));
                 found_first = true;
 
                 // If first_match_only, stop immediately
@@ -1417,6 +1465,8 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
     auto [filtered, filter_stats] = filter_elements(all_elements, filters);
     if (!filter_stats.value("filter_applied", false)) return;
 
+    const std::string text_needle = filters.text_contains.has_value()
+        ? lowercase_ascii(filters.text_contains.value()) : std::string();
     json categorized = json::object();
     std::unordered_set<std::string> wanted_ids;
     std::unordered_set<std::string> assigned_ids;
@@ -1429,8 +1479,10 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
             for (const auto& element : elements) {
                 if (!element.is_object()) continue;
                 const std::string id = element.value("id", "");
-                if (wanted_ids.count(id) && assigned_ids.insert(id).second)
+                if (wanted_ids.count(id) && assigned_ids.insert(id).second) {
                     categorized[category].push_back(element);
+                    if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
+                }
             }
         }
     }
@@ -1447,6 +1499,7 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
                                type == "GuiTableControl" || type == "GuiGridView" ? "tables" :
                                type == "GuiToolbar" ? "toolbar" : "other";
         categorized[category].push_back(element);
+        if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
     }
     screen_data["elements"] = filtered;
     screen_data["element_count"] = filtered.size();

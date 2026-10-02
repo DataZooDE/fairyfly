@@ -339,7 +339,9 @@ std::vector<ToolSpec> read_tool_specs() {
                      {"only", enum_str({"buttons", "fields", "editable", "f4_fields", "tables"},
                           "Show only buttons, input fields, changeable fields, fields with F4 help or tables/grids. "
                           "Elements an `only` value drops (grids with `fields`) are listed under `suppressed`.")},
-                     {"text_contains", str_min("Only elements whose text/tooltip contains this (case-insensitive).")},
+                     {"text_contains", str_min("Only elements whose text/tooltip contains this (case-insensitive). "
+                                              "Grids/table controls keep only the rows with a matching cell "
+                                              "(`rows_matched` of `rows_total`).")},
                      {"id_contains", str_min("Only elements whose ID contains this.")},
                      {"type", str_min("Only elements of this exact SAP type, e.g. GuiCTextField.")},
                      {"first", boolean("Return only the first matching element.")},

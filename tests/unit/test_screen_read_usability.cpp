@@ -190,3 +190,82 @@ TEST_CASE("gui_screen_read passes offset and only=tables to the CLI", "[mcp][too
     CHECK(read->def.input_schema.at("properties").contains("offset"));
     CHECK(read->def.input_schema.at("properties").at("only").at("enum").size() == 5);
 }
+
+// ---- Item 3: --text-contains filters grid rows ------------------------------------------------
+
+TEST_CASE("text_contains keeps only matching grid rows", "[screen][filters][rows]") {
+    const json grid = {{"id", "wnd[0]/usr/grid"}, {"type", "GuiShell"}, {"subtype", "GridView"},
+                       {"table_data", {{"columns", json::array({"USER", "STATUS"})},
+                                       {"rows", json::array({json::array({"ALICE", "Locked"}),
+                                                             json::array({"BOB", "Active"}),
+                                                             json::array({"CAROL", "locked"})})},
+                                       {"total_row_count", 3}}}};
+    json data = {{"elements", json::array({grid})},
+                 {"hierarchy", {{"tables", json::array({grid})}}},
+                 {"element_count", 1}};
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "LOCKED";
+    cli::apply_screen_filters(data, filters);
+
+    for (const json* element : {&data.at("elements").at(0), &data.at("hierarchy").at("tables").at(0)}) {
+        const auto& table = element->at("table_data");
+        REQUIRE(table.at("rows").size() == 2);
+        CHECK(table.at("rows").at(0).at(0) == "ALICE");
+        CHECK(table.at("rows").at(1).at(0) == "CAROL");
+        CHECK(table.at("rows_matched") == 2);
+        CHECK(table.at("rows_total") == 3);
+        CHECK(table.at("total_row_count") == 3);
+    }
+    const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    CHECK(md.find("**Rows Matched** | 2 of 3") != std::string::npos);
+    CHECK(md.find("BOB") == std::string::npos);
+}
+
+TEST_CASE("text_contains filters object rows and leaves rows alone on a title match", "[screen][filters][rows]") {
+    SECTION("object rows") {
+        json data = {{"elements", json::array({
+            {{"id", "g"}, {"type", "GuiGridView"},
+             {"table_data", {{"rows", json::array({{{"Value", "ZFFLY_ONE"}}, {{"Value", "OTHER"}}})}}}}})},
+            {"element_count", 1}};
+        cli::ScreenFilterOptions filters;
+        filters.text_contains = "zffly";
+        cli::apply_screen_filters(data, filters);
+        const auto& table = data.at("elements").at(0).at("table_data");
+        CHECK(table.at("rows").size() == 1);
+        CHECK(table.at("rows_total") == 2);
+    }
+    SECTION("the element's own label matched: rows stay") {
+        json data = {{"elements", json::array({
+            {{"id", "g"}, {"type", "GuiTableControl"}, {"label", "Locked users"},
+             {"table_data", {{"rows", json::array({json::array({"a"}), json::array({"b"})})}}}}})},
+            {"element_count", 1}};
+        cli::ScreenFilterOptions filters;
+        filters.text_contains = "locked";
+        cli::apply_screen_filters(data, filters);
+        const auto& table = data.at("elements").at(0).at("table_data");
+        CHECK(table.at("rows").size() == 2);
+        CHECK_FALSE(table.contains("rows_matched"));
+    }
+    SECTION("a column title matched: rows stay") {
+        json data = {{"elements", json::array({
+            {{"id", "g"}, {"type", "GuiGridView"},
+             {"table_data", {{"columns", json::array({"LOCKED"})},
+                             {"rows", json::array({json::array({"a"}), json::array({"b"})})}}}}})},
+            {"element_count", 1}};
+        cli::ScreenFilterOptions filters;
+        filters.text_contains = "locked";
+        cli::apply_screen_filters(data, filters);
+        CHECK(data.at("elements").at(0).at("table_data").at("rows").size() == 2);
+    }
+    SECTION("non-table elements are unchanged") {
+        json data = {{"elements", json::array({
+            {{"id", "l"}, {"type", "GuiLabel"}, {"text", "Locked"}},
+            {{"id", "m"}, {"type", "GuiLabel"}, {"text", "Other"}}})},
+            {"element_count", 2}};
+        cli::ScreenFilterOptions filters;
+        filters.text_contains = "locked";
+        cli::apply_screen_filters(data, filters);
+        REQUIRE(data.at("elements").size() == 1);
+        CHECK(data.at("elements").at(0).at("id") == "l");
+    }
+}

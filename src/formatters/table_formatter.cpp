@@ -172,15 +172,21 @@ void TableFormatter::format_table_data(
     if (table_data.contains("returned")) {
         const int offset = table_data.value("offset", 0);
         const int trimmed = table_data.value("empty_rows_trimmed", 0);
+        // With a text filter `row_count` only counts the matching rows; the window is what was read.
+        const int window = table_data.value("returned", row_count);
+        if (table_data.contains("rows_matched")) {
+            oss << "_Text filter: " << table_data.value("rows_matched", 0) << " of "
+                << table_data.value("rows_total", window) << " rows read match_\n\n";
+        }
         if (table_data.contains("next_offset")) {
-            oss << "_Showing rows " << offset << "-" << (offset + row_count - 1) << " of " << total_rows
+            oss << "_Showing rows " << offset << "-" << (offset + window - 1) << " of " << total_rows
                 << "; more rows: offset=" << table_data["next_offset"].get<int>() << " (--offset "
                 << table_data["next_offset"].get<int>() << ")_\n\n";
         } else if (trimmed > 0) {
-            oss << "_The control exposes " << table_data.value("exposed_rows", offset + row_count)
+            oss << "_The control exposes " << table_data.value("exposed_rows", offset + window)
                 << " of " << total_rows << " rows (" << trimmed << " empty padding row(s) trimmed)_\n\n";
         } else if (offset > 0) {
-            oss << "_Showing rows " << offset << "-" << (offset + row_count - 1) << " of " << total_rows
+            oss << "_Showing rows " << offset << "-" << (offset + window - 1) << " of " << total_rows
                 << "_\n\n";
         }
     } else if (total_rows > row_count) {
