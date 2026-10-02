@@ -2,6 +2,12 @@
 
 ## 2026.09.30 (unreleased)
 
+### Added (release engineering, SignPath Foundation conditions)
+
+- MIT `LICENSE`, `THIRD_PARTY_NOTICES.md`, README sections "Download", "License" and "Code signing policy" (attribution, roles, privacy statement).
+- Version information resource in `fairyfly.exe` (`ProductName fairyfly`, `ProductVersion` equal to `fairyfly --version`), checked in CI.
+- `release.yml`: tag-triggered build, optional SignPath signing, GitHub release with `SHA256SUMS`; `docs/SIGNING.md`; `.github/CODEOWNERS`.
+
 Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are retired.
 
 ### Changed

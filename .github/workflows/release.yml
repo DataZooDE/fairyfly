@@ -1,0 +1,135 @@
+name: Release fairyfly
+
+# Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with the SignPath
+# Foundation (free OSS code signing, see docs/SIGNING.md) and publishes it with SHA256SUMS.
+# Tag format: vYYYY.MM.DD (calendar version = ProductVersion of fairyfly.exe). Without SignPath secrets the
+# release is published unsigned.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (vYYYY.MM.DD)'
+        required: true
+
+env:
+  VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      signing: ${{ steps.cfg.outputs.signing }}
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+    steps:
+    - name: Checkout the tagged source
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.RELEASE_TAG }}
+
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        git checkout ${{ env.VCPKG_COMMIT }}
+        .\bootstrap-vcpkg.bat
+      shell: pwsh
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Build (Release, static)
+      run: |
+        $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        cmake -B build -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+        cmake --build build --config Release --target fairyfly unit_tests --parallel
+      shell: pwsh
+
+    - name: Unit tests (SAP-free)
+      run: '& "build/Release/unit_tests.exe" "~[!mayfail]"'
+      shell: pwsh
+
+    - name: Check version metadata against the tag
+      run: |
+        $info = (Get-Item "build/Release/fairyfly.exe").VersionInfo
+        $reported = (& "build/Release/fairyfly.exe" --version | Out-String).Trim()
+        if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)'"; exit 1 }
+        if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
+        if ("${{ env.RELEASE_TAG }}" -ne "v$reported") { Write-Error "Tag '${{ env.RELEASE_TAG }}' does not match the product version 'v$reported': bump src/include/version.h, CMakeLists.txt and vcpkg.json before tagging"; exit 1 }
+        Write-Host "Release $reported OK"
+      shell: pwsh
+
+    - name: Upload unsigned fairyfly.exe
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-unsigned
+        path: build/Release/fairyfly.exe
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Signing configured?
+      id: cfg
+      run: |
+        if ($env:SIGNPATH_API_TOKEN) { "signing=true" >> $env:GITHUB_OUTPUT } else { "signing=false" >> $env:GITHUB_OUTPUT }
+      shell: pwsh
+
+  sign:
+    needs: build
+    if: needs.build.outputs.signing == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Submit the signing request to SignPath
+      uses: signpath/github-action-submit-signing-request@v1
+      with:
+        api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+        organization-id: '${{ vars.SIGNPATH_ORGANIZATION_ID }}'
+        project-slug: 'fairyfly'
+        signing-policy-slug: 'release-signing'
+        github-artifact-id: '${{ needs.build.outputs.artifact-id }}'
+        wait-for-completion: true
+        output-artifact-directory: 'signed'
+
+    - name: Upload the signed fairyfly.exe
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-signed
+        path: signed
+        if-no-files-found: error
+
+  release:
+    needs: [ build, sign ]
+    # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
+    if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download the signed build (or the unsigned one)
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ needs.sign.result == 'success' && 'fairyfly-signed' || 'fairyfly-unsigned' }}
+        path: dist
+
+    - name: Checksums and release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SIGNED: ${{ needs.sign.result == 'success' }}
+      run: |
+        cd dist
+        sha256sum fairyfly.exe > SHA256SUMS
+        cat SHA256SUMS
+        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Signed with the SignPath Foundation certificate."; else SIGNNOTE="Not code-signed."; fi
+        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64. ${SIGNNOTE} See the README (Code signing policy) for how to verify."
+        gh release create "$RELEASE_TAG" fairyfly.exe SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"

@@ -86,6 +86,13 @@ jobs:
           Write-Host "`nTesting executable..."
           & "build/Release/fairyfly.exe" --version
           & "build/Release/fairyfly.exe" --help
+
+          # Code signing metadata (SignPath Foundation): product name = project name, product version = fairyfly --version
+          $info = (Get-Item "build/Release/fairyfly.exe").VersionInfo
+          $reported = (& "build/Release/fairyfly.exe" --version | Out-String).Trim()
+          if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)', expected 'fairyfly'"; exit 1 }
+          if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
+          Write-Host "  Version info OK: $($info.ProductName) $($info.ProductVersion)"
         } else {
           Write-Error "fairyfly.exe not found!"
           exit 1

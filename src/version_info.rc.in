@@ -1,0 +1,32 @@
+// Version information of fairyfly.exe (configured by CMake: configure_file, @VAR@ placeholders).
+// SignPath Foundation requires the product name to be the project name and the product version to match across builds.
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,0
+ PRODUCTVERSION  @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,0
+ FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+ FILEFLAGS       0x0L
+ FILEOS          VOS_NT_WINDOWS32
+ FILETYPE        VFT_APP
+ FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "fairyfly contributors (DataZooDE)"
+            VALUE "FileDescription",  "fairyfly - SAP GUI automation CLI and MCP server"
+            VALUE "FileVersion",      "@FAIRYFLY_VERSION_STRING@"
+            VALUE "InternalName",     "fairyfly"
+            VALUE "LegalCopyright",   "Copyright (c) 2025-2026 fairyfly contributors. MIT License."
+            VALUE "OriginalFilename", "fairyfly.exe"
+            VALUE "ProductName",      "fairyfly"
+            VALUE "ProductVersion",   "@FAIRYFLY_VERSION_STRING@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

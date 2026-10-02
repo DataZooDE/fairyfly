@@ -137,3 +137,43 @@ The Makefile provides build shortcuts. Routine builds target the CLI; test targe
 The CLI and its test suite are under active development. Version 2026.09.30. The MCP server offers stdio and, for remote use, HTTPS through http.sys (stateless 2026-07-28 and legacy protocol eras); cross-platform SAP GUI support remains future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
 
 SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.
+
+## Download
+
+Release builds of `fairyfly.exe` (Windows x64, statically linked, no installer) are published on the
+[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) together with a `SHA256SUMS` file.
+fairyfly drives the SAP GUI that is installed on the same machine through the documented SAP GUI Scripting COM
+interface (it needs a running SAP GUI with scripting enabled), and it can expose that session to AI clients as an
+MCP server (stdio or HTTPS). It is not a security tool: it automates the user's own SAP session with the user's own
+credentials, and every token, scope and read-only restriction of the MCP server narrows what a client may do.
+
+## License
+
+fairyfly is open source under the [MIT License](LICENSE). The third-party libraries it is built with, and their
+licences, are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Contributions are accepted under the same
+license.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+Windows binaries (`fairyfly.exe`) are signed only when they were built from this repository's source code by the
+GitHub Actions workflow [`release.yml`](.github/workflows/release.yml) on a GitHub-hosted runner, from a version tag
+(`vYYYY.MM.DD`); third-party binaries are never signed. How to verify a download: `signtool verify /pa /v fairyfly.exe`
+(or the file's Properties > Digital Signatures tab) and compare the SHA-256 with `SHA256SUMS`. The product name is
+`fairyfly` and the product version is the calendar version of the release (for example `2026.09.30`), identical in
+the file's version information, in `fairyfly --version` and in the release tag.
+
+Team roles (see [docs/SIGNING.md](docs/SIGNING.md) for how the roles are enforced):
+
+- **Authors / committers** (trusted to change the code): [@jrosskopf](https://github.com/jrosskopf)
+- **Reviewers** (review changes of non-committers, build scripts and CI configuration): [@jrosskopf](https://github.com/jrosskopf)
+- **Approvers** (approve signing requests in SignPath): [@jrosskopf](https://github.com/jrosskopf)
+
+Privacy policy: This program will not transfer any information to other networked systems unless specifically
+requested by the user or the person installing or operating it. fairyfly has no telemetry. It only talks to the SAP
+GUI on the same machine and, when the user starts `fairyfly mcp --http`, to the MCP clients that connect to the
+address and port the user configured; credentials are stored only in the Windows Credential Manager and are never
+written to logs or the audit trail.
+
