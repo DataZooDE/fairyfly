@@ -44,7 +44,7 @@ else { $o = Cert-Json $c; $o['found'] = $true; Out-Json $o }
 const std::string kCreateSelfSigned = std::string(kPsPreamble) + kCertHelpers + R"PS(
 $c = New-SelfSignedCertificate -Subject ('CN=' + $p.hostname) -DnsName $p.hostname -CertStoreLocation 'Cert:\LocalMachine\My' `
   -FriendlyName ('fairyfly-mcp ' + $p.hostname) -NotAfter (Get-Date).AddDays([int]$p.valid_days) `
-  -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyUsage DigitalSignature, KeyEncipherment `
+  -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -KeyUsage DigitalSignature, KeyEncipherment, CertSign `
   -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1')
 $o = Cert-Json $c
 $o['found'] = $true

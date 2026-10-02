@@ -348,7 +348,7 @@ std::string make_runbook(const Options& o, const RunbookContext& c) {
             << "$c = New-SelfSignedCertificate -Subject 'CN=" << o.hostname << "' -DnsName '" << o.hostname
             << "' -CertStoreLocation Cert:\\LocalMachine\\My -FriendlyName 'fairyfly-mcp " << o.hostname
             << "' -NotAfter (Get-Date).AddDays(730) -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256"
-               " -KeyUsage DigitalSignature,KeyEncipherment -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1')\n"
+               " -KeyUsage DigitalSignature,KeyEncipherment,CertSign -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1')\n"
             << "$c.Thumbprint\n";
     } else if (tls) {
         out << "\n# " << n++ << ". Certificate: use the existing one (must be in LocalMachine\\My with its private key)\n"

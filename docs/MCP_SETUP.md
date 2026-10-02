@@ -95,7 +95,7 @@ fairyfly mcp cert export [--out PATH] [--format der|pem] [--hostname H] [--port 
 $c = New-SelfSignedCertificate -Subject 'CN=sapbox.corp.example' -DnsName 'sapbox.corp.example' `
   -CertStoreLocation Cert:\LocalMachine\My -FriendlyName 'fairyfly-mcp sapbox.corp.example' `
   -NotAfter (Get-Date).AddDays(730) -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
-  -KeyUsage DigitalSignature,KeyEncipherment -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1')
+  -KeyUsage DigitalSignature,KeyEncipherment,CertSign -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.1')
 netsh http add urlacl url=https://+:8443/mcp/ user=CORP\jr
 netsh http add sslcert ipport=0.0.0.0:8443 certhash=$($c.Thumbprint) appid={8e2b5c3a-4d17-4f6a-b9c0-7a1d3e5f2b64} certstorename=MY
 netsh http add sslcert ipport=[::]:8443   certhash=$($c.Thumbprint) appid={8e2b5c3a-4d17-4f6a-b9c0-7a1d3e5f2b64} certstorename=MY
