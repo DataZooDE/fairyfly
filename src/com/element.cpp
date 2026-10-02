@@ -164,7 +164,7 @@ std::string ComGuiElement::get_text() const {
         // A name that merely reports a credential's state (PASSWORD_EXT_PWD_STATE) is shown only for a field that is KNOWN
         // to be display-only and whose value looks like a state label; changeable or unknown changeability stays redacted.
         bool changeable_known = false, changeable = false;
-        try { changeable = get_bool_property(L"Changeable"); changeable_known = true; } catch (const std::exception&) {}
+        try { changeable = changeable_cached(); changeable_known = true; } catch (const std::exception&) {}
         const auto reason = sensitive_field_reason_for_display(
             type, get_id(), get_label(), changeable_known, changeable, [&] {
                 std::string shown = get_string_property(L"DisplayedText");
@@ -506,12 +506,17 @@ std::string ComGuiElement::get_tooltip() const {
     }
 }
 
+bool ComGuiElement::changeable_cached() const {
+    if (!cached_changeable_) cached_changeable_ = get_bool_property(L"Changeable");
+    return *cached_changeable_;
+}
+
 bool ComGuiElement::is_changeable() const {
     if (!dispatch_) return false;
 
     try {
         // Check Changeable property (available on most interactive elements)
-        return get_bool_property(L"Changeable");
+        return changeable_cached();
     } catch (const ComException&) {
         // If Changeable not available, assume not changeable
         return false;

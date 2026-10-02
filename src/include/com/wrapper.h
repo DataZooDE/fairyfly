@@ -4,6 +4,7 @@
 #include "include/sap_gui_base.h"
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <stdexcept>
 #include <windows.h>
@@ -82,6 +83,10 @@ private:
     mutable IDispatchPtr children_dispatch_;
     mutable int children_count_ = -1;
     IDispatchPtr children_dispatch_cached() const;
+    // Changeable is read at most once per wrapper by is_changeable() and get_text(). The strict
+    // fail-closed reads (selection_input_guard) and set_text() always read it fresh.
+    mutable std::optional<bool> cached_changeable_;
+    bool changeable_cached() const;
 
 public:
     /// Classify element type from type string

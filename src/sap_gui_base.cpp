@@ -3,7 +3,9 @@
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
+#include <cwchar>
 
 namespace fairyfly {
 namespace sap {
@@ -17,6 +19,21 @@ static std::unordered_map<std::string, std::unordered_map<std::wstring, DISPID>>
 // element of that type; each miss costs ~3 COM round trips, so remember it.
 static std::unordered_map<std::string, std::unordered_map<std::wstring, HRESULT>> s_type_dispid_miss_cache;
 static std::mutex s_dispid_cache_mutex;
+// Universal Type DISPID: every SAP GUI object is expected to expose Type under the same DISPID.
+// Never trusted blindly: it is only used to read a value that is then checked against the
+// set of type names already confirmed through ITypeInfo (a name is added when its own
+// typeinfo DISPID equals the universal one). One disagreement disables the shortcut for the
+// process, so a wrong DISPID cannot silently misread properties. All guarded by the mutex above.
+static DISPID s_universal_type_dispid = DISPID_UNKNOWN;
+static bool s_universal_type_known = false;
+static bool s_universal_type_disabled = false;
+static std::unordered_set<std::string> s_validated_type_names;
+
+// GuiShell members that no shell subtype exposes (grid, tree, toolbar, HTML viewer, calendar, ...).
+// Only these may be negatively cached for the shared "GuiShell" Type string.
+static bool is_shell_member_always_absent(const wchar_t* name) {
+    return std::wcscmp(name, L"DisplayedText") == 0;
+}
 
 static bool is_cacheable_dispid_miss(HRESULT hr) {
     return hr == DISP_E_UNKNOWNNAME || hr == DISP_E_MEMBERNOTFOUND ||
@@ -27,10 +44,26 @@ void SapGuiObject::clear_dispid_cache() {
     std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
     s_type_dispid_cache.clear();
     s_type_dispid_miss_cache.clear();
+    s_universal_type_dispid = DISPID_UNKNOWN;
+    s_universal_type_known = false;
+    s_universal_type_disabled = false;
+    s_validated_type_names.clear();
 }
 
 HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const {
+    return resolve_dispid_ex(name, dispid, nullptr);
+}
+
+HRESULT SapGuiObject::resolve_dispid_ex(const wchar_t* name, DISPID* dispid, bool* from_cache) const {
+    if (from_cache) *from_cache = false;
     if (!dispatch_ || !name || !dispid) return E_POINTER;
+
+    // An unprimed wrapper reads its Type first (cheap with the universal DISPID) so the
+    // per-type cache below applies to the very first property read. "Type" itself skips
+    // this: get_type() resolves it through the slow path and must not recurse.
+    if (!type_cached_ && dispatch_ && std::wcscmp(name, L"Type") != 0) {
+        get_type();
+    }
 
     std::string type_name;
     {
@@ -44,6 +77,7 @@ HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const 
                 auto prop_it = type_it->second.find(name);
                 if (prop_it != type_it->second.end()) {
                     *dispid = prop_it->second;
+                    if (from_cache) *from_cache = true;
                     return S_OK;
                 }
             }
@@ -77,7 +111,9 @@ HRESULT SapGuiObject::resolve_dispid(const wchar_t* name, DISPID* dispid) const 
         // GridView only). A miss on one shell must not poison the others, so shells are never
         // negatively cached. Other types (GuiTextField, GuiButton, GuiCustomControl,
         // GuiContainerShell, ...) have a fixed interface per Type string and stay cached.
-        if (!type_name.empty() && type_name != "GuiShell") {
+        // Exception: an explicit allowlist of members no shell subtype has (DisplayedText is a
+        // text-field member; get_text probes it on every element).
+        if (!type_name.empty() && (type_name != "GuiShell" || is_shell_member_always_absent(name))) {
             s_type_dispid_miss_cache[type_name][name] = hr;
         }
     }
@@ -96,6 +132,43 @@ SapGuiObject::SapGuiObject(IDispatchPtr dispatch)
     }
 }
 
+HRESULT SapGuiObject::invoke_property_get(const wchar_t* name, _variant_t& result, bool* lookup_failed) const {
+    if (lookup_failed) *lookup_failed = false;
+    DISPID dispid;
+    bool from_cache = false;
+    HRESULT hr = resolve_dispid_ex(name, &dispid, &from_cache);
+    if (FAILED(hr)) {
+        if (lookup_failed) *lookup_failed = true;
+        return hr;
+    }
+
+    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
+                           &no_params, &result, nullptr, nullptr);
+
+    // A cached DISPID that the object now rejects is stale: drop it, re-resolve through ITypeInfo
+    // and retry exactly once.
+    if (from_cache && (hr == DISP_E_MEMBERNOTFOUND || hr == DISP_E_UNKNOWNNAME)) {
+        std::string type_name;
+        {
+            std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+            if (type_cached_) type_name = cached_type_;
+            auto type_it = s_type_dispid_cache.find(type_name);
+            if (type_it != s_type_dispid_cache.end()) type_it->second.erase(name);
+        }
+        DISPID fresh;
+        if (SUCCEEDED(get_dispid_via_typeinfo(dispatch_, name, &fresh))) {
+            if (!type_name.empty()) {
+                std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+                s_type_dispid_cache[type_name][name] = fresh;
+            }
+            hr = dispatch_->Invoke(fresh, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
+                                   &no_params, &result, nullptr, nullptr);
+        }
+    }
+    return hr;
+}
+
 std::string SapGuiObject::get_string_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_string_property");
 
@@ -104,29 +177,15 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
         return "";
     }
 
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
+    // Resolve the DISPID (cached type lookup, falling back to ITypeInfo) and invoke the getter
+    _variant_t result;
+    bool lookup_failed = false;
+    HRESULT hr = invoke_property_get(name, result, &lookup_failed);
+    if (lookup_failed) {
         spdlog::debug("get_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
         return "";
     }
-
-    // Invoke property getter
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    _variant_t result;
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-        &no_params,
-        &result,
-        nullptr,
-        nullptr
-    );
-
     if (FAILED(hr)) {
         spdlog::debug("get_string_property|Invoke failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -224,29 +283,15 @@ int SapGuiObject::get_int_property(const wchar_t* name) const {
         return 0;
     }
 
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
+    // Resolve the DISPID (cached type lookup, falling back to ITypeInfo) and invoke the getter
+    _variant_t result;
+    bool lookup_failed = false;
+    HRESULT hr = invoke_property_get(name, result, &lookup_failed);
+    if (lookup_failed) {
         spdlog::debug("get_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
         return 0;
     }
-
-    // Invoke property getter
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    _variant_t result;
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-        &no_params,
-        &result,
-        nullptr,
-        nullptr
-    );
-
     if (FAILED(hr)) {
         spdlog::debug("get_int_property|Invoke failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -272,29 +317,15 @@ bool SapGuiObject::get_bool_property(const wchar_t* name) const {
         return false;
     }
 
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
+    // Resolve the DISPID (cached type lookup, falling back to ITypeInfo) and invoke the getter
+    _variant_t result;
+    bool lookup_failed = false;
+    HRESULT hr = invoke_property_get(name, result, &lookup_failed);
+    if (lookup_failed) {
         spdlog::debug("get_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
         return false;
     }
-
-    // Invoke property getter
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    _variant_t result;
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-        &no_params,
-        &result,
-        nullptr,
-        nullptr
-    );
-
     if (FAILED(hr)) {
         spdlog::debug("get_bool_property|Invoke failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -320,29 +351,15 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
         return nullptr;
     }
 
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
+    // Resolve the DISPID (cached type lookup, falling back to ITypeInfo) and invoke the getter
+    _variant_t result;
+    bool lookup_failed = false;
+    HRESULT hr = invoke_property_get(name, result, &lookup_failed);
+    if (lookup_failed) {
         spdlog::debug("get_dispatch_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
         return nullptr;
     }
-
-    // Invoke property getter
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    _variant_t result;
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-        &no_params,
-        &result,
-        nullptr,
-        nullptr
-    );
-
     if (FAILED(hr)) {
         spdlog::debug("get_dispatch_property|Invoke failed|prop={}|hr={:#010x}",
                       (const char*)_bstr_t(name), (unsigned int)hr);
@@ -694,7 +711,69 @@ std::string SapGuiObject::get_type() const {
         return cached_type_;
     }
 
-    cached_type_ = get_string_property(L"Type");
+    // Fast path: invoke the universal Type DISPID and accept the answer only when it is a
+    // BSTR naming a type already validated through ITypeInfo. Anything else (member not
+    // found, wrong variant type, unknown name) falls through to the typeinfo path below.
+    if (dispatch_) {
+        DISPID universal = DISPID_UNKNOWN;
+        {
+            std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+            if (s_universal_type_known && !s_universal_type_disabled) universal = s_universal_type_dispid;
+        }
+        if (universal != DISPID_UNKNOWN) {
+            DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+            _variant_t result;
+            const HRESULT hr = dispatch_->Invoke(universal, IID_NULL, LOCALE_USER_DEFAULT,
+                                                 DISPATCH_PROPERTYGET | DISPATCH_METHOD, &no_params, &result,
+                                                 nullptr, nullptr);
+            if (SUCCEEDED(hr) && result.vt == VT_BSTR && result.bstrVal) {
+                std::string value = com::bstr_to_utf8(result.bstrVal);
+                std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+                if (!s_universal_type_disabled && s_validated_type_names.count(value)) {
+                    cached_type_ = std::move(value);
+                    type_cached_ = true;
+                    return cached_type_;
+                }
+            }
+        }
+    }
+
+    // Slow path: Type resolved through ITypeInfo (resolve_dispid skips the type-first step
+    // for "Type"), then used to validate the universal DISPID for this type name.
+    DISPID type_dispid = DISPID_UNKNOWN;
+    const bool have_dispid = dispatch_ && SUCCEEDED(resolve_dispid(L"Type", &type_dispid));
+    std::string value;
+    bool read_ok = false;
+    if (have_dispid) {
+        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+        _variant_t result;
+        const HRESULT hr = dispatch_->Invoke(type_dispid, IID_NULL, LOCALE_USER_DEFAULT,
+                                             DISPATCH_PROPERTYGET | DISPATCH_METHOD, &no_params, &result,
+                                             nullptr, nullptr);
+        if (SUCCEEDED(hr) && result.vt == VT_BSTR && result.bstrVal) {
+            value = com::bstr_to_utf8(result.bstrVal);
+            read_ok = true;
+        }
+    }
+    if (read_ok && !value.empty()) {
+        std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
+        if (!s_universal_type_disabled) {
+            if (!s_universal_type_known) {
+                s_universal_type_dispid = type_dispid;
+                s_universal_type_known = true;
+                s_validated_type_names.insert(value);
+            } else if (s_universal_type_dispid == type_dispid) {
+                s_validated_type_names.insert(value);
+            } else {
+                s_universal_type_disabled = true;
+                s_validated_type_names.clear();
+                spdlog::warn("get_type|Type DISPID differs between types ({} vs {} for {}); "
+                             "universal Type DISPID disabled", s_universal_type_dispid, type_dispid, value);
+            }
+        }
+    }
+
+    cached_type_ = value;
     type_cached_ = true;
     return cached_type_;
 }
