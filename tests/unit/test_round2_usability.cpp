@@ -5,6 +5,7 @@
 #include "include/tab_guard.h"
 #include "include/cli_handler.h"
 #include "include/screenshot_handler.h"
+#include "include/formatters/screen_markdown_formatter.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -395,5 +396,125 @@ TEST_CASE("a scale that would produce an empty image is rejected", "[screenshot]
     options.crop_height = 10;
     options.scale = "0.01";
     CHECK_THROWS_AS(ScreenshotHandler::plan_capture_geometry(800, 600, options), std::invalid_argument);
+}
+
+// ---- Item 5: text filter across tabs -----------------------------------------------------------------
+
+namespace {
+json tabbed_read(bool expanded, bool only_second) {
+    const json tab1 = {{"id", "wnd[0]/usr/tabsTS/tabpONE"}, {"type", "GuiTab"}, {"text", "Logon data"}};
+    const json tab2 = {{"id", "wnd[0]/usr/tabsTS/tabpTWO"}, {"type", "GuiTab"}, {"text", "Address"}};
+    const json tab3 = {{"id", "wnd[0]/usr/tabsTS/tabpTHREE"}, {"type", "GuiTab"}, {"text", "Roles"}};
+    json data = {{"elements", json::array({tab1, tab2, tab3,
+                                           {{"id", "wnd[0]/usr/txtNAME"}, {"type", "GuiTextField"}, {"text", "ALICE"}}})},
+                 {"hierarchy", {{"tabs", json::array({tab1, tab2, tab3})},
+                                {"form_fields", json::array({{{"id", "wnd[0]/usr/txtNAME"}, {"type", "GuiTextField"},
+                                                              {"text", "ALICE"}}})}}},
+                 {"element_count", 4}};
+    if (expanded) {
+        json content = json::array();
+        if (!only_second)
+            content.push_back({{"tab_id", tab1["id"]}, {"tab_name", "Logon data"}, {"elements", json::array()},
+                               {"hierarchy", json::object()}, {"element_count", 0}});
+        content.push_back({{"tab_id", tab2["id"]}, {"tab_name", "Address"},
+                           {"elements", json::array({{{"id", "wnd[0]/usr/tabsTS/tabpTWO/txtCITY"},
+                                                      {"type", "GuiTextField"}, {"text", "Berlin"}}})},
+                           {"hierarchy", {{"form_fields", json::array({{{"id", "wnd[0]/usr/tabsTS/tabpTWO/txtCITY"},
+                                                                         {"type", "GuiTextField"}, {"text", "Berlin"}}})}}},
+                           {"element_count", 1}});
+        data["tabs_content"] = content;
+        data["tabs_expanded"] = true;
+    }
+    return data;
+}
+}  // namespace
+
+TEST_CASE("tab coverage lists searched and skipped tabs", "[screen][filters][tabs][round2]") {
+    SECTION("all tabs expanded") {
+        auto data = tabbed_read(true, false);
+        data["tabs_failed"] = json::array({{{"tab_id", "wnd[0]/usr/tabsTS/tabpTHREE"}, {"tab_name", "Roles"},
+                                            {"reason", "busy_timeout"}}});
+        const auto coverage = cli::describe_tab_coverage(data);
+        CHECK(coverage.at("searched") == json::array({"Logon data", "Address"}));
+        REQUIRE(coverage.at("skipped").size() == 1);
+        CHECK(coverage.at("skipped").at(0).at("reason") == "busy_timeout");
+    }
+    SECTION("--no-tabs: nothing expanded") {
+        const auto coverage = cli::describe_tab_coverage(tabbed_read(false, false));
+        CHECK(coverage.at("searched").empty());
+        REQUIRE(coverage.at("skipped").size() == 3);
+        CHECK(coverage.at("skipped").at(0).at("reason") == "not_expanded");
+    }
+    SECTION("--tab: the others are not requested") {
+        const auto coverage = cli::describe_tab_coverage(tabbed_read(true, true));
+        CHECK(coverage.at("searched") == json::array({"Address"}));
+        REQUIRE(coverage.at("skipped").size() == 2);
+        CHECK(coverage.at("skipped").at(0).at("reason") == "not_requested");
+    }
+    SECTION("a screen without tabs has no coverage") {
+        json plain = {{"elements", json::array({{{"id", "x"}, {"type", "GuiTextField"}}})}};
+        CHECK(cli::describe_tab_coverage(plain).empty());
+    }
+}
+
+TEST_CASE("text_contains with collapsed tabs says what it did not search", "[screen][filters][tabs][round2]") {
+    auto data = tabbed_read(false, false);
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "berlin";
+    cli::apply_screen_filters(data, filters);
+    CHECK(data.at("element_count") == 0);
+    CHECK(data.at("tabs_searched").empty());
+    CHECK(data.at("tabs_skipped").size() == 3);
+    const auto note = data.at("text_filter_note").get<std::string>();
+    CHECK(note.find("0 matches") != std::string::npos);
+    CHECK(note.find("tabs not expanded: [Logon data, Address, Roles]") != std::string::npos);
+    CHECK(note.find("(use tab=...)") != std::string::npos);
+
+    const auto markdown = cli::ScreenMarkdownFormatter::format(data, true);
+    CHECK(markdown.find("tabs not expanded") != std::string::npos);
+}
+
+TEST_CASE("text_contains over expanded tabs finds the match and names the searched tabs", "[screen][filters][tabs][round2]") {
+    auto data = tabbed_read(true, false);
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "berlin";
+    cli::apply_screen_filters(data, filters);
+    CHECK(data.at("tabs_searched") == json::array({"Logon data", "Address"}));
+    CHECK(data.at("tabs_content").at(1).at("element_count") == 1);
+    // the third tab was not read: even with a match the caller is told
+    REQUIRE(data.at("tabs_skipped").size() == 1);
+    CHECK(data.at("tabs_skipped").at(0).at("tab_name") == "Roles");
+    CHECK(data.at("text_filter_note") == "Searched tabs [Logon data, Address]; tabs not expanded: [Roles] (use tab=...)");
+
+    SECTION("every tab read and a match: no note") {
+        auto all = tabbed_read(true, false);
+        all["tabs_content"].push_back({{"tab_id", "wnd[0]/usr/tabsTS/tabpTHREE"}, {"tab_name", "Roles"},
+                                       {"elements", json::array()}, {"hierarchy", json::object()},
+                                       {"element_count", 0}});
+        cli::apply_screen_filters(all, filters);
+        CHECK_FALSE(all.contains("tabs_skipped"));
+        CHECK_FALSE(all.contains("text_filter_note"));
+        CHECK(all.at("tabs_searched").size() == 3);
+    }
+}
+
+TEST_CASE("text_contains with --tab reports the other tabs as not requested", "[screen][filters][tabs][round2]") {
+    auto data = tabbed_read(true, true);
+    cli::ScreenFilterOptions filters;
+    filters.text_contains = "nomatch";
+    cli::apply_screen_filters(data, filters);
+    CHECK(data.at("tabs_searched") == json::array({"Address"}));
+    const auto note = data.at("text_filter_note").get<std::string>();
+    CHECK(note.find("0 matches in tabs [Address]") != std::string::npos);
+    CHECK(note.find("tabs not expanded: [Logon data, Roles]") != std::string::npos);
+}
+
+TEST_CASE("without text_contains no tab fields are added", "[screen][filters][tabs][round2]") {
+    auto data = tabbed_read(false, false);
+    cli::ScreenFilterOptions filters;
+    filters.only_buttons = true;
+    cli::apply_screen_filters(data, filters);
+    CHECK_FALSE(data.contains("tabs_searched"));
+    CHECK_FALSE(data.contains("text_filter_note"));
 }
 

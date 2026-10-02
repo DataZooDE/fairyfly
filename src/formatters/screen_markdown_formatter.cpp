@@ -79,6 +79,12 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         if (!note.empty()) oss << "_" << note << "_\n\n";
     }
 
+    // A text filter across tabs: say which tabs were searched and which were not, instead of an empty result.
+    if (data.contains("text_filter_note") && data["text_filter_note"].is_string()) {
+        const std::string note = data["text_filter_note"].get<std::string>();
+        if (!note.empty()) oss << "_" << note << "_\n\n";
+    }
+
     // Check if we have hierarchy data
     if (!data.contains("hierarchy")) {
         oss << "_No screen structure available_\n";

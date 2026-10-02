@@ -51,7 +51,19 @@ struct ScreenFilterOptions {
     bool first_match_only = false;            ///< Return only first matching element
 };
 
+/// Applies the filters to a screen read. With `text_contains` on a screen that has tabs it also adds
+/// `tabs_searched` (names), `tabs_skipped` ([{tab_id, tab_name, reason}]: not_expanded, not_requested,
+/// busy_timeout, not_found, error) and, when tabs were skipped or nothing matched, `text_filter_note`
+/// ("0 matches in tabs [A, B]; tabs not expanded: [C] (use tab=...)"), so a miss is never silently empty.
 void apply_screen_filters(nlohmann::json& screen_data, const ScreenFilterOptions& filters);
+
+/// Which tabs of an (unfiltered) screen read were searched and which were not. {} when the screen has no tabs.
+/// Pure: reads `elements`, `hierarchy`, `tabs_content`, `tabs_failed` and `tabs_expanded` of the read result.
+nlohmann::json describe_tab_coverage(const nlohmann::json& screen_data);
+
+/// Adds tabs_searched / tabs_skipped / text_filter_note to a FILTERED read (see apply_screen_filters).
+/// `matches` is the number of elements the filter kept across the screen and the expanded tabs.
+void annotate_text_filter_coverage(nlohmann::json& screen_data, const nlohmann::json& coverage, size_t matches);
 
 /// Whether grid/table cells can reach the output under these filters. The only_buttons / only_fields /
 /// only_editable / only_f4_fields selectors never keep a grid (only its synthetic toolbar buttons), so

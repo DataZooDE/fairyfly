@@ -17,6 +17,7 @@ Versioning switched to calendar versions (YYYY.MM.DD); earlier 0.x numbers are r
 
 ### Screen read
 
+- `--text-contains` across tabs reports `tabs_searched`, `tabs_skipped` (`not_expanded`, `not_requested`, `busy_timeout`, `not_found`, `error`) and a `text_filter_note` (`0 matches in tabs [A]; tabs not expanded: [B, C] (use tab=...)`, also a Markdown line) when a tab was not searched or nothing matched, instead of a silent empty result. `--tab` still reads only that tab.
 - `element fill` result: `value` is the value read back from the control (max 200 characters; credential fields keep `[REDACTED: reason]` and `value_redacted: true`), new `field` object (`type`, `max_length`, `numerical`, `required`, `input_kind`, `format_hint`, `format_hint_source`, `value_normalized`, `format_warning`; never a rejection) and `status_bar` / `status_message` only when the bar changed during the fill (a stale message from the previous action is no longer echoed).
 - New error code `ELEMENT_ON_INACTIVE_TAB` (`element get`, `element click`, `element fill`; fields `tab_id`, `tab_text`, `tab_strip_id`, `hint`) and `element get --activate-tab` (MCP `activate_tab`), which selects the tab, reads the element and restores the previous tab (`tabs_activated`, `tabs_restored`).
 - `element get` and `screen find` (JSON, Markdown, TOON) add `tooltip` for GuiButton, GuiTab, GuiCheckBox and GuiRadioButton, and `text` in `element get` when it differs from `value`; absent when empty.
