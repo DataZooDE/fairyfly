@@ -272,6 +272,16 @@ ToolResult shape_result(const Result& result, const ToolSpec& spec, const Policy
                                     : "SAP GUI screenshot";
             std::string caption = title + ", " + (w ? std::to_string(w) + "x" + std::to_string(h) : std::string("unknown size")) +
                                   " px, " + std::to_string(decoded_size(b64)) + " bytes";
+            if (result.data.contains("native_size") && result.data["native_size"].is_object()) {
+                const auto& native = result.data["native_size"];
+                caption += "; native " + std::to_string(native.value("width", 0)) + "x" +
+                           std::to_string(native.value("height", 0));
+                if (result.data.contains("crop") && result.data["crop"].is_object()) {
+                    const auto& crop = result.data["crop"];
+                    caption += ", crop x=" + std::to_string(crop.value("x", 0)) + " y=" + std::to_string(crop.value("y", 0)) +
+                               " " + std::to_string(crop.value("width", 0)) + "x" + std::to_string(crop.value("height", 0));
+                }
+            }
             out.content.push_back(json{{"type", "image"}, {"data", b64}, {"mimeType", "image/png"}});
             out.content.push_back(text_block(caption));
             return out;

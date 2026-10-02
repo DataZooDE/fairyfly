@@ -28,6 +28,11 @@ void attach_status_message(json& data, const ActionStatus& before, const ActionS
 /// result.error["status_bar"] on error. No-op when the message is empty.
 void attach_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after);
 
+/// Like attach_status_bar, but only when the action itself produced a message: an unchanged status bar (same text and
+/// type as before) is left over from an earlier action and is omitted. For actions that do not talk to the server
+/// (typing into a field), where a re-read right after the call would otherwise echo the previous message.
+void attach_fresh_status_bar(Result& result, const ActionStatus& before, const ActionStatus& after);
+
 /// Single-snapshot variant (no change detection) for read-only commands.
 void attach_status_bar(Result& result, const ActionStatus& current);
 

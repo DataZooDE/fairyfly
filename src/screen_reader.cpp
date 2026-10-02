@@ -1,5 +1,6 @@
 #include "include/screen_reader.h"
 #include "include/action_status.h"
+#include "include/field_fill_info.h"
 #include "include/element_metadata_extractor.h"
 #include "include/screen_element_collector.h"
 #include "include/table_data_extractor.h"
@@ -102,6 +103,12 @@ struct ScreenSearchContext {
         if (type == "GuiCheckBox" || type == "GuiRadioButton") {
             try { match["selected"] = element->get_property_bool(L"Selected"); }
             catch (const std::exception&) { /* State unavailable. */ }
+        }
+        if (type_shows_tooltip(type)) {
+            // Icon-only buttons have no text: the tooltip is how `screen read only=buttons` names them too.
+            std::string tooltip;
+            try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+            attach_tooltip_fields(match, type, tooltip, std::string());
         }
         matches.push_back(std::move(match));
         if (matches.size() >= static_cast<size_t>(query.limit)) {

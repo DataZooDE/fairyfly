@@ -118,17 +118,17 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | Tool | Purpose | Key arguments | Read-only mode | Annotations |
 |---|---|---|---|---|
 | `gui_doctor` | Environment diagnostics | none | allowed | RO |
-| `gui_session_list` | List open SAP GUI sessions | none | allowed | RO |
+| `gui_session_list` | List open SAP GUI sessions; per session `server_time: null` / `server_time_source: "unavailable"` (the scripting API has no server clock), plus `server_time_summary`, `client_time`, `client_utc_offset` (PC clock, a stand-in only) | none | allowed | RO |
 | `gui_connection_list` | List saved fairyfly connection list | `cleanup` | allowed | not RO (cleanup deletes local files) |
-| `gui_session_attach` | Attach to a running session, becomes the default connection | `session_id` (optional when only one session is open) | allowed | not RO |
+| `gui_session_attach` | Attach to a running session, becomes the default connection (result carries the same `server_time*` / `client_time` fields as the list) | `session_id` (optional when only one session is open) | allowed | not RO |
 | `gui_session_launch` | Open a SAP Logon entry, optionally log on | `name`, `login`, `credential`, `multiple_logon`, `allow_sapshcut` | allowed; `multiple_logon=end` refused | D |
 | `gui_session_login` | Log on with the Credential Manager entry | `connection`, `credential`, `multiple_logon` | allowed; `multiple_logon=end` refused | D |
 | `gui_transaction_start` | Run a transaction code (`/nSM37`, `/n`) | `code` | allowed | not RO |
-| `gui_screen_read` | Read the screen (Markdown or JSON) | `tab`, `no_tabs`, `only` (`buttons`, `fields`, `editable`, `f4_fields`, `tables`), `text_contains`, `id_contains`, `type`, `max_rows`, `offset`, `compact`, `format` | allowed | RO |
-| `gui_screen_find` | Find controls by id/name/type | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
-| `gui_element_get` | One element's properties/value (`list_nodes` for trees) | `element`, `list_nodes` | allowed | RO |
+| `gui_screen_read` | Read the screen (Markdown or JSON) | `tab`, `no_tabs`, `only` (`buttons`, `fields`, `editable`, `f4_fields`, `tables`), `text_contains`, `id_contains`, `type`, `max_rows`, `offset`, `compact`, `format` (with `text_contains` the result lists `tabs_searched` / `tabs_skipped` and a `text_filter_note` when a tab was not searched or nothing matched) | allowed | RO |
+| `gui_screen_find` | Find controls by id/name/type (buttons, tabs and checkboxes also return `tooltip`) | `id_contains`, `name_contains`, `type`, `limit` | allowed | RO |
+| `gui_element_get` | One element's properties/value (`list_nodes` for trees; buttons/tabs/checkboxes add `tooltip`; `ELEMENT_ON_INACTIVE_TAB` for an element on a tab that is not selected, `activate_tab` selects it for the read and restores the previous tab) | `element`, `list_nodes`, `activate_tab` | allowed | RO |
 | `gui_menu_list` | List the menu bar tree | `window` | allowed | RO |
-| `gui_screen_capture` | PNG screenshot as an image block | `scale` (number), `x`, `y`, `width`, `height` | allowed | RO |
+| `gui_screen_capture` | PNG screenshot as an image block; the crop (`x`, `y`, `width`, `height`) is always in native window pixels and applied before `scale`; the caption names the native size and the crop, a crop completely outside the window is INVALID_ARGUMENT with the native size | `scale` (number), `x`, `y`, `width`, `height` | allowed | RO |
 | `gui_credentials_list` | Names of stored credentials, never passwords | none | allowed | RO |
 | `gui_element_click` | Click a button, tab, checkbox, grid cell, tree node | `element`, `wait_for_window`, `row`, `column`, `doubleclick`, `node_key`, `tree_action` | state-changing controls refused (READ_ONLY_REFUSED) | D |
 | `gui_key_send` | Send Enter, F-keys, ctrl+s, raw VKey | `key`, `window` | only allowlisted keys | D |
@@ -137,7 +137,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_menu_select` | Select a menu item by text path | `path`, `window` | Save/Delete-style items refused | D |
 | `gui_session_disconnect` | Remove a saved connection | `connection`, `close_session` | `close_session=true` refused | D |
 | `gui_batch` | Up to 20 tool calls in one round trip | `items` (`tool`, `arguments`), `stop_on_error` | each item is checked like a normal call | D |
-| `gui_element_fill` | Enter or clear a field or grid cell | `element`, `value` or `clear`, `row`, `column`, `checkbox`, `commit` | hidden; a call returns TOOL_UNAVAILABLE_READ_ONLY | D |
+| `gui_element_fill` | Enter or clear a field or grid cell. The result echoes `value` as read back from the control (max 200 characters; `[REDACTED: reason]` for credential fields), a `field` object (`type`, `max_length`, `input_kind`, `format_hint`, `format_warning`) and a status bar only when it changed during the fill; `ELEMENT_ON_INACTIVE_TAB` for a field on a tab that is not selected | `element`, `value` or `clear`, `row`, `column`, `checkbox`, `commit` | hidden; a call returns TOOL_UNAVAILABLE_READ_ONLY | D |
 
 All tools take an optional `connection` (saved connection id) except the ones that do not need a session. Input schemas set `additionalProperties: false`: unknown arguments are rejected with INVALID_ARGUMENT.
 

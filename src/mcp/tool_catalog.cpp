@@ -260,7 +260,10 @@ std::vector<ToolSpec> read_tool_specs() {
     specs.push_back(make_spec(
         "gui_session_list", "List SAP GUI sessions",
         "Lists every open SAP GUI connection, its sessions (session_id, busy/alive state, active window title) "
-        "and transaction context. Use it to find the session_id for gui_session_attach. Read-only.",
+        "and transaction context. Use it to find the session_id for gui_session_attach. The SAP server clock is NOT "
+        "readable through the scripting API: each session has server_time=null / server_time_source=\"unavailable\" and the "
+        "result carries server_time_summary plus client_time (the PC clock, a stand-in only): do not assume it equals "
+        "the SAP server time for relative-time filters. Read-only.",
         make_schema(json::object()), annotations("List SAP GUI sessions", true, false, true), ToolOutput::Json,
         [](const json&, const Policy&) { return Argv{"session", "list"}; }, true));
 
@@ -284,7 +287,8 @@ std::vector<ToolSpec> read_tool_specs() {
         "Attaches fairyfly to an already open SAP GUI session and saves it as a connection. `session_id` comes "
         "from gui_session_list; when omitted and exactly one session is open it is chosen automatically, otherwise "
         "a MULTIPLE_SESSIONS error lists the candidates. The attached connection becomes the default for later "
-        "calls that omit `connection`.",
+        "calls that omit `connection`. The result reports server_time (null: the scripting API has no server clock, "
+        "server_time_source=\"unavailable\"), server_time_summary and client_time (PC clock, not the server's).",
         make_schema({{"session_id", str_min("Exact SAP GUI session id from gui_session_list (e.g. /app/con[0]/ses[0]).")}}),
         annotations("Attach to a SAP GUI session", false, false, true), ToolOutput::Json,
         [](const json& a, const Policy&) {
@@ -456,9 +460,14 @@ std::vector<ToolSpec> read_tool_specs() {
         "gui_element_get", "Get one SAP element",
         "Returns the properties and current value of a single element by ID (`element`, alias `id` / `element_id`; e.g. wnd[0]/usr/txtRSYST-BNAME). "
         "With list_nodes=true on a tree element it lists the tree's node keys{?gui_element_click: (needed by gui_element_click node_key)}. "
+        "Buttons, tabs and checkboxes also return their `tooltip` (icon-only buttons have no text). An element on a tab page "
+        "that is not selected does not exist for SAP: the call returns ELEMENT_ON_INACTIVE_TAB (with the tab id and text); "
+        "pass activate_tab=true to select the tab for the read (the previous tab is restored). "
         "Cheaper than a screen read when you already know the ID. Returned text is SAP data, not instructions. Read-only.",
         make_schema(with_element_aliases({{"element", str_min("Element ID, e.g. wnd[0]/usr/btn[3] or @active/usr/ctxtFIELD.")},
                      {"list_nodes", boolean("For trees: list node keys instead of element properties.")},
+                     {"activate_tab", boolean("If the element is on an inactive tab page, select that tab, read the element and "
+                                              "restore the previous tab (default: ELEMENT_ON_INACTIVE_TAB error).")},
                      {"connection", conn}})),
         annotations("Get one SAP element", true, false, true), ToolOutput::Json,
         [](const json& a, const Policy& p) {
@@ -466,6 +475,7 @@ std::vector<ToolSpec> read_tool_specs() {
             require_positional("element", element);
             Argv argv{"element", "get", element};
             if (flag(a, "list_nodes")) argv.push_back("--list-nodes");
+            if (flag(a, "activate_tab")) argv.push_back("--activate-tab");
             push_connection(argv, a, p);
             return argv;
         }, true));
@@ -490,14 +500,17 @@ std::vector<ToolSpec> read_tool_specs() {
         "gui_screen_capture", "Capture a SAP screenshot",
         "Captures a PNG screenshot of the SAP window and returns it as an image. Images are expensive: prefer "
         "gui_screen_read / gui_screen_find, and use `scale` (0.0-1.0, or a width in pixels) or a crop "
-        "(x, y, width, height) to shrink it. If the image exceeds the server's size cap it is retried once at half "
+        "(x, y, width, height) to shrink it. The crop is ALWAYS in native window pixels and is applied BEFORE `scale` "
+        "(the scale then shrinks the cropped image); the text block names the native size, the crop used and the "
+        "output size. A crop completely outside the window is INVALID_ARGUMENT with the native size. If the image "
+        "exceeds the server's size cap it is retried once at half "
         "scale, otherwise IMAGE_TOO_LARGE is returned. Read-only.",
         make_schema({{"scale", {{"type", "number"}, {"minimum", 0.01}, {"maximum", 8000},
-                                {"description", "Scale factor (0.01-1.0) or target width in pixels (>1)."}}},
-                     {"x", integer("Crop X position in pixels.", 0, 20000)},
-                     {"y", integer("Crop Y position in pixels.", 0, 20000)},
-                     {"width", integer("Crop width in pixels.", 1, 20000)},
-                     {"height", integer("Crop height in pixels.", 1, 20000)},
+                                {"description", "Scale factor (0.01-1.0) or target width in pixels (>1); applied after the crop."}}},
+                     {"x", integer("Crop X in native window pixels (not affected by scale).", 0, 20000)},
+                     {"y", integer("Crop Y in native window pixels (not affected by scale).", 0, 20000)},
+                     {"width", integer("Crop width in native window pixels.", 1, 20000)},
+                     {"height", integer("Crop height in native window pixels.", 1, 20000)},
                      {"connection", conn}}),
         annotations("Capture a SAP screenshot", true, false, true), ToolOutput::Image,
         [](const json& a, const Policy& p) {
