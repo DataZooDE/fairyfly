@@ -17,6 +17,7 @@ add_executable(unit_tests
     unit/test_compact_json.cpp
     unit/test_html_viewer_reader.cpp
     unit/test_object_tree_diag.cpp
+    unit/test_object_tree.cpp
     unit/test_element_metadata_extractor.cpp
     unit/test_raii_core_renderers.cpp
     unit/test_doctor.cpp
@@ -59,6 +60,9 @@ add_executable(unit_tests
 add_executable(connection_cache_worker EXCLUDE_FROM_ALL unit/connection_cache_worker.cpp)
 target_link_libraries(connection_cache_worker PRIVATE fairyfly_core)
 add_dependencies(unit_tests connection_cache_worker)
+
+# Recorded SAP screens (object trees and legacy reads) used by the bulk reader parity tests
+target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures")
 
 # Link against fairyfly_core library (all dependencies inherited)
 target_link_libraries(unit_tests PRIVATE

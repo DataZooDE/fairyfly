@@ -1,3 +1,4 @@
+#include "include/object_tree.h"
 #include "include/screen_reader.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
@@ -677,11 +678,7 @@ namespace {
 // ComGuiElement::get_text for labels (structured text carrying sensitive names).
 std::string read_positioned_label_text(const ComGuiElementPtr& label, const std::string& id) {
     label->prime_identity(id, "GuiLabel");
-    const std::string text = label->get_string_property(L"Text");
-    const bool structured = text.find('=') != std::string::npos ||
-                            text.find(':') != std::string::npos;
-    if (structured && contains_sensitive_data_name(text)) return redact_sensitive_response_text(text);
-    return text;
+    return redact_positioned_label_text(label->get_string_property(L"Text"));
 }
 } // namespace
 
