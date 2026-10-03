@@ -2,6 +2,7 @@
 #include "include/sensitive_data.h"
 #include "include/constants.h"
 #include "include/element_type_registry.h"
+#include "include/element_metadata_builder.h"
 #include "include/html_viewer_reader.h"
 #include "include/table_data_extractor.h"
 #include "include/com/wrapper.h"
@@ -71,29 +72,28 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
             return nullptr;
         }
 
-        metadata["id"] = elem_id;
-        metadata["type"] = type;
+        ElementFacts facts;
+        facts.id = elem_id;
+        facts.type = type;
 
-        std::string element_name;
         try {
-            element_name = elem->get_name();
-            metadata["name"] = element_name;
+            facts.name = elem->get_name();
         } catch (const std::exception& e) {
             spdlog::debug("extract: get_name() failed for {}: {}", elem_id, e.what());
-            metadata["name"] = "";
+            facts.name = "";
         }
 
         // Never read password fields into automatic screen output.
         std::string text;
         if (type == "GuiPasswordField") {
-            metadata["text"] = redaction_marker(redaction_reason::password_field);
+            facts.text = redaction_marker(redaction_reason::password_field);
         } else {
             try {
                 text = elem->get_text();
-                metadata["text"] = text;
+                facts.text = text;
             } catch (const std::exception& e) {
                 spdlog::debug("extract: get_text() failed for {}: {}", elem_id, e.what());
-                metadata["text"] = "";
+                facts.text = "";
             }
         }
 
@@ -107,85 +107,39 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
 
         // Interactive states - query based on element type capabilities
         bool enabled = true;
-        bool visible = true;
         bool changeable = false;
 
         // Visual and state properties
         if (type != "GuiLabel" && !is_non_visual_container(type)) {
             enabled = elem->is_enabled();
         }
-        visible = elem->is_visible();
+        facts.enabled = enabled;
+        facts.visible = elem->is_visible();
 
-        // Only input controls can be changeable
-        if (type == "GuiTextField" || type == "GuiCTextField" ||
-            type == "GuiPasswordField" || type == "GuiOkCodeField" ||
-            type == "GuiComboBox" || type == "GuiComboBoxControl" ||
-            type == "GuiCheckBox" || type == "GuiRadioButton") {
+        if (metadata_reads_changeable(type)) {
             changeable = elem->is_changeable();
         }
-
-        metadata["enabled"] = enabled;
-        metadata["visible"] = visible;
-        metadata["changeable"] = changeable;
-        if (type == "GuiCheckBox" || type == "GuiRadioButton") {
-            metadata["selected"] = elem->get_property_bool(L"Selected");
+        facts.changeable = changeable;
+        if (metadata_reads_selected(type)) {
+            facts.selected = elem->get_property_bool(L"Selected");
         }
 
-        // Accessibility labels and tooltips - only input controls have associated label
-        if (!is_non_visual_container(type)) {
-            if (type == "GuiTextField" || type == "GuiCTextField" ||
-                type == "GuiPasswordField" || type == "GuiComboBox" ||
-                type == "GuiComboBoxControl" || type == "GuiCheckBox" ||
-                type == "GuiRadioButton") {
-                std::string label = elem->get_label();
-                if (!label.empty()) metadata["label"] = label;
-            }
-
-            // Tooltips
-            if (type == "GuiButton" || type == "GuiTextField" || type == "GuiCTextField" ||
-                type == "GuiPasswordField" || type == "GuiTab" || type == "GuiComboBox" ||
-                type == "GuiStatusPane") {
-                std::string tooltip = elem->get_tooltip();
-                if (!tooltip.empty()) metadata["tooltip"] = tooltip;
-            }
-        }
+        if (metadata_reads_label(type)) facts.label = elem->get_label();
+        if (metadata_reads_tooltip(type)) facts.tooltip = elem->get_tooltip();
 
         // Container classification
         std::string container_type = elem->get_container_type();
-        if (!container_type.empty()) {
-            metadata["container_type"] = container_type;
-        }
-
-        // Parse grid coordinates for grid-positioned labels (pattern: lbl[row,col])
-        if (type == "GuiLabel" && elem_id.find("/lbl[") != std::string::npos) {
-            size_t bracket_pos = elem_id.find("/lbl[");
-            size_t comma_pos = elem_id.find(",", bracket_pos);
-            size_t close_bracket = elem_id.find("]", comma_pos);
-
-            if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
-                try {
-                    // SAP GUI coordinate notation is /lbl[col,row] (column character offset, line row number)
-                    std::string col_str = elem_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5);
-                    std::string row_str = elem_id.substr(comma_pos + 1, close_bracket - comma_pos - 1);
-
-                    metadata["grid_col"] = std::stoi(col_str);
-                    metadata["grid_row"] = std::stoi(row_str);
-                } catch (const std::invalid_argument&) {
-                    // Failed to parse coordinates, skip
-                } catch (const std::out_of_range&) {
-                    // Number out of range, skip
-                }
-            }
-        }
+        facts.container_type = container_type;
 
         // SubType for GuiShell elements (GridView, Tree, Toolbar, etc.)
+        if (type == "GuiShell") facts.subtype = elem->get_subtype();
+
+        // Everything a plain element carries (grid coordinates of positioned labels, subtype
+        // placeholder, group flag, capabilities, F4 help); children are added below.
+        metadata = build_plain_metadata(facts);
+
         if (type == "GuiShell") {
-            std::string subtype = elem->get_subtype();
-            if (!subtype.empty()) {
-                metadata["subtype"] = subtype;
-            } else {
-                metadata["subtype"] = "N/A";
-            }
+            const std::string& subtype = facts.subtype;
 
             if (subtype == "HTMLViewer") {
                 // Text is the browser control name, not the displayed page.
@@ -286,24 +240,6 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                 }
                 // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
                 if (looks_like_prog_id(text)) metadata.erase("text");
-            }
-        }
-
-        // Special handling for GuiBox (grouping container)
-        if (type == "GuiBox") {
-            metadata["is_group"] = true;
-        }
-
-        // Derive capabilities
-        metadata["capabilities"] = derive_capabilities(type, enabled, changeable);
-
-        // Detect F4 search help availability
-        // GuiCTextField always has F4 help (the "C" stands for "Combo"/search)
-        if (type == "GuiCTextField") {
-            metadata["has_f4_help"] = true;
-            // Add to capabilities array as well
-            if (metadata["capabilities"].is_array()) {
-                metadata["capabilities"].push_back("has_f4_help");
             }
         }
 
@@ -470,7 +406,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
             if (child_count > 0 || force_enumerate) {
                 spdlog::debug("extract_element_metadata: Processing {} children of {} at depth {} (force={})",
                              child_count, elem->get_id(), depth, force_enumerate);
-                json children = json::array();
+                std::vector<std::string> children;
 
                 try {
                     // Use the .item(index) method which works with SAP GUI collections
@@ -508,7 +444,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                     if (!enumerated_ok || enumerated_children == 0) {
                         // Discard any partial prefix from a failed enumeration so the
                         // indexed walk neither duplicates nor drops children.
-                        children = json::array();
+                        children.clear();
                         for (int i = 0; i < max_children; ++i) {
                             try {
                                 ComGuiElementPtr child_ptr = children_collection.item(i);
@@ -543,8 +479,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                 }
 
                 if (!children.empty()) {
-                    metadata["children"] = children;
-                    metadata["child_count"] = children.size();
+                    add_child_ids(metadata, children);
                 } else if (child_count > 0) {
                     spdlog::debug("extract_element_metadata: No children extracted for {} (had {} children)",
                                  elem->get_id(), child_count);

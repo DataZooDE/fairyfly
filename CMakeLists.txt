@@ -115,6 +115,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/base64.cpp
     src/semantic_classifier.cpp
     src/sensitive_data.cpp
+    src/display_text_policy.cpp
+    src/element_metadata_builder.cpp
     src/html_viewer_reader.cpp
     src/object_tree_diag.cpp
     src/object_tree.cpp

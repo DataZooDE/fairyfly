@@ -3457,3 +3457,51 @@ TEST_CASE("GuiSession.GetObjectTree wrapper passes id and props and returns the 
         REQUIRE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
     }
 }
+namespace {
+// Plain-element scenes shared by the metadata golden tests below.
+FakeNode* make_golden_field(const wchar_t* type, const wchar_t* id) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = type;
+    node->strings[L"Id"] = id;
+    node->strings[L"Name"] = L"BNAME";
+    node->strings[L"Text"] = L"Miller";
+    node->strings[L"DisplayedText"] = L"Miller";
+    node->strings[L"AccLabel"] = L"User";
+    node->strings[L"AccTooltip"] = L"User name";
+    node->bools[L"Changeable"] = true;
+    node->bools[L"Enabled"] = true;
+    node->bools[L"Visible"] = true;
+    return node;
+}
+}  // namespace
+
+// Golden dumps recorded from the build before the display-text policy and metadata builder
+// were split out of ComGuiElement::get_text and ElementMetadataExtractor::extract.
+TEST_CASE("ElementMetadataExtractor plain elements keep their recorded JSON", "[metadata][golden]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* field = make_golden_field(L"GuiTextField", L"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME");
+    auto* ctext = make_golden_field(L"GuiCTextField", L"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME");
+    auto* check = make_golden_field(L"GuiCheckBox", L"/app/con[0]/ses[0]/wnd[0]/usr/chkBNAME");
+    check->bools[L"Selected"] = true;
+    auto* box = new FakeNode();
+    box->strings[L"Type"] = L"GuiBox";
+    box->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/boxBNAME";
+    box->strings[L"Name"] = L"BOX";
+    box->strings[L"Text"] = L"Group";
+    auto* container = new FakeNode();
+    container->strings[L"Type"] = L"GuiSimpleContainer";
+    container->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/subSUB";
+    auto* kids = new FakeNode();
+    kids->items = {field, ctext};
+    kids->enumerable = true;
+    container->dispatches[L"Children"] = kids;
+
+    const auto dump = [](FakeNode* node) {
+        return ElementMetadataExtractor::extract(ComGuiElement::create(node)).dump();
+    };
+    CHECK(dump(field) == R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiTextField","visible":true})");
+    CHECK(dump(ctext) == R"({"capabilities":["fillable","readable","has_f4_help"],"changeable":true,"enabled":true,"has_f4_help":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiCTextField","visible":true})");
+    CHECK(dump(check) == R"({"capabilities":["selectable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/chkBNAME","label":"User","name":"BNAME","selected":true,"text":"Miller","type":"GuiCheckBox","visible":true})");
+    CHECK(dump(box) == R"({"capabilities":["container"],"changeable":false,"container_type":"group","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/boxBNAME","is_group":true,"name":"BOX","text":"Group","type":"GuiBox","visible":false})");
+    CHECK(dump(container) == R"({"capabilities":["container"],"changeable":false,"child_count":2,"children":["/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME"],"container_type":"form","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/subSUB","name":"","text":"","type":"GuiSimpleContainer","visible":false})");
+}
