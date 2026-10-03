@@ -366,6 +366,37 @@ TEST_CASE("credential state flags, roles and profiles are not redacted", "[priva
     }
 }
 
+TEST_CASE("USR02 / USH02 / USRPWDHISTORY credential-hash names are redacted, state and date names are not",
+          "[privacy][redaction]") {
+    const std::vector<std::string> secret = {"BCODE", "CODVN", "PASSCODE", "OCOD1", "OCOD2", "OCOD3", "OCOD4",
+                                             "OCOD5", "PWDSALTEDHASH", "PWDHISTORY", "PWDSALT"};
+    for (const auto& name : secret) {
+        for (const auto& spelling : {name, "USR02-" + name, "wnd[0]/usr/txtUSR02-" + name}) {
+            INFO(spelling);
+            CHECK(sensitive_name_reason(spelling) == "field name matches secret pattern");
+            CHECK(sensitive_name_reason(spelling, StateExemption::Allow) == "field name matches secret pattern");
+            CHECK(sensitive_input_field_reason("GuiTextField", "wnd[0]/usr/txtUSR02-" + name, "") ==
+                  "field name matches secret pattern");
+        }
+        // grid / list column titles
+        nlohmann::json table = {{"columns", {"BNAME", name}}, {"rows", nlohmann::json::array({nlohmann::json::array({"DDIC", "0123456789ABCDEF"})})}};
+        redact_sensitive_header_rows(table);
+        INFO(name);
+        CHECK(table["rows"][0][0] == "DDIC");
+        CHECK(table["rows"][0][1] == "[REDACTED: field name matches secret pattern]");
+        // positioned report/grid cell holding the technical name
+        CHECK(sensitive_cell_reason(name, false) == "field name matches secret pattern");
+    }
+    for (const char* name : {"PWDSTATE", "PWDCHGDATE", "USR02-PWDSTATE", "USR02-PWDCHGDATE", "BNAME", "USTYP"}) {
+        INFO(name);
+        CHECK(sensitive_name_reason(name).empty());
+        CHECK(sensitive_input_field_reason("GuiTextField", std::string("wnd[0]/usr/txt") + name, "").empty());
+        nlohmann::json table = {{"columns", {"BNAME", name}}, {"rows", nlohmann::json::array({nlohmann::json::array({"DDIC", "01.10.2026"})})}};
+        redact_sensitive_header_rows(table);
+        CHECK(table["rows"][0][1] == "01.10.2026");
+    }
+}
+
 TEST_CASE("secret-bearing fields stay redacted with a reason", "[privacy][redaction]") {
     CHECK(sensitive_input_field_reason("GuiPasswordField", "wnd[0]/usr/pwdRSYST-BCODE", "") ==
           "password input field");

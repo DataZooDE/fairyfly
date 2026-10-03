@@ -74,7 +74,8 @@ public:
 
         // Add "capture" subcommand
         capture_cmd_ = add_leaf(app, {"screen", "capture"});
-        capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout");
+        capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout. With --format base64 the file receives the data:image/png;base64,... text "
+                          "and the result carries filepath instead of the string");
         capture_cmd_->add_option("--format", screenshot_format_, "Output format: png, base64")
             ->check(CLI::IsMember({"png", "base64"}));
         capture_cmd_->add_option("--scale", screenshot_scale_,

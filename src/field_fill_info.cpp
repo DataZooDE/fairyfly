@@ -170,7 +170,9 @@ json build_fill_field_info(const FieldProbe& probe, const std::string& typed) {
             info["format_hint"] = format;
             info["format_hint_source"] = source;
             const std::string typed_shape = shape(typed);
-            if (!typed_shape.empty() && typed_shape != format) {
+            // Only SAP's own normalisation is evidence of the user's format. The text the field held before the
+            // fill is unvalidated (it may be an earlier rejected input), so it stays an informational hint.
+            if (source == "normalized_input" && !typed_shape.empty() && typed_shape != format) {
                 info["format_warning"] = "the typed value looks like " + typed_shape +
                                          " but this SAP user's format is " + format;
             }
