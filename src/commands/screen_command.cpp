@@ -1,6 +1,7 @@
 #include "include/commands/command_base.h"
 #include "include/cli_handler.h"
 #include "include/constants.h"
+#include "include/object_tree_diag.h"
 #include "include/screen_reader.h"
 #include <spdlog/spdlog.h>
 #include <optional>
@@ -38,6 +39,12 @@ public:
         read_cmd_->add_option("--connection", read_conn_id_, "Connection ID to use");
         read_cmd_->add_option("--output", read_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
+        // Hidden diagnostics for the bulk screen reader (raw, unredacted; FAIRYFLY_DIAG=1 only).
+        read_cmd_->add_flag("--dump-object-tree", dump_object_tree_,
+            "Diagnostic: raw GuiSession.GetObjectTree dump (needs FAIRYFLY_DIAG=1)")->group("");
+        read_cmd_->add_option("--object-tree-id", object_tree_id_, "Diagnostic: element id for --dump-object-tree (default: active window)")->group("");
+        read_cmd_->add_option("--object-tree-props", object_tree_props_, "Diagnostic: comma separated property names for --dump-object-tree")
+            ->delimiter(',')->group("");
 
         // Filter options
         read_cmd_->add_flag("--only-buttons", filters_.only_buttons, "Show only GuiButton elements");
@@ -81,6 +88,16 @@ public:
     }
 
     Result execute(cli::CommandHandler& handler) override {
+        if (*read_cmd_ && dump_object_tree_) {
+            if (!diag::diag_enabled_from_environment()) {
+                Result denied;
+                denied.status = Result::Status::Error;
+                denied.error["code"] = "DIAG_DISABLED";
+                denied.error["message"] = "The object tree dump is raw and unredacted; set FAIRYFLY_DIAG=1 to use it";
+                return denied;
+            }
+            return handler.handle_object_tree_dump(read_conn_id_, object_tree_id_, object_tree_props_);
+        }
         if (*read_cmd_) {
             bool should_expand_tabs = !no_tabs_ || !only_tab_.empty();
 
@@ -156,6 +173,9 @@ private:
     bool skip_trees_ = false;
     bool compact_ = false;
     bool probe_all_ = false;
+    bool dump_object_tree_ = false;
+    std::string object_tree_id_;
+    std::vector<std::string> object_tree_props_;
     int max_rows_ = constants::MAX_TABLE_ROWS;
     int row_offset_ = 0;
     std::optional<int> read_conn_id_;

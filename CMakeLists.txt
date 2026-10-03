@@ -116,6 +116,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/semantic_classifier.cpp
     src/sensitive_data.cpp
     src/html_viewer_reader.cpp
+    src/object_tree_diag.cpp
     src/element_renderer_registry.cpp
     src/element_renderers.cpp
     src/grid_analyzer.cpp

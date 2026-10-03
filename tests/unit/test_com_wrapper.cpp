@@ -1,3 +1,4 @@
+#include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
 #include "include/com/wrapper.h"
@@ -2649,6 +2650,15 @@ public:
     int busy_true_reads = -1;
     int start_transaction_calls = 0;
     std::chrono::steady_clock::time_point start_transaction_at{};
+    // GuiSession.GetObjectTree(Id, [props]): records the call, answers object_tree_payload (a UTF-16
+    // string) or fails with object_tree_hresult. Names in unknown_names do not resolve a DISPID.
+    int object_tree_calls = 0;
+    std::wstring object_tree_id;
+    std::vector<std::wstring> object_tree_props;
+    bool object_tree_props_passed = false;
+    std::wstring object_tree_payload;
+    HRESULT object_tree_hresult = S_OK;
+    std::set<std::wstring> unknown_names;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2675,6 +2685,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID,
                                             DISPID* ids) override {
         if (!names || !ids || count != 1) return E_INVALIDARG;
+        if (unknown_names.count(names[0])) return DISP_E_UNKNOWNNAME;
         auto& table = name_table();
         for (size_t i = 0; i < table.size(); ++i) {
             if (table[i] == names[0]) { *ids = static_cast<DISPID>(1000 + i); return S_OK; }
@@ -2703,6 +2714,37 @@ public:
         if ((flags & DISPATCH_METHOD) && name == L"StartTransaction") {
             ++start_transaction_calls;
             start_transaction_at = std::chrono::steady_clock::now();
+            return S_OK;
+        }
+        if ((flags & DISPATCH_METHOD) && name == L"GetObjectTree") {
+            ++object_tree_calls;
+            if (!params || params->cArgs < 1 || params->cArgs > 2) return DISP_E_BADPARAMCOUNT;
+            const VARIANT& id_arg = params->rgvarg[params->cArgs - 1];
+            if (id_arg.vt != VT_BSTR) return DISP_E_TYPEMISMATCH;
+            object_tree_id = id_arg.bstrVal;
+            object_tree_props.clear();
+            object_tree_props_passed = params->cArgs == 2;
+            if (object_tree_props_passed) {
+                const VARIANT& props_arg = params->rgvarg[0];
+                if (props_arg.vt != (VT_ARRAY | VT_VARIANT)) return DISP_E_TYPEMISMATCH;
+                SAFEARRAY* array = props_arg.parray;
+                LONG lower = 0, upper = -1;
+                SafeArrayGetLBound(array, 1, &lower);
+                SafeArrayGetUBound(array, 1, &upper);
+                for (LONG i = lower; i <= upper; ++i) {
+                    VARIANT element;
+                    VariantInit(&element);
+                    SafeArrayGetElement(array, &i, &element);
+                    if (element.vt != VT_BSTR) { VariantClear(&element); return DISP_E_TYPEMISMATCH; }
+                    object_tree_props.emplace_back(element.bstrVal);
+                    VariantClear(&element);
+                }
+            }
+            if (FAILED(object_tree_hresult)) return object_tree_hresult;
+            if (!result) return S_OK;
+            VariantInit(result);
+            result->vt = VT_BSTR;
+            result->bstrVal = SysAllocString(object_tree_payload.c_str());
             return S_OK;
         }
         if ((flags & DISPATCH_METHOD) && name == L"FindById") {
@@ -3364,4 +3406,54 @@ TEST_CASE("Tab whose reported children yield nothing falls back to the user area
     for (const auto& element : result.data.at("tabs_content").at(0).at("elements"))
         extra_found |= element.value("id", "").find("txtEXTRA") != std::string::npos;
     REQUIRE(extra_found);
+}
+
+TEST_CASE("GuiSession.GetObjectTree wrapper passes id and props and returns the JSON text", "[com][session][bulk]") {
+    ScopedDispatchCacheReset cache_reset;
+    ComGuiSession::reset_object_tree_support();
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+    node->object_tree_payload = L"{\"children\":[{\"Id\":\"/app/con[0]/ses[0]/wnd[0]\",\"Text\":\"Müller\"}]}";
+
+    SECTION("props travel as a variant array of strings and the id as the first argument") {
+        const auto tree = session->get_object_tree("wnd[0]", {"Id", "Type", "Text"});
+        REQUIRE(tree.has_value());
+        REQUIRE(*tree == "{\"children\":[{\"Id\":\"/app/con[0]/ses[0]/wnd[0]\",\"Text\":\"M\xc3\xbc" "ller\"}]}");
+        REQUIRE(node->object_tree_calls == 1);
+        REQUIRE(node->object_tree_id == L"wnd[0]");
+        REQUIRE(node->object_tree_props_passed);
+        REQUIRE(node->object_tree_props == std::vector<std::wstring>{L"Id", L"Type", L"Text"});
+        REQUIRE(ComGuiSession::object_tree_support() == ObjectTreeSupport::Available);
+    }
+    SECTION("no props passes only the id (the Optional parameter stays absent)") {
+        REQUIRE(session->get_object_tree("wnd[0]").has_value());
+        REQUIRE_FALSE(node->object_tree_props_passed);
+        REQUIRE(node->object_tree_id == L"wnd[0]");
+    }
+    SECTION("an empty answer is treated as unusable") {
+        node->object_tree_payload.clear();
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+    }
+    SECTION("a failing call returns nullopt and is retried on the next call") {
+        node->object_tree_hresult = DISP_E_EXCEPTION;
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(ComGuiSession::object_tree_support() != ObjectTreeSupport::Missing);
+        node->object_tree_hresult = S_OK;
+        REQUIRE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(node->object_tree_calls == 2);
+    }
+    SECTION("a missing method marks the support Missing and later calls do not touch COM") {
+        node->unknown_names.insert(L"GetObjectTree");
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(ComGuiSession::object_tree_support() == ObjectTreeSupport::Missing);
+        node->unknown_names.clear();   // even if the name resolves now, the process stays on the legacy path
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(node->object_tree_calls == 0);
+        ComGuiSession::reset_object_tree_support();
+        SapGuiObject::clear_dispid_cache();   // the DISPID miss itself is cached per type as well
+        REQUIRE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+    }
 }

@@ -1777,6 +1777,20 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
     return result;
 }
 
+Result CommandHandler::handle_object_tree_dump(std::optional<int> connection_id, const std::string& id,
+                                               const std::vector<std::string>& props)
+{
+    auto conn_result = resolve_and_validate_connection(connection_id);
+    if (conn_result.status != ResultT<Connection>::Status::Success) {
+        return result_from_error(conn_result);
+    }
+    auto result = engine_->dump_object_tree(id, props);
+    if (result.status == Result::Status::Success) {
+        result.data["connection_id"] = conn_result.value.id;
+    }
+    return result;
+}
+
 Result CommandHandler::handle_screen_find(const sap::ScreenFindOptions& query,
                                           std::optional<int> connection_id)
 {

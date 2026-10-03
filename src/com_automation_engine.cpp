@@ -1,4 +1,5 @@
 #include "include/com_automation_engine.h"
+#include "include/object_tree_diag.h"
 #include "include/session_facts.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
@@ -2028,6 +2029,29 @@ Result ComAutomationEngine::find_screen(const ScreenFindOptions& query) {
     }
     screen_reader_->set_probe_all(probe_all_ || query.probe_all);
     return screen_reader_->find(query);
+}
+
+Result ComAutomationEngine::dump_object_tree(const std::string& id, const std::vector<std::string>& props) {
+    Result result;
+    try {
+        auto session = ensure_session();
+        std::string target = id;
+        if (target.empty()) {
+            auto window = session->get_active_window();
+            if (!window) throw ComException("No active window");
+            target = window->get_id();
+        }
+        result.data = diag::build_object_tree_diagnostic(
+            target, props, [&session](const std::string& tree_id, const std::vector<std::string>& tree_props) {
+                return session->get_object_tree(tree_id, tree_props);
+            });
+        result.status = Result::Status::Success;
+    } catch (const std::exception& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "COM_ERROR";
+        result.error["message"] = e.what();
+    }
+    return result;
 }
 
 Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& options) {

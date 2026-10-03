@@ -336,6 +336,9 @@ public:
     IDispatch* get_com_object() const { return dispatch_; }
 };
 
+/// Process-wide knowledge about GuiSession.GetObjectTree (SAP GUI 7.70 PL3 and later).
+enum class ObjectTreeSupport { Unknown, Available, Missing };
+
 /// COM-based SAP GUI session wrapper
 class ComGuiSession : public SapGuiObject {
 public:
@@ -357,6 +360,15 @@ public:
 
     /// Find element by ID/path
     ComGuiElementPtr find_element_by_id(const std::string& id) const;
+
+    /// GuiSession.GetObjectTree(id, props): the element `id` and all its descendants as one JSON string
+    /// (one COM round trip). `props` empty passes no property list (Ids only). Returns nullopt when the
+    /// method is unavailable (older SAP GUI: the process is then remembered as Missing), the call fails
+    /// or the answer is empty. Never logs the payload.
+    std::optional<std::string> get_object_tree(const std::string& id,
+                                               const std::vector<std::string>& props = {}) const;
+    static ObjectTreeSupport object_tree_support();
+    static void reset_object_tree_support();
 
     /// Execute SAP transaction by code
     void start_transaction(const std::string& tcode);

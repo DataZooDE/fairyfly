@@ -106,6 +106,7 @@ public:
     Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20,
                                  const std::string& only_tab = "") override;
     Result find_screen(const ScreenFindOptions& query) override;
+    Result dump_object_tree(const std::string& id, const std::vector<std::string>& props) override;
     void set_probe_all(bool probe_all) override { probe_all_ = probe_all; }
     void set_row_offset(int row_offset) override { row_offset_ = row_offset < 0 ? 0 : row_offset; }
     void set_grid_rows_needed(bool needed) override { grid_rows_needed_ = needed; }

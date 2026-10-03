@@ -6,6 +6,8 @@
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <chrono>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 namespace fairyfly {
@@ -62,6 +64,93 @@ ComGuiElementPtr ComGuiSession::find_element_by_id(const std::string& id) const 
         throw ComException("Element not found: " + id);
     }
     return ComGuiElement::create(elem);
+}
+
+namespace {
+std::mutex s_object_tree_mutex;
+ObjectTreeSupport s_object_tree_support = ObjectTreeSupport::Unknown;
+
+void set_object_tree_support(ObjectTreeSupport value) {
+    std::lock_guard<std::mutex> lock(s_object_tree_mutex);
+    s_object_tree_support = value;
+}
+} // namespace
+
+ObjectTreeSupport ComGuiSession::object_tree_support() {
+    std::lock_guard<std::mutex> lock(s_object_tree_mutex);
+    return s_object_tree_support;
+}
+
+void ComGuiSession::reset_object_tree_support() { set_object_tree_support(ObjectTreeSupport::Unknown); }
+
+std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
+                                                          const std::vector<std::string>& props) const {
+    if (!dispatch_) throw ComException("Null object");
+    if (object_tree_support() == ObjectTreeSupport::Missing) return std::nullopt;
+    try {
+        (void)get_type();
+    } catch (const std::exception&) {}
+    DISPID dispid = DISPID_UNKNOWN;
+    if (FAILED(resolve_dispid(L"GetObjectTree", &dispid))) {
+        set_object_tree_support(ObjectTreeSupport::Missing);
+        spdlog::info("GuiSession.GetObjectTree is not available (SAP GUI older than 7.70 PL3?)");
+        return std::nullopt;
+    }
+
+    // IDispatch::Invoke wants the arguments in reverse order: [0] = props (optional), last = id.
+    VARIANT args[2];
+    VariantInit(&args[0]);
+    VariantInit(&args[1]);
+    UINT arg_count = 1;
+    VARIANT& id_arg = props.empty() ? args[0] : args[1];
+    const auto wide_id = com::utf8_to_wide(id);
+    id_arg.vt = VT_BSTR;
+    id_arg.bstrVal = SysAllocStringLen(wide_id.data(), static_cast<UINT>(wide_id.size()));
+    if (!props.empty()) {
+        arg_count = 2;
+        SAFEARRAY* array = SafeArrayCreateVector(VT_VARIANT, 0, static_cast<ULONG>(props.size()));
+        if (!array) {
+            VariantClear(&id_arg);
+            return std::nullopt;
+        }
+        for (LONG i = 0; i < static_cast<LONG>(props.size()); ++i) {
+            const auto wide_prop = com::utf8_to_wide(props[static_cast<size_t>(i)]);
+            VARIANT element;
+            VariantInit(&element);
+            element.vt = VT_BSTR;
+            element.bstrVal = SysAllocStringLen(wide_prop.data(), static_cast<UINT>(wide_prop.size()));
+            SafeArrayPutElement(array, &i, &element);   // copies the element
+            VariantClear(&element);
+        }
+        args[0].vt = VT_ARRAY | VT_VARIANT;
+        args[0].parray = array;
+    }
+    DISPPARAMS params = {args, nullptr, arg_count, 0};
+    VARIANT result;
+    VariantInit(&result);
+    const auto started = std::chrono::steady_clock::now();
+    const HRESULT hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    VariantClear(&args[0]);
+    VariantClear(&args[1]);
+    if (FAILED(hr)) {
+        VariantClear(&result);
+        if (hr == DISP_E_MEMBERNOTFOUND || hr == DISP_E_UNKNOWNNAME) {
+            set_object_tree_support(ObjectTreeSupport::Missing);
+        }
+        spdlog::warn("GuiSession.GetObjectTree failed hr=0x{:08X} after {} ms", static_cast<unsigned>(hr), elapsed_ms);
+        return std::nullopt;
+    }
+    std::string text = safe_bstr_to_string(result, "GetObjectTree");
+    VariantClear(&result);
+    if (text.empty()) {
+        spdlog::warn("GuiSession.GetObjectTree returned an empty answer after {} ms", elapsed_ms);
+        return std::nullopt;
+    }
+    set_object_tree_support(ObjectTreeSupport::Available);
+    spdlog::debug("GuiSession.GetObjectTree|bytes={}|ms={}", text.size(), elapsed_ms);
+    return text;
 }
 
 void ComGuiSession::start_transaction(const std::string& tcode) {

@@ -183,6 +183,9 @@ public:
                              bool compact = false, int max_rows = 20,
                              const std::string& only_tab = "", bool probe_all = false,
                              int row_offset = 0);
+    /// Diagnostic only (FAIRYFLY_DIAG=1, checked by the command): raw object tree dump of `id`.
+    Result handle_object_tree_dump(std::optional<int> connection_id, const std::string& id,
+                                   const std::vector<std::string>& props);
     Result handle_screen_find(const sap::ScreenFindOptions& query,
                               std::optional<int> connection_id);
     Result handle_screenshot(std::optional<int> connection_id, const ScreenshotOptions& options);
