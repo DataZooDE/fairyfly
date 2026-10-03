@@ -109,12 +109,15 @@ ToolSpec make_fill_spec() {
         "GridView cell (row + column; checkbox toggles a checkbox cell, commit notifies SAP after the change). "
         "Confirm with the user before changing values. Never put passwords or other secrets into fill values "
         "(use gui_session_login for authentication). The result echoes the value read back from the control, "
-        "except for credential fields (shown redacted); audit logs never contain the value. Give exactly one of value or clear.";
+        "except for credential fields (shown redacted); audit logs never contain the value. Give exactly one of value or clear. "
+        "Check boxes take true/false (also 1/0, yes/no, on/off, x) and report the resulting `selected`; radio buttons "
+        "can only be selected; combo boxes accept the entry key or its displayed text and report the resulting key/value "
+        "(INVALID_ARGUMENT lists the available entries when nothing matches).";
     spec.def.input_schema = json{
         {"type", "object"},
         {"properties",
          catalog::with_element_aliases({{"element", {{"type", "string"}, {"description", "SAP element id from gui_screen_read, e.g. wnd[0]/usr/txtFIELD (aliases: id, element_id)"}}},
-          {"value", {{"type", "string"}, {"description", "Text to enter (omit when clear is true). For checkbox cells: X/1/true or 0/false"}}},
+          {"value", {{"type", "string"}, {"description", "Text to enter (omit when clear is true). For checkbox cells: X/1/true or 0/false. For a GuiCheckBox element: true/false/1/0/yes/no/on/off/x. For a GuiRadioButton: true/1/x selects it (it cannot be cleared). For a GuiComboBox: an entry key or its displayed value"}}},
           {"clear", {{"type", "boolean"}, {"description", "Empty the field instead of entering a value"}}},
           {"row", {{"type", "integer"}, {"minimum", 0}, {"description", "Zero-based GridView row (requires column)"}}},
           {"column", {{"type", "string"}, {"description", "GridView column id (requires row)"}}},

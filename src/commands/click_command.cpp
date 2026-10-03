@@ -15,7 +15,8 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","click"});
-        cmd_->add_option("element", element_, "Element ID (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3])")
+        cmd_->add_option("element", element_, "Element ID (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3]). "
+            "A check box is toggled, a radio button is selected; the result reports the resulting 'selected' state")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
         cmd_->add_flag("--wait-for-window", wait_for_window_,

@@ -2659,6 +2659,9 @@ public:
     std::wstring object_tree_payload;
     HRESULT object_tree_hresult = S_OK;
     std::set<std::wstring> unknown_names;
+    // Property writes: recorded in `puts` and stored into strings/bools; names in put_fails answer DISP_E_EXCEPTION.
+    std::vector<std::pair<std::wstring, std::wstring>> puts;
+    std::set<std::wstring> put_fails;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2756,6 +2759,20 @@ public:
             result->vt = VT_DISPATCH;
             result->pdispVal = it->second;
             it->second->AddRef();
+            return S_OK;
+        }
+        if ((flags & DISPATCH_PROPERTYPUT) && params && params->cArgs == 1) {
+            if (put_fails.count(name)) return DISP_E_EXCEPTION;
+            const VARIANT& arg = params->rgvarg[0];
+            if (arg.vt == VT_BSTR) {
+                strings[name] = arg.bstrVal;
+                puts.emplace_back(name, std::wstring(arg.bstrVal));
+            } else if (arg.vt == VT_BOOL) {
+                bools[name] = arg.boolVal != VARIANT_FALSE;
+                puts.emplace_back(name, std::wstring(arg.boolVal != VARIANT_FALSE ? L"true" : L"false"));
+            } else {
+                return DISP_E_TYPEMISMATCH;
+            }
             return S_OK;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
@@ -3507,4 +3524,214 @@ TEST_CASE("ElementMetadataExtractor plain elements keep their recorded JSON", "[
     CHECK(dump(check) == R"({"capabilities":["selectable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/chkBNAME","label":"User","name":"BNAME","selected":true,"text":"Miller","type":"GuiCheckBox","visible":true})");
     CHECK(dump(box) == R"({"capabilities":["container"],"changeable":false,"container_type":"group","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/boxBNAME","is_group":true,"name":"BOX","text":"Group","type":"GuiBox","visible":false})");
     CHECK(dump(container) == R"({"capabilities":["container"],"changeable":false,"child_count":2,"children":["/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME"],"container_type":"form","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/subSUB","name":"","text":"","type":"GuiSimpleContainer","visible":false})");
+}
+
+namespace {
+FakeNode* make_check_node(const wchar_t* type, bool selected) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = type;
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG";
+    node->strings[L"Text"] = L"Flag";
+    node->bools[L"Changeable"] = true;
+    node->bools[L"Selected"] = selected;
+    node->put_fails.insert(L"Text");  // the checkbox Text property is read-only in SAP
+    return node;
+}
+
+FakeNode* make_combo_node(const std::vector<std::pair<std::wstring, std::wstring>>& entries, bool with_entries = true) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiComboBox";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/cmbLANG";
+    node->strings[L"Key"] = L"DE";
+    node->strings[L"Value"] = L"German";
+    node->bools[L"Changeable"] = true;
+    if (!with_entries) return node;
+    auto* collection = new FakeNode();
+    collection->enumerable = true;
+    for (const auto& [key, value] : entries) {
+        auto* entry = new FakeNode();
+        entry->strings[L"Key"] = key;
+        entry->strings[L"Value"] = value;
+        collection->items.push_back(entry);
+    }
+    node->dispatches[L"Entries"] = collection;
+    return node;
+}
+}  // namespace
+
+TEST_CASE("Check box click toggles instead of always selecting", "[com][checkbox]") {
+    ScopedDispatchCacheReset cache_reset;
+    SECTION("a checked box becomes unchecked") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(false));
+    }
+    SECTION("an unchecked box becomes checked") {
+        auto* node = make_check_node(L"GuiCheckBox", false);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(true));
+    }
+    SECTION("a radio button click selects it") {
+        auto* node = make_check_node(L"GuiRadioButton", false);
+        node->on_select = [node] { node->bools[L"Selected"] = true; };
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(true));
+    }
+    SECTION("an unreadable Selected state is not toggled blindly") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        node->unknown_names.insert(L"Selected");
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK_THROWS_AS(element->press(), ComException);
+        CHECK(node->puts.empty());
+    }
+}
+
+TEST_CASE("Check box and radio button fill write Selected", "[com][checkbox]") {
+    ScopedDispatchCacheReset cache_reset;
+    using Status = ComGuiElement::FillOutcome::Status;
+    SECTION("spellings are case-insensitive and trimmed") {
+        for (const char* off : {"false", "0", "no", "off", " FALSE ", "No", ""}) {
+            auto* node = make_check_node(L"GuiCheckBox", true);
+            auto element = ComGuiElement::create(node);
+            node->Release();
+            const auto outcome = element->fill_value(off);
+            INFO("value '" << off << "'");
+            CHECK(outcome.status == Status::Written);
+            CHECK(outcome.selected == std::optional<bool>(false));
+        }
+        for (const char* on : {"true", "1", "yes", "on", "X", " x "}) {
+            auto* node = make_check_node(L"GuiCheckBox", false);
+            auto element = ComGuiElement::create(node);
+            node->Release();
+            const auto outcome = element->fill_value(on);
+            INFO("value '" << on << "'");
+            CHECK(outcome.status == Status::Written);
+            CHECK(outcome.selected == std::optional<bool>(true));
+        }
+    }
+    SECTION("fill never touches the read-only Text property") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->fill_value("false");
+        for (const auto& put : node->puts) CHECK(put.first != L"Text");
+    }
+    SECTION("an unknown spelling is INVALID_ARGUMENT and lists the accepted ones") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("maybe");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("maybe") != std::string::npos);
+        CHECK(outcome.message.find("yes, no, on, off") != std::string::npos);
+        CHECK(node->puts.empty());
+    }
+    SECTION("a radio button is selected by true and cannot be cleared") {
+        auto* node = make_check_node(L"GuiRadioButton", false);
+        node->on_select = [node] { node->bools[L"Selected"] = true; };
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto cleared = element->fill_value("false");
+        CHECK(cleared.status == Status::InvalidArgument);
+        CHECK(cleared.message.find("cannot be cleared") != std::string::npos);
+        CHECK(node->select_calls == 0);
+        const auto selected = element->fill_value("1");
+        CHECK(selected.status == Status::Written);
+        CHECK(selected.selected == std::optional<bool>(true));
+    }
+    SECTION("a non-changeable check box is reported read-only") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        node->bools[L"Changeable"] = false;
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK(element->fill_value("false").status == Status::ReadOnly);
+        CHECK(node->puts.empty());
+    }
+}
+
+TEST_CASE("Combo box fill accepts the key or the displayed value", "[com][combobox]") {
+    ScopedDispatchCacheReset cache_reset;
+    using Status = ComGuiElement::FillOutcome::Status;
+    const std::vector<std::pair<std::wstring, std::wstring>> entries{
+        {L"DE", L"German"}, {L"EN", L"English"}, {L"FR", L"French"}};
+    const auto key_written = [](FakeNode* node) {
+        std::wstring key;
+        for (const auto& put : node->puts) if (put.first == L"Key") key = put.second;
+        return key;
+    };
+    SECTION("key match") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("EN");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+        CHECK(outcome.key == std::optional<std::string>("EN"));
+    }
+    SECTION("display text match writes the key of the entry") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("English");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+    }
+    SECTION("case and surrounding whitespace are tolerated") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK(element->fill_value("  fRENCH ").status == Status::Written);
+        CHECK(key_written(node) == L"FR");
+    }
+    SECTION("no match lists the available key = value pairs and writes nothing") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("Klingon");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("Klingon") != std::string::npos);
+        CHECK(outcome.message.find("EN = English") != std::string::npos);
+        CHECK(outcome.message.find("DE = German") != std::string::npos);
+        CHECK(node->puts.empty());
+    }
+    SECTION("the option list is capped at 30 entries") {
+        std::vector<std::pair<std::wstring, std::wstring>> many;
+        for (int i = 0; i < 40; ++i) many.emplace_back(L"K" + std::to_wstring(i), L"V" + std::to_wstring(i));
+        auto* node = make_combo_node(many);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("nothing");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("K29 = V29") != std::string::npos);
+        CHECK(outcome.message.find("K30 = V30") == std::string::npos);
+        CHECK(outcome.message.find("10 more") != std::string::npos);
+    }
+    SECTION("entries unavailable falls back to a direct Key write") {
+        auto* node = make_combo_node({}, false);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("EN");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+    }
+    SECTION("entries unavailable and the direct write fails gives a clear error") {
+        auto* node = make_combo_node({}, false);
+        node->put_fails.insert(L"Key");
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        try {
+            element->fill_value("English");
+            FAIL("expected a ComException");
+        } catch (const ComException& e) {
+            CHECK(std::string(e.what()).find("entries are unavailable") != std::string::npos);
+            CHECK(std::string(e.what()).find("English") != std::string::npos);
+        }
+    }
 }

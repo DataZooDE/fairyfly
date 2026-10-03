@@ -144,21 +144,153 @@ std::string ComGuiElement::get_text() const {
     return resolve_display_text(in);
 }
 
-bool ComGuiElement::set_text(const std::string& text) {
-    // An absent Changeable property is common on SAP GUI objects. Only block
-    // the write when SAP explicitly reports VARIANT_FALSE.
+bool ComGuiElement::explicitly_read_only() const {
     DISPID changeable_id;
-    if (SUCCEEDED(resolve_dispid(L"Changeable", &changeable_id))) {
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        _variant_t changeable;
-        const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_PROPERTYGET, &no_params,
-                                             &changeable, nullptr, nullptr);
-        if (SUCCEEDED(hr) && changeable.vt == VT_BOOL &&
-            changeable.boolVal == VARIANT_FALSE) {
-            return false;
-        }
+    if (FAILED(resolve_dispid(L"Changeable", &changeable_id))) return false;
+    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+    _variant_t changeable;
+    const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
+                                         DISPATCH_PROPERTYGET, &no_params,
+                                         &changeable, nullptr, nullptr);
+    return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
+}
+
+namespace {
+std::string trim_copy(const std::string& text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    const auto last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+std::string lower_copy(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+}  // namespace
+
+std::optional<bool> ComGuiElement::parse_check_value(const std::string& value) {
+    const std::string v = lower_copy(trim_copy(value));
+    if (v == "true" || v == "1" || v == "yes" || v == "on" || v == "x") return true;
+    if (v == "false" || v == "0" || v == "no" || v == "off" || v.empty()) return false;
+    return std::nullopt;
+}
+
+std::optional<bool> ComGuiElement::get_selected() const {
+    const auto read = read_bool_property_strict(L"Selected");
+    if (read.status != PropertyStatus::Ok) return std::nullopt;
+    return read.value == "true";
+}
+
+std::optional<bool> ComGuiElement::toggle_selected() {
+    if (get_classified_type() != GuiElementType::CheckBox) {
+        throw ComException("toggle only works on check boxes");
     }
+    const auto current = get_selected();
+    if (!current) throw ComException("Cannot read the check box Selected state, so it is not toggled blindly");
+    select(!*current);
+    return get_selected();
+}
+
+ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
+    FillOutcome outcome;
+    if (explicitly_read_only()) {
+        outcome.status = FillOutcome::Status::ReadOnly;
+        return outcome;
+    }
+    const std::string type = get_type();
+    const auto invalid = [&](std::string message) {
+        outcome.status = FillOutcome::Status::InvalidArgument;
+        outcome.message = std::move(message);
+        return outcome;
+    };
+
+    if (type == "GuiCheckBox" || type == "GuiRadioButton") {
+        const bool radio = type == "GuiRadioButton";
+        const auto wanted = parse_check_value(value);
+        if (!wanted) {
+            return invalid("Cannot interpret '" + value + "' as a " + (radio ? "radio button" : "check box") +
+                           " value; accepted: true, false, 1, 0, yes, no, on, off, x or an empty value (case-insensitive)");
+        }
+        if (radio && !*wanted) {
+            return invalid("A radio button cannot be cleared; select another option of the group instead");
+        }
+        select(*wanted);
+        outcome.selected = get_selected();
+        return outcome;
+    }
+
+    if (type == "GuiComboBox") {
+        struct Entry { std::string key, value; };
+        std::vector<Entry> entries;
+        try {
+            if (auto entries_dispatch = get_dispatch_property(L"Entries")) {
+                SapGuiCollection<ComGuiElement> collection(entries_dispatch);
+                const bool walked = collection.for_each([&](const std::shared_ptr<ComGuiElement>& entry) {
+                    entries.push_back({entry->get_string_property(L"Key"), entry->get_string_property(L"Value")});
+                });
+                if (!walked) entries.clear();
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("ComboBox entries unavailable: {}", e.what());
+            entries.clear();
+        }
+        const bool entries_known = !entries.empty();
+
+        std::string key_to_write = value;
+        if (entries_known) {
+            const std::string wanted = trim_copy(value);
+            const std::string wanted_lower = lower_copy(wanted);
+            const Entry* match = nullptr;
+            for (const auto& entry : entries) {  // exact key first, then the displayed value
+                if (trim_copy(entry.key) == wanted) { match = &entry; break; }
+            }
+            if (!match) {
+                for (const auto& entry : entries) {
+                    if (lower_copy(trim_copy(entry.value)) == wanted_lower) { match = &entry; break; }
+                }
+            }
+            if (!match) {  // keys that differ only in case ("en" for "EN")
+                for (const auto& entry : entries) {
+                    if (lower_copy(trim_copy(entry.key)) == wanted_lower) { match = &entry; break; }
+                }
+            }
+            if (!match) {
+                constexpr size_t kMaxListed = 30;
+                std::string list;
+                for (size_t i = 0; i < entries.size() && i < kMaxListed; ++i) {
+                    if (i) list += "; ";
+                    list += entries[i].key + " = " + entries[i].value;
+                }
+                if (entries.size() > kMaxListed) {
+                    list += "; ... (" + std::to_string(entries.size() - kMaxListed) + " more)";
+                }
+                return invalid("No combo box entry matches '" + value +
+                               "' (key or displayed value). Available entries (key = value): " + list);
+            }
+            key_to_write = match->key;
+        }
+
+        try {
+            set_string_property(L"Key", key_to_write);
+        } catch (const std::exception& e) {
+            if (entries_known) throw;
+            throw ComException("Combo box entries are unavailable, so '" + value +
+                               "' was written as a key and SAP rejected it: " + e.what());
+        }
+        try { outcome.key = get_string_property(L"Key"); } catch (const std::exception&) {}
+        try { outcome.display_value = get_string_property(L"Value"); } catch (const std::exception&) {}
+        return outcome;
+    }
+
+    set_string_property(L"Text", value);
+    spdlog::debug("Set text on element type {}", type);
+    return outcome;
+}
+
+bool ComGuiElement::set_text(const std::string& text) {
+    if (explicitly_read_only()) return false;
     const std::string type = get_type();
     if (type == "GuiComboBox") {
         set_string_property(L"Key", text);
@@ -279,8 +411,13 @@ void ComGuiElement::press() {
     try {
         std::string elem_type = get_type();
         if (elem_type == "GuiTab" || elem_type == "GuiMenu" ||
-            elem_type == "GuiRadioButton" || elem_type == "GuiCheckBox") {
+            elem_type == "GuiRadioButton") {
             select(true);
+            return;
+        }
+        if (elem_type == "GuiCheckBox") {
+            // A click flips a check box; assigning Selected=true would leave a checked box checked.
+            toggle_selected();
             return;
         }
 
