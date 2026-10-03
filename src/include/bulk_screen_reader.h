@@ -24,6 +24,14 @@ struct ObjectTreeServerFault : std::runtime_error {
     ObjectTreeServerFault() : std::runtime_error("GetObjectTree raised RPC_E_SERVERFAULT") {}
 };
 
+/// Diagnostic fault injection for live robustness checks (FAIRYFLY_DIAG=1 and FAIRYFLY_BULK_FAULT=<mode>):
+/// unsupported (no answer), garbage (not JSON), wrongroot (a tree for another element), fault
+/// (ObjectTreeServerFault), exception (runtime_error). Any other mode returns `real` unchanged.
+ObjectTreeSource wrap_with_injected_fault(ObjectTreeSource real, const std::string& mode);
+
+/// The mode to inject: `fault_env` only when `diag_env` is exactly "1", else "".
+std::string injected_fault_mode(const char* diag_env, const char* fault_env);
+
 /// The two values a tree answer cannot carry (AccLabel is ignored by SAP, Selected faults the call).
 struct ElementProbe {
     std::string acc_label;

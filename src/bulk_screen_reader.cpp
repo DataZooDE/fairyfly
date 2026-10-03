@@ -165,5 +165,37 @@ std::optional<json> build_bulk_plain_element(const TreeSnapshot& snapshot, const
     return build_plain_metadata(facts);
 }
 
+ObjectTreeSource wrap_with_injected_fault(ObjectTreeSource real, const std::string& mode) {
+    if (mode == "unsupported") {
+        return [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> { return std::nullopt; };
+    }
+    if (mode == "garbage") {
+        return [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> {
+            return std::string("{not json");
+        };
+    }
+    if (mode == "wrongroot") {
+        return [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> {
+            return std::string(R"({"children":[{"properties":{"Id":"/injected/wrong-root","Type":"GuiMainWindow"}}]})");
+        };
+    }
+    if (mode == "fault") {
+        return [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> {
+            throw ObjectTreeServerFault();
+        };
+    }
+    if (mode == "exception") {
+        return [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> {
+            throw std::runtime_error("injected object tree failure");
+        };
+    }
+    return real;
+}
+
+std::string injected_fault_mode(const char* diag_env, const char* fault_env) {
+    if (!diag_env || std::string(diag_env) != "1" || !fault_env) return "";
+    return fault_env;
+}
+
 } // namespace sap
 } // namespace fairyfly

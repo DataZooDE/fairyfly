@@ -803,12 +803,17 @@ TreeReaderMode ScreenReader::effective_tree_reader_mode() const {
 
 ObjectTreeSource ScreenReader::object_tree_source() const {
     if (tree_source_) return tree_source_;
-    return [session = session_](const std::string& id, const std::vector<std::string>& props) {
+    ObjectTreeSource real = [session = session_](const std::string& id, const std::vector<std::string>& props) {
         ObjectTreeFailure why = ObjectTreeFailure::None;
         auto answer = session->get_object_tree(id, props, &why);
         if (!answer && why == ObjectTreeFailure::ServerFault) throw ObjectTreeServerFault();
         return answer;
     };
+    // Live robustness checks: FAIRYFLY_DIAG=1 + FAIRYFLY_BULK_FAULT=<mode> simulate a failing GetObjectTree.
+    const char* diag = std::getenv("FAIRYFLY_DIAG");
+    const char* fault = std::getenv("FAIRYFLY_BULK_FAULT");
+    const std::string mode = injected_fault_mode(diag, fault);
+    return mode.empty() ? real : wrap_with_injected_fault(std::move(real), mode);
 }
 
 ElementProbeSource ScreenReader::element_probe_source() const {
