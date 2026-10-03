@@ -105,7 +105,15 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
     } else {
         describe_element(element_id, type, text, tooltip);
     }
-    rule = sap::matched_read_only_rule(type, text, tooltip, element_id);
+    std::string judged_id = element_id;
+    if (judged_id.rfind("@active", 0) == 0) {
+        try {
+            judged_id = sap::expand_active_window_prefix(judged_id, engine_->get_active_window_id().id);
+        } catch (const std::exception& e) {
+            spdlog::debug("Read-only guard could not resolve the active window for {}: {}", element_id, e.what());
+        }
+    }
+    rule = sap::matched_read_only_rule(type, text, tooltip, judged_id);
     if (rule.empty()) return std::nullopt;
     return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
 }

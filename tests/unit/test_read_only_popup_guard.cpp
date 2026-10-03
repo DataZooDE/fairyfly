@@ -58,3 +58,19 @@ TEST_CASE("read-only guard refuses answer buttons of popups it cannot classify",
         CHECK_FALSE(matched_read_only_rule("GuiButton", "OK", "", "wnd[1]/usr/btnX").empty());  // relative id
     }
 }
+
+TEST_CASE("@active element ids are judged against the real active window", "[read_only][popup]") {
+    using fairyfly::sap::expand_active_window_prefix;
+    const std::string popup = "/app/con[0]/ses[0]/wnd[1]";
+    CHECK(expand_active_window_prefix("@active/usr/btnBUTTON_1", popup) == popup + "/usr/btnBUTTON_1");
+    CHECK(expand_active_window_prefix("@active", popup) == popup);
+    CHECK(expand_active_window_prefix("/app/con[0]/ses[0]/wnd[0]/usr/btnX", popup) == "/app/con[0]/ses[0]/wnd[0]/usr/btnX");
+    CHECK(expand_active_window_prefix("@active/usr/btnX", "") == "@active/usr/btnX");   // unknown window: unchanged
+    // with the window known, an answer button given as @active/... gets the popup rule
+    const auto expanded = expand_active_window_prefix("@active/usr/btnBUTTON_1", popup);
+    CHECK(matched_read_only_rule("GuiButton", "Yes", "", expanded) == "popup-button:yes");
+    CHECK(matched_read_only_rule("GuiButton", "No", "", expanded).empty());
+    // the same text on the main window stays allowed
+    CHECK(matched_read_only_rule("GuiButton", "Yes", "",
+          expand_active_window_prefix("@active/usr/btnBUTTON_1", "/app/con[0]/ses[0]/wnd[0]")).empty());
+}

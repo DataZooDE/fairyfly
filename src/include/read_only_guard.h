@@ -30,6 +30,11 @@ class ComGuiElement;
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
                                    const std::string& tooltip, const std::string& element_id);
 
+/// Replaces a leading "@active" of an element id by the id of the active window so the guard sees the
+/// real window index (an answer button of a popup must not slip through as @active/usr/btn...).
+/// Unchanged when the id has no such prefix or the active window id is unknown (empty).
+std::string expand_active_window_prefix(const std::string& element_id, const std::string& active_window_id);
+
 /// True when the described control would change SAP state.
 bool is_state_changing_action(const std::string& element_type, const std::string& text,
                               const std::string& tooltip, const std::string& element_id);

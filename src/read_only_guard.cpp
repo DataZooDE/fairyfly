@@ -91,6 +91,11 @@ bool is_safe_popup_label(const std::string& label) {
 
 } // namespace
 
+std::string expand_active_window_prefix(const std::string& element_id, const std::string& active_window_id) {
+    if (active_window_id.empty() || element_id.rfind("@active", 0) != 0) return element_id;
+    return active_window_id + element_id.substr(7);
+}
+
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
                                    const std::string& tooltip, const std::string& element_id) {
     const std::string id = lower(element_id);
