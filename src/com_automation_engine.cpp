@@ -979,6 +979,9 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         }
         result.data["action"] = "click";
         result.data["element_type"] = elem->get_type();
+        if (elem_type == "GuiCheckBox" || elem_type == "GuiRadioButton") {
+            if (const auto selected = elem->get_selected()) result.data["selected"] = *selected;
+        }
         result.data["window"] = resolved_element.get_window().id;
         attach_status_bar(result, before_status, after_status);
 
@@ -1329,9 +1332,16 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         // Set the text. SetText is local to the GUI front end (no server round trip until Enter), so a status bar
         // read right after it still shows the previous action's message: report it only when it changed.
         const auto before_status = read_action_status(session);
-        const bool text_set = elem->set_text(value);
+        const auto outcome = elem->fill_value(value);
         const auto after_status = read_action_status(session);
-        if (!text_set) {
+        if (outcome.status == ComGuiElement::FillOutcome::Status::InvalidArgument) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INVALID_ARGUMENT";
+            result.error["message"] = outcome.message;
+            result.error["element"] = resolved_element.path;
+            return result;
+        }
+        if (outcome.status == ComGuiElement::FillOutcome::Status::ReadOnly) {
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_READ_ONLY";
             result.error["message"] = "Element is not changeable on the current SAP screen";
@@ -1357,6 +1367,9 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         result.data["action"] = "fill";
         result.data["window"] = resolved_element.get_window().id;
         result.data["field"] = build_fill_field_info(probe, value);
+        if (outcome.selected) result.data["selected"] = *outcome.selected;
+        if (outcome.key) result.data["key"] = *outcome.key;
+        if (outcome.display_value) result.data["display_value"] = *outcome.display_value;
         attach_fresh_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();

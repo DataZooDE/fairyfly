@@ -87,6 +87,8 @@ private:
     // fail-closed reads (selection_input_guard) and set_text() always read it fresh.
     mutable std::optional<bool> cached_changeable_;
     bool changeable_cached() const;
+    // An absent Changeable property is common on SAP GUI objects: only an explicit VARIANT_FALSE means read-only.
+    bool explicitly_read_only() const;
 
 public:
     /// Classify element type from type string
@@ -113,6 +115,30 @@ public:
 
     /// Set text in element (for text fields). Returns false if SAP explicitly marks it read-only.
     bool set_text(const std::string& text);
+
+    /// Outcome of fill_value(): what the field-type specific write did.
+    struct FillOutcome {
+        enum class Status { Written, ReadOnly, InvalidArgument };
+        Status status = Status::Written;
+        std::string message;               ///< InvalidArgument: what was wrong and what is accepted
+        std::optional<bool> selected;      ///< GuiCheckBox/GuiRadioButton: Selected read back after the write
+        std::optional<std::string> key;    ///< GuiComboBox: resulting Key read back after the write
+        std::optional<std::string> display_value;  ///< GuiComboBox: resulting Value read back after the write
+    };
+
+    /// Type-aware fill: GuiCheckBox/GuiRadioButton take a boolean spelling and write Selected, GuiComboBox accepts an
+    /// entry key or its displayed value, every other type behaves like set_text(). Throws ComException on COM failures.
+    FillOutcome fill_value(const std::string& value);
+
+    /// Parse true/false/1/0/yes/no/on/off/x/space-empty (case-insensitive, trimmed); nullopt for anything else.
+    static std::optional<bool> parse_check_value(const std::string& value);
+
+    /// Current Selected state of a check box or radio button (nullopt when it cannot be read).
+    std::optional<bool> get_selected() const;
+
+    /// Flip a check box (reads Selected, writes the opposite) and return the new state read back.
+    /// Throws ComException when the state cannot be read or the element is not a check box.
+    std::optional<bool> toggle_selected();
 
     /// Check if element is enabled
     bool is_enabled() const;

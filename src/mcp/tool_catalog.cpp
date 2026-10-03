@@ -533,7 +533,7 @@ std::vector<ToolSpec> read_tool_specs() {
     // gui_element_click --------------------------------------------------------------------------------
     specs.push_back(make_spec(
         "gui_element_click", "Click a SAP element",
-        "Clicks/presses an element by ID (`element`, alias `id` / `element_id`): buttons, checkboxes, tabs, tree nodes "
+        "Clicks/presses an element by ID (`element`, alias `id` / `element_id`): buttons, checkboxes (a click toggles the box and reports the resulting `selected`; radio buttons are selected), tabs, tree nodes "
         "(node_key + tree_action), GridView cells (row/column, optionally doubleclick) or context-menu items. Tree "
         "actions: `select` only MARKS the node and does NOT refresh data shown in other controls (for example the grid "
         "next to the tree in STRUST); `doubleclick` (default) activates the node and loads its data; `expand` / `collapse` "
