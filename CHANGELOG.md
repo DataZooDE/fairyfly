@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixes from the Codex live bug hunts (2026-10-03)
+
+- `--read-only` no longer lets a click on the Yes/OK button of a popup through (found live: Yes on the SU01 Delete Users dialog deleted the user); popup buttons are allowed only when they dismiss or navigate, also in the `@active/...` id form. Clicking a check box or radio button of a selection screen stays allowed under `--read-only` (documented decision).
+- `element click` on a check box toggles it (it only ever checked it); `element fill` accepts true/false/1/0/yes/no/on/off/x for check boxes and radio buttons and the key or the displayed text for combo boxes (`INVALID_ARGUMENT` lists the available entries); the fill/click result reports `selected`, `key` and `display_value`.
+- Grid paging: `screen read --offset N` on a lazily loading ALV grid (SM21, 2,732 rows) returned empty pages until something scrolled the grid there; the reader now scrolls to the rows a window needs and restores the scroll position. The first far scroll can cost SAP up to a minute once.
+- Classic lists: the header row is the row the data rows align with, not the busiest row, so the SE16 result for TVARVC is a table again.
+- `screen capture --format base64 --file` writes the file; a date-format hint taken from the field's previous text no longer produces a warning (it may be an earlier rejected input); error and hint polish (`TAB_NOT_FOUND` carries `tab_id` and `reason`, the inactive-tab hint names the tab id, `element get` answers `ELEMENT_NOT_FOUND`).
+- USR02 credential-hash columns OCOD1-OCOD5, PWDSALT and PWDHISTORY (also table-qualified names such as `USR02-OCOD1`) are redacted like BCODE.
+
 ### Bulk screen reader (default)
 
 - `screen read` can read the whole screen tree with one `GuiSession.GetObjectTree` call: `FAIRYFLY_SCREEN_READER=auto|bulk|legacy` (hidden `--tree-reader` overrides per read). **Bulk is the default** (`auto`): the output shape does not change (no `diagnostics` block unless a mode is chosen explicitly or the read had to fall back) and `FAIRYFLY_SCREEN_READER=legacy` restores the per-element reader. The output (`data.*`) is identical to the per-element reader on 18 live screens and 7 recorded fixtures; on Bigfox the 12 screen reads of the 10-task workload took 8.4 s legacy and 5.4 s bulk (-35%, whole workload -15%). Only 12 vetted properties are requested; `Selected` is never requested because it makes SAP GUI raise `RPC_E_SERVERFAULT` (and probably crashed SAP Logon), `AccLabel` and `Selected` are read per element. Password fields are blanked right after parsing, the raw tree is never logged. `auto` falls back to the per-element reader on any problem and reports why in `diagnostics.screen_reader`; `bulk` returns `OBJECT_TREE_UNAVAILABLE`; a server fault or three invalid answers in a row switch the bulk path off for the process. `--probe-all`, `screen find` and structure-less reads stay on the per-element reader.
