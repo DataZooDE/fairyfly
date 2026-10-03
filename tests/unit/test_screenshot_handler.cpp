@@ -2,6 +2,8 @@
 #include "include/screenshot_handler.h"
 #include "include/cli_handler.h"
 #include "include/com/wrapper.h"
+#include <filesystem>
+#include <fstream>
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -110,5 +112,41 @@ TEST_CASE("ScreenshotHandler - Capture with no session", "[screenshot][handler]"
 
     REQUIRE(result.status == Result::Status::Error);
     REQUIRE(result.error["code"] == "NO_SESSION");
+}
+
+TEST_CASE("ScreenshotHandler - base64 output honours --file", "[screenshot][handler]") {
+    const std::string b64 = "iVBORw0KGgo=";
+    SECTION("no file keeps the data URI in the result") {
+        Result result;
+        ScreenshotHandler::emit_base64_output(result, b64, "");
+        CHECK(result.data["screenshot"] == "data:image/png;base64," + b64);
+        CHECK(result.data["format"] == "base64");
+        CHECK_FALSE(result.data.contains("filepath"));
+    }
+    SECTION("'-' keeps the result on stdout") {
+        Result result;
+        ScreenshotHandler::emit_base64_output(result, b64, "-");
+        CHECK(result.data["screenshot"] == "data:image/png;base64," + b64);
+        CHECK_FALSE(result.data.contains("filepath"));
+    }
+    SECTION("a file path writes the data URI and reports filepath without repeating it") {
+        const auto path = (std::filesystem::temp_directory_path() / "fairyfly_b64_capture_test.txt").string();
+        std::filesystem::remove(path);
+        Result result;
+        ScreenshotHandler::emit_base64_output(result, b64, path);
+        CHECK(result.data["filepath"] == path);
+        CHECK(result.data["format"] == "base64");
+        CHECK_FALSE(result.data.contains("screenshot"));
+        std::ifstream in(path, std::ios::binary);
+        std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK(content == "data:image/png;base64," + b64);
+        in.close();
+        std::filesystem::remove(path);
+    }
+    SECTION("an unwritable path throws") {
+        Result result;
+        CHECK_THROWS_AS(ScreenshotHandler::emit_base64_output(result, b64, "Z:\\no\\such\\dir\\x.txt"),
+                        std::runtime_error);
+    }
 }
 

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <fmt/format.h>
 #include <CImg.h>
 
@@ -141,6 +142,21 @@ std::vector<uint8_t> ScreenshotHandler::extract_safearray_bytes(VARIANT& var) {
     std::vector<uint8_t> result(data, data + size);
     // SafeArrayUnaccessData called automatically by guard destructor
     return result;
+}
+
+void ScreenshotHandler::emit_base64_output(Result& result, const std::string& base64_data,
+                                           const std::string& output_file) {
+    const std::string data_uri = "data:image/png;base64," + base64_data;
+    result.data["format"] = "base64";
+    if (output_file.empty() || output_file == "-") {
+        result.data["screenshot"] = data_uri;
+        return;
+    }
+    std::ofstream out(std::filesystem::path(com::utf8_to_wide(output_file)), std::ios::binary | std::ios::trunc);
+    out.write(data_uri.data(), static_cast<std::streamsize>(data_uri.size()));
+    out.close();
+    if (!out) throw std::runtime_error("Failed to write base64 screenshot to " + output_file);
+    result.data["filepath"] = output_file;
 }
 
 Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
@@ -415,8 +431,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
                 // File automatically closed by RAII guard
 
                 std::string base64_data = utils::base64_encode(output_bytes);
-                result.data["screenshot"] = "data:image/png;base64," + base64_data;
-                result.data["format"] = "base64";
+                emit_base64_output(result, base64_data, options.output_file);
                 spdlog::info("Screenshot encoded as base64 ({} bytes)", base64_data.size());
             } else if (options.output_file == "-") {
                 // Write to stdout

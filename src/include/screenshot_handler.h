@@ -45,6 +45,11 @@ public:
     /// {native_size, crop?, crop_clamped?, output_size} for the result JSON.
     static json geometry_json(const CaptureGeometry& plan);
 
+    /// Base64 output of a capture: without a file (or with "-") the data URI is returned in `screenshot`; with a file path
+    /// the identical data URI text is written to that file and the result carries `filepath` instead (like png).
+    /// Throws std::runtime_error when the file cannot be written.
+    static void emit_base64_output(Result& result, const std::string& base64_data, const std::string& output_file);
+
     /// Validate subsection parameters (all-or-nothing)
     static void validate_subsection_complete(const cli::ScreenshotOptions& opts);
 
