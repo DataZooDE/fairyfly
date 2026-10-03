@@ -4,6 +4,7 @@
 #include "include/com/utf8.h"
 #include "include/sensitive_data.h"
 #include "include/display_text_policy.h"
+#include "include/element_metadata_builder.h"
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
@@ -531,31 +532,7 @@ SapGuiCollection<ComGuiElement> ComGuiElement::children() const {
 
 std::string ComGuiElement::get_container_type() const {
     if (!dispatch_) return "";
-
-    std::string type = get_type();
-
-    // Leaf elements are never containers - fast path avoids COM Children query
-    if (type == "GuiLabel" || type == "GuiButton" || type == "GuiTextField" ||
-        type == "GuiCTextField" || type == "GuiPasswordField" || type == "GuiOkCodeField" ||
-        type == "GuiCheckBox" || type == "GuiRadioButton" || type == "GuiComboBox" ||
-        type == "GuiComboBoxControl" || type == "GuiStatusPane") {
-        return "";
-    }
-
-    // Classify containers by SAP GUI type
-    if (type == "GuiToolbar" || type == "GuiMenubar") return "toolbar";
-    if (type == "GuiTabStrip") return "tabs";
-    if (type == "GuiTableControl") return "table";
-    if (type == "GuiGridView") return "grid";
-    if (type == "GuiUserArea" || type == "GuiSimpleContainer") return "form";
-    if (type == "GuiStatusPane") return "statusbar";
-    if (type == "GuiTitlebar") return "titlebar";
-    if (type == "GuiBox") return "group";
-
-    // Check if element has children (generic container)
-    if (get_child_count() > 0) return "container";
-
-    return "";
+    return classify_container_type(get_type(), [&] { return get_child_count(); });
 }
 
 int ComGuiElement::get_property_int(const std::wstring& property_name) const {

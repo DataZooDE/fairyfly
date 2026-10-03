@@ -84,9 +84,15 @@ ObjectTreeSupport ComGuiSession::object_tree_support() {
 void ComGuiSession::reset_object_tree_support() { set_object_tree_support(ObjectTreeSupport::Unknown); }
 
 std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
-                                                          const std::vector<std::string>& props) const {
+                                                          const std::vector<std::string>& props,
+                                                          ObjectTreeFailure* failure) const {
     if (!dispatch_) throw ComException("Null object");
-    if (object_tree_support() == ObjectTreeSupport::Missing) return std::nullopt;
+    if (failure) *failure = ObjectTreeFailure::None;
+    const auto fail = [&](ObjectTreeFailure why) -> std::optional<std::string> {
+        if (failure) *failure = why;
+        return std::nullopt;
+    };
+    if (object_tree_support() == ObjectTreeSupport::Missing) return fail(ObjectTreeFailure::Unsupported);
     try {
         (void)get_type();
     } catch (const std::exception&) {}
@@ -94,7 +100,7 @@ std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
     if (FAILED(resolve_dispid(L"GetObjectTree", &dispid))) {
         set_object_tree_support(ObjectTreeSupport::Missing);
         spdlog::info("GuiSession.GetObjectTree is not available (SAP GUI older than 7.70 PL3?)");
-        return std::nullopt;
+        return fail(ObjectTreeFailure::Unsupported);
     }
 
     // IDispatch::Invoke wants the arguments in reverse order: [0] = props (optional), last = id.
@@ -111,7 +117,7 @@ std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
         SAFEARRAY* array = SafeArrayCreateVector(VT_VARIANT, 0, static_cast<ULONG>(props.size()));
         if (!array) {
             VariantClear(&id_arg);
-            return std::nullopt;
+            return fail(ObjectTreeFailure::Failed);
         }
         for (LONG i = 0; i < static_cast<LONG>(props.size()); ++i) {
             const auto wide_prop = com::utf8_to_wide(props[static_cast<size_t>(i)]);
@@ -140,13 +146,14 @@ std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
             set_object_tree_support(ObjectTreeSupport::Missing);
         }
         spdlog::warn("GuiSession.GetObjectTree failed hr=0x{:08X} after {} ms", static_cast<unsigned>(hr), elapsed_ms);
-        return std::nullopt;
+        if (hr == RPC_E_SERVERFAULT) return fail(ObjectTreeFailure::ServerFault);
+        return fail(ObjectTreeFailure::Failed);
     }
     std::string text = safe_bstr_to_string(result, "GetObjectTree");
     VariantClear(&result);
     if (text.empty()) {
         spdlog::warn("GuiSession.GetObjectTree returned an empty answer after {} ms", elapsed_ms);
-        return std::nullopt;
+        return fail(ObjectTreeFailure::Empty);
     }
     set_object_tree_support(ObjectTreeSupport::Available);
     spdlog::debug("GuiSession.GetObjectTree|bytes={}|ms={}", text.size(), elapsed_ms);

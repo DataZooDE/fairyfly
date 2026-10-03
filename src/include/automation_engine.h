@@ -74,6 +74,9 @@ public:
     }
     /// Opt in to exhaustive FindById probing for subsequent screen reads/finds.
     virtual void set_probe_all(bool /*probe_all*/) {}
+    /// Screen tree reader of subsequent reads ("legacy", "bulk", "auto"; empty follows
+    /// FAIRYFLY_SCREEN_READER).
+    virtual void set_tree_reader(const std::string& /*mode*/) {}
     /// First grid/table row to return in subsequent screen reads (`screen read --offset`).
     virtual void set_row_offset(int /*row_offset*/) {}
     /// False: grid/table cells are not read (the caller's filter discards all tables).

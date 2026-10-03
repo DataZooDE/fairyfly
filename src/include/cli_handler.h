@@ -182,7 +182,7 @@ public:
                              const ScreenFilterOptions& filters = {}, bool skip_trees = false,
                              bool compact = false, int max_rows = 20,
                              const std::string& only_tab = "", bool probe_all = false,
-                             int row_offset = 0);
+                             int row_offset = 0, const std::string& tree_reader = "");
     /// Diagnostic only (FAIRYFLY_DIAG=1, checked by the command): raw object tree dump of `id`.
     Result handle_object_tree_dump(std::optional<int> connection_id, const std::string& id,
                                    const std::vector<std::string>& props);

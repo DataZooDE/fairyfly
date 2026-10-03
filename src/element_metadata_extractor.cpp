@@ -388,14 +388,9 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
 
         // Process children for container elements only
         // Skip child extraction for leaf elements and GuiUserArea
-        bool skip_children = (type == "GuiUserArea");
-        bool is_container = (!container_type.empty() || type == "GuiContainerShell" ||
-                             type == "GuiCustomControl" || type == "GuiSplitterContainer" ||
-                             type == "GuiContainerCtrl" || type == "GuiSplitterShell" ||
-                             type == "GuiDockShell" || type == "GuiTabStrip" ||
-                             type == "GuiToolbar" || type == "GuiMenubar");
+        const bool is_container = metadata_lists_children(type, container_type);
 
-        if (depth < constants::MAX_ELEMENT_DEPTH && !skip_children && is_container) {
+        if (depth < constants::MAX_ELEMENT_DEPTH && is_container) {
             int child_count = elem->get_child_count();
 
             // Special handling for GuiContainerShell - always try to enumerate children

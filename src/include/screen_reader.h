@@ -1,11 +1,13 @@
 #pragma once
 
+#include "bulk_screen_reader.h"
 #include "core.h"
 #include "com/wrapper.h"
 #include "element_metadata_extractor.h"
 #include "screen_element_collector.h"
 #include <memory>
 #include <functional>
+#include <optional>
 #include <tuple>
 #include <vector>
 #include <string>
@@ -92,8 +94,25 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
 /// True when FAIRYFLY_PROBE_ALL=1 requests exhaustive ID probing.
 bool probe_all_from_environment();
 
+/// How `screen read` obtains the element tree: element by element over COM (Legacy), or with one
+/// GuiSession.GetObjectTree call (Bulk), the latter with a per-read fallback to Legacy (Auto).
+enum class TreeReaderMode { Legacy, Bulk, Auto };
+
+/// FAIRYFLY_SCREEN_READER=legacy|bulk|auto; unset or unknown means Legacy.
+TreeReaderMode tree_reader_mode_from_environment();
+
+/// "legacy", "bulk" or "auto" (any case); nullopt for anything else.
+std::optional<TreeReaderMode> parse_tree_reader_mode(const std::string& text);
+const char* tree_reader_mode_name(TreeReaderMode mode);
+
+/// True once the bulk reader is switched off for the process (RPC_E_SERVERFAULT, or three
+/// consecutive validator failures). Thread-safe.
+bool bulk_reader_disabled();
+/// Re-enables the bulk reader and clears its failure counters (tests).
+void reset_bulk_reader_state_for_testing();
+
 /// Why one tab could not be read.
-enum class TabReadStatus { Ok, NotFound, BusyTimeout };
+enum class TabReadStatus { Ok, NotFound, BusyTimeout, TreeUnavailable };
 const char* tab_read_failure_reason(TabReadStatus status);
 
 /// Test hook: override the post-select busy wait (default 5000 ms); <= 0 restores it.
@@ -113,6 +132,13 @@ public:
 
     /// Opt in to exhaustive FindById probing of every container (legacy behavior).
     void set_probe_all(bool probe_all) { probe_all_ = probe_all; }
+
+    /// Tree reader mode for subsequent reads; nullopt (default) follows FAIRYFLY_SCREEN_READER.
+    void set_tree_reader_mode(std::optional<TreeReaderMode> mode) { tree_reader_mode_ = mode; }
+
+    /// Test seams: replace GuiSession.GetObjectTree and the targeted AccLabel/Selected reads.
+    void set_object_tree_source(ObjectTreeSource source) { tree_source_ = std::move(source); }
+    void set_element_probe_source(ElementProbeSource source) { probe_source_ = std::move(source); }
 
     /// False when the caller's filter discards every grid and table (only buttons/fields/...):
     /// their cells are then not read at all. Default true.
@@ -164,6 +190,37 @@ private:
     int row_offset_ = 0;
     bool grid_rows_needed_ = true;
     bool probe_all_ = false;
+    std::optional<TreeReaderMode> tree_reader_mode_;
+    ObjectTreeSource tree_source_;
+    ElementProbeSource probe_source_;
+
+    /// Effective mode of this read: the override, else the environment.
+    TreeReaderMode effective_tree_reader_mode() const;
+
+    /// Bulk read of the window (`is_window`: toolbars, title bar, children) or of one element
+    /// subtree (a tab, the window user area) with one GetObjectTree call: replays discovery over
+    /// the parsed tree, runs phase 2/2B and builds the plain elements from it. `root_child_count`
+    /// is the COM child count of the root, checked against the tree. False (with `reason`) when
+    /// this read must use the legacy reader; `elements` is then untouched.
+    bool read_elements_bulk(const std::string& root_id, bool is_window, int root_child_count,
+                            bool skip_trees, json& elements, std::string& reason);
+
+    /// Whether this read may use the bulk path at all (not --probe-all, not disabled); `reason`
+    /// says why not.
+    bool bulk_permitted(TreeReaderMode mode, std::string& reason) const;
+
+    /// Per read_tab/read_with_tabs run: how the tab subtrees were read.
+    struct TabBulkStats {
+        int bulk = 0;
+        int legacy = 0;
+        std::string reason;       // first fallback reason
+        std::string unavailable;  // forced Bulk could not read a tab
+    };
+    TabBulkStats tab_bulk_;
+    void attach_tab_diagnostics(Result& result, TreeReaderMode mode) const;
+    static Result bulk_unavailable_error(const std::string& reason);
+    ObjectTreeSource object_tree_source() const;
+    ElementProbeSource element_probe_source() const;
 
     /// Discover all UI elements from a window using recursive traversal
     /// Populates the provided collector with elements and extracted tree data
@@ -205,7 +262,10 @@ private:
                           json& elements);
 
     /// Extract metadata for all elements collected in collector
-    json extract_metadata_for_collector(const ScreenElementCollector& collector);
+    /// With a snapshot (bulk path), plain elements the tree describes are built from it without
+    /// COM calls; everything else is read element by element as always.
+    json extract_metadata_for_collector(const ScreenElementCollector& collector,
+                                        const TreeSnapshot* snapshot = nullptr);
 
     /// Group elements by container type for better organization
     static json group_elements_by_container(const json& elements);

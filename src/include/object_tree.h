@@ -97,5 +97,11 @@ struct TreeReplayResult {
 TreeReplayResult replay_discovery(const TreeSnapshot& snapshot, const std::string& window_id,
                                   bool skip_trees, ScreenElementCollector& collector);
 
+/// Replays ScreenReader::traverse_element_tree (depth 0) for the element `root_id` of the
+/// snapshot only, as `screen read --tab` does for a tab or the window user area. A root the
+/// snapshot does not hold yields nothing.
+TreeReplayResult replay_subtree(const TreeSnapshot& snapshot, const std::string& root_id,
+                                bool skip_trees, ScreenElementCollector& collector);
+
 } // namespace sap
 } // namespace fairyfly

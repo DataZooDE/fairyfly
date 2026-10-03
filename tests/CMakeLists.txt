@@ -18,6 +18,7 @@ add_executable(unit_tests
     unit/test_html_viewer_reader.cpp
     unit/test_object_tree_diag.cpp
     unit/test_object_tree.cpp
+    unit/test_screen_reader_bulk.cpp
     unit/test_element_metadata_extractor.cpp
     unit/test_element_metadata_builder.cpp
     unit/test_display_text_policy.cpp

@@ -1740,7 +1740,8 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
 Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id,
                                            bool expand_tabs, const ScreenFilterOptions& filters,
                                            bool skip_trees, bool compact, int max_rows,
-                                           const std::string& only_tab, bool probe_all, int row_offset)
+                                           const std::string& only_tab, bool probe_all, int row_offset,
+                                           const std::string& tree_reader)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -1752,6 +1753,7 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
                  include_children, expand_tabs, skip_trees, conn_result.value.id);
 
     engine_->set_probe_all(probe_all);
+    engine_->set_tree_reader(tree_reader);
     engine_->set_row_offset(row_offset);
     engine_->set_grid_rows_needed(screen_filters_need_grid_rows(filters));
     Result result;
