@@ -1,4 +1,5 @@
 #include "include/com_automation_engine.h"
+#include "include/element_errors.h"
 #include "include/object_tree_diag.h"
 #include "include/session_facts.h"
 #include "include/action_status.h"
@@ -1589,7 +1590,7 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
 
     } catch (const ComException& e) {
         result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
+        result.error["code"] = error_code_for_com_message(e.what());
         result.error["message"] = e.what();
         spdlog::error("Read failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {

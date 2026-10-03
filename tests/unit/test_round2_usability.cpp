@@ -233,7 +233,10 @@ TEST_CASE("an element on an inactive tab gets ELEMENT_ON_INACTIVE_TAB", "[tabs][
     CHECK(result->error.at("element") == element);
     const auto hint = result->error.at("hint").get<std::string>();
     CHECK(hint.find("activate the tab first (gui_element_click on the tab)") != std::string::npos);
-    CHECK(hint.find("gui_screen_read tab=Address") != std::string::npos);
+    // `screen read --tab` takes a tab id or its trailing part, not the tab text (found by a live bug hunt)
+    CHECK(hint.find("gui_screen_read tab=tabpADDR") != std::string::npos);
+    CHECK(hint.find("tab=Address") == std::string::npos);
+    CHECK(result->error.at("suggestions").dump().find("screen read --tab 'tabpADDR'") != std::string::npos);
     CHECK(result->error.at("suggestions").dump().find("--activate-tab") != std::string::npos);
 
     auto no_activate = classify_element_on_inactive_tab(element, inactive, false);

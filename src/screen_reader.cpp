@@ -2106,6 +2106,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             result.status = Result::Status::Error;
             result.error["code"] = "TAB_NOT_FOUND";
             result.error["message"] = "No tab matches '" + only_tab + "'";
+            result.error["tab_id"] = only_tab;
+            result.error["reason"] = "not_found";
             result.error["available_tabs"] = available;
             return result;
         }
@@ -2396,6 +2398,8 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
                 result.status = Result::Status::Error;
                 result.error["code"] = "TAB_NOT_FOUND";
                 result.error["message"] = "No tab matches '" + only_tab + "'";
+                result.error["tab_id"] = only_tab;
+                result.error["reason"] = "not_found";
                 result.error["available_tabs"] = available;
                 return result;
             }

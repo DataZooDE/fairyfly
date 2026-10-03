@@ -19,6 +19,7 @@ add_executable(unit_tests
     unit/test_object_tree_diag.cpp
     unit/test_bulk_fault_injection.cpp
     unit/test_read_only_popup_guard.cpp
+    unit/test_element_error_codes.cpp
     unit/test_object_tree.cpp
     unit/test_screen_reader_bulk.cpp
     unit/test_element_metadata_extractor.cpp

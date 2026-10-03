@@ -3114,6 +3114,9 @@ TEST_CASE("read_tab reports TAB_NOT_FOUND with the available tab ids", "[screen]
     REQUIRE(result.status == Result::Status::Error);
     REQUIRE(result.error.at("code") == "TAB_NOT_FOUND");
     REQUIRE(result.error.at("message") == "No tab matches 'tabpMISSING'");
+    // same fields as TAB_LOAD_FAILED so callers handle both alike (README contract)
+    REQUIRE(result.error.at("tab_id") == "tabpMISSING");
+    REQUIRE(result.error.at("reason") == "not_found");
     REQUIRE(result.error.at("available_tabs") == json::array({
         "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
         "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES"}));
