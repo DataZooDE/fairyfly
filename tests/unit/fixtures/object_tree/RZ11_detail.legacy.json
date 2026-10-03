@@ -1,0 +1,750 @@
+{
+ "child_count": 7,
+ "compact": false,
+ "element_count": 23,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 8,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[7]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[7]",
+   "name": "btn[7]",
+   "text": "",
+   "tooltip": "Display Documentation   (F7)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]",
+   "name": "btn[13]",
+   "text": "",
+   "tooltip": "Display information   (Shift+F1)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "Display Profile Parameter Details",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell",
+   "name": "shell",
+   "subtype": "HTMLViewer",
+   "text": "Metadata for Parameter rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nDescription\nValue\nName\nrdisp/wp_no_dia\nType\nInteger Interval\nFurther Selection Criteria\nInterval [2,512]\nUnit\n￼\nParameter Group\nDispatcher\nParameter Description\nNumber of dialog work processes\nCSN Component\nBC-CST-DP\nSystem-Wide Parameter\nNo\nDynamic Parameter\nNo\nVector Parameter\nNo\nHas Subparameters\nNo\nCheck Function Exists\nNo\nInternal Parameter\nNo\nRead-Only Parameter\nNo\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\nValue of Profile Parameter rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nExpansion Hierarchy\nSource\nValue/Formula\nResult Value\n1\nKernel Default\n2\n2\n2\nDefault Profile\n￼\n2\n3\nInstance Profile\n24\n24\nResulting Source\nInstance Profile\n￼\n24\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\nAdditional Information for rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nDescription\nParameter Assigments\nSetting on All Instances\n",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell",
+   "name": "shell",
+   "subtype": "HTMLViewer",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 4,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 2,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "",
+   "type": "GuiStatusbar",
+   "visible": true
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[7]",
+    "name": "btn[7]",
+    "text": "",
+    "tooltip": "Display Documentation   (F7)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]",
+    "name": "btn[13]",
+    "text": "",
+    "tooltip": "Display information   (Shift+F1)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "Display Profile Parameter Details",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell",
+    "name": "shell",
+    "subtype": "HTMLViewer",
+    "text": "Metadata for Parameter rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nDescription\nValue\nName\nrdisp/wp_no_dia\nType\nInteger Interval\nFurther Selection Criteria\nInterval [2,512]\nUnit\n￼\nParameter Group\nDispatcher\nParameter Description\nNumber of dialog work processes\nCSN Component\nBC-CST-DP\nSystem-Wide Parameter\nNo\nDynamic Parameter\nNo\nVector Parameter\nNo\nHas Subparameters\nNo\nCheck Function Exists\nNo\nInternal Parameter\nNo\nRead-Only Parameter\nNo\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\nValue of Profile Parameter rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nExpansion Hierarchy\nSource\nValue/Formula\nResult Value\n1\nKernel Default\n2\n2\n2\nDefault Profile\n￼\n2\n3\nInstance Profile\n24\n24\nResulting Source\nInstance Profile\n￼\n24\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\n￼\nAdditional Information for rdisp/wp_no_dia\n￼\n￼\n￼\n￼\n￼\n￼\nDescription\nParameter Assigments\nSetting on All Instances\n",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell",
+    "name": "shell",
+    "subtype": "HTMLViewer",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 2,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "",
+    "type": "GuiStatusbar",
+    "visible": true
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 8,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[7]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 4,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "title": "Display Profile Parameter Details",
+ "transaction": "RZ11"
+}

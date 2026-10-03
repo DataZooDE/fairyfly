@@ -1,0 +1,2864 @@
+{
+ "child_count": 6,
+ "compact": false,
+ "element_count": 96,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 8,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 2,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+   "name": "btn[19]",
+   "text": "",
+   "tooltip": "Display/Change   (Shift+F7)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "Display Users",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 11,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[10]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "User",
+   "text": "User",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 1,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 2,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "Information",
+   "text": "Information",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 9,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+   "name": "Environment",
+   "text": "Environment",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+   "name": "SUID_ST_BNAME-BNAME",
+   "text": "User",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_BNAME-BNAME",
+   "label": "User",
+   "name": "SUID_ST_BNAME-BNAME",
+   "text": "DEVELOPER   ",
+   "tooltip": "User Name in User Master Record",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnIDADTYPE_INFO",
+   "name": "IDADTYPE_INFO",
+   "text": "",
+   "tooltip": "Information",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtG_IDADTYPE",
+   "label": "User",
+   "name": "G_IDADTYPE",
+   "text": "User with Classic Address                                                       ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+   "name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+   "text": "Changed By",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODIFIER",
+   "label": "Changed By",
+   "name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+   "text": "DEVELOPER   ",
+   "tooltip": "Last Changed By",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODDATE",
+   "label": "Changed By",
+   "name": "SUID_ST_NODE_ADMINDATA-MODDATE",
+   "text": "26.03.2024",
+   "tooltip": "Modification date",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODTIME",
+   "label": "Changed By",
+   "name": "SUID_ST_NODE_ADMINDATA-MODTIME",
+   "text": "16:45:45",
+   "tooltip": "Modification time",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+   "name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+   "text": "Status",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+   "label": "Status",
+   "name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+   "text": "Saved                  ",
+   "tooltip": "Status of the Identity Processing",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDOCU",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpSNC",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDEFA",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPARAM",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpACTG",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPROF",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpGRUP",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPERS",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLAW",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpUSAT"
+   ],
+   "container_type": "tabs",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1",
+   "name": "TABSTRIP1",
+   "text": "",
+   "type": "GuiTabStrip",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDOCU",
+   "name": "DOCU",
+   "text": "Documentation",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 1,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+   "name": "ADDR",
+   "text": "Address",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "child_count": 50,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT001",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-PERSON_DETAIL",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/ctxtSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME-LANGU",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT007",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FUNCTION",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FLOOR",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-BUILDING",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT003",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_TEL",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_MOB",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_FAX",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_SMTP",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-MCOM",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/boxGS_ADDR_OTHERS-COM_ORG_FRAME",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-COMPANY_INFO",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtGS_ADDR_OTHERS-COMP_NAME",
+    "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cntlG_ADDR_STATUS_TOOLBAR"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900",
+   "name": "MAINAREA:SAPLSUID_MAINTENANCE:1900",
+   "text": "",
+   "type": "GuiScrollContainer",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT001",
+   "is_group": true,
+   "name": "%#AUTOTEXT001",
+   "text": "Person",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+   "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+   "text": "Title",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable",
+    "has_options"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+   "label": "Title",
+   "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+   "text": "                                                                                                                                                                                                                                                               ",
+   "tooltip": "Title text",
+   "type": "GuiComboBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-PERSON_DETAIL",
+   "name": "GS_ADDR_OTHERS-PERSON_DETAIL",
+   "text": "",
+   "tooltip": "More Fields",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+   "text": "Last Name",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+   "label": "Last Name",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+   "text": "Doe                                     ",
+   "tooltip": "Last Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+   "text": "First Name",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+   "label": "First Name",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+   "text": "John                                    ",
+   "tooltip": "First Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+   "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+   "text": "Academic Title",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/ctxtSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+   "label": "Academic Title",
+   "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+   "text": "                    ",
+   "tooltip": "Academic Title: Written Form",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+   "text": "Full Name",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+   "label": "Full Name",
+   "name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+   "text": "John Doe                                                                        ",
+   "tooltip": "Full Name of Person",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+   "name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+   "text": "Language",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable",
+    "has_options"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME-LANGU",
+   "label": "Language",
+   "name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+   "text": "English                                                                                                                                                                                                                                                        ",
+   "tooltip": "Language Key",
+   "type": "GuiComboBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT007",
+   "is_group": true,
+   "name": "%#AUTOTEXT007",
+   "text": "Work Center",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+   "name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+   "text": "Function",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FUNCTION",
+   "label": "Function",
+   "name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+   "text": "                                        ",
+   "tooltip": "Function",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+   "name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+   "text": "Department",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+   "label": "Department",
+   "name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+   "text": "                                        ",
+   "tooltip": "Department",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+   "name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+   "text": "Room Number",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+   "label": "Room Number",
+   "name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+   "text": "          ",
+   "tooltip": "Room or Apartment Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+   "name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+   "text": "Floor",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FLOOR",
+   "label": "Floor",
+   "name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+   "text": "          ",
+   "tooltip": "Floor in building",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+   "name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+   "text": "Building code",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-BUILDING",
+   "label": "Building code",
+   "name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+   "text": "          ",
+   "tooltip": "Building (number or code)",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT003",
+   "is_group": true,
+   "name": "%#AUTOTEXT003",
+   "text": "Communication",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+   "name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+   "text": "Telephone",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+   "label": "Telephone",
+   "name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+   "text": "                              ",
+   "tooltip": "First Telephone No.: Dialing Code + Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+   "name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+   "text": "Extension",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+   "label": "Extension",
+   "name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+   "text": "          ",
+   "tooltip": "First Telephone No.: Extension",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_TEL",
+   "name": "GS_ADDR_OTHERS-ICON_TEL",
+   "text": "",
+   "tooltip": "Other Telephone Numbers",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+   "name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+   "text": "Mobile Phone",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+   "label": "Mobile Phone",
+   "name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+   "text": "                              ",
+   "tooltip": "First Cell Phone Number: Dialing Code + Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_MOB",
+   "name": "GS_ADDR_OTHERS-ICON_MOB",
+   "text": "",
+   "tooltip": "Other Cell Phone Numbers",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+   "name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+   "text": "Fax",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+   "label": "Fax",
+   "name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+   "text": "                              ",
+   "tooltip": "First Fax No.: Area Code + Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+   "name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+   "text": "Extension",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+   "label": "Extension",
+   "name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+   "text": "          ",
+   "tooltip": "First fax no.: extension",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_FAX",
+   "name": "GS_ADDR_OTHERS-ICON_FAX",
+   "text": "",
+   "tooltip": "Other Fax Numbers",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+   "name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+   "text": "E-Mail Address",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+   "label": "E-Mail Address",
+   "name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+   "text": "                                                                                                                                                                                                                                                 ",
+   "tooltip": "E-Mail Address",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_SMTP",
+   "name": "GS_ADDR_OTHERS-ICON_SMTP",
+   "text": "",
+   "tooltip": "Other E-Mail Addresses",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+   "name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+   "text": "Method",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable",
+    "has_options"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+   "label": "Method",
+   "name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+   "text": "                                                                                                                                                                                                                                                               ",
+   "tooltip": "Communication Method (Key) (Business Address Services)",
+   "type": "GuiComboBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-MCOM",
+   "name": "GS_ADDR_OTHERS-MCOM",
+   "text": "Other Communication...",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/boxGS_ADDR_OTHERS-COM_ORG_FRAME",
+   "is_group": true,
+   "name": "GS_ADDR_OTHERS-COM_ORG_FRAME",
+   "text": "Company",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-COMPANY_INFO",
+   "name": "GS_ADDR_OTHERS-COMPANY_INFO",
+   "text": "",
+   "tooltip": "Display Full Company Address",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+   "name": "SUID_ST_NODE_ORGANIZATION-COMPANY",
+   "text": "Company",
+   "type": "GuiLabel",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtGS_ADDR_OTHERS-COMP_NAME",
+   "label": "Company",
+   "name": "GS_ADDR_OTHERS-COMP_NAME",
+   "text": "Itelo1 /   / DE                                                                                                                     ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO",
+   "name": "LOGO",
+   "text": "Logon Data",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpSNC",
+   "name": "SNC",
+   "text": "SNC",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDEFA",
+   "name": "DEFA",
+   "text": "Defaults",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPARAM",
+   "name": "PARAM",
+   "text": "Parameters",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpACTG",
+   "name": "ACTG",
+   "text": "Roles",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPROF",
+   "name": "PROF",
+   "text": "Profiles",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpGRUP",
+   "name": "GRUP",
+   "text": "Groups",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPERS",
+   "name": "PERS",
+   "text": "Personalization",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLAW",
+   "name": "LAW",
+   "text": "Lic. Data",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpUSAT",
+   "name": "USAT",
+   "text": "User Attributes",
+   "type": "GuiTab",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "",
+   "type": "GuiStatusbar",
+   "visible": true
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+    "name": "btn[19]",
+    "text": "",
+    "tooltip": "Display/Change   (Shift+F7)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "form_fields": [
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+    "name": "SUID_ST_BNAME-BNAME",
+    "text": "User",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_BNAME-BNAME",
+    "label": "User",
+    "name": "SUID_ST_BNAME-BNAME",
+    "text": "DEVELOPER   ",
+    "tooltip": "User Name in User Master Record",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtG_IDADTYPE",
+    "label": "User",
+    "name": "G_IDADTYPE",
+    "text": "User with Classic Address                                                       ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+    "name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+    "text": "Changed By",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODIFIER",
+    "label": "Changed By",
+    "name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+    "text": "DEVELOPER   ",
+    "tooltip": "Last Changed By",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODDATE",
+    "label": "Changed By",
+    "name": "SUID_ST_NODE_ADMINDATA-MODDATE",
+    "text": "26.03.2024",
+    "tooltip": "Modification date",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODTIME",
+    "label": "Changed By",
+    "name": "SUID_ST_NODE_ADMINDATA-MODTIME",
+    "text": "16:45:45",
+    "tooltip": "Modification time",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+    "name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+    "text": "Status",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+    "label": "Status",
+    "name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+    "text": "Saved                  ",
+    "tooltip": "Status of the Identity Processing",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "text": "Title",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable",
+     "has_options"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "label": "Title",
+    "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+    "text": "                                                                                                                                                                                                                                                               ",
+    "tooltip": "Title text",
+    "type": "GuiComboBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "text": "Last Name",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "label": "Last Name",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+    "text": "Doe                                     ",
+    "tooltip": "Last Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "text": "First Name",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "label": "First Name",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+    "text": "John                                    ",
+    "tooltip": "First Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "text": "Academic Title",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/ctxtSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "label": "Academic Title",
+    "name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+    "text": "                    ",
+    "tooltip": "Academic Title: Written Form",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "text": "Full Name",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "label": "Full Name",
+    "name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+    "text": "John Doe                                                                        ",
+    "tooltip": "Full Name of Person",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+    "name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+    "text": "Language",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable",
+     "has_options"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME-LANGU",
+    "label": "Language",
+    "name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+    "text": "English                                                                                                                                                                                                                                                        ",
+    "tooltip": "Language Key",
+    "type": "GuiComboBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+    "name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+    "text": "Function",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FUNCTION",
+    "label": "Function",
+    "name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+    "text": "                                        ",
+    "tooltip": "Function",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "text": "Department",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "label": "Department",
+    "name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+    "text": "                                        ",
+    "tooltip": "Department",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "text": "Room Number",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "label": "Room Number",
+    "name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+    "text": "          ",
+    "tooltip": "Room or Apartment Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+    "name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+    "text": "Floor",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FLOOR",
+    "label": "Floor",
+    "name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+    "text": "          ",
+    "tooltip": "Floor in building",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+    "name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+    "text": "Building code",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-BUILDING",
+    "label": "Building code",
+    "name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+    "text": "          ",
+    "tooltip": "Building (number or code)",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "text": "Telephone",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "label": "Telephone",
+    "name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+    "text": "                              ",
+    "tooltip": "First Telephone No.: Dialing Code + Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "text": "Extension",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "label": "Extension",
+    "name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+    "text": "          ",
+    "tooltip": "First Telephone No.: Extension",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "text": "Mobile Phone",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "label": "Mobile Phone",
+    "name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+    "text": "                              ",
+    "tooltip": "First Cell Phone Number: Dialing Code + Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "text": "Fax",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "label": "Fax",
+    "name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+    "text": "                              ",
+    "tooltip": "First Fax No.: Area Code + Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "text": "Extension",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "label": "Extension",
+    "name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+    "text": "          ",
+    "tooltip": "First fax no.: extension",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "text": "E-Mail Address",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "label": "E-Mail Address",
+    "name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+    "text": "                                                                                                                                                                                                                                                 ",
+    "tooltip": "E-Mail Address",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "text": "Method",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable",
+     "has_options"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "label": "Method",
+    "name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+    "text": "                                                                                                                                                                                                                                                               ",
+    "tooltip": "Communication Method (Key) (Business Address Services)",
+    "type": "GuiComboBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+    "name": "SUID_ST_NODE_ORGANIZATION-COMPANY",
+    "text": "Company",
+    "type": "GuiLabel",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtGS_ADDR_OTHERS-COMP_NAME",
+    "label": "Company",
+    "name": "GS_ADDR_OTHERS-COMP_NAME",
+    "text": "Itelo1 /   / DE                                                                                                                     ",
+    "type": "GuiTextField",
+    "visible": true
+   }
+  ],
+  "inline_buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnIDADTYPE_INFO",
+    "name": "IDADTYPE_INFO",
+    "text": "",
+    "tooltip": "Information",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-PERSON_DETAIL",
+    "name": "GS_ADDR_OTHERS-PERSON_DETAIL",
+    "text": "",
+    "tooltip": "More Fields",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_TEL",
+    "name": "GS_ADDR_OTHERS-ICON_TEL",
+    "text": "",
+    "tooltip": "Other Telephone Numbers",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_MOB",
+    "name": "GS_ADDR_OTHERS-ICON_MOB",
+    "text": "",
+    "tooltip": "Other Cell Phone Numbers",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_FAX",
+    "name": "GS_ADDR_OTHERS-ICON_FAX",
+    "text": "",
+    "tooltip": "Other Fax Numbers",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_SMTP",
+    "name": "GS_ADDR_OTHERS-ICON_SMTP",
+    "text": "",
+    "tooltip": "Other E-Mail Addresses",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-MCOM",
+    "name": "GS_ADDR_OTHERS-MCOM",
+    "text": "Other Communication...",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-COMPANY_INFO",
+    "name": "GS_ADDR_OTHERS-COMPANY_INFO",
+    "text": "",
+    "tooltip": "Display Full Company Address",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "Display Users",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 11,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[10]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "User",
+    "text": "User",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 1,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 2,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "Information",
+    "text": "Information",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 9,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "name": "Environment",
+    "text": "Environment",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "child_count": 50,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT001",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-PERSON_DETAIL",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/ctxtSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME-LANGU",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT007",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FUNCTION",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FLOOR",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-BUILDING",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT003",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_TEL",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_MOB",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_FAX",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_SMTP",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-MCOM",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/boxGS_ADDR_OTHERS-COM_ORG_FRAME",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-COMPANY_INFO",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtGS_ADDR_OTHERS-COMP_NAME",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cntlG_ADDR_STATUS_TOOLBAR"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900",
+    "name": "MAINAREA:SAPLSUID_MAINTENANCE:1900",
+    "text": "",
+    "type": "GuiScrollContainer",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT001",
+    "is_group": true,
+    "name": "%#AUTOTEXT001",
+    "text": "Person",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT007",
+    "is_group": true,
+    "name": "%#AUTOTEXT007",
+    "text": "Work Center",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT003",
+    "is_group": true,
+    "name": "%#AUTOTEXT003",
+    "text": "Communication",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/boxGS_ADDR_OTHERS-COM_ORG_FRAME",
+    "is_group": true,
+    "name": "GS_ADDR_OTHERS-COM_ORG_FRAME",
+    "text": "Company",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "",
+    "type": "GuiStatusbar",
+    "visible": true
+   }
+  ],
+  "tabs": [
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDOCU",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpSNC",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDEFA",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPARAM",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpACTG",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPROF",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpGRUP",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPERS",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLAW",
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpUSAT"
+    ],
+    "container_type": "tabs",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1",
+    "name": "TABSTRIP1",
+    "text": "",
+    "type": "GuiTabStrip",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDOCU",
+    "name": "DOCU",
+    "text": "Documentation",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 1,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+    "name": "ADDR",
+    "text": "Address",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO",
+    "name": "LOGO",
+    "text": "Logon Data",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpSNC",
+    "name": "SNC",
+    "text": "SNC",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDEFA",
+    "name": "DEFA",
+    "text": "Defaults",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPARAM",
+    "name": "PARAM",
+    "text": "Parameters",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpACTG",
+    "name": "ACTG",
+    "text": "Roles",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPROF",
+    "name": "PROF",
+    "text": "Profiles",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpGRUP",
+    "name": "GRUP",
+    "text": "Groups",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPERS",
+    "name": "PERS",
+    "text": "Personalization",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLAW",
+    "name": "LAW",
+    "text": "Lic. Data",
+    "type": "GuiTab",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpUSAT",
+    "name": "USAT",
+    "text": "User Attributes",
+    "type": "GuiTab",
+    "visible": true
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 8,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 2,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "title": "Display Users",
+ "transaction": "SU01"
+}

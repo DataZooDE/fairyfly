@@ -1,0 +1,4101 @@
+{
+ "id": "/app/con[0]/ses[0]/wnd[0]",
+ "props": [
+  "Id",
+  "Type",
+  "Name",
+  "Text",
+  "DisplayedText",
+  "Changeable",
+  "SubType",
+  "AccTooltip",
+  "DefaultTooltip",
+  "Tooltip",
+  "LeftLabel",
+  "RightLabel"
+ ],
+ "tree": {
+  "children": [
+   {
+    "children": [
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Execute",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Execute",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Execute and Print",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Execute and Print",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+           "LeftLabel": "",
+           "Name": "Execute in Background",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Execute in Background",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+           "LeftLabel": "",
+           "Name": "menu[3]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Exit",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Exit",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+         "LeftLabel": "",
+         "Name": "Program",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Program",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+           "LeftLabel": "",
+           "Name": "All Selections",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "All Selections",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Chosen Selections",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Chosen Selections",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[2]",
+           "LeftLabel": "",
+           "Name": "menu[2]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[3]",
+           "LeftLabel": "",
+           "Name": "Selection Options",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Selection Options",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[4]",
+           "LeftLabel": "",
+           "Name": "menu[4]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[5]",
+           "LeftLabel": "",
+           "Name": "Delete Selection Row",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Delete Selection Row",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[6]",
+           "LeftLabel": "",
+           "Name": "Delete Entire Selection",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Delete Entire Selection",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[7]",
+           "LeftLabel": "",
+           "Name": "menu[7]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[8]",
+           "LeftLabel": "",
+           "Name": "Dynamic Selections",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Dynamic Selections",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[9]",
+           "LeftLabel": "",
+           "Name": "menu[9]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[10]",
+           "LeftLabel": "",
+           "Name": "Number of Entries",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Number of Entries",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[11]",
+           "LeftLabel": "",
+           "Name": "menu[11]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[12]",
+           "LeftLabel": "",
+           "Name": "Cancel",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Cancel",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+         "LeftLabel": "",
+         "Name": "Edit",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Edit",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Get...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Get...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Display...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Display...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Delete ...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Delete ...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]/menu[3]",
+             "LeftLabel": "",
+             "Name": "Save as Variant...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Save as Variant...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Variants",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Variants",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+           "LeftLabel": "",
+           "Name": "menu[1]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+           "LeftLabel": "",
+           "Name": "User Variables...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Variables...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+           "LeftLabel": "",
+           "Name": "menu[3]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Back",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Back",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+         "LeftLabel": "",
+         "Name": "Goto",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Goto",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Sort...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Sort...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Choose Fields...",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Choose Fields...",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Format List",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Format List",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+           "LeftLabel": "",
+           "Name": "User Parameters...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Parameters...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+           "LeftLabel": "",
+           "Name": "Fields for Selection",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Fields for Selection",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+         "LeftLabel": "",
+         "Name": "Settings",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Settings",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+           "LeftLabel": "",
+           "Name": "New GUI Window",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "New GUI Window",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Close GUI Window",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Close GUI Window",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Hold Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Hold Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Set Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Set Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Delete Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Delete Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]/menu[3]",
+             "LeftLabel": "",
+             "Name": "User Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "User Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Expand Favorites",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Expand Favorites",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+           "LeftLabel": "",
+           "Name": "User Profile",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Profile",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Reporting",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Reporting",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[1]",
+             "LeftLabel": "",
+             "Name": "QuickViewer",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "QuickViewer",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Output Control",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Output Control",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[3]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Extended Table Maintenance",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Extended Table Maintenance",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[3]/menu[1]",
+               "LeftLabel": "",
+               "Name": "View Cluster Maintenance",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "View Cluster Maintenance",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[3]",
+             "LeftLabel": "",
+             "Name": "Table Maintenance",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Table Maintenance",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Sessions",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Sessions",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Logs",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Logs",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Recorder",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Recorder",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[3]",
+               "LeftLabel": "",
+               "Name": "Restart Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Restart Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[4]",
+               "LeftLabel": "",
+               "Name": "Delete Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Delete Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[5]",
+               "LeftLabel": "",
+               "Name": "Next Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Next Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[6]",
+               "LeftLabel": "",
+               "Name": "Process in Foreground",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Process in Foreground",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[7]",
+               "LeftLabel": "",
+               "Name": "Display Errors Only",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Display Errors Only",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[8]",
+               "LeftLabel": "",
+               "Name": "Expert Mode On",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Expert Mode On",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[9]",
+               "LeftLabel": "",
+               "Name": "Expert Mode Off",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Expert Mode Off",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]/menu[10]",
+               "LeftLabel": "",
+               "Name": "Cancel",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Cancel",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Batch Input",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Batch Input",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[5]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Recorder",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Recorder",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[5]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Process in Foreground",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Process in Foreground",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[5]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Display Errors Only",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Display Errors Only",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[5]/menu[3]",
+               "LeftLabel": "",
+               "Name": "Cancel",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Cancel",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[5]",
+             "LeftLabel": "",
+             "Name": "Fast Entry",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Fast Entry",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[6]",
+             "LeftLabel": "",
+             "Name": "Direct Input",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Direct Input",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[7]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Define Job",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Define Job",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[7]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Job Overview",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Job Overview",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[7]",
+             "LeftLabel": "",
+             "Name": "Jobs",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Jobs",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[8]",
+             "LeftLabel": "",
+             "Name": "Queue",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Queue",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+           "LeftLabel": "",
+           "Name": "Services",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Services",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Debug Dynpro",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug Dynpro",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Debug ABAP",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug ABAP",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Debug System",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug System",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[3]",
+             "LeftLabel": "",
+             "Name": "Resource Usage",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Resource Usage",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Autom. Queue: Synchronous Processing",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Autom. Queue: Synchronous Processing",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[5]",
+             "LeftLabel": "",
+             "Name": "Performance Trace",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Performance Trace",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[6]",
+             "LeftLabel": "",
+             "Name": "Context Trace",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Context Trace",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[7]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Execute",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Execute",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[7]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Switch On",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Switch On",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[7]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Switch Off",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Switch Off",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[7]",
+             "LeftLabel": "",
+             "Name": "Runtime Analysis",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Runtime Analysis",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[8]",
+             "LeftLabel": "",
+             "Name": "Display Authorization Check",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Display Authorization Check",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[9]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Create Memory Snapshot",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Create Memory Snapshot",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[9]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Compare Memory Snapshots",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Compare Memory Snapshots",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]/menu[9]",
+             "LeftLabel": "",
+             "Name": "Memory Analysis",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Memory Analysis",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Utilities",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Utilities",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+           "LeftLabel": "",
+           "Name": "Services for Object",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Services for Object",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Object History",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Object History",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Edit Objects",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Edit Objects",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+           "LeftLabel": "",
+           "Name": "My Objects",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "My Objects",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+           "LeftLabel": "",
+           "Name": "Own Spool Requests",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Own Spool Requests",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]",
+           "LeftLabel": "",
+           "Name": "Own Jobs",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Own Jobs",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[9]",
+           "LeftLabel": "",
+           "Name": "Short Message",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Short Message",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[10]",
+           "LeftLabel": "",
+           "Name": "Status...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Status...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[11]",
+           "LeftLabel": "",
+           "Name": "Log Off",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Log Off",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+         "LeftLabel": "",
+         "Name": "System",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "System",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Product Assistance",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Product Assistance",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+           "LeftLabel": "",
+           "Name": "SAP Help Portal",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "SAP Help Portal",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+           "LeftLabel": "",
+           "Name": "menu[2]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+           "LeftLabel": "",
+           "Name": "SAP Support Portal",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "SAP Support Portal",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Create Support Message",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Create Support Message",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+           "LeftLabel": "",
+           "Name": "menu[5]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+           "LeftLabel": "",
+           "Name": "Settings...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Settings...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+         "LeftLabel": "",
+         "Name": "Help",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Help",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "false",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+       "LeftLabel": "",
+       "Name": "mbar",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiMenubar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+         "LeftLabel": "",
+         "Name": "btn[0]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Enter   (Enter)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+         "LeftLabel": "",
+         "Name": "btn[11]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Save as Variant...   (Ctrl+S)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+         "LeftLabel": "",
+         "Name": "btn[3]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Back",
+         "Tooltip": "Back   (F3)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+         "LeftLabel": "",
+         "Name": "btn[15]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Exit",
+         "Tooltip": "Exit   (Shift+F3)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+         "LeftLabel": "",
+         "Name": "btn[12]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Cancel",
+         "Tooltip": "Cancel   (F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+         "LeftLabel": "",
+         "Name": "btn[86]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Execute and Print   (Ctrl+P)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+         "LeftLabel": "",
+         "Name": "btn[419]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "New GUI Window",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+         "LeftLabel": "",
+         "Name": "btn[418]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Generates shortcut",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+         "LeftLabel": "",
+         "Name": "btn[446]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+         "LeftLabel": "",
+         "Name": "okcd",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiOkCodeField"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+       "LeftLabel": "",
+       "Name": "tbar[0]",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiToolbar"
+      }
+     },
+     {
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/titl",
+       "LeftLabel": "",
+       "Name": "titl",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "Data Browser: Table TADIR: Selection Screen",
+       "Tooltip": "",
+       "Type": "GuiTitlebar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+         "LeftLabel": "",
+         "Name": "btnvhmore",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "More",
+         "Tooltip": "More (Alt+F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+         "LeftLabel": "",
+         "Name": "btn[8]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Execute   (F8)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[2]",
+         "LeftLabel": "",
+         "Name": "btn[2]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Selection Options   (F2)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[14]",
+         "LeftLabel": "",
+         "Name": "btn[14]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Delete Selection Row   (Shift+F2)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[18]",
+         "LeftLabel": "",
+         "Name": "btn[18]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Selection Screen Help   (Shift+F6)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[31]",
+         "LeftLabel": "",
+         "Name": "btn[31]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Number of Entries",
+         "Tooltip": "Number of Entries   (Ctrl+F7)",
+         "Type": "GuiButton"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+       "LeftLabel": "",
+       "Name": "tbar[1]",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiToolbar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/boxSCR_TITL",
+         "LeftLabel": "",
+         "Name": "SCR_TITL",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiBox"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "PGMID                         ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I1_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "PGMID",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Program ID in Requests and Tasks",
+         "DisplayedText": "    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI1-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TEXT",
+         "Name": "I1-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TEXT",
+         "Name": "%_I1_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Program ID in Requests and Tasks",
+         "DisplayedText": "    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI1-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TO_TEXT",
+         "Name": "I1-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I1_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I1_%_APP_%-TO_TEXT",
+         "Name": "%_I1_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "OBJECT                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I2_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "OBJECT",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Type in Object Directory",
+         "DisplayedText": "    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI2-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TEXT",
+         "Name": "I2-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TEXT",
+         "Name": "%_I2_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Type in Object Directory",
+         "DisplayedText": "    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI2-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TO_TEXT",
+         "Name": "I2-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I2_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I2_%_APP_%-TO_TEXT",
+         "Name": "%_I2_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "OBJ_NAME                      ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I3_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "OBJ_NAME",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Name in Object Directory",
+         "DisplayedText": "                                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI3-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TEXT",
+         "Name": "I3-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TEXT",
+         "Name": "%_I3_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Name in Object Directory",
+         "DisplayedText": "                                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI3-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TO_TEXT",
+         "Name": "I3-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I3_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I3_%_APP_%-TO_TEXT",
+         "Name": "%_I3_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "KORRNUM                       ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I4_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "KORRNUM",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Request/task up to and including Release 3.0",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI4-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TEXT",
+         "Name": "I4-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TEXT",
+         "Name": "%_I4_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Request/task up to and including Release 3.0",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI4-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TO_TEXT",
+         "Name": "I4-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I4_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I4_%_APP_%-TO_TEXT",
+         "Name": "%_I4_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "SRCSYSTEM                     ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I5_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "SRCSYSTEM",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Original System of Object",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI5-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TEXT",
+         "Name": "I5-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TEXT",
+         "Name": "%_I5_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Original System of Object",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI5-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TO_TEXT",
+         "Name": "I5-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I5_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I5_%_APP_%-TO_TEXT",
+         "Name": "%_I5_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "AUTHOR                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I6_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "AUTHOR",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Person Responsible for a Repository Object",
+         "DisplayedText": "            ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI6-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TEXT",
+         "Name": "I6-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TEXT",
+         "Name": "%_I6_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Person Responsible for a Repository Object",
+         "DisplayedText": "            ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI6-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TO_TEXT",
+         "Name": "I6-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I6_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I6_%_APP_%-TO_TEXT",
+         "Name": "%_I6_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "SRCDEP                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I7_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "SRCDEP",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Repair Flag for Repository Object",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI7-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TEXT",
+         "Name": "I7-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TEXT",
+         "Name": "%_I7_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Repair Flag for Repository Object",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI7-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TO_TEXT",
+         "Name": "I7-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I7_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I7_%_APP_%-TO_TEXT",
+         "Name": "%_I7_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "DEVCLASS                      ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I8_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "DEVCLASS",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Package",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI8-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TEXT",
+         "Name": "I8-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TEXT",
+         "Name": "%_I8_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Package",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI8-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TO_TEXT",
+         "Name": "I8-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I8_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I8_%_APP_%-TO_TEXT",
+         "Name": "%_I8_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "GENFLAG                       ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I9_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "GENFLAG",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Generation flag",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI9-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TEXT",
+         "Name": "I9-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TEXT",
+         "Name": "%_I9_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Generation flag",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI9-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TO_TEXT",
+         "Name": "I9-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I9_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I9_%_APP_%-TO_TEXT",
+         "Name": "%_I9_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "EDTFLAG                       ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I10_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "EDTFLAG",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Flag: Object can only be edited with a special editor",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI10-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TEXT",
+         "Name": "I10-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TEXT",
+         "Name": "%_I10_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Flag: Object can only be edited with a special editor",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI10-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TO_TEXT",
+         "Name": "I10-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I10_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I10_%_APP_%-TO_TEXT",
+         "Name": "%_I10_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "CPROJECT                      ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I11_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "CPROJECT",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Internal Use",
+         "DisplayedText": "        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI11-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TEXT",
+         "Name": "I11-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TEXT",
+         "Name": "%_I11_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Internal Use",
+         "DisplayedText": "        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI11-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TO_TEXT",
+         "Name": "I11-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I11_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I11_%_APP_%-TO_TEXT",
+         "Name": "%_I11_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "MASTERLANG                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I12_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "MASTERLANG",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Original Language in Repository objects",
+         "DisplayedText": "  ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI12-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TEXT",
+         "Name": "I12-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TEXT",
+         "Name": "%_I12_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Original Language in Repository objects",
+         "DisplayedText": "  ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI12-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TO_TEXT",
+         "Name": "I12-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I12_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I12_%_APP_%-TO_TEXT",
+         "Name": "%_I12_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "VERSID                        ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I13_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "VERSID",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Internal Use",
+         "DisplayedText": "                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI13-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TEXT",
+         "Name": "I13-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TEXT",
+         "Name": "%_I13_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Internal Use",
+         "DisplayedText": "                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI13-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TO_TEXT",
+         "Name": "I13-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I13_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I13_%_APP_%-TO_TEXT",
+         "Name": "%_I13_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "PAKNOCHECK                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I14_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "PAKNOCHECK",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Exception Indicator for Package Check",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI14-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TEXT",
+         "Name": "I14-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TEXT",
+         "Name": "%_I14_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Exception Indicator for Package Check",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI14-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TO_TEXT",
+         "Name": "I14-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I14_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I14_%_APP_%-TO_TEXT",
+         "Name": "%_I14_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "OBJSTABLTY                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I15_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "OBJSTABLTY",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Deployment Target",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI15-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TEXT",
+         "Name": "I15-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TEXT",
+         "Name": "%_I15_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Deployment Target",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI15-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TO_TEXT",
+         "Name": "I15-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I15_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I15_%_APP_%-TO_TEXT",
+         "Name": "%_I15_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "COMPONENT                     ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I16_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "COMPONENT",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Software Component",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI16-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TEXT",
+         "Name": "I16-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TEXT",
+         "Name": "%_I16_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Software Component",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI16-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TO_TEXT",
+         "Name": "I16-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I16_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I16_%_APP_%-TO_TEXT",
+         "Name": "%_I16_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "CRELEASE                      ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I17_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "CRELEASE",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "SAP Release",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI17-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TEXT",
+         "Name": "I17-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TEXT",
+         "Name": "%_I17_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "SAP Release",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI17-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TO_TEXT",
+         "Name": "I17-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I17_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I17_%_APP_%-TO_TEXT",
+         "Name": "%_I17_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "DELFLAG                       ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I18_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "DELFLAG",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Deletion Flag",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI18-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TEXT",
+         "Name": "I18-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TEXT",
+         "Name": "%_I18_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Deletion Flag",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI18-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TO_TEXT",
+         "Name": "I18-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I18_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I18_%_APP_%-TO_TEXT",
+         "Name": "%_I18_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "TRANSLTTXT                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I19_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "TRANSLTTXT",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Translate Technical Texts into Development Language",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI19-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TEXT",
+         "Name": "I19-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TEXT",
+         "Name": "%_I19_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Translate Technical Texts into Development Language",
+         "DisplayedText": " ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI19-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TO_TEXT",
+         "Name": "I19-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I19_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I19_%_APP_%-TO_TEXT",
+         "Name": "%_I19_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "CREATED_ON                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I20_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "CREATED_ON",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Created On",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI20-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TEXT",
+         "Name": "I20-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TEXT",
+         "Name": "%_I20_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Object Created On",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI20-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TO_TEXT",
+         "Name": "I20-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I20_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I20_%_APP_%-TO_TEXT",
+         "Name": "%_I20_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "CHECK_DATE                    ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I21_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "CHECK_DATE",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Checked on",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI21-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TEXT",
+         "Name": "I21-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TEXT",
+         "Name": "%_I21_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Checked on",
+         "DisplayedText": "          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtI21-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TO_TEXT",
+         "Name": "I21-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I21_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I21_%_APP_%-TO_TEXT",
+         "Name": "%_I21_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "CHECK_CFG                     ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_I22_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "CHECK_CFG",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Check Configuration",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI22-LOW",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TEXT",
+         "Name": "I22-LOW",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "to   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TO_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TEXT",
+         "Name": "%_I22_%_APP_%-TO_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "to",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Check Configuration",
+         "DisplayedText": "                              ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtI22-HIGH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TO_TEXT",
+         "Name": "I22-HIGH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_I22_%_APP_%-VALU_PUSH",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_I22_%_APP_%-TO_TEXT",
+         "Name": "%_I22_%_APP_%-VALU_PUSH",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Multiple Selection",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "Width of Output List          ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_LIST_BRE_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_LIST_BRE_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Width of Output List",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "List Width of Data Browser",
+         "DisplayedText": " 250",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtLIST_BRE",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_LIST_BRE_%_APP_%-TEXT",
+         "Name": "LIST_BRE",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "250",
+         "Tooltip": "",
+         "Type": "GuiCTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "Maximum No. of Hits           ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_MAX_SEL_%_APP_%-TEXT",
+         "LeftLabel": "",
+         "Name": "%_MAX_SEL_%_APP_%-TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Maximum No. of Hits",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "Maximum Number of Selected Entries",
+         "DisplayedText": "       200 ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtMAX_SEL",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_MAX_SEL_%_APP_%-TEXT",
+         "Name": "MAX_SEL",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "200 ",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/usr",
+       "LeftLabel": "",
+       "Name": "usr",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiUserArea"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+         "LeftLabel": "",
+         "Name": "pane[0]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "A maintenance view exists for table TADIR",
+         "Tooltip": "A maintenance view exists for table TADIR",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+         "LeftLabel": "",
+         "Name": "pane[1]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "A4H (1) 001",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+         "LeftLabel": "",
+         "Name": "pane[2]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+         "LeftLabel": "",
+         "Name": "pane[3]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "OVR",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+         "LeftLabel": "",
+         "Name": "pane[4]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "                    ",
+         "Tooltip": "SAP GUI Scripting: Script is running",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+         "LeftLabel": "",
+         "Name": "pane[5]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": " SERVER ",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]",
+         "LeftLabel": "",
+         "Name": "pane[6]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "KANA",
+         "Tooltip": "Secure Network Communication is not enabled",
+         "Type": "GuiStatusPane"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "false",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+       "LeftLabel": "",
+       "Name": "sbar",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "A maintenance view exists for table TADIR",
+       "Tooltip": "",
+       "Type": "GuiStatusbar"
+      }
+     }
+    ],
+    "properties": {
+     "AccTooltip": "",
+     "Changeable": "true",
+     "DefaultTooltip": "",
+     "DisplayedText": "",
+     "Id": "/app/con[0]/ses[0]/wnd[0]",
+     "LeftLabel": "",
+     "Name": "wnd[0]",
+     "RightLabel": "",
+     "SubType": "",
+     "Text": "Data Browser: Table TADIR: Selection Screen",
+     "Tooltip": "",
+     "Type": "GuiMainWindow"
+    }
+   }
+  ]
+ }
+}

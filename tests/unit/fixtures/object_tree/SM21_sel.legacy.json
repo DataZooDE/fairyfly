@@ -1,0 +1,2306 @@
+{
+ "child_count": 6,
+ "compact": false,
+ "element_count": 73,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 10,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+   "name": "btn[11]",
+   "text": "",
+   "tooltip": "Save as Variant...   (Ctrl+S)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+   "name": "btn[86]",
+   "text": "",
+   "tooltip": "Execute and Print   (Ctrl+P)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+   "name": "btn[8]",
+   "text": "",
+   "tooltip": "Execute   (F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]",
+   "name": "btn[13]",
+   "text": "",
+   "tooltip": "Program Documentation   (Shift+F1)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "Display the system log",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "Program",
+   "text": "Program",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 11,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[10]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B001001_BLOCK_1000",
+   "is_group": true,
+   "name": "%B001001_BLOCK_1000",
+   "text": "Basic attributes",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%F005003_1000",
+   "name": "%F005003_1000",
+   "text": "From Date / Time               ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtDATE_FR",
+   "label": "From Date / Time",
+   "name": "DATE_FR",
+   "text": "02.10.2026",
+   "tooltip": "Field of type DATS",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%C007005_1000",
+   "label": "From Date / Time",
+   "name": "%C007005_1000",
+   "text": "   / ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTIME_FR",
+   "label": "From Date / Time",
+   "name": "TIME_FR",
+   "text": "23:00:00",
+   "tooltip": "Field of type TIMS",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%F006009_1000",
+   "name": "%F006009_1000",
+   "text": "To Date / Time                 ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtDATE_TO",
+   "label": "To Date / Time",
+   "name": "DATE_TO",
+   "text": "          ",
+   "tooltip": "Field of type DATS",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%C007011_1000",
+   "label": "To Date / Time",
+   "name": "%C007011_1000",
+   "text": "   / ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTIME_TO",
+   "label": "To Date / Time",
+   "name": "TIME_TO",
+   "text": "00:00:00",
+   "tooltip": "Field of type TIMS",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtMSGIDOPT-LOW",
+   "label": "Message ID",
+   "name": "MSGIDOPT-LOW",
+   "text": "   ",
+   "tooltip": "System log message Identifier",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtMSGIDOPT-HIGH",
+   "label": "Message ID",
+   "name": "MSGIDOPT-HIGH",
+   "range_part": "to",
+   "text": "   ",
+   "tooltip": "System log message Identifier",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_MSGIDOPT_%_APP_%-VALU_PUSH",
+   "name": "%_MSGIDOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtMANDTOPT-LOW",
+   "label": "Client",
+   "name": "MANDTOPT-LOW",
+   "text": "   ",
+   "tooltip": "Client",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtMANDTOPT-HIGH",
+   "label": "Client",
+   "name": "MANDTOPT-HIGH",
+   "range_part": "to",
+   "text": "   ",
+   "tooltip": "Client",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_MANDTOPT_%_APP_%-VALU_PUSH",
+   "name": "%_MANDTOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtUSEROPT-LOW",
+   "label": "User",
+   "name": "USEROPT-LOW",
+   "text": "            ",
+   "tooltip": "User Name in User Master Record",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtUSEROPT-HIGH",
+   "label": "User",
+   "name": "USEROPT-HIGH",
+   "range_part": "to",
+   "text": "            ",
+   "tooltip": "User Name in User Master Record",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_USEROPT_%_APP_%-VALU_PUSH",
+   "name": "%_USEROPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "selectable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkRB1",
+   "name": "RB1",
+   "selected": false,
+   "text": "High severity messages only",
+   "type": "GuiCheckBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B002019_BLOCK_1000",
+   "is_group": true,
+   "name": "%B002019_BLOCK_1000",
+   "text": "Extended attributes",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtINSTOPT-LOW",
+   "label": "Extended Instance Name",
+   "name": "INSTOPT-LOW",
+   "text": "vhcala4hci_A4H_00                      ",
+   "tooltip": "Instance Name",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtINSTOPT-HIGH",
+   "label": "Extended Instance Name",
+   "name": "INSTOPT-HIGH",
+   "range_part": "to",
+   "text": "                                       ",
+   "tooltip": "Instance Name",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_INSTOPT_%_APP_%-VALU_PUSH",
+   "name": "%_INSTOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTCODEOPT-LOW",
+   "label": "Transaction Code",
+   "name": "TCODEOPT-LOW",
+   "text": "                    ",
+   "tooltip": "Transaction Code",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTCODEOPT-HIGH",
+   "label": "Transaction Code",
+   "name": "TCODEOPT-HIGH",
+   "range_part": "to",
+   "text": "                    ",
+   "tooltip": "Transaction Code",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TCODEOPT_%_APP_%-VALU_PUSH",
+   "name": "%_TCODEOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTYPEOPT-LOW",
+   "label": "Workprocess Type",
+   "name": "TYPEOPT-LOW",
+   "text": "    ",
+   "tooltip": "Workprocess type",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTYPEOPT-HIGH",
+   "label": "Workprocess Type",
+   "name": "TYPEOPT-HIGH",
+   "range_part": "to",
+   "text": "    ",
+   "tooltip": "Workprocess type",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TYPEOPT_%_APP_%-VALU_PUSH",
+   "name": "%_TYPEOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROCOPT-LOW",
+   "label": "Process No.",
+   "name": "PROCOPT-LOW",
+   "text": "   ",
+   "tooltip": "Process Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROCOPT-HIGH",
+   "label": "Process No.",
+   "name": "PROCOPT-HIGH",
+   "range_part": "to",
+   "text": "   ",
+   "tooltip": "Process Number",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PROCOPT_%_APP_%-VALU_PUSH",
+   "name": "%_PROCOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROGOPT-LOW",
+   "label": "Program",
+   "name": "PROGOPT-LOW",
+   "text": "                                        ",
+   "tooltip": "Program Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROGOPT-HIGH",
+   "label": "Program",
+   "name": "PROGOPT-HIGH",
+   "range_part": "to",
+   "text": "                                        ",
+   "tooltip": "Program Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PROGOPT_%_APP_%-VALU_PUSH",
+   "name": "%_PROGOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtPACKOPT-LOW",
+   "label": "Package",
+   "name": "PACKOPT-LOW",
+   "text": "                              ",
+   "tooltip": "Package",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtPACKOPT-HIGH",
+   "label": "Package",
+   "name": "PACKOPT-HIGH",
+   "range_part": "to",
+   "text": "                              ",
+   "tooltip": "Package",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PACKOPT_%_APP_%-VALU_PUSH",
+   "name": "%_PACKOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTXIDOPT-LOW",
+   "label": "EPP Transaction ID",
+   "name": "TXIDOPT-LOW",
+   "text": "                                ",
+   "tooltip": "Transaction ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTXIDOPT-HIGH",
+   "label": "EPP Transaction ID",
+   "name": "TXIDOPT-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "Transaction ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TXIDOPT_%_APP_%-VALU_PUSH",
+   "name": "%_TXIDOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONTOPT-LOW",
+   "label": "EPP Root Context ID",
+   "name": "CONTOPT-LOW",
+   "text": "                                ",
+   "tooltip": "EPP Full Context ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONTOPT-HIGH",
+   "label": "EPP Root Context ID",
+   "name": "CONTOPT-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "EPP Full Context ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_CONTOPT_%_APP_%-VALU_PUSH",
+   "name": "%_CONTOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONNOPT-LOW",
+   "label": "EPP Connection ID",
+   "name": "CONNOPT-LOW",
+   "text": "                                ",
+   "tooltip": "EPP Connection ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONNOPT-HIGH",
+   "label": "EPP Connection ID",
+   "name": "CONNOPT-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "EPP Connection ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_CONNOPT_%_APP_%-VALU_PUSH",
+   "name": "%_CONNOPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B003031_BLOCK_1000",
+   "is_group": true,
+   "name": "%B003031_BLOCK_1000",
+   "text": "Display options",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "selectable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkRB2",
+   "name": "RB2",
+   "selected": false,
+   "text": "Display ALV Header",
+   "type": "GuiCheckBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "",
+   "type": "GuiStatusbar",
+   "visible": true
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+    "name": "btn[11]",
+    "text": "",
+    "tooltip": "Save as Variant...   (Ctrl+S)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+    "name": "btn[86]",
+    "text": "",
+    "tooltip": "Execute and Print   (Ctrl+P)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+    "name": "btn[8]",
+    "text": "",
+    "tooltip": "Execute   (F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]",
+    "name": "btn[13]",
+    "text": "",
+    "tooltip": "Program Documentation   (Shift+F1)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "form_fields": [
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%F005003_1000",
+    "name": "%F005003_1000",
+    "text": "From Date / Time               ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtDATE_FR",
+    "label": "From Date / Time",
+    "name": "DATE_FR",
+    "text": "02.10.2026",
+    "tooltip": "Field of type DATS",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%C007005_1000",
+    "label": "From Date / Time",
+    "name": "%C007005_1000",
+    "text": "   / ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTIME_FR",
+    "label": "From Date / Time",
+    "name": "TIME_FR",
+    "text": "23:00:00",
+    "tooltip": "Field of type TIMS",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%F006009_1000",
+    "name": "%F006009_1000",
+    "text": "To Date / Time                 ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtDATE_TO",
+    "label": "To Date / Time",
+    "name": "DATE_TO",
+    "text": "          ",
+    "tooltip": "Field of type DATS",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%C007011_1000",
+    "label": "To Date / Time",
+    "name": "%C007011_1000",
+    "text": "   / ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTIME_TO",
+    "label": "To Date / Time",
+    "name": "TIME_TO",
+    "text": "00:00:00",
+    "tooltip": "Field of type TIMS",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtMSGIDOPT-LOW",
+    "label": "Message ID",
+    "name": "MSGIDOPT-LOW",
+    "text": "   ",
+    "tooltip": "System log message Identifier",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtMSGIDOPT-HIGH",
+    "label": "Message ID",
+    "name": "MSGIDOPT-HIGH",
+    "range_part": "to",
+    "text": "   ",
+    "tooltip": "System log message Identifier",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtMANDTOPT-LOW",
+    "label": "Client",
+    "name": "MANDTOPT-LOW",
+    "text": "   ",
+    "tooltip": "Client",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtMANDTOPT-HIGH",
+    "label": "Client",
+    "name": "MANDTOPT-HIGH",
+    "range_part": "to",
+    "text": "   ",
+    "tooltip": "Client",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtUSEROPT-LOW",
+    "label": "User",
+    "name": "USEROPT-LOW",
+    "text": "            ",
+    "tooltip": "User Name in User Master Record",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtUSEROPT-HIGH",
+    "label": "User",
+    "name": "USEROPT-HIGH",
+    "range_part": "to",
+    "text": "            ",
+    "tooltip": "User Name in User Master Record",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "selectable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkRB1",
+    "name": "RB1",
+    "selected": false,
+    "text": "High severity messages only",
+    "type": "GuiCheckBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtINSTOPT-LOW",
+    "label": "Extended Instance Name",
+    "name": "INSTOPT-LOW",
+    "text": "vhcala4hci_A4H_00                      ",
+    "tooltip": "Instance Name",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtINSTOPT-HIGH",
+    "label": "Extended Instance Name",
+    "name": "INSTOPT-HIGH",
+    "range_part": "to",
+    "text": "                                       ",
+    "tooltip": "Instance Name",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTCODEOPT-LOW",
+    "label": "Transaction Code",
+    "name": "TCODEOPT-LOW",
+    "text": "                    ",
+    "tooltip": "Transaction Code",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTCODEOPT-HIGH",
+    "label": "Transaction Code",
+    "name": "TCODEOPT-HIGH",
+    "range_part": "to",
+    "text": "                    ",
+    "tooltip": "Transaction Code",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTYPEOPT-LOW",
+    "label": "Workprocess Type",
+    "name": "TYPEOPT-LOW",
+    "text": "    ",
+    "tooltip": "Workprocess type",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtTYPEOPT-HIGH",
+    "label": "Workprocess Type",
+    "name": "TYPEOPT-HIGH",
+    "range_part": "to",
+    "text": "    ",
+    "tooltip": "Workprocess type",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROCOPT-LOW",
+    "label": "Process No.",
+    "name": "PROCOPT-LOW",
+    "text": "   ",
+    "tooltip": "Process Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROCOPT-HIGH",
+    "label": "Process No.",
+    "name": "PROCOPT-HIGH",
+    "range_part": "to",
+    "text": "   ",
+    "tooltip": "Process Number",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROGOPT-LOW",
+    "label": "Program",
+    "name": "PROGOPT-LOW",
+    "text": "                                        ",
+    "tooltip": "Program Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtPROGOPT-HIGH",
+    "label": "Program",
+    "name": "PROGOPT-HIGH",
+    "range_part": "to",
+    "text": "                                        ",
+    "tooltip": "Program Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtPACKOPT-LOW",
+    "label": "Package",
+    "name": "PACKOPT-LOW",
+    "text": "                              ",
+    "tooltip": "Package",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtPACKOPT-HIGH",
+    "label": "Package",
+    "name": "PACKOPT-HIGH",
+    "range_part": "to",
+    "text": "                              ",
+    "tooltip": "Package",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTXIDOPT-LOW",
+    "label": "EPP Transaction ID",
+    "name": "TXIDOPT-LOW",
+    "text": "                                ",
+    "tooltip": "Transaction ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTXIDOPT-HIGH",
+    "label": "EPP Transaction ID",
+    "name": "TXIDOPT-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "Transaction ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONTOPT-LOW",
+    "label": "EPP Root Context ID",
+    "name": "CONTOPT-LOW",
+    "text": "                                ",
+    "tooltip": "EPP Full Context ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONTOPT-HIGH",
+    "label": "EPP Root Context ID",
+    "name": "CONTOPT-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "EPP Full Context ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONNOPT-LOW",
+    "label": "EPP Connection ID",
+    "name": "CONNOPT-LOW",
+    "text": "                                ",
+    "tooltip": "EPP Connection ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtCONNOPT-HIGH",
+    "label": "EPP Connection ID",
+    "name": "CONNOPT-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "EPP Connection ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "selectable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkRB2",
+    "name": "RB2",
+    "selected": false,
+    "text": "Display ALV Header",
+    "type": "GuiCheckBox",
+    "visible": true
+   }
+  ],
+  "inline_buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_MSGIDOPT_%_APP_%-VALU_PUSH",
+    "name": "%_MSGIDOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_MANDTOPT_%_APP_%-VALU_PUSH",
+    "name": "%_MANDTOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_USEROPT_%_APP_%-VALU_PUSH",
+    "name": "%_USEROPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_INSTOPT_%_APP_%-VALU_PUSH",
+    "name": "%_INSTOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TCODEOPT_%_APP_%-VALU_PUSH",
+    "name": "%_TCODEOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TYPEOPT_%_APP_%-VALU_PUSH",
+    "name": "%_TYPEOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PROCOPT_%_APP_%-VALU_PUSH",
+    "name": "%_PROCOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PROGOPT_%_APP_%-VALU_PUSH",
+    "name": "%_PROGOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_PACKOPT_%_APP_%-VALU_PUSH",
+    "name": "%_PACKOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_TXIDOPT_%_APP_%-VALU_PUSH",
+    "name": "%_TXIDOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_CONTOPT_%_APP_%-VALU_PUSH",
+    "name": "%_CONTOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_CONNOPT_%_APP_%-VALU_PUSH",
+    "name": "%_CONNOPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "Display the system log",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "Program",
+    "text": "Program",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 11,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[10]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B001001_BLOCK_1000",
+    "is_group": true,
+    "name": "%B001001_BLOCK_1000",
+    "text": "Basic attributes",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B002019_BLOCK_1000",
+    "is_group": true,
+    "name": "%B002019_BLOCK_1000",
+    "text": "Extended attributes",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/box%B003031_BLOCK_1000",
+    "is_group": true,
+    "name": "%B003031_BLOCK_1000",
+    "text": "Display options",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "",
+    "type": "GuiStatusbar",
+    "visible": true
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 10,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[13]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "title": "Display the system log",
+ "transaction": "SM21"
+}

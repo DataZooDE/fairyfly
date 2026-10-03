@@ -1,0 +1,2350 @@
+{
+ "child_count": 6,
+ "compact": false,
+ "element_count": 77,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 9,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+   "name": "btn[11]",
+   "text": "",
+   "tooltip": "Save   (Ctrl+S)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[5]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[6]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[5]",
+   "name": "btn[5]",
+   "text": "",
+   "tooltip": "Overview   (F5)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[6]",
+   "name": "btn[6]",
+   "text": "",
+   "tooltip": "Statistics   (F6)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "ABAP Runtime Errors - All Clients",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 2,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "Runtime Errors",
+   "text": "Runtime Errors",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 1,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE3",
+   "is_group": true,
+   "name": "TITLE3",
+   "text": "Parameters",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE1",
+   "is_group": true,
+   "name": "TITLE1",
+   "text": "Standard",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnTODAY",
+   "name": "TODAY",
+   "text": "Today",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTOD_NUM",
+   "name": "TOD_NUM",
+   "text": "0       Runtime Errors        ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnYESTERD",
+   "name": "YESTERD",
+   "text": "Yesterday",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtYED_NUM",
+   "name": "YED_NUM",
+   "text": "9       Runtime Errors        ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "group",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE2",
+   "is_group": true,
+   "name": "TITLE2",
+   "text": "Own Selection",
+   "type": "GuiBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "selectable",
+    "readable",
+    "has_options"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/cmbP_DTMODE",
+   "label": "Time Restriction Mode",
+   "name": "P_DTMODE",
+   "text": "Selection options for date/time (system time UTC)                                                                                                                                                                                                              ",
+   "tooltip": "Mode for Time Restriction of Selection",
+   "type": "GuiComboBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-LOW",
+   "label": "Date",
+   "name": "S_DATUM-LOW",
+   "text": "03.10.2026",
+   "tooltip": "System Date",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-HIGH",
+   "label": "Date",
+   "name": "S_DATUM-HIGH",
+   "range_part": "to",
+   "text": "          ",
+   "tooltip": "System Date",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_DATUM_%_APP_%-VALU_PUSH",
+   "name": "%_S_DATUM_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-LOW",
+   "label": "Time",
+   "name": "S_UZEIT-LOW",
+   "text": "00:00:00",
+   "tooltip": "System Time",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-HIGH",
+   "label": "Time",
+   "name": "S_UZEIT-HIGH",
+   "range_part": "to",
+   "text": "00:00:00",
+   "tooltip": "System Time",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_UZEIT_%_APP_%-VALU_PUSH",
+   "name": "%_S_UZEIT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_AHOST-LOW",
+   "label": "Host",
+   "name": "S_AHOST-LOW",
+   "text": "                                ",
+   "tooltip": "Name of Current Application Server",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_AHOST-HIGH",
+   "label": "Host",
+   "name": "S_AHOST-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "Name of Current Application Server",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_AHOST_%_APP_%-VALU_PUSH",
+   "name": "%_S_AHOST_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_WPID-LOW",
+   "label": "Work Process Index",
+   "name": "S_WPID-LOW",
+   "text": "           ",
+   "tooltip": "Index of Work Process",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_WPID-HIGH",
+   "label": "Work Process Index",
+   "name": "S_WPID-HIGH",
+   "range_part": "to",
+   "text": "           ",
+   "tooltip": "Index of Work Process",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_WPID_%_APP_%-VALU_PUSH",
+   "name": "%_S_WPID_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_UNAME-LOW",
+   "label": "User",
+   "name": "S_UNAME-LOW",
+   "text": "DEVELOPER   ",
+   "tooltip": "User Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_UNAME-HIGH",
+   "label": "User",
+   "name": "S_UNAME-HIGH",
+   "range_part": "to",
+   "text": "            ",
+   "tooltip": "User Name",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_UNAME_%_APP_%-VALU_PUSH",
+   "name": "%_S_UNAME_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_MANDT-LOW",
+   "label": "Client",
+   "name": "S_MANDT-LOW",
+   "text": "   ",
+   "tooltip": "Client ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_MANDT-HIGH",
+   "label": "Client",
+   "name": "S_MANDT-HIGH",
+   "range_part": "to",
+   "text": "   ",
+   "tooltip": "Client ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_MANDT_%_APP_%-VALU_PUSH",
+   "name": "%_S_MANDT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_XHOLD-LOW",
+   "label": "To be stored",
+   "name": "S_XHOLD-LOW",
+   "text": " ",
+   "tooltip": "Storage of Short Dump",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_XHOLD-HIGH",
+   "label": "To be stored",
+   "name": "S_XHOLD-HIGH",
+   "range_part": "to",
+   "text": " ",
+   "tooltip": "Storage of Short Dump",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_XHOLD_%_APP_%-VALU_PUSH",
+   "name": "%_S_XHOLD_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_ERRID-LOW",
+   "label": "Runtime Error",
+   "name": "S_ERRID-LOW",
+   "text": "                              ",
+   "tooltip": "Name of ABAP Runtime Error",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable",
+    "has_f4_help"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "has_f4_help": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_ERRID-HIGH",
+   "label": "Runtime Error",
+   "name": "S_ERRID-HIGH",
+   "range_part": "to",
+   "text": "                              ",
+   "tooltip": "Name of ABAP Runtime Error",
+   "type": "GuiCTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_ERRID_%_APP_%-VALU_PUSH",
+   "name": "%_S_ERRID_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_PRG-LOW",
+   "label": "Canceled Program",
+   "name": "S_PRG-LOW",
+   "text": "                                        ",
+   "tooltip": "ABAP Program: Current Master Program",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_PRG-HIGH",
+   "label": "Canceled Program",
+   "name": "S_PRG-HIGH",
+   "range_part": "to",
+   "text": "                                        ",
+   "tooltip": "ABAP Program: Current Master Program",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_PRG_%_APP_%-VALU_PUSH",
+   "name": "%_S_PRG_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EXCEPT-LOW",
+   "label": "Exception",
+   "name": "S_EXCEPT-LOW",
+   "text": "                              ",
+   "tooltip": "Exception Column for ST22 ALV",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EXCEPT-HIGH",
+   "label": "Exception",
+   "name": "S_EXCEPT-HIGH",
+   "range_part": "to",
+   "text": "                              ",
+   "tooltip": "Exception Column for ST22 ALV",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EXCEPT_%_APP_%-VALU_PUSH",
+   "name": "%_S_EXCEPT_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_TID-LOW",
+   "label": "Transaction ID",
+   "name": "S_TID-LOW",
+   "text": "                                ",
+   "tooltip": "Transaction ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_TID-HIGH",
+   "label": "Transaction ID",
+   "name": "S_TID-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "Transaction ID",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_TID_%_APP_%-VALU_PUSH",
+   "name": "%_S_TID_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtST_EPRID",
+   "name": "ST_EPRID",
+   "text": "EPP Root Context ID       ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPRID-LOW",
+   "label": "EPP Root Context ID",
+   "name": "S_EPPRID-LOW",
+   "text": "                                ",
+   "tooltip": "Root Context ID of Extended Passport (EPP)",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPRID-HIGH",
+   "label": "EPP Root Context ID",
+   "name": "S_EPPRID-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "Root Context ID of Extended Passport (EPP)",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EPPRID_%_APP_%-VALU_PUSH",
+   "name": "%_S_EPPRID_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtST_EPCID",
+   "name": "ST_EPCID",
+   "text": "EPP Connection ID         ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPCID-LOW",
+   "label": "EPP Connection ID",
+   "name": "S_EPPCID-LOW",
+   "text": "                                ",
+   "tooltip": "Connection ID of Extended Passport (EPP)",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPCID-HIGH",
+   "label": "EPP Connection ID",
+   "name": "S_EPPCID-HIGH",
+   "range_part": "to",
+   "text": "                                ",
+   "tooltip": "Connection ID of Extended Passport (EPP)",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EPPCID_%_APP_%-VALU_PUSH",
+   "name": "%_S_EPPCID_%_APP_%-VALU_PUSH",
+   "text": "",
+   "tooltip": "Multiple Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnSTARTSEL",
+   "name": "STARTSEL",
+   "text": " Start",
+   "tooltip": "Start",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnRESETSEL",
+   "name": "RESETSEL",
+   "text": " Reset",
+   "tooltip": "Reset Selection",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtRESTRICT",
+   "name": "RESTRICT",
+   "text": "More Options                                                          ",
+   "type": "GuiTextField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "selectable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG_EXC",
+   "name": "FLAG_EXC",
+   "selected": false,
+   "text": "Abridged display of the runtime error",
+   "type": "GuiCheckBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "selectable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG_COM",
+   "name": "FLAG_COM",
+   "selected": false,
+   "text": "Get relevant application component (performance-intensive)",
+   "type": "GuiCheckBox",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "No short dumps match the selection criteria",
+   "type": "GuiStatusbar",
+   "visible": true
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+    "name": "btn[11]",
+    "text": "",
+    "tooltip": "Save   (Ctrl+S)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[5]",
+    "name": "btn[5]",
+    "text": "",
+    "tooltip": "Overview   (F5)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[6]",
+    "name": "btn[6]",
+    "text": "",
+    "tooltip": "Statistics   (F6)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "form_fields": [
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTOD_NUM",
+    "name": "TOD_NUM",
+    "text": "0       Runtime Errors        ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtYED_NUM",
+    "name": "YED_NUM",
+    "text": "9       Runtime Errors        ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "selectable",
+     "readable",
+     "has_options"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/cmbP_DTMODE",
+    "label": "Time Restriction Mode",
+    "name": "P_DTMODE",
+    "text": "Selection options for date/time (system time UTC)                                                                                                                                                                                                              ",
+    "tooltip": "Mode for Time Restriction of Selection",
+    "type": "GuiComboBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-LOW",
+    "label": "Date",
+    "name": "S_DATUM-LOW",
+    "text": "03.10.2026",
+    "tooltip": "System Date",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-HIGH",
+    "label": "Date",
+    "name": "S_DATUM-HIGH",
+    "range_part": "to",
+    "text": "          ",
+    "tooltip": "System Date",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-LOW",
+    "label": "Time",
+    "name": "S_UZEIT-LOW",
+    "text": "00:00:00",
+    "tooltip": "System Time",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-HIGH",
+    "label": "Time",
+    "name": "S_UZEIT-HIGH",
+    "range_part": "to",
+    "text": "00:00:00",
+    "tooltip": "System Time",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_AHOST-LOW",
+    "label": "Host",
+    "name": "S_AHOST-LOW",
+    "text": "                                ",
+    "tooltip": "Name of Current Application Server",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_AHOST-HIGH",
+    "label": "Host",
+    "name": "S_AHOST-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "Name of Current Application Server",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_WPID-LOW",
+    "label": "Work Process Index",
+    "name": "S_WPID-LOW",
+    "text": "           ",
+    "tooltip": "Index of Work Process",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_WPID-HIGH",
+    "label": "Work Process Index",
+    "name": "S_WPID-HIGH",
+    "range_part": "to",
+    "text": "           ",
+    "tooltip": "Index of Work Process",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_UNAME-LOW",
+    "label": "User",
+    "name": "S_UNAME-LOW",
+    "text": "DEVELOPER   ",
+    "tooltip": "User Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_UNAME-HIGH",
+    "label": "User",
+    "name": "S_UNAME-HIGH",
+    "range_part": "to",
+    "text": "            ",
+    "tooltip": "User Name",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_MANDT-LOW",
+    "label": "Client",
+    "name": "S_MANDT-LOW",
+    "text": "   ",
+    "tooltip": "Client ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_MANDT-HIGH",
+    "label": "Client",
+    "name": "S_MANDT-HIGH",
+    "range_part": "to",
+    "text": "   ",
+    "tooltip": "Client ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_XHOLD-LOW",
+    "label": "To be stored",
+    "name": "S_XHOLD-LOW",
+    "text": " ",
+    "tooltip": "Storage of Short Dump",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_XHOLD-HIGH",
+    "label": "To be stored",
+    "name": "S_XHOLD-HIGH",
+    "range_part": "to",
+    "text": " ",
+    "tooltip": "Storage of Short Dump",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_ERRID-LOW",
+    "label": "Runtime Error",
+    "name": "S_ERRID-LOW",
+    "text": "                              ",
+    "tooltip": "Name of ABAP Runtime Error",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable",
+     "has_f4_help"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_ERRID-HIGH",
+    "label": "Runtime Error",
+    "name": "S_ERRID-HIGH",
+    "range_part": "to",
+    "text": "                              ",
+    "tooltip": "Name of ABAP Runtime Error",
+    "type": "GuiCTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_PRG-LOW",
+    "label": "Canceled Program",
+    "name": "S_PRG-LOW",
+    "text": "                                        ",
+    "tooltip": "ABAP Program: Current Master Program",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_PRG-HIGH",
+    "label": "Canceled Program",
+    "name": "S_PRG-HIGH",
+    "range_part": "to",
+    "text": "                                        ",
+    "tooltip": "ABAP Program: Current Master Program",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EXCEPT-LOW",
+    "label": "Exception",
+    "name": "S_EXCEPT-LOW",
+    "text": "                              ",
+    "tooltip": "Exception Column for ST22 ALV",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EXCEPT-HIGH",
+    "label": "Exception",
+    "name": "S_EXCEPT-HIGH",
+    "range_part": "to",
+    "text": "                              ",
+    "tooltip": "Exception Column for ST22 ALV",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_TID-LOW",
+    "label": "Transaction ID",
+    "name": "S_TID-LOW",
+    "text": "                                ",
+    "tooltip": "Transaction ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_TID-HIGH",
+    "label": "Transaction ID",
+    "name": "S_TID-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "Transaction ID",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtST_EPRID",
+    "name": "ST_EPRID",
+    "text": "EPP Root Context ID       ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPRID-LOW",
+    "label": "EPP Root Context ID",
+    "name": "S_EPPRID-LOW",
+    "text": "                                ",
+    "tooltip": "Root Context ID of Extended Passport (EPP)",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPRID-HIGH",
+    "label": "EPP Root Context ID",
+    "name": "S_EPPRID-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "Root Context ID of Extended Passport (EPP)",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtST_EPCID",
+    "name": "ST_EPCID",
+    "text": "EPP Connection ID         ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPCID-LOW",
+    "label": "EPP Connection ID",
+    "name": "S_EPPCID-LOW",
+    "text": "                                ",
+    "tooltip": "Connection ID of Extended Passport (EPP)",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtS_EPPCID-HIGH",
+    "label": "EPP Connection ID",
+    "name": "S_EPPCID-HIGH",
+    "range_part": "to",
+    "text": "                                ",
+    "tooltip": "Connection ID of Extended Passport (EPP)",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtRESTRICT",
+    "name": "RESTRICT",
+    "text": "More Options                                                          ",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "selectable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG_EXC",
+    "name": "FLAG_EXC",
+    "selected": false,
+    "text": "Abridged display of the runtime error",
+    "type": "GuiCheckBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "selectable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG_COM",
+    "name": "FLAG_COM",
+    "selected": false,
+    "text": "Get relevant application component (performance-intensive)",
+    "type": "GuiCheckBox",
+    "visible": true
+   }
+  ],
+  "inline_buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnTODAY",
+    "name": "TODAY",
+    "text": "Today",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnYESTERD",
+    "name": "YESTERD",
+    "text": "Yesterday",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_DATUM_%_APP_%-VALU_PUSH",
+    "name": "%_S_DATUM_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_UZEIT_%_APP_%-VALU_PUSH",
+    "name": "%_S_UZEIT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_AHOST_%_APP_%-VALU_PUSH",
+    "name": "%_S_AHOST_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_WPID_%_APP_%-VALU_PUSH",
+    "name": "%_S_WPID_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_UNAME_%_APP_%-VALU_PUSH",
+    "name": "%_S_UNAME_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_MANDT_%_APP_%-VALU_PUSH",
+    "name": "%_S_MANDT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_XHOLD_%_APP_%-VALU_PUSH",
+    "name": "%_S_XHOLD_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_ERRID_%_APP_%-VALU_PUSH",
+    "name": "%_S_ERRID_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_PRG_%_APP_%-VALU_PUSH",
+    "name": "%_S_PRG_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EXCEPT_%_APP_%-VALU_PUSH",
+    "name": "%_S_EXCEPT_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_TID_%_APP_%-VALU_PUSH",
+    "name": "%_S_TID_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EPPRID_%_APP_%-VALU_PUSH",
+    "name": "%_S_EPPRID_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_EPPCID_%_APP_%-VALU_PUSH",
+    "name": "%_S_EPPCID_%_APP_%-VALU_PUSH",
+    "text": "",
+    "tooltip": "Multiple Selection",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnSTARTSEL",
+    "name": "STARTSEL",
+    "text": " Start",
+    "tooltip": "Start",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btnRESETSEL",
+    "name": "RESETSEL",
+    "text": " Reset",
+    "tooltip": "Reset Selection",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "ABAP Runtime Errors - All Clients",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 2,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "Runtime Errors",
+    "text": "Runtime Errors",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 1,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE3",
+    "is_group": true,
+    "name": "TITLE3",
+    "text": "Parameters",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE1",
+    "is_group": true,
+    "name": "TITLE1",
+    "text": "Standard",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "group",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/boxTITLE2",
+    "is_group": true,
+    "name": "TITLE2",
+    "text": "Own Selection",
+    "type": "GuiBox",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "No short dumps match the selection criteria",
+    "type": "GuiStatusbar",
+    "visible": true
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 9,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[5]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[6]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "status_bar": {
+  "message_id": "SN                  ",
+  "message_number": "404",
+  "message_type": "W",
+  "text": "No short dumps match the selection criteria"
+ },
+ "title": "ABAP Runtime Errors - All Clients",
+ "transaction": "ST22"
+}
