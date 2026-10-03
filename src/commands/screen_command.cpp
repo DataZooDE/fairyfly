@@ -30,6 +30,9 @@ public:
         read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
         read_cmd_->add_flag("--probe-all", probe_all_,
             "Exhaustively probe every container by FindById (slower; restores pre-gating behavior; also FAIRYFLY_PROBE_ALL=1)");
+        read_cmd_->add_option("--tree-reader", tree_reader_,
+            "Screen tree reader: legacy (default), bulk (one GetObjectTree call, errors when unavailable) or auto (bulk with per-read fallback); default from FAIRYFLY_SCREEN_READER")
+            ->check(CLI::IsMember({"legacy", "bulk", "auto"}))->group("");
         read_cmd_->add_flag("--compact", compact_, "Compact output. markdown: hide IDs, collapse empty fields. json/toon: hierarchy and per-tab elements become id arrays, empty/null/false element fields omitted");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
             ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
@@ -113,7 +116,8 @@ public:
             }
 
             return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
-                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_, row_offset_);
+                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_, row_offset_,
+                                              tree_reader_);
         }
         else if (*find_cmd_) {
             sap::ScreenFindOptions query;
@@ -173,6 +177,7 @@ private:
     bool skip_trees_ = false;
     bool compact_ = false;
     bool probe_all_ = false;
+    std::string tree_reader_;
     bool dump_object_tree_ = false;
     std::string object_tree_id_;
     std::vector<std::string> object_tree_props_;

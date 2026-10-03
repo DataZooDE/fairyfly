@@ -339,6 +339,11 @@ public:
 /// Process-wide knowledge about GuiSession.GetObjectTree (SAP GUI 7.70 PL3 and later).
 enum class ObjectTreeSupport { Unknown, Available, Missing };
 
+/// Why GuiSession.GetObjectTree returned no answer. ServerFault (RPC_E_SERVERFAULT, 0x80010105) is
+/// the failure SAP GUI raises for a property it cannot serve (`Selected`); it can take saplogon down,
+/// so callers stop using the call for the whole process.
+enum class ObjectTreeFailure { None, Unsupported, ServerFault, Failed, Empty };
+
 /// COM-based SAP GUI session wrapper
 class ComGuiSession : public SapGuiObject {
 public:
@@ -364,9 +369,10 @@ public:
     /// GuiSession.GetObjectTree(id, props): the element `id` and all its descendants as one JSON string
     /// (one COM round trip). `props` empty passes no property list (Ids only). Returns nullopt when the
     /// method is unavailable (older SAP GUI: the process is then remembered as Missing), the call fails
-    /// or the answer is empty. Never logs the payload.
+    /// or the answer is empty. Never logs the payload. `failure` (optional) tells the caller why.
     std::optional<std::string> get_object_tree(const std::string& id,
-                                               const std::vector<std::string>& props = {}) const;
+                                               const std::vector<std::string>& props = {},
+                                               ObjectTreeFailure* failure = nullptr) const;
     static ObjectTreeSupport object_tree_support();
     static void reset_object_tree_support();
 

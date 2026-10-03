@@ -9,6 +9,7 @@
 #include "include/constants.h"
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <set>
@@ -744,6 +745,88 @@ bool probe_all_from_environment() {
     return enabled;
 }
 
+std::optional<TreeReaderMode> parse_tree_reader_mode(const std::string& text) {
+    const std::string value = lower_ascii(text);
+    if (value == "legacy") return TreeReaderMode::Legacy;
+    if (value == "bulk") return TreeReaderMode::Bulk;
+    if (value == "auto") return TreeReaderMode::Auto;
+    return std::nullopt;
+}
+
+const char* tree_reader_mode_name(TreeReaderMode mode) {
+    switch (mode) {
+        case TreeReaderMode::Bulk: return "bulk";
+        case TreeReaderMode::Auto: return "auto";
+        default: return "legacy";
+    }
+}
+
+TreeReaderMode tree_reader_mode_from_environment() {
+    char* buffer = nullptr;
+    size_t size = 0;
+    TreeReaderMode mode = TreeReaderMode::Legacy;
+    if (_dupenv_s(&buffer, &size, "FAIRYFLY_SCREEN_READER") == 0 && buffer != nullptr) {
+        mode = parse_tree_reader_mode(buffer).value_or(TreeReaderMode::Legacy);
+        free(buffer);
+    }
+    return mode;
+}
+
+namespace {
+// Process-wide switch-off of the bulk reader: one RPC_E_SERVERFAULT, or this many validator
+// failures in a row (a success resets the streak).
+constexpr int kMaxConsecutiveValidatorFailures = 3;
+std::atomic<bool> g_bulk_reader_disabled{false};
+std::atomic<int> g_validator_failures{0};
+
+void disable_bulk_reader(const char* why) {
+    if (!g_bulk_reader_disabled.exchange(true))
+        spdlog::warn("screen read: object tree reader disabled for this process ({})", why);
+}
+
+void note_validator_failure() {
+    if (g_validator_failures.fetch_add(1) + 1 >= kMaxConsecutiveValidatorFailures)
+        disable_bulk_reader("repeated validator failures");
+}
+} // namespace
+
+bool bulk_reader_disabled() { return g_bulk_reader_disabled.load(); }
+
+void reset_bulk_reader_state_for_testing() {
+    g_bulk_reader_disabled = false;
+    g_validator_failures = 0;
+}
+
+TreeReaderMode ScreenReader::effective_tree_reader_mode() const {
+    return tree_reader_mode_ ? *tree_reader_mode_ : tree_reader_mode_from_environment();
+}
+
+ObjectTreeSource ScreenReader::object_tree_source() const {
+    if (tree_source_) return tree_source_;
+    return [session = session_](const std::string& id, const std::vector<std::string>& props) {
+        ObjectTreeFailure why = ObjectTreeFailure::None;
+        auto answer = session->get_object_tree(id, props, &why);
+        if (!answer && why == ObjectTreeFailure::ServerFault) throw ObjectTreeServerFault();
+        return answer;
+    };
+}
+
+ElementProbeSource ScreenReader::element_probe_source() const {
+    if (probe_source_) return probe_source_;
+    return [session = session_](const std::string& id, bool want_acc_label, bool want_selected) {
+        auto element = session->find_element_by_id(id);
+        if (!element) throw ComException("Element not found: " + id);
+        ElementProbe probe;
+        if (want_acc_label) {
+            try {
+                probe.acc_label = element->get_string_property(L"AccLabel");
+            } catch (const ComException&) {}  // same as ComGuiElement::get_label
+        }
+        if (want_selected) probe.selected = element->get_property_bool(L"Selected");
+        return probe;
+    };
+}
+
 void ScreenReader::traverse_element_tree(
     ComGuiElementPtr element,
     ScreenElementCollector& collector,
@@ -1292,8 +1375,10 @@ void ScreenReader::discover_elements(ComGuiWindowPtr window, ScreenElementCollec
     extract_collected_trees_and_grids(collector);
 }
 
-json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& collector) {
+json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& collector,
+                                                  const TreeSnapshot* snapshot) {
     auto element_ids = collector.element_ids();
+    const ElementProbeSource probe_source = snapshot ? element_probe_source() : ElementProbeSource();
 
     const size_t MAX_ELEMENTS = 500;
     if (element_ids.size() > MAX_ELEMENTS) {
@@ -1327,6 +1412,28 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
             try {
                 if ((elem_index + 1) % 50 == 0 || elem_index == 0) {
                     spdlog::info("read: Extracting metadata for element {}/{}", elem_index + 1, element_ids.size());
+                }
+
+                // Bulk path: the tree already holds this element's properties.
+                if (snapshot) {
+                    if (const ObjectTreeNode* node = snapshot->find(elem_id)) {
+                        if (is_phase3_skipped_container(node->type, elem_id)) {
+                            spdlog::warn("read: Skipping container element {}/{} ({}): {} - containers not extractable",
+                                       elem_index + 1, element_ids.size(), node->type, elem_id);
+                            elem_index++;
+                            continue;
+                        }
+                        try {
+                            if (auto built = build_bulk_plain_element(*snapshot, *node, probe_source)) {
+                                elements.push_back(std::move(*built));
+                                elem_index++;
+                                continue;
+                            }
+                        } catch (const std::exception& e) {
+                            // Element vanished or a targeted read failed: read it the legacy way.
+                            spdlog::debug("read: bulk element {} falls back to the legacy read: {}", elem_id, e.what());
+                        }
+                    }
                 }
 
                 auto elem = session_->find_element_by_id(elem_id);
@@ -1461,6 +1568,80 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
     return result;
 }
 
+bool ScreenReader::read_elements_bulk(ComGuiWindowPtr window, int window_child_count,
+                                      bool skip_trees, json& elements, std::string& reason) {
+    try {
+        const std::string window_id = window->get_id();
+        const auto started = std::chrono::steady_clock::now();
+        std::optional<std::string> raw;
+        try {
+            raw = object_tree_source()(window_id, object_tree_requested_properties());
+        } catch (const ObjectTreeServerFault&) {
+            disable_bulk_reader("RPC_E_SERVERFAULT");
+            reason = "server_fault";
+            return false;
+        }
+        if (!raw) {
+            reason = ComGuiSession::object_tree_support() == ObjectTreeSupport::Missing
+                         ? "unsupported" : "no_answer";
+            return false;
+        }
+        const size_t bytes = raw->size();
+
+        std::string parse_error;
+        auto tree = parse_object_tree(*raw, window_id, &parse_error);
+        std::string().swap(*raw);  // the raw answer (unredacted) is not kept any longer
+        if (!tree) {
+            note_validator_failure();
+            reason = "invalid_tree: " + parse_error;
+            return false;
+        }
+        TreeSnapshot snapshot(std::move(*tree));
+        if (snapshot.root().children.size() != static_cast<size_t>(window_child_count)) {
+            note_validator_failure();
+            reason = "node_count_mismatch";
+            return false;
+        }
+        g_validator_failures = 0;
+        const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        spdlog::info("screen read: object tree 1 call, {} B, {} ms, {} nodes",
+                     bytes, elapsed_ms, snapshot.size());
+
+        ScreenElementCollector collector;
+        const TreeReplayResult replay = replay_discovery(snapshot, window_id, skip_trees, collector);
+
+        // Hosts the tree cannot answer keep their legacy FindById probe (see id_probe_candidates).
+        for (const auto& host : replay.probe_hosts) {
+            const ObjectTreeNode* host_node = snapshot.find(host);
+            const auto probes = id_probe_candidates(host_node ? host_node->type : std::string(),
+                                                    host, 0, collector, false);
+            std::string missed_index_family;
+            for (const auto& probe_id : probes) {
+                const auto bracket = probe_id.find('[');
+                const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
+                if (!family.empty() && family == missed_index_family) continue;
+                try {
+                    auto probed = session_->find_element_by_id(probe_id);
+                    if (probed) traverse_element_tree(probed, collector, 1, skip_trees, nullptr);
+                } catch (const std::exception& e) {
+                    spdlog::trace("No probed child {}: {}", probe_id, e.what());
+                    if (!family.empty()) missed_index_family = family;
+                }
+            }
+        }
+
+        spdlog::info("Discovery complete, {} elements found", collector.size());
+        extract_collected_trees_and_grids(collector);
+        elements = extract_metadata_for_collector(collector, &snapshot);
+        return true;
+    } catch (const std::exception& e) {
+        spdlog::warn("screen read: bulk reader failed, using the legacy reader: {}", e.what());
+        reason = "exception";
+        return false;
+    }
+}
+
 Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows) {
     auto start = std::chrono::high_resolution_clock::now();
     Result result;
@@ -1495,19 +1676,50 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         attach_status_bar(result, read_action_status(session_, window->get_id()));
         result.data["child_count"] = window->get_child_count();
 
+        const TreeReaderMode mode = effective_tree_reader_mode();
+        std::string bulk_reason;
+        bool used_bulk = false;
+
         if (include_structure) {
             // Clear extraction cache at start of each screen read
             ElementMetadataExtractor::clear_cache();
             ElementMetadataExtractor::set_skip_trees(skip_trees);
 
-            // Discover all unique elements (O(1) deduplication)
-            // Also extracts tree data immediately to avoid stale COM pointer segfaults
-            ScreenElementCollector collector;
-            discover_elements(window, collector, skip_trees);
+            json elements;
+            if (mode != TreeReaderMode::Legacy) {
+                if (probe_all_ || probe_all_from_environment()) {
+                    bulk_reason = "probe_all";
+                } else if (bulk_reader_disabled()) {
+                    bulk_reason = "disabled";
+                } else {
+                    used_bulk = read_elements_bulk(window, result.data["child_count"].get<int>(),
+                                                   skip_trees, elements, bulk_reason);
+                }
+                if (!used_bulk && mode == TreeReaderMode::Bulk && bulk_reason != "probe_all") {
+                    // Forced bulk never falls back silently, so a measurement cannot be the legacy path.
+                    result.status = Result::Status::Error;
+                    result.data = json::object();
+                    result.error["code"] = "OBJECT_TREE_UNAVAILABLE";
+                    result.error["message"] = "The bulk screen reader (FAIRYFLY_SCREEN_READER=bulk) could not read this screen: " + bulk_reason;
+                    result.error["reason"] = bulk_reason;
+                    return result;
+                }
+                if (!used_bulk) {
+                    // Fresh state for the legacy read (a failed bulk attempt may have run phase 2).
+                    ElementMetadataExtractor::clear_cache();
+                }
+            }
 
-            spdlog::info("Discovery complete, {} elements found", collector.size());
+            if (!used_bulk) {
+                // Discover all unique elements (O(1) deduplication)
+                // Also extracts tree data immediately to avoid stale COM pointer segfaults
+                ScreenElementCollector collector;
+                discover_elements(window, collector, skip_trees);
 
-            json elements = extract_metadata_for_collector(collector);
+                spdlog::info("Discovery complete, {} elements found", collector.size());
+
+                elements = extract_metadata_for_collector(collector);
+            }
             redact_sensitive_report_labels(elements);
 
             result.data["elements"] = elements;
@@ -1530,6 +1742,13 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
                 result.data["trees"] = trees;
                 spdlog::info("Extracted {} tree elements to dedicated trees field", trees.size());
             }
+        }
+
+        if (mode != TreeReaderMode::Legacy) {
+            if (!include_structure) bulk_reason = "include_structure_false";
+            json info = {{"mode", tree_reader_mode_name(mode)}, {"used", used_bulk ? "bulk" : "legacy"}};
+            if (!bulk_reason.empty()) info["fallback_reason"] = bulk_reason;
+            result.diagnostics["screen_reader"] = std::move(info);
         }
 
         auto end = std::chrono::high_resolution_clock::now();

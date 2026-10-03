@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -36,6 +37,15 @@ bool metadata_reads_changeable(const std::string& type);
 bool metadata_reads_selected(const std::string& type);
 bool metadata_reads_label(const std::string& type);
 bool metadata_reads_tooltip(const std::string& type);
+
+/// The container classification of ComGuiElement::get_container_type: leaf types and the fixed
+/// container types are decided by the type alone; any other type is "container" when
+/// `child_count()` (only called then) is positive, else "".
+std::string classify_container_type(const std::string& type, const std::function<int()>& child_count);
+
+/// Whether ElementMetadataExtractor lists the child ids of an element of this type and
+/// container classification (the caller still needs at least one child).
+bool metadata_lists_children(const std::string& type, const std::string& container_type);
 
 /// Adds "children" and "child_count" when there is at least one child id.
 void add_child_ids(nlohmann::json& metadata, const std::vector<std::string>& child_ids);
