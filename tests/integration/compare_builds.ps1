@@ -23,13 +23,18 @@
 .PARAMETER Screens Optional subset of screen names (see the list below; matching is case-insensitive).
 .PARAMETER DryRun  Print the navigation plan only.
 .PARAMETER FullCompare  Also deep-compare data.elements (by id), hierarchy, tabs and status_bar of both builds.
+.PARAMETER OldEnv  Environment variables set for the Old runs only, e.g. @{FAIRYFLY_SCREEN_READER='legacy'}.
+.PARAMETER NewEnv  Environment variables set for the New runs and for navigation, e.g. @{FAIRYFLY_SCREEN_READER='bulk'}.
+                   With the same exe for -OldExe and -NewExe this A/B-compares two reader modes of one build.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$OldExe,
     [Parameter(Mandatory = $true)][string]$NewExe,
     [string[]]$Screens = @(),
     [switch]$DryRun,
-    [switch]$FullCompare
+    [switch]$FullCompare,
+    [hashtable]$OldEnv = @{},
+    [hashtable]$NewEnv = @{}
 )
 $ErrorActionPreference = 'Stop'
 $S = '/app/con[0]/ses[0]'
@@ -44,7 +49,7 @@ function ConvertTo-ArgString([string[]]$Items) {
 }
 
 function Invoke-Build {
-    param([string]$Exe, [string[]]$FfArgs, [int]$TimeoutSec = 180)
+    param([string]$Exe, [string[]]$FfArgs, [int]$TimeoutSec = 180, [hashtable]$Env = @{})
     $all = @($FfArgs)
     if ($script:Conn -ne '') { $all += @('--connection', $script:Conn) }
     if ($DryRun) { Write-Host ("      > " + (Split-Path -Leaf $Exe) + " " + ($all -join ' ')); return [pscustomobject]@{ Ms = 0; Raw = ''; Json = $null; Ok = $true; Code = '' } }
@@ -56,6 +61,7 @@ function Invoke-Build {
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    foreach ($k in $Env.Keys) { $psi.EnvironmentVariables[[string]$k] = [string]$Env[$k] }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $p = New-Object System.Diagnostics.Process
     $p.StartInfo = $psi
@@ -213,7 +219,7 @@ if ($Screens.Count -gt 0) {
 
 if (-not $DryRun) {
     foreach ($e in @($OldExe, $NewExe)) { if (-not (Test-Path -LiteralPath $e)) { Write-Host "ERROR: not found: $e"; exit 2 } }
-    $a = Invoke-Build $NewExe @('session', 'attach', '--session-id', $S)
+    $a = Invoke-Build $NewExe @('session', 'attach', '--session-id', $S) 180 $NewEnv
     if (-not $a.Ok) { Write-Host "ERROR: no SAP GUI session ($S): $($a.Code)"; exit 2 }
     $script:Conn = [string]$a.Json.data.connection_file_id
 } else { $script:Conn = '<conn-id>' }
@@ -227,7 +233,7 @@ try {
         if ($DryRun) { Write-Host "PLAN  $name" }
         $navOk = $true; $navMsg = ''
         foreach ($step in $catalog[$name]) {
-            $r = Invoke-Build $NewExe $step
+            $r = Invoke-Build $NewExe $step 180 $NewEnv
             if (-not $r.Ok) { $navOk = $false; $navMsg = "$($step[0]) failed: $($r.Code)"; break }
         }
         if (-not $navOk) {
@@ -239,8 +245,8 @@ try {
         $readArgs = @('screen', 'read', '--no-tabs', '--max-rows', '100', '--output', 'json')
         if ($FullCompare) { $readArgs = @('screen', 'read', '--max-rows', '100', '--output', 'json') }  # tabs are compared too
         $best = @{}
-        foreach ($pair in @(@('Old', $OldExe), @('New', $NewExe))) {
-            $runs = @(1..2 | ForEach-Object { Invoke-Build $pair[1] $readArgs })
+        foreach ($pair in @(@('Old', $OldExe, $OldEnv), @('New', $NewExe, $NewEnv))) {
+            $runs = @(1..2 | ForEach-Object { Invoke-Build $pair[1] $readArgs 180 $pair[2] })
             $best[$pair[0]] = $runs | Sort-Object Ms | Select-Object -First 1
         }
         if ($DryRun) { continue }
