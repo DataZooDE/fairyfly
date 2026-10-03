@@ -36,7 +36,8 @@ std::string time_format_of_text(const std::string& text);
 std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, bool& redacted);
 
 /// The `field` object of a fill result: {type, max_length?, input_kind?, format_hint?, format_hint_source?,
-/// numerical?, required?, value_normalized?, format_warning?}. Never a hard validation: a mismatch only adds
+/// numerical?, required?, value_normalized?, format_warning?}. Never a hard validation: a mismatch with SAP's own
+/// normalisation (format_hint_source "normalized_input") only adds
 /// format_warning. For credential fields nothing but the type is reported.
 json build_fill_field_info(const FieldProbe& probe, const std::string& typed);
 

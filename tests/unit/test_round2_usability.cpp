@@ -113,15 +113,35 @@ TEST_CASE("fill field info reports type, length and date format source", "[fill]
         CHECK(field.at("format_hint_source") == "field_value");
         CHECK_FALSE(field.contains("format_warning"));
     }
-    SECTION("a wrong-format value is only a warning, never a rejection") {
+    SECTION("text that was in the field before the fill is unvalidated: no warning from it") {
+        // A first fill with 2026-10-01 was rejected (E message), the field still holds it; the valid 01.10.2026
+        // must not be reported against that invalid text.
         auto probe = plain_field();
-        probe.text_before = "30.09.2026";
+        probe.text_before = "2026-10-01";
+        probe.text_after = "01.10.2026";
+        probe.text_after_known = true;
+        const auto field = build_fill_field_info(probe, "01.10.2026");
+        CHECK(field.at("format_hint") == "YYYY-MM-DD");
+        CHECK(field.at("format_hint_source") == "field_value");
+        CHECK_FALSE(field.contains("format_warning"));
+        auto other = plain_field();
+        other.text_before = "30.09.2026";
+        other.text_after = "10/01/2026";
+        other.text_after_known = true;
+        const auto mismatch = build_fill_field_info(other, "10/01/2026");
+        CHECK(mismatch.at("format_hint") == "DD.MM.YYYY");
+        CHECK_FALSE(mismatch.contains("format_warning"));
+    }
+    SECTION("SAP's own normalisation evidence still warns about a wrong-format value") {
+        auto probe = plain_field();
+        probe.text_before = "";
         probe.text_after = "10/01/2026";
         probe.text_after_known = true;
-        const auto field = build_fill_field_info(probe, "10/01/2026");
-        CHECK(field.at("format_hint") == "DD.MM.YYYY");
+        const auto field = build_fill_field_info(probe, "2026-10-01");
+        CHECK(field.at("format_hint") == "MM/DD/YYYY");
+        CHECK(field.at("format_hint_source") == "normalized_input");
         REQUIRE(field.contains("format_warning"));
-        CHECK(field.at("format_warning").get<std::string>().find("MM/DD/YYYY") != std::string::npos);
+        CHECK(field.at("format_warning").get<std::string>().find("YYYY-MM-DD") != std::string::npos);
     }
     SECTION("an empty field of unknown format says unknown but keeps the type") {
         auto probe = plain_field();

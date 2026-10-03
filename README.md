@@ -44,7 +44,7 @@ For a control search without a full screen extraction, use `screen find --id-con
 
 Use `element fill <element-id> --clear` to empty a text field or TextEdit shell. This works in Windows PowerShell 5.1, which can omit an empty quoted positional argument when launching a native executable.
 
-`element fill` echoes the typed `value` as the control shows it (max 200 characters; `[REDACTED: reason]` for password and credential fields), reports a `field` object (`type`, `max_length`, `input_kind` date/time/numeric, `format_hint` such as `DD.MM.YYYY` or `unknown`, `format_warning` when the typed value has another date shape; nothing is rejected) and a status bar message only when it changed during the fill.
+`element fill` echoes the typed `value` as the control shows it (max 200 characters; `[REDACTED: reason]` for password and credential fields), reports a `field` object (`type`, `max_length`, `input_kind` date/time/numeric, `format_hint` such as `DD.MM.YYYY` or `unknown`, `format_warning` only when SAP itself normalised the typed value into another date shape (a hint read from the previous field text never warns); nothing is rejected) and a status bar message only when it changed during the fill.
 
 `element get` and `element fill`/`click` on an element that lives on a tab page that is not selected return `ELEMENT_ON_INACTIVE_TAB` (with `tab_id` and `tab_text`) instead of a bare COM error; `element get --activate-tab` selects the tab for the read and restores the previous one. `element get` and `screen find` add the `tooltip` of buttons, tabs, checkboxes and radio buttons (icon-only buttons have no text).
 
