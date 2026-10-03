@@ -37,6 +37,17 @@ std::vector<std::vector<std::string>> read_grid_rows(
     const std::function<std::string(int, const std::string&)>& read_cell,
     int row_offset = 0);
 
+/// Like read_grid_rows, for ALV grids that load rows lazily around their viewport (SM21: a read at offset 100 of a
+/// 2,732-row grid returned only empty rows until something scrolled the grid there). When the window ends in blank rows
+/// but the grid has more rows, `scroll_to(first blank row)` is called so SAP loads them, the blank tail is re-read, and
+/// this repeats chunk by chunk (at most 40 scrolls; a scroll that loads nothing or throws ends the attempt). The caller
+/// restores the original scroll position. Without a callback this is read_grid_rows.
+std::vector<std::vector<std::string>> read_grid_rows_loading(
+    int row_count, int col_count, int max_rows,
+    const std::vector<std::string>& column_names,
+    const std::function<std::string(int, const std::string&)>& read_cell,
+    int row_offset, const std::function<void(int)>& scroll_to);
+
 /// Remove trailing rows whose cells are all empty (SAP grids pad their row window with them).
 /// Returns how many rows were removed. Empty rows between data rows are kept.
 int trim_trailing_empty_rows(std::vector<std::vector<std::string>>& rows);

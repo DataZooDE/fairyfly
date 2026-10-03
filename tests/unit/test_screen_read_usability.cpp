@@ -445,3 +445,70 @@ TEST_CASE("a grid dropped by an only selector never needed its rows", "[screen][
     CHECK(a.at("elements") == b.at("elements"));
     CHECK(a.at("elements").at(0).at("id") == "g/btn_X");
 }
+
+// Found by a live Codex hunt: SM21's ALV grid (2,732 rows) only exposes the rows around its viewport; a
+// read at offset 100 or 500 returned an empty page until something scrolled the grid there.
+TEST_CASE("read_grid_rows_loading scrolls a lazily loading grid to the rows it needs", "[table][grid][window][paging]") {
+    const std::vector<std::string> columns{"A"};
+    struct LazyGrid {
+        int loaded_from = 0;
+        int loaded_until = 100;   // rows [loaded_from, loaded_until) are readable
+        int scrolls = 0;
+        std::string read(int row) const {
+            return row >= loaded_from && row < loaded_until ? "r" + std::to_string(row) : std::string();
+        }
+        void scroll(int row) { ++scrolls; loaded_from = row; loaded_until = row + 100; }
+    };
+    SECTION("an offset beyond the loaded rows scrolls once and returns real rows") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 3, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 500, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 3);
+        CHECK(rows.at(0).at(0) == "r500");
+        CHECK(rows.at(2).at(0) == "r502");
+        CHECK(g.scrolls == 1);
+    }
+    SECTION("a window that spans several load chunks scrolls chunk by chunk") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 250, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 0, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 250);
+        CHECK(rows.front().at(0) == "r0");
+        CHECK(rows.back().at(0) == "r249");
+        CHECK(g.scrolls >= 1);
+        CHECK(g.scrolls <= 4);
+    }
+    SECTION("rows already loaded cost no scroll") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 20, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 10, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 20);
+        CHECK(g.scrolls == 0);
+    }
+    SECTION("without a scroll callback the old behaviour stays (blank rows are returned for trimming)") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 3, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 500, nullptr);
+        REQUIRE(rows.size() == 3);
+        CHECK(rows.at(0).at(0).empty());
+    }
+    SECTION("a scroll that loads nothing stops after one attempt per blank run") {
+        int scrolls = 0;
+        const auto rows = read_grid_rows_loading(1000, 1, 5, columns,
+            [](int, const std::string&) { return std::string(); }, 600, [&](int) { ++scrolls; });
+        REQUIRE(rows.size() == 5);
+        CHECK(scrolls == 1);
+    }
+    SECTION("a failing scroll is ignored") {
+        const auto rows = read_grid_rows_loading(1000, 1, 5, columns,
+            [](int, const std::string&) { return std::string(); }, 600, [](int) { throw std::runtime_error("no"); });
+        CHECK(rows.size() == 5);
+    }
+    SECTION("rows that are genuinely blank inside a loaded grid are not chased beyond the row count") {
+        int scrolls = 0;
+        const auto rows = read_grid_rows_loading(10, 1, 50, columns,
+            [](int r, const std::string&) { return r < 4 ? std::string("x") : std::string(); }, 0, [&](int) { ++scrolls; });
+        CHECK(rows.size() == 10);
+        CHECK(scrolls <= 1);
+    }
+}
