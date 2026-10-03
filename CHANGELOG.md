@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Bulk screen reader (opt-in)
+
+- `screen read` can read the whole screen tree with one `GuiSession.GetObjectTree` call: `FAIRYFLY_SCREEN_READER=legacy|bulk|auto` (hidden `--tree-reader` overrides per read; default `legacy`). The output (`data.*`) is identical to the per-element reader on 18 live screens and 7 recorded fixtures; on Bigfox the 12 screen reads of the 10-task workload took 8.4 s legacy and 5.4 s bulk (-35%, whole workload -15%). Only 12 vetted properties are requested; `Selected` is never requested because it makes SAP GUI raise `RPC_E_SERVERFAULT` (and probably crashed SAP Logon), `AccLabel` and `Selected` are read per element. Password fields are blanked right after parsing, the raw tree is never logged. `auto` falls back to the per-element reader on any problem and reports why in `diagnostics.screen_reader`; `bulk` returns `OBJECT_TREE_UNAVAILABLE`; a server fault or three invalid answers in a row switch the bulk path off for the process. `--probe-all`, `screen find` and structure-less reads stay on the per-element reader.
+- Diagnostics (hidden): `screen read --dump-object-tree` prints the raw, unredacted tree and `FAIRYFLY_BULK_FAULT=unsupported|garbage|wrongroot|fault|exception` injects tree failures; both need `FAIRYFLY_DIAG=1`.
+- Shared, tested implementations of the display-text/redaction decisions and the plain-element metadata (`display_text_policy`, `element_metadata_builder`) now serve both readers.
+
 ### Performance (speed round 3)
 
 - `transaction start` no longer sleeps a blind 100 ms after `SendCommand`/`StartTransaction`; `wait_for_completion` checks `Busy` immediately and polls every 20 ms (`SESSION_POLL_INTERVAL_MS`). The unused `ComGuiSession::send_vkey` was removed.
