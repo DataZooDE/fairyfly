@@ -62,6 +62,33 @@ std::string rule_for_label(const std::string& label) {
     return {};
 }
 
+// Index N of the first "wnd[N]" segment of a (possibly relative) element id; -1 when there is none.
+int window_index_of(const std::string& lower_id) {
+    const auto pos = lower_id.find("wnd[");
+    if (pos == std::string::npos) return -1;
+    size_t i = pos + 4;
+    int value = 0;
+    bool any = false;
+    while (i < lower_id.size() && std::isdigit(static_cast<unsigned char>(lower_id[i]))) {
+        value = value * 10 + (lower_id[i] - '0');
+        any = true;
+        ++i;
+    }
+    return any && i < lower_id.size() && lower_id[i] == ']' ? value : -1;
+}
+
+// Answer buttons of a popup are judged as a whole: a "Yes" or "OK" confirms whatever question the
+// dialog asks (found live: Yes on the SU01 Delete Users dialog deleted the user under --read-only),
+// and its label carries no deny word. Only dismissing and navigating buttons are allowed.
+bool is_safe_popup_label(const std::string& label) {
+    const auto words = words_of(label);
+    if (words.empty()) return false;
+    static const char* kSafe[] = {"no", "nein", "cancel", "abbrechen", "close", "schliessen", "back", "zurueck",
+                                  "help", "details", "detail"};
+    for (const char* s : kSafe) if (has(words, s)) return true;
+    return false;
+}
+
 } // namespace
 
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
@@ -77,7 +104,18 @@ std::string matched_read_only_rule(const std::string& element_type, const std::s
     }
     if (is_data_type(element_type)) return {};
     if (auto r = rule_for_label(text); !r.empty()) return r;
-    return rule_for_label(tooltip);
+    if (auto r = rule_for_label(tooltip); !r.empty()) return r;
+    if (element_type == "GuiButton" && window_index_of(id) > 0) {
+        static const std::string kCancel = "tbar[0]/btn[12]";   // the standard Cancel (F12) of a popup
+        const size_t cancel_at = id.find(kCancel);
+        const bool standard_cancel = cancel_at != std::string::npos &&
+            (cancel_at + kCancel.size() >= id.size() || !std::isdigit(static_cast<unsigned char>(id[cancel_at + kCancel.size()])));
+        if (standard_cancel || is_safe_popup_label(text) || (text.empty() && is_safe_popup_label(tooltip)))
+            return {};
+        const auto words = words_of(!text.empty() ? text : tooltip);
+        return "popup-button:" + (words.empty() ? std::string("unlabelled") : words.front());
+    }
+    return {};
 }
 
 bool is_state_changing_action(const std::string& element_type, const std::string& text,
