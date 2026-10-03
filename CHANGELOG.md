@@ -11,7 +11,7 @@
 ### Performance (speed round 3)
 
 - `transaction start` no longer sleeps a blind 100 ms after `SendCommand`/`StartTransaction`; `wait_for_completion` checks `Busy` immediately and polls every 20 ms (`SESSION_POLL_INTERVAL_MS`). The unused `ComGuiSession::send_vkey` was removed.
-- HTML viewer reads (`read_html_viewer_text`) have a 300 ms budget (50 ms poll), retry only while a UI Automation document exists but is empty, and reuse one `IUIAutomation`. `content_available` is unchanged on SM21 and RZ11 (it was already false there); a window-class gate for the generic shell probe exists but is off (`kGateGenericHtmlProbe`).
+- HTML viewer reads (`read_html_viewer_text`) have a 300 ms budget (50 ms poll), retry only while the UI Automation document is missing or empty (a Codex review pointed out that a browser window may not have created its document yet), and reuse one `IUIAutomation`. `content_available` is unchanged on SM21 and RZ11 (it was already false there); a window-class gate for the generic shell probe exists but is off (`kGateGenericHtmlProbe`).
 - DISPID lookup: a validated process-wide `Type` DISPID and type-first resolution for fresh wrappers; `Changeable` is read once per wrapper and `DisplayedText` misses on GuiShell are cached. Status bar reads need 5 round trips (3 with a known window id; message id/number only when a message exists). Dead response serialisation in `run_cli` removed.
 - `tests/integration/compare_builds.ps1 -FullCompare` deep-compares elements, hierarchy, tabs and status bar between two builds; `-Screens` no longer clobbers the session id.
 - Measured on Bigfox (10 Basis tasks, 45 invocations, best of 3, debug logging off): 26.5 s to 21.9 s (-17%); screen content identical on 18 screens.

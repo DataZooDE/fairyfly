@@ -16,7 +16,11 @@ TEST_CASE("HTML viewer retry decision retries only an empty document within budg
     CHECK_FALSE(retry_decision(HtmlReadOutcome::DocumentEmpty, 400, budget));
     CHECK_FALSE(retry_decision(HtmlReadOutcome::NoAutomation, 0, budget));
     CHECK_FALSE(retry_decision(HtmlReadOutcome::NoRoot, 0, budget));
-    CHECK_FALSE(retry_decision(HtmlReadOutcome::NoDocument, 0, budget));
+    // A browser window that has not created its UIA document yet is retried like an empty document.
+    CHECK(retry_decision(HtmlReadOutcome::NoDocument, 0, budget));
+    CHECK(retry_decision(HtmlReadOutcome::NoDocument, 249, budget));
+    CHECK_FALSE(retry_decision(HtmlReadOutcome::NoDocument, 250, budget));
+    CHECK_FALSE(retry_decision(HtmlReadOutcome::NoDocument, 0, HtmlReadBudget{0, 0}));
     CHECK_FALSE(retry_decision(HtmlReadOutcome::Text, 0, budget));
     CHECK_FALSE(retry_decision(HtmlReadOutcome::DocumentEmpty, 0, HtmlReadBudget{0, 0}));
 }
