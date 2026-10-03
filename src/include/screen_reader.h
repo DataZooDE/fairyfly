@@ -5,6 +5,8 @@
 #include "com/wrapper.h"
 #include "element_metadata_extractor.h"
 #include "screen_element_collector.h"
+#include <map>
+#include <set>
 #include <memory>
 #include <functional>
 #include <optional>
@@ -174,6 +176,11 @@ public:
 
     /// A positioned-label user area is a table only when data rows share
     /// multiple columns with its header. Reports also use /lbl[col,row].
+    /// Header row of a classic list (cells per row, by column): the row that most later rows align with
+    /// (at least two shared columns), ties broken by the number of cells, then by the first row. A preamble
+    /// line with as many cells as the real header (SE16: "Displayed Fields: 6 of 9 ... List Width") therefore
+    /// no longer wins. -1 when there are no rows.
+    static int choose_list_header_row(const std::map<int, std::set<int>>& occupied);
     static bool is_tabular_userarea(
         const std::vector<std::tuple<int, int, std::string>>& cells);
 

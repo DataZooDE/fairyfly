@@ -512,3 +512,32 @@ TEST_CASE("read_grid_rows_loading scrolls a lazily loading grid to the rows it n
         CHECK(scrolls <= 1);
     }
 }
+
+// Found by a live Codex hunt: the SE16 result for TVARVC (one row) is a classic list whose preamble line
+// ("Displayed Fields: 6 of 9 ... List Width") has as many cells as the real header row; the header choice
+// "row with most text" picked the preamble, so the data row aligned with nothing and no table_data appeared.
+TEST_CASE("a classic list header is the row the data rows align with, not just the busiest row", "[table][userarea][header]") {
+    using Cells = std::vector<std::tuple<int, int, std::string>>;
+    const Cells tvarvc = {
+        {0, 0, "Table:"}, {16, 0, "TVARVC"},
+        {0, 1, "Displayed Fields:"}, {19, 1, " 6"}, {22, 1, "of"}, {26, 1, " 9 "}, {36, 1, "Fixed Columns:"}, {74, 1, "List Width"},
+        {3, 3, "MANDT"}, {9, 3, "NAME"}, {40, 3, "TYPE"}, {45, 3, "NUMB"}, {50, 3, "SIGN"}, {55, 3, "OPTI"},
+        {3, 5, "001"}, {9, 5, "SAP_SCMA_DETAIL_LIST"}, {40, 5, "P"}, {45, 5, "0000"}};
+    CHECK(ScreenReader::is_tabular_userarea(tvarvc));
+
+    std::map<int, std::set<int>> occupied;
+    for (const auto& [col, row, text] : tvarvc) occupied[row].insert(col);
+    CHECK(ScreenReader::choose_list_header_row(occupied) == 3);
+
+    SECTION("a normal list keeps its busiest row as header") {
+        std::map<int, std::set<int>> list = {{0, {0, 10, 20, 30}}, {1, {0, 10, 20, 30}}, {2, {0, 10, 20}}};
+        CHECK(ScreenReader::choose_list_header_row(list) == 0);
+    }
+    SECTION("rows without any aligned follower fall back to the row with most cells") {
+        std::map<int, std::set<int>> list = {{0, {0, 5}}, {1, {1, 7, 9}}, {2, {2, 8}}};
+        CHECK(ScreenReader::choose_list_header_row(list) == 1);
+    }
+    SECTION("empty input") {
+        CHECK(ScreenReader::choose_list_header_row({}) == -1);
+    }
+}

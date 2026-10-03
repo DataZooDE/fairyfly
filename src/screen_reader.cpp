@@ -123,6 +123,34 @@ struct ScreenSearchContext {
 ScreenReader::ScreenReader(ComGuiSessionPtr session) : session_(session) {
 }
 
+int ScreenReader::choose_list_header_row(const std::map<int, std::set<int>>& occupied) {
+    int best_row = -1;
+    int best_aligned = -1;
+    size_t best_cells = 0;
+    for (auto candidate = occupied.begin(); candidate != occupied.end(); ++candidate) {
+        if (candidate->second.size() < 2) continue;
+        int aligned_rows = 0;
+        for (auto later = std::next(candidate); later != occupied.end(); ++later) {
+            int shared = 0;
+            for (int col : later->second)
+                if (candidate->second.count(col)) ++shared;
+            if (shared >= 2) ++aligned_rows;
+        }
+        if (aligned_rows > best_aligned ||
+            (aligned_rows == best_aligned && candidate->second.size() > best_cells)) {
+            best_row = candidate->first;
+            best_aligned = aligned_rows;
+            best_cells = candidate->second.size();
+        }
+    }
+    if (best_row >= 0) return best_row;
+    // No candidate with two cells: the busiest row, as before (or -1 without rows).
+    for (const auto& [row, cols] : occupied) {
+        if (best_row < 0 || cols.size() > occupied.at(best_row).size()) best_row = row;
+    }
+    return best_row;
+}
+
 bool ScreenReader::is_tabular_userarea(
     const std::vector<std::tuple<int, int, std::string>>& cells) {
     std::map<int, std::set<int>> occupied;
@@ -136,13 +164,10 @@ bool ScreenReader::is_tabular_userarea(
     }
     if (occupied.size() < 2) return false;
 
-    // Match the extraction path's header choice: the row with most text.
-    auto header = occupied.end();
-    for (auto it = occupied.begin(); it != occupied.end(); ++it) {
-        if (header == occupied.end() || it->second.size() > header->second.size())
-            header = it;
-    }
-    if (header->second.size() < 2) return false;
+    // The same header choice as the extraction path.
+    const int header_row = choose_list_header_row(occupied);
+    const auto header = occupied.find(header_row);
+    if (header == occupied.end() || header->second.size() < 2) return false;
 
     for (auto it = std::next(header); it != occupied.end(); ++it) {
         int aligned = 0;
@@ -592,24 +617,16 @@ json ScreenReader::extract_userarea_grid_data(ComGuiElementPtr element, const st
             return true;
         };
 
-        // Header detection: find row with most non-empty non-separator cells
-        int header_row = -1;
-        size_t max_header_cols = 0;
-
+        // Header detection: the row the later rows align with (see choose_list_header_row), over the
+        // non-empty non-separator cells; the busiest row when nothing aligns.
+        std::map<int, std::set<int>> occupied_cells;
         for (const auto& [r, cols] : grid_map) {
-            size_t non_empty = 0;
             for (const auto& [c, val] : cols) {
-                if (!val.empty() && !is_separator(val)) {
-                    non_empty++;
-                }
-            }
-            if (non_empty > max_header_cols) {
-                max_header_cols = non_empty;
-                header_row = r;
+                if (!val.empty() && !is_separator(val)) occupied_cells[r].insert(c);
             }
         }
-
-        if (header_row == -1 || max_header_cols == 0) {
+        int header_row = choose_list_header_row(occupied_cells);
+        if (header_row == -1) {
             header_row = grid_map.begin()->first;
         }
 
