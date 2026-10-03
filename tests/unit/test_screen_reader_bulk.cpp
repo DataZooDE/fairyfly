@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <map>
@@ -54,6 +55,8 @@ public:
     std::set<std::wstring> unknown_names;
     std::map<std::wstring, int> reads;
     int object_tree_calls = 0;
+    int select_calls = 0;
+    std::function<void()> on_select;
     std::wstring object_tree_payload;
     HRESULT object_tree_hresult = S_OK;
 
@@ -96,6 +99,11 @@ public:
         const auto& table = name_table();
         if (id < 7000 || static_cast<size_t>(id - 7000) >= table.size()) return DISP_E_MEMBERNOTFOUND;
         const std::wstring& name = table[id - 7000];
+        if ((flags & DISPATCH_METHOD) && name == L"Select") {
+            ++select_calls;
+            if (on_select) on_select();
+            return S_OK;
+        }
         if ((flags & DISPATCH_METHOD) && name == L"GetObjectTree") {
             ++object_tree_calls;
             if (FAILED(object_tree_hresult)) return object_tree_hresult;
@@ -977,4 +985,260 @@ TEST_CASE("children ids follow the legacy container rule and the 50 cap", "[bulk
     REQUIRE(tbar.has_value());
     CHECK(tbar->at("container_type") == "toolbar");
     CHECK_FALSE(tbar->contains("children"));
+}
+
+// =============================================================================================
+// `screen read --tab` (read_tab_content): one GetObjectTree(tab id) after the select
+// =============================================================================================
+
+namespace {
+
+// The GetObjectTree answer of a node and its descendants, generated from the fake COM objects
+// themselves so legacy and bulk read the same screen.
+json tree_node_of(Node* node) {
+    static const wchar_t* kProps[] = {L"Id", L"Type", L"Name", L"Text", L"DisplayedText", L"SubType"};
+    json props = json::object();
+    for (const wchar_t* name : kProps) {
+        const auto it = node->strings.find(name);
+        if (it == node->strings.end()) continue;
+        std::string value;
+        for (wchar_t ch : it->second) value.push_back(static_cast<char>(ch));
+        props[std::string(name, name + wcslen(name))] = value;
+    }
+    if (const auto it = node->bools.find(L"Changeable"); it != node->bools.end())
+        props["Changeable"] = it->second ? "true" : "false";
+    json children = json::array();
+    if (const auto it = node->dispatches.find(L"Children"); it != node->dispatches.end())
+        for (auto* child : static_cast<Node*>(it->second)->items)
+            children.push_back(tree_node_of(static_cast<Node*>(child)));
+    return {{"properties", props}, {"children", children}};
+}
+
+std::string tree_answer_of(Node* node) { return json{{"children", json::array({tree_node_of(node)})}}.dump(); }
+
+constexpr const char* kTabStrip = "/app/con[0]/ses[0]/wnd[0]/usr/tabsSTRIP";
+constexpr const char* kTabA = "/app/con[0]/ses[0]/wnd[0]/usr/tabsSTRIP/tabpA";
+constexpr const char* kTabB = "/app/con[0]/ses[0]/wnd[0]/usr/tabsSTRIP/tabpB";
+constexpr const char* kTabC = "/app/con[0]/ses[0]/wnd[0]/usr/tabsSTRIP/tabpC";
+
+// wnd[0] -> usr -> strip(tabpA selected, tabpB with fields, tabpC empty)
+struct TabScene2 {
+    std::vector<Node*> owned;
+    Node *session, *window, *usr, *strip, *tab_a, *tab_b, *tab_c, *field_a, *field_b, *button_b;
+    int restored_a = 0;
+
+    Node* make(const std::string& type, const std::string& id, const std::string& name = "",
+               const std::string& text = "") {
+        auto* node = new Node();
+        node->strings[L"Type"] = widen(type);
+        node->strings[L"Id"] = widen(id);
+        node->strings[L"Name"] = widen(name);
+        node->strings[L"Text"] = widen(text);
+        node->unknown_names = {L"Enabled", L"Visible"};
+        owned.push_back(node);
+        return node;
+    }
+    Node* collection(std::vector<IDispatch*> items) {
+        auto* node = make("GuiCollection", "");
+        node->items = std::move(items);
+        return node;
+    }
+    TabScene2() {
+        session = make("GuiSession", "/app/con[0]/ses[0]");
+        auto* info = make("GuiSessionInfo", "");
+        info->strings[L"Transaction"] = L"SU01";
+        window = make("GuiMainWindow", kWnd, "wnd[0]", "Maintain Users");
+        usr = make("GuiUserArea", kUsr, "usr");
+        strip = make("GuiTabStrip", kTabStrip, "tabsSTRIP");
+        tab_a = make("GuiTab", kTabA, "tabpA", "Address");
+        tab_b = make("GuiTab", kTabB, "tabpB", "Roles");
+        tab_c = make("GuiTab", kTabC, "tabpC", "Empty");
+        field_a = make("GuiTextField", std::string(kTabA) + "/txtA", "A", "alpha");
+        field_a->strings[L"DisplayedText"] = L"alpha";
+        field_a->bools[L"Changeable"] = true;
+        field_b = make("GuiTextField", std::string(kTabB) + "/txtB", "B", "bravo");
+        field_b->strings[L"DisplayedText"] = L"bravo";
+        field_b->bools[L"Changeable"] = true;
+        button_b = make("GuiButton", std::string(kTabB) + "/btnB", "B_BTN", "Go");
+        tab_a->dispatches[L"Children"] = collection({field_a});
+        tab_b->dispatches[L"Children"] = collection({field_b, button_b});
+        tab_c->dispatches[L"Children"] = collection({});
+        strip->dispatches[L"Children"] = collection({tab_a, tab_b, tab_c});
+        strip->dispatches[L"SelectedTab"] = tab_a;
+        usr->dispatches[L"Children"] = collection({strip});
+        window->dispatches[L"Children"] = collection({usr});
+        session->dispatches[L"ActiveWindow"] = window;
+        session->dispatches[L"Info"] = info;
+        session->bools[L"Busy"] = false;
+        for (Node* node : {window, usr, strip, tab_a, tab_b, tab_c, field_a, field_b, button_b})
+            session->find_by_id[node->strings[L"Id"]] = node;
+        for (Node* tab : {tab_b, tab_c})
+            tab->on_select = [this, tab] { strip->dispatches[L"SelectedTab"] = tab; };
+        tab_a->on_select = [this] { ++restored_a; strip->dispatches[L"SelectedTab"] = tab_a; };
+    }
+    ~TabScene2() { for (auto* node : owned) node->Release(); }
+    ComGuiSessionPtr wrapper() { return ComGuiSession::create(IDispatchPtr(session)); }
+
+    // Answers GetObjectTree for any node of the scene by id.
+    ObjectTreeSource tree_source(std::vector<std::string>* requested = nullptr) {
+        return [this, requested](const std::string& id, const std::vector<std::string>&) {
+            if (requested) requested->push_back(id);
+            const auto it = session->find_by_id.find(widen(id));
+            if (it == session->find_by_id.end()) return std::optional<std::string>();
+            return std::optional<std::string>(tree_answer_of(static_cast<Node*>(it->second)));
+        };
+    }
+};
+
+Result read_tab_with(TabScene2& scene, const char* tab, TreeReaderMode mode, ObjectTreeSource source = nullptr) {
+    ScreenReader reader(scene.wrapper());
+    reader.set_tree_reader_mode(mode);
+    if (source) reader.set_object_tree_source(std::move(source));
+    return reader.read_tab(tab);
+}
+
+}  // namespace
+
+TEST_CASE("read_tab uses one GetObjectTree call for the tab subtree", "[bulk][tab]") {
+    CleanState state;
+    TabScene2 scene;
+    const Result legacy = read_tab_with(scene, "tabpB", TreeReaderMode::Legacy);
+    REQUIRE(legacy.status == Result::Status::Success);
+    CHECK(legacy.diagnostics.empty());
+    REQUIRE(legacy.data.at("tabs_content").size() == 1);
+    scene.restored_a = 0;
+    scene.strip->dispatches[L"SelectedTab"] = scene.tab_a;
+
+    std::vector<std::string> requested;
+    const Result bulk = read_tab_with(scene, "tabpB", TreeReaderMode::Auto, scene.tree_source(&requested));
+    REQUIRE(bulk.status == Result::Status::Success);
+    CHECK(bulk.data == legacy.data);
+    CHECK(requested == std::vector<std::string>{kTabB});
+    CHECK(bulk.diagnostics.at("screen_reader").at("used") == "bulk");
+    CHECK(scene.restored_a == 1);  // the previously selected tab is restored as before
+
+    // The tab content really came from the tree: the field's own properties were not read again.
+    scene.field_b->reads.clear();
+    (void)read_tab_with(scene, "tabpB", TreeReaderMode::Bulk, scene.tree_source());
+    CHECK(scene.field_b->reads[L"DisplayedText"] == 0);
+    CHECK(scene.field_b->reads[L"Text"] == 0);
+}
+
+TEST_CASE("read_tab falls back per read and keeps the restore guard", "[bulk][tab][fallback]") {
+    CleanState state;
+    TabScene2 scene;
+    const Result legacy = read_tab_with(scene, "tabpB", TreeReaderMode::Legacy);
+    REQUIRE(legacy.status == Result::Status::Success);
+    scene.strip->dispatches[L"SelectedTab"] = scene.tab_a;
+
+    SECTION("no answer in auto mode") {
+        scene.restored_a = 0;
+        const Result result = read_tab_with(scene, "tabpB", TreeReaderMode::Auto,
+            [](const std::string&, const std::vector<std::string>&) { return std::optional<std::string>(); });
+        REQUIRE(result.status == Result::Status::Success);
+        CHECK(result.data == legacy.data);
+        CHECK(result.diagnostics.at("screen_reader").at("used") == "legacy");
+        CHECK(result.diagnostics.at("screen_reader").at("fallback_reason") == "no_answer");
+        CHECK(scene.restored_a == 1);
+    }
+    SECTION("invalid tree in auto mode") {
+        const Result result = read_tab_with(scene, "tabpB", TreeReaderMode::Auto,
+            [](const std::string&, const std::vector<std::string>&) { return std::optional<std::string>("{}"); });
+        REQUIRE(result.status == Result::Status::Success);
+        CHECK(result.data == legacy.data);
+    }
+    SECTION("child count that disagrees with the tab") {
+        const Result result = read_tab_with(scene, "tabpB", TreeReaderMode::Auto,
+            [&](const std::string& id, const std::vector<std::string>&) {
+                return std::optional<std::string>(json{{"children", json::array({json{
+                    {"properties", {{"Id", id}, {"Type", "GuiTab"}}}, {"children", json::array()}}})}}.dump());
+            });
+        CHECK(result.data == legacy.data);
+        CHECK(result.diagnostics.at("screen_reader").at("fallback_reason") == "node_count_mismatch");
+    }
+    SECTION("a server fault disables the path and the tab is still read") {
+        const Result result = read_tab_with(scene, "tabpB", TreeReaderMode::Auto,
+            [](const std::string&, const std::vector<std::string>&) -> std::optional<std::string> {
+                throw ObjectTreeServerFault();
+            });
+        CHECK(result.data == legacy.data);
+        CHECK(bulk_reader_disabled());
+    }
+    SECTION("forced Bulk reports OBJECT_TREE_UNAVAILABLE and still restores the tab") {
+        scene.restored_a = 0;
+        const Result result = read_tab_with(scene, "tabpB", TreeReaderMode::Bulk,
+            [](const std::string&, const std::vector<std::string>&) { return std::optional<std::string>(); });
+        REQUIRE(result.status == Result::Status::Error);
+        CHECK(result.error.at("code") == "OBJECT_TREE_UNAVAILABLE");
+        CHECK(result.error.at("reason") == "no_answer");
+        CHECK(scene.restored_a == 1);
+    }
+    SECTION("probe-all stays legacy") {
+        ScreenReader reader(scene.wrapper());
+        reader.set_tree_reader_mode(TreeReaderMode::Auto);
+        reader.set_probe_all(true);
+        int calls = 0;
+        reader.set_object_tree_source([&](const std::string&, const std::vector<std::string>&) {
+            ++calls;
+            return std::optional<std::string>();
+        });
+        const Result result = reader.read_tab("tabpB");
+        CHECK(calls == 0);
+        CHECK(result.status == Result::Status::Success);
+    }
+}
+
+TEST_CASE("read_tab fallback to the window user area uses GetObjectTree of wnd/usr", "[bulk][tab]") {
+    CleanState state;
+    TabScene2 scene;
+    const Result legacy = read_tab_with(scene, "tabpC", TreeReaderMode::Legacy);
+    REQUIRE(legacy.status == Result::Status::Success);
+    scene.strip->dispatches[L"SelectedTab"] = scene.tab_a;
+    scene.restored_a = 0;
+
+    std::vector<std::string> requested;
+    const Result bulk = read_tab_with(scene, "tabpC", TreeReaderMode::Bulk, scene.tree_source(&requested));
+    REQUIRE(bulk.status == Result::Status::Success);
+    CHECK(bulk.data == legacy.data);
+    CHECK(requested == std::vector<std::string>{kTabC, kUsr});
+    CHECK(scene.restored_a == 1);
+}
+
+TEST_CASE("read_with_tabs reads each tab through the tree and keeps the base read", "[bulk][tab]") {
+    CleanState state;
+    TabScene2 scene;
+    const auto run = [&](TreeReaderMode mode, ObjectTreeSource source) {
+        scene.strip->dispatches[L"SelectedTab"] = scene.tab_a;
+        ScreenReader reader(scene.wrapper());
+        reader.set_tree_reader_mode(mode);
+        if (source) reader.set_object_tree_source(std::move(source));
+        return reader.read_with_tabs();
+    };
+    const Result legacy = run(TreeReaderMode::Legacy, nullptr);
+    REQUIRE(legacy.status == Result::Status::Success);
+
+    std::vector<std::string> requested;
+    const Result bulk = run(TreeReaderMode::Auto, scene.tree_source(&requested));
+    REQUIRE(bulk.status == Result::Status::Success);
+    CHECK(bulk.data == legacy.data);
+    // window (base read) + one call per tab (+ the user area for the empty tab)
+    CHECK(requested.front() == kWnd);
+    CHECK(std::count(requested.begin(), requested.end(), std::string(kTabA)) == 1);
+    CHECK(std::count(requested.begin(), requested.end(), std::string(kTabB)) == 1);
+    CHECK(bulk.diagnostics.at("screen_reader").at("used") != "legacy");
+}
+
+TEST_CASE("replay_subtree replays one element like the legacy traversal", "[bulk][tab]") {
+    TabScene2 scene;
+    const std::string answer = tree_answer_of(scene.tab_b);
+    auto tree = parse_object_tree(answer, kTabB);
+    REQUIRE(tree.has_value());
+    TreeSnapshot snapshot(std::move(*tree));
+    ScreenElementCollector collector;
+    replay_subtree(snapshot, kTabB, false, collector);
+    CHECK(collector.element_ids() ==
+          std::vector<std::string>{kTabB, std::string(kTabB) + "/txtB", std::string(kTabB) + "/btnB"});
+    ScreenElementCollector unknown;
+    replay_subtree(snapshot, "/not/in/tree", false, unknown);
+    CHECK(unknown.size() == 0);
 }

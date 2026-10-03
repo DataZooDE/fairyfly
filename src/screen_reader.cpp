@@ -1568,10 +1568,53 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
     return result;
 }
 
-bool ScreenReader::read_elements_bulk(ComGuiWindowPtr window, int window_child_count,
-                                      bool skip_trees, json& elements, std::string& reason) {
+bool ScreenReader::bulk_permitted(TreeReaderMode mode, std::string& reason) const {
+    if (mode == TreeReaderMode::Legacy) return false;
+    if (probe_all_ || probe_all_from_environment()) {
+        reason = "probe_all";
+        return false;
+    }
+    if (bulk_reader_disabled()) {
+        reason = "disabled";
+        return false;
+    }
+    return true;
+}
+
+Result ScreenReader::bulk_unavailable_error(const std::string& reason) {
+    // Forced bulk never falls back silently, so a measurement cannot be the legacy path.
+    Result result;
+    result.status = Result::Status::Error;
+    result.data = json::object();
+    result.error["code"] = "OBJECT_TREE_UNAVAILABLE";
+    result.error["message"] = "The bulk screen reader (FAIRYFLY_SCREEN_READER=bulk) could not read this screen: " + reason;
+    result.error["reason"] = reason;
+    return result;
+}
+
+void ScreenReader::attach_tab_diagnostics(Result& result, TreeReaderMode mode) const {
+    if (mode == TreeReaderMode::Legacy) return;
+    // read_with_tabs: the base read already reported; the tab reads add to it.
+    std::set<std::string> kinds;
+    std::string reason = tab_bulk_.reason;
+    if (result.diagnostics.contains("screen_reader")) {
+        const json& base = result.diagnostics["screen_reader"];
+        kinds.insert(base.value("used", "legacy"));
+        if (reason.empty()) reason = base.value("fallback_reason", "");
+    }
+    if (tab_bulk_.bulk > 0) kinds.insert("bulk");
+    if (tab_bulk_.legacy > 0) kinds.insert("legacy");
+    const std::string used = kinds.empty() ? "legacy" : kinds.size() == 1 ? *kinds.begin() : "mixed";
+    json info = {{"mode", tree_reader_mode_name(mode)}, {"used", used}};
+    if (!reason.empty()) info["fallback_reason"] = reason;
+    result.diagnostics["screen_reader"] = std::move(info);
+}
+
+bool ScreenReader::read_elements_bulk(const std::string& root_id, bool is_window,
+                                      int root_child_count, bool skip_trees, json& elements,
+                                      std::string& reason) {
     try {
-        const std::string window_id = window->get_id();
+        const std::string& window_id = root_id;
         const auto started = std::chrono::steady_clock::now();
         std::optional<std::string> raw;
         try {
@@ -1597,7 +1640,7 @@ bool ScreenReader::read_elements_bulk(ComGuiWindowPtr window, int window_child_c
             return false;
         }
         TreeSnapshot snapshot(std::move(*tree));
-        if (snapshot.root().children.size() != static_cast<size_t>(window_child_count)) {
+        if (snapshot.root().children.size() != static_cast<size_t>(root_child_count)) {
             note_validator_failure();
             reason = "node_count_mismatch";
             return false;
@@ -1609,7 +1652,9 @@ bool ScreenReader::read_elements_bulk(ComGuiWindowPtr window, int window_child_c
                      bytes, elapsed_ms, snapshot.size());
 
         ScreenElementCollector collector;
-        const TreeReplayResult replay = replay_discovery(snapshot, window_id, skip_trees, collector);
+        const TreeReplayResult replay = is_window
+            ? replay_discovery(snapshot, window_id, skip_trees, collector)
+            : replay_subtree(snapshot, window_id, skip_trees, collector);
 
         // Hosts the tree cannot answer keep their legacy FindById probe (see id_probe_candidates).
         for (const auto& host : replay.probe_hosts) {
@@ -1687,23 +1732,13 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
 
             json elements;
             if (mode != TreeReaderMode::Legacy) {
-                if (probe_all_ || probe_all_from_environment()) {
-                    bulk_reason = "probe_all";
-                } else if (bulk_reader_disabled()) {
-                    bulk_reason = "disabled";
-                } else {
-                    used_bulk = read_elements_bulk(window, result.data["child_count"].get<int>(),
+                if (bulk_permitted(mode, bulk_reason)) {
+                    used_bulk = read_elements_bulk(window->get_id(), true,
+                                                   result.data["child_count"].get<int>(),
                                                    skip_trees, elements, bulk_reason);
                 }
-                if (!used_bulk && mode == TreeReaderMode::Bulk && bulk_reason != "probe_all") {
-                    // Forced bulk never falls back silently, so a measurement cannot be the legacy path.
-                    result.status = Result::Status::Error;
-                    result.data = json::object();
-                    result.error["code"] = "OBJECT_TREE_UNAVAILABLE";
-                    result.error["message"] = "The bulk screen reader (FAIRYFLY_SCREEN_READER=bulk) could not read this screen: " + bulk_reason;
-                    result.error["reason"] = bulk_reason;
-                    return result;
-                }
+                if (!used_bulk && mode == TreeReaderMode::Bulk && bulk_reason != "probe_all")
+                    return bulk_unavailable_error(bulk_reason);
                 if (!used_bulk) {
                     // Fresh state for the legacy read (a failed bulk attempt may have run phase 2).
                     ElementMetadataExtractor::clear_cache();
@@ -1944,6 +1979,7 @@ const char* tab_read_failure_reason(TabReadStatus status) {
     switch (status) {
         case TabReadStatus::NotFound: return "not_found";
         case TabReadStatus::BusyTimeout: return "busy_timeout";
+        case TabReadStatus::TreeUnavailable: return "object_tree_unavailable";
         default: return "error";
     }
 }
@@ -1961,6 +1997,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             return result;
         }
         max_rows_ = max_rows;
+        tab_bulk_ = TabBulkStats();
         if (!session_) {
             result.status = Result::Status::Error;
             result.error["code"] = "NO_SESSION";
@@ -2136,6 +2173,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             result.error["message"] = "Screen read could not restore the original tab";
             return result;
         }
+        if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
@@ -2168,6 +2206,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["tabs_expanded"] = true;
         result.data["expanded_tab_count"] = tabs_content.size();
         if (!tabs_failed.empty()) result.data["tabs_failed"] = tabs_failed;
+        attach_tab_diagnostics(result, effective_tree_reader_mode());
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
@@ -2205,10 +2244,38 @@ TabReadStatus ScreenReader::read_tab_content(const std::string& tab_id, bool nee
         if (!tab_elem) return TabReadStatus::NotFound;
     }
 
-    ScreenElementCollector tab_collector;
-    traverse_element_tree(tab_elem, tab_collector, 0, skip_trees);
-    extract_collected_trees_and_grids(tab_collector);
-    elements = extract_metadata_for_collector(tab_collector);
+    // One GetObjectTree call for the subtree when the bulk reader is on; otherwise (or when it
+    // cannot serve this read) the element by element traversal. False: forced Bulk failed.
+    const TreeReaderMode mode = effective_tree_reader_mode();
+    auto read_subtree = [&](const ComGuiElementPtr& root, const std::string& root_id, json& out) {
+        if (mode != TreeReaderMode::Legacy) {
+            std::string reason;
+            bool ok = false;
+            if (bulk_permitted(mode, reason)) {
+                try {
+                    ok = read_elements_bulk(root_id, false, root->get_child_count(), skip_trees, out, reason);
+                } catch (const std::exception&) {
+                    reason = "exception";
+                }
+            }
+            if (ok) {
+                ++tab_bulk_.bulk;
+                return true;
+            }
+            if (mode == TreeReaderMode::Bulk && reason != "probe_all") {
+                tab_bulk_.unavailable = reason;
+                return false;
+            }
+            ++tab_bulk_.legacy;
+            if (tab_bulk_.reason.empty()) tab_bulk_.reason = reason;
+        }
+        ScreenElementCollector collector;
+        traverse_element_tree(root, collector, 0, skip_trees);
+        extract_collected_trees_and_grids(collector);
+        out = extract_metadata_for_collector(collector);
+        return true;
+    };
+    if (!read_subtree(tab_elem, tab_id, elements)) return TabReadStatus::TreeUnavailable;
 
     // The tab subtree is authoritative when it yields anything besides the tab container
     // itself. A tab that reports children but exposes nothing extractable falls back to the
@@ -2220,12 +2287,11 @@ TabReadStatus ScreenReader::read_tab_content(const std::string& tab_id, bool nee
         spdlog::debug("Tab {} yielded no content, probing window user area", tab_id);
         auto active_wnd = session_->get_active_window();
         if (active_wnd) {
-            auto usr = session_->find_element_by_id(active_wnd->get_id() + "/usr");
+            const std::string usr_id = active_wnd->get_id() + "/usr";
+            auto usr = session_->find_element_by_id(usr_id);
             if (usr) {
-                ScreenElementCollector usr_collector;
-                traverse_element_tree(usr, usr_collector, 0, skip_trees);
-                extract_collected_trees_and_grids(usr_collector);
-                json fallback = extract_metadata_for_collector(usr_collector);
+                json fallback;
+                if (!read_subtree(usr, usr_id, fallback)) return TabReadStatus::TreeUnavailable;
                 if (!fallback.empty() || elements.empty()) elements = std::move(fallback);
             }
         }
@@ -2250,6 +2316,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         // A single requested tab never needs the full base read plus every other tab.
         if (!only_tab.empty()) return read_tab(only_tab, skip_trees, max_rows);
 
+        tab_bulk_ = TabBulkStats();
         // Get initial screen structure
         Result initial_result = read(true, skip_trees, max_rows);
         if (initial_result.status != Result::Status::Success) {
@@ -2408,6 +2475,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             result.error["message"] = "Screen read could not restore the original tab";
             return result;
         }
+        if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
@@ -2429,6 +2497,8 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
 
         result.status = Result::Status::Success;
         result.data = screen_data;
+        result.diagnostics = initial_result.diagnostics;
+        attach_tab_diagnostics(result, effective_tree_reader_mode());
 
         auto end = std::chrono::high_resolution_clock::now();
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);

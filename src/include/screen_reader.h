@@ -112,7 +112,7 @@ bool bulk_reader_disabled();
 void reset_bulk_reader_state_for_testing();
 
 /// Why one tab could not be read.
-enum class TabReadStatus { Ok, NotFound, BusyTimeout };
+enum class TabReadStatus { Ok, NotFound, BusyTimeout, TreeUnavailable };
 const char* tab_read_failure_reason(TabReadStatus status);
 
 /// Test hook: override the post-select busy wait (default 5000 ms); <= 0 restores it.
@@ -197,11 +197,28 @@ private:
     /// Effective mode of this read: the override, else the environment.
     TreeReaderMode effective_tree_reader_mode() const;
 
-    /// Bulk read of the whole window with one GetObjectTree call: replays discovery over the
-    /// parsed tree, runs phase 2/2B and builds the plain elements from it. False (with `reason`)
-    /// when this read must use the legacy reader; `elements` is then untouched.
-    bool read_elements_bulk(ComGuiWindowPtr window, int window_child_count, bool skip_trees,
-                            json& elements, std::string& reason);
+    /// Bulk read of the window (`is_window`: toolbars, title bar, children) or of one element
+    /// subtree (a tab, the window user area) with one GetObjectTree call: replays discovery over
+    /// the parsed tree, runs phase 2/2B and builds the plain elements from it. `root_child_count`
+    /// is the COM child count of the root, checked against the tree. False (with `reason`) when
+    /// this read must use the legacy reader; `elements` is then untouched.
+    bool read_elements_bulk(const std::string& root_id, bool is_window, int root_child_count,
+                            bool skip_trees, json& elements, std::string& reason);
+
+    /// Whether this read may use the bulk path at all (not --probe-all, not disabled); `reason`
+    /// says why not.
+    bool bulk_permitted(TreeReaderMode mode, std::string& reason) const;
+
+    /// Per read_tab/read_with_tabs run: how the tab subtrees were read.
+    struct TabBulkStats {
+        int bulk = 0;
+        int legacy = 0;
+        std::string reason;       // first fallback reason
+        std::string unavailable;  // forced Bulk could not read a tab
+    };
+    TabBulkStats tab_bulk_;
+    void attach_tab_diagnostics(Result& result, TreeReaderMode mode) const;
+    static Result bulk_unavailable_error(const std::string& reason);
     ObjectTreeSource object_tree_source() const;
     ElementProbeSource element_probe_source() const;
 

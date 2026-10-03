@@ -370,5 +370,13 @@ TreeReplayResult replay_discovery(const TreeSnapshot& snapshot, const std::strin
     return replay.result;
 }
 
+TreeReplayResult replay_subtree(const TreeSnapshot& snapshot, const std::string& root_id,
+                                bool skip_trees, ScreenElementCollector& collector) {
+    collector.reserve(200);
+    Replay replay(snapshot, skip_trees, collector);
+    if (const ObjectTreeNode* root = snapshot.find(root_id)) replay.traverse(*root, 0);
+    return replay.result;
+}
+
 } // namespace sap
 } // namespace fairyfly
