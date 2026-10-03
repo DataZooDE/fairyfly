@@ -16,6 +16,8 @@ add_executable(unit_tests
     unit/test_screen_read_usability.cpp
     unit/test_compact_json.cpp
     unit/test_element_metadata_extractor.cpp
+    unit/test_element_metadata_builder.cpp
+    unit/test_display_text_policy.cpp
     unit/test_raii_core_renderers.cpp
     unit/test_doctor.cpp
     unit/test_connection_manager.cpp
