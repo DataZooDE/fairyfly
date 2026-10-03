@@ -93,6 +93,8 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
 
 /// True when FAIRYFLY_PROBE_ALL=1 requests exhaustive ID probing.
 bool probe_all_from_environment();
+/// True when FAIRYFLY_SCREEN_READER holds a valid mode (the default mode is auto when it does not).
+bool tree_reader_mode_set_in_environment();
 
 /// How `screen read` obtains the element tree: element by element over COM (Legacy), or with one
 /// GuiSession.GetObjectTree call (Bulk), the latter with a per-read fallback to Legacy (Auto).
@@ -220,6 +222,7 @@ private:
     void attach_tab_diagnostics(Result& result, TreeReaderMode mode) const;
     static Result bulk_unavailable_error(const std::string& reason);
     ObjectTreeSource object_tree_source() const;
+    bool report_screen_reader_diagnostics(const std::string& fallback_reason) const;
     ElementProbeSource element_probe_source() const;
 
     /// Discover all UI elements from a window using recursive traversal

@@ -764,12 +764,24 @@ const char* tree_reader_mode_name(TreeReaderMode mode) {
 TreeReaderMode tree_reader_mode_from_environment() {
     char* buffer = nullptr;
     size_t size = 0;
-    TreeReaderMode mode = TreeReaderMode::Legacy;
+    // Bulk where available is the default; `legacy` is the explicit escape hatch.
+    TreeReaderMode mode = TreeReaderMode::Auto;
     if (_dupenv_s(&buffer, &size, "FAIRYFLY_SCREEN_READER") == 0 && buffer != nullptr) {
-        mode = parse_tree_reader_mode(buffer).value_or(TreeReaderMode::Legacy);
+        mode = parse_tree_reader_mode(buffer).value_or(TreeReaderMode::Auto);
         free(buffer);
     }
     return mode;
+}
+
+bool tree_reader_mode_set_in_environment() {
+    char* buffer = nullptr;
+    size_t size = 0;
+    bool explicit_mode = false;
+    if (_dupenv_s(&buffer, &size, "FAIRYFLY_SCREEN_READER") == 0 && buffer != nullptr) {
+        explicit_mode = parse_tree_reader_mode(buffer).has_value();
+        free(buffer);
+    }
+    return explicit_mode;
 }
 
 namespace {
@@ -799,6 +811,14 @@ void reset_bulk_reader_state_for_testing() {
 
 TreeReaderMode ScreenReader::effective_tree_reader_mode() const {
     return tree_reader_mode_ ? *tree_reader_mode_ : tree_reader_mode_from_environment();
+}
+
+bool ScreenReader::report_screen_reader_diagnostics(const std::string& fallback_reason) const {
+    // The default mode keeps the output shape of the per-element reader: diagnostics appear when a mode was
+    // chosen explicitly (override or environment) or when the bulk reader failed and the read fell back.
+    // Intentional legacy reads (--probe-all, reads without structure) are not failures.
+    if (tree_reader_mode_ || tree_reader_mode_set_in_environment()) return true;
+    return !fallback_reason.empty() && fallback_reason != "probe_all" && fallback_reason != "include_structure_false";
 }
 
 ObjectTreeSource ScreenReader::object_tree_source() const {
@@ -1602,6 +1622,10 @@ void ScreenReader::attach_tab_diagnostics(Result& result, TreeReaderMode mode) c
     // read_with_tabs: the base read already reported; the tab reads add to it.
     std::set<std::string> kinds;
     std::string reason = tab_bulk_.reason;
+    if (reason.empty() && result.diagnostics.contains("screen_reader")) {
+        reason = result.diagnostics["screen_reader"].value("fallback_reason", "");
+    }
+    if (!report_screen_reader_diagnostics(reason)) return;
     if (result.diagnostics.contains("screen_reader")) {
         const json& base = result.diagnostics["screen_reader"];
         kinds.insert(base.value("used", "legacy"));
@@ -1784,8 +1808,8 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
             }
         }
 
-        if (mode != TreeReaderMode::Legacy) {
-            if (!include_structure) bulk_reason = "include_structure_false";
+        if (!include_structure) bulk_reason = "include_structure_false";
+        if (mode != TreeReaderMode::Legacy && report_screen_reader_diagnostics(bulk_reason)) {
             json info = {{"mode", tree_reader_mode_name(mode)}, {"used", used_bulk ? "bulk" : "legacy"}};
             if (!bulk_reason.empty()) info["fallback_reason"] = bulk_reason;
             result.diagnostics["screen_reader"] = std::move(info);

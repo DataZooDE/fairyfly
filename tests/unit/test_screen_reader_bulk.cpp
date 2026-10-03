@@ -581,27 +581,69 @@ TEST_CASE("the legacy path is untouched when the mode is Legacy", "[bulk][reader
     ScriptedSource source;
     source.answer = [] { return std::optional<std::string>("never used"); };
 
-    // No override and no environment variable: Legacy. No diagnostics, no tree call.
-    const Result by_default = read_with_mode(scene, std::nullopt, &source);
+    // Explicit Legacy (override or environment): no diagnostics, no tree call.
     const Result explicit_legacy = read_with_mode(scene, TreeReaderMode::Legacy, &source);
-    REQUIRE(by_default.status == Result::Status::Success);
+    REQUIRE(explicit_legacy.status == Result::Status::Success);
     CHECK(source.calls == 0);
     CHECK(scene.session->object_tree_calls == 0);
-    CHECK(by_default.diagnostics.empty());
     CHECK(explicit_legacy.diagnostics.empty());
-    CHECK(by_default.data == explicit_legacy.data);
-
-    // An unknown environment value is Legacy as well.
-    _putenv_s("FAIRYFLY_SCREEN_READER", "turbo");
-    const Result unknown = read_with_mode(scene, std::nullopt, &source);
+    _putenv_s("FAIRYFLY_SCREEN_READER", "legacy");
+    const Result via_environment = read_with_mode(scene, std::nullopt, &source);
     CHECK(source.calls == 0);
-    CHECK(unknown.data == by_default.data);
-    CHECK(unknown.diagnostics.empty());
+    CHECK(via_environment.diagnostics.empty());
+    CHECK(via_environment.data == explicit_legacy.data);
+}
+
+TEST_CASE("bulk is the default mode: silent when it works, falling back when it does not", "[bulk][reader][default]") {
+    CleanState state;
+    Scene scene;
+    const Result legacy = read_with_mode(scene, TreeReaderMode::Legacy);
+    REQUIRE(legacy.status == Result::Status::Success);
+
+    ScriptedSource good;
+    good.answer = [&] { return std::optional<std::string>(scene_tree_answer(scene.specs)); };
+
+    SECTION("no override and no environment variable uses the bulk reader without any diagnostics") {
+        const Result by_default = read_with_mode(scene, std::nullopt, &good);
+        REQUIRE(by_default.status == Result::Status::Success);
+        CHECK(good.calls == 1);
+        CHECK(by_default.data == legacy.data);
+        CHECK(by_default.diagnostics.empty());   // the default output shape does not change
+    }
+    SECTION("an unknown environment value behaves like the default") {
+        _putenv_s("FAIRYFLY_SCREEN_READER", "turbo");
+        const Result unknown = read_with_mode(scene, std::nullopt, &good);
+        CHECK(good.calls == 1);
+        CHECK(unknown.data == legacy.data);
+        CHECK(unknown.diagnostics.empty());
+    }
+    SECTION("an explicitly chosen auto mode reports what it used") {
+        _putenv_s("FAIRYFLY_SCREEN_READER", "auto");
+        const Result explicit_auto = read_with_mode(scene, std::nullopt, &good);
+        CHECK(explicit_auto.diagnostics.at("screen_reader").at("used") == "bulk");
+    }
+    SECTION("a failing tree source falls back to the legacy reader and says why") {
+        ScriptedSource failing;
+        failing.answer = [] { return std::optional<std::string>(); };
+        const Result fell_back = read_with_mode(scene, std::nullopt, &failing);
+        REQUIRE(fell_back.status == Result::Status::Success);
+        CHECK(fell_back.data == legacy.data);
+        CHECK(fell_back.diagnostics.at("screen_reader").at("used") == "legacy");
+        CHECK(fell_back.diagnostics.at("screen_reader").at("fallback_reason") == "no_answer");
+    }
+    SECTION("probe-all and structure-less reads are intentional legacy reads and stay silent") {
+        const Result probe_all = read_with_mode(scene, std::nullopt, &good, true, true);
+        CHECK(good.calls == 0);
+        CHECK(probe_all.diagnostics.empty());
+        const Result no_structure = read_with_mode(scene, std::nullopt, &good, false);
+        CHECK(good.calls == 0);
+        CHECK(no_structure.diagnostics.empty());
+    }
 }
 
 TEST_CASE("FAIRYFLY_SCREEN_READER selects the mode", "[bulk][mode]") {
     CleanState state;
-    CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Legacy);
+    CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Auto);   // bulk where available is the default
     _putenv_s("FAIRYFLY_SCREEN_READER", "bulk");
     CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Bulk);
     _putenv_s("FAIRYFLY_SCREEN_READER", "AUTO");
@@ -609,7 +651,7 @@ TEST_CASE("FAIRYFLY_SCREEN_READER selects the mode", "[bulk][mode]") {
     _putenv_s("FAIRYFLY_SCREEN_READER", "legacy");
     CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Legacy);
     _putenv_s("FAIRYFLY_SCREEN_READER", "nonsense");
-    CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Legacy);
+    CHECK(tree_reader_mode_from_environment() == TreeReaderMode::Auto);
 
     CHECK(parse_tree_reader_mode("bulk") == TreeReaderMode::Bulk);
     CHECK(parse_tree_reader_mode("") == std::nullopt);
