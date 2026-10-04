@@ -62,6 +62,7 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             // (the server mode remains the ceiling) unless --read-only narrows it.
             request.read_only = args.read_only_flag || !scopes_given;
             request.sap_systems = split_list(args.systems);
+            request.sap_identities = split_list(args.sap_identities);
             request.tcodes = split_list(args.tcodes);
             request.connections = split_list(args.connections);
             if (args.allow_navigation && request.tcodes.empty())

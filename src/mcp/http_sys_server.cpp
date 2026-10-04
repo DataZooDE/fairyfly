@@ -10,6 +10,7 @@
 #include <iostream>
 #include <cstdio>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #include <spdlog/spdlog.h>
@@ -290,6 +291,10 @@ struct McpHttpServer::Impl {
     std::unique_ptr<IAuthenticator> auth;
     CallExecutor executor;
     HttpEndpoint endpoint;
+    std::shared_ptr<SessionExecutorPool> session_pool;
+    std::function<void()> session_shutdown;
+    std::once_flag session_shutdown_once;
+    std::function<void(bool)> session_mode_hook;
     std::function<void(bool)> apply_read_only;
 
     bool bound = false;
@@ -372,7 +377,13 @@ void McpHttpServer::Impl::handle_request(const HTTP_REQUEST& req) {
             }
             request.body = std::move(body);
         }
+        // The JSON path waits for a queued/running tool call before sending headers.
+        // Observe an http.sys disconnect during that wait so an abandoned queued call
+        // is removed before it can change SAP GUI state.
+        HttpSysSink disconnect_watch(conn, false);
+        request.connected = [&disconnect_watch] { return disconnect_watch.connected(); };
         HttpResponse response = endpoint.handle_authenticated(request, pre.principal);
+        disconnect_watch.stop_wait();
         responded = true;
         if (!response.stream) {
             send_response(conn, response, false, false, false);
@@ -443,6 +454,8 @@ McpHttpServer::McpHttpServer(HttpServerConfig config, ToolProvider& provider,
       config_(std::move(config)), read_only_(config_.read_only) {}
 
 McpHttpServer::~McpHttpServer() {
+    request_stop();
+    if (impl_->session_pool) impl_->session_pool->join();
     impl_->close_all();
 }
 
@@ -450,6 +463,7 @@ const std::string& McpHttpServer::bind_error_reason() const { return impl_->bind
 const std::string& McpHttpServer::prefix() const { return impl_->prefix; }
 
 bool McpHttpServer::bind(std::string* error) {
+    std::lock_guard<std::mutex> routing_lock(routing_mu_);
     Impl& s = *impl_;
     if (s.bound) return true;
     const auto fail = [&](const std::string& reason, const std::string& message) {
@@ -530,6 +544,7 @@ bool McpHttpServer::bind(std::string* error) {
     s.prefix = prefix;
     s.bound_port = config_.port;
     s.bound = true;
+    routing_locked_ = true;
     s.bind_reason.clear();
     return true;
 }
@@ -537,6 +552,31 @@ bool McpHttpServer::bind(std::string* error) {
 int McpHttpServer::port() const { return impl_->bound_port; }
 HttpEndpoint& McpHttpServer::endpoint() { return impl_->endpoint; }
 CallExecutor& McpHttpServer::executor() { return impl_->executor; }
+void McpHttpServer::set_session_router(std::shared_ptr<SessionExecutorPool> pool,
+                                       HttpEndpoint::SessionRouter router,
+                                       HttpEndpoint::SessionRouter recheck_router) {
+    if (!pool || !router) throw std::invalid_argument("session routing requires a pool and router");
+    std::lock_guard<std::mutex> routing_lock(routing_mu_);
+    if (routing_locked_) throw std::logic_error("session routing must be configured before bind");
+    impl_->session_pool = std::move(pool);
+    impl_->endpoint.set_session_router(impl_->session_pool.get(), std::move(router),
+                                       std::move(recheck_router));
+    session_routed_.store(true);
+}
+
+void McpHttpServer::set_session_shutdown(std::function<void()> shutdown) {
+    if (!shutdown) throw std::invalid_argument("session shutdown callback is required");
+    std::lock_guard<std::mutex> routing_lock(routing_mu_);
+    if (routing_locked_) throw std::logic_error("session shutdown must be configured before bind");
+    impl_->session_shutdown = std::move(shutdown);
+}
+
+void McpHttpServer::set_session_mode_hook(std::function<void(bool)> hook) {
+    if (!hook) throw std::invalid_argument("session mode callback is required");
+    std::lock_guard<std::mutex> routing_lock(routing_mu_);
+    if (routing_locked_) throw std::logic_error("session mode must be configured before bind");
+    impl_->session_mode_hook = std::move(hook);
+}
 
 int McpHttpServer::run() {
     if (stop_.load()) return 0;  // stop requested before run() (tray: stop-before-run)
@@ -570,7 +610,9 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
                                                                      : "plain HTTP (loopback only)"));
     std::string allow;
     for (const auto& a : config_.allow_ip) allow += (allow.empty() ? "" : ", ") + a;
-    lines.push_back("  client ip allow-list: " + (allow.empty() ? std::string("any (loopback always allowed)") : allow));
+    lines.push_back("  client ip allow-list: " + (allow.empty() ? std::string("any") : allow) +
+                    (config_.endpoint.allow_ip_include_loopback && !allow.empty() ? " (includes loopback)" :
+                     !allow.empty() ? " (loopback exempt)" : ""));
     lines.push_back(std::string("  mode:           ") + (read_only_.load() ? "read-only guard (write tools hidden and refused)"
                                                                           : "WRITE MODE (state-changing tools enabled)") +
                     (config_.read_only_cap ? " [FAIRYFLY_READ_ONLY cap active]" : ""));
@@ -613,6 +655,7 @@ ServerStatus McpHttpServer::status() const {
     s.endpoint = http_endpoint_url(config_.tls, config_.host, config_.endpoint.allowed_hosts,
                                    impl_->bound ? impl_->bound_port : config_.port, config_.endpoint.path);
     s.read_only = read_only_.load();
+    s.parallel_sessions = session_routed_.load();
     for (const auto& line : posture_lines())
         if (line.find("WARNING:") != std::string::npos) s.warnings.push_back(line.substr(line.find("WARNING:") + 9));
     s.calls_total = impl_->endpoint.calls_total();
@@ -626,6 +669,19 @@ void McpHttpServer::set_read_only(bool read_only) {
         return;
     }
     if (read_only_.exchange(read_only) == read_only) return;
+    if (impl_->session_mode_hook) {
+        try { impl_->session_mode_hook(read_only); }
+        catch (const std::exception& e) {
+            spdlog::error("switching session mode failed: {}", e.what());
+            request_stop();
+            return;
+        }
+        catch (...) {
+            spdlog::error("switching session mode failed");
+            request_stop();
+            return;
+        }
+    }
     if (!impl_->apply_read_only) return;
     // Applied on the main thread, between calls: subsequent calls use the new mode.
     ExecJob job;
@@ -644,6 +700,14 @@ void McpHttpServer::set_read_only(bool read_only) {
 void McpHttpServer::request_stop() {
     stop_ = true;
     impl_->executor.request_stop();
+    if (impl_->session_shutdown) {
+        std::call_once(impl_->session_shutdown_once, [this] {
+            try { impl_->session_shutdown(); }
+            catch (const std::exception& e) { spdlog::error("session worker shutdown failed: {}", e.what()); }
+            catch (...) { spdlog::error("session worker shutdown failed"); }
+        });
+    }
+    if (impl_->session_pool) impl_->session_pool->request_stop();
     impl_->stopping = true;
     impl_->shutdown_queue();
 }
@@ -688,6 +752,7 @@ int run_mcp_http(HttpRunArgs args, bool* restart_requested) {
     config.endpoint.allowed_hosts = o.allowed_hosts;
     config.endpoint.cors_origins = o.cors_origins;
     config.endpoint.allow_ip = o.allow_ip;
+    config.endpoint.allow_ip_include_loopback = o.allow_ip_include_loopback;
     config.endpoint.server = args.server_options;
 
     auto authenticator = args.authenticator ? std::move(args.authenticator) : make_http_authenticator(o.insecure_no_auth);
@@ -698,6 +763,7 @@ int run_mcp_http(HttpRunArgs args, bool* restart_requested) {
         if (apply_handler) apply_handler(ro);
         provider->reset(make_provider(ro));
     });
+    if (args.configure_session_routing) args.configure_session_routing(server);
 
     std::string error;
     if (!server.bind(&error)) {

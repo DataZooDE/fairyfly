@@ -8,7 +8,7 @@ namespace fairyfly::mcp {
 
 /// Read-only tools (gui_screen_read, ...). Implemented in tool_catalog.cpp.
 std::vector<ToolSpec> read_tool_specs();
-/// State-changing tools (gui_element_click, gui_element_fill, ...), all with write_tool = true. tool_catalog_write.cpp.
+/// Additional catalog tools implemented in tool_catalog_write.cpp (fill and broker lease control).
 std::vector<ToolSpec> write_tool_specs();
 /// read_tool_specs() followed by write_tool_specs().
 std::vector<ToolSpec> all_tool_specs();

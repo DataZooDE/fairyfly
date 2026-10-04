@@ -9,6 +9,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","login"});
+        cmd_->footer(R"HELP(Usage notes:
+Authenticates an already launched session. Default credentials come from Windows Credential Manager.
+Inspect the result and any multiple-logon dialog before navigating. Never put passwords in argv.
+Example: fairyfly session login --connection 3 --credential DEV
+)HELP");
         cmd_->add_option("--credentials-file", credentials_file_, "Colon-separated credential file (deprecated: use `credentials import-env`)");
         cmd_->add_flag("--credentials-stdin", from_stdin_, "Read the same credential lines from standard input");
         cmd_->add_option("--credential", credential_name_,

@@ -92,6 +92,8 @@ public:
     void request_stop();
     bool stopping() const { return stop_.load(); }
     std::size_t queued() const;
+    /// True only when no queued or currently executing job remains (including untimed jobs).
+    bool idle() const;
     /// The timed call that is running right now (or whose soft timeout passed while it still runs); nullopt when idle.
     std::optional<CallInfo> running_info() const;
 
@@ -109,6 +111,7 @@ private:
         std::shared_ptr<CallState> state;
     };
     std::deque<Queued> queue_;
+    bool active_ = false;
     std::shared_ptr<CallState> running_;
     std::atomic<bool> stop_{false};
 };

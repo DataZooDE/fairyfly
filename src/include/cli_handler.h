@@ -6,8 +6,10 @@
 #include "credential_store.h"
 #include "audit_log.h"
 #include <string>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace fairyfly {
 namespace cli {
@@ -25,6 +27,11 @@ enum class OutputFormat {
 /// warnings). Login failure: the login error, carrying the launch data under error.launch
 /// and `connection_open: true` so the caller knows the connection is still open.
 Result compose_launch_login_result(Result launch, const Result& login);
+
+/// The keyless prelogin exception requires a live window handle in the facts
+/// identity. Authenticated owner calls still require a server session key.
+bool owner_bound_session_matches(const Connection& saved, const audit::SapFacts& live,
+                                 const std::string& expected_session, const std::string& expected_owner);
 
 /// Screenshot capture options
 struct ScreenshotOptions {
@@ -80,6 +87,14 @@ private:
     bool selection_input_only_ = false;  ///< see set_selection_input_only
     std::string selection_program_, selection_screen_;
     bool batch_mode_ = false; ///< inside `batch`: stdin belongs to the batch file, no prompts
+    std::vector<std::string> attach_owner_identities_;  ///< HTTP endpoint owner guard, checked before cache writes
+    std::function<void(int)> connection_changed_hook_;
+    std::function<bool(const audit::SapFacts&, const std::string&)> attach_target_guard_;
+    std::function<bool(const audit::SapFacts&, const std::string&)> login_target_guard_;
+    std::function<bool(const audit::SapFacts&, const std::string&)> launch_target_guard_;
+    std::optional<Connection> pending_owner_launch_;
+    std::optional<Connection> pending_owner_attach_;
+    std::string expected_mcp_session_, expected_mcp_owner_;  ///< one MCP call, checked after selecting the live session
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
@@ -91,7 +106,8 @@ private:
     /// Resolve and validate connection before command execution
     /// \param explicit_conn_id Optional connection ID from --connection flag
     /// \return Connection if successful, error Result otherwise
-    ResultT<Connection> resolve_and_validate_connection(std::optional<int> explicit_conn_id);
+    ResultT<Connection> resolve_and_validate_connection(std::optional<int> explicit_conn_id,
+                                                        bool update_cache = true);
 
     /// When several cache files exist, delete those whose SAP session is
     /// confirmed gone so auto-detect is not blocked by stale files.
@@ -107,6 +123,29 @@ public:
     /// Batch mode disables interactive/stdin secret prompts (credentials set / import-env).
     void set_batch_mode(bool batch_mode) { batch_mode_ = batch_mode; }
     bool batch_mode() const { return batch_mode_; }
+
+    void set_attach_owner_identities(std::vector<std::string> identities);
+    void set_owner_window_guard(bool enabled);
+    void set_connection_changed_hook(std::function<void(int)> hook) {
+        connection_changed_hook_ = std::move(hook);
+    }
+    void set_attach_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
+        attach_target_guard_ = std::move(guard);
+    }
+    void set_login_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
+        login_target_guard_ = std::move(guard);
+    }
+    void set_launch_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
+        launch_target_guard_ = std::move(guard);
+    }
+    /// Remove only the exact cache generation written by this tray launch.
+    bool rollback_owner_launch(int connection_id);
+    /// Commit a verified attach, or remove only its exact saved generation and detach the COM binding.
+    bool finalize_owner_attach(bool accepted);
+    void set_expected_mcp_session(std::string session_identity, std::string sap_identity) {
+        expected_mcp_session_ = std::move(session_identity);
+        expected_mcp_owner_ = std::move(sap_identity);
+    }
 
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }
@@ -158,7 +197,7 @@ public:
     Result handle_disconnect(std::optional<int> connection_id, bool close_session = false);
 
     // Connection listing and management
-    Result handle_connections_list(bool cleanup);
+    Result handle_connections_list(bool cleanup, bool validate = true);
 
     // Transaction execution
     Result handle_transaction(const std::string& tcode, std::optional<int> connection_id);

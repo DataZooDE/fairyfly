@@ -15,6 +15,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"transaction","start"});
+        cmd_->footer(R"HELP(Usage notes:
+Requires a logged-in session. Starting a transaction changes the current screen.
+Check the result and read the new screen; handle any blocking popup before retrying.
+Example: fairyfly transaction start SM59 --connection 3
+)HELP");
         cmd_->add_option("code", tcode_, "Transaction code (e.g., SE38, VA01)")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

@@ -23,6 +23,18 @@ public:
 
         // Add "read" subcommand
         read_cmd_ = add_leaf(app, {"screen", "read"});
+        read_cmd_->footer(R"HELP(Usage notes:
+Returns the current screen and its controls. For targeted discovery prefer screen find.
+JSON includes data.transaction, data.elements and data.trees; a GuiShell may be a
+Tree or GridView. Trees contain tree_nodes; grids/tables have rows. Do not infer
+that a collapsed tree is empty. Use element get --list-nodes and expand parent keys.
+--no-tabs skips tab expansion. --compact preserves JSON IDs while reducing duplication.
+Grid/table reads are bounded: follow next_offset for further rows.
+Examples:
+  fairyfly screen read --connection 3 --no-tabs --compact
+  fairyfly screen read --connection 3 --type GuiShell --no-tabs
+  fairyfly screen read --connection 3 --only-tables --max-rows 100 --offset 0
+)HELP");
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
         read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
@@ -61,6 +73,11 @@ public:
         read_cmd_->add_flag("--first", filters_.first_match_only, "Return only first matching element");
 
         find_cmd_ = add_leaf(app, {"screen", "find"});
+        find_cmd_->footer(R"HELP(Usage notes:
+Find control IDs without reading unrelated values. Default limit is one;
+request more when several shells match, then inspect each subtype before acting.
+Example: fairyfly screen find --type GuiShell --limit 20 --connection 3
+)HELP");
         find_cmd_->add_option("--id-contains", find_id_contains_, "Element ID substring (case-sensitive)");
         find_cmd_->add_option("--name-contains", find_name_contains_, "Control name substring (ASCII case-insensitive)");
         find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
@@ -74,6 +91,11 @@ public:
 
         // Add "capture" subcommand
         capture_cmd_ = add_leaf(app, {"screen", "capture"});
+        capture_cmd_->footer(R"HELP(Usage notes:
+Capture the screen when visual context is needed. Crop coordinates use native pixels;
+provide x, y, width and height together. Cropping happens before scaling.
+Example: fairyfly screen capture --file screen.png --connection 3
+)HELP");
         capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout. With --format base64 the file receives the data:image/png;base64,... text "
                           "and the result carries filepath instead of the string");
         capture_cmd_->add_option("--format", screenshot_format_, "Output format: png, base64")

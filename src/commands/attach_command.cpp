@@ -13,6 +13,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","attach"});
+        cmd_->footer(R"HELP(Usage notes:
+Attach a session ID observed in session list; without --session-id this requires mouse selection.
+Retain data.connection_id from the response for later --connection arguments.
+Example: fairyfly session attach --session-id "/app/con[1]/ses[0]"
+)HELP");
         cmd_->add_option("--timeout", timeout_, "Timeout in seconds for window selection")
             ->check(CLI::PositiveNumber);
         session_option_ = cmd_->add_option("--session-id", session_id_, "Exact SAP GUI session ID from list");

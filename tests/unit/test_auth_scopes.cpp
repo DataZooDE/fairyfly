@@ -97,12 +97,12 @@ struct Env {
 TEST_CASE("scopes: the verb list is derived from the command table", "[auth][scopes]") {
     const auto verbs = verb_scopes();
     const std::vector<std::string> expected = {
-        "session.list",   "session.attach", "session.launch", "session.login", "session.disconnect", "connection.list",
+        "session.list",   "session.attach", "session.launch", "session.login", "session.disconnect", "session.lease", "connection.list",
         "screen.read",    "screen.find",    "screen.capture", "menu.list",     "menu.select",        "element.get",
         "element.click",  "element.fill",   "element.f4",     "key.send",      "popup.close",        "transaction.start",
         "credentials.list"};
     CHECK(verbs == expected);
-    CHECK(verbs_of_family("session") == std::vector<std::string>{"list", "attach", "launch", "login", "disconnect"});
+    CHECK(verbs_of_family("session") == std::vector<std::string>{"list", "attach", "launch", "login", "disconnect", "lease"});
     CHECK(verbs_of_family("system").empty());
     CHECK(verbs_of_family("batch").empty());
     CHECK(verb_scope_of_tool("gui_session_disconnect") == "session.disconnect");
@@ -184,6 +184,8 @@ TEST_CASE("scopes: every tool resolves to its own valid verb scope", "[auth][sco
 }
 
 TEST_CASE("scopes: tools/list shows exactly what the scopes allow", "[auth][scopes][dispatch]") {
+    CHECK(listed(token({"session"})).count("gui_session_lease") == 0);
+    CHECK(listed(token({"session.lease"})).count("gui_session_lease") == 1);
     CHECK(listed(token({"session.list", "session.attach", "screen"})) ==
           std::set<std::string>{"gui_session_list", "gui_session_attach", "gui_screen_read", "gui_screen_find", "gui_screen_capture"});
     CHECK(listed(token({"session.disconnect"})) == std::set<std::string>{"gui_session_disconnect"});

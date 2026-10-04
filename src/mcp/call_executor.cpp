@@ -56,6 +56,7 @@ SubmitResult CallExecutor::submit(ExecJob job, std::shared_ptr<CallState>* state
     state->tool = job.tool;
     {
         std::lock_guard<std::mutex> lock(mu_);
+        if (stop_) return SubmitResult::QueueFull;
         if (job.timed && running_ && running_->timed_out) return SubmitResult::Busy;
         if (queue_.size() >= max_queue_) return SubmitResult::QueueFull;
         if (state_out) *state_out = state;
@@ -124,6 +125,11 @@ std::size_t CallExecutor::queued() const {
     return queue_.size();
 }
 
+bool CallExecutor::idle() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return queue_.empty() && !active_;
+}
+
 void CallExecutor::request_stop() {
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -180,6 +186,7 @@ void CallExecutor::run() {
             }
             item = std::move(queue_.front());
             queue_.pop_front();
+            active_ = true;
             if (item.job.timed) {
                 item.state->started = Clock::now();
                 item.state->deadline = item.state->started + std::chrono::milliseconds(call_timeout_ms_);
@@ -199,11 +206,13 @@ void CallExecutor::run() {
         }
 
         bool answer = true;
-        if (item.job.timed) {
+        {
             std::lock_guard<std::mutex> lock(mu_);
-            running_.reset();
-            if (item.state->responded) answer = false;  // cancelled, or already answered as timed out
-            else item.state->responded = true;
+            if (item.job.timed) {
+                running_.reset();
+                if (item.state->responded) answer = false;  // cancelled, or already answered as timed out
+                else item.state->responded = true;
+            }
         }
         if (item.job.timed) cv_watchdog_.notify_all();
         if (answer && item.job.deliver && !response.is_null()) {
@@ -212,6 +221,10 @@ void CallExecutor::run() {
             } catch (const std::exception& e) {
                 spdlog::error("MCP deliver failed: {}", e.what());
             }
+        }
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            active_ = false;
         }
     }
     request_stop();

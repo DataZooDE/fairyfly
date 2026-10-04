@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "include/core.h"  // fairyfly::Result
+#include "include/audit_log.h"
 #include "include/mcp/principal.h"
 
 namespace fairyfly::mcp {
@@ -59,12 +60,22 @@ struct ToolResult {
 
 /// Per-call context handed to the provider by the server.
 struct CallContext {
+    struct BatchLease {
+        std::string session_identity;
+        std::string token_id;
+        std::string lease_id;
+        int connection = -1;
+    };
     json request_id;                       ///< JSON-RPC id of the tools/call request
     std::optional<json> progress_token;    ///< params._meta.progressToken when supplied
     std::function<bool()> cancelled;       ///< polled by long calls; true after notifications/cancelled
+    /// HTTP worker handoff: refreshes the bearer token immediately before each
+    /// private worker action (including screenshot retries). Empty fails closed.
+    std::function<bool()> reauthorize;
     Principal principal;                   ///< caller identity (default: local stdio principal)
     ProtocolEra era = ProtocolEra::Legacy; ///< protocol era of this request
     bool http = false;                     ///< transport: false = stdio
+    std::optional<BatchLease> batch_lease; ///< broker-only pin for a single-session batch
     /// Optional progress reporter (added for the HTTP/SSE transport, additive): emits a
     /// notifications/progress event when the client supplied a progressToken. Empty = no reporting.
     /// Providers may call it from the main thread between GUI steps; it never blocks.
@@ -120,6 +131,8 @@ struct Policy {
     /// --audit-required / FAIRYFLY_AUDIT=required: a tool call whose audit record could not be
     /// written is reported as AUDIT_UNAVAILABLE (the action itself already ran).
     bool audit_required = false;
+    /// Exact SID/CLIENT/USER identities that remote clients may operate; empty disables this opt-in gate.
+    std::vector<std::string> owner_sap_identities;
 };
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).
@@ -146,10 +159,13 @@ struct ServeOptions {
     // ---- http.sys listener (additive) ----
     /// Serve HTTPS (TLS terminated in-kernel by http.sys with the certificate bound by `mcp setup`).
     bool tls = false;
-    /// Client allow-list (IPv4/IPv6 addresses or CIDR blocks); loopback is always allowed. Empty = no restriction.
+    /// Client allow-list (IPv4/IPv6 addresses or CIDR blocks). Empty = no restriction.
     std::vector<std::string> allow_ip;
+    bool allow_ip_include_loopback = false; ///< Also require loopback peers to match a nonempty allow-list.
     /// Permit plain HTTP on a non-loopback host (flag only; never read from the config file).
     bool insecure_http = false;
+    /// Exact SID/CLIENT/USER identities allowed through this HTTP endpoint; empty disables owner filtering.
+    std::vector<std::string> owner_sap_identities;
 };
 
 /// How a tool renders its result.
@@ -179,6 +195,7 @@ struct McpCallRecord {
     std::string command;               ///< CLI subcommand it ran ("" if refused before running)
     std::vector<std::string> argv;     ///< argv without program name (redacted downstream)
     std::optional<int> connection;
+    std::optional<audit::SapFacts> sap; ///< checked live target facts for audit, especially private worker lanes
     std::string status;                ///< "success" | "error" | "refused"
     std::string error_code;            ///< machine code only, never messages
     std::string client;                ///< "name/version" of the MCP client
@@ -186,6 +203,7 @@ struct McpCallRecord {
     long long duration_ms = 0;
     bool read_only = true;
     std::string principal;             ///< token name ("stdio" locally)
+    std::string token_id;              ///< non-secret issuance ID; distinguishes rotated tokens with the same name
     std::string remote_addr;           ///< client address for HTTP, "" for stdio
     std::string transport = "stdio";   ///< "stdio" | "http"
     std::string era;                   ///< "legacy" | "stateless" | ""

@@ -14,6 +14,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","list"});
+        cmd_->footer(R"HELP(Usage notes:
+Lists live SAP GUI sessions. Copy sessions[].id into session attach --session-id.
+The indices here are SAP enumeration indices, not --connection values.
+Example: fairyfly session list
+)HELP");
         add_output_option(cmd_, output_format_);
         return cmd_;
     }

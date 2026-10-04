@@ -13,6 +13,16 @@ using namespace fairyfly::setup;
 using Catch::Matchers::ContainsSubstring;
 namespace sys = fairyfly::sys;
 
+#ifdef _WIN32
+TEST_CASE("PowerShell runner launches after restricting inherited handles", "[ps][live]") {
+    auto runner = sys::make_windows_powershell_runner();
+    const auto result = runner->run("Write-Output 'handle-list-ok'", "{}", 10000);
+    CHECK_FALSE(result.timed_out);
+    CHECK(result.exit_code == 0);
+    CHECK_THAT(result.out, ContainsSubstring("handle-list-ok"));
+}
+#endif
+
 TEST_CASE("setup validators: hostname", "[setup]") {
     for (const char* ok : {"mcp.example.com", "a", "srv-01.corp.local", "A1.b2"}) CHECK_FALSE(hostname_error(ok));
     for (const char* bad : {"", "-a.com", "a..com", "a.com.", "*.example.com", "exa mple.com", "a_b.com", "10.1.2.3",

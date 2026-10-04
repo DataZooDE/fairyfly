@@ -156,7 +156,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
         }
 
         const auto before_status = read_action_status(session, window_before);
-        const auto close_attempt = attempt_close(before_index,
+        auto close_attempt = attempt_close(before_index,
             [&] { window->send_vkey(vkey); },
             [&] { window->close(); });
         if (close_attempt.method == CloseMethod::Unsupported) {
@@ -175,14 +175,23 @@ Result ComAutomationEngine::close_popup(int vkey) {
 
         int after_index = before_index;
         std::string window_after = window_before;
-        for (int attempt = 0; attempt < 20; ++attempt) {
-            window_after = get_active_window_id().id;
-            after_index = WindowId(window_after).get_index();
-            if (classify_close_outcome(before_index, after_index) == CloseOutcome::Closed) break;
-            if (attempt < 19) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const auto poll_closed = [&] {
+            for (int attempt = 0; attempt < 20; ++attempt) {
+                window_after = get_active_window_id().id;
+                after_index = WindowId(window_after).get_index();
+                if (classify_close_outcome(before_index, after_index) == CloseOutcome::Closed) return true;
+                if (attempt < 19) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            return false;
+        };
+        bool closed = poll_closed();
+        if (!closed && close_attempt.method == CloseMethod::Vkey) {
+            close_attempt = fallback_close_when_still_open(before_index, after_index, close_attempt,
+                                                           [&] { window->close(); });
+            if (close_attempt.method == CloseMethod::WindowClose) closed = poll_closed();
         }
 
-        if (classify_close_outcome(before_index, after_index) != CloseOutcome::Closed) {
+        if (!closed) {
             auto result = error_result("POPUP_STILL_OPEN",
                 close_attempt.method == CloseMethod::WindowClose
                     ? std::string("The popup did not close after calling the window Close method")

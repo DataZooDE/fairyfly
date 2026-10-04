@@ -37,6 +37,7 @@ struct TokenMeta {
     std::optional<TimePoint> expires;
     std::vector<std::string> scopes;       ///< tool families or "*"
     std::vector<std::string> sap_systems;  ///< "SID/CLIENT" patterns (globs)
+    std::vector<std::string> sap_identities;///< exact "SID/CLIENT/USER" grants; empty = legacy/unbound
     std::vector<std::string> tcodes;       ///< T-code globs
     std::vector<std::string> connections;  ///< saved connection / SAP Logon entry name globs; empty = any
     int rate_per_minute = 0;               ///< 0 = server default
@@ -62,6 +63,7 @@ struct NewToken {
     std::string name;
     std::vector<std::string> scopes;
     std::vector<std::string> sap_systems;
+    std::vector<std::string> sap_identities;
     std::vector<std::string> tcodes;
     std::vector<std::string> connections;
     int rate_per_minute = 0;
@@ -77,6 +79,16 @@ struct NewToken {
 struct CreatedToken {
     TokenMeta meta;
     std::string token;
+};
+
+enum class TokenLookupStatus { Found, Absent, Unavailable };
+struct FreshTokenLookup {
+    TokenLookupStatus status = TokenLookupStatus::Unavailable;
+    std::optional<TokenMeta> meta;
+};
+struct FreshTokenSnapshot {
+    bool complete = false;
+    std::map<std::string, TokenMeta> by_id;
 };
 
 // ---- token format helpers (pure) -----------------------------------------------------------
@@ -115,6 +127,12 @@ public:
 
     /// O(1) lookup used on every request; served from a cache of at most `cache_ttl` age.
     std::optional<TokenMeta> find_by_id(const std::string& id);
+    /// Fresh full scan for lease cleanup. Absent means every enumerated record
+    /// was readable; one failed/malformed record makes absence uncertain.
+    FreshTokenLookup lookup_fresh(const std::string& id);
+    /// One uncached scan for periodic cleanup. `complete` is false if any
+    /// enumerated record could not be read or parsed; absence is then unknown.
+    FreshTokenSnapshot scan_fresh();
     /// Number of stored tokens (cached like find_by_id).
     std::size_t count();
     /// Drops the cache (used after every local mutation, callable by tests/tray).

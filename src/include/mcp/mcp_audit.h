@@ -14,10 +14,10 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
                               const std::function<cli::CommandHandler*()>& peek_handler,
                               bool read_only);
 
-/// True once any append made through a hook from make_mcp_audit_hook / append_serve_event failed
-/// (thread-safe, sticky until reset). In audit Required mode the dispatcher / run_mcp should
-/// query this after a call and refuse further calls with AUDIT_UNAVAILABLE. In other modes a
-/// failure only logs one spdlog warning (done by AuditSink) and never affects the call.
+/// True when the most recent append made through a hook or append_serve_event failed.
+/// Thread-safe; a successful denial append clears the failure and permits a later
+/// request in Required mode. An action that already ran still reports
+/// AUDIT_UNAVAILABLE when its own append fails. In other modes failures only log.
 bool mcp_audit_failed() noexcept;
 void mcp_audit_reset_failure() noexcept;
 

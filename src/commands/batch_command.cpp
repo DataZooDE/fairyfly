@@ -95,7 +95,10 @@ CLI::App* BatchCommand::setup_cli(CLI::App& app) {
     cmd_->footer("One command per line, without the program name: a JSON array ([\"transaction\",\"start\",\"SM37\"]) "
                  "or shell-style words (double quotes, backslash-escaped spaces). Blank lines and "
                  "lines starting with '#' are ignored. Each line prints one compact JSON result. "
-                 "Exit code is non-zero if any command failed.");
+                 "Exit code is non-zero if any command failed. Use --stop-on-error for dependent actions. "
+                 "This is sequential execution: it cannot substitute a result from an earlier line into later arguments.\n"
+                 "Example: fairyfly batch --file commands.jsonl --stop-on-error\n"
+                 "Example commands.jsonl line: [\"element\",\"get\",\"TREE\",\"--list-nodes\",\"--connection\",\"3\"]\n");
     return cmd_;
 }
 

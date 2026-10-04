@@ -12,6 +12,7 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
         if (!engine) return facts;
         auto session = engine->get_session();
         if (!session) return facts;
+        if (!engine->current_session_owner_window_allowed()) return facts;
         // The audit record of every call reads these: never wait long for a busy session (2 s), unknown facts are fine.
         facts = sap::read_facts_bounded(
             [&] { return session->is_busy(); },
@@ -26,6 +27,7 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
                 return read;
             },
             sap::FactsBudget{std::chrono::milliseconds(2000), std::chrono::milliseconds(100)});
+        if (!engine->current_session_owner_window_allowed()) return {};
     } catch (...) {
     }
     return facts;
@@ -40,9 +42,15 @@ audit::SapFacts CommandHandler::audit_facts_for_connection(std::optional<int> co
         audit::SapFacts facts = engine->peek_session_facts(resolved.value.session_id, resolved.value.server_session_key);
         if (!facts.any()) return facts;
         facts.connection_id = resolved.value.id;
-        if (!resolved.value.session_id.empty())
+        if (!resolved.value.session_id.empty()) {
             facts.session_identity = resolved.value.session_id + "|" + resolved.value.server_session_key + "|" +
                                      resolved.value.cache_generation;
+            if (resolved.value.server_session_key.empty() && facts.user.empty()) {
+                const auto handle = engine->peek_session_window_handle(resolved.value.session_id);
+                facts.session_identity = handle && !resolved.value.cache_generation.empty()
+                    ? facts.session_identity + "|hwnd:" + std::to_string(handle) : std::string();
+            }
+        }
         return facts;
     } catch (...) {
         return {};

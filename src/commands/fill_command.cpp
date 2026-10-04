@@ -15,6 +15,13 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","fill"});
+        cmd_->footer(R"HELP(Usage notes:
+Use a value or --clear. Read the result's value to see SAP normalization.
+For a GridView cell supply both --row and --column; --commit notifies SAP of the final edit.
+Examples:
+  fairyfly element fill "wnd[0]/usr/ctxtFIELD" "VALUE" --connection 3
+  fairyfly element fill "wnd[0]/usr/ctxtFIELD" --clear --connection 3
+)HELP");
         cmd_->add_option("element", element_, "Element ID")
             ->required();
         value_option_ = cmd_->add_option("value", value_, "Value to enter. Check box: true/false/1/0/yes/no/on/off/x (sets Selected); "

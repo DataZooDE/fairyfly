@@ -1,0 +1,298 @@
+{
+  "format": "OpenInference span records (JSON export)",
+  "format_reference": "https://github.com/Arize-ai/openinference/blob/main/spec/traces.md",
+  "trace_id": "78d04f10254c45f5a3839bc16222b2ad",
+  "trace_name": "Read SM59 RFC destinations with Fairyfly",
+  "environment": {
+    "workspace": "C:\\Users\\jr\\Desktop\\Projects\\fairyfly",
+    "date": "2026-10-03",
+    "timezone": "Europe/Berlin",
+    "sap_system": "A4H",
+    "sap_transaction": "SM59",
+    "fairyfly_executable": ".\\build\\bin\\Release\\fairyfly.exe",
+    "notes": [
+      "This is a manual JSON export using OpenInference span fields and semantic attributes; it is not an OTLP protobuf export.",
+      "Spans record observable agent tool calls and Fairyfly CLI calls. Internal model reasoning is not recorded.",
+      "Raw SAP screen output was large. For screen reads, outputs below preserve the observed transaction, title, tree element, categories, and node results instead of duplicating unrelated UI controls.",
+      "Connection descriptions and endpoint configuration were not opened; this trace records destination names only."
+    ]
+  },
+  "spans": [
+    {
+      "name": "Answer SM59 destination inventory request",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000000" },
+      "span_kind": "SPAN_KIND_INTERNAL",
+      "parent_id": null,
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "AGENT",
+        "input.value": "What SM59 connections does the system have?",
+        "input.mime_type": "text/plain",
+        "output.value": "Read the active A4H SM59 tree through Fairyfly and returned 57 destination names grouped by connection type.",
+        "output.mime_type": "text/plain"
+      },
+      "events": [
+        { "name": "assistant.commentary", "attributes": { "message": "I’ll check the connected SAP data sources and see whether I can read the system’s SM59 destinations." } },
+        { "name": "assistant.commentary", "attributes": { "message": "The open SAP session is already in SM59 on the A4H system. I can read the screen, but its tree is collapsed to connection categories; I’m checking the CLI’s tree-reading options so I can list the actual destinations." } },
+        { "name": "assistant.commentary", "attributes": { "message": "The SM59 read was read-only, though expanding the tree changed what was visible in the SAP GUI. I’m saving the calls and results as span records, with the final destination list captured in the last read." } }
+      ]
+    },
+    {
+      "name": "Check OpenInference trace field conventions",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "000000000000000d" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000000",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "web search",
+        "input.value": "OpenInference span attributes specification openinference.span.kind tool input value output value official",
+        "input.mime_type": "text/plain",
+        "output.value": "Consulted OpenInference traces and semantic conventions pages. Used span context, parent ID, span kind, status, attributes and events fields; tagged the manual export as not OTLP protobuf.",
+        "output.mime_type": "text/plain",
+        "source.url": "https://github.com/Arize-ai/openinference/blob/main/spec/traces.md"
+      },
+      "events": []
+    },
+    {
+      "name": "Discover available SAP tools",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000001" },
+      "span_kind": "SPAN_KIND_INTERNAL",
+      "parent_id": "0000000000000000",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "AGENT",
+        "input.value": "Inspect available tools for SAP, SM59, RFC destination, and RFC connection support.",
+        "input.mime_type": "text/plain",
+        "output.value": "No SAP or SM59 integration tool was available; local Fairyfly CLI was used.",
+        "output.mime_type": "text/plain",
+        "tool.name": "ALL_TOOLS filter via functions.exec"
+      },
+      "events": []
+    },
+    {
+      "name": "Search repository for SM59 workflow context",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000002" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "exec_command",
+        "input.value": "rg -n -i \"SM59|RFC destination|RFC connection\" .",
+        "input.mime_type": "text/plain",
+        "output.value": "Found repository documentation and integration examples for reading SM59, including CLI usage and notes that the live SAP session may already be in SM59.",
+        "output.mime_type": "text/plain"
+      },
+      "events": []
+    },
+    {
+      "name": "Inspect project CLI guidance and workspace state",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000003" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "exec_command",
+        "input.value": "Get-ChildItem -Force; rg -n \"session list|screen read|--connection|SM59\" README.md docs tests/integration/README.md",
+        "input.mime_type": "text/plain",
+        "output.value": "README documents `session list`; existing git changes were present in unrelated MCP/auth files and were left untouched.",
+        "output.mime_type": "text/plain"
+      },
+      "events": []
+    },
+    {
+      "name": "Read Fairyfly CLI help",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000004" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe --help; .\\build\\bin\\Release\\fairyfly.exe tree --help",
+        "input.mime_type": "text/plain",
+        "output.value": "Top-level help listed session, connection, screen, element, key, and transaction command groups. `tree --help` displayed the same top-level command help; there is no standalone tree command.",
+        "output.mime_type": "text/plain"
+      },
+      "events": []
+    },
+    {
+      "name": "List live SAP GUI sessions",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000005" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe session list --output json",
+        "input.mime_type": "text/plain",
+        "output.value": "One live connection: Bigfox, session /app/con[1]/ses[0], active window title `Configuration of RFC Connections A4H (1)`, alive=true, busy=false. The session list gives no usable server clock.",
+        "output.mime_type": "text/plain",
+        "sap.system": "A4H",
+        "sap.transaction": "SM59"
+      },
+      "events": []
+    },
+    {
+      "name": "Attempt screen read with connection file ID 0",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000006" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "ERROR",
+      "status_message": "CONNECTION_NOT_FOUND: connection file fairyfly.0.con not found",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe screen read --output json --connection 0",
+        "input.mime_type": "text/plain",
+        "output.value": "{\"error\":{\"code\":\"CONNECTION_NOT_FOUND\",\"message\":\"Connection file fairyfly.0.con not found\"},\"status\":\"error\"}",
+        "output.mime_type": "application/json"
+      },
+      "events": []
+    },
+    {
+      "name": "Read current SAP screen",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000007" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe screen read --output json",
+        "input.mime_type": "text/plain",
+        "output.value": "Screen read succeeded on connection_id=3. It reported transaction=SM59, title=`Configuration of RFC Connections A4H (1)`, and tree element `/app/con[1]/ses[0]/wnd[0]/usr/cntlSM59CNTL_AREA/shellcont/shell/shellcont[1]/shell[1]`. The tree initially exposed seven collapsed category nodes.",
+        "output.mime_type": "text/plain",
+        "sap.transaction": "SM59",
+        "sap.system": "A4H"
+      },
+      "events": []
+    },
+    {
+      "name": "Inspect element and screen command options",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000008" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": [
+          ".\\build\\bin\\Release\\fairyfly.exe element --help; .\\build\\bin\\Release\\fairyfly.exe screen --help",
+          ".\\build\\bin\\Release\\fairyfly.exe element click --help; .\\build\\bin\\Release\\fairyfly.exe key --help; .\\build\\bin\\Release\\fairyfly.exe screen find --help",
+          ".\\build\\bin\\Release\\fairyfly.exe element get --help"
+        ],
+        "input.mime_type": "application/json",
+        "output.value": "Help showed `element get --list-nodes` and `element click --tree-action expand --node-key` support for SAP GuiShell trees.",
+        "output.mime_type": "text/plain"
+      },
+      "events": []
+    },
+    {
+      "name": "List initially visible SM59 tree nodes",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "0000000000000009" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe element get --connection 3 --list-nodes /app/con[1]/ses[0]/wnd[0]/usr/cntlSM59CNTL_AREA/shellcont/shell/shellcont[1]/shell[1]",
+        "input.mime_type": "text/plain",
+        "output.value": [
+          "ABAP Connections",
+          "HTTP Connections to External Server",
+          "HTTP Connections to ABAP System",
+          "Internal Connections",
+          "TCP/IP Connections",
+          "WebSocket RFC",
+          "Connections Using ABAP Driver"
+        ],
+        "output.mime_type": "application/json"
+      },
+      "events": []
+    },
+    {
+      "name": "Expand ABAP Connections category",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "000000000000000a" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe element click --connection 3 --tree-action expand --node-key '          1' /app/con[1]/ses[0]/wnd[0]/usr/cntlSM59CNTL_AREA/shellcont/shell/shellcont[1]/shell[1]",
+        "input.mime_type": "text/plain",
+        "output.value": "Tree action `expand_node` succeeded for key `          1`.",
+        "output.mime_type": "text/plain"
+      },
+      "events": []
+    },
+    {
+      "name": "Read ABAP category destinations",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "000000000000000b" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI",
+        "input.value": ".\\build\\bin\\Release\\fairyfly.exe element get --connection 3 --list-nodes /app/con[1]/ses[0]/wnd[0]/usr/cntlSM59CNTL_AREA/shellcont/shell/shellcont[1]/shell[1]",
+        "input.mime_type": "text/plain",
+        "output.value": [
+          "ABAP Connections",
+          "A4H",
+          "A4HCLNT001",
+          "SAPOSS",
+          "TMSADM@A4H.DOMAIN_A4H",
+          "TMSSUP@A4H.DOMAIN_A4H"
+        ],
+        "output.mime_type": "application/json"
+      },
+      "events": []
+    },
+    {
+      "name": "Expand remaining SM59 categories and read destinations",
+      "context": { "trace_id": "78d04f10254c45f5a3839bc16222b2ad", "span_id": "000000000000000c" },
+      "span_kind": "SPAN_KIND_CLIENT",
+      "parent_id": "0000000000000001",
+      "status_code": "OK",
+      "status_message": "",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "Fairyfly CLI via PowerShell",
+        "input.value": "$exe = '.\\build\\bin\\Release\\fairyfly.exe'; $tree = '/app/con[1]/ses[0]/wnd[0]/usr/cntlSM59CNTL_AREA/shellcont/shell/shellcont[1]/shell[1]'; foreach ($n in 2..7) { $key = $n.ToString().PadLeft(11); & $exe element click --connection 3 --tree-action expand --node-key $key $tree | Out-Null }; & $exe element get --connection 3 --list-nodes $tree",
+        "input.mime_type": "text/plain",
+        "output.value": {
+          "ABAP Connections": ["A4H", "A4HCLNT001", "SAPOSS", "TMSADM@A4H.DOMAIN_A4H", "TMSSUP@A4H.DOMAIN_A4H"],
+          "HTTP Connections to External Server": ["CSI_AWS_EC2", "CSI_AWS_S3", "RCC_GRID_ENGINE"],
+          "HTTP Connections to ABAP System": ["SAP_SUPPORT_PORTAL"],
+          "Internal Connections": ["BACK", "NONE", "NONE_NU", "SELF", "vhcala4hci_A4H_00"],
+          "TCP/IP Connections": ["C_TP_00_vhcala4hci", "DOCUMENTATION_HELP", "ERPL_REV", "EU_SCRP_WN32", "GFW_ITS_RFC_DEST", "IGS_RFC_DEST", "LOCAL_EXEC", "LOCAL_EXEX", "LOCAL_PRINT", "MDX PARSER", "OPTSERVER_MIP01", "R3_WINDOWS_SERVER", "SAPFORMS", "SAPGUI", "SAPHTTPA", "SAPIRCONTROLLER", "SAPIRPCFILETRANSFER", "SAPJ2EE", "SAPKPROTP", "SAP_KW_HTMLEDITOR", "SAP_SCHEDULE_16", "SAP_SCHEDULE_32", "SAP_SSFATGUI", "SERVER_EXEC", "SLD_NUC", "SLD_UC", "VFOLDER", "ZERPL_ABI_TEST", "ZERPL_CAL2", "ZERPL_CALL", "ZERPL_DECF", "ZERPL_EXC", "ZERPL_PING", "ZERPL_POOL", "ZERPL_TBL", "ZERPL_TYPE", "ZSAPRFC_PY", "ZSAPRFC_RUBY_SPEC", "ZSAPRFC_TEST"],
+          "WebSocket RFC": ["WSSELF"],
+          "Connections Using ABAP Driver": ["RECORDER", "RECORDER_NU", "SAPGUI_QUEUE"]
+        },
+        "output.mime_type": "application/json",
+        "sap.destination_count": 57,
+        "sap.transaction": "SM59",
+        "sap.system": "A4H"
+      },
+      "events": []
+    }
+  ]
+}

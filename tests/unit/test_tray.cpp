@@ -193,6 +193,15 @@ TEST_CASE("tray menu: write mode, stopped and error states", "[tray][menu]") {
     CHECK(icon_for(make_status(true, true), failed) == IconState::Error);   // error wins
 }
 
+TEST_CASE("tray status identifies owner-routed parallel session mode", "[tray][menu]") {
+    auto status = make_status(true, true);
+    status.parallel_sessions = true;
+    const auto menu = build_menu(status, {});
+    CHECK(menu.items[0].label.find("parallel SAP windows") != std::string::npos);
+    CHECK(menu.tooltip.find("parallel sessions") != std::string::npos);
+    CHECK(status_balloon_text(status).find("same-window calls ordered") != std::string::npos);
+}
+
 TEST_CASE("tray menu: hard read-only cap locks the toggle", "[tray][menu]") {
     TrayState locked;
     locked.hard_read_only = true;

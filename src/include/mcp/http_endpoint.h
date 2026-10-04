@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "include/mcp/call_executor.h"
+#include "include/mcp/session_executor_pool.h"
 #include "include/mcp/principal.h"
 #include "include/mcp/types.h"
 
@@ -33,6 +34,7 @@ struct HttpRequest {
     std::string body;
     std::string peer_addr;  ///< socket peer ("127.0.0.1")
     bool tls = false;       ///< the request arrived over TLS (http.sys HTTPS binding)
+    std::function<bool()> connected; ///< optional transport disconnect check while a JSON tool call is pending
 
     std::string header(const std::string& name) const {
         auto it = headers.find(name);
@@ -77,8 +79,9 @@ struct HttpEndpointOptions {
     bool sse = true;
     int keepalive_ms = 15000;                ///< ": keep-alive" comment interval on SSE streams
     int poll_ms = 100;                       ///< SSE / wait poll slice
-    /// Server-level client allow-list (addresses or CIDR blocks); loopback is always allowed; empty = allow all.
+    /// Server-level client allow-list (addresses or CIDR blocks); empty = allow all.
     std::vector<std::string> allow_ip;
+    bool allow_ip_include_loopback = false; ///< Apply nonempty allow-list to loopback peers too.
     ServerOptions server;                    ///< name/version/instructions
 };
 
@@ -87,6 +90,22 @@ public:
     /// `authenticator` is not owned and must outlive the endpoint (null = deny everything).
     HttpEndpoint(HttpEndpointOptions options, CallExecutor& executor, ToolProvider& provider,
                  IAuthenticator* authenticator);
+
+    struct SessionRoute {
+        bool handled = false;             ///< false: use the existing control executor
+        std::string identity;             ///< immutable live SAP session identity
+        std::shared_ptr<ToolProvider> provider; ///< owned for the full routed call
+        std::string lane_key;             ///< stable GUI window FIFO key across identity changes
+        std::string error_code;           ///< handled refusal before lane allocation
+        std::string error_message;
+        bool global_control = false;      ///< router explicitly approved tray control execution
+    };
+    using SessionRouter = std::function<SessionRoute(const Principal&, const std::string& tool,
+                                                      const json& arguments)>;
+    /// The router must validate owner, token target and live generation before
+    /// returning a lane. The endpoint reauthenticates again at lane dequeue.
+    void set_session_router(SessionExecutorPool* pool, SessionRouter router,
+                            SessionRouter recheck_router = {});
 
     /// Cheap header-only checks (path, method, Host, Origin, Content-Type, Content-Length). Returns a
     /// response when the request must be rejected. Used by the adapter's pre-routing handler and
@@ -124,6 +143,9 @@ private:
     CallExecutor& executor_;
     ToolProvider& provider_;
     IAuthenticator* authenticator_;
+    SessionExecutorPool* session_pool_ = nullptr;
+    SessionRouter session_router_;
+    SessionRouter session_recheck_router_;
     std::atomic<long long> calls_total_{0};
     mutable std::atomic<long long> calls_denied_{0};
 };

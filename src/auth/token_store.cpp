@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <set>
+#include <regex>
 
 #include "include/auth/ip.h"
 #include "include/command_table.h"
@@ -75,7 +76,15 @@ bool valid_pattern(const std::string& s, const char* extra) {
     return std::all_of(s.begin(), s.end(), [&](unsigned char c) { return std::isalnum(c) || std::strchr(extra, c) != nullptr; });
 }
 
+bool valid_sap_identity(const std::string& value) {
+    static const std::regex identity_pattern(R"(^[A-Z0-9_-]+/[0-9]{3}/[A-Z0-9_.-]+$)");
+    return value.size() <= 64 && std::regex_match(value, identity_pattern);
+}
+
 void validate(const NewToken& request) {
+    for (const auto& identity : request.sap_identities)
+        if (!valid_sap_identity(identity))
+            throw AuthError("INVALID_ARGUMENT", "SAP identity must be an exact uppercase SID/CLIENT/USER");
     if (!valid_token_name(request.name))
         throw AuthError("INVALID_ARGUMENT", "token name must be 1-64 characters of letters, digits, '.', '_' or '-'");
     if (request.scopes.empty()) throw AuthError("INVALID_ARGUMENT", "a token needs at least one scope");
@@ -125,6 +134,7 @@ json TokenMeta::to_public_json() const {
               {"created", format_iso_utc(created)},
               {"scopes", scopes},
               {"sap_systems", sap_systems},
+              {"sap_identities", sap_identities},
               {"tcodes", tcodes},
               {"connections", connections},
               {"rate_per_minute", rate_per_minute},
@@ -152,6 +162,7 @@ json TokenMeta::to_compact_json() const {
     if (expires) j["e"] = std::chrono::floor<std::chrono::seconds>(*expires).time_since_epoch().count();
     if (!scopes.empty()) j["s"] = scopes;
     if (!sap_systems.empty()) j["y"] = sap_systems;
+    if (!sap_identities.empty()) j["u"] = sap_identities;
     if (!tcodes.empty()) j["t"] = tcodes;
     if (!connections.empty()) j["k"] = connections;
     if (rate_per_minute != 0) j["r"] = rate_per_minute;
@@ -180,6 +191,7 @@ json expand_compact(const json& c) {
     }
     j["scopes"] = c.contains("s") ? c["s"] : json::array();
     j["sap_systems"] = c.contains("y") ? c["y"] : json::array();
+    j["sap_identities"] = c.contains("u") ? c["u"] : json::array();
     j["tcodes"] = c.contains("t") ? c["t"] : json::array();
     j["connections"] = c.contains("k") ? c["k"] : json::array();
     j["allowed_ips"] = c.contains("p") ? c["p"] : json::array();
@@ -198,9 +210,9 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     const bool compact = input.contains("v") && input["v"].is_number_integer() && input["v"].get<int>() == 2;
     // A record mixing both key styles is ambiguous: the parser would silently ignore one style and could turn a
     // restriction into "unrestricted". Such a record is unusable. Legacy records without compact keys load as before.
-    static const char* const kLongKeys[] = {"scopes", "sap_systems", "tcodes", "connections", "allowed_ips"};
-    static const char* const kCompactKeys[] = {"s", "y", "t", "k", "p"};
-    for (std::size_t i = 0; i < 5; ++i)
+    static const char* const kLongKeys[] = {"scopes", "sap_systems", "tcodes", "connections", "allowed_ips", "sap_identities"};
+    static const char* const kCompactKeys[] = {"s", "y", "t", "k", "p", "u"};
+    for (std::size_t i = 0; i < 6; ++i)
         if (input.contains(compact ? kLongKeys[i] : kCompactKeys[i])) return std::nullopt;
     const json j = compact ? expand_compact(input) : input;
     TokenMeta m;
@@ -220,12 +232,16 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
     }
     const auto scopes = string_array(j, "scopes");
     const auto sap_systems = string_array(j, "sap_systems");
+    const auto sap_identities = string_array(j, "sap_identities");
     const auto tcodes = string_array(j, "tcodes");
     const auto connections = string_array(j, "connections");
     const auto allowed_ips = string_array(j, "allowed_ips");
-    if (!scopes || !sap_systems || !tcodes || !connections || !allowed_ips) return std::nullopt;  // unusable, never unrestricted
+    if (!scopes || !sap_systems || !sap_identities || !tcodes || !connections || !allowed_ips) return std::nullopt;
+    for (const auto& identity : *sap_identities)
+        if (!valid_sap_identity(identity)) return std::nullopt;
     m.scopes = *scopes;
     m.sap_systems = *sap_systems;
+    m.sap_identities = *sap_identities;
     m.tcodes = *tcodes;
     m.connections = *connections;
     m.allowed_ips = *allowed_ips;
@@ -432,6 +448,37 @@ std::optional<TokenMeta> TokenStore::find_by_id(const std::string& id) {
     return it->second;
 }
 
+FreshTokenLookup TokenStore::lookup_fresh(const std::string& id) {
+    const auto scan = scan_fresh();
+    const auto it = scan.by_id.find(id);
+    if (it != scan.by_id.end()) return {TokenLookupStatus::Found, it->second};
+    return {scan.complete ? TokenLookupStatus::Absent : TokenLookupStatus::Unavailable, std::nullopt};
+}
+
+FreshTokenSnapshot TokenStore::scan_fresh() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    FreshTokenSnapshot scan;
+    try {
+        scan.complete = true;
+        for (const auto& name : backend_->list_names()) {
+            if (is_chunk_name(name)) continue;
+            try {
+                bool incomplete = false;
+                const auto value = read_record(name, &incomplete);
+                if (!value || incomplete) { scan.complete = false; continue; }
+                const auto meta = TokenMeta::from_json(json::parse(*value));
+                if (!meta) { scan.complete = false; continue; }
+                scan.by_id[meta->id] = *meta;
+            } catch (...) {
+                scan.complete = false;
+            }
+        }
+    } catch (...) {
+        scan.complete = false;
+    }
+    return scan;
+}
+
 std::size_t TokenStore::count() {
     std::lock_guard<std::mutex> lock(mutex_);
     return snapshot().by_id.size();
@@ -470,6 +517,7 @@ CreatedToken TokenStore::create(const NewToken& request) {
     meta.expires = request.expires;
     for (const auto& scope : request.scopes) meta.scopes.push_back(normalize_scope(scope));
     meta.sap_systems = request.sap_systems;
+    meta.sap_identities = request.sap_identities;
     meta.tcodes = request.tcodes;
     meta.connections = request.connections;
     meta.rate_per_minute = request.rate_per_minute;

@@ -75,6 +75,16 @@ TEST_CASE("config: apply_config only touches keys that are present", "[config]")
     CHECK_FALSE(options.default_connection.has_value());
 }
 
+TEST_CASE("config: owner SAP identities are local, exact endpoint policy", "[config][owner-identity]") {
+    const auto parsed = parse_yaml("owner:\n  sap_identities: [A4H/001/OWNER, QAS/100/BOT]\n");
+    REQUIRE(parsed.ok());
+    mcp::ServeOptions options;
+    apply_config(parsed.config, options);
+    CHECK(options.owner_sap_identities == std::vector<std::string>{"A4H/001/OWNER", "QAS/100/BOT"});
+    CHECK_FALSE(parse_yaml("owner:\n  sap_identities: [A4H/*/OWNER]\n").ok());
+    CHECK_FALSE(parse_yaml("owner:\n  sap_identities: [A4H/001]\n").ok());
+}
+
 TEST_CASE("config: validation errors carry line numbers", "[config]") {
     struct Case { const char* yaml; const char* code; int line; };
     const Case cases[] = {
@@ -242,33 +252,39 @@ TEST_CASE("config: tls and allow_ip keys apply with precedence flag > env > yaml
     mcp::ServeOptions defaults;
     CHECK_FALSE(defaults.tls);
     CHECK(defaults.allow_ip.empty());
+    CHECK_FALSE(defaults.allow_ip_include_loopback);
     const auto eff = resolve(McpConfig{}, McpConfig{}, fake_env({}));
     CHECK_FALSE(std::get<bool>(eff.at("server.tls").value));
     CHECK(std::get<std::vector<std::string>>(eff.at("server.allow_ip").value).empty());
     CHECK(config::find_key("server.tls")->env == "FAIRYFLY_MCP_SERVER_TLS");
     CHECK(config::find_key("server.allow_ip")->env == "FAIRYFLY_MCP_SERVER_ALLOW_IP");
 
-    const auto parsed = parse_yaml("server:\n  host: \"+\"\n  tls: true\n  allow_ip: [192.168.0.0/16, fd00::/8]\n");
+    const auto parsed = parse_yaml("server:\n  host: \"+\"\n  tls: true\n  allow_ip: [192.168.0.0/16, fd00::/8]\n  allow_ip_include_loopback: true\n");
     REQUIRE(parsed.ok());
     mcp::ServeOptions y;
     apply_config(merged_layers(parsed.config, McpConfig{}, fake_env({})), y);
     CHECK(y.host == "+");
     CHECK(y.tls);
     CHECK(y.allow_ip == std::vector<std::string>{"192.168.0.0/16", "fd00::/8"});
+    CHECK(y.allow_ip_include_loopback);
 
     mcp::ServeOptions e;
     apply_config(merged_layers(parsed.config, McpConfig{},
-                               fake_env({{"FAIRYFLY_MCP_SERVER_TLS", "false"}, {"FAIRYFLY_MCP_SERVER_ALLOW_IP", "10.0.0.0/8"}})), e);
+                               fake_env({{"FAIRYFLY_MCP_SERVER_TLS", "false"}, {"FAIRYFLY_MCP_SERVER_ALLOW_IP", "10.0.0.0/8"},
+                                         {"FAIRYFLY_MCP_SERVER_ALLOW_IP_INCLUDE_LOOPBACK", "false"}})), e);
     CHECK_FALSE(e.tls);
     CHECK(e.allow_ip == std::vector<std::string>{"10.0.0.0/8"});
+    CHECK_FALSE(e.allow_ip_include_loopback);
 
     McpConfig flags;
     flags.set("server.tls", true);
     flags.set("server.allow_ip", std::vector<std::string>{"172.16.0.0/12"});
+    flags.set("server.allow_ip_include_loopback", true);
     mcp::ServeOptions f;
     apply_config(merged_layers(parsed.config, flags, fake_env({{"FAIRYFLY_MCP_SERVER_TLS", "false"}})), f);
     CHECK(f.tls);
     CHECK(f.allow_ip == std::vector<std::string>{"172.16.0.0/12"});
+    CHECK(f.allow_ip_include_loopback);
 
     // an invalid entry from the environment is ignored (defaults stay), from the flag layer the value validator refuses it
     std::vector<ConfigIssue> issues;
@@ -313,6 +329,21 @@ TEST_CASE("config: invalid environment values are ignored with a warning", "[con
     CHECK(std::get<bool>(effective.at("mode.read_only").value));
     CHECK(std::get<std::vector<std::string>>(effective.at("tools.families").value) ==
           std::vector<std::string>{"session", "screen"});
+}
+
+TEST_CASE("config: invalid owner environment value is a fatal issue", "[config][owner]") {
+    std::vector<ConfigIssue> issues;
+    const auto layer = env_layer(fake_env({{"FAIRYFLY_MCP_OWNER_SAP_IDENTITIES", "a4h/001/owner"}}), &issues);
+    CHECK_FALSE(layer.has("owner.sap_identities"));
+    REQUIRE(issues.size() == 1);
+    CHECK(issues[0].severity == Severity::Error);
+    CHECK(issues[0].code == "CONFIG_OWNER_ENV_INVALID");
+
+    issues.clear();
+    const auto separators = env_layer(fake_env({{"FAIRYFLY_MCP_OWNER_SAP_IDENTITIES", " , "}}), &issues);
+    CHECK_FALSE(separators.has("owner.sap_identities"));
+    REQUIRE(issues.size() == 1);
+    CHECK(issues[0].code == "CONFIG_OWNER_ENV_INVALID");
 }
 
 TEST_CASE("config: path resolution flag > env > default", "[config][precedence]") {

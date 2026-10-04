@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-156 -116 312 217" width="312" height="217">
+  <!-- fairyfly mark without tile and wordmark (light-variant colours). Geometry shared with assets/generate_icons.py. -->
+  <polygon points="-6,-60 -150,-110 -115,25" fill="#20A884" />
+  <polygon points="-6,-60 -115,25 -55,80" fill="#17745B" />
+  <polygon points="-6,5 -55,80 -20,95" fill="#1E2E3D" />
+  <polygon points="6,-60 150,-110 115,25" fill="#26BA93" />
+  <polygon points="6,-60 115,25 55,80" fill="#1C8B6D" />
+  <polygon points="6,5 55,80 20,95" fill="#293E52" />
+  <polygon points="0,-85 -7,-15 0,75 7,-15" fill="#0F172A" />
+  <circle cx="0" cy="-98" r="6" fill="#0F172A" />
+</svg>

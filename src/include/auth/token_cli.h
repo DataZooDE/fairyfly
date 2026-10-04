@@ -14,6 +14,7 @@ struct TokenCliArgs {
     std::string name;
     std::vector<std::string> scopes;      ///< --scope (already split on commas by the CLI layer; split again here to be safe)
     std::vector<std::string> systems;     ///< --system
+    std::vector<std::string> sap_identities; ///< --sap-identity
     std::vector<std::string> tcodes;      ///< --tcode
     std::vector<std::string> connections; ///< --connections
     std::vector<std::string> ips;         ///< --ip

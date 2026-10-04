@@ -86,7 +86,7 @@
 
 ## 0.2.0
 
-Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/MIGRATION_CLI.md](docs/MIGRATION_CLI.md) for the full old-to-new tables.
+Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/CLI.md](docs/CLI.md#migrating-from-the-flat-commands) for the full old-to-new tables.
 
 ### Changed (breaking)
 

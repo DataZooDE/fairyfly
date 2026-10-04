@@ -15,6 +15,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"key","send"});
+        cmd_->footer(R"HELP(Usage notes:
+Sends a SAP virtual key to the active window by default. Enter/F8 can execute reports.
+Read the resulting screen before continuing.
+Example: fairyfly key send f3 --connection 3
+)HELP");
         cmd_->add_option("key", key_, "Key name (enter, f3, f8, shift+f4, ...) or raw SAP VKey number")
             ->required();
         cmd_->add_option("--window", window_, "Target window: @active (default) or wnd[N]")

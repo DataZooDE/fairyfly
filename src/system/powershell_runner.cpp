@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -45,24 +46,56 @@ public:
 
         SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
         HANDLE out_r = nullptr, out_w = nullptr, err_r = nullptr, err_w = nullptr;
-        if (!CreatePipe(&out_r, &out_w, &sa, 0) || !CreatePipe(&err_r, &err_w, &sa, 0)) {
+        if (!CreatePipe(&out_r, &out_w, &sa, 0)) {
             throw PowerShellError{"PS_SCRIPT_FAILED", "could not create pipes for PowerShell"};
         }
-        SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
-        SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0);
+        if (!CreatePipe(&err_r, &err_w, &sa, 0)) {
+            CloseHandle(out_r); CloseHandle(out_w);
+            throw PowerShellError{"PS_SCRIPT_FAILED", "could not create pipes for PowerShell"};
+        }
+        if (!SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0) ||
+            !SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0)) {
+            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w);
+            throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell pipe handles"};
+        }
         HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
 
-        STARTUPINFOW si{};
-        si.cb = sizeof si;
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdInput = nul;
-        si.hStdOutput = out_w;
-        si.hStdError = err_w;
+        if (nul == INVALID_HANDLE_VALUE) {
+            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w);
+            throw PowerShellError{"PS_SCRIPT_FAILED", "could not open PowerShell input sink"};
+        }
+        SIZE_T attribute_bytes = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_bytes);
+        std::vector<unsigned char> attribute_storage(attribute_bytes);
+        auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
+        if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes)) {
+            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w); CloseHandle(nul);
+            throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell handles"};
+        }
+        struct AttributeGuard {
+            LPPROC_THREAD_ATTRIBUTE_LIST value;
+            ~AttributeGuard() { DeleteProcThreadAttributeList(value); }
+        } attribute_guard{attributes};
+        std::array<HANDLE, 3> inherited{nul, out_w, err_w};
+        if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                       inherited.data(), sizeof inherited, nullptr, nullptr)) {
+            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w); CloseHandle(nul);
+            throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell handles"};
+        }
+        STARTUPINFOEXW si{};
+        si.StartupInfo.cb = sizeof si;
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdInput = nul;
+        si.StartupInfo.hStdOutput = out_w;
+        si.StartupInfo.hStdError = err_w;
+        si.lpAttributeList = attributes;
         PROCESS_INFORMATION pi{};
 
         const std::wstring env_name = widen(kParamsEnvVar);
         SetEnvironmentVariableW(env_name.c_str(), widen(params_json).c_str());
-        const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
+                                            CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+                                            nullptr, nullptr, &si.StartupInfo, &pi);
         SetEnvironmentVariableW(env_name.c_str(), nullptr);
         CloseHandle(out_w);
         CloseHandle(err_w);

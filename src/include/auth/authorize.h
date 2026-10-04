@@ -13,6 +13,12 @@ namespace fairyfly::auth {
 /// Case-insensitive glob ('*' any run, '?' one character).
 bool glob_match(const std::string& pattern, const std::string& text);
 
+/// A token's SAP system patterns accept SID/CLIENT, or SID for any client.
+bool system_allowed(const std::vector<std::string>& patterns, const std::string& current);
+
+/// Cheap scope check for refusing calls before any SAP GUI lookup.
+bool scope_allows(const mcp::Principal& principal, const std::string& family, const std::string& tool);
+
 /// "/nSE16 ", "/o se16", "/*VA01" -> "SE16"/"VA01": trims, upper-cases, strips the /n /o /* prefix and any
 /// parameters after the first blank. Other slash commands keep their slash ("/H", "/I") so they never
 /// match a plain allowlist entry.
@@ -102,6 +108,7 @@ struct SessionTarget {
     std::string system;           ///< "SID/CLIENT" (or just "SID" when the client is not known yet)
     std::string connection_name;  ///< live connection description / saved connection / SAP Logon entry name
     bool ambiguous = false;       ///< launch: open sessions of the entry name run on different systems
+    std::string user;             ///< live SAP user; empty when not known
 };
 
 /// True when `tool` must be checked against the target (see authorize_session_target) for this principal, so the
