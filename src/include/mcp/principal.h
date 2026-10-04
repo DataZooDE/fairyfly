@@ -18,6 +18,7 @@ struct Principal {
     std::set<std::string> scopes;        ///< tool families (session, screen, ...); empty + all_scopes=false => none
     bool all_scopes = true;              ///< "*": every family
     std::vector<std::string> sap_systems;///< allowed "SID/CLIENT" pairs ("A4H/001"); empty = any
+    std::vector<std::string> sap_identities;///< exact "SID/CLIENT/USER" grants; empty = legacy/unbound
     std::vector<std::string> tcodes;     ///< allowed T-codes (glob, case-insensitive); empty = any
     std::vector<std::string> connections;///< allowed saved connection / SAP Logon entry names (glob, case-insensitive); empty = any
     int rate_per_minute = 0;             ///< 0 = server default
@@ -61,6 +62,8 @@ class IAuthenticator {
 public:
     virtual ~IAuthenticator() = default;
     virtual AuthOutcome authenticate(const AuthRequest& request) = 0;
+    /// Force the next authentication to read current token metadata before a queued job executes.
+    virtual void invalidate_cache() {}
     /// Human-readable startup warnings (no tokens configured, insecure mode, ...). For the posture banner/tray.
     virtual std::vector<std::string> posture_warnings() const { return {}; }
 };
@@ -70,6 +73,7 @@ struct ServerStatus {
     bool running = false;
     std::string endpoint;               ///< "http://127.0.0.1:8383/mcp" or "stdio"
     bool read_only = true;
+    bool parallel_sessions = false;     ///< owner-routed HTTP calls use one ordered lane per SAP window
     std::vector<std::string> warnings;
     long long calls_total = 0;
     long long calls_denied = 0;

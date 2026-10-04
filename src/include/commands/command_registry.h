@@ -8,12 +8,12 @@
 namespace fairyfly {
 namespace commands {
 
-/// Singleton registry for all CLI commands
+/// Per-thread registry for all CLI commands. Each worker builds and parses its own CLI tree.
 /// Commands register via explicit register_all_commands() call
 class CommandRegistry {
 public:
     static CommandRegistry& instance() {
-        static CommandRegistry registry;
+        static thread_local CommandRegistry registry;
         return registry;
     }
 

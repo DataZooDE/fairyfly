@@ -33,6 +33,9 @@ PolicyDecision refuse(const char* code, std::string message) {
 }
 
 bool has_scope(const mcp::Principal& p, const std::string& family, const std::string& tool) {
+    // A generic session scope is commonly granted for discovery. Lease acquisition can
+    // block another client, so it requires the explicit coordination scope (or *).
+    if (tool == "gui_session_lease") return p.all_scopes || p.scopes.count("session.lease") > 0;
     return scopes_allow(p.scopes, p.all_scopes, family, tool);
 }
 
@@ -43,16 +46,6 @@ bool system_exempt(const std::string& family, const std::string& tool) {
 
 bool matches_any(const std::vector<std::string>& patterns, const std::string& text) {
     return std::any_of(patterns.begin(), patterns.end(), [&](const std::string& p) { return glob_match(p, text); });
-}
-
-bool system_allowed(const std::vector<std::string>& patterns, const std::string& current) {
-    const auto slash = current.find('/');
-    const std::string sid = slash == std::string::npos ? current : current.substr(0, slash);
-    for (const auto& pattern : patterns) {
-        if (glob_match(pattern, current)) return true;
-        if (pattern.find('/') == std::string::npos && glob_match(pattern, sid)) return true;  // "A4H" = any client
-    }
-    return false;
 }
 
 bool present(const json& args, const char* key) {
@@ -246,6 +239,20 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
 
 } // namespace
 
+bool scope_allows(const mcp::Principal& principal, const std::string& family, const std::string& tool) {
+    return has_scope(principal, family, tool);
+}
+
+bool system_allowed(const std::vector<std::string>& patterns, const std::string& current) {
+    const auto slash = current.find('/');
+    const std::string sid = slash == std::string::npos ? current : current.substr(0, slash);
+    for (const auto& pattern : patterns) {
+        if (glob_match(pattern, current)) return true;
+        if (pattern.find('/') == std::string::npos && glob_match(pattern, sid)) return true;  // "A4H" = any client
+    }
+    return false;
+}
+
 bool glob_match(const std::string& pattern, const std::string& text) {
     std::size_t p = 0, t = 0, star = std::string::npos, mark = 0;
     while (t < text.size()) {
@@ -319,7 +326,8 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
 namespace {
 
 bool session_system_tool(const std::string& tool, const mcp::json& args) {
-    if (tool == "gui_session_launch" || tool == "gui_session_login" || tool == "gui_session_attach") return true;
+    if (tool == "gui_session_launch" || tool == "gui_session_login" || tool == "gui_session_attach" ||
+        tool == "gui_session_lease") return true;
     return tool == "gui_session_disconnect" && args.is_object() && args.contains("close_session") &&
            args["close_session"].is_boolean() && args["close_session"].get<bool>();
 }
@@ -332,12 +340,25 @@ bool targetless_tool(const std::string& tool) {
 } // namespace
 
 bool needs_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args) {
+    if (!principal.sap_identities.empty() && !targetless_tool(tool)) return true;
     if (!principal.sap_systems.empty() && session_system_tool(tool, args)) return true;
     return !principal.connections.empty() && !targetless_tool(tool);
 }
 
 mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, const std::string& tool, const mcp::json& args,
                                              const SessionTarget& target) {
+    if (!principal.sap_identities.empty() && !targetless_tool(tool)) {
+        // Launch/login may be on an unauthenticated SAP logon screen. Their live post-login
+        // guards check the resulting identity before returning a usable saved connection.
+        const bool prelogin = (tool == "gui_session_launch" || tool == "gui_session_login") && target.user.empty();
+        if (!prelogin) {
+            const std::string identity = target.system + "/" + target.user;
+            if (target.system.empty() || target.user.empty() ||
+                std::find(principal.sap_identities.begin(), principal.sap_identities.end(), identity) ==
+                    principal.sap_identities.end())
+                return refuse("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+        }
+    }
     if (!principal.sap_systems.empty() && tool == "gui_session_launch") {
         // The system of a SAP Logon entry is unknown before it is opened. Facts of other sessions are not proof, so the
         // operator has to vouch for the entry name with --connections (fail closed otherwise).

@@ -38,7 +38,8 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     // Status line.
     std::string line;
     if (!state.last_error.empty()) line = "Error: " + state.last_error;
-    else if (status.running) line = "Running: " + endpoint_text(status) + " (" + mode_text(status) + ")";
+    else if (status.running) line = "Running: " + endpoint_text(status) + " (" + mode_text(status) +
+        (status.parallel_sessions ? ", parallel SAP windows" : "") + ")";
     else line = "Stopped: " + endpoint_text(status) + " (" + mode_text(status) + ")";
     model.items.push_back(item(line, TrayAction::None, false));
 
@@ -82,7 +83,8 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     std::string tip = "fairyfly MCP: ";
     if (!state.last_error.empty()) tip += "error";
     else if (!status.running) tip += "stopped";
-    else tip += "running (" + mode_text(status) + ")";
+    else tip += "running (" + mode_text(status) +
+        (status.parallel_sessions ? ", parallel sessions" : "") + ")";
     if (status.running && !status.warnings.empty()) tip += ", " + std::to_string(status.warnings.size()) + " warning(s)";
     if (tip.size() > 127) tip.resize(127);
     model.tooltip = std::move(tip);
@@ -93,6 +95,8 @@ std::string status_balloon_text(const mcp::ServerStatus& status) {
     std::string text = status.running ? "Running: " : "Stopped: ";
     text += endpoint_text(status) + " (" + mode_text(status) + ")";
     text += "\nCalls: " + std::to_string(status.calls_total) + ", denied: " + std::to_string(status.calls_denied);
+    if (status.running && status.parallel_sessions)
+        text += "\nOwner-restricted sessions: same-window calls ordered; different windows concurrent";
     for (const auto& w : status.warnings) text += "\n! " + w;
     return text;
 }

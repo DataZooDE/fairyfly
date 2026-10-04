@@ -31,6 +31,7 @@ const std::vector<FlagMap>& flag_map() {
         {"server.transport", {"--transport"}},
         {"server.tls", {"--tls"}},
         {"server.allow_ip", {"--allow-ip"}},
+        {"server.allow_ip_include_loopback", {"--allow-ip-include-loopback"}},
         {"server.sse", {"--sse"}},
         {"server.allowed_hosts", {"--allowed-hosts"}},
         {"server.cors_origins", {"--cors-origin"}},
@@ -253,16 +254,33 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     config->fallthrough();
     config->require_subcommand(1);
     x.config_show = config->add_subcommand("show", "Effective settings with the source of each (flag/env/yaml/default)");
+    x.config_show->footer(R"HELP(Usage notes:
+Example: fairyfly mcp config show
+)HELP");
     x.config_path_cmd = config->add_subcommand("path", "Print the config file path");
+    x.config_path_cmd->footer(R"HELP(Usage notes:
+Example: fairyfly mcp config path
+)HELP");
     x.config_init = config->add_subcommand("init", "Write a commented template (never overwrites without --force)");
+    x.config_init->footer(R"HELP(Usage notes:
+Creates a local config template; inspect it before starting the server.
+Example: fairyfly mcp config init
+)HELP");
     x.config_init->add_flag("--force", x.init_force, "Overwrite an existing file");
     x.config_validate = config->add_subcommand("validate", "Validate the config file (line-numbered errors)");
+    x.config_validate->footer(R"HELP(Usage notes:
+Example: fairyfly mcp config validate
+)HELP");
     for (CLI::App* leaf : {x.config_show, x.config_path_cmd, x.config_init, x.config_validate}) {
         leaf->fallthrough();
         output_option(leaf, x.output);
     }
 
     x.client_config = mcp.add_subcommand("client-config", "Print ready-to-paste client configurations (placeholder token only)");
+    x.client_config->footer(R"HELP(Usage notes:
+Produces configuration instructions; does not connect a client automatically.
+Example: fairyfly mcp client-config --stdio --claude-code
+)HELP");
     x.client_config->fallthrough();
     x.client_config->add_flag("--claude-code", x.client.claude_code, "Claude Code (claude mcp add and .mcp.json)");
     x.client_config->add_flag("--claude-desktop", x.client.claude_desktop, "Claude Desktop via mcp-remote");
@@ -275,6 +293,10 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     output_option(x.client_config, x.output);
 
     x.doctor = mcp.add_subcommand("doctor", "Check the MCP server environment (config, port, SAP GUI, desktop, tokens, http.sys setup: urlacl, sslcert, certificate, TLS, autostart, tray)");
+    x.doctor->footer(R"HELP(Usage notes:
+Use to diagnose server setup and connectivity prerequisites.
+Example: fairyfly mcp doctor
+)HELP");
     x.doctor->fallthrough();
     output_option(x.doctor, x.output);
     setup_mcp_setup_commands(mcp, x);
@@ -303,6 +325,13 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
     }
     if (!loaded.parsed.ok()) return report_error("text", loaded.parsed.first_error_code(), label + " is invalid; run 'fairyfly mcp config validate'", 2);
 
+    std::vector<ConfigIssue> env_issues;
+    env_layer(env, &env_issues);
+    for (const auto& issue : env_issues) {
+        if (issue.severity == Severity::Error)
+            return report_error("text", issue.code, issue.message, 2);
+        spdlog::warn("{}", format_issue(issue));
+    }
     const McpConfig layers = merged_layers(loaded.parsed.config, flags_layer(*x.mcp_app), env);
     apply_config(layers, options);
     if (!x.tray && layers.get_bool("tray.enabled") != true && !x.install_autostart && !x.remove_autostart) return std::nullopt;

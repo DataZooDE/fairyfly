@@ -336,6 +336,23 @@ HttpEndpoint::HttpEndpoint(HttpEndpointOptions options, CallExecutor& executor, 
     for (auto& o : options_.cors_origins) o = lower(strip_slash(trim(o)));
 }
 
+bool same_security_principal(const Principal& a, const Principal& b) {
+    return a.id == b.id && a.name == b.name && a.scopes == b.scopes &&
+           a.all_scopes == b.all_scopes && a.sap_systems == b.sap_systems &&
+           a.sap_identities == b.sap_identities &&
+           a.tcodes == b.tcodes && a.connections == b.connections &&
+           a.rate_per_minute == b.rate_per_minute && a.rate_families == b.rate_families &&
+           a.read_only == b.read_only && a.allow_navigation == b.allow_navigation &&
+           a.allow_selection_input == b.allow_selection_input && a.authenticated == b.authenticated;
+}
+
+void HttpEndpoint::set_session_router(SessionExecutorPool* pool, SessionRouter router,
+                                      SessionRouter recheck_router) {
+    session_pool_ = pool;
+    session_router_ = std::move(router);
+    session_recheck_router_ = recheck_router ? std::move(recheck_router) : session_router_;
+}
+
 bool HttpEndpoint::host_allowed(const std::string& host_header) const {
     const std::string name = host_name(host_header);
     if (name.empty()) return false;
@@ -365,9 +382,10 @@ HttpResponse HttpEndpoint::finish(const HttpRequest& request, HttpResponse respo
 }
 
 std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) const {
-    // Server-level client allow-list first (before Host/Origin/auth/body): loopback always passes, an empty list
-    // allows everyone, anything else must match a CIDR. An unparsable peer fails closed.
-    if (!options_.allow_ip.empty() && !auth::ip_is_loopback(request.peer_addr) &&
+    // Server-level client allow-list first (before Host/Origin/auth/body). A
+    // configured strict list also covers loopback on shared Windows hosts.
+    if ((options_.allow_ip_include_loopback || !options_.allow_ip.empty()) &&
+        (options_.allow_ip_include_loopback || !auth::ip_is_loopback(request.peer_addr)) &&
         !auth::ip_allowed(request.peer_addr, options_.allow_ip)) {
         ++calls_denied_;
         return finish(request, plain_error(403, "ADDRESS_NOT_ALLOWED",
@@ -621,6 +639,57 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                                     : json();
     const bool sse = options_.sse && is_call && accept_prefers_sse(request.header("Accept"), !progress_token.is_null());
 
+    SessionRoute session_route;
+    const AuthRequest execution_auth{request.header("Authorization"), request.peer_addr};
+    Principal admission_principal = principal;
+    if (is_call && session_pool_ && session_router_ && params.is_object() &&
+        params.contains("name") && params["name"].is_string()) {
+        AuthOutcome refreshed;
+        try {
+            if (authenticator_) {
+                authenticator_->invalidate_cache();
+                refreshed = authenticator_->authenticate(execution_auth);
+            }
+        } catch (...) {
+            refreshed.ok = false;
+            refreshed.error_code = "AUTH_UNAVAILABLE";
+        }
+        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
+            const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+            return reply(make_error(message.id, kInvalidParams, "authorization changed before route admission",
+                                    json{{"code", code}}));
+        }
+        admission_principal = std::move(refreshed.principal);
+        const std::string tool = params["name"].get<std::string>();
+        try {
+            session_route = session_router_(admission_principal, tool,
+                                            params.value("arguments", json::object()));
+        } catch (...) {
+            session_route.handled = true;
+            session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
+            session_route.error_message = "the SAP session could not be routed";
+        }
+        const bool global_control = session_route.global_control ||
+                                    tool == "gui_session_list" || tool == "gui_connection_list" ||
+                                    tool == "gui_credentials_list" || tool == "gui_doctor" ||
+                                    tool == "gui_session_lease" || tool == "gui_session_attach" ||
+                                    tool == "gui_session_login" || tool == "gui_session_launch";
+        if (!session_route.error_code.empty() ||
+            (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
+            (!session_route.handled && !global_control)) {
+            const std::string code = session_route.error_code.empty() ? "SESSION_ROUTE_UNAVAILABLE" : session_route.error_code;
+            const std::string effective_code = !session_route.handled && !global_control && session_route.error_code.empty()
+                                                   ? "SESSION_ROUTE_REQUIRED" : code;
+            const std::string reason = session_route.error_message.empty() ? "the SAP session could not be routed"
+                                                                    : session_route.error_message;
+            return reply(make_error(message.id, kInvalidParams, reason, json{{"code", effective_code}}));
+        }
+    }
+    const bool routed = session_route.handled;
+    const std::string route_identity = session_route.identity;
+    const std::string route_lane_key = session_route.lane_key.empty() ? route_identity : session_route.lane_key;
+    std::shared_ptr<ToolProvider> route_provider = std::move(session_route.provider);
+
     auto waiter = std::make_shared<Waiter>();
     ExecJob job;
     job.id = message.id;
@@ -636,22 +705,70 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
     Pending pending{message.id, method, params};
     const bool want_progress = sse && !progress_token.is_null();
-    job.run = [this, pending, principal, era, stateless, server_info, client_info, progress_token, want_progress,
+    job.run = [this, pending, principal = admission_principal, execution_auth, era, stateless, server_info, client_info, progress_token, want_progress,
+               route_provider, route_identity, route_lane_key, routed,
                waiter](CallState& state) -> json {
+        AuthOutcome refreshed;
+        try {
+            if (authenticator_) {
+                authenticator_->invalidate_cache();
+                refreshed = authenticator_->authenticate(execution_auth);
+            }
+        } catch (...) {
+            refreshed.ok = false;
+            refreshed.error_code = "AUTH_UNAVAILABLE";
+        }
+        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
+            const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+            json denied = make_error(pending.id, kInvalidParams, "authorization changed before execution",
+                                     json{{"code", reason}});
+            return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
+        }
+        const Principal& current_principal = refreshed.principal;
+        if (routed) {
+            bool valid_route = false;
+            try {
+                const SessionRoute current = session_recheck_router_(current_principal,
+                    pending.params.at("name").get<std::string>(),
+                    pending.params.value("arguments", json::object()));
+                valid_route = current.handled && current.error_code.empty() &&
+                              current.identity == route_identity &&
+                              (current.lane_key.empty() ? current.identity : current.lane_key) == route_lane_key &&
+                              current.provider.get() == route_provider.get();
+            } catch (...) {
+                valid_route = false;
+            }
+            if (!valid_route) {
+                json denied = make_error(pending.id, kInvalidParams, "SAP session routing changed before execution",
+                                         json{{"code", "SESSION_ROUTE_CHANGED"}});
+                return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
+            }
+        }
+        ToolProvider& selected_provider = route_provider ? *route_provider : provider_;
         json out;
         if (pending.method == "tools/list") {
-            out = tools_list_message(provider_, pending, true, &principal);
+            out = tools_list_message(selected_provider, pending, true, &current_principal);
         } else {
             try {
-                provider_.set_client_info(client_info.is_object() ? client_info : json::object());
+                selected_provider.set_client_info(client_info.is_object() ? client_info : json::object());
             } catch (const std::exception& e) {
                 spdlog::warn("set_client_info failed: {}", e.what());
             }
             CallContext ctx;
-            ctx.principal = principal;
+            ctx.principal = current_principal;
             ctx.era = era;
             ctx.http = true;
             ctx.cancelled = [&state] { return state.cancelled.load(); };
+            ctx.reauthorize = [this, execution_auth, bound = current_principal]() {
+                if (!authenticator_) return false;
+                try {
+                    authenticator_->invalidate_cache();
+                    const AuthOutcome latest = authenticator_->authenticate(execution_auth);
+                    return latest.ok && same_security_principal(latest.principal, bound);
+                } catch (...) {
+                    return false;
+                }
+            };
             auto last = std::make_shared<double>(0.0);
             if (want_progress) {
                 waiter->push_frame(progress_frame(progress_token, 0.0, std::nullopt, "started"));
@@ -662,18 +779,22 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                     waiter->push_frame(progress_frame(progress_token, progress, total, text));
                 };
             }
-            out = call_tool_message(provider_, pending, std::move(ctx));
+            out = call_tool_message(selected_provider, pending, std::move(ctx));
             if (want_progress) waiter->push_frame(progress_frame(progress_token, *last + 1.0, std::nullopt, "finished"));
         }
         return stateless ? decorate_stateless(std::move(out), pending.method, server_info) : out;
     };
 
     std::shared_ptr<CallState> state;
-    switch (executor_.submit(std::move(job), &state)) {
+    const SubmitResult submission = routed ? session_pool_->submit(route_lane_key, std::move(job), &state)
+                                           : executor_.submit(std::move(job), &state);
+    switch (submission) {
     case SubmitResult::Queued:
         break;
     case SubmitResult::Busy:
-        return reply(make_result(message.id, busy_call_result("SERVER_BUSY", executor_.running_info().value_or(CallInfo{}))));
+        return reply(make_result(message.id, busy_call_result("SERVER_BUSY",
+            routed ? session_pool_->running_info(route_lane_key).value_or(CallInfo{})
+                   : executor_.running_info().value_or(CallInfo{}))));
     case SubmitResult::QueueFull: {
         HttpResponse r = json_response(503, make_error(message.id, kServerBusy, "server busy", json{{"retry", true}}));
         r.set_header("Retry-After", "1");
@@ -683,6 +804,13 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     if (is_call) ++calls_total_;
 
     const auto poll = std::chrono::milliseconds(std::max(1, options_.poll_ms));
+    const auto route_cancel = [this, routed, route_lane_key, state] {
+        if (routed) session_pool_->cancel(route_lane_key, state);
+        else executor_.cancel(state);
+    };
+    const auto route_stopping = [this, routed] {
+        return executor_.stopping() || (routed && session_pool_->stopping());
+    };
     auto shutting_down = [&] {
         HttpResponse r = json_response(503, make_error(message.id, kServerBusy, "server shutting down", json{{"retry", true}}));
         return r;
@@ -692,11 +820,16 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
         std::unique_lock<std::mutex> lock(waiter->m);
         while (!waiter->done) {
             waiter->cv.wait_for(lock, poll);
-            if (!waiter->done && executor_.stopping()) break;
+            if (!waiter->done && request.connected && !request.connected()) {
+                lock.unlock();
+                route_cancel();
+                return json_response(499, make_error(message.id, kServerBusy, "client disconnected"));
+            }
+            if (!waiter->done && route_stopping()) break;
         }
         if (!waiter->done || waiter->final_message.is_null()) {
             lock.unlock();
-            executor_.cancel(state);
+            route_cancel();
             return shutting_down();
         }
         return json_response(200, waiter->final_message);
@@ -710,8 +843,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     r.set_header("X-Accel-Buffering", "no");
     r.set_header("Connection", "keep-alive");
     const int keepalive_ms = options_.keepalive_ms;
-    CallExecutor* executor = &executor_;
-    r.stream = [waiter, state, executor, poll, keepalive_ms](SseSink& sink) {
+    r.stream = [waiter, state, route_cancel, route_stopping, poll, keepalive_ms](SseSink& sink) {
         auto last_write = std::chrono::steady_clock::now();
         auto emit = [&](const std::string& frame) {
             if (!sink.write(frame)) return false;
@@ -734,7 +866,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
             }
             for (const auto& f : frames)
                 if (!emit(f)) {
-                    executor->cancel(state);
+                    route_cancel();
                     return;
                 }
             if (done) {
@@ -743,13 +875,13 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                 emit(format_sse_event("message", dump(final_message)));
                 return;
             }
-            if (!sink.connected() || executor->stopping()) {
-                executor->cancel(state);
+            if (!sink.connected() || route_stopping()) {
+                route_cancel();
                 return;
             }
             if (keepalive_ms > 0 && std::chrono::steady_clock::now() - last_write >= std::chrono::milliseconds(keepalive_ms))
                 if (!emit(format_sse_comment("keep-alive"))) {
-                    executor->cancel(state);
+                    route_cancel();
                     return;
                 }
         }

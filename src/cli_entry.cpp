@@ -8,7 +8,6 @@
 #include <string>
 #include <memory>
 #include <chrono>
-#include <iomanip>
 #include <sstream>
 #include <algorithm>
 #include <cstdint>
@@ -41,26 +40,6 @@ using namespace fairyfly::cli;
 using namespace fairyfly::commands;
 
 namespace {
-    /// Add timestamp and version metadata to result
-    void add_metadata(json& response) {
-        auto now = std::chrono::system_clock::now();
-        auto time_t = std::chrono::system_clock::to_time_t(now);
-        std::tm tm_buf;
-#ifdef _WIN32
-        gmtime_s(&tm_buf, &time_t);
-#else
-        gmtime_r(&time_t, &tm_buf);
-#endif
-        std::stringstream ss;
-        ss << std::put_time(&tm_buf, "%Y-%m-%dT%H:%M:%SZ");
-
-        if (!response.contains("metadata")) {
-            response["metadata"] = json::object();
-        }
-        response["metadata"]["timestamp"] = ss.str();
-        response["metadata"]["version"] = fairyfly::FAIRYFLY_VERSION;
-    }
-
     /// Convert log level string to spdlog::level::level_enum
     spdlog::level::level_enum parse_log_level(const std::string& level_str) {
         std::string lower = level_str;
@@ -329,10 +308,6 @@ namespace {
             std::cout << app.help() << std::endl;
             return 0;
         }
-
-        // Add metadata
-        json response = command_result.to_json();
-        add_metadata(response);
 
         print_result();
 

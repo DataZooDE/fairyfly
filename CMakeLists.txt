@@ -115,7 +115,12 @@ set(FAIRYFLY_LIB_SOURCES
     src/base64.cpp
     src/semantic_classifier.cpp
     src/sensitive_data.cpp
+    src/display_text_policy.cpp
+    src/element_metadata_builder.cpp
     src/html_viewer_reader.cpp
+    src/object_tree_diag.cpp
+    src/object_tree.cpp
+    src/bulk_screen_reader.cpp
     src/element_renderer_registry.cpp
     src/element_renderers.cpp
     src/grid_analyzer.cpp
@@ -169,6 +174,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/run_mcp.cpp
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
+    src/system/window_owner.cpp
     src/system/cert_scripts.cpp
     src/setup/setup_validators.cpp
     src/setup/setup_model.cpp
@@ -191,6 +197,15 @@ set(FAIRYFLY_LIB_SOURCES
     src/auth/token_cli.cpp
     src/commands/mcp_token_command.cpp
     src/mcp/call_executor.cpp
+    src/mcp/session_executor_pool.cpp
+    src/mcp/session_route_plan.cpp
+    src/mcp/session_route_coordinator.cpp
+    src/mcp/session_worker_protocol.cpp
+    src/mcp/session_worker_main.cpp
+    src/mcp/session_worker_process.cpp
+    src/mcp/session_worker_broker.cpp
+    src/mcp/session_worker_provider.cpp
+    src/mcp/session_leases.cpp
     src/mcp/protocol_session.cpp
     src/mcp/http_endpoint.cpp
     src/mcp/http_sys_mapping.cpp
@@ -263,7 +278,7 @@ endif()
 
 # Create executable (only main.cpp, links against library)
 if(WIN32)
-    # Tray icon resources (assets/icons via src/tray/fairyfly.rc)
+    # Executable and tray icon resources (assets/icons via src/tray/fairyfly.rc; regenerate with assets/generate_icons.py)
     enable_language(RC)
     # Version information (ProductName "fairyfly", calendar version) embedded in fairyfly.exe: used for code signing
     # (product name = project name, product version consistent across builds).

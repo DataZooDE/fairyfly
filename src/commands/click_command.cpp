@@ -15,7 +15,21 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","click"});
-        cmd_->add_option("element", element_, "Element ID (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3])")
+        cmd_->footer(R"HELP(Usage notes:
+Select the action for the observed control subtype:
+  Button: pass its element ID.
+  Tree: pass --node-key and --tree-action. Keys come from element get --list-nodes.
+  GridView: pass --row and --column; add --doubleclick to open that cell.
+--doubleclick is a grid flag; a tree double-click uses --tree-action doubleclick.
+Expanding a tree changes its display and may load children; list nodes afterward.
+Examples (TREE and GRID stand for observed IDs):
+  fairyfly element click "wnd[0]/tbar[0]/btn[3]" --connection 3
+  fairyfly element click "TREE" --node-key "          1" --tree-action expand --connection 3
+  fairyfly element click "TREE" --node-key "          8" --tree-action doubleclick --connection 3
+  fairyfly element click "GRID" --row 0 --column "NAME" --doubleclick --connection 3
+)HELP");
+        cmd_->add_option("element", element_, "Element ID (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3]). "
+            "A check box is toggled, a radio button is selected; the result reports the resulting 'selected' state")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");
         cmd_->add_flag("--wait-for-window", wait_for_window_,

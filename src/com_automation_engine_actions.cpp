@@ -108,11 +108,16 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
             return result;
         }
         const std::string window_before = target->get_id();
-        const auto before_status = read_action_status(session);
+        // The pre-action read stays fresh; the id shortcut applies only when the target is the active window.
+        const bool target_is_active = window.empty() || window == "@active";
+        const auto before_status = target_is_active ? read_action_status(session, window_before)
+                                                    : read_action_status(session);
 
         target->send_vkey(vkey);
         session->wait_for_completion(500);
-        const auto after_status = read_action_status(session);
+        // The window that is active after the key is also reported below: fetch it once.
+        const std::string window_after = get_active_window_id().id;
+        const auto after_status = read_action_status(session, window_after);
 
         Result result;
         // Enter, Execute (F8) and Save (Ctrl+S = 11) submit; other keys navigate.
@@ -125,7 +130,7 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
         result.data["action"] = "send_key";
         result.data["vkey"] = vkey;
         result.data["window"] = window_before;
-        result.data["window_after"] = get_active_window_id().id;
+        result.data["window_after"] = window_after;
         result.duration = elapsed_since(start);
         return result;
     } catch (const ComException& e) {
@@ -150,8 +155,8 @@ Result ComAutomationEngine::close_popup(int vkey) {
             return result;
         }
 
-        const auto before_status = read_action_status(session);
-        const auto close_attempt = attempt_close(before_index,
+        const auto before_status = read_action_status(session, window_before);
+        auto close_attempt = attempt_close(before_index,
             [&] { window->send_vkey(vkey); },
             [&] { window->close(); });
         if (close_attempt.method == CloseMethod::Unsupported) {
@@ -170,14 +175,23 @@ Result ComAutomationEngine::close_popup(int vkey) {
 
         int after_index = before_index;
         std::string window_after = window_before;
-        for (int attempt = 0; attempt < 20; ++attempt) {
-            window_after = get_active_window_id().id;
-            after_index = WindowId(window_after).get_index();
-            if (classify_close_outcome(before_index, after_index) == CloseOutcome::Closed) break;
-            if (attempt < 19) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const auto poll_closed = [&] {
+            for (int attempt = 0; attempt < 20; ++attempt) {
+                window_after = get_active_window_id().id;
+                after_index = WindowId(window_after).get_index();
+                if (classify_close_outcome(before_index, after_index) == CloseOutcome::Closed) return true;
+                if (attempt < 19) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            return false;
+        };
+        bool closed = poll_closed();
+        if (!closed && close_attempt.method == CloseMethod::Vkey) {
+            close_attempt = fallback_close_when_still_open(before_index, after_index, close_attempt,
+                                                           [&] { window->close(); });
+            if (close_attempt.method == CloseMethod::WindowClose) closed = poll_closed();
         }
 
-        if (classify_close_outcome(before_index, after_index) != CloseOutcome::Closed) {
+        if (!closed) {
             auto result = error_result("POPUP_STILL_OPEN",
                 close_attempt.method == CloseMethod::WindowClose
                     ? std::string("The popup did not close after calling the window Close method")
@@ -189,7 +203,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
         }
 
         Result result;
-        const auto after_status = read_action_status(session);
+        const auto after_status = read_action_status(session, window_after);
         if (apply_status_outcome(result, before_status, after_status, window_before, false)) {
             result.duration = elapsed_since(start);
             return result;

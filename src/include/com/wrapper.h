@@ -4,6 +4,7 @@
 #include "include/sap_gui_base.h"
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <stdexcept>
 #include <windows.h>
@@ -82,6 +83,12 @@ private:
     mutable IDispatchPtr children_dispatch_;
     mutable int children_count_ = -1;
     IDispatchPtr children_dispatch_cached() const;
+    // Changeable is read at most once per wrapper by is_changeable() and get_text(). The strict
+    // fail-closed reads (selection_input_guard) and set_text() always read it fresh.
+    mutable std::optional<bool> cached_changeable_;
+    bool changeable_cached() const;
+    // An absent Changeable property is common on SAP GUI objects: only an explicit VARIANT_FALSE means read-only.
+    bool explicitly_read_only() const;
 
 public:
     /// Classify element type from type string
@@ -108,6 +115,30 @@ public:
 
     /// Set text in element (for text fields). Returns false if SAP explicitly marks it read-only.
     bool set_text(const std::string& text);
+
+    /// Outcome of fill_value(): what the field-type specific write did.
+    struct FillOutcome {
+        enum class Status { Written, ReadOnly, InvalidArgument };
+        Status status = Status::Written;
+        std::string message;               ///< InvalidArgument: what was wrong and what is accepted
+        std::optional<bool> selected;      ///< GuiCheckBox/GuiRadioButton: Selected read back after the write
+        std::optional<std::string> key;    ///< GuiComboBox: resulting Key read back after the write
+        std::optional<std::string> display_value;  ///< GuiComboBox: resulting Value read back after the write
+    };
+
+    /// Type-aware fill: GuiCheckBox/GuiRadioButton take a boolean spelling and write Selected, GuiComboBox accepts an
+    /// entry key or its displayed value, every other type behaves like set_text(). Throws ComException on COM failures.
+    FillOutcome fill_value(const std::string& value);
+
+    /// Parse true/false/1/0/yes/no/on/off/x/space-empty (case-insensitive, trimmed); nullopt for anything else.
+    static std::optional<bool> parse_check_value(const std::string& value);
+
+    /// Current Selected state of a check box or radio button (nullopt when it cannot be read).
+    std::optional<bool> get_selected() const;
+
+    /// Flip a check box (reads Selected, writes the opposite) and return the new state read back.
+    /// Throws ComException when the state cannot be read or the element is not a check box.
+    std::optional<bool> toggle_selected();
 
     /// Check if element is enabled
     bool is_enabled() const;
@@ -331,6 +362,14 @@ public:
     IDispatch* get_com_object() const { return dispatch_; }
 };
 
+/// Process-wide knowledge about GuiSession.GetObjectTree (SAP GUI 7.70 PL3 and later).
+enum class ObjectTreeSupport { Unknown, Available, Missing };
+
+/// Why GuiSession.GetObjectTree returned no answer. ServerFault (RPC_E_SERVERFAULT, 0x80010105) is
+/// the failure SAP GUI raises for a property it cannot serve (`Selected`); it can take saplogon down,
+/// so callers stop using the call for the whole process.
+enum class ObjectTreeFailure { None, Unsupported, ServerFault, Failed, Empty };
+
 /// COM-based SAP GUI session wrapper
 class ComGuiSession : public SapGuiObject {
 public:
@@ -353,16 +392,21 @@ public:
     /// Find element by ID/path
     ComGuiElementPtr find_element_by_id(const std::string& id) const;
 
+    /// GuiSession.GetObjectTree(id, props): the element `id` and all its descendants as one JSON string
+    /// (one COM round trip). `props` empty passes no property list (Ids only). Returns nullopt when the
+    /// method is unavailable (older SAP GUI: the process is then remembered as Missing), the call fails
+    /// or the answer is empty. Never logs the payload. `failure` (optional) tells the caller why.
+    std::optional<std::string> get_object_tree(const std::string& id,
+                                               const std::vector<std::string>& props = {},
+                                               ObjectTreeFailure* failure = nullptr) const;
+    static ObjectTreeSupport object_tree_support();
+    static void reset_object_tree_support();
+
     /// Execute SAP transaction by code
     void start_transaction(const std::string& tcode);
 
     /// Wait for session to complete current operation
     void wait_for_completion(int timeout_ms = 30000);
-
-    /// Send virtual key to session (F3, F8, Enter, etc.)
-    /// Common keys: 0=Enter, 1=F1, 8=F8, 3=F3, 12=F12, etc.
-    /// Throws ComException if operation fails
-    void send_vkey(int vkey);
 
     /// Wait for element to appear with polling
     /// @param element_id Element path to wait for (e.g., "wnd[0]/usr/btn[99]")

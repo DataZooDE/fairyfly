@@ -34,6 +34,7 @@ public:
     TokenStore& tokens() { return *tokens_; }
     /// Drops cached token records (revoke/rotate elsewhere become visible at once).
     void invalidate();
+    void invalidate_cache() override { invalidate(); }
 
 private:
     AuthConfig config_;

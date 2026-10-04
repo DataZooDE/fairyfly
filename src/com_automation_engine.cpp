@@ -1,4 +1,6 @@
 #include "include/com_automation_engine.h"
+#include "include/element_errors.h"
+#include "include/object_tree_diag.h"
 #include "include/session_facts.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
@@ -16,6 +18,7 @@
 #include "include/table_data_extractor.h"
 #include "include/cli_handler.h"
 #include "include/string_utils.h"
+#include "include/system/window_owner.h"
 #include "include/base64.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
@@ -158,9 +161,27 @@ ComGuiSessionPtr ComAutomationEngine::ensure_session() {
         if (conn->get_session_count() == 0) {
             throw ComException("No sessions available in connection");
         }
-        bind_session(conn, conn->get_session(0));
+        auto session = conn->get_session(0);
+        if (!owner_window_allowed(session))
+            throw ComException("SAP GUI window is unavailable to this Windows logon");
+        bind_session(conn, std::move(session));
     }
+    if (!owner_window_allowed(current_session_))
+        throw ComException("SAP GUI window is unavailable to this Windows logon");
     return current_session_;
+}
+
+bool ComAutomationEngine::owner_window_allowed(const ComGuiSessionPtr& session) const noexcept {
+    if (!owner_window_guard_) return true;
+    try {
+        if (!session) return false;
+        const auto window = session->get_active_window();
+        if (!window) return false;
+        // SAP's Handle is a signed COM Long; Windows sign-extends user handles.
+        const auto raw = window->get_int_property(L"Handle");
+        const auto handle = system::sap_com_long_to_window_handle(raw);
+        return system::window_owned_by_current_logon(handle);
+    } catch (...) { return false; }
 }
 
 Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
@@ -585,6 +606,7 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
     try {
         auto sess = find_session_by_id(session_id).second;
         if (!sess) return facts;
+        if (!owner_window_allowed(sess)) return facts;
         if (!server_session_key.empty() && sess->get_server_session_key() != server_session_key) return facts;
         bool timed_out = false;
         facts = read_facts_bounded(
@@ -602,6 +624,7 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
             FactsBudget{}, FactsClock{}, &timed_out);
         if (timed_out)
             spdlog::warn("peek_session_facts: session {} stayed busy for 5 s, facts unknown", session_id);
+        if (!owner_window_allowed(sess)) return audit::SapFacts{};
     } catch (...) {
         return audit::SapFacts{};
     }
@@ -612,17 +635,29 @@ std::string ComAutomationEngine::peek_session_connection_description(const std::
     try {
         auto found = find_session_by_id(session_id);
         if (!found.first || !found.second) return {};
+        if (!owner_window_allowed(found.second)) return {};
         return found.first->get_description();
     } catch (...) {
         return {};
     }
 }
 
+std::uintptr_t ComAutomationEngine::peek_session_window_handle(const std::string& session_id) const noexcept {
+    try {
+        auto sess = find_session_by_id(session_id).second;
+        if (!sess || !owner_window_allowed(sess)) return 0;
+        auto window = sess->get_active_window();
+        if (!window) return 0;
+        const auto handle = system::sap_com_long_to_window_handle(window->get_int_property(L"Handle"));
+        return system::window_owned_by_current_logon(handle) ? handle : 0;
+    } catch (...) { return 0; }
+}
+
 bool ComAutomationEngine::validate_session(const std::string& session_id,
                                            const std::string& server_session_key) const {
     try {
         auto session = find_session_by_id(session_id).second;
-        return session && (server_session_key.empty() ||
+        return session && owner_window_allowed(session) && (server_session_key.empty() ||
                            session->get_server_session_key() == server_session_key);
     } catch (const std::exception& e) {
         spdlog::debug("Cannot validate session {}: {}", session_id, e.what());
@@ -640,6 +675,7 @@ bool ComAutomationEngine::select_session(const std::string& session_id,
     try {
         auto [conn, sess] = find_session_by_id(session_id);
         if (!sess) return false;
+        if (!owner_window_allowed(sess)) return false;
         if (!server_session_key.empty() &&
             sess->get_server_session_key() != server_session_key) return false;
         bind_session(std::move(conn), std::move(sess));
@@ -680,7 +716,6 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         if (request.use_send_command) {
             // StartTransaction prepends "/n" itself, so "/nXYZ" must go via SendCommand.
             session->invoke_method_with_string(L"SendCommand", request.command);
-            std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
         } else {
             session->start_transaction(request.command);
         }
@@ -690,12 +725,19 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
 
         // SAP can set Transaction to the requested code while reporting that
         // startup failed in an information dialog instead of the status bar.
+        // The active window is fetched once here and reused for the post-action status read.
+        std::string active_window_id;
+        bool window_known = false;
         try {
             auto window = session->get_active_window();
-            if (window && window->get_id().find("wnd[1]") != std::string::npos) {
+            if (window) {
+                active_window_id = window->get_id();
+                window_known = true;
+            }
+            if (window && active_window_id.find("wnd[1]") != std::string::npos) {
                 auto message = session->find_element_by_id("wnd[1]/usr/txtMESSTXT1");
                 if (message) {
-                    if (auto rejection = classify_transaction_modal(window->get_id(),
+                    if (auto rejection = classify_transaction_modal(active_window_id,
                                                                      message->get_text(), expected_tcode)) {
                         rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::high_resolution_clock::now() - start);
@@ -708,7 +750,8 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         }
 
         // 2. Check for error or abort messages on statusbar
-        const ActionStatus post_status = read_action_status(session);
+        const ActionStatus post_status = window_known ? read_action_status(session, active_window_id)
+                                                      : read_action_status(session);
         const std::string post_sbar_type = post_status.type;
         const std::string post_sbar_text = post_status.text;
         if (!post_sbar_text.empty()) {
@@ -809,12 +852,15 @@ ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
     try {
         auto session = current_session_;
         if (!session) return snapshot;
+        bool window_known = false;
         if (auto window = session->get_active_window()) {
             snapshot.window_id = window->get_id();
+            window_known = true;
             try { snapshot.title = window->get_title(); } catch (const std::exception&) {}
         }
         try { snapshot.transaction = session->get_transaction_code(); } catch (const std::exception&) {}
-        snapshot.statusbar_text = read_action_status(session).text;
+        snapshot.statusbar_text = (window_known ? read_action_status(session, snapshot.window_id)
+                                                : read_action_status(session)).text;
     } catch (const std::exception&) {
         // A partially readable snapshot is still useful for change detection.
     }
@@ -967,6 +1013,9 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         }
         result.data["action"] = "click";
         result.data["element_type"] = elem->get_type();
+        if (elem_type == "GuiCheckBox" || elem_type == "GuiRadioButton") {
+            if (const auto selected = elem->get_selected()) result.data["selected"] = *selected;
+        }
         result.data["window"] = resolved_element.get_window().id;
         attach_status_bar(result, before_status, after_status);
 
@@ -1317,9 +1366,16 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         // Set the text. SetText is local to the GUI front end (no server round trip until Enter), so a status bar
         // read right after it still shows the previous action's message: report it only when it changed.
         const auto before_status = read_action_status(session);
-        const bool text_set = elem->set_text(value);
+        const auto outcome = elem->fill_value(value);
         const auto after_status = read_action_status(session);
-        if (!text_set) {
+        if (outcome.status == ComGuiElement::FillOutcome::Status::InvalidArgument) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INVALID_ARGUMENT";
+            result.error["message"] = outcome.message;
+            result.error["element"] = resolved_element.path;
+            return result;
+        }
+        if (outcome.status == ComGuiElement::FillOutcome::Status::ReadOnly) {
             result.status = Result::Status::Error;
             result.error["code"] = "ELEMENT_READ_ONLY";
             result.error["message"] = "Element is not changeable on the current SAP screen";
@@ -1345,6 +1401,9 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         result.data["action"] = "fill";
         result.data["window"] = resolved_element.get_window().id;
         result.data["field"] = build_fill_field_info(probe, value);
+        if (outcome.selected) result.data["selected"] = *outcome.selected;
+        if (outcome.key) result.data["key"] = *outcome.key;
+        if (outcome.display_value) result.data["display_value"] = *outcome.display_value;
         attach_fresh_status_bar(result, before_status, after_status);
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -1578,7 +1637,7 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
 
     } catch (const ComException& e) {
         result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
+        result.error["code"] = error_code_for_com_message(e.what());
         result.error["message"] = e.what();
         spdlog::error("Read failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {
@@ -1980,6 +2039,7 @@ Result ComAutomationEngine::read_screen(bool include_structure, bool skip_trees,
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
+    screen_reader_->set_tree_reader_mode(parse_tree_reader_mode(tree_reader_));
     screen_reader_->set_row_offset(row_offset_);
     screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read(include_structure, skip_trees, max_rows);
@@ -1999,6 +2059,7 @@ Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows,
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
+    screen_reader_->set_tree_reader_mode(parse_tree_reader_mode(tree_reader_));
     screen_reader_->set_row_offset(row_offset_);
     screen_reader_->set_grid_rows_needed(grid_rows_needed_);
     return screen_reader_->read_with_tabs(skip_trees, max_rows, only_tab);
@@ -2018,6 +2079,29 @@ Result ComAutomationEngine::find_screen(const ScreenFindOptions& query) {
     }
     screen_reader_->set_probe_all(probe_all_ || query.probe_all);
     return screen_reader_->find(query);
+}
+
+Result ComAutomationEngine::dump_object_tree(const std::string& id, const std::vector<std::string>& props) {
+    Result result;
+    try {
+        auto session = ensure_session();
+        std::string target = id;
+        if (target.empty()) {
+            auto window = session->get_active_window();
+            if (!window) throw ComException("No active window");
+            target = window->get_id();
+        }
+        result.data = diag::build_object_tree_diagnostic(
+            target, props, [&session](const std::string& tree_id, const std::vector<std::string>& tree_props) {
+                return session->get_object_tree(tree_id, tree_props);
+            });
+        result.status = Result::Status::Success;
+    } catch (const std::exception& e) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "COM_ERROR";
+        result.error["message"] = e.what();
+    }
+    return result;
 }
 
 Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& options) {

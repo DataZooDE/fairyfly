@@ -104,21 +104,61 @@ TEST_CASE("Dispatcher: a failed audit write in required mode reports AUDIT_UNAVA
     Fixture f;
     Policy required;
     required.audit_required = true;
+    required.read_only = false;
+    required.allow_write = true;
     CommandDispatcher strict(f.invoker(), required, make_mcp_audit_hook(&sink, {}, true));
     auto r = strict.call_tool("gui_doctor", json::object(), ctx_with_id());
     CHECK(r.is_error);
     CHECK(text_of(r).find("AUDIT_UNAVAILABLE") != std::string::npos);
     CHECK(f.calls.size() == 1);  // the action itself ran
 
+    // A second action must not run while the required sink is still broken.
+    r = strict.call_tool("gui_doctor", json::object(), ctx_with_id());
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("AUDIT_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+
+    // The first call after a repair is a denied recovery probe. Its successful
+    // audit append reopens the gate for a later action.
+    std::error_code ec;
+    REQUIRE(std::filesystem::remove(blocker, ec));
+    REQUIRE_FALSE(ec);
+    REQUIRE(std::filesystem::create_directory(blocker, ec));
+    REQUIRE_FALSE(ec);
+    r = strict.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}},
+                                                              {{"tool", "gui_screen_read"}}})},
+                                        {"stop_on_error", false}}, ctx_with_id());
+    CHECK(r.is_error);
+    CHECK(text_of(r).find("AUDIT_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+    CHECK_FALSE(mcp_audit_failed());
+    r = strict.call_tool("gui_doctor", json::object(), ctx_with_id());
+    CHECK_FALSE(r.is_error);
+    CHECK(f.calls.size() == 2);
+    const auto healthy_batch = strict.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}},
+                                                                                     {{"tool", "gui_screen_read"}}})}}, ctx_with_id());
+    INFO(text_of(healthy_batch));
+    CHECK_FALSE(healthy_batch.is_error);
+    CHECK(f.calls.size() == 4);
+
     // Without the requirement the same audit failure is tolerated.
+    REQUIRE(std::filesystem::remove(blocker / "audit.jsonl", ec));
+    REQUIRE(std::filesystem::remove(blocker, ec));
+    { std::ofstream(blocker) << "x"; }
     mcp_audit_reset_failure();
     CommandDispatcher relaxed(f.invoker(), Policy{}, make_mcp_audit_hook(&sink, {}, true));
     auto ok_result = relaxed.call_tool("gui_doctor", json::object(), ctx_with_id());
     CHECK_FALSE(ok_result.is_error);
 
     mcp_audit_reset_failure();
-    std::error_code ec;
     std::filesystem::remove(blocker, ec);
+
+    Fixture no_hook;
+    CommandDispatcher missing(no_hook.invoker(), required);
+    const auto missing_audit = missing.call_tool("gui_doctor", json::object(), ctx_with_id());
+    CHECK(missing_audit.is_error);
+    CHECK(text_of(missing_audit).find("AUDIT_UNAVAILABLE") != std::string::npos);
+    CHECK(no_hook.calls.empty());
 }
 
 TEST_CASE("Dispatcher: hidden write tools are known but refused with guidance", "[mcp][dispatcher]") {
@@ -417,6 +457,56 @@ TEST_CASE("Dispatcher: sticky default connection from attach and launch", "[mcp]
     CHECK_FALSE(d3.sticky_connection().has_value());
 }
 
+TEST_CASE("Dispatcher: sticky routing survives provider replacement", "[mcp][dispatcher][routing]") {
+    auto routing = std::make_shared<SessionRoutingState>();
+    Fixture first;
+    first.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "session attach")
+            return ok({{"connection_file_id", 7}});
+        return ok({{"transaction", "SE38"}});
+    };
+    auto before = first.make();
+    before.set_routing_state(routing);
+    REQUIRE_FALSE(before.call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+
+    Fixture second;
+    second.handler = first.handler;
+    auto after = second.make();
+    after.set_routing_state(routing);
+    REQUIRE(after.sticky_connection() == 7);
+    REQUIRE_FALSE(after.call_tool("gui_transaction_start", json{{"code", "SE38"}}, ctx_with_id()).is_error);
+    CHECK(has_pair(second.calls.back(), "--connection", "7"));
+}
+
+TEST_CASE("Dispatcher: sticky routing refuses a reused saved connection", "[mcp][dispatcher][routing]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "session attach")
+            return ok({{"connection_file_id", 7}});
+        return ok();
+    };
+    std::string identity = "path|server-key|generation-A";
+    auto d = f.make();
+    d.set_sap_facts_provider([&](std::optional<int> connection) -> std::optional<fairyfly::audit::SapFacts> {
+        fairyfly::audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = connection.value_or(7);
+        facts.session_identity = identity;
+        return facts;
+    });
+    REQUIRE_FALSE(d.call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+    identity = "path|server-key|generation-B";
+    f.calls.clear();
+    const auto refused = d.call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_with_id());
+    CHECK(refused.is_error);
+    CHECK(text_of(refused).find("SESSION_TARGET_CHANGED") != std::string::npos);
+    CHECK(f.calls.empty());
+
+    // Discovery and a new explicit attach must remain available to repair the default.
+    CHECK_FALSE(d.call_tool("gui_session_list", json::object(), ctx_with_id()).is_error);
+    CHECK_FALSE(d.call_tool("gui_session_attach", {{"session_id", "/app/con[1]/ses[0]"}}, ctx_with_id()).is_error);
+    CHECK_FALSE(d.call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_with_id()).is_error);
+}
+
 TEST_CASE("Dispatcher: gui_session_attach auto-selects a single session", "[mcp][dispatcher]") {
     auto list_with = [](int n) {
         json sessions = json::array();
@@ -469,6 +559,25 @@ TEST_CASE("Dispatcher: gui_session_attach auto-selects a single session", "[mcp]
     }
 }
 
+TEST_CASE("Dispatchers share a token rate budget across session lanes", "[mcp][dispatcher][parallel]") {
+    Fixture f;
+    Policy policy;
+    policy.max_calls_per_minute = 1;
+    auto first = f.make(policy);
+    auto second = f.make(policy);
+    auto shared = std::make_shared<KeyedRateLimiter>();
+    first.set_shared_rate_limiter(shared);
+    second.set_shared_rate_limiter(shared);
+    CallContext ctx;
+    ctx.principal.id = "token-A";
+    ctx.principal.name = "alice";
+    CHECK_FALSE(first.call_tool("gui_doctor", json::object(), ctx).is_error);
+    const auto refused = second.call_tool("gui_doctor", json::object(), ctx);
+    CHECK(refused.is_error);
+    CHECK(text_of(refused).rfind("ERROR RATE_LIMITED", 0) == 0);
+    CHECK(f.calls.size() == 1);
+}
+
 TEST_CASE("Dispatcher: rate limiter seam refuses and audits", "[mcp][dispatcher]") {
     Fixture f;
     auto d = f.make();
@@ -494,7 +603,13 @@ TEST_CASE("Dispatcher: gui_batch runs items through the full pipeline", "[mcp][d
     auto d = f.make();
     json args = {{"items", json::array({{{"tool", "gui_transaction_start"}, {"arguments", {{"code", "SE38"}}}},
                                         {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "x"}}}}})}};
-    auto r = d.call_tool("gui_batch", args, ctx_with_id(9));
+    std::vector<double> progress;
+    auto ctx = ctx_with_id(9);
+    ctx.report_progress = [&](double done, std::optional<double> total, const std::string&) {
+        CHECK(total == 2.0);
+        progress.push_back(done);
+    };
+    auto r = d.call_tool("gui_batch", args, ctx);
     REQUIRE_FALSE(r.is_error);
     REQUIRE(f.calls.size() == 2);
     REQUIRE(f.records.size() == 2);  // one audit record per item, none for the batch itself
@@ -509,6 +624,7 @@ TEST_CASE("Dispatcher: gui_batch runs items through the full pipeline", "[mcp][d
     CHECK(summary[0]["ok"] == true);
     CHECK(text.find("--- [2/2] gui_screen_find ---") != std::string::npos);
     CHECK(text.find("SAP screen data (untrusted") != std::string::npos);
+    CHECK(progress == std::vector<double>{1.0, 2.0});
 }
 
 TEST_CASE("Dispatcher: gui_batch stop_on_error, nesting and validation", "[mcp][dispatcher][batch]") {

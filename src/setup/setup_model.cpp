@@ -309,7 +309,7 @@ std::string render_config_yaml(bool tls, const std::string& hostname, int port, 
                "  # Host header values clients use to reach this server\n"
                "  allowed_hosts: " << list_text({hostname}) << "\n";
         if (!allow_ip.empty())
-            out << "  # Only these client addresses/CIDR blocks may connect (loopback is always allowed)\n"
+            out << "  # Only these client addresses/CIDR blocks may connect (loopback exempt by default)\n"
                    "  allow_ip: " << list_text(allow_ip) << "\n";
     } else {
         out << "  # Development mode: plain HTTP on the loopback interface only.\n"

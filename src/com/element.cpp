@@ -3,12 +3,15 @@
 #include "include/com/raii_helpers.h"
 #include "include/com/utf8.h"
 #include "include/sensitive_data.h"
+#include "include/display_text_policy.h"
+#include "include/element_metadata_builder.h"
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <optional>
 
 namespace fairyfly {
 namespace sap {
@@ -74,148 +77,220 @@ std::string ComGuiElement::get_text_for_direct_read() const {
 }
 
 std::string ComGuiElement::get_text() const {
-    const auto type = get_type();
-    if (type == "GuiPasswordField") return redaction_marker(redaction_reason::password_field);
-    // Name/value dialogs can give the value field a neutral ID and label.
-    // Look for corresponding name/key fields under the same parent before
-    // reading a VALUE field. Gateway's known header-value control fails
-    // closed if its NAME sibling cannot be observed.
-    if (type == "GuiTextField" || type == "GuiCTextField") {
-        const auto id = get_id();
-        const auto separator = id.find_last_of('/');
-        const auto leaf = id.substr(separator == std::string::npos ? 0 : separator + 1);
-        // Table controls append [column,row] to each field ID. Preserve the
-        // row so a name in another visible row cannot classify this value.
-        const auto split_index = [](const std::string& field) {
-            const auto open = field.rfind('[');
-            const auto comma = open == std::string::npos ? std::string::npos
-                : field.find(',', open + 1);
-            if (comma == std::string::npos || field.back() != ']')
-                return std::pair{field, std::string{}};
-            const auto row = field.substr(comma + 1, field.size() - comma - 2);
-            if (row.empty() || !std::all_of(row.begin(), row.end(), [](unsigned char c) {
-                    return std::isdigit(c) != 0;
-                })) return std::pair{field, std::string{}};
-            return std::pair{field.substr(0, open), row};
-        };
-        const auto [field_leaf, value_row] = split_index(leaf);
-        const bool known_header = field_leaf == "txtIP_HEADER_VALUE";
-        if ((field_leaf.starts_with("txt") || field_leaf.starts_with("ctxt")) &&
-            field_leaf.ends_with("VALUE")) {
-            const auto base = field_leaf.substr(0, field_leaf.size() - 5);
-            const std::array<std::string, 4> sibling_leaves = {
-                base + "NAME", base + "KEY", base + "FIELDNAME", base + "HEADERNAME"};
-            std::array<bool, sibling_leaves.size()> sibling_found{};
-            try {
-                auto parent = get_dispatch_property(L"Parent");
-                if (!parent) return redaction_marker(redaction_reason::unverified);
-                bool needs_enumeration = !value_row.empty();
-                if (value_row.empty()) {
-                    for (size_t index = 0; index < sibling_leaves.size(); ++index) {
-                        auto sibling_dispatch = call_method_with_string(
-                            parent, "FindById", sibling_leaves[index]);
-                        if (!sibling_dispatch) {
-                            needs_enumeration = true;
-                            continue;
-                        }
-                        sibling_found[index] = true;
-                        const auto name = ComGuiElement::create(sibling_dispatch)
-                            ->get_string_property(L"Text");
-                        if (normalize_sensitive_name(name).empty() ||
-                            is_redaction_marker(name) || contains_sensitive_data_name(name))
-                            return redaction_marker(redaction_reason::paired_name);
+    // The credential decisions live in resolve_display_text (shared with other element
+    // sources); this adapter only supplies the lazy COM reads.
+    DisplayTextInputs in;
+    in.type = get_type();
+    in.id = [&] { return get_id(); };
+    in.label = [&] { return get_label(); };
+    in.changeable = [&]() -> std::optional<bool> {
+        try { return changeable_cached(); } catch (const std::exception&) { return std::nullopt; }
+    };
+    in.displayed_text = [&]() -> std::optional<std::string> {
+        try {
+            return get_string_property(L"DisplayedText");
+        } catch (const ComException&) {
+            // DisplayedText property not available on this element type
+            return std::nullopt;
+        }
+    };
+    in.text = [&] { return get_string_property(L"Text"); };
+    in.sibling_probe = [&](const SiblingQuery& query, const SiblingVisitor& visit) {
+        try {
+            auto parent = get_dispatch_property(L"Parent");
+            if (!parent) return false;
+            bool needs_enumeration = !query.row.empty();
+            if (query.row.empty()) {
+                for (size_t index = 0; index < query.leaves.size(); ++index) {
+                    auto sibling_dispatch = call_method_with_string(
+                        parent, "FindById", query.leaves[index]);
+                    if (!sibling_dispatch) {
+                        needs_enumeration = true;
+                        continue;
                     }
+                    const auto name = ComGuiElement::create(sibling_dispatch)
+                        ->get_string_property(L"Text");
+                    if (!visit(index, name)) return true;
                 }
-                if (needs_enumeration) {
-                    // A failed FindById call can mean either absence or a COM
-                    // observation error. Enumerate the bounded parent to prove
-                    // absence before allowing an ordinary VALUE field through.
-                    auto parent_element = ComGuiElement::create(parent);
-                    const int count = parent_element->get_child_count();
-                    if (count <= 0 || count > 200) return redaction_marker(redaction_reason::unverified);
-                    for (int index = 0; index < count; ++index) {
-                        auto child = parent_element->get_child(index);
-                        if (!child) return redaction_marker(redaction_reason::unverified);
-                        const auto child_id = child->get_id();
-                        if (child_id.empty()) return redaction_marker(redaction_reason::unverified);
-                        const auto child_separator = child_id.find_last_of('/');
-                        const auto child_leaf = child_id.substr(
-                            child_separator == std::string::npos ? 0 : child_separator + 1);
-                        const auto [child_field, child_row] = split_index(child_leaf);
-                        if (child_row != value_row) continue;
-                        const auto match = std::find(sibling_leaves.begin(),
-                                                     sibling_leaves.end(), child_field);
-                        if (match == sibling_leaves.end()) continue;
-                        sibling_found[static_cast<size_t>(match - sibling_leaves.begin())] = true;
-                        const auto name = child->get_string_property(L"Text");
-                        if (normalize_sensitive_name(name).empty() ||
-                            is_redaction_marker(name) || contains_sensitive_data_name(name))
-                            return redaction_marker(redaction_reason::paired_name);
-                    }
-                }
-                if (known_header && !sibling_found[0]) return redaction_marker(redaction_reason::unverified);
-            } catch (const std::exception&) {
-                return redaction_marker(redaction_reason::unverified);
             }
+            if (needs_enumeration) {
+                // A failed FindById call can mean either absence or a COM
+                // observation error. Enumerate the bounded parent to prove
+                // absence before allowing an ordinary VALUE field through.
+                auto parent_element = ComGuiElement::create(parent);
+                const int count = parent_element->get_child_count();
+                if (count <= 0 || count > 200) return false;
+                for (int index = 0; index < count; ++index) {
+                    auto child = parent_element->get_child(index);
+                    if (!child) return false;
+                    const auto child_id = child->get_id();
+                    if (child_id.empty()) return false;
+                    const auto child_separator = child_id.find_last_of('/');
+                    const auto child_leaf = child_id.substr(
+                        child_separator == std::string::npos ? 0 : child_separator + 1);
+                    const auto [child_field, child_row] = split_field_index(child_leaf);
+                    if (child_row != query.row) continue;
+                    const auto match = std::find(query.leaves.begin(), query.leaves.end(), child_field);
+                    if (match == query.leaves.end()) continue;
+                    const auto name = child->get_string_property(L"Text");
+                    if (!visit(static_cast<size_t>(match - query.leaves.begin()), name)) return true;
+                }
+            }
+            return true;
+        } catch (const std::exception&) {
+            return false;
         }
-    }
-    if (type == "GuiTextField" || type == "GuiCTextField" ||
-        type == "GuiComboBox" || type == "GuiComboBoxControl") {
-        // A name that merely reports a credential's state (PASSWORD_EXT_PWD_STATE) is shown only for a field that is KNOWN
-        // to be display-only and whose value looks like a state label; changeable or unknown changeability stays redacted.
-        bool changeable_known = false, changeable = false;
-        try { changeable = get_bool_property(L"Changeable"); changeable_known = true; } catch (const std::exception&) {}
-        const auto reason = sensitive_field_reason_for_display(
-            type, get_id(), get_label(), changeable_known, changeable, [&] {
-                std::string shown = get_string_property(L"DisplayedText");
-                if (shown.empty()) shown = get_string_property(L"Text");
-                return shown;
-            });
-        if (!reason.empty()) return redaction_marker(reason.c_str());
-    }
+    };
+    return resolve_display_text(in);
+}
 
-    const auto filter_text = [&](const std::string& value) {
-        const bool structured = value.find('=') != std::string::npos ||
-                                value.find(':') != std::string::npos;
-        if (type == "GuiTextedit" || type == "GuiShell" ||
-            (structured && contains_sensitive_data_name(value))) {
-            return redact_sensitive_response_text(value);
-        }
-        return value;
+bool ComGuiElement::explicitly_read_only() const {
+    DISPID changeable_id;
+    if (FAILED(resolve_dispid(L"Changeable", &changeable_id))) return false;
+    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
+    _variant_t changeable;
+    const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
+                                         DISPATCH_PROPERTYGET, &no_params,
+                                         &changeable, nullptr, nullptr);
+    return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
+}
+
+namespace {
+std::string trim_copy(const std::string& text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    const auto last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+std::string lower_copy(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+}  // namespace
+
+std::optional<bool> ComGuiElement::parse_check_value(const std::string& value) {
+    const std::string v = lower_copy(trim_copy(value));
+    if (v == "true" || v == "1" || v == "yes" || v == "on" || v == "x") return true;
+    if (v == "false" || v == "0" || v == "no" || v == "off" || v.empty()) return false;
+    return std::nullopt;
+}
+
+std::optional<bool> ComGuiElement::get_selected() const {
+    const auto read = read_bool_property_strict(L"Selected");
+    if (read.status != PropertyStatus::Ok) return std::nullopt;
+    return read.value == "true";
+}
+
+std::optional<bool> ComGuiElement::toggle_selected() {
+    if (get_classified_type() != GuiElementType::CheckBox) {
+        throw ComException("toggle only works on check boxes");
+    }
+    const auto current = get_selected();
+    if (!current) throw ComException("Cannot read the check box Selected state, so it is not toggled blindly");
+    select(!*current);
+    return get_selected();
+}
+
+ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
+    FillOutcome outcome;
+    if (explicitly_read_only()) {
+        outcome.status = FillOutcome::Status::ReadOnly;
+        return outcome;
+    }
+    const std::string type = get_type();
+    const auto invalid = [&](std::string message) {
+        outcome.status = FillOutcome::Status::InvalidArgument;
+        outcome.message = std::move(message);
+        return outcome;
     };
 
-    // For text fields (GuiTextField, GuiCTextField), DisplayedText contains the actual value
-    // For other elements (GuiLabel, etc.), Text contains the displayed text
-    // Try DisplayedText first (preferred for input fields), then fall back to Text
-    try {
-        std::string displayed_text = get_string_property(L"DisplayedText");
-        if (!displayed_text.empty()) {
-            return filter_text(displayed_text);
+    if (type == "GuiCheckBox" || type == "GuiRadioButton") {
+        const bool radio = type == "GuiRadioButton";
+        const auto wanted = parse_check_value(value);
+        if (!wanted) {
+            return invalid("Cannot interpret '" + value + "' as a " + (radio ? "radio button" : "check box") +
+                           " value; accepted: true, false, 1, 0, yes, no, on, off, x or an empty value (case-insensitive)");
         }
-    } catch (const ComException&) {
-        // DisplayedText property not available on this element type
+        if (radio && !*wanted) {
+            return invalid("A radio button cannot be cleared; select another option of the group instead");
+        }
+        select(*wanted);
+        outcome.selected = get_selected();
+        return outcome;
     }
 
-    // Fall back to Text property
-    auto text = get_string_property(L"Text");
-    return filter_text(text);
+    if (type == "GuiComboBox") {
+        struct Entry { std::string key, value; };
+        std::vector<Entry> entries;
+        try {
+            if (auto entries_dispatch = get_dispatch_property(L"Entries")) {
+                SapGuiCollection<ComGuiElement> collection(entries_dispatch);
+                const bool walked = collection.for_each([&](const std::shared_ptr<ComGuiElement>& entry) {
+                    entries.push_back({entry->get_string_property(L"Key"), entry->get_string_property(L"Value")});
+                });
+                if (!walked) entries.clear();
+            }
+        } catch (const std::exception& e) {
+            spdlog::debug("ComboBox entries unavailable: {}", e.what());
+            entries.clear();
+        }
+        const bool entries_known = !entries.empty();
+
+        std::string key_to_write = value;
+        if (entries_known) {
+            const std::string wanted = trim_copy(value);
+            const std::string wanted_lower = lower_copy(wanted);
+            const Entry* match = nullptr;
+            for (const auto& entry : entries) {  // exact key first, then the displayed value
+                if (trim_copy(entry.key) == wanted) { match = &entry; break; }
+            }
+            if (!match) {
+                for (const auto& entry : entries) {
+                    if (lower_copy(trim_copy(entry.value)) == wanted_lower) { match = &entry; break; }
+                }
+            }
+            if (!match) {  // keys that differ only in case ("en" for "EN")
+                for (const auto& entry : entries) {
+                    if (lower_copy(trim_copy(entry.key)) == wanted_lower) { match = &entry; break; }
+                }
+            }
+            if (!match) {
+                constexpr size_t kMaxListed = 30;
+                std::string list;
+                for (size_t i = 0; i < entries.size() && i < kMaxListed; ++i) {
+                    if (i) list += "; ";
+                    list += entries[i].key + " = " + entries[i].value;
+                }
+                if (entries.size() > kMaxListed) {
+                    list += "; ... (" + std::to_string(entries.size() - kMaxListed) + " more)";
+                }
+                return invalid("No combo box entry matches '" + value +
+                               "' (key or displayed value). Available entries (key = value): " + list);
+            }
+            key_to_write = match->key;
+        }
+
+        try {
+            set_string_property(L"Key", key_to_write);
+        } catch (const std::exception& e) {
+            if (entries_known) throw;
+            throw ComException("Combo box entries are unavailable, so '" + value +
+                               "' was written as a key and SAP rejected it: " + e.what());
+        }
+        try { outcome.key = get_string_property(L"Key"); } catch (const std::exception&) {}
+        try { outcome.display_value = get_string_property(L"Value"); } catch (const std::exception&) {}
+        return outcome;
+    }
+
+    set_string_property(L"Text", value);
+    spdlog::debug("Set text on element type {}", type);
+    return outcome;
 }
 
 bool ComGuiElement::set_text(const std::string& text) {
-    // An absent Changeable property is common on SAP GUI objects. Only block
-    // the write when SAP explicitly reports VARIANT_FALSE.
-    DISPID changeable_id;
-    if (SUCCEEDED(resolve_dispid(L"Changeable", &changeable_id))) {
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        _variant_t changeable;
-        const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_PROPERTYGET, &no_params,
-                                             &changeable, nullptr, nullptr);
-        if (SUCCEEDED(hr) && changeable.vt == VT_BOOL &&
-            changeable.boolVal == VARIANT_FALSE) {
-            return false;
-        }
-    }
+    if (explicitly_read_only()) return false;
     const std::string type = get_type();
     if (type == "GuiComboBox") {
         set_string_property(L"Key", text);
@@ -336,8 +411,13 @@ void ComGuiElement::press() {
     try {
         std::string elem_type = get_type();
         if (elem_type == "GuiTab" || elem_type == "GuiMenu" ||
-            elem_type == "GuiRadioButton" || elem_type == "GuiCheckBox") {
+            elem_type == "GuiRadioButton") {
             select(true);
+            return;
+        }
+        if (elem_type == "GuiCheckBox") {
+            // A click flips a check box; assigning Selected=true would leave a checked box checked.
+            toggle_selected();
             return;
         }
 
@@ -506,12 +586,17 @@ std::string ComGuiElement::get_tooltip() const {
     }
 }
 
+bool ComGuiElement::changeable_cached() const {
+    if (!cached_changeable_) cached_changeable_ = get_bool_property(L"Changeable");
+    return *cached_changeable_;
+}
+
 bool ComGuiElement::is_changeable() const {
     if (!dispatch_) return false;
 
     try {
         // Check Changeable property (available on most interactive elements)
-        return get_bool_property(L"Changeable");
+        return changeable_cached();
     } catch (const ComException&) {
         // If Changeable not available, assume not changeable
         return false;
@@ -584,31 +669,7 @@ SapGuiCollection<ComGuiElement> ComGuiElement::children() const {
 
 std::string ComGuiElement::get_container_type() const {
     if (!dispatch_) return "";
-
-    std::string type = get_type();
-
-    // Leaf elements are never containers - fast path avoids COM Children query
-    if (type == "GuiLabel" || type == "GuiButton" || type == "GuiTextField" ||
-        type == "GuiCTextField" || type == "GuiPasswordField" || type == "GuiOkCodeField" ||
-        type == "GuiCheckBox" || type == "GuiRadioButton" || type == "GuiComboBox" ||
-        type == "GuiComboBoxControl" || type == "GuiStatusPane") {
-        return "";
-    }
-
-    // Classify containers by SAP GUI type
-    if (type == "GuiToolbar" || type == "GuiMenubar") return "toolbar";
-    if (type == "GuiTabStrip") return "tabs";
-    if (type == "GuiTableControl") return "table";
-    if (type == "GuiGridView") return "grid";
-    if (type == "GuiUserArea" || type == "GuiSimpleContainer") return "form";
-    if (type == "GuiStatusPane") return "statusbar";
-    if (type == "GuiTitlebar") return "titlebar";
-    if (type == "GuiBox") return "group";
-
-    // Check if element has children (generic container)
-    if (get_child_count() > 0) return "container";
-
-    return "";
+    return classify_container_type(get_type(), [&] { return get_child_count(); });
 }
 
 int ComGuiElement::get_property_int(const std::wstring& property_name) const {

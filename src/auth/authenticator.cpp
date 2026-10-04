@@ -122,6 +122,7 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
     for (const auto& scope : meta->scopes)
         if (scope != "*") ok.principal.scopes.insert(scope);
     ok.principal.sap_systems = meta->sap_systems;
+    ok.principal.sap_identities = meta->sap_identities;
     ok.principal.tcodes = meta->tcodes;
     ok.principal.connections = meta->connections;
     ok.principal.rate_per_minute = meta->rate_per_minute;

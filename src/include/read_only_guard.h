@@ -23,12 +23,22 @@ class ComGuiElement;
 /// Text and tooltip are ignored for data-holding element types (text fields, labels)
 /// because their text is content, not an action label; the id rules always apply.
 ///
+/// Decision (2026-10-03, after a Codex hunt): a click on a check box or radio button of a selection screen is
+/// ALLOWED under --read-only. It only changes input (like choosing a search filter), not SAP data; `element fill`
+/// stays refused. Answer buttons of POPUPS are the opposite: a Yes/OK confirms whatever the dialog asks, so only
+/// dismissing buttons (No, Cancel, Close, Back, Help, Details, standard Cancel) are allowed there.
+///
 /// Residual risk: double-click and Enter on the main window are allowed and can trigger
 /// application actions the guard cannot classify; --read-only is a safety net, not a sandbox.
 ///
 /// Returns the name of the first matching rule, or an empty string when allowed.
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
                                    const std::string& tooltip, const std::string& element_id);
+
+/// Replaces a leading "@active" of an element id by the id of the active window so the guard sees the
+/// real window index (an answer button of a popup must not slip through as @active/usr/btn...).
+/// Unchanged when the id has no such prefix or the active window id is unknown (empty).
+std::string expand_active_window_prefix(const std::string& element_id, const std::string& active_window_id);
 
 /// True when the described control would change SAP state.
 bool is_state_changing_action(const std::string& element_type, const std::string& text,

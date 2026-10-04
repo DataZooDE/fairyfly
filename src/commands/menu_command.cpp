@@ -16,11 +16,19 @@ public:
         menu_cmd_ = noun_app(app, "menu");
 
         list_cmd_ = add_leaf(app, {"menu", "list"});
+        list_cmd_->footer(R"HELP(Usage notes:
+Read menu paths before selecting an item; use @active for a popup's menu.
+Example: fairyfly menu list --window @active --connection 3
+)HELP");
         list_cmd_->add_option("--window", list_window_, "Window whose menu bar is listed (default wnd[0], or @active)")
             ->default_val("wnd[0]");
         list_cmd_->add_option("--connection", list_conn_id_, "Connection ID to use");
 
         select_cmd_ = add_leaf(app, {"menu", "select"});
+        select_cmd_->footer(R"HELP(Usage notes:
+Select an observed slash-separated text path from menu list. Inspect the screen afterward.
+Example: fairyfly menu select "System/Status" --connection 3
+)HELP");
         select_cmd_->add_option("path", select_path_,
             "Menu text path to select, e.g. 'Runtime Errors/Display' (case-insensitive, '&' ignored)")
             ->required();

@@ -93,6 +93,10 @@ std::string f4_dialog_path(int active_window_index);
 
 ActionStatus read_action_status(const ComGuiSessionPtr& session);
 
+/// Same as above for a caller that already holds the id of the active window (skips the
+/// ActiveWindow and Id reads). The id must belong to the window that is active right now.
+ActionStatus read_action_status(const ComGuiSessionPtr& session, const std::string& active_window_id);
+
 std::optional<Result> classify_action_status(const ActionStatus& before,
                                              const ActionStatus& after,
                                              const std::string& element,

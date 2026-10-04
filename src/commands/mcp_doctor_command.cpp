@@ -28,7 +28,8 @@ namespace {
 /// Real probes. SAP state comes from the existing read-only `doctor` handler; nothing is clicked.
 class RealProbes : public DoctorProbes {
 public:
-    explicit RealProbes(const HandlerProvider& get_handler) : get_handler_(get_handler) {}
+    RealProbes(const HandlerProvider& get_handler, std::vector<std::string> owner_identities)
+        : get_handler_(get_handler), owner_identities_(std::move(owner_identities)) {}
 
     PortState probe_port(const std::string& host, int port) override {
         WSADATA data;
@@ -55,7 +56,9 @@ public:
     SapState sap() override {
         SapState out;
         try {
-            const Result result = get_handler_().handle_doctor();
+            auto& handler = get_handler_();
+            handler.set_owner_window_guard(!owner_identities_.empty());
+            const Result result = handler.handle_doctor();
             if (result.status != Result::Status::Success || !result.data.contains("checks")) return out;
             for (const auto& c : result.data["checks"]) {
                 const std::string name = c.value("name", "");
@@ -63,13 +66,41 @@ public:
                 if (name == "com_engine")
                     out.scripting_available = status == "pass" ? SapState::Tri::Yes : SapState::Tri::No;
                 if (name == "active_sessions") {
-                    out.session_present = status == "pass" ? SapState::Tri::Yes : SapState::Tri::No;
                     if (status != "pass") out.detail = c.value("message", "");
                 }
                 if (name == "com_engine" && status != "pass") out.detail = c.value("message", "");
             }
         } catch (const std::exception& e) {
             out.scripting_available = SapState::Tri::No;
+            out.detail = e.what();
+            return out;
+        }
+        if (out.scripting_available != SapState::Tri::Yes) return out;
+        try {
+            auto& handler = get_handler_();
+            const Result listed = handler.handle_list_all();
+            if (listed.status != Result::Status::Success || !listed.data.is_object() ||
+                !listed.data.contains("connections") || !listed.data["connections"].is_array()) return out;
+            bool complete = listed.data.value("connection_enumeration_errors", 0) == 0 &&
+                            listed.data.value("session_enumeration_errors", 0) == 0;
+            std::vector<std::optional<std::string>> users;
+            for (const auto& connection : listed.data["connections"]) {
+                if (!connection.is_object() || !connection.contains("sessions") ||
+                    !connection["sessions"].is_array()) { complete = false; continue; }
+                for (const auto& session : connection["sessions"]) {
+                    if (!session.is_object() || !session.contains("id") || !session["id"].is_string() ||
+                        !session.value("alive", false)) { complete = false; continue; }
+                    const auto target = handler.peek_session_target("", session["id"].get<std::string>(), {});
+                    if (target.facts.system.empty() || target.facts.client.empty()) users.emplace_back(std::nullopt);
+                    else if (owner_sap_identity_allowed(target.facts.system, target.facts.client,
+                                                        target.facts.user, owner_identities_))
+                        users.emplace_back(target.facts.user);
+                    else users.emplace_back(std::string{});
+                }
+            }
+            out.session_present = classify_logged_in_users(users, complete);
+        } catch (const std::exception& e) {
+            out.session_present = SapState::Tri::Unknown;
             out.detail = e.what();
         }
         return out;
@@ -143,6 +174,7 @@ public:
 
 private:
     const HandlerProvider& get_handler_;
+    std::vector<std::string> owner_identities_;
 };
 
 } // namespace
@@ -168,7 +200,10 @@ int run_mcp_doctor_command(McpExtras& x, const HandlerProvider& get_handler) {
     if (const auto it = effective.find("server.allowed_hosts"); it != effective.end())
         if (const auto* list = std::get_if<std::vector<std::string>>(&it->second.value); list && !list->empty()) input.hostname = list->front();
 
-    RealProbes probes(get_handler);
+    std::vector<std::string> owner_identities;
+    if (const auto it = effective.find("owner.sap_identities"); it != effective.end())
+        if (const auto* list = std::get_if<std::vector<std::string>>(&it->second.value)) owner_identities = *list;
+    RealProbes probes(get_handler, std::move(owner_identities));
     const auto checks = run_mcp_doctor(input, probes);
     if (x.output == "json") {
         nlohmann::json out;

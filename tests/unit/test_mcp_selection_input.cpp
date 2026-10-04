@@ -201,6 +201,19 @@ TEST_CASE("selection input: the option works the same on a write-mode server wit
     CHECK(env.events[1] == false);
 }
 
+TEST_CASE("selection input: initial screen state survives provider replacement", "[mcp][selection-input][provider-reload]") {
+    Env env;
+    auto state = std::make_shared<SessionPolicyState>();
+    const Principal p = ro_token("basis");
+    auto before = env.make(true);
+    before->set_session_policy_state(state);
+    REQUIRE_FALSE(start_su01(*before, p).is_error);
+
+    auto after = env.make(true);
+    after->set_session_policy_state(state);
+    CHECK_FALSE(after->call_tool("gui_element_fill", fill(), ctx_for(p)).is_error);
+}
+
 TEST_CASE("selection input: typing is refused after navigating away from the initial screen", "[mcp][selection-input]") {
     Env env;
     auto d = env.make(true);

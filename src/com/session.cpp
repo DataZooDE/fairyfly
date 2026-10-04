@@ -6,6 +6,8 @@
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
 #include <chrono>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 namespace fairyfly {
@@ -64,6 +66,100 @@ ComGuiElementPtr ComGuiSession::find_element_by_id(const std::string& id) const 
     return ComGuiElement::create(elem);
 }
 
+namespace {
+std::mutex s_object_tree_mutex;
+ObjectTreeSupport s_object_tree_support = ObjectTreeSupport::Unknown;
+
+void set_object_tree_support(ObjectTreeSupport value) {
+    std::lock_guard<std::mutex> lock(s_object_tree_mutex);
+    s_object_tree_support = value;
+}
+} // namespace
+
+ObjectTreeSupport ComGuiSession::object_tree_support() {
+    std::lock_guard<std::mutex> lock(s_object_tree_mutex);
+    return s_object_tree_support;
+}
+
+void ComGuiSession::reset_object_tree_support() { set_object_tree_support(ObjectTreeSupport::Unknown); }
+
+std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
+                                                          const std::vector<std::string>& props,
+                                                          ObjectTreeFailure* failure) const {
+    if (!dispatch_) throw ComException("Null object");
+    if (failure) *failure = ObjectTreeFailure::None;
+    const auto fail = [&](ObjectTreeFailure why) -> std::optional<std::string> {
+        if (failure) *failure = why;
+        return std::nullopt;
+    };
+    if (object_tree_support() == ObjectTreeSupport::Missing) return fail(ObjectTreeFailure::Unsupported);
+    try {
+        (void)get_type();
+    } catch (const std::exception&) {}
+    DISPID dispid = DISPID_UNKNOWN;
+    if (FAILED(resolve_dispid(L"GetObjectTree", &dispid))) {
+        set_object_tree_support(ObjectTreeSupport::Missing);
+        spdlog::info("GuiSession.GetObjectTree is not available (SAP GUI older than 7.70 PL3?)");
+        return fail(ObjectTreeFailure::Unsupported);
+    }
+
+    // IDispatch::Invoke wants the arguments in reverse order: [0] = props (optional), last = id.
+    VARIANT args[2];
+    VariantInit(&args[0]);
+    VariantInit(&args[1]);
+    UINT arg_count = 1;
+    VARIANT& id_arg = props.empty() ? args[0] : args[1];
+    const auto wide_id = com::utf8_to_wide(id);
+    id_arg.vt = VT_BSTR;
+    id_arg.bstrVal = SysAllocStringLen(wide_id.data(), static_cast<UINT>(wide_id.size()));
+    if (!props.empty()) {
+        arg_count = 2;
+        SAFEARRAY* array = SafeArrayCreateVector(VT_VARIANT, 0, static_cast<ULONG>(props.size()));
+        if (!array) {
+            VariantClear(&id_arg);
+            return fail(ObjectTreeFailure::Failed);
+        }
+        for (LONG i = 0; i < static_cast<LONG>(props.size()); ++i) {
+            const auto wide_prop = com::utf8_to_wide(props[static_cast<size_t>(i)]);
+            VARIANT element;
+            VariantInit(&element);
+            element.vt = VT_BSTR;
+            element.bstrVal = SysAllocStringLen(wide_prop.data(), static_cast<UINT>(wide_prop.size()));
+            SafeArrayPutElement(array, &i, &element);   // copies the element
+            VariantClear(&element);
+        }
+        args[0].vt = VT_ARRAY | VT_VARIANT;
+        args[0].parray = array;
+    }
+    DISPPARAMS params = {args, nullptr, arg_count, 0};
+    VARIANT result;
+    VariantInit(&result);
+    const auto started = std::chrono::steady_clock::now();
+    const HRESULT hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    VariantClear(&args[0]);
+    VariantClear(&args[1]);
+    if (FAILED(hr)) {
+        VariantClear(&result);
+        if (hr == DISP_E_MEMBERNOTFOUND || hr == DISP_E_UNKNOWNNAME) {
+            set_object_tree_support(ObjectTreeSupport::Missing);
+        }
+        spdlog::warn("GuiSession.GetObjectTree failed hr=0x{:08X} after {} ms", static_cast<unsigned>(hr), elapsed_ms);
+        if (hr == RPC_E_SERVERFAULT) return fail(ObjectTreeFailure::ServerFault);
+        return fail(ObjectTreeFailure::Failed);
+    }
+    std::string text = safe_bstr_to_string(result, "GetObjectTree");
+    VariantClear(&result);
+    if (text.empty()) {
+        spdlog::warn("GuiSession.GetObjectTree returned an empty answer after {} ms", elapsed_ms);
+        return fail(ObjectTreeFailure::Empty);
+    }
+    set_object_tree_support(ObjectTreeSupport::Available);
+    spdlog::debug("GuiSession.GetObjectTree|bytes={}|ms={}", text.size(), elapsed_ms);
+    return text;
+}
+
 void ComGuiSession::start_transaction(const std::string& tcode) {
     utils::TraceGuard trace("ComGuiSession::start_transaction");
     if (!dispatch_) throw ComException("Null session");
@@ -93,9 +189,6 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
 
         trace.mark_success();
         spdlog::info("Started transaction: {}", tcode);
-
-        // Brief wait for transaction to load
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
     } catch (const ComException&) {
         spdlog::error("Failed to start transaction '{}'", tcode);
         throw;
@@ -107,51 +200,17 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
 }
 
 void ComGuiSession::wait_for_completion(int timeout_ms) {
-    auto start = std::chrono::high_resolution_clock::now();
+    // StartTransaction/SendCommand are synchronous, so Busy is usually already false:
+    // check immediately and sleep only while the session is actually busy.
+    const auto start = std::chrono::steady_clock::now();
     while (is_busy()) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start
+            std::chrono::steady_clock::now() - start
         );
         if (elapsed.count() > timeout_ms) {
             throw ComException("Session timeout waiting for completion");
         }
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-    }
-}
-
-void ComGuiSession::send_vkey(int vkey) {
-    utils::TraceGuard trace("ComGuiSession::send_vkey");
-    if (!dispatch_) throw ComException("Null session");
-
-    try {
-        _bstr_t method("SendVKey");
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
-        if (FAILED(hr)) {
-            trace.mark_error(fmt::format("SendVKey method not found: 0x{:08X}", hr));
-            throw ComException("SendVKey method not found", hr);
-        }
-
-        _variant_t vkey_var(vkey);
-        DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
-        if (FAILED(hr)) {
-            trace.mark_error(fmt::format("SendVKey invoke failed: 0x{:08X}", hr));
-            throw ComException("Failed to send virtual key", hr);
-        }
-
-        trace.mark_success();
-        spdlog::debug("Sent virtual key: {}", vkey);
-
-        // Brief wait for server to process key
-        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-    } catch (const ComException&) {
-        throw;
-    } catch (const std::exception& e) {
-        trace.mark_error(e.what());
-        throw ComException(std::string("Exception in send_vkey: ") + e.what());
+        std::this_thread::sleep_for(constants::Milliseconds(constants::SESSION_POLL_INTERVAL_MS));
     }
 }
 

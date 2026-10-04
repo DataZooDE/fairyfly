@@ -3,6 +3,7 @@
 This is the deployment guide for `fairyfly mcp --http`. The protocol basics, tools and stdio use are in
 [MCP.md](MCP.md); the one-time setup of the certificate, URL reservation and TLS binding is in
 [MCP_SETUP.md](MCP_SETUP.md); the tray, YAML config, client-config and doctor are in [MCP_TRAY.md](MCP_TRAY.md).
+SAP username/password and SSO/SNC setup for multiple SAP users is in [MCP_SAP_AUTHENTICATION.md](MCP_SAP_AUTHENTICATION.md).
 Verify current flags with `fairyfly mcp --help`.
 
 ## Architecture
@@ -36,7 +37,7 @@ Verify current flags with `fairyfly mcp --help`.
   never loaded into the fairyfly process, which runs unelevated and holds no key and no administrator rights.
 - Plain HTTP on `127.0.0.1` stays possible for development and tests (`fairyfly mcp --http` without `--tls`).
   Plain HTTP on any other host is refused (`INSECURE_BIND`) unless the flag-only `--insecure-http` is given.
-- All tool calls are serialized on one main thread (queue of 256 at the listener, executor queue of 16, soft timeout
+- Without owner mode, all tool calls are serialized on one main thread (queue of 256 at the listener, executor queue of 16, soft timeout
   120 s). HTTP worker threads only queue and wait. Because of this, the per-token check -> invoke -> update
   sequence in the dispatcher (for example the "left the T-code allowlist" block) is atomic per process: no two
   calls, not even of the same token, are ever inside `call_tool` at once (unit test `CallExecutor: concurrent
@@ -48,12 +49,11 @@ Verify current flags with `fairyfly mcp --help`.
 
 ### Why a console/tray program and not a Windows service
 
-SAP GUI scripting talks to the SAP GUI process of a logged-on user and needs that user's interactive desktop.
-A Windows service runs in Session 0, which has no access to that desktop, so it cannot see SAP GUI. fairyfly
-is therefore an ordinary process started by the VM user: a console window, or with `--tray` a hidden console
-plus a notification-area icon (see [MCP_TRAY.md](MCP_TRAY.md)). It only runs while that user is logged on to
-an interactive session that stays unlocked. http.sys does not need a service either: an unelevated process can
-own a URL prefix once an administrator has reserved it for the user (the URL ACL created by `mcp setup`).
+SAP GUI scripting needs the interactive desktop of a logged-on user, which Windows services do not have (see
+[ARCHITECTURE.md](ARCHITECTURE.md#why-not-a-windows-service)). fairyfly is therefore an ordinary process of the VM
+user: a console window, or with `--tray` a notification-area icon ([MCP_TRAY.md](MCP_TRAY.md)). It only runs while
+that user is logged on to an unlocked interactive session. http.sys needs no service either: an unelevated process
+can own a URL prefix once an administrator has reserved it for the user (the URL ACL created by `mcp setup`).
 
 ## Step-by-step setup
 
@@ -75,7 +75,7 @@ own a URL prefix once an administrator has reserved it for the user (the URL ACL
 
 ~~~powershell
 fairyfly mcp setup --hostname mcp.example.com --self-signed --allow-ip 203.0.113.0/24 --dry-run   # plan only
-fairyfly mcp setup --hostname mcp.example.com --self-signed --yes
+fairyfly mcp setup --hostname mcp.example.com --self-signed --allow-ip 203.0.113.0/24 --yes
 ~~~
 
 `mcp setup` creates the certificate (`--self-signed`, or bring your own with `--cert-thumbprint`), the URL ACL for
@@ -119,7 +119,8 @@ Relevant options (see `fairyfly mcp --help`):
 | `--http` / `--transport http` | serve MCP over HTTP or HTTPS (http.sys) instead of stdio |
 | `--tls` / `--no-tls` | HTTPS; the certificate binding must exist (`mcp setup`) |
 | `--mcp-host` (default 127.0.0.1), `--mcp-port` / `--port` (8383; `mcp setup` chooses 8443 for TLS) | URL prefix: `127.0.0.1` (loopback), `+` (all interfaces, TLS recommended) or a host name; `localhost` is treated as 127.0.0.1 |
-| `--allow-ip CIDR,...` | server-level client allow-list; loopback is always allowed; empty = any |
+| `--allow-ip CIDR,...` | server-level client allow-list; loopback is exempt by default; empty = any |
+| `--allow-ip-include-loopback` | require loopback callers to match a nonempty `--allow-ip` list too; YAML: `server.allow_ip_include_loopback: true` |
 | `--insecure-http` | allow plain HTTP on a non-loopback host (flag-only, dangerous) |
 | `--allow-write`, `--read-only` | server mode; a token can only narrow it; `FAIRYFLY_READ_ONLY=1` is a hard cap |
 | `--allowed-hosts`, `--cors-origin` | extra accepted Host values, accepted browser Origins (default: none, any Origin is refused with 403) |
@@ -135,13 +136,76 @@ Note on the YAML file: `mode.*`, `limits.*`, `tools.families`, `default_connecti
 default. `--insecure-no-auth` and `--insecure-http` are flag-only on purpose: they cannot be set from YAML or the
 environment. The old `auth.proxy_secret_source` key is gone (reported as an unknown key).
 
+Set the exact SAP identities exposed by one interactive tray in the local YAML file:
+
+~~~yaml
+owner:
+  sap_identities: [A4H/001/ALICE, A4H/001/BOB]
+~~~
+
+When this list has more than one identity, issue each client token with an exact `--sap-identity SID/CLIENT/USER` grant. Older unbound tokens are refused until reissued. See [MCP_SAP_AUTHENTICATION.md](MCP_SAP_AUTHENTICATION.md) for password and SSO/SNC logon.
+
+On a shared Windows host, set `server.allow_ip_include_loopback: true` if the server IP allowlist must
+also govern other local accounts and loopback tunnels. Include the intended `127.0.0.1/8` or `::1` peer
+in `server.allow_ip` when those clients need access. A nonempty `server.allow_ip` list is required when this
+setting is true; startup rejects an empty list. Bearer tokens remain required either way.
+
+An entry is uppercase `SID/CLIENT/USER` with a three-digit client; wildcards are rejected. This opt-in rule
+refuses server startup if `FAIRYFLY_MCP_OWNER_SAP_IDENTITIES` is set to an invalid value, so a typo cannot
+silently remove the owner boundary. The YAML parser also rejects invalid entries.
+For owner-mode tray routing, the SAP window must also belong to the same Windows user SID, interactive session,
+and logon authentication ID as the tray and its private worker. An unavailable window handle or unreadable
+process token denies selection. This Windows check supplements the exact SAP identity rule below. Each Windows
+account needs its own interactive tray endpoint and SAP GUI if separate Windows credential custody is required;
+the primary multi-user acceptance test uses different SAP users under one Windows account.
+This rule
+checks live SAP facts for session calls, filters `gui_session_list` per session and token system allowlist,
+and checks explicit `gui_session_attach` before any saved-connection write and again afterwards. Session
+commands bind to the checked saved connection and revalidate its generation, live SAP identity and nonempty
+server session key in the handler before acting. A changed session during a call has its result withheld as
+`OUTCOME_UNKNOWN`; a write may already have run. Unknown and foreign sessions share the public
+`OWNER_SESSION_UNAVAILABLE` refusal. If a session's identity cannot be verified, the call is denied.
+Owner-filtered session discovery returns validated session IDs and live connection names; it omits window
+titles and other enumerated metadata that could belong to an earlier occupant of a reused session ID.
+With this rule, `gui_session_launch` requires a token whose `--connections` restriction explicitly vouches for
+the SAP Logon entry. The newly opened window is checked before it receives a saved connection ID and checked
+again before that ID is returned. The `--allow-sapshcut` fallback is refused in owner-mode HTTP. `gui_session_login`
+can authenticate a saved prelogin window when the stored credential resolves to a token-authorized SAP identity. On a multi-identity endpoint, the window must also have been launched by that same token; on this
+SAP GUI installation the logon screen reports client `000` and transaction `S000` before it changes to the
+authenticated client. Login holds the target session lane and pauses admission probes while it types. Implicit
+attach and credential listings remain withheld. `gui_connection_list` returns only saved connections verified against
+the live allowed SAP identity and token restrictions; `gui_doctor` reports only the count and readiness of those
+verified connections. Existing SAP sessions can be found with `gui_session_list` and saved with explicit
+`gui_session_attach`. On a multi-identity endpoint, an unfinished window launched through Fairyfly is bound to the launching token and saved generation for 15 minutes. Only that token may complete `gui_session_login`; an unbound prelogin window is refused. `gui_session_launch` with `login:true` also supports password logon, and a SAP Logon entry may complete SSO during launch. For navigation and writes, acquire an exclusive
+`gui_session_lease` for the saved connection and pass its `lease_id` on each state-changing tool call; renew it
+before its 60-second expiry and release it when finished. A lease is bound to the live saved-session generation
+and token issuance ID. Observational reads need no lease: use `gui_screen_read` with `no_tabs=true`;
+the default tab expansion and `gui_element_get` with `activate_tab=true` select tabs and require a lease.
+An owner-mode `gui_screen_read` also returns a `screen_guard` in `structuredContent` when SAP reports a known
+transaction, program and screen number. Pass that value as `expected_screen_guard` on a later session action
+to reject it with `SCREEN_CHANGED` if the session or dynpro changed while the client was deciding or waiting.
+This is an optional precondition; it cannot detect edits that leave the same dynpro identity unchanged, so keep
+the lease for multi-step writes.
+Separate clients using one token still need the lease secret
+to coordinate. Lease acquisition requires the explicit `session.lease` token scope (or `*`); the broad `session`
+scope covers the other session tools (list, attach, launch, login, disconnect, subject to mode and target
+restrictions) but not leases. With an owner allowlist, the tray routes established SAP
+windows to private workers and ordered per-window lanes. Different windows can make progress concurrently;
+calls to one window remain ordered. On the tested A4H host, a read of one window finished while a 20-read
+batch ran in another, both for separate SAP connections and for two windows in one connection. SAP GUI-wide
+operations and SAP backend waits can still limit concurrency.
+Owner-mode `gui_batch` requires a top-level `connection` and uses one top-level `lease_id` for all items that
+select tabs, navigate or write. Mixed-session batches are refused before any item runs. A queued HTTP call is
+reauthenticated against fresh token metadata before execution; an action already running cannot be revoked mid-call.
+
 ### 5. Tray and autostart
 
 `fairyfly mcp --tray --http -c C:\path\mcp.yaml` detaches the server into a tray icon;
 `fairyfly mcp --tray --install-autostart` registers it in `HKCU\...\Run` so it starts at logon of that user.
 Details, the icon menu (start/stop/restart, read-only toggle) and the manual checklist are in
-[MCP_TRAY.md](MCP_TRAY.md). The tray needs the HTTP transport: pass `--http` (also to `--install-autostart`) or, as
-your own choice, put `server.transport: http` into the YAML because the Run value only carries the config path.
+[MCP_TRAY.md](MCP_TRAY.md). The tray needs the HTTP transport: pass `--http` when you start it by hand. For autostart,
+put `server.transport: http` into the YAML first: the Run value only carries `mcp --tray` and the config path, so an
+`--http` given to `--install-autostart` is not kept.
 `fairyfly mcp setup` does not write `server.transport` on purpose, so a plain stdio `fairyfly mcp` (for example a
 Claude Desktop config) keeps working after setup.
 
@@ -250,7 +314,7 @@ problems); tool failures are normal `200` JSON-RPC results with `isError: true` 
 | 400 | JSON-RPC **-32022** | unsupported protocol version; `error.data.supported` lists ours |
 | 401 | `AUTH_REQUIRED` | no bearer token, or no token exists on the server yet (with `WWW-Authenticate: Bearer realm="fairyfly"`) |
 | 401 | `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED` | malformed/unknown/wrong secret (deliberately not distinguishable), expired, revoked |
-| 403 | `ADDRESS_NOT_ALLOWED` | peer address outside the server's `--allow-ip` list (checked first, before everything else; loopback always passes) |
+| 403 | `ADDRESS_NOT_ALLOWED` | peer address outside the server's `--allow-ip` list (checked first, before everything else; loopback is exempt unless strict mode is enabled) |
 | 403 | `IP_NOT_ALLOWED` | peer address outside the token's `--ip` list |
 | 403 | `HOST_NOT_ALLOWED`, `ORIGIN_NOT_ALLOWED` | DNS-rebinding defence: Host not loopback/`--allowed-hosts`, or an Origin that is not in `--cors-origin` |
 | 404 | `NOT_FOUND` | any path other than `/mcp` |
@@ -286,65 +350,12 @@ The SSE response is a `text/event-stream` (`Cache-Control: no-cache`, `X-Accel-B
 Any other request (including `tools/call` under the rules above, and `tools/list`) is a plain JSON
 response. Events are written progressively by http.sys; put no buffering or compressing intermediary between
 client and server. HTTP/2 and HTTP/1.1 clients are both served (verification against a live host is tracked in
-[OPEN_WORK.md](OPEN_WORK.md)).
+[internal/OPEN_WORK.md](internal/OPEN_WORK.md)).
 
 ## Security model
 
-Layers, outside in:
-
-1. **TLS in the kernel** (http.sys with the certificate bound by `mcp setup`; Schannel negotiates, machine policy
-   sets the minimum version, setup warns below TLS 1.2). The private key never enters the fairyfly process.
-2. **Server `--allow-ip`**: a client allow-list of addresses or CIDR blocks on the socket peer, checked first, a
-   403 `ADDRESS_NOT_ALLOWED` before anything else is looked at. Loopback always passes; empty = any. Combine it
-   with a firewall rule (`mcp setup --open-firewall`) for defence in depth.
-3. **Bearer tokens** (`ffy_<id>_<secret>`): only SHA-256 plus metadata are stored, in Windows Credential Manager
-   (`fairyfly-mcp:<name>`; a compact JSON record, split over `fairyfly-mcp:<name>#1..n` chunk entries when a long
-   allowlist exceeds one Credential Manager value, up to 16 chunks, else `TOKEN_TOO_LARGE`; the head entry is written
-   last and a damaged or incomplete set never authenticates; `token delete` removes every chunk, `cmdkey` users must
-   delete the `#n` entries as well); constant-time comparison; optional expiry and per-token **IP binding on the
-   real peer address** (`IP_NOT_ALLOWED`); revocation takes effect within 5 s (instantly in the revoking process).
-4. **Scopes** per tool family or single tool (`<family>.<verb>`), the token **read-only** flag, **SAP system/client** allowlist and **T-code**
-   allowlist, a per-token **rate limit**. The effective policy is the server policy intersected with the token's:
-   a token can narrow, never widen. `FAIRYFLY_READ_ONLY=1` is a hard cap that no token or flag overrides.
-5. **Request limits**: per-URL-group kernel timeouts (entity body 15 s, drain 5 s, minimum send rate; measured: an authenticated request whose body stalls is cut after 15 s), machine-wide connection timers for connections that have not delivered a complete header yet (see the threat model),
-   16 receive workers, a request queue of 256, 1 MiB body limit answered before the body is read.
-6. **Audit trail**: one record per tool call with `principal`, `transport: "http"`, `remote_addr` (the real peer),
-   `era`, tool, status and error code; never results, screen content, fill values or tokens.
-7. The read-only **guard** of the CLI (refuses Save/Delete/Release/... in read-only mode), unchanged from stdio.
-
-There is no reverse proxy and no trusted-proxy mode: `X-Forwarded-For`, `X-Forwarded-Proto` and
-`X-Fairyfly-Proxy-Secret` are ignored, so a client cannot choose the address it is judged by. Terminating TLS in a
-front proxy is a non-goal; if you run one anyway, token `--ip` and server `--allow-ip` see the proxy's address.
-
-### Threat model
-
-Assets: the SAP session and its data (whatever the logged-on SAP user may do), the SAP credentials in the
-Credential Manager, the bearer tokens, the TLS private key, the audit trail.
-
-Actors: (a) a legitimate client with a token; (b) a network attacker without a token; (c) a compromised or
-malicious client or MCP host (including prompt injection through SAP screen text); (d) a local user or malware on
-the VM; (e) an operator with an over-privileged token.
-
-| Threat | Control | Residual risk |
-|---|---|---|
-| Sniffing or tampering on the wire | TLS 1.2+ in the kernel (http.sys/Schannel); plain HTTP only on loopback unless `--insecure-http`; certificate pinned by thumbprint in the setup verification | a self-signed certificate must be distributed and trusted on each client by hand; the minimum TLS version follows the machine's Schannel policy, not fairyfly; on loopback any local process can reach `127.0.0.1` (it still needs a token or `--insecure-no-auth`) |
-| Unauthenticated access | bearer tokens required always; 401 for everything while no token exists; `TOKEN_INVALID` does not reveal which part is wrong | a leaked token is valid until revoked, rotated or expired |
-| Access from unexpected networks | server `--allow-ip` (403 `ADDRESS_NOT_ALLOWED`); per-token `--ip`; both judge the real socket peer, forwarded headers are ignored; optional firewall rule | behind NAT or a proxy every client shares one address; an allowed host that is compromised is trusted; IPv6 privacy addresses need CIDR blocks |
-| Browser-based attacks (DNS rebinding, CSRF) | Host check (loopback or `--allowed-hosts`); any `Origin` refused unless in `--cors-origin`; POST + JSON only | none known beyond misconfigured `--allowed-hosts`/`--cors-origin` |
-| Client does more than intended | scopes per tool family or per tool (`<family>.<verb>`); token read-only flag; server mode ceiling; `FAIRYFLY_READ_ONLY` hard cap; per-item checks in `gui_batch` | a family scope is coarse (use `<family>.<verb>` scopes for least privilege, for example `--scope session.list,session.attach,screen,element,transaction`; the default scope already excludes launch, login and disconnect); a write-mode server with a write token can change any data the SAP user may |
-| Access to unintended SAP systems | `--system SID/CLIENT` allowlist, checked against the connection the call targets (explicit, default or sticky; read-only lookup, no attach); `SYSTEM_DENIED`, `SYSTEM_UNKNOWN` when it cannot be established | login/attach/disconnect --close-session are checked against their own target (attach: the LIVE connection description and system, never a saved record); a launch (also `login=true`) under `--system` is fail closed: it needs the entry name in `--connections` (operator vouches that the name maps to an allowed system) and any open session of that name must be on an allowed system, else `SYSTEM_UNKNOWN`/`SYSTEM_DENIED`; a changed SAP Logon entry can still be reached by the launch itself once; `--connections NAME` restricts saved connections by name (`CONNECTION_DENIED`); the three listing tools return only the token's connections (result filtering), and the SAP Logon system of a not-yet-open entry cannot be known |
-| Typing into SAP through a read-only token (`--allow-selection-input`) | explicit per-token option, default off, needs `--tcode` and a read-only token, shown by `token list`; typing only on the initial screen (program + screen number + connection after the last successful `gui_transaction_start`, per token id; cleared by the first later call that sees another or an unknown screen, so typing is only possible between the start and the first navigation), only into plain input fields (no grid cells, no command field, no password/credential fields), the handler guard is lifted for that single call and the handler re-validates the live control (plain changeable `GuiTextField`/`GuiCTextField`, no credential id/name/label/tooltip) and the live program + screen number immediately before the write (`INPUT_TARGET_DENIED` / `INPUT_SCREEN_DENIED`), clicks on commit buttons stay refused by the read-only guard; refusals `INPUT_NOT_ALLOWED` / `INPUT_SCREEN_DENIED` / `INPUT_TARGET_DENIED`; the audit record has `input_allowed: true`, the value is never recorded | residual: free text in selection fields (a wildcard selection can start a heavy report; a value can be an unexpected filter); the screen is read just before the call and can change during it; the state lives in memory and is lost on restart (typing is then denied until the next `gui_transaction_start`); not blocked by `FAIRYFLY_READ_ONLY=1` because it cannot commit |
-| Access to unintended transactions | `--tcode` allowlist on `gui_transaction_start`, on the transaction already open for every screen, element, key, popup and menu tool (unknown = denied), and on `gui_batch` items; typing into the command field is blocked; with an allowlist `gui_menu_select` is denied and `gui_key_send` is limited to enter, f4, f8 and page keys unless the token has `--allow-navigation` (fail closed); after every screen-acting call the transaction is read again: a token that ended outside its allowlist gets `tcode_left_allowlist` in the result and audit and is blocked (`TCODE_DENIED`) until an allowed `gui_transaction_start` succeeds | partly mitigated: `gui_element_click`, `gui_element_f4` and `gui_popup_close` can still navigate, and that is noticed only after the call (the destination screen has loaded); tokens with `--allow-navigation` can use menus and F3/F12 freely; the transaction is read just before a call and can change during it; treat T-code lists as a guard rail, not isolation |
-| Runaway or abusive clients | per-token rate limit (`--rate`, optional per-family `--rate-family element=10,key=10`, `RATE_LIMITED`); one call at a time; executor queue of 16, listener queue of 256, 16 receive workers; 1 MiB request limit; result size caps; kernel timeouts | a busy client can still delay others (single shared SAP session, calls are serialized) |
-| Slow-body / slow-loris clients exhausting the workers | the kernel enforces the entity-body (15 s), drain (5 s) and minimum-send-rate timers of the URL group and never hands a request without complete headers to fairyfly; a socket that has sent only PART of a header (or nothing) is governed solely by the machine-wide http.sys timers (`netsh http show timeout`, registry `HKLM\SYSTEM\CurrentControlSet\Services\HTTP\Parameters`, default 120 s) because the per-URL-group HeaderWait/IdleConnection values only apply once a request is routed to the URL group; measured on Windows 10 22H2: such sockets stayed open 125 s (about the 120 s machine timer) whatever the app-level HeaderWait (10 s) and IdleConnection (20 s test value) were, plain HTTP and TLS alike; they cost a kernel connection but no fairyfly worker; an operator who wants a shorter limit lowers the machine-wide timers with `netsh http add timeout` (fairyfly does not change machine settings); authentication and the header checks run on the headers BEFORE the body is read, and a rejected request never has its body read | a slow body sent with a VALID token still occupies one of the 16 workers until the kernel timeout; the server allow-list, a firewall rule and short-lived tokens limit who can do that |
-| Local privilege boundary | `mcp setup`/`teardown` need exactly one elevated step (self-elevating, explicit user SID in the plan file). The elevated child never trusts the plan file by path: the unelevated parent writes the exact plan bytes (`CREATE_NEW`, `FILE_SHARE_READ` only, handle held open until the child exits, random file names in the per-user `%LOCALAPPDATA%\fairyfly\run`) and puts their SHA-256, a nonce, its pid, the approved SID and the `--force-binding` consent on the elevated command line (shown in the UAC consent data, not changeable by an unelevated process); the child reads the file once into memory, refuses with `INVALID_PLAN` (no change made) unless the bytes hash to that value, the embedded nonce/pid match, the plan is at most 10 minutes old, the plan SID equals `--plan-sid` and `force_binding` was approved, and parses those same bytes; the parent only believes a result file after a normal child exit, below 1 MiB, parsing as JSON and echoing the nonce; the running server is unelevated, holds no private key and no administrator rights; the URL ACL reserves the prefix for one user SID only, so other local users cannot bind it or hijack the port | a local administrator can rebind the port or read the machine key; another process of the same user can bind another prefix and can read that user's Credential Manager entries |
-| Teardown deleting objects it did not create | `mcp teardown` removes only what the manifest proves setup created and re-checks it before each delete: the URL reservation only when `urlacl_created` and its SDDL still equals the recorded `urlacl_sddl` (the elevated child re-checks); the TLS binding only with fairyfly's AppId; the firewall rule only by its unique internal Name (`fairyfly-mcp-https-<port>-<8 hex>`), never by display name; the exported `.cer` only at the path derived from the validated host name and only when it holds the certificate with the recorded thumbprint (the manifest's `cer_path` is ignored); the self-signed certificate only with the fairyfly friendly name; everything else is skipped and listed under "Left for a human" | the manifest is user-writable and not tamper-proof: another process of the same user can make teardown skip things (it cannot make it delete foreign objects), and a manifest from an older version (no ownership fields) makes teardown leave the URL reservation and the firewall rule for a human |
-| Legacy artefacts of earlier proxy setups | none are created any more | a leftover Credential Manager entry `fairyfly:fairyfly-mcp-proxy` is unused: delete it (`cmdkey /delete:fairyfly:fairyfly-mcp-proxy`); `mcp doctor` reports it |
-| Prompt injection via SAP content | screen results are labelled untrusted; server instructions tell the model not to follow them; read-only default | the model may still be persuaded to use write tools it has been granted; keep write tokens rare and confirm destructive actions client-side |
-| Credential theft | no tool accepts a password; SAP logon uses the Credential Manager; tokens only stored as hashes; secrets never in logs, audit, YAML or listings | Credential Manager entries are readable by any process of the same Windows user |
-| Repudiation, forensics | audit record per call with principal, real peer address and era; start/stop records | append-only by convention, not tamper-proof |
-| Shared state between principals | none by design for auth | the sticky default connection and the default rate budget are per token, but the SAP GUI session and its screen state (open transaction, popups, field contents) are shared: one client's navigation still changes what the next client sees, so tokens with different purposes should use different saved connections (`--connections`) |
-| Session unavailable | `mcp doctor` and the tray warn | RDP disconnect, lock screen or log off yields black screenshots and failing calls; nothing restarts the desktop |
+The security layers (TLS in the kernel, client allowlist, tokens, scopes and allowlists, request limits, audit,
+read-only guard) and the full threat model with residual risks are in [SECURITY.md](SECURITY.md#remote-access).
 
 ## Client cookbook
 
@@ -445,7 +456,7 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 | 401 `AUTH_REQUIRED` and the message says no tokens are configured | no token exists on the VM (as this user): `fairyfly mcp token create NAME` |
 | 401 `TOKEN_INVALID` | wrong, truncated or rotated token, or the client added quotes; recreate or rotate |
 | 401 `TOKEN_REVOKED` / `TOKEN_EXPIRED` | revoked or past its `--expires`; create or rotate a token |
-| 403 `ADDRESS_NOT_ALLOWED` | the client address is not in the server's `--allow-ip` / `server.allow_ip`; loopback is always allowed |
+| 403 `ADDRESS_NOT_ALLOWED` | the client address is not in the server's `--allow-ip` / `server.allow_ip`; loopback is exempt unless `allow_ip_include_loopback` is enabled |
 | 403 `IP_NOT_ALLOWED` | the client address is not in the token's `--ip`; the real peer address is judged, `X-Forwarded-For` is ignored (check NAT: the server may see the NAT address) |
 | 403 `HOST_NOT_ALLOWED` / `ORIGIN_NOT_ALLOWED` | a client uses a Host name that is not loopback or in `--allowed-hosts` (add the DNS name of the VM), or a browser Origin; use `--allowed-hosts` / `--cors-origin` |
 | 404 | wrong path; it must be exactly `/mcp` |

@@ -1,5 +1,168 @@
 # SAP GUI integration scripts
 
+## Owner-filtered discovery through the tray
+
+`mcp_live_owner_discovery.ps1` starts a temporary owner-mode tray endpoint and
+token on loopback, calls `gui_connection_list` and `gui_doctor`, checks that
+their counts agree, and removes the token, tray, and temporary config. With
+`-ExpectedSessions`, it also checks `gui_session_list` through the disposable
+owner-discovery worker. Run it
+when no SAP session is logged in to verify stale saved records stay hidden:
+
+~~~powershell
+.\tests\integration\mcp_live_owner_discovery.ps1 -OwnerIdentity A4H/001/DEVELOPER -ConnectionPattern Bigfox -ExpectedCount 0 -ExpectedSessions 0 -UnavailableConnection 5
+~~~
+
+When owner-allowed SAP windows are open, pass their expected count to verify
+positive discovery. The script checks that returned rows contain no saved
+connection file, session key, generation, connection string, or window title.
+`-UnavailableConnection` additionally checks that a closed saved ID or a live
+ID belonging to another allowed SAP owner receives a non-enumerating owner
+denial through HTTP.
+It requires a free loopback port (default 8383) and a Fairyfly build at
+`build\Release\fairyfly.exe` unless `-Fairyfly` is supplied.
+
+## Token-owned prelogin window
+
+`mcp_live_prelogin_claim.ps1` uses the locally stored `Bigfox` credential for
+`A4H/001/DEVELOPER`. It launches a logon window with one temporary MCP token,
+checks that a second token cannot log in through the saved ID, then completes
+password login and verifies owner discovery. It also opens a second unfinished
+window, checks that the other token cannot close it, and closes it through the
+launching token. It closes the test window and
+removes its tokens, tray, and temporary config. The second token is deliberately
+granted `A4H/001/OTHER`; the script does not need that SAP user's password.
+
+~~~powershell
+.\tests\integration\mcp_live_prelogin_claim.ps1
+~~~
+
+This checks the prelogin ownership boundary. The separate two-user acceptance
+run below logs in two real SAP users under one interactive Windows account.
+
+## Two SAP users through one tray
+
+Start one owner-mode tray whose `owner.sap_identities` contains both exact SAP
+users. Log in two SAP GUI windows under the same interactive Windows account,
+save each connection, and pass their IDs to both probes. Use two users in the
+same SID/client so a foreign-ID denial tests SAP user isolation. Display
+distinct, stable, read-only screen text in the windows, and choose one short
+phrase unique to each screen as its marker. The probes create
+short-lived read-only tokens with one exact SAP identity each and delete them
+afterward. The first checks that each token discovers and reads only its own
+window, then measures serial and cross-window reads. The second confirms that
+a read on the other window finishes while a 20-item batch runs, while a read
+queued to the batch's window waits for that batch.
+
+~~~powershell
+$aliceId = 5  # replace with the saved connection ID for ALICE
+$bobId = 6    # replace with the saved connection ID for BOB
+$aliceMarker = 'Job Selection'  # replace with text visible only in ALICE's screen read
+$bobMarker = 'SAP Easy Access'  # replace with text visible only in BOB's screen read
+.\tests\integration\mcp_live_parallel_gate.ps1 -ConnectionA $aliceId -ConnectionB $bobId -IdentityA A4H/001/ALICE -IdentityB A4H/001/BOB -ScreenMarkerA $aliceMarker -ScreenMarkerB $bobMarker
+.\tests\integration\mcp_live_batch_overlap.ps1 -SlowConnection $aliceId -ReaderConnection $bobId -SlowIdentity A4H/001/ALICE -ReaderIdentity A4H/001/BOB -SlowMarker $aliceMarker -ReaderMarker $bobMarker
+~~~
+
+Use `-Endpoint` for a different loopback port; the probes refuse remote URLs
+so temporary bearer tokens stay on this host. Newly issued tokens can take up
+to five seconds to appear in the running tray's token cache, so the probes
+wait six seconds after creating them. The parallel probe measures each window
+separately and requires the concurrent run to save at least 20 percent of the shorter
+window's baseline (and at least 50 ms).
+These probes only read SAP screens. They need two real, distinct
+SAP logins to satisfy the multi-user acceptance gate; the offline contract
+tests in `test_mcp_live_parallel_gate.py` verify probe behavior against a mock
+endpoint but cannot replace that live run.
+
+For a disposable two-user run on the A4H test system, build `fairyfly` and
+`sap_sta_parallel_probe`, log `DEVELOPER` into one test-owned saved Bigfox
+connection, and run the SU01 workflow with that saved ID:
+
+~~~powershell
+.\tests\integration\test_su01_create_user.ps1 -ExistingConnectionId <admin-id> -VerifyChangedPasswordLogin -McpGateScript .\tests\integration\mcp_live_disposable_user_gate.ps1 -FairyflyPath .\build\Release\fairyfly.exe
+~~~
+
+This creates and later deletes a temporary `ZFF*` SAP user. The gate uses an
+independent SAP GUI scripting probe to confirm both live `SID/CLIENT/USER`
+values, then checks each token's view, overlap and FIFO ordering. The final
+probe submits a read to the disposable user's occupied session lane, waits for
+its SSE response headers to confirm submission, closes that test-owned SAP
+window, and requires the queued screen result to be withheld. A separate
+deterministic HTTP unit test changes an admitted queued request's route before
+dequeue and requires `SESSION_ROUTE_CHANGED`. If window cleanup fails, stop
+and inspect the named window before another run. The final live two-user run
+passed on 2026-10-04 and left no test user, test window, token or temporary
+credential.
+
+## Live cross-window progress and same-window ordering
+
+With two logged-in Bigfox windows and an owner-mode tray endpoint already
+running, use `mcp_live_batch_overlap.ps1 -SlowConnection <id> -ReaderConnection
+<other-id>`. It waits for the first item of a 20-read batch, then submits one
+read to each window. The other window must finish before the batch; the read
+queued to the batch's window must wait until the batch completes. The script
+creates and removes its own read-only test tokens. Pass `-SlowIdentity` and
+`-ReaderIdentity`, with `-SlowMarker` and `-ReaderMarker`, when the tray allows
+multiple SAP users.
+
+## Optional two-Windows-account isolation gate
+
+`mcp_cross_account_isolation.ps1` checks stronger desktop separation for
+`docs/MCP_PARALLEL_SESSIONS_PLAN.md`. Run it **on the shared Windows host**.
+Start one owner-mode tray endpoint under each of two interactive Windows
+accounts. Each account needs SAP GUI scripting, exactly one owner-allowed SAP
+window, and its own `owner.sap_identities` entry matching that window. The two
+allowed windows must have different SAP GUI session paths (for example
+`/app/con[0]/ses[0]` and `/app/con[1]/ses[0]`); arrange a disallowed extra GUI
+connection if needed. Use different loopback ports. Create a short-lived
+read-only token in each account with
+`--scope session.list,connection.list,screen --read-only`; keep token system and
+connection restrictions broad enough that the probe can detect an unintended
+foreign window. Also create a separate short-lived token per account with
+`--scope session.attach` and without `--read-only`, so a foreign attach denial
+cannot be explained by the read-only cap. Configure the tray endpoint to allow
+session attach (`--allow-write` or its tray setting), with no
+`FAIRYFLY_READ_ONLY=1` hard cap. Put distinct visible transaction or
+screen text in the two windows. The script reads screens and attempts only an
+explicit foreign session path; it does not navigate or change SAP data. Use
+the default per-user Fairyfly session cache (`%LOCALAPPDATA%\fairyfly\sessions`),
+without `FAIRYFLY_CACHE_DIR` overrides. The controller must be able to read
+both user-profile cache directories to verify that the rejected attach wrote
+no saved connection.
+
+From a PowerShell controller on the same host, set
+`FAIRYFLY_OWNER_A_TOKEN`, `FAIRYFLY_OWNER_B_TOKEN`,
+`FAIRYFLY_OWNER_A_ATTACH_TOKEN`, and `FAIRYFLY_OWNER_B_ATTACH_TOKEN` in its
+process environment without logging them. Find each live `fairyfly.exe` tray PID under its own
+account, then run:
+
+~~~powershell
+powershell -NoProfile -File tests\integration\mcp_cross_account_isolation.ps1 `
+  -EndpointA http://127.0.0.1:8383/mcp -EndpointB http://127.0.0.1:8384/mcp `
+  -TrayPidA 1234 -TrayPidB 5678 `
+  -FairyflyExe 'C:\path\to\fairyfly.exe' `
+  -ConnectionA 1 -ConnectionB 1 `
+  -SessionIdA '/app/con[0]/ses[0]' -SessionIdB '/app/con[1]/ses[0]' `
+  -ScreenMarkerA 'unique A screen text' -ScreenMarkerB 'unique B screen text'
+~~~
+
+Use each account's local Fairyfly saved connection ID; the IDs may coincide.
+The script verifies that HTTP.sys has each URL in the supplied live Fairyfly
+process's request queue and that the processes have different interactive
+Windows owner SIDs and the expected executable path. It checks those process identities again before reporting
+success. It requires one verified session in each endpoint's filtered list,
+refusal of saved-connection listing, each owner's screen marker on its own
+read, no unexpected screen through the other owner's numeric ID, and HTTP 401
+when a token is presented to the other endpoint. It hashes the saved connection
+files immediately before and after each foreign attach attempt. Its output contains only pass
+flags. The numeric-ID check is a smoke check because IDs are local to each
+endpoint; the distinct foreign SAP GUI session-path check tests attach denial.
+Run `python -m unittest tests.integration.test_mcp_cross_account_isolation`
+for protocol-only offline harness checks. Their `-ProtocolOnly` mode explicitly
+reports `account_endpoints_isolated=false`. The live result is still pending
+until two interactive accounts are available. Revoke and delete all four
+short-lived tokens after the run.
+
 The retained Python SM59 runner and PowerShell SU01 script exercise live SAP GUI behavior. They require Windows, SAP GUI with client and server scripting enabled, and a suitable SAP test session. They are not registered with CTest. Read a script before running it: both can navigate transactions or change the active screen.
 
 Build the CLI first:
@@ -73,6 +236,8 @@ powershell -NoProfile -File tests\integration\compare_builds.ps1 -OldExe old.exe
 ~~~
 
 For each of 18 read-only screens the script navigates once with `-NewExe`, then reads `screen read --no-tabs --max-rows 100 --output json` with both builds (best of 2 runs each), and prints Screen / OldMs / NewMs / OldEl / NewEl / OnlyOld / OnlyNew / OldKB / NewKB. The first 8 ids that differ are printed per screen. Exit code 1 if any element id differs, 2 if no SAP session. A screen whose navigation or read fails is reported as SKIP.
+
+`-FullCompare` additionally deep-compares, per screen, the parsed JSON of `data.elements` (matched by id), `data.hierarchy`, `data.tabs` and `data.status_bar` between the two builds after stripping `duration_ms` and timestamp fields (`timestamp`, `*_timestamp`, `*_at`). In this mode the read runs without `--no-tabs` so that `data.tabs` is populated (the tab elements then also count in the id sets). Each difference is printed as a path-level line (`elements[id=/app/...].text: OLD = "a" <> NEW = "b"`, up to 20 per screen) and the exit code is 1. Use it for output-identity gates, for example `-Screens ST22-list,SM37-joblist,SU01-display,SE16-TADIR,RZ11-detail,SM50 -FullCompare`. Without the switch the behaviour is unchanged.
 
 ## MCP smoke test (mcp_smoke.ps1)
 

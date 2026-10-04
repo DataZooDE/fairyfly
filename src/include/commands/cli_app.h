@@ -15,6 +15,7 @@ void add_global_options(CLI::App& app, GlobalOptions& options);
 
 /// Builds the whole noun/verb command tree on `app`: allow_windows_style_options(false) (element ids
 /// start with '/'), register_all_commands() and setup_all_commands().
+/// Installs recursive help generated from CLI11 options and command-local footers.
 void build_command_tree(CLI::App& app);
 
 /// Space-joined names of the parsed subcommand chain after app.parse(): "element click",

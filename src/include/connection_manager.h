@@ -99,6 +99,17 @@ public:
         const std::string& server_session_key = ""
     );
 
+    /// Create a new saved connection for an owner-mode launch. Never rewrites an
+    /// existing file; a colliding or keyless reused GUI path is ambiguous.
+    Connection create_new_connection(
+        const std::string& session_id,
+        const std::string& connection_id,
+        const std::string& description,
+        const std::string& connection_string,
+        const std::string& window_title,
+        const std::string& server_session_key = ""
+    );
+
     /// Update last_validated only if the file still matches the selected snapshot
     void touch_connection(const Connection& expected);
 
@@ -111,6 +122,9 @@ public:
 
     /// Delete only if the cache file still represents the validated snapshot.
     bool delete_connection_if_unchanged(const Connection& expected);
+
+    /// Check an exact cache generation under the cross-process cache lock.
+    bool matches_connection_generation(const Connection& expected) const;
 
     /// Delete every other cache entry for the same session path as `keep`.
     /// Only safe after `keep` was validated live: a path names one live session.

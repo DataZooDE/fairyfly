@@ -1,3 +1,4 @@
+#include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
 #include "include/com/wrapper.h"
@@ -14,7 +15,9 @@
 #include "include/read_only_guard.h"
 #include "include/action_argument_checks.h"
 #include "include/sensitive_data.h"
+#include "include/action_status.h"
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <exception>
 #include <functional>
 #include <iostream>
@@ -138,6 +141,11 @@ public:
     bool visible_fails = false;
     bool visible_value = true;
     size_t enum_fail_after = static_cast<size_t>(-1);
+    // Type property reads that fail with DISP_E_MEMBERNOTFOUND before succeeding (a type whose object
+    // rejects the universal Type DISPID once).
+    int type_invoke_failures = 0;
+    int changeable_reads = 0;
+    bool displayed_text_missing = false;  // DisplayedText is an unknown member (like on a GuiShell)
     bool has_row_count = false;  // grid-like GuiShell: RowCount exists (tree-like: unknown name)
     // GuiShell toolbar buttons {id, text, tooltip}; ButtonCount/GetButton* exist only when non-empty.
     std::vector<std::array<const wchar_t*, 3>> shell_buttons;
@@ -169,7 +177,10 @@ public:
         if (!names || !ids || count != 1) return E_INVALIDARG;
         ++name_lookups[names[0]];
         if (std::wcscmp(names[0], L"Type") == 0) *ids = type_id_;
-        else if (std::wcscmp(names[0], L"DisplayedText") == 0) *ids = type_id_ + 1;
+        else if (std::wcscmp(names[0], L"DisplayedText") == 0) {
+            if (displayed_text_missing) return DISP_E_UNKNOWNNAME;
+            *ids = type_id_ + 1;
+        }
         else if (std::wcscmp(names[0], L"Text") == 0) *ids = type_id_ + 2;
         else if (std::wcscmp(names[0], L"Id") == 0) *ids = type_id_ + 3;
         else if (std::wcscmp(names[0], L"AccLabel") == 0) *ids = type_id_ + 4;
@@ -278,6 +289,10 @@ public:
             selected_tree_nodes.emplace_back(params->rgvarg[0].bstrVal);
             tree_selection_calls.push_back("SelectNode");
             return S_OK;
+        }
+        if (id == type_id_ && type_invoke_failures > 0) {
+            --type_invoke_failures;
+            return DISP_E_MEMBERNOTFOUND;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
         if (id == type_id_ + 38 && (flags & DISPATCH_PROPERTYGET)) {
@@ -419,6 +434,7 @@ public:
             result->boolVal = visible_value ? VARIANT_TRUE : VARIANT_FALSE;
             return S_OK;
         }
+        if (id == type_id_ + 29) ++changeable_reads;
         if (id >= type_id_ + 27 && id <= type_id_ + 29) {
             result->vt = VT_BOOL;
             result->boolVal = id == type_id_ + 27 && !selected ? VARIANT_FALSE : VARIANT_TRUE;
@@ -833,6 +849,20 @@ TEST_CASE("Popup close falls back to window Close when SendVKey throws", "[com][
         REQUIRE(a.method == CloseMethod::Unsupported);
         REQUIRE(dispatch->close_calls == 0);
     }
+}
+
+TEST_CASE("Popup close falls back when SendVKey returns but the modal stays open", "[com][window][close]") {
+    using fairyfly::sap::attempt_close;
+    using fairyfly::sap::fallback_close_when_still_open;
+    using fairyfly::sap::CloseMethod;
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+    ComGuiWindow window(IDispatchPtr(dispatch, true));
+    auto attempt = attempt_close(1, [&] { window.send_vkey(12); }, [&] { window.close(); });
+    REQUIRE(attempt.method == CloseMethod::Vkey);
+    attempt = fallback_close_when_still_open(1, 1, attempt, [&] { window.close(); });
+    CHECK(attempt.method == CloseMethod::WindowClose);
+    CHECK(dispatch->close_calls == 1);
 }
 
 TEST_CASE("Menu tree enumeration nests children and never selects", "[com][menu]") {
@@ -2212,6 +2242,100 @@ TEST_CASE("Unknown member DISPID misses are cached per type", "[com][perf]") {
     REQUIRE(second_fake->name_lookups[L"AccTooltip"] == 1);
 }
 
+TEST_CASE("Universal Type DISPID skips the typeinfo lookup for validated types", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_type() == "GuiTextField");
+    REQUIRE(second_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(first_element->get_dispatch())->name_lookups[L"Type"] == 1);
+    // The second wrapper of a validated type reads Type through the universal DISPID: no lookup.
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Type"] == 0);
+}
+
+TEST_CASE("A differing Type DISPID disables the universal Type path", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* text = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* button = new TextFieldDispatch(L"GuiButton", 7100);
+    auto* text_again = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto text_element = ComGuiElement::create(text);
+    auto button_element = ComGuiElement::create(button);
+    auto text_again_element = ComGuiElement::create(text_again);
+    text->Release();
+    button->Release();
+    text_again->Release();
+
+    REQUIRE(text_element->get_type() == "GuiTextField");
+    REQUIRE(button_element->get_type() == "GuiButton");
+    // The button's own typeinfo DISPID disagreed with the universal one, so the shortcut is off
+    // and even an already validated type is looked up again.
+    REQUIRE(text_again_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(text_again_element->get_dispatch())->name_lookups[L"Type"] == 1);
+}
+
+TEST_CASE("A member-not-found universal Type read falls back without disabling", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* text = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* box = new TextFieldDispatch(L"GuiBox", 7000);
+    box->type_invoke_failures = 1;
+    auto* text_again = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* box_again = new TextFieldDispatch(L"GuiBox", 7000);
+    auto text_element = ComGuiElement::create(text);
+    auto box_element = ComGuiElement::create(box);
+    auto text_again_element = ComGuiElement::create(text_again);
+    auto box_again_element = ComGuiElement::create(box_again);
+    text->Release();
+    box->Release();
+    text_again->Release();
+    box_again->Release();
+
+    REQUIRE(text_element->get_type() == "GuiTextField");
+    REQUIRE(box_element->get_type() == "GuiBox");
+    REQUIRE(static_cast<TextFieldDispatch*>(box_element->get_dispatch())->name_lookups[L"Type"] == 1);
+    // Not disabled: the validated types are served by the universal DISPID.
+    REQUIRE(text_again_element->get_type() == "GuiTextField");
+    REQUIRE(box_again_element->get_type() == "GuiBox");
+    REQUIRE(static_cast<TextFieldDispatch*>(text_again_element->get_dispatch())->name_lookups[L"Type"] == 0);
+    REQUIRE(static_cast<TextFieldDispatch*>(box_again_element->get_dispatch())->name_lookups[L"Type"] == 0);
+}
+
+TEST_CASE("The first property read on a fresh wrapper resolves through its Type", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000, L"", L"", L"", L"abc");
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000, L"", L"", L"", L"def");
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_string_property(L"Text") == "abc");
+    REQUIRE(second_element->get_string_property(L"Text") == "def");
+    auto* second_fake = static_cast<TextFieldDispatch*>(second_element->get_dispatch());
+    REQUIRE(second_fake->name_lookups[L"Type"] == 0);
+    REQUIRE(second_fake->name_lookups[L"Text"] == 0);
+    REQUIRE(second_element->get_type() == "GuiTextField");
+}
+
+TEST_CASE("clear_dispid_cache resets the universal Type DISPID state", "[com][perf][dispid]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto* second = new TextFieldDispatch(L"GuiTextField", 7000);
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    REQUIRE(first_element->get_type() == "GuiTextField");
+    SapGuiObject::clear_dispid_cache();
+    REQUIRE(second_element->get_type() == "GuiTextField");
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"Type"] == 1);
+}
+
 TEST_CASE("Shell member misses are not cached across GuiShell subtypes", "[com][perf][err142]") {
     ScopedDispatchCacheReset cache_reset;
     // Same COM Type string "GuiShell" for both: a tree-like shell without RowCount and a
@@ -2256,6 +2380,60 @@ TEST_CASE("Enumeration failure mid-way falls back to indexed children without du
     a->Release();
     b->Release();
     c->Release();
+}
+
+TEST_CASE("get_text and is_changeable share one Changeable read per wrapper", "[com][perf][changeable]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiTextField", 33000, L"wnd[0]/usr/txtFIELD", L"", L"", L"abc");
+    auto element = ComGuiElement::create(dispatch);
+    dispatch->Release();
+
+    REQUIRE(element->get_text() == "abc");
+    REQUIRE(element->is_changeable());
+    REQUIRE(element->is_changeable());
+    REQUIRE(static_cast<TextFieldDispatch*>(element->get_dispatch())->changeable_reads == 1);
+
+    // The memo is per wrapper: a new wrapper reads Changeable itself.
+    auto* other = new TextFieldDispatch(L"GuiTextField", 33000, L"wnd[0]/usr/txtOTHER", L"", L"", L"abc");
+    auto other_element = ComGuiElement::create(other);
+    other->Release();
+    REQUIRE(other_element->is_changeable());
+    REQUIRE(static_cast<TextFieldDispatch*>(other_element->get_dispatch())->changeable_reads == 1);
+}
+
+TEST_CASE("DisplayedText misses are cached for GuiShell but other shell misses are not", "[com][perf][shell]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* first = new TextFieldDispatch(L"GuiShell", 34000, L"wnd[0]/usr/shell1", L"", L"Toolbar", L"");
+    auto* second = new TextFieldDispatch(L"GuiShell", 34000, L"wnd[0]/usr/shell2", L"", L"Tree", L"");
+    first->displayed_text_missing = true;
+    second->displayed_text_missing = true;
+    auto first_element = ComGuiElement::create(first);
+    auto second_element = ComGuiElement::create(second);
+    first->Release();
+    second->Release();
+
+    first_element->get_text();
+    second_element->get_text();
+    REQUIRE(static_cast<TextFieldDispatch*>(first_element->get_dispatch())->name_lookups[L"DisplayedText"] == 1);
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"DisplayedText"] == 0);
+    // Members outside the allowlist stay uncached across GuiShell subtypes (see RowCount test).
+    REQUIRE(first_element->get_property_int(L"RowCount") == 0);
+    REQUIRE(second_element->get_property_int(L"RowCount") == 0);
+    REQUIRE(static_cast<TextFieldDispatch*>(second_element->get_dispatch())->name_lookups[L"RowCount"] == 1);
+}
+
+TEST_CASE("ElementMetadataExtractor output for a text field is unchanged", "[com][metadata][golden]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiTextField", 35000, L"/app/con[0]/ses[0]/wnd[0]/usr/txtFIELD",
+                                           L"Field label", L"", L"abc");
+    auto element = ComGuiElement::create(dispatch);
+    dispatch->Release();
+    const auto metadata = ElementMetadataExtractor::extract(element);
+    // Golden: the memoised Changeable read and the shell negative cache must not change the output.
+    REQUIRE(metadata.dump() ==
+            R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,)"
+            R"("id":"/app/con[0]/ses[0]/wnd[0]/usr/txtFIELD","label":"Field label","name":"",)"
+            R"("text":"abc","type":"GuiTextField","visible":true})");
 }
 
 TEST_CASE("for_each reports a failed enumeration so callers fall back", "[com][perf][enum]") {
@@ -2481,6 +2659,23 @@ public:
     int new_enum_calls = 0;
     int item_calls = 0;
     long count_override = -1;
+    // Scripted Busy: while busy_true_reads > 0 each Busy read returns true and decrements it,
+    // then false. -1 leaves Busy to the bools map. StartTransaction records its call time.
+    int busy_true_reads = -1;
+    int start_transaction_calls = 0;
+    std::chrono::steady_clock::time_point start_transaction_at{};
+    // GuiSession.GetObjectTree(Id, [props]): records the call, answers object_tree_payload (a UTF-16
+    // string) or fails with object_tree_hresult. Names in unknown_names do not resolve a DISPID.
+    int object_tree_calls = 0;
+    std::wstring object_tree_id;
+    std::vector<std::wstring> object_tree_props;
+    bool object_tree_props_passed = false;
+    std::wstring object_tree_payload;
+    HRESULT object_tree_hresult = S_OK;
+    std::set<std::wstring> unknown_names;
+    // Property writes: recorded in `puts` and stored into strings/bools; names in put_fails answer DISP_E_EXCEPTION.
+    std::vector<std::pair<std::wstring, std::wstring>> puts;
+    std::set<std::wstring> put_fails;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2507,6 +2702,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID,
                                             DISPID* ids) override {
         if (!names || !ids || count != 1) return E_INVALIDARG;
+        if (unknown_names.count(names[0])) return DISP_E_UNKNOWNNAME;
         auto& table = name_table();
         for (size_t i = 0; i < table.size(); ++i) {
             if (table[i] == names[0]) { *ids = static_cast<DISPID>(1000 + i); return S_OK; }
@@ -2532,6 +2728,42 @@ public:
             if (on_select) on_select();
             return S_OK;
         }
+        if ((flags & DISPATCH_METHOD) && name == L"StartTransaction") {
+            ++start_transaction_calls;
+            start_transaction_at = std::chrono::steady_clock::now();
+            return S_OK;
+        }
+        if ((flags & DISPATCH_METHOD) && name == L"GetObjectTree") {
+            ++object_tree_calls;
+            if (!params || params->cArgs < 1 || params->cArgs > 2) return DISP_E_BADPARAMCOUNT;
+            const VARIANT& id_arg = params->rgvarg[params->cArgs - 1];
+            if (id_arg.vt != VT_BSTR) return DISP_E_TYPEMISMATCH;
+            object_tree_id = id_arg.bstrVal;
+            object_tree_props.clear();
+            object_tree_props_passed = params->cArgs == 2;
+            if (object_tree_props_passed) {
+                const VARIANT& props_arg = params->rgvarg[0];
+                if (props_arg.vt != (VT_ARRAY | VT_VARIANT)) return DISP_E_TYPEMISMATCH;
+                SAFEARRAY* array = props_arg.parray;
+                LONG lower = 0, upper = -1;
+                SafeArrayGetLBound(array, 1, &lower);
+                SafeArrayGetUBound(array, 1, &upper);
+                for (LONG i = lower; i <= upper; ++i) {
+                    VARIANT element;
+                    VariantInit(&element);
+                    SafeArrayGetElement(array, &i, &element);
+                    if (element.vt != VT_BSTR) { VariantClear(&element); return DISP_E_TYPEMISMATCH; }
+                    object_tree_props.emplace_back(element.bstrVal);
+                    VariantClear(&element);
+                }
+            }
+            if (FAILED(object_tree_hresult)) return object_tree_hresult;
+            if (!result) return S_OK;
+            VariantInit(result);
+            result->vt = VT_BSTR;
+            result->bstrVal = SysAllocString(object_tree_payload.c_str());
+            return S_OK;
+        }
         if ((flags & DISPATCH_METHOD) && name == L"FindById") {
             if (!result || !params || params->cArgs != 1 || params->rgvarg[0].vt != VT_BSTR)
                 return DISP_E_BADPARAMCOUNT;
@@ -2541,6 +2773,20 @@ public:
             result->vt = VT_DISPATCH;
             result->pdispVal = it->second;
             it->second->AddRef();
+            return S_OK;
+        }
+        if ((flags & DISPATCH_PROPERTYPUT) && params && params->cArgs == 1) {
+            if (put_fails.count(name)) return DISP_E_EXCEPTION;
+            const VARIANT& arg = params->rgvarg[0];
+            if (arg.vt == VT_BSTR) {
+                strings[name] = arg.bstrVal;
+                puts.emplace_back(name, std::wstring(arg.bstrVal));
+            } else if (arg.vt == VT_BOOL) {
+                bools[name] = arg.boolVal != VARIANT_FALSE;
+                puts.emplace_back(name, std::wstring(arg.boolVal != VARIANT_FALSE ? L"true" : L"false"));
+            } else {
+                return DISP_E_TYPEMISMATCH;
+            }
             return S_OK;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;
@@ -2561,6 +2807,12 @@ public:
         if (name == L"Count") {
             result->vt = VT_I4;
             result->lVal = count_override >= 0 ? count_override : static_cast<long>(items.size());
+            return S_OK;
+        }
+        if (name == L"Busy" && busy_true_reads >= 0) {
+            result->vt = VT_BOOL;
+            result->boolVal = busy_true_reads > 0 ? VARIANT_TRUE : VARIANT_FALSE;
+            if (busy_true_reads > 0) --busy_true_reads;
             return S_OK;
         }
         if (auto d = dispatches.find(name); d != dispatches.end()) {
@@ -2682,6 +2934,148 @@ struct TabScene {
 };
 } // namespace
 
+TEST_CASE("wait_for_completion checks Busy immediately and polls only while busy", "[com][session][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+
+    SECTION("an idle session costs exactly one Busy read and no sleep") {
+        node->busy_true_reads = 0;
+        const auto start = std::chrono::steady_clock::now();
+        session->wait_for_completion(500);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(node->reads[L"Busy"] == 1);
+        REQUIRE(elapsed < std::chrono::milliseconds(15));
+    }
+    SECTION("busy once then idle reads Busy twice and stays under 60 ms") {
+        node->busy_true_reads = 1;
+        const auto start = std::chrono::steady_clock::now();
+        session->wait_for_completion(500);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(node->reads[L"Busy"] == 2);
+        REQUIRE(elapsed < std::chrono::milliseconds(60));
+    }
+    SECTION("busy N times then idle reads N+1 times") {
+        node->busy_true_reads = 3;
+        session->wait_for_completion(500);
+        REQUIRE(node->reads[L"Busy"] == 4);
+    }
+    SECTION("an always busy session throws within the bound") {
+        node->bools[L"Busy"] = true;
+        const auto start = std::chrono::steady_clock::now();
+        REQUIRE_THROWS_AS(session->wait_for_completion(50), ComException);
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        REQUIRE(elapsed < std::chrono::milliseconds(150));
+    }
+}
+
+TEST_CASE("start_transaction returns right after the invoke without a settle sleep", "[com][session][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+
+    session->start_transaction("SM37");
+    const auto returned = std::chrono::steady_clock::now();
+    REQUIRE(node->start_transaction_calls == 1);
+    REQUIRE(returned - node->start_transaction_at < std::chrono::milliseconds(20));
+}
+
+namespace {
+// Session with a main window bar and a dialog bar, as FakeNode graph for status bar read counts.
+struct StatusBarScene {
+    FakeNode *session, *bar0, *bar1, *window0, *window1;
+    explicit StatusBarScene(const wchar_t* active_id) {
+        auto make = [](const wchar_t* type, const wchar_t* id) {
+            auto* node = new FakeNode();
+            node->strings[L"Type"] = type;
+            node->strings[L"Id"] = id;
+            return node;
+        };
+        session = make(L"GuiSession", L"/app/con[0]/ses[0]");
+        bar0 = make(L"GuiStatusbar", L"/app/con[0]/ses[0]/wnd[0]/sbar");
+        bar1 = make(L"GuiStatusbar", L"/app/con[0]/ses[0]/wnd[1]/sbar");
+        window0 = make(L"GuiMainWindow", L"/app/con[0]/ses[0]/wnd[0]");
+        window1 = make(L"GuiModalWindow", L"/app/con[0]/ses[0]/wnd[1]");
+        for (auto* bar : {bar0, bar1}) {
+            bar->strings[L"Text"] = L"";
+            bar->strings[L"MessageType"] = L"";
+        }
+        session->find_by_id[L"wnd[0]/sbar"] = bar0;
+        session->find_by_id[L"wnd[1]/sbar"] = bar1;
+        session->dispatches[L"ActiveWindow"] = std::wstring(active_id) == L"wnd[1]" ? window1 : window0;
+    }
+    ~StatusBarScene() { for (auto* node : {session, bar0, bar1, window0, window1}) node->Release(); }
+    ComGuiSessionPtr wrapper() { return ComGuiSession::create(IDispatchPtr(session)); }
+    static constexpr const char* kWnd0 = "/app/con[0]/ses[0]/wnd[0]";
+    static constexpr const char* kWnd1 = "/app/con[0]/ses[0]/wnd[1]";
+};
+} // namespace
+
+TEST_CASE("An empty status bar is read in three round trips", "[com][status][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[0]");
+    const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd0);
+    REQUIRE(status.text.empty());
+    REQUIRE(status.type.empty());
+    REQUIRE(scene.bar0->reads[L"Text"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageType"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageId"] == 0);
+    REQUIRE(scene.bar0->reads[L"MessageNumber"] == 0);
+    REQUIRE(scene.bar0->reads[L"Type"] == 0);
+    REQUIRE(scene.bar0->reads[L"DisplayedText"] == 0);
+    REQUIRE(scene.session->reads[L"ActiveWindow"] == 0);
+}
+
+TEST_CASE("A status bar message keeps its JSON and costs two extra reads", "[com][status][perf]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[0]");
+    scene.bar0->strings[L"Text"] = L"Job log displayed";
+    scene.bar0->strings[L"MessageType"] = L"S";
+    scene.bar0->strings[L"MessageId"] = L"BL";
+    scene.bar0->strings[L"MessageNumber"] = L"001";
+    const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd0);
+    REQUIRE(status_bar_json(status) == json{{"text", "Job log displayed"}, {"message_type", "S"},
+                                            {"message_id", "BL"}, {"message_number", "001"}});
+    REQUIRE(scene.bar0->reads[L"Type"] == 0);
+    REQUIRE(scene.bar0->reads[L"DisplayedText"] == 0);
+    REQUIRE(scene.bar0->reads[L"MessageId"] == 1);
+    REQUIRE(scene.bar0->reads[L"MessageNumber"] == 1);
+}
+
+TEST_CASE("The dialog status bar wins when non-empty, otherwise the main bar is used", "[com][status]") {
+    ScopedDispatchCacheReset cache_reset;
+    StatusBarScene scene(L"wnd[1]");
+    scene.bar0->strings[L"Text"] = L"Main message";
+    scene.bar0->strings[L"MessageType"] = L"I";
+
+    SECTION("empty dialog bar falls back to the main bar") {
+        const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(status.text == "Main message");
+        REQUIRE(status.type == "I");
+    }
+    SECTION("non-empty dialog bar is preferred") {
+        scene.bar1->strings[L"Text"] = L"Dialog message";
+        scene.bar1->strings[L"MessageType"] = L"E";
+        const auto status = read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(status.text == "Dialog message");
+        REQUIRE(status.type == "E");
+        REQUIRE(scene.bar0->reads[L"Text"] == 0);
+    }
+    SECTION("the overload with a known window id never reads ActiveWindow, the plain call does") {
+        (void)read_action_status(scene.wrapper(), StatusBarScene::kWnd1);
+        REQUIRE(scene.session->reads[L"ActiveWindow"] == 0);
+        const auto status = read_action_status(scene.wrapper());
+        REQUIRE(scene.session->reads[L"ActiveWindow"] == 1);
+        REQUIRE(status.text == "Main message");
+    }
+}
+
 TEST_CASE("read_tab selects, re-fetches the tab, restores, and reads grids inside it", "[screen][tabs][read_tab]") {
     ScopedDispatchCacheReset cache_reset;
     TabScene scene;
@@ -2751,6 +3145,9 @@ TEST_CASE("read_tab reports TAB_NOT_FOUND with the available tab ids", "[screen]
     REQUIRE(result.status == Result::Status::Error);
     REQUIRE(result.error.at("code") == "TAB_NOT_FOUND");
     REQUIRE(result.error.at("message") == "No tab matches 'tabpMISSING'");
+    // same fields as TAB_LOAD_FAILED so callers handle both alike (README contract)
+    REQUIRE(result.error.at("tab_id") == "tabpMISSING");
+    REQUIRE(result.error.at("reason") == "not_found");
     REQUIRE(result.error.at("available_tabs") == json::array({
         "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
         "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpROLES"}));
@@ -2800,7 +3197,10 @@ TEST_CASE("Positioned label cells are read with one Text property and no Type or
     auto result = reader.read(true);
     REQUIRE(result.status == Result::Status::Success);
     for (auto* label : labels) {
-        REQUIRE(label->reads[L"Type"] == 0);   // implied by /lbl[ prefix, then carried to Phase 3
+        // The label type is implied by the /lbl[ prefix and primed for the cell read and Phase 3. Fresh
+        // enumeration wrappers read Type once through the universal DISPID (cheaper than the typeinfo
+        // lookup their Id read used to cost), so the count is bounded by those wrappers, not zero.
+        REQUIRE(label->reads[L"Type"] <= 2);
         REQUIRE(label->reads[L"Text"] >= 1);
         // Only the Phase 3 metadata extraction may read DisplayedText; the cell read must not.
         REQUIRE(label->reads[L"DisplayedText"] <= 1);
@@ -2900,7 +3300,7 @@ TEST_CASE("Container and userarea traversal enumerates once and matches the item
         fast_usr_items = fast.scene.usr_children->item_calls;
         fast_container_items = fast.container_children->item_calls;
         for (auto* cell : fast.cells) {
-            REQUIRE(cell->reads[L"Type"] == 0);
+            REQUIRE(cell->reads[L"Type"] <= 2);   // enumeration wrappers read Type via the universal DISPID
             REQUIRE(cell->reads[L"Text"] >= 1);
         }
     }
@@ -3040,4 +3440,312 @@ TEST_CASE("Tab whose reported children yield nothing falls back to the user area
     for (const auto& element : result.data.at("tabs_content").at(0).at("elements"))
         extra_found |= element.value("id", "").find("txtEXTRA") != std::string::npos;
     REQUIRE(extra_found);
+}
+
+TEST_CASE("GuiSession.GetObjectTree wrapper passes id and props and returns the JSON text", "[com][session][bulk]") {
+    ScopedDispatchCacheReset cache_reset;
+    ComGuiSession::reset_object_tree_support();
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiSession";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]";
+    auto session = ComGuiSession::create(IDispatchPtr(node));
+    node->Release();
+    node->object_tree_payload = L"{\"children\":[{\"Id\":\"/app/con[0]/ses[0]/wnd[0]\",\"Text\":\"Müller\"}]}";
+
+    SECTION("props travel as a variant array of strings and the id as the first argument") {
+        const auto tree = session->get_object_tree("wnd[0]", {"Id", "Type", "Text"});
+        REQUIRE(tree.has_value());
+        REQUIRE(*tree == "{\"children\":[{\"Id\":\"/app/con[0]/ses[0]/wnd[0]\",\"Text\":\"M\xc3\xbc" "ller\"}]}");
+        REQUIRE(node->object_tree_calls == 1);
+        REQUIRE(node->object_tree_id == L"wnd[0]");
+        REQUIRE(node->object_tree_props_passed);
+        REQUIRE(node->object_tree_props == std::vector<std::wstring>{L"Id", L"Type", L"Text"});
+        REQUIRE(ComGuiSession::object_tree_support() == ObjectTreeSupport::Available);
+    }
+    SECTION("no props passes only the id (the Optional parameter stays absent)") {
+        REQUIRE(session->get_object_tree("wnd[0]").has_value());
+        REQUIRE_FALSE(node->object_tree_props_passed);
+        REQUIRE(node->object_tree_id == L"wnd[0]");
+    }
+    SECTION("an empty answer is treated as unusable") {
+        node->object_tree_payload.clear();
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+    }
+    SECTION("a failing call returns nullopt and is retried on the next call") {
+        node->object_tree_hresult = DISP_E_EXCEPTION;
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(ComGuiSession::object_tree_support() != ObjectTreeSupport::Missing);
+        node->object_tree_hresult = S_OK;
+        REQUIRE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(node->object_tree_calls == 2);
+    }
+    SECTION("a missing method marks the support Missing and later calls do not touch COM") {
+        node->unknown_names.insert(L"GetObjectTree");
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(ComGuiSession::object_tree_support() == ObjectTreeSupport::Missing);
+        node->unknown_names.clear();   // even if the name resolves now, the process stays on the legacy path
+        REQUIRE_FALSE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+        REQUIRE(node->object_tree_calls == 0);
+        ComGuiSession::reset_object_tree_support();
+        SapGuiObject::clear_dispid_cache();   // the DISPID miss itself is cached per type as well
+        REQUIRE(session->get_object_tree("wnd[0]", {"Id"}).has_value());
+    }
+}
+namespace {
+// Plain-element scenes shared by the metadata golden tests below.
+FakeNode* make_golden_field(const wchar_t* type, const wchar_t* id) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = type;
+    node->strings[L"Id"] = id;
+    node->strings[L"Name"] = L"BNAME";
+    node->strings[L"Text"] = L"Miller";
+    node->strings[L"DisplayedText"] = L"Miller";
+    node->strings[L"AccLabel"] = L"User";
+    node->strings[L"AccTooltip"] = L"User name";
+    node->bools[L"Changeable"] = true;
+    node->bools[L"Enabled"] = true;
+    node->bools[L"Visible"] = true;
+    return node;
+}
+}  // namespace
+
+// Golden dumps recorded from the build before the display-text policy and metadata builder
+// were split out of ComGuiElement::get_text and ElementMetadataExtractor::extract.
+TEST_CASE("ElementMetadataExtractor plain elements keep their recorded JSON", "[metadata][golden]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* field = make_golden_field(L"GuiTextField", L"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME");
+    auto* ctext = make_golden_field(L"GuiCTextField", L"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME");
+    auto* check = make_golden_field(L"GuiCheckBox", L"/app/con[0]/ses[0]/wnd[0]/usr/chkBNAME");
+    check->bools[L"Selected"] = true;
+    auto* box = new FakeNode();
+    box->strings[L"Type"] = L"GuiBox";
+    box->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/boxBNAME";
+    box->strings[L"Name"] = L"BOX";
+    box->strings[L"Text"] = L"Group";
+    auto* container = new FakeNode();
+    container->strings[L"Type"] = L"GuiSimpleContainer";
+    container->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/subSUB";
+    auto* kids = new FakeNode();
+    kids->items = {field, ctext};
+    kids->enumerable = true;
+    container->dispatches[L"Children"] = kids;
+
+    const auto dump = [](FakeNode* node) {
+        return ElementMetadataExtractor::extract(ComGuiElement::create(node)).dump();
+    };
+    CHECK(dump(field) == R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiTextField","visible":true})");
+    CHECK(dump(ctext) == R"({"capabilities":["fillable","readable","has_f4_help"],"changeable":true,"enabled":true,"has_f4_help":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiCTextField","visible":true})");
+    CHECK(dump(check) == R"({"capabilities":["selectable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/chkBNAME","label":"User","name":"BNAME","selected":true,"text":"Miller","type":"GuiCheckBox","visible":true})");
+    CHECK(dump(box) == R"({"capabilities":["container"],"changeable":false,"container_type":"group","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/boxBNAME","is_group":true,"name":"BOX","text":"Group","type":"GuiBox","visible":false})");
+    CHECK(dump(container) == R"({"capabilities":["container"],"changeable":false,"child_count":2,"children":["/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME"],"container_type":"form","enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/subSUB","name":"","text":"","type":"GuiSimpleContainer","visible":false})");
+}
+
+namespace {
+FakeNode* make_check_node(const wchar_t* type, bool selected) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = type;
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/chkFLAG";
+    node->strings[L"Text"] = L"Flag";
+    node->bools[L"Changeable"] = true;
+    node->bools[L"Selected"] = selected;
+    node->put_fails.insert(L"Text");  // the checkbox Text property is read-only in SAP
+    return node;
+}
+
+FakeNode* make_combo_node(const std::vector<std::pair<std::wstring, std::wstring>>& entries, bool with_entries = true) {
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiComboBox";
+    node->strings[L"Id"] = L"/app/con[0]/ses[0]/wnd[0]/usr/cmbLANG";
+    node->strings[L"Key"] = L"DE";
+    node->strings[L"Value"] = L"German";
+    node->bools[L"Changeable"] = true;
+    if (!with_entries) return node;
+    auto* collection = new FakeNode();
+    collection->enumerable = true;
+    for (const auto& [key, value] : entries) {
+        auto* entry = new FakeNode();
+        entry->strings[L"Key"] = key;
+        entry->strings[L"Value"] = value;
+        collection->items.push_back(entry);
+    }
+    node->dispatches[L"Entries"] = collection;
+    return node;
+}
+}  // namespace
+
+TEST_CASE("Check box click toggles instead of always selecting", "[com][checkbox]") {
+    ScopedDispatchCacheReset cache_reset;
+    SECTION("a checked box becomes unchecked") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(false));
+    }
+    SECTION("an unchecked box becomes checked") {
+        auto* node = make_check_node(L"GuiCheckBox", false);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(true));
+    }
+    SECTION("a radio button click selects it") {
+        auto* node = make_check_node(L"GuiRadioButton", false);
+        node->on_select = [node] { node->bools[L"Selected"] = true; };
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->press();
+        CHECK(element->get_selected() == std::optional<bool>(true));
+    }
+    SECTION("an unreadable Selected state is not toggled blindly") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        node->unknown_names.insert(L"Selected");
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK_THROWS_AS(element->press(), ComException);
+        CHECK(node->puts.empty());
+    }
+}
+
+TEST_CASE("Check box and radio button fill write Selected", "[com][checkbox]") {
+    ScopedDispatchCacheReset cache_reset;
+    using Status = ComGuiElement::FillOutcome::Status;
+    SECTION("spellings are case-insensitive and trimmed") {
+        for (const char* off : {"false", "0", "no", "off", " FALSE ", "No", ""}) {
+            auto* node = make_check_node(L"GuiCheckBox", true);
+            auto element = ComGuiElement::create(node);
+            node->Release();
+            const auto outcome = element->fill_value(off);
+            INFO("value '" << off << "'");
+            CHECK(outcome.status == Status::Written);
+            CHECK(outcome.selected == std::optional<bool>(false));
+        }
+        for (const char* on : {"true", "1", "yes", "on", "X", " x "}) {
+            auto* node = make_check_node(L"GuiCheckBox", false);
+            auto element = ComGuiElement::create(node);
+            node->Release();
+            const auto outcome = element->fill_value(on);
+            INFO("value '" << on << "'");
+            CHECK(outcome.status == Status::Written);
+            CHECK(outcome.selected == std::optional<bool>(true));
+        }
+    }
+    SECTION("fill never touches the read-only Text property") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        element->fill_value("false");
+        for (const auto& put : node->puts) CHECK(put.first != L"Text");
+    }
+    SECTION("an unknown spelling is INVALID_ARGUMENT and lists the accepted ones") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("maybe");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("maybe") != std::string::npos);
+        CHECK(outcome.message.find("yes, no, on, off") != std::string::npos);
+        CHECK(node->puts.empty());
+    }
+    SECTION("a radio button is selected by true and cannot be cleared") {
+        auto* node = make_check_node(L"GuiRadioButton", false);
+        node->on_select = [node] { node->bools[L"Selected"] = true; };
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto cleared = element->fill_value("false");
+        CHECK(cleared.status == Status::InvalidArgument);
+        CHECK(cleared.message.find("cannot be cleared") != std::string::npos);
+        CHECK(node->select_calls == 0);
+        const auto selected = element->fill_value("1");
+        CHECK(selected.status == Status::Written);
+        CHECK(selected.selected == std::optional<bool>(true));
+    }
+    SECTION("a non-changeable check box is reported read-only") {
+        auto* node = make_check_node(L"GuiCheckBox", true);
+        node->bools[L"Changeable"] = false;
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK(element->fill_value("false").status == Status::ReadOnly);
+        CHECK(node->puts.empty());
+    }
+}
+
+TEST_CASE("Combo box fill accepts the key or the displayed value", "[com][combobox]") {
+    ScopedDispatchCacheReset cache_reset;
+    using Status = ComGuiElement::FillOutcome::Status;
+    const std::vector<std::pair<std::wstring, std::wstring>> entries{
+        {L"DE", L"German"}, {L"EN", L"English"}, {L"FR", L"French"}};
+    const auto key_written = [](FakeNode* node) {
+        std::wstring key;
+        for (const auto& put : node->puts) if (put.first == L"Key") key = put.second;
+        return key;
+    };
+    SECTION("key match") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("EN");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+        CHECK(outcome.key == std::optional<std::string>("EN"));
+    }
+    SECTION("display text match writes the key of the entry") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("English");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+    }
+    SECTION("case and surrounding whitespace are tolerated") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        CHECK(element->fill_value("  fRENCH ").status == Status::Written);
+        CHECK(key_written(node) == L"FR");
+    }
+    SECTION("no match lists the available key = value pairs and writes nothing") {
+        auto* node = make_combo_node(entries);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("Klingon");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("Klingon") != std::string::npos);
+        CHECK(outcome.message.find("EN = English") != std::string::npos);
+        CHECK(outcome.message.find("DE = German") != std::string::npos);
+        CHECK(node->puts.empty());
+    }
+    SECTION("the option list is capped at 30 entries") {
+        std::vector<std::pair<std::wstring, std::wstring>> many;
+        for (int i = 0; i < 40; ++i) many.emplace_back(L"K" + std::to_wstring(i), L"V" + std::to_wstring(i));
+        auto* node = make_combo_node(many);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("nothing");
+        CHECK(outcome.status == Status::InvalidArgument);
+        CHECK(outcome.message.find("K29 = V29") != std::string::npos);
+        CHECK(outcome.message.find("K30 = V30") == std::string::npos);
+        CHECK(outcome.message.find("10 more") != std::string::npos);
+    }
+    SECTION("entries unavailable falls back to a direct Key write") {
+        auto* node = make_combo_node({}, false);
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        const auto outcome = element->fill_value("EN");
+        CHECK(outcome.status == Status::Written);
+        CHECK(key_written(node) == L"EN");
+    }
+    SECTION("entries unavailable and the direct write fails gives a clear error") {
+        auto* node = make_combo_node({}, false);
+        node->put_fails.insert(L"Key");
+        auto element = ComGuiElement::create(node);
+        node->Release();
+        try {
+            element->fill_value("English");
+            FAIL("expected a ComException");
+        } catch (const ComException& e) {
+            CHECK(std::string(e.what()).find("entries are unavailable") != std::string::npos);
+            CHECK(std::string(e.what()).find("English") != std::string::npos);
+        }
+    }
 }

@@ -6,6 +6,7 @@
 #include <set>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 #include <CLI/CLI.hpp>
 
@@ -14,10 +15,12 @@
 #include "include/auth/token_store.h"
 #include "include/command_table.h"
 #include "include/commands/cli_app.h"
+#include "include/cli_handler.h"
 #include "include/commands/global_options.h"
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/mcp_audit.h"
 #include "include/mcp/policy.h"
+#include "include/mcp/session_leases.h"
 #include "include/mcp/tool_catalog.h"
 
 using namespace fairyfly;
@@ -121,7 +124,7 @@ TEST_CASE("authorize: scope matrix per family", "[auth][authz]") {
             INFO(granted << " -> " << spec.def.name);
             if (spec.def.name == "gui_batch") continue;  // batch is checked separately below
             const auto d = decide(p, spec.def.name, sample_args(spec.def.name));
-            if (spec.family == granted) {
+            if (spec.family == granted && spec.def.name != "gui_session_lease") {
                 CHECK(d.allowed);
             } else {
                 CHECK_FALSE(d.allowed);
@@ -271,6 +274,12 @@ struct Fixture {
     std::vector<Argv> calls;
     std::vector<McpCallRecord> records;
     std::vector<bool> read_only_events;
+    std::vector<std::pair<std::string, std::string>> owner_guard_events;
+    std::function<bool(const audit::SapFacts&, const std::string&)> attach_guard;
+    std::function<bool(const audit::SapFacts&, const std::string&)> login_guard;
+    std::function<bool(const audit::SapFacts&, const std::string&)> launch_guard;
+    std::vector<int> launch_rollbacks;
+    std::vector<bool> attach_finalizations;
     std::optional<audit::SapFacts> facts;
     std::function<std::optional<audit::SapFacts>(std::optional<int>)> facts_for;  // per-connection facts (wins over `facts`)
     std::function<Result(const Argv&)> handler = [](const Argv&) { return ok_result(); };
@@ -279,7 +288,33 @@ struct Fixture {
         auto d = std::make_unique<CommandDispatcher>([this](const Argv& argv) { calls.push_back(argv); return handler(argv); },
                                                      policy, [this](const McpCallRecord& r) { records.push_back(r); });
         d->set_sap_facts_provider([this](std::optional<int> c) { return facts_for ? facts_for(c) : facts; });
+        d->set_connection_snapshot_provider([this] {
+            const Argv argv{"connection", "list"};
+            calls.push_back(argv);
+            return handler(argv);
+        });
         d->set_read_only_override([this](bool ro) { read_only_events.push_back(ro); });
+        d->set_owner_session_override([this](const std::string& session, const std::string& owner) {
+            owner_guard_events.emplace_back(session, owner);
+        });
+        d->set_attach_target_guard_override([this](CommandDispatcher::AttachTargetGuard guard) {
+            attach_guard = std::move(guard);
+        });
+        d->set_login_target_guard_override([this](CommandDispatcher::LoginTargetGuard guard) {
+            login_guard = std::move(guard);
+        });
+        d->set_launch_target_guard_override([this](CommandDispatcher::LaunchTargetGuard guard) {
+            launch_guard = std::move(guard);
+        });
+        d->set_launch_rollback_override([this](int id) {
+            launch_rollbacks.push_back(id);
+            return true;
+        });
+        d->set_attach_finalize_override([this](bool accepted) {
+            attach_finalizations.push_back(accepted);
+            return true;
+        });
+        d->set_control_probe_gate(std::make_shared<std::shared_timed_mutex>());
         return d;
     }
 };
@@ -290,6 +325,7 @@ CallContext ctx_for(const Principal& p, bool http = true) {
     ctx.principal = p;
     ctx.http = http;
     ctx.era = ProtocolEra::Stateless;
+    ctx.reauthorize = [] { return true; };
     return ctx;
 }
 
@@ -652,6 +688,7 @@ TEST_CASE("audit: principal, remote_addr, transport and era reach the JSONL; no 
     CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return ok_result(); }, policy,
                         make_mcp_audit_hook(&sink, nullptr, false));
     Principal p = token("ci-bot", {"screen", "element"});
+    p.id = "issued-token-123";
     p.remote_addr = "10.0.0.5";
     p.read_only = true;
     d.set_client_info(json{{"name", "curl"}, {"version", "1"}});
@@ -674,6 +711,7 @@ TEST_CASE("audit: principal, remote_addr, transport and era reach the JSONL; no 
     REQUIRE(rows.size() == 3);
     for (const auto& row : rows) {
         CHECK(row["principal"] == "ci-bot");
+        CHECK(row["token_id"] == "issued-token-123");
         CHECK(row["remote_addr"] == "10.0.0.5");
         CHECK(row["transport"] == "http");
         CHECK(row["era"] == "stateless");
@@ -1562,6 +1600,27 @@ TEST_CASE("dispatcher: an allowed start that still ends outside the allowlist ke
     CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
 }
 
+TEST_CASE("dispatcher: T-code denial survives provider replacement", "[auth][dispatch][recheck][provider-reload]") {
+    Fixture f;
+    auto policy_state = std::make_shared<SessionPolicyState>();
+    auto before = f.make(write_mode());
+    before->set_session_policy_state(policy_state);
+    Principal p = token("reload", {"screen", "key"});
+    p.tcodes = {"VA03"};
+    f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "key") f.facts->transaction = "S000";
+        return ok_result();
+    };
+    REQUIRE_FALSE(before->call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
+    f.facts->transaction = "VA03";
+    auto after = f.make(write_mode());
+    after->set_session_policy_state(policy_state);
+    const auto denied = after->call_tool("gui_screen_read", json::object(), ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("TCODE_DENIED") != std::string::npos);
+}
+
 TEST_CASE("dispatcher: tokens without a T-code allowlist never re-check", "[auth][dispatch][recheck]") {
     Fixture f;
     auto d_ptr = f.make(write_mode());
@@ -1632,4 +1691,1737 @@ TEST_CASE("dispatcher: per-principal state is keyed by token id, not by name", "
     CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(b)).is_error);
     CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(a)).is_error);  // A stays blocked
     CHECK_FALSE(d.sticky_connection("idB").has_value());
+}
+
+TEST_CASE("dispatcher: leaving a T-code allowlist blocks only the affected SAP session", "[auth][dispatch][recheck][session-state]") {
+    Fixture f;
+    auto d = f.make(write_mode());
+    Principal p = token("operator", {"key", "screen", "transaction"});
+    p.id = "token-1";
+    p.tcodes = {"VA03"};
+    std::map<int, std::string> transactions{{1, "VA03"}, {2, "VA03"}};
+    f.facts_for = [&](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        if (!connection || !transactions.count(*connection)) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", "U", transactions.at(*connection)};
+        facts.connection_id = *connection;
+        facts.session_identity = "session-" + std::to_string(*connection);
+        return facts;
+    };
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() >= 2 && argv[0] == "key" && argv[1] == "send") transactions[1] = "SE38";
+        return ok_result();
+    };
+
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
+    transactions[1] = "VA03";  // another actor navigated back; the block persists for session 1
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 2}}, ctx_for(p)).is_error);
+    CHECK(d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p)).is_error);
+
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "VA03"}, {"connection", 2}}, ctx_for(p)).is_error);
+    CHECK(d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d->call_tool("gui_transaction_start", {{"code", "VA03"}, {"connection", 1}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p)).is_error);
+}
+
+TEST_CASE("dispatcher: mismatched live connection facts cannot authorize another session", "[auth][dispatch][session-state]") {
+    Fixture f;
+    auto d = f.make(write_mode());
+    Principal p = token("agent", {"screen"});
+    p.tcodes = {"VA03"};
+    f.facts_for = [](std::optional<int>) -> std::optional<audit::SapFacts> {
+        audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = 2;
+        facts.session_identity = "session-two";
+        return facts;
+    };
+    const auto denied = d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("SESSION_TARGET_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: mismatched post-call facts cannot block a different SAP session", "[auth][dispatch][recheck][session-state]") {
+    Fixture f;
+    auto d = f.make(write_mode());
+    Principal p = token("agent", {"key", "screen"});
+    p.tcodes = {"VA03"};
+    bool after_key = false;
+    f.facts_for = [&](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        const int reported = connection == 1 && after_key ? 2 : connection.value_or(0);
+        audit::SapFacts facts{"A4H", "001", "OWNER", connection == 1 && after_key ? "SE38" : "VA03"};
+        facts.connection_id = reported;
+        facts.session_identity = "session-" + std::to_string(reported);
+        return facts;
+    };
+    f.handler = [&](const Argv&) { after_key = true; return ok_result(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 2}}, ctx_for(p)).is_error);
+}
+
+TEST_CASE("dispatcher: T-code block survives a missing session identity", "[auth][dispatch][session-state]") {
+    Fixture f;
+    auto d = f.make(write_mode());
+    Principal p = token("agent", {"key", "screen"});
+    p.tcodes = {"VA03"};
+    std::string transaction = "VA03";
+    bool identity_missing = false;
+    f.facts_for = [&](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        audit::SapFacts facts{"A4H", "001", "OWNER", transaction};
+        facts.connection_id = connection;
+        facts.session_identity = identity_missing ? "" : "session-one|key|generation";
+        return facts;
+    };
+    f.handler = [&](const Argv&) { transaction = "SE38"; return ok_result(); };
+    CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
+    transaction = "VA03";
+    identity_missing = true;
+    const auto denied = d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("TCODE_DENIED") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("dispatcher: owner SAP identity limits established session calls", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one";
+
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p)).is_error);
+    CHECK(f.calls.size() == 1);
+
+    f.facts->user = "OTHER";
+    auto denied = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+    REQUIRE_FALSE(f.records.empty());
+    CHECK(f.records.back().error_code == "OWNER_IDENTITY_DENIED");
+
+    f.facts->user.clear();
+    denied = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("dispatcher sends an authorized bound call to its session worker", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("reader", {"screen"});
+    p.read_only = true;
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
+    std::optional<WorkerCall> received;
+    d->set_session_invoker([&](const WorkerCall& call) {
+        received = call;
+        Result result = ok_result();
+        result.data = {{"connection_id", 7}};
+        return result;
+    });
+
+    const auto result = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx_for(p));
+    CHECK_FALSE(result.is_error);
+    REQUIRE(received);
+    CHECK(received->connection == 7);
+    CHECK(received->session_identity == f.facts->session_identity);
+    CHECK(received->owner_identity == "A4H/001/OWNER");
+    CHECK(received->read_only);
+    CHECK(std::find(received->argv.begin(), received->argv.end(), "--connection") != received->argv.end());
+    CHECK(f.calls.empty());
+
+    d->set_session_invoker([](const WorkerCall&) -> Result {
+        throw std::runtime_error("worker pipe closed after submission");
+    });
+    const auto uncertain = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(uncertain.is_error);
+    CHECK(text_of(uncertain).find("OUTCOME_UNKNOWN") != std::string::npos);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("required audit failure before worker send does not claim the SAP action ran", "[auth][dispatch][audit]") {
+    mcp_audit_reset_failure();
+    const auto blocker = std::filesystem::temp_directory_path() /
+        ("ff_worker_audit_blocker_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    { std::ofstream(blocker) << "x"; }
+    audit::AuditSink sink(audit::AuditConfig{audit::Mode::Required, blocker / "audit.jsonl"});
+    Fixture f;
+    Policy policy = write_mode();
+    policy.audit_required = true;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("reader", {"screen"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "/app/con[0]/ses[0]|key|generation";
+    bool worker_action = false;
+    d->set_session_invoker_with_gate([&](const WorkerCall&, const std::function<void()>& gate) {
+        CHECK_FALSE(append_serve_event(&sink, "probe", true));
+        gate();
+        worker_action = true;
+        return ok_result();
+    });
+    const auto result = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("AUDIT_UNAVAILABLE") != std::string::npos);
+    CHECK(text_of(result).find("before the worker action") != std::string::npos);
+    CHECK(text_of(result).find("carried out") == std::string::npos);
+    CHECK_FALSE(worker_action);
+    mcp_audit_reset_failure();
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+}
+
+TEST_CASE("dispatcher reauthenticates immediately before each worker action", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("reader", {"screen"});
+    p.read_only = true;
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
+    int worker_calls = 0;
+    d->set_session_invoker([&](const WorkerCall&) { ++worker_calls; return ok_result(); });
+    auto ctx = ctx_for(p);
+    ctx.reauthorize = [] { return false; };
+    const auto revoked = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
+    INFO(text_of(revoked));
+    CHECK(revoked.is_error);
+    CHECK(text_of(revoked).find("TOKEN_CHANGED") != std::string::npos);
+    CHECK(worker_calls == 0);
+    ctx.reauthorize = {};
+    const auto missing = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
+    INFO(text_of(missing));
+    CHECK(missing.is_error);
+    CHECK(text_of(missing).find("AUTH_UNAVAILABLE") != std::string::npos);
+    CHECK(worker_calls == 0);
+}
+
+TEST_CASE("dispatcher screenshot retry stays in its bound worker", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    policy.max_image_bytes = 100;
+    auto d = f.make(policy);
+    Principal p = token("reader", {"screen"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
+    std::vector<WorkerCall> worker_calls;
+    d->set_session_invoker([&](const WorkerCall& call) {
+        worker_calls.push_back(call);
+        Result result = ok_result();
+        result.data = {{"screenshot", "data:image/png;base64," + std::string(4000, 'A')}};
+        return result;
+    });
+    (void)d->call_tool("gui_screen_capture", {{"connection", 7}}, ctx_for(p));
+    CHECK(worker_calls.size() == 2);
+    CHECK(f.calls.empty());
+    if (worker_calls.size() == 2)
+        CHECK(worker_calls[0].session_identity == worker_calls[1].session_identity);
+}
+
+TEST_CASE("worker mode refuses an unrecognized session command without local fallback", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    ToolSpec spec;
+    spec.def.name = "gui_screen_unknown";
+    spec.def.input_schema = {{"type", "object"}, {"properties", {{"connection", {{"type", "integer"}}}}}};
+    spec.family = "screen";
+    spec.build_argv = [](const json&, const Policy&) {
+        return Argv{"screen", "unknown", "--connection", "7"};
+    };
+    CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return ok_result(); },
+                        policy, nullptr, {spec});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
+    d.set_sap_facts_provider([&](std::optional<int>) { return f.facts; });
+    d.set_owner_session_override([](const std::string&, const std::string&) {});
+    d.set_session_invoker([](const WorkerCall&) { return ok_result(); });
+    Principal p = token("reader", {"screen"});
+    const auto result = d.call_tool("gui_screen_unknown", {{"connection", 7}}, ctx_for(p));
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("WORKER_UNSUPPORTED") != std::string::npos);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: owner check pins an implicitly resolved connection", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    f.facts_for = [](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        if (connection && *connection != 2) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = 2;
+        facts.session_identity = "session-two|key|generation";
+        return facts;
+    };
+    const auto read = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    CHECK_FALSE(read.is_error);
+    REQUIRE(f.calls.size() == 1);
+    CHECK(std::find(f.calls[0].begin(), f.calls[0].end(), "--connection") != f.calls[0].end());
+    CHECK(std::find(f.calls[0].begin(), f.calls[0].end(), "2") != f.calls[0].end());
+    REQUIRE(f.owner_guard_events.size() == 2);
+    CHECK(f.owner_guard_events[0] == std::make_pair(std::string("session-two|key|generation"), std::string("A4H/001/OWNER")));
+    CHECK(f.owner_guard_events[1] == std::make_pair(std::string(), std::string()));
+}
+
+TEST_CASE("dispatcher: unknown and foreign sessions have the same owner refusal", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    f.facts_for = [](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        if (connection != 2) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", "OTHER", "VA03"};
+        facts.connection_id = 2;
+        facts.session_identity = "session-two|key|generation";
+        return facts;
+    };
+    const auto missing = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p));
+    const auto foreign = d->call_tool("gui_screen_read", {{"connection", 2}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(missing.is_error);
+    CHECK(foreign.is_error);
+    CHECK(text_of(missing) == text_of(foreign));
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: owner recheck withholds a result from a changed session", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    bool changed = false;
+    f.facts_for = [&](std::optional<int>) -> std::optional<audit::SapFacts> {
+        audit::SapFacts facts{"A4H", "001", changed ? "OTHER" : "OWNER", "VA03"};
+        facts.connection_id = 1;
+        facts.session_identity = changed ? "session-new|key|generation" : "session-old|key|generation";
+        return facts;
+    };
+    f.handler = [&](const Argv&) {
+        changed = true;
+        Result result = ok_result();
+        result.data = {{"secret", "PRIVATE SCREEN"}};
+        return result;
+    };
+    const auto read = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p));
+    CHECK(read.is_error);
+    CHECK(text_of(read).find("PRIVATE SCREEN") == std::string::npos);
+    CHECK(text_of(read).find("OUTCOME_UNKNOWN") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: owner recheck covers screenshot retry", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    policy.max_image_bytes = 100;
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    int captures = 0;
+    f.facts_for = [&](std::optional<int>) -> std::optional<audit::SapFacts> {
+        audit::SapFacts facts{"A4H", "001", captures == 2 ? "OTHER" : "OWNER", "VA03"};
+        facts.connection_id = 1;
+        facts.session_identity = captures == 2 ? "new|key|generation" : "old|key|generation";
+        return facts;
+    };
+    f.handler = [&](const Argv&) {
+        ++captures;
+        Result result = ok_result();
+        result.data = {{"screenshot", "data:image/png;base64," + std::string(captures == 1 ? 400 : 40, 'A')},
+                       {"format", "base64"}};
+        return result;
+    };
+    const auto image = d->call_tool("gui_screen_capture", {{"connection", 1}}, ctx_for(p));
+    CHECK(captures == 2);
+    CHECK(image.is_error);
+    CHECK(text_of(image).find("OUTCOME_UNKNOWN") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: scope refusal does not inspect a SAP session", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    int lookups = 0;
+    f.facts_for = [&](std::optional<int>) -> std::optional<audit::SapFacts> {
+        ++lookups;
+        return std::nullopt;
+    };
+    const auto denied = d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("SCOPE_DENIED") != std::string::npos);
+    CHECK(lookups == 0);
+}
+
+TEST_CASE("dispatcher: rate refusal does not inspect a SAP session", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen"});
+    p.rate_per_minute = 1;
+    int lookups = 0;
+    f.facts_for = [&](std::optional<int>) -> std::optional<audit::SapFacts> {
+        ++lookups;
+        audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = 1;
+        facts.session_identity = "session-one|key|generation";
+        return facts;
+    };
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p)).is_error);
+    const int before = lookups;
+    const auto denied = d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("RATE_LIMITED") != std::string::npos);
+    CHECK(lookups == before);
+}
+
+TEST_CASE("dispatcher: attaching a session checks the requested SAP user", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one|key|generation";
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 1}, {"session_id", "session-one"}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery& query) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = query.session_id == "session-two" ? "OTHER" : "OWNER";
+        return target;
+    });
+
+    auto denied = d->call_tool("gui_session_attach", {{"session_id", "session-two"}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.empty());
+    auto revoked = ctx_for(p);
+    revoked.reauthorize = [] { return false; };
+    const auto changed = d->call_tool("gui_session_attach", {{"session_id", "session-one"}}, revoked);
+    CHECK(changed.is_error);
+    CHECK(text_of(changed).find("TOKEN_CHANGED") != std::string::npos);
+    CHECK(f.calls.empty());
+    CHECK_FALSE(d->call_tool("gui_session_attach", {{"session_id", "session-one"}}, ctx_for(p)).is_error);
+    CHECK(f.calls.size() == 1);
+    CHECK(f.attach_finalizations == std::vector<bool>{true});
+    f.calls.clear();
+    d->set_attach_finalize_override([&](bool accepted) {
+        f.attach_finalizations.push_back(accepted);
+        return false;  // saved generation was replaced by another process before commit
+    });
+    const auto replaced = d->call_tool("gui_session_attach", {{"session_id", "session-one"}}, ctx_for(p));
+    CHECK(replaced.is_error);
+    CHECK(text_of(replaced).find("OUTCOME_UNKNOWN") != std::string::npos);
+    CHECK(f.attach_finalizations == std::vector<bool>{true, true});
+    f.calls.clear();
+    d->set_attach_finalize_override({});
+    const auto no_rollback = d->call_tool("gui_session_attach", {{"session_id", "session-one"}}, ctx_for(p));
+    CHECK(no_rollback.is_error);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("attach checks token limits again before writing a changed live target", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER", "B4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"A Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OWNER";
+        target.connection_name = "A Logon";
+        return target;
+    });
+    bool cache_written = false;
+    f.handler = [&](const Argv&) {
+        audit::SapFacts changed{"B4H", "001", "OWNER", ""};
+        changed.session_identity = "session-one|key|generation";
+        if (!f.attach_guard || !f.attach_guard(changed, "B Logon")) {
+            Result denied;
+            denied.status = Result::Status::Error;
+            denied.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "session unavailable"}};
+            return denied;
+        }
+        cache_written = true;
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 1}, {"session_id", "session-one"}};
+        return result;
+    };
+    const auto denied = d->call_tool("gui_session_attach", {{"session_id", "session-one"}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK_FALSE(cache_written);
+    CHECK_FALSE(f.attach_guard);
+}
+
+TEST_CASE("dispatcher: owner identity gate withholds unfiltered session discovery", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session", "connection", "credentials"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one";
+
+    for (const char* tool : {"gui_session_list", "gui_connection_list", "gui_credentials_list"}) {
+        const auto denied = d->call_tool(tool, json::object(), ctx_for(p));
+        CHECK(denied.is_error);
+        CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    }
+    const auto implicit = d->call_tool("gui_session_attach", json::object(), ctx_for(p));
+    CHECK(implicit.is_error);
+    CHECK(text_of(implicit).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == 2);  // malformed session and connection listings were withheld
+}
+
+TEST_CASE("owner session listing withholds results after cancellation or verification timeout", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.handler = [](const Argv&) {
+        Result r = ok_result();
+        r.data = session_list_data();
+        return r;
+    };
+    bool cancelled = false;
+    int probes = 0;
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        ++probes;
+        cancelled = true;
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.connection_name = "DEV1";
+        target.user = "OWNER";
+        return target;
+    });
+    auto ctx = ctx_for(p);
+    ctx.cancelled = [&] { return cancelled; };
+    auto result = d->call_tool("gui_session_list", json::object(), ctx);
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("SECRETPRD") == std::string::npos);
+    CHECK(probes == 1);
+
+    cancelled = false;
+    probes = 0;
+    d->set_owner_listing_budget(std::chrono::milliseconds(1));
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        ++probes;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.connection_name = "DEV1";
+        target.user = "OWNER";
+        return target;
+    });
+    result = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("SECRETPRD") == std::string::npos);
+    CHECK(probes == 1);
+
+    // The initial SAP enumeration is synchronous. If it returns after the budget,
+    // its unverified data must still be withheld before any owner probes run.
+    probes = 0;
+    f.handler = [](const Argv&) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        Result r = ok_result();
+        r.data = session_list_data();
+        return r;
+    };
+    result = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("SECRETPRD") == std::string::npos);
+    CHECK(probes == 0);
+}
+
+TEST_CASE("owner discovery uses verified worker targets without tray COM enumeration", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    int tray_calls = 0;
+    f.handler = [&](const Argv&) { ++tray_calls; return ok_result(); };
+    int tray_probes = 0;
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        ++tray_probes;
+        return auth::SessionTarget{};
+    });
+    d->set_owner_session_listing_provider([](std::chrono::milliseconds, const std::function<bool()>&) {
+        Result r = ok_result();
+        r.data = session_list_data();
+        r.data["connections"][0]["sessions"][0]["verified_target"] =
+            {{"system", "A4H/001"}, {"user", "OWNER"}, {"connection_name", "DEV1"}};
+        r.data["connections"][0]["sessions"][1]["verified_target"] =
+            {{"system", "A4H/001"}, {"user", "OTHER"}, {"connection_name", "DEV1"}};
+        return r;
+    });
+    const auto result = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK_FALSE(result.is_error);
+    CHECK(everything_of(result).find("/app/con[0]/ses[0]") != std::string::npos);
+    CHECK(everything_of(result).find("/app/con[0]/ses[1]") == std::string::npos);
+    CHECK(everything_of(result).find("SECRETPRD") == std::string::npos);
+    CHECK(tray_calls == 0);
+    CHECK(tray_probes == 0);
+}
+
+TEST_CASE("owner connection listing exposes only verified live owner rows", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"connection", "system"});
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"Allowed*"};
+    f.handler = [](const Argv&) {
+        Result r = ok_result();
+        r.data = {{"connections", json::array({
+            {{"id", 1}, {"session_id", "session-one"}, {"server_session_key", "key-one"},
+             {"cache_generation", "gen-one"}, {"description", "SAVED_SECRET"}, {"file", "SECRET_FILE"}, {"valid", false}},
+            {{"id", 2}, {"session_id", "session-two"}, {"server_session_key", "key-two"},
+             {"cache_generation", "gen-two"}, {"description", "FOREIGN_SECRET"}, {"valid", true}},
+            {{"id", 3}, {"session_id", "session-three"}, {"server_session_key", "key-three"},
+             {"cache_generation", "gen-three"}, {"description", "STALE_SECRET"}, {"valid", true}},
+            {{"id", 4}, {"session_id", "session-four"}, {"server_session_key", "key-four"},
+             {"cache_generation", "gen-four"}, {"description", "NARROW_SECRET"}, {"valid", true}}
+        })}, {"count", 4}};
+        return r;
+    };
+    f.facts_for = [](std::optional<int> id) -> std::optional<audit::SapFacts> {
+        if (!id) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", *id == 2 ? "OTHER" : "OWNER", "VA03"};
+        facts.connection_id = *id;
+        facts.session_identity = "session-" + std::string(*id == 1 ? "one|key-one|gen-one" :
+            *id == 2 ? "two|key-two|gen-two" : *id == 3 ? "three|key-three|old-gen" :
+            "four|key-four|gen-four");
+        return facts;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery& q) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = q.connection == 2 ? "OTHER" : "OWNER";
+        target.connection_name = q.connection == 4 ? "Other Logon" : "Allowed Logon";
+        return target;
+    });
+    const auto result = d->call_tool("gui_connection_list", json::object(), ctx_for(p));
+    INFO(text_of(result));
+    REQUIRE_FALSE(result.is_error);
+    const auto visible = text_of(result);
+    CHECK(visible.find("Allowed Logon") != std::string::npos);
+    CHECK(visible.find("session-one") != std::string::npos);
+    for (const char* secret : {"SAVED_SECRET", "SECRET_FILE", "FOREIGN_SECRET", "STALE_SECRET",
+                               "NARROW_SECRET", "session-two", "session-three", "session-four", "key-one", "gen-one"})
+        CHECK(visible.find(secret) == std::string::npos);
+    CHECK(visible.find("\"count\":1") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+    const auto doctor = d->call_tool("gui_doctor", json::object(), ctx_for(p));
+    REQUIRE_FALSE(doctor.is_error);
+    const auto diagnostics = text_of(doctor);
+    CHECK(diagnostics.find("owner_connections") != std::string::npos);
+    CHECK(diagnostics.find("Allowed Logon") == std::string::npos); // count-only diagnostic
+    for (const char* secret : {"SAVED_SECRET", "SECRET_FILE", "FOREIGN_SECRET", "STALE_SECRET",
+                               "NARROW_SECRET", "session-two", "session-three", "session-four", "key-one", "gen-one"})
+        CHECK(diagnostics.find(secret) == std::string::npos);
+    CHECK(f.calls.size() == 2);
+    const auto local_doctor = d->call_tool("gui_doctor", json::object(), ctx_for(p, false));
+    CHECK(local_doctor.is_error);  // local doctor still reports global desktop state
+    CHECK(text_of(local_doctor).find("CONNECTION_DENIED") != std::string::npos);
+    CHECK(f.calls.size() == 2);
+    const auto cleanup = d->call_tool("gui_connection_list", {{"cleanup", true}}, ctx_for(p));
+    CHECK(cleanup.is_error);
+    CHECK(f.calls.size() == 2);
+    f.handler = [](const Argv&) {
+        Result r = ok_result();
+        r.data = {{"connections", json::array()}, {"count", 0}};
+        return r;
+    };
+    const auto empty = d->call_tool("gui_doctor", json::object(), ctx_for(p));
+    REQUIRE_FALSE(empty.is_error);
+    CHECK(text_of(empty).find("No allowed SAP connection is ready") != std::string::npos);
+    CHECK(text_of(empty).find("\"overall_health\":\"warning\"") != std::string::npos);
+    f.handler = [](const Argv&) {
+        Result r = ok_result();
+        r.data = {{"connections", "FOREIGN_SECRET"}, {"count", 1}};
+        return r;
+    };
+    const auto malformed = d->call_tool("gui_doctor", json::object(), ctx_for(p));
+    CHECK(malformed.is_error);
+    CHECK(text_of(malformed).find("FOREIGN_SECRET") == std::string::npos);
+    f.handler = [](const Argv&) {
+        Result r;
+        r.status = Result::Status::Error;
+        r.error = {{"code", "ENUMERATION_FAILED"}, {"message", "FOREIGN_SECRET"}};
+        return r;
+    };
+    const auto failed = d->call_tool("gui_doctor", json::object(), ctx_for(p));
+    CHECK(failed.is_error);
+    CHECK(text_of(failed).find("FOREIGN_SECRET") == std::string::npos);
+}
+
+TEST_CASE("dispatcher: owner identity gate does not trust an existing session to authorize launch or login", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one";
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OWNER";
+        return target;
+    });
+    for (const char* tool : {"gui_session_launch", "gui_session_login"}) {
+        const json args = std::string(tool) == "gui_session_launch" ? json{{"name", "DEV"}} : json{{"connection", 1}};
+        const auto denied = d->call_tool(tool, args, ctx_for(p));
+        CHECK(denied.is_error);
+        CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    }
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("owner launch verifies a new prelogin window before exposing its saved ID", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"A4H Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "A4H Logon";
+        return target;
+    });
+    bool wrong_system = true;
+    bool saved = false;
+    f.handler = [&](const Argv&) {
+        audit::SapFacts live{wrong_system ? "PRD" : "A4H", "000", "", "S000"};
+        if (!f.launch_guard || !f.launch_guard(live, "A4H Logon")) {
+            Result denied;
+            denied.status = Result::Status::Error;
+            denied.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "launch unavailable"}};
+            return denied;
+        }
+        saved = true;
+        f.facts = audit::SapFacts{"A4H", "000", "", "S000"};
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven||generation";
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
+        return result;
+    };
+    auto denied = d->call_tool("gui_session_launch", {{"name", "A4H Logon"}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK_FALSE(saved);
+    wrong_system = false;
+    auto allowed = d->call_tool("gui_session_launch", {{"name", "A4H Logon"}}, ctx_for(p));
+    INFO(text_of(allowed));
+    CHECK_FALSE(allowed.is_error);
+    CHECK(saved);
+    CHECK_FALSE(f.launch_guard);
+}
+
+TEST_CASE("multi-user launch does not inherit an existing logon entry's SAP user", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/DEVELOPER", "A4H/001/SECOND"};
+    auto d = f.make(policy);
+    Principal second = token("second", {"session"});
+    second.id = "second-token";
+    second.sap_identities = {"A4H/001/SECOND"};
+    second.sap_systems = {"A4H/001"};
+    second.connections = {"Bigfox"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget existing;
+        existing.system = "A4H/001";
+        existing.user = "DEVELOPER";
+        existing.connection_name = "Bigfox";
+        return existing;
+    });
+    f.handler = [&](const Argv&) {
+        audit::SapFacts pre{"A4H", "000", "", "S000"};
+        REQUIRE(f.launch_guard);
+        REQUIRE(f.launch_guard(pre, "Bigfox"));
+        f.facts = pre;
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven|key|generation";
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
+        return result;
+    };
+    const auto opened = d->call_tool("gui_session_launch", {{"name", "Bigfox"}}, ctx_for(second));
+    INFO(text_of(opened));
+    CHECK_FALSE(opened.is_error);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("owner launch with login checks credential identity before SAP submission", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"A4H Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "A4H Logon";
+        return target;
+    });
+    bool wrong_credential = true;
+    bool typed = false;
+    f.handler = [&](const Argv&) {
+        const auto denied = [] {
+            Result result;
+            result.status = Result::Status::Error;
+            result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "login denied"}};
+            return result;
+        };
+        audit::SapFacts pre{"A4H", "000", "", "S000"};
+        if (!f.launch_guard || !f.launch_guard(pre, "A4H Logon")) return denied();
+        audit::SapFacts credential = pre;
+        credential.client = "001";
+        credential.user = wrong_credential ? "OTHER" : "OWNER";
+        credential.connection_id = 7;
+        credential.session_identity = "session-seven||generation";
+        if (!f.login_guard || !f.login_guard(credential, "A4H Logon"))
+            return denied();
+        typed = true;
+        f.facts = credential;
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven|key|generation";
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
+        return result;
+    };
+    const json args = {{"name", "A4H Logon"}, {"login", true}};
+    CHECK(d->call_tool("gui_session_launch", args, ctx_for(p)).is_error);
+    CHECK_FALSE(typed);
+    wrong_credential = false;
+    const auto allowed = d->call_tool("gui_session_launch", args, ctx_for(p));
+    INFO(text_of(allowed));
+    CHECK_FALSE(allowed.is_error);
+    CHECK(typed);
+    CHECK_FALSE(f.launch_guard);
+    CHECK_FALSE(f.login_guard);
+}
+
+TEST_CASE("owner launch rolls back its saved generation when postcheck fails", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.connections = {"A4H Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "A4H Logon";
+        return target;
+    });
+    f.handler = [&](const Argv&) {
+        audit::SapFacts pre{"A4H", "", "", ""};
+        REQUIRE(f.launch_guard);
+        REQUIRE(f.launch_guard(pre, "A4H Logon"));
+        f.facts = audit::SapFacts{"PRD", "100", "OTHER", ""};
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven|key|generation";
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
+        return result;
+    };
+    const auto outcome = d->call_tool("gui_session_launch", {{"name", "A4H Logon"}}, ctx_for(p));
+    CHECK(outcome.is_error);
+    CHECK(text_of(outcome).find("OUTCOME_UNKNOWN") != std::string::npos);
+    CHECK(f.launch_rollbacks == std::vector<int>{7});
+}
+
+TEST_CASE("owner launch keeps a verified prelogin connection after credential refusal", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.connections = {"A4H Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "A4H Logon";
+        return target;
+    });
+    f.handler = [&](const Argv&) {
+        audit::SapFacts pre{"A4H", "", "", ""};
+        REQUIRE(f.launch_guard);
+        REQUIRE(f.launch_guard(pre, "A4H Logon"));
+        f.facts = pre;
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven||generation";
+        Result result;
+        result.status = Result::Status::Error;
+        result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "credential denied"},
+                        {"launch", {{"connection_file_id", 7}, {"session_id", "session-seven"}}}};
+        return result;
+    };
+    const auto outcome = d->call_tool("gui_session_launch",
+        {{"name", "A4H Logon"}, {"login", true}}, ctx_for(p));
+    CHECK(outcome.is_error);
+    CHECK(text_of(outcome).find("LOGIN_NOT_COMPLETED") != std::string::npos);
+    CHECK(text_of(outcome).find("connection_file_id") != std::string::npos);
+    CHECK(f.launch_rollbacks.empty());
+}
+
+TEST_CASE("owner login checks the credential identity before touching SAP", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto probe_gate = std::make_shared<std::shared_timed_mutex>();
+    d->set_control_probe_gate(probe_gate);
+    std::string reserved_lane;
+    bool unrelated_probe_can_run_while_login_waits = false;
+    d->set_login_lane_reserver([&](const std::string& lane, const std::function<bool()>&) -> std::shared_ptr<void> {
+        reserved_lane = lane;
+        std::thread probe([&] {
+            unrelated_probe_can_run_while_login_waits =
+                probe_gate->try_lock_shared_for(std::chrono::milliseconds(30));
+            if (unrelated_probe_can_run_while_login_waits) probe_gate->unlock_shared();
+        });
+        probe.join();
+        return std::make_shared<int>(1);
+    });
+    Principal p = token("agent", {"session"});
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"A Logon"};
+    f.facts = audit::SapFacts{"A4H", "", "", ""};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one||generation";
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = f.facts->system + (f.facts->client.empty() ? "" : "/" + f.facts->client);
+        target.user = f.facts->user;
+        target.connection_name = "A Logon";
+        return target;
+    });
+    bool typed = false;
+    bool wrong_credential = true;
+    f.handler = [&](const Argv&) {
+        audit::SapFacts anticipated = *f.facts;
+        anticipated.client = "001";
+        anticipated.user = wrong_credential ? "OTHER" : "OWNER";
+        if (!f.login_guard || !f.login_guard(anticipated, "A Logon")) {
+            Result denied;
+            denied.status = Result::Status::Error;
+            denied.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "login unavailable"}};
+            return denied;
+        }
+        typed = true;
+        f.facts->client = "001";
+        f.facts->user = "OWNER";
+        f.facts->session_identity = "session-one|newkey|newgeneration";
+        Result result = ok_result();
+        result.data = {{"connection_id", 1}, {"session_id", "session-one"}};
+        return result;
+    };
+    const auto denied = d->call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK_FALSE(typed);
+    wrong_credential = false;
+    const auto success = d->call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+    INFO(text_of(success));
+    CHECK_FALSE(success.is_error);
+    CHECK(typed);
+    CHECK(reserved_lane == "window:session-one");
+    CHECK(unrelated_probe_can_run_while_login_waits);
+    CHECK_FALSE(f.login_guard);
+}
+
+TEST_CASE("owner login refuses before invoking SAP when its lane cannot be reserved", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.facts = audit::SapFacts{"A4H", "", "", ""};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one||generation";
+    auto denied = d->call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.empty());
+    d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> { return {}; });
+    denied = d->call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("SESSION_ROUTE_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("owner login reports an unknown outcome when post-login facts cannot be verified", "[auth][dispatch][owner-identity]") {
+    for (const bool missing_facts : {true, false}) {
+        Fixture f;
+        Policy policy = write_mode();
+        policy.owner_sap_identities = {"A4H/001/OWNER"};
+        auto d = f.make(policy);
+        d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> {
+            return std::make_shared<int>(1);
+        });
+        Principal p = token("agent", {"session"});
+        f.facts = audit::SapFacts{"A4H", "", "", ""};
+        f.facts->connection_id = 1;
+        f.facts->session_identity = "session-one||generation";
+        d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+            auth::SessionTarget target;
+            target.system = "A4H/001";
+            target.user = "OWNER";
+            target.connection_name = "A Logon";
+            return target;
+        });
+        bool submitted = false;
+        f.handler = [&](const Argv&) {
+            audit::SapFacts anticipated = *f.facts;
+            anticipated.client = "001";
+            anticipated.user = "OWNER";
+            REQUIRE(f.login_guard);
+            REQUIRE(f.login_guard(anticipated, "A Logon"));
+            submitted = true;
+            if (missing_facts) {
+                f.facts.reset();
+            } else {
+                f.facts->client = "001";
+                f.facts->user = "OTHER";
+                f.facts->session_identity = "session-one|newkey|newgeneration";
+            }
+            Result result = ok_result();
+            result.data = {{"connection_id", 1}, {"session_id", "session-one"}};
+            return result;
+        };
+        const auto outcome = d->call_tool("gui_session_login", {{"connection", 1}}, ctx_for(p));
+        INFO("missing_facts=" << missing_facts << ": " << text_of(outcome));
+        CHECK(submitted);
+        CHECK(outcome.is_error);
+        CHECK(text_of(outcome).find("OUTCOME_UNKNOWN") != std::string::npos);
+        CHECK(text_of(outcome).find("before retrying") != std::string::npos);
+        CHECK_FALSE(f.login_guard);
+    }
+}
+
+TEST_CASE("dispatcher: attach result is withheld if the selected SAP user changes during attach", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OWNER";
+        return target;
+    });
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 2}, {"session_id", "session-two"}, {"user", "OTHER"}};
+        return result;
+    };
+    f.facts_for = [](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        if (connection != 2) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", "OTHER", "VA03"};
+        facts.connection_id = 2;
+        facts.session_identity = "session-two|key|generation";
+        return facts;
+    };
+    const auto denied = d->call_tool("gui_session_attach", {{"session_id", "session-two"}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(text_of(denied).find("OTHER") == std::string::npos);
+    CHECK_FALSE(d->sticky_connection(p.id).has_value());
+    CHECK(f.attach_finalizations == std::vector<bool>{false});
+}
+
+TEST_CASE("dispatcher: session discovery shows only sessions of the configured SAP owner", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connections", json::array({{{"id", "/app/con[0]"}, {"description", "DEV"},
+                      {"connection_string", "secret.example"},
+                      {"sessions", json::array({{{"id", "allowed"}, {"active_window_title", "Allowed"}},
+                                                {{"id", "denied"}, {"active_window_title", "SECRET"}}})},
+                      {"session_count", 2}}})}, {"total_connections", 1}, {"total_sessions", 2}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery& query) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = query.session_id == "allowed" ? "OWNER" : "OTHER";
+        return target;
+    });
+    const auto listed = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK_FALSE(listed.is_error);
+    const auto content = text_of(listed);
+    CHECK(content.find("allowed") != std::string::npos);
+    CHECK(content.find("denied") == std::string::npos);
+    CHECK(content.find("SECRET") == std::string::npos);
+    CHECK(content.find("secret.example") == std::string::npos);
+}
+
+TEST_CASE("dispatcher: owner session discovery also honors the token SAP system", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER", "QAS/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.sap_systems = {"A4H/001"};
+    p.sap_identities = {"A4H/001/OWNER"};
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connections", json::array({
+            {{"id", "con-a"}, {"description", "A4H"}, {"sessions", json::array({{{"id", "allowed"}, {"active_window_title", "Allowed"}}})}},
+            {{"id", "con-q"}, {"description", "QAS"}, {"sessions", json::array({{{"id", "hidden"}, {"active_window_title", "SECRET"}}})}}
+        })}, {"total_connections", 2}, {"total_sessions", 2}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery& query) {
+        auth::SessionTarget target;
+        target.system = query.session_id == "allowed" ? "A4H/001" : "QAS/001";
+        target.user = "OWNER";
+        return target;
+    });
+    const auto listed = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK_FALSE(listed.is_error);
+    const auto content = text_of(listed);
+    CHECK(content.find("allowed") != std::string::npos);
+    CHECK(content.find("hidden") == std::string::npos);
+    CHECK(content.find("SECRET") == std::string::npos);
+    CHECK(content.find("QAS") == std::string::npos);
+}
+
+TEST_CASE("dispatcher: two SAP users on one tray are separated by token identity", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    auto d = f.make(policy);
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connections", json::array({{{"description", "Bigfox"},
+            {"sessions", json::array({{{"id", "alice-window"}}, {{"id", "bob-window"}}})}}})},
+            {"total_connections", 1}, {"total_sessions", 2}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery& query) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = query.session_id == "alice-window" ? "ALICE" : "BOB";
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    Principal caller = token("alice-client", {"session"});
+    const auto unbound = d->call_tool("gui_session_list", json::object(), ctx_for(caller));
+    CHECK(unbound.is_error);
+    CHECK(text_of(unbound).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    caller.sap_identities = {"A4H/001/ALICE"};
+    const auto alice = d->call_tool("gui_session_list", json::object(), ctx_for(caller));
+    REQUIRE_FALSE(alice.is_error);
+    CHECK(text_of(alice).find("alice-window") != std::string::npos);
+    CHECK(text_of(alice).find("bob-window") == std::string::npos);
+    caller.sap_identities = {"A4H/001/BOB"};
+    const auto bob = d->call_tool("gui_session_list", json::object(), ctx_for(caller));
+    REQUIRE_FALSE(bob.is_error);
+    CHECK(text_of(bob).find("alice-window") == std::string::npos);
+    CHECK(text_of(bob).find("bob-window") != std::string::npos);
+}
+
+TEST_CASE("a client token cannot read, lease, or attach another SAP user's window", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    auto d = f.make(policy);
+    Principal alice = token("alice-client", {"session", "screen"});
+    alice.all_scopes = true;
+    alice.id = "alice-token";
+    alice.sap_identities = {"A4H/001/ALICE"};
+    f.facts = audit::SapFacts{"A4H", "001", "BOB", "S000"};
+    f.facts->connection_id = 7;
+    f.facts->session_identity = "bob-window|key|generation";
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "BOB";
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    for (const auto& [tool, args] : std::vector<std::pair<std::string, json>>{
+             {"gui_screen_read", {{"connection", 7}, {"no_tabs", true}}},
+             {"gui_session_lease", {{"connection", 7}, {"action", "acquire"}}},
+             {"gui_session_attach", {{"session_id", "bob-window"}}}}) {
+        const auto result = d->call_tool(tool, args, ctx_for(alice));
+        INFO(tool << ": " << text_of(result));
+        CHECK(result.is_error);
+        CHECK(text_of(result).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    }
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("multi-user prelogin window is bound to its launching token", "[auth][dispatch][owner-identity][prelogin]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    auto d = f.make(policy);
+    Principal alice = token("alice-client", {"session"});
+    alice.id = "alice-token";
+    alice.sap_identities = {"A4H/001/ALICE"};
+    alice.connections = {"Bigfox"};
+    alice.sap_systems = {"A4H/001"};
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        if (f.facts && !f.facts->user.empty()) {
+            target.system = f.facts->system + "/" + f.facts->client;
+            target.user = f.facts->user;
+        }
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> {
+        return std::make_shared<int>(1);
+    });
+    f.handler = [&](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "session login") {
+            audit::SapFacts anticipated = *f.facts;
+            anticipated.client = "001";
+            anticipated.user = "ALICE";
+            REQUIRE(f.login_guard);
+            REQUIRE(f.login_guard(anticipated, "Bigfox"));
+            f.facts->client = "001";
+            f.facts->user = "ALICE";
+            f.facts->session_identity = "session-seven|key|new-generation";
+            return ok_result();
+        }
+        audit::SapFacts pre{"A4H", "000", "", "S000"};
+        REQUIRE(f.launch_guard);
+        REQUIRE(f.launch_guard(pre, "Bigfox"));
+        f.facts = pre;
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven||generation";
+        Result result = ok_result();
+        result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
+        return result;
+    };
+    const auto launch = d->call_tool("gui_session_launch", {{"name", "Bigfox"}}, ctx_for(alice));
+    CHECK_FALSE(launch.is_error);
+    CHECK(f.launch_rollbacks.empty());
+    const auto before_login = f.calls.size();
+    Principal bob = token("bob-client", {"session"});
+    bob.id = "bob-token";
+    bob.sap_identities = {"A4H/001/BOB"};
+    bob.connections = {"Bigfox"};
+    const auto login = d->call_tool("gui_session_login", {{"connection", 7}, {"credential", "Bigfox-Bob"}}, ctx_for(bob));
+    CHECK(login.is_error);
+    CHECK(text_of(login).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.size() == before_login);
+    const auto owner_login = d->call_tool("gui_session_login",
+        {{"connection", 7}, {"credential", "Bigfox-Alice"}}, ctx_for(alice));
+    INFO(text_of(owner_login));
+    CHECK_FALSE(owner_login.is_error);
+    CHECK(f.calls.size() == before_login + 1);
+}
+
+TEST_CASE("multi-user launch refuses a full prelogin claim table before opening SAP", "[auth][dispatch][owner-identity][prelogin]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    auto d = f.make(policy);
+    auto routing = std::make_shared<SessionRoutingState>();
+    for (int i = 0; i < 64; ++i)
+        REQUIRE(routing->bind_prelogin("old-token-" + std::to_string(i / 8), i,
+                                       "window-" + std::to_string(i) + "|key|generation"));
+    d->set_routing_state(routing);
+    Principal alice = token("alice-client", {"session"});
+    alice.id = "alice-token";
+    alice.sap_identities = {"A4H/001/ALICE"};
+    alice.connections = {"Bigfox"};
+    const auto denied = d->call_tool("gui_session_launch", {{"name", "Bigfox"}}, ctx_for(alice));
+    CHECK(denied.is_error);
+    CHECK(text_of(denied).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("only the launching token can close its exact prelogin window", "[auth][dispatch][owner-identity][prelogin]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    auto d = f.make(policy);
+    auto routing = std::make_shared<SessionRoutingState>();
+    REQUIRE(routing->bind_prelogin("alice-token", 7, "session-seven|key|generation"));
+    d->set_routing_state(routing);
+    audit::SapFacts pre{"A4H", "000", "", "S000"};
+    pre.connection_id = 7;
+    pre.session_identity = "session-seven|key|generation";
+    f.facts = pre;
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    Principal alice = token("alice-client", {"session"});
+    alice.id = "alice-token";
+    alice.sap_identities = {"A4H/001/ALICE"};
+    alice.connections = {"Bigfox"};
+    alice.sap_systems = {"A4H/001"};
+    Principal bob = alice;
+    bob.id = "bob-token";
+    bob.sap_identities = {"A4H/001/BOB"};
+    const json close = {{"connection", 7}, {"close_session", true}};
+    const auto other = d->call_tool("gui_session_disconnect", close, ctx_for(bob));
+    CHECK(other.is_error);
+    CHECK(f.calls.empty());
+    f.facts->session_identity = "session-seven|key|replacement";
+    const auto reused = d->call_tool("gui_session_disconnect", close, ctx_for(alice));
+    CHECK(reused.is_error);
+    CHECK(f.calls.empty());
+    f.facts->session_identity = pre.session_identity;
+    f.handler = [&](const Argv&) {
+        REQUIRE_FALSE(f.owner_guard_events.empty());
+        CHECK(f.owner_guard_events.back().first == pre.session_identity);
+        Result result = ok_result();
+        result.data = {{"file_deleted", true}};
+        return result;
+    };
+    const auto closed = d->call_tool("gui_session_disconnect", close, ctx_for(alice));
+    INFO(text_of(closed));
+    CHECK_FALSE(closed.is_error);
+    CHECK(f.calls.size() == 1);
+    CHECK_FALSE(routing->owns_prelogin(alice.id, 7, pre.session_identity));
+}
+
+TEST_CASE("keyless owner guard requires the same live prelogin window", "[auth][prelogin]") {
+    cli::Connection saved{};
+    saved.id = 7;
+    saved.session_id = "/app/con[0]/ses[0]";
+    saved.cache_generation = "generation";
+    audit::SapFacts live{"A4H", "000", "", "S000"};
+    live.connection_id = 7;
+    live.session_identity = saved.session_id + "||generation|hwnd:12345";
+    CHECK(cli::owner_bound_session_matches(saved, live, live.session_identity, "A4H/000/"));
+    CHECK_FALSE(cli::owner_bound_session_matches(saved, live, saved.session_id + "||generation|hwnd:999", "A4H/000/"));
+    live.user = "ALICE";
+    CHECK_FALSE(cli::owner_bound_session_matches(saved, live, live.session_identity, "A4H/000/ALICE"));
+    live.user.clear();
+    live.transaction = "SE80";
+    CHECK_FALSE(cli::owner_bound_session_matches(saved, live, live.session_identity, "A4H/000/"));
+    live.transaction = "S000";
+    live.session_identity = saved.session_id + "||generation";
+    CHECK_FALSE(cli::owner_bound_session_matches(saved, live, live.session_identity, "A4H/000/"));
+    saved.server_session_key = "server-key";
+    live.user = "ALICE";
+    live.client = "001";
+    live.session_identity = saved.session_id + "|server-key|generation";
+    CHECK(cli::owner_bound_session_matches(saved, live, live.session_identity, "A4H/001/ALICE"));
+}
+
+TEST_CASE("dispatcher: owner session discovery does not forward stale window metadata", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connections", json::array({{
+            {"id", "stale-connection"}, {"description", "stale-name"},
+            {"sessions", json::array({{{"id", "reused-id"}, {"active_window_title", "PRIVATE PRIOR WINDOW"}}})}
+        }})}, {"total_connections", 1}, {"total_sessions", 1}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OWNER";
+        target.connection_name = "current-name";
+        return target;
+    });
+    const auto listed = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    CHECK_FALSE(listed.is_error);
+    const auto content = text_of(listed);
+    CHECK(content.find("reused-id") != std::string::npos);
+    CHECK(content.find("PRIVATE PRIOR WINDOW") == std::string::npos);
+    CHECK(content.find("stale-name") == std::string::npos);
+    CHECK(content.find("stale-connection") == std::string::npos);
+    CHECK(content.find("current-name") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: owner discovery groups windows of one GUI connection", "[auth][dispatch][owner-identity]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    f.handler = [](const Argv&) {
+        Result result = ok_result();
+        result.data = {{"connections", json::array({{{"id", "con-one"}, {"description", "DEV"},
+            {"sessions", json::array({{{"id", "session-one"}}, {{"id", "session-two"}}})}}})},
+            {"total_connections", 1}, {"total_sessions", 2}};
+        return result;
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OWNER";
+        target.connection_name = "DEV";
+        return target;
+    });
+    const auto listed = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    REQUIRE_FALSE(listed.is_error);
+    REQUIRE(listed.structured.has_value());
+    const auto& data = listed.structured->at("data");
+    CHECK(data.at("total_connections") == 1);
+    CHECK(data.at("total_sessions") == 2);
+    CHECK(data.at("connections").size() == 1);
+    CHECK(data.at("connections").at(0).at("sessions").size() == 2);
+}
+
+TEST_CASE("dispatcher: owner session navigation requires a live lease held by this token", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-secret"; });
+    d->set_session_leases(leases);
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|server-key|generation-1";
+    Principal a = token("agent-a", {"session", "session.lease", "element"});
+    a.id = "token-a";
+    Principal b = token("agent-b", {"session", "session.lease", "element"});
+    b.id = "token-b";
+    const json click = {{"element", "wnd[0]/usr/btnX"}, {"connection", 1}};
+
+    const auto missing = d->call_tool("gui_element_click", click, ctx_for(a));
+    CHECK(missing.is_error);
+    CHECK(text_of(missing).find("LEASE_REQUIRED") != std::string::npos);
+    CHECK(f.calls.empty());
+
+    const auto acquired = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(a));
+    REQUIRE_FALSE(acquired.is_error);
+    REQUIRE(acquired.structured.has_value());
+    const std::string id = acquired.structured->at("lease_id").get<std::string>();
+    CHECK(id == "lease-secret");
+    CHECK(f.calls.empty());
+    CHECK(d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(b)).is_error);
+
+    json allowed = click;
+    allowed["lease_id"] = id;
+    CHECK_FALSE(d->call_tool("gui_element_click", allowed, ctx_for(a)).is_error);
+    CHECK(d->call_tool("gui_element_click", allowed, ctx_for(b)).is_error);
+    REQUIRE(f.calls.size() == 1);
+    CHECK(std::find(f.calls[0].begin(), f.calls[0].end(), id) == f.calls[0].end());
+    CHECK(std::none_of(f.records.begin(), f.records.end(), [&](const McpCallRecord& record) {
+        return std::find(record.argv.begin(), record.argv.end(), id) != record.argv.end();
+    }));
+    f.facts->session_identity = "ses-1|server-key|generation-2";
+    CHECK(d->call_tool("gui_element_click", allowed, ctx_for(a)).is_error);
+    f.facts->session_identity = "ses-1|server-key|generation-1";
+    CHECK(d->call_tool("gui_session_lease", {{"action", "release"}, {"connection", 1}, {"lease_id", id}}, ctx_for(a)).is_error == false);
+    CHECK(d->call_tool("gui_element_click", allowed, ctx_for(a)).is_error);
+}
+
+TEST_CASE("dispatcher: owner screen guard rejects navigation after the observed dynpro changes", "[auth][dispatch][screen-guard]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-secret"; }));
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|server-key|generation-1";
+    f.facts->program = "SAPMV45A";
+    f.facts->screen_number = "0100";
+    Principal agent = token("agent", {"screen", "session.lease", "element"});
+    agent.id = "token-a";
+
+    const auto observed = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(agent));
+    REQUIRE_FALSE(observed.is_error);
+    REQUIRE(observed.structured.has_value());
+    REQUIRE(observed.structured->contains("screen_guard"));
+    const std::string guard = observed.structured->at("screen_guard").get<std::string>();
+    REQUIRE(guard.size() == 64);
+    const auto lease = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(agent));
+    REQUIRE_FALSE(lease.is_error);
+    json click = {{"element", "wnd[0]/usr/btnX"}, {"connection", 1},
+                  {"lease_id", lease.structured->at("lease_id")}, {"expected_screen_guard", guard}};
+    f.calls.clear();
+    CHECK_FALSE(d->call_tool("gui_element_click", click, ctx_for(agent)).is_error);
+    REQUIRE(f.calls.size() == 1);
+    f.facts->screen_number = "0200";
+    const auto stale = d->call_tool("gui_element_click", click, ctx_for(agent));
+    CHECK(stale.is_error);
+    CHECK(text_of(stale).find("SCREEN_CHANGED") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("dispatcher: T-code block survives a saved connection generation change", "[auth][dispatch][session-state]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto state = std::make_shared<SessionPolicyState>();
+    d->set_session_policy_state(state);
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "/app/con[0]/ses[0]|key|generation-1";
+    Principal agent = token("agent", {"screen", "key"});
+    agent.id = "token-A";
+    agent.tcodes = {"VA03"};
+    agent.allow_navigation = true;
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "key") f.facts->transaction = "SE38";
+        return ok_result();
+    };
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; }));
+    // Seed through the call itself so both the identity and numeric fallback block are set.
+    auto lease_principal = agent;
+    lease_principal.scopes.insert("session.lease");
+    const auto lease = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(lease_principal));
+    REQUIRE_FALSE(lease.is_error);
+    const auto left = d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}, {"lease_id", "lease-A"}},
+                                   ctx_for(lease_principal));
+    REQUIRE_FALSE(left.is_error);
+    state->retire_connection(1); // saved connection detached, window still alive
+    f.facts->session_identity = "/app/con[0]/ses[0]|key|generation-2";
+    f.facts->transaction = "VA03"; // another actor moved it back
+    const auto blocked = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(agent));
+    CHECK(blocked.is_error);
+    CHECK(text_of(blocked).find("TCODE_DENIED") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: screen read with a changing dynpro does not issue a guard for unrelated content", "[auth][dispatch][screen-guard]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    f.facts->program = "SAPMV45A";
+    f.facts->screen_number = "0100";
+    f.handler = [&](const Argv&) {
+        f.facts->screen_number = "0200";
+        return ok_result();
+    };
+    auto d = f.make(policy);
+    Principal agent = token("agent", {"screen"});
+    agent.id = "token-A";
+    const auto read = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(agent));
+    REQUIRE_FALSE(read.is_error);
+    CHECK_FALSE((read.structured && read.structured->contains("screen_guard")));
+}
+
+TEST_CASE("dispatcher: read-only owner clients can acquire a navigation lease", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "navigation-lease"; }));
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    Principal p = token("reader", {"session", "session.lease"});
+    p.id = "reader-id";
+    p.read_only = true;
+    const auto result = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p));
+    REQUIRE_FALSE(result.is_error);
+    CHECK(result.structured->at("lease_id") == "navigation-lease");
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: successful disconnect retires its workflow lease", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; });
+    d->set_session_leases(leases);
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    Principal p = token("agent", {"session", "session.lease"});
+    p.id = "token-A";
+    REQUIRE_FALSE(d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p)).is_error);
+    REQUIRE(leases->permits_write(f.facts->session_identity, p.id, "lease-A", SessionLeases::Clock::now()));
+    CHECK_FALSE(d->call_tool("gui_session_disconnect", {{"connection", 1}, {"lease_id", "lease-A"}}, ctx_for(p)).is_error);
+    CHECK_FALSE(leases->permits_write(f.facts->session_identity, p.id, "lease-A", SessionLeases::Clock::now()));
+}
+
+TEST_CASE("dispatcher: stale disconnect preserves replacement connection policy", "[auth][dispatch][session-state]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto state = std::make_shared<SessionPolicyState>();
+    d->set_session_policy_state(state);
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; }));
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|old-key|old-generation";
+    Principal p = token("agent", {"session", "session.lease"});
+    p.id = "token-A";
+    REQUIRE_FALSE(d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p)).is_error);
+    const std::string replacement_key = std::string("token-B\x1f") + "connection:1";
+    state->set_tcode_blocked(replacement_key, true);
+    f.handler = [](const Argv&) {
+        auto result = ok_result();
+        result.data["file_deleted"] = false; // saved ID was replaced while disconnect ran
+        result.data["session_closed"] = false;
+        return result;
+    };
+    CHECK_FALSE(d->call_tool("gui_session_disconnect", {{"connection", 1}, {"lease_id", "lease-A"}}, ctx_for(p)).is_error);
+    CHECK(state->tcode_blocked(replacement_key));
+}
+
+TEST_CASE("worker mode dispatches disconnect through its bound session lane", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; });
+    d->set_session_leases(leases);
+    std::optional<WorkerCall> sent;
+    d->set_session_invoker([&](const WorkerCall& call) { sent = call; return ok_result(); });
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    Principal p = token("agent", {"session", "session.lease"});
+    p.id = "token-A";
+    REQUIRE_FALSE(d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p)).is_error);
+    const auto result = d->call_tool("gui_session_disconnect", {{"connection", 1}, {"lease_id", "lease-A"}}, ctx_for(p));
+    CHECK_FALSE(result.is_error);
+    REQUIRE(sent.has_value());
+    CHECK(sent->connection == 1);
+    CHECK(sent->session_identity == "ses-1|key|generation");
+    CHECK(sent->argv == std::vector<std::string>{"session", "disconnect", "--connection", "1"});
+    CHECK_FALSE(leases->permits_write(f.facts->session_identity, p.id, "lease-A", SessionLeases::Clock::now()));
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: tab-changing reads need a lease in owner mode", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; }));
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    Principal p = token("reader", {"session.lease", "screen", "element"});
+    p.id = "token-A";
+    CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(p)).is_error);
+    CHECK(text_of(d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p))).find("LEASE_REQUIRED") != std::string::npos);
+    CHECK(text_of(d->call_tool("gui_element_get", {{"connection", 1}, {"element", "wnd[0]/usr/txtX"},
+        {"activate_tab", true}}, ctx_for(p))).find("LEASE_REQUIRED") != std::string::npos);
+}
+
+TEST_CASE("dispatcher: owner batch binds one connection and one lease", "[auth][dispatch][lease][batch]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; }));
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|key|generation";
+    Principal p = token("agent", {"session.lease", "batch", "element", "screen"});
+    p.id = "token-A";
+    REQUIRE_FALSE(d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p)).is_error);
+    const json items = json::array({{{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnX"}}}},
+                                    {{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}}});
+    const auto good = d->call_tool("gui_batch", {{"connection", 1}, {"lease_id", "lease-A"}, {"items", items}}, ctx_for(p));
+    CHECK_FALSE(good.is_error);
+    REQUIRE(f.calls.size() == 2);
+    for (const auto& argv : f.calls) {
+        CHECK(std::find(argv.begin(), argv.end(), "lease-A") == argv.end());
+        CHECK(std::find(argv.begin(), argv.end(), "1") != argv.end());
+    }
+    f.calls.clear();
+    json mixed = items;
+    mixed[1]["arguments"]["connection"] = 2;
+    const auto denied = d->call_tool("gui_batch", {{"connection", 1}, {"lease_id", "lease-A"}, {"items", mixed}}, ctx_for(p));
+    CHECK(denied.is_error);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: owner batch pins its lease between items", "[auth][dispatch][lease][batch]") {
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; });
+    Principal p = token("agent", {"session.lease", "batch", "element"});
+    p.id = "token-A";
+    int invoked = 0;
+    bool released_between_items = true;
+    CommandDispatcher d([&](const Argv&) { ++invoked; return ok_result(); }, policy,
+        [&](const McpCallRecord& record) {
+            if (record.tool == "gui_element_click" && invoked == 1)
+                released_between_items = leases->release("ses-1|key|generation", p.id, "lease-A");
+        });
+    d.set_session_leases(leases);
+    d.set_sap_facts_provider([](std::optional<int>) -> std::optional<audit::SapFacts> {
+        audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = 1;
+        facts.session_identity = "ses-1|key|generation";
+        return facts;
+    });
+    d.set_owner_session_override([](const std::string&, const std::string&) {});
+    REQUIRE_FALSE(d.call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p)).is_error);
+    const json items = json::array({{{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnA"}}}},
+                                    {{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnB"}}}}});
+    CHECK_FALSE(d.call_tool("gui_batch", {{"connection", 1}, {"lease_id", "lease-A"}, {"items", items}}, ctx_for(p)).is_error);
+    CHECK_FALSE(released_between_items);
+    CHECK(invoked == 2);
+}
+
+TEST_CASE("dispatcher: lease acquisition is withheld if its SAP session disappears", "[auth][dispatch][lease]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; });
+    d->set_session_leases(leases);
+    int lookups = 0;
+    f.facts_for = [&](std::optional<int>) -> std::optional<audit::SapFacts> {
+        if (++lookups > 1) return std::nullopt;
+        audit::SapFacts facts{"A4H", "001", "OWNER", "VA03"};
+        facts.connection_id = 1;
+        facts.session_identity = "ses-1|key|generation";
+        return facts;
+    };
+    Principal p = token("agent", {"session.lease"});
+    p.id = "token-A";
+    const auto result = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p));
+    CHECK(result.is_error);
+    CHECK_FALSE(leases->permits_write("ses-1|key|generation", p.id, "lease-A", SessionLeases::Clock::now()));
 }

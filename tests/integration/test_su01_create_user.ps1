@@ -4,6 +4,7 @@ param(
     [int]$ExistingConnectionId = -1,
     [switch]$LoginFromTrialEnv,
     [switch]$VerifyChangedPasswordLogin,
+    [string]$McpGateScript = '',
     [string]$FairyflyPath = (Join-Path $PSScriptRoot '..\..\build\bin\Release\fairyfly.exe'),
     [string]$Username = ('ZFF' + [guid]::NewGuid().ToString('N').Substring(0, 8)).ToUpperInvariant(),
     [string]$FirstName = 'Fairyfly',
@@ -20,6 +21,8 @@ if ($env:FAIRYFLY_SU01_OFFLINE_ONLY -eq '1' -and
 if ($Username -notmatch '^[A-Z0-9_]{1,12}$') { throw 'Username must be uppercase and at most 12 characters' }
 if ($ExistingConnectionId -lt -1) { throw 'ExistingConnectionId must be zero or greater' }
 if ($ExistingConnectionId -ge 0 -and $LoginFromTrialEnv) { throw 'LoginFromTrialEnv requires a newly launched connection' }
+if ($McpGateScript -and -not $VerifyChangedPasswordLogin) { throw 'McpGateScript requires VerifyChangedPasswordLogin' }
+if ($McpGateScript -and -not (Test-Path -LiteralPath $McpGateScript -PathType Leaf)) { throw 'McpGateScript was not found' }
 if (-not (Test-Path -LiteralPath $FairyflyPath)) { throw "Fairyfly CLI was not found: $FairyflyPath" }
 
 $userField = 'wnd[0]/usr/ctxtSUID_ST_BNAME-BNAME'
@@ -30,6 +33,8 @@ $popupPasswordPrefix = 'wnd[1]/usr/subPOPUP:SAPLSUID_MAINTENANCE:1101/pwdSUID_ST
 $ownedConnection = $false
 $creationAttempted = $false
 $deleted = $false
+$gateCredentialCreated = $false
+$gateCredentialName = ''
 $connectionId = $ExistingConnectionId
 
 function Invoke-Fairyfly {
@@ -108,6 +113,7 @@ function Test-ChangedPasswordLogin {
             } catch { Write-Warning "Could not close disposable-user session $userConnectionId" }
         }
     }
+    return $postLoginPassword
 }
 
 try {
@@ -168,7 +174,21 @@ try {
     [void](Invoke-Fairyfly @('element', 'click', 'wnd[1]/tbar[0]/btn[0]'))
     Assert-Status -Pattern '(?i)password.*changed|kennwort.*geändert' -Phase 'Password change'
 
-    if ($VerifyChangedPasswordLogin) { Test-ChangedPasswordLogin }
+    $verifiedPassword = ''
+    if ($VerifyChangedPasswordLogin) { $verifiedPassword = Test-ChangedPasswordLogin }
+    if ($McpGateScript) {
+        $gateCredentialName = "FFTEST-$Username"
+        $stored = Invoke-Fairyfly @('credentials', 'list')
+        if (@($stored.data.credentials | Where-Object { $_.connection -eq $gateCredentialName }).Count) {
+            throw "Temporary credential $gateCredentialName already exists; refusing to replace it"
+        }
+        $gateCredentialCreated = $true
+        [void](Invoke-Fairyfly -Arguments @('credentials', 'set', $gateCredentialName,
+            '--user', $Username, '--client', '001', '--password-stdin') -InputLines @($verifiedPassword))
+        & $McpGateScript -Username $Username -CredentialName $gateCredentialName `
+            -AdminConnectionId $connectionId -ConnectionName $ConnectionName -FairyflyPath $FairyflyPath
+        if (-not $?) { throw 'Disposable-user MCP gate failed' }
+    }
 
     Remove-TestUser
     Start-SU01
@@ -181,6 +201,10 @@ try {
 } finally {
     if ($creationAttempted -and -not $deleted) {
         try { Remove-TestUser } catch { Write-Warning "Cleanup failed for disposable user $Username; manual deletion is required" }
+    }
+    if ($gateCredentialCreated) {
+        try { [void](Invoke-Fairyfly @('credentials', 'delete', $gateCredentialName)) }
+        catch { Write-Warning "Could not remove temporary credential $gateCredentialName" }
     }
     if ($ownedConnection) {
         try {

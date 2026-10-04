@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Fixes from the Codex live bug hunts (2026-10-03)
+
+- `--read-only` no longer lets a click on the Yes/OK button of a popup through (found live: Yes on the SU01 Delete Users dialog deleted the user); popup buttons are allowed only when they dismiss or navigate, also in the `@active/...` id form. Clicking a check box or radio button of a selection screen stays allowed under `--read-only` (documented decision).
+- `element click` on a check box toggles it (it only ever checked it); `element fill` accepts true/false/1/0/yes/no/on/off/x for check boxes and radio buttons and the key or the displayed text for combo boxes (`INVALID_ARGUMENT` lists the available entries); the fill/click result reports `selected`, `key` and `display_value`.
+- Grid paging: `screen read --offset N` on a lazily loading ALV grid (SM21, 2,732 rows) returned empty pages until something scrolled the grid there; the reader now scrolls to the rows a window needs and restores the scroll position. The first far scroll can cost SAP up to a minute once.
+- Classic lists: the header row is the row the data rows align with, not the busiest row, so the SE16 result for TVARVC is a table again.
+- `screen capture --format base64 --file` writes the file; a date-format hint taken from the field's previous text no longer produces a warning (it may be an earlier rejected input); error and hint polish (`TAB_NOT_FOUND` carries `tab_id` and `reason`, the inactive-tab hint names the tab id, `element get` answers `ELEMENT_NOT_FOUND`).
+- USR02 credential-hash columns OCOD1-OCOD5, PWDSALT and PWDHISTORY (also table-qualified names such as `USR02-OCOD1`) are redacted like BCODE.
+
+### Bulk screen reader (default)
+
+- `screen read` can read the whole screen tree with one `GuiSession.GetObjectTree` call: `FAIRYFLY_SCREEN_READER=auto|bulk|legacy` (hidden `--tree-reader` overrides per read). **Bulk is the default** (`auto`): the output shape does not change (no `diagnostics` block unless a mode is chosen explicitly or the read had to fall back) and `FAIRYFLY_SCREEN_READER=legacy` restores the per-element reader. The output (`data.*`) is identical to the per-element reader on 18 live screens and 7 recorded fixtures; on Bigfox the 12 screen reads of the 10-task workload took 8.4 s legacy and 5.4 s bulk (-35%, whole workload -15%). Only 12 vetted properties are requested; `Selected` is never requested because it makes SAP GUI raise `RPC_E_SERVERFAULT` (and probably crashed SAP Logon), `AccLabel` and `Selected` are read per element. Password fields are blanked right after parsing, the raw tree is never logged. `auto` falls back to the per-element reader on any problem and reports why in `diagnostics.screen_reader`; `bulk` returns `OBJECT_TREE_UNAVAILABLE`; a server fault or three invalid answers in a row switch the bulk path off for the process. `--probe-all`, `screen find` and structure-less reads stay on the per-element reader.
+- Diagnostics (hidden): `screen read --dump-object-tree` prints the raw, unredacted tree and `FAIRYFLY_BULK_FAULT=unsupported|garbage|wrongroot|fault|exception` injects tree failures; both need `FAIRYFLY_DIAG=1`.
+- Shared, tested implementations of the display-text/redaction decisions and the plain-element metadata (`display_text_policy`, `element_metadata_builder`) now serve both readers.
+
+### Performance (speed round 3)
+
+- `transaction start` no longer sleeps a blind 100 ms after `SendCommand`/`StartTransaction`; `wait_for_completion` checks `Busy` immediately and polls every 20 ms (`SESSION_POLL_INTERVAL_MS`). The unused `ComGuiSession::send_vkey` was removed.
+- HTML viewer reads (`read_html_viewer_text`) have a 300 ms budget (50 ms poll), retry only while the UI Automation document is missing or empty (a Codex review pointed out that a browser window may not have created its document yet), and reuse one `IUIAutomation`. `content_available` is unchanged on SM21 and RZ11 (it was already false there); a window-class gate for the generic shell probe exists but is off (`kGateGenericHtmlProbe`).
+- DISPID lookup: a validated process-wide `Type` DISPID and type-first resolution for fresh wrappers; `Changeable` is read once per wrapper and `DisplayedText` misses on GuiShell are cached. Status bar reads need 5 round trips (3 with a known window id; message id/number only when a message exists). Dead response serialisation in `run_cli` removed.
+- `tests/integration/compare_builds.ps1 -FullCompare` deep-compares elements, hierarchy, tabs and status bar between two builds; `-Screens` no longer clobbers the session id.
+- Measured on Bigfox (10 Basis tasks, 45 invocations, best of 3, debug logging off): 26.5 s to 21.9 s (-17%); screen content identical on 18 screens.
+
+
 ## 2026.09.30 (2026-10-02)
 
 ### Added (release engineering)
@@ -60,7 +86,7 @@
 
 ## 0.2.0
 
-Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/MIGRATION_CLI.md](docs/MIGRATION_CLI.md) for the full old-to-new tables.
+Breaking release: a hard switch to a noun/verb CLI and `gui_<noun>_<verb>` MCP tool names, with no compatibility aliases. See [docs/CLI.md](docs/CLI.md#migrating-from-the-flat-commands) for the full old-to-new tables.
 
 ### Changed (breaking)
 

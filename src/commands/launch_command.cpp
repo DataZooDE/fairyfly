@@ -13,6 +13,12 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","launch"});
+        cmd_->footer(R"HELP(Usage notes:
+Reuse an existing logged-in session when available. Launch alone opens SAP Logon;
+use --login to authenticate with stored credentials, or call session login afterward.
+Keep the returned connection_id. Check login succeeded before starting a transaction.
+Example: fairyfly session launch "DEV" --login
+)HELP");
         cmd_->add_option("connection", connection_name_, "Connection name (e.g., PRD, DEV)")
             ->required();
         cmd_->add_flag("--allow-sapshcut", allow_sapshcut_,

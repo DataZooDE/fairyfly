@@ -93,7 +93,15 @@ public:
     /// Resolve DISPID using type-based cache, falling back to ITypeInfo
     HRESULT resolve_dispid(const wchar_t* name, DISPID* dispid) const;
 
-    /// Clear the global type-level DISPID cache
+    /// resolve_dispid that also reports whether the DISPID came from the per-type cache
+    HRESULT resolve_dispid_ex(const wchar_t* name, DISPID* dispid, bool* from_cache) const;
+
+    /// Resolve `name` and invoke it as a property getter. A cached DISPID the object rejects with
+    /// DISP_E_MEMBERNOTFOUND/UNKNOWNNAME is re-resolved and retried once. *lookup_failed is set when
+    /// the DISPID could not be resolved at all (as opposed to the invoke failing).
+    HRESULT invoke_property_get(const wchar_t* name, _variant_t& result, bool* lookup_failed) const;
+
+    /// Clear the global type-level DISPID cache and the universal Type DISPID state
     static void clear_dispid_cache();
 
 public:

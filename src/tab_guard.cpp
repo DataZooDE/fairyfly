@@ -74,6 +74,9 @@ std::optional<Result> classify_element_on_inactive_tab(const std::string& elemen
     if (!inactive) return std::nullopt;
     const auto& [page, state] = *inactive;
     const std::string name = tab_read_name(page, state);
+    // `screen read --tab` takes the tab id or its trailing part (tabpLOGO), not the tab text.
+    const auto last_slash = page.page_id.find_last_of('/');
+    const std::string tab_arg = last_slash == std::string::npos ? page.page_id : page.page_id.substr(last_slash + 1);
 
     Result result;
     result.status = Result::Status::Error;
@@ -84,10 +87,10 @@ std::optional<Result> classify_element_on_inactive_tab(const std::string& elemen
     result.error["tab_id"] = page.page_id;
     result.error["tab_text"] = state.text;
     result.error["tab_strip_id"] = page.strip_id;
-    result.error["hint"] = "activate the tab first (gui_element_click on the tab) or read it with gui_screen_read tab=" + name;
+    result.error["hint"] = "activate the tab first (gui_element_click on the tab) or read it with gui_screen_read tab=" + tab_arg;
     json suggestions = json::array({
         "Activate the tab first: fairyfly element click '" + page.page_id + "'",
-        "Or read it without leaving the current tab: fairyfly screen read --tab '" + name + "'"});
+        "Or read it without leaving the current tab: fairyfly screen read --tab '" + tab_arg + "'"});
     if (offer_activate_tab)
         suggestions.push_back("Or repeat the call with --activate-tab (activate_tab=true) to select the tab for the read");
     result.error["suggestions"] = suggestions;

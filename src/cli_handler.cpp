@@ -44,6 +44,20 @@
 namespace fairyfly {
 namespace cli {
 
+bool owner_bound_session_matches(const Connection& saved, const audit::SapFacts& live,
+                                 const std::string& expected_session, const std::string& expected_owner) {
+    if (!live.connection_id || *live.connection_id != saved.id || expected_session.empty() ||
+        live.session_identity != expected_session || live.system.empty() || live.client.empty() ||
+        expected_owner != live.system + "/" + live.client + "/" + live.user) return false;
+    if (!saved.server_session_key.empty()) return true;
+    if (!live.user.empty() || live.transaction != "S000" || saved.cache_generation.empty()) return false;
+    const std::string prefix = saved.session_id + "||" + saved.cache_generation + "|hwnd:";
+    if (live.session_identity.rfind(prefix, 0) != 0) return false;
+    const std::string handle = live.session_identity.substr(prefix.size());
+    return !handle.empty() && handle != "0" &&
+        std::all_of(handle.begin(), handle.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+}
+
 void CommandHandler::describe_element(const std::string& element_id, std::string& type,
                                        std::string& text, std::string& tooltip)
 {
@@ -105,7 +119,15 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
     } else {
         describe_element(element_id, type, text, tooltip);
     }
-    rule = sap::matched_read_only_rule(type, text, tooltip, element_id);
+    std::string judged_id = element_id;
+    if (judged_id.rfind("@active", 0) == 0) {
+        try {
+            judged_id = sap::expand_active_window_prefix(judged_id, engine_->get_active_window_id().id);
+        } catch (const std::exception& e) {
+            spdlog::debug("Read-only guard could not resolve the active window for {}: {}", element_id, e.what());
+        }
+    }
+    rule = sap::matched_read_only_rule(type, text, tooltip, judged_id);
     if (rule.empty()) return std::nullopt;
     return sap::make_read_only_refusal(element_id, type, text, tooltip, rule);
 }
@@ -117,6 +139,16 @@ CommandHandler::CommandHandler(std::unique_ptr<cred::CredentialStore> store)
 {
     // Initialize command handler
     spdlog::debug("CommandHandler initialized");
+}
+
+void CommandHandler::set_owner_window_guard(bool enabled) {
+    if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
+        com->set_owner_window_guard(enabled);
+}
+
+void CommandHandler::set_attach_owner_identities(std::vector<std::string> identities) {
+    attach_owner_identities_ = std::move(identities);
+    set_owner_window_guard(!attach_owner_identities_.empty());
 }
 
 std::vector<int> CommandHandler::prune_dead_entries()
@@ -142,9 +174,10 @@ std::vector<int> CommandHandler::prune_dead_entries()
     return removed;
 }
 
-ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id)
+ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id,
+                                                                    bool update_cache)
 {
-    if (!explicit_conn_id.has_value()) {
+    if (update_cache && !explicit_conn_id.has_value()) {
         prune_dead_entries();
     }
 
@@ -159,7 +192,7 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     // Validate that the session still exists
     if (!engine_->select_session(conn.session_id, conn.server_session_key)) {
         spdlog::warn("Connection {} has invalid session {}, deleting", conn.id, conn.session_id);
-        conn_mgr_->delete_connection_if_unchanged(conn);
+        if (update_cache) conn_mgr_->delete_connection_if_unchanged(conn);
 
         ResultT<Connection> result;
         result.status = ResultT<Connection>::Status::Error;
@@ -173,8 +206,23 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
         return result;
     }
 
+    // The dispatcher checked this exact saved connection before invoking the command. Recheck
+    // after selecting it and before any SAP action or cache touch; a closed/reused GUI index or
+    // changed cache generation must not silently redirect a queued MCP call.
+    if (!expected_mcp_session_.empty()) {
+        const audit::SapFacts live = audit_facts_for_connection(conn.id);
+        if (!owner_bound_session_matches(conn, live, expected_mcp_session_, expected_mcp_owner_)) {
+            ResultT<Connection> denied;
+            denied.status = ResultT<Connection>::Status::Error;
+            denied.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "the requested SAP session is unavailable"}};
+            return denied;
+        }
+    }
+
     // Update last_validated timestamp
-    if (conn.server_session_key.empty()) {
+    if (!update_cache) {
+        // Owner-mode login must authorize the credential identity before altering saved state.
+    } else if (conn.server_session_key.empty()) {
         const auto key = engine_->current_server_session_key();
         if (!key.empty()) {
             conn = conn_mgr_->set_session_key(conn, key);
@@ -193,6 +241,8 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
 
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
 {
+    pending_owner_attach_.reset();
+    try {
     if (session_id) {
         spdlog::info("Attaching to SAP GUI session {}", *session_id);
     } else {
@@ -208,6 +258,33 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
         std::string attached_session_id = result.data.value("session_id", "");
         std::string connection_id = result.data.value("connection_id", "");
         std::string window_title = result.data.value("window_title", "");
+        std::string checked_server_key;
+        audit::SapFacts checked_facts;
+        auto owner_attach_unavailable = [&]() {
+            // attach_by_session_id already selected the target in the engine. Drop that
+            // local binding so a denied foreign session cannot appear in later audit facts.
+            // disconnect() here does not close the SAP GUI window.
+            if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
+                (void)com->disconnect();
+            result.status = Result::Status::Error;
+            result.data = json::object();
+            result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "the requested SAP session is unavailable"}};
+            return result;
+        };
+
+        // The MCP endpoint's owner rule must run before create_or_update_connection.
+        // The later dispatcher postcheck conditionally removes this generation if it changes.
+        if (!attach_owner_identities_.empty()) {
+            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            checked_server_key = com ? com->current_server_session_key() : std::string();
+            const audit::SapFacts facts = com && !attached_session_id.empty() && !checked_server_key.empty()
+                ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
+            const std::string identity = facts.system + "/" + facts.client + "/" + facts.user;
+            const bool allowed = !facts.system.empty() && !facts.client.empty() && !facts.user.empty() &&
+                (!session_id || *session_id == attached_session_id) &&
+                std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) != attach_owner_identities_.end();
+            if (!allowed) return owner_attach_unavailable();
+        }
 
         // Get connection metadata if available
         auto app_info = engine_->get_application_info();
@@ -224,6 +301,20 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             }
         }
 
+        if (!attach_owner_identities_.empty()) {
+            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            checked_facts = com && com->current_server_session_key() == checked_server_key
+                ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
+            const std::string identity = checked_facts.system + "/" + checked_facts.client + "/" + checked_facts.user;
+            if (checked_facts.system.empty() || checked_facts.client.empty() || checked_facts.user.empty() ||
+                std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) == attach_owner_identities_.end())
+                return owner_attach_unavailable();
+            bool token_allowed = false;
+            try { token_allowed = attach_target_guard_ && attach_target_guard_(checked_facts, description); }
+            catch (...) {}
+            if (!token_allowed) return owner_attach_unavailable();
+        }
+
         // Create or update connection file
         Connection conn = conn_mgr_->create_or_update_connection(
             attached_session_id,
@@ -231,13 +322,20 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             description,
             connection_string,
             window_title,
-            engine_->current_server_session_key()
+            attach_owner_identities_.empty() ? engine_->current_server_session_key() : checked_server_key
         );
+        if (!attach_owner_identities_.empty()) pending_owner_attach_ = conn;
+        if (connection_changed_hook_) {
+            try { connection_changed_hook_(conn.id); }
+            catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+            catch (...) { spdlog::error("saved connection notification failed"); }
+        }
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
-        result.data["pruned_stale"] = conn_mgr_->prune_other_entries_for_path(
-            conn, engine_->current_server_session_key());  // live key re-read right before pruning
+        result.data["pruned_stale"] = attach_owner_identities_.empty()
+            ? conn_mgr_->prune_other_entries_for_path(conn, engine_->current_server_session_key())
+            : 0;  // do not prune other users' entries during an owner-mode attach race
         result.data["message"] = fmt::format("Attached to SAP GUI session (connection: {})", conn.id);
         {
             const json clock = sap::server_time_fields();
@@ -257,6 +355,17 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
     }
 
     return result;
+    } catch (...) {
+        if (!attach_owner_identities_.empty()) {
+            if (pending_owner_attach_) {
+                try { (void)finalize_owner_attach(false); }
+                catch (...) { try { (void)engine_->disconnect(); } catch (...) {} }
+            } else {
+                try { (void)engine_->disconnect(); } catch (...) {}
+            }
+        }
+        throw;
+    }
 }
 
 Result compose_launch_login_result(Result launch, const Result& login)
@@ -280,6 +389,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
                                      bool login, const std::string& credential_name,
                                      const std::string& multiple_logon)
 {
+    pending_owner_launch_.reset();
     spdlog::info("Launching SAP connection: {}", connection_name);
     auto result = engine_->launch_connection(connection_name, allow_sapshcut);
 
@@ -290,30 +400,73 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         std::string session_id = result.data.value("session_id", "");
         std::string connection_id = result.data.value("connection_id", "");
 
+        // Owner-mode HTTP launches may open a prelogin window with no SAP user yet.
+        // Check the exact new live window before writing any saved connection.
+        auto owner_launch_unavailable = [&]() {
+            if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
+                (void)com->disconnect();  // detach Fairyfly; leave the SAP window for operator inspection
+            result.status = Result::Status::Error;
+            result.data = json::object();
+            result.diagnostics = json::object();
+            result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"},
+                            {"message", "the requested SAP connection is unavailable"}};
+            return result;
+        };
+        std::string checked_server_key;
+        std::string checked_description;
+        if (!attach_owner_identities_.empty()) {
+            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            checked_server_key = com ? com->current_server_session_key() : std::string();
+            const auto selected = com ? com->get_session() : nullptr;
+            bool selected_matches = false;
+            try { selected_matches = selected && selected->is_alive() && selected->get_id() == session_id; }
+            catch (...) {}
+            const audit::SapFacts live = com && selected_matches
+                ? com->peek_session_facts(session_id, checked_server_key) : audit::SapFacts{};
+            checked_description = com ? com->peek_session_connection_description(session_id) : std::string();
+            bool allowed = false;
+            try {
+                allowed = !session_id.empty() && !connection_id.empty() && !live.system.empty() &&
+                    sap::ConnectionLauncher::matches_connection_name(connection_name, checked_description) &&
+                    launch_target_guard_ && launch_target_guard_(live, checked_description);
+            } catch (...) {}
+            if (!allowed) return owner_launch_unavailable();
+        }
+
         // Get connection metadata
-        auto app_info = engine_->get_application_info();
         std::string description = connection_name;
         std::string connection_string = "";
-
-        if (app_info.contains("connections") && app_info["connections"].is_array()) {
-            for (const auto& candidate : app_info["connections"]) {
-                if (candidate.value("id", "") == connection_id) {
-                    description = candidate.value("description", connection_name);
-                    connection_string = candidate.value("connection_string", "");
-                    break;
+        if (!attach_owner_identities_.empty()) {
+            description = checked_description;
+        } else {
+            auto app_info = engine_->get_application_info();
+            if (app_info.contains("connections") && app_info["connections"].is_array()) {
+                for (const auto& candidate : app_info["connections"]) {
+                    if (candidate.value("id", "") == connection_id) {
+                        description = candidate.value("description", connection_name);
+                        connection_string = candidate.value("connection_string", "");
+                        break;
+                    }
                 }
             }
         }
 
         // Create or update connection file
-        Connection conn = conn_mgr_->create_or_update_connection(
+        Connection conn = attach_owner_identities_.empty() ? conn_mgr_->create_or_update_connection(
             session_id,
             connection_id,
             description,
             connection_string,
             "",  // No window title for launch
-            engine_->current_server_session_key()
-        );
+            attach_owner_identities_.empty() ? engine_->current_server_session_key() : checked_server_key
+        ) : conn_mgr_->create_new_connection(
+            session_id, connection_id, description, connection_string, "", checked_server_key);
+        if (!attach_owner_identities_.empty()) pending_owner_launch_ = conn;
+        if (connection_changed_hook_) {
+            try { connection_changed_hook_(conn.id); }
+            catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+            catch (...) { spdlog::error("saved connection notification failed"); }
+        }
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
@@ -326,12 +479,68 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         // logging on is authentication, not a change of business state. On failure the
         // connection stays open and the launch data is returned with the login error.
         if (login) {
-            auto login_result = handle_login("", conn.id, false, credential_name, multiple_logon);
+            Result login_result;
+            try { login_result = handle_login("", conn.id, false, credential_name, multiple_logon); }
+            catch (const std::exception& e) {
+                spdlog::error("SAP login after launch failed unexpectedly: {}", e.what());
+                login_result.status = Result::Status::Error;
+                login_result.error = {{"code", "OUTCOME_UNKNOWN"},
+                                      {"message", "SAP login outcome is unknown; inspect the launched session before retrying"}};
+            } catch (...) {
+                spdlog::error("SAP login after launch failed unexpectedly");
+                login_result.status = Result::Status::Error;
+                login_result.error = {{"code", "OUTCOME_UNKNOWN"},
+                                      {"message", "SAP login outcome is unknown; inspect the launched session before retrying"}};
+            }
             return compose_launch_login_result(std::move(result), login_result);
         }
     }
 
     return result;
+}
+
+bool CommandHandler::finalize_owner_attach(bool accepted) {
+    if (!pending_owner_attach_) return false;
+    const Connection written = *pending_owner_attach_;
+    pending_owner_attach_.reset();
+    if (accepted) {
+        bool unchanged = false;
+        try { unchanged = conn_mgr_->matches_connection_generation(written); } catch (...) {}
+        if (unchanged) return true;
+        try { (void)engine_->disconnect(); } catch (...) {}
+        return false;
+    }
+    // The postcheck withheld this attach. The old cache generation, if any,
+    // was replaced by the attach; deleting only our generation is safer than
+    // leaving a session that failed verification addressable by its saved ID.
+    try { (void)engine_->disconnect(); }
+    catch (const std::exception& e) { spdlog::error("owner attach detach failed: {}", e.what()); }
+    catch (...) { spdlog::error("owner attach detach failed"); }
+    const bool removed = conn_mgr_->delete_connection_if_unchanged(written);
+    if (removed && connection_changed_hook_) {
+        try { connection_changed_hook_(written.id); }
+        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+        catch (...) { spdlog::error("saved connection notification failed"); }
+    }
+    return removed;
+}
+
+bool CommandHandler::rollback_owner_launch(int connection_id) {
+    if (!pending_owner_launch_ || pending_owner_launch_->id != connection_id) return false;
+    const Connection written = *pending_owner_launch_;
+    pending_owner_launch_.reset();
+    // The launch may have selected a window that failed the owner's postcheck.
+    // Drop the tray's COM binding even if the conditional cache delete fails.
+    try { (void)engine_->disconnect(); }
+    catch (const std::exception& e) { spdlog::error("owner launch detach failed: {}", e.what()); }
+    catch (...) { spdlog::error("owner launch detach failed"); }
+    const bool removed = conn_mgr_->delete_connection_if_unchanged(written);
+    if (removed && connection_changed_hook_) {
+        try { connection_changed_hook_(connection_id); }
+        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+        catch (...) { spdlog::error("saved connection notification failed"); }
+    }
+    return removed;
 }
 
 Result CommandHandler::handle_login(const std::string& credentials_file,
@@ -353,7 +562,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         return result;
     }
 
-    auto selected = resolve_and_validate_connection(connection_id);
+    auto selected = resolve_and_validate_connection(connection_id, !login_target_guard_);
     if (selected.status != ResultT<Connection>::Status::Success) {
         return result_from_error(selected);
     }
@@ -371,7 +580,10 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         });
     if (resolved.status != ResultT<cred::ResolvedLogin>::Status::Success) {
         result.status = Result::Status::Error;
-        result.error = resolved.error;
+        result.error = login_target_guard_
+            ? json{{"code", "OWNER_SESSION_UNAVAILABLE"},
+                   {"message", "the requested SAP logon is unavailable"}}
+            : resolved.error;
         return result;
     }
     LoginCredentials credentials = std::move(resolved.value.credentials);
@@ -381,6 +593,52 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         ~CredentialScrubber() { cred::scrub_login_credentials(credentials); }
     } scrubber{credentials};
     for (const auto& warning : resolved.value.warnings) spdlog::warn("{}", warning);
+
+    const auto owner_login_allowed = [&]() {
+        if (!login_target_guard_) return true;
+        const audit::SapFacts live = audit_facts_for_connection(selected.value.id);
+        const std::string expected_identity = selected.value.session_id + "|" +
+            selected.value.server_session_key + "|" + selected.value.cache_generation;
+        const std::string learned_identity = selected.value.session_id + "|" +
+            engine_->current_server_session_key() + "|" + selected.value.cache_generation;
+        const bool identity_matches = live.session_identity == expected_identity ||
+            (selected.value.server_session_key.empty() &&
+             !engine_->current_server_session_key().empty() &&
+             live.session_identity == learned_identity);
+        const auto target = peek_session_target("", "", selected.value.id);
+        audit::SapFacts anticipated = live;
+        anticipated.client = credentials.client;
+        anticipated.user = credentials.username;
+        bool allowed = false;
+        try {
+            allowed = live.connection_id == selected.value.id && identity_matches &&
+                !live.system.empty() &&
+                (live.user.empty() || sap_user_matches(live.user, credentials.username)) &&
+                (live.client.empty() || live.client == credentials.client ||
+                 (live.user.empty() && live.client == "000" && live.transaction == "S000")) &&
+                !target.ambiguous &&
+                !target.connection_name.empty() &&
+                login_target_guard_(anticipated, target.connection_name);
+        } catch (...) {}
+        return allowed;
+    };
+    bool password_typed = false;
+    const auto deny_owner_login = [&]() {
+        // A revocation can arrive after the password field was filled.
+        if (password_typed) {
+            try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
+        }
+        result.status = Result::Status::Error;
+        result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"},
+                        {"message", "the requested SAP logon is unavailable"}};
+        return result;
+    };
+    if (login_target_guard_) {
+        const audit::SapFacts live = audit_facts_for_connection(selected.value.id);
+        if (!live.user.empty() || !owner_login_allowed()) {
+            return deny_owner_login();
+        }
+    }
 
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
     if (!com_engine || !com_engine->get_session()) {
@@ -419,11 +677,18 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
             return result;
         }
     }
+    password_typed = true;
 
+    if (!owner_login_allowed()) return deny_owner_login();
     result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
     if (result.status != Result::Status::Success) {
         engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
         return result;
+    }
+    if (connection_changed_hook_) {
+        try { connection_changed_hook_(selected.value.id); }
+        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+        catch (...) { spdlog::error("saved connection notification failed"); }
     }
 
     // Multiple-logon dialog (user already logged on): handled before the password change check.
@@ -465,8 +730,10 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
             return result;
         }
         if (plan.action == Action::Select) {
+            if (!owner_login_allowed()) return deny_owner_login();
             result = engine_->click_element(ElementId("@active/" + plan.radio_suffix));
             if (result.status != Result::Status::Success) return result;
+            if (!owner_login_allowed()) return deny_owner_login();
             result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
             if (result.status != Result::Status::Success) return result;
             if (plan.choice == "terminate") {
@@ -501,6 +768,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
             result = engine_->fill_field(ElementId(field), credentials.new_password);
             if (result.status != Result::Status::Success) return result;
         }
+        if (!owner_login_allowed()) return deny_owner_login();
         result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
         if (result.status != Result::Status::Success) return result;
     }
@@ -519,6 +787,44 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
                         {"transaction", session->get_transaction_code()},
                         {"password_change_detected", password_change_required}};
         return result;
+    }
+
+    if (login_target_guard_) {
+        const audit::SapFacts authenticated = audit_facts_for_connection(selected.value.id);
+        if (authenticated.system.empty() || authenticated.client != credentials.client ||
+            !sap_user_matches(authenticated.user, credentials.username) || !owner_login_allowed()) {
+            result.status = Result::Status::Error;
+            result.error = {{"code", "OUTCOME_UNKNOWN"},
+                            {"message", "SAP logon may have completed but its owner cannot be verified; inspect or attach before retry"}};
+            return result;
+        }
+        const std::string key = engine_->current_server_session_key();
+        if (key.empty() || (!selected.value.server_session_key.empty() &&
+                            selected.value.server_session_key != key)) {
+            result.status = Result::Status::Error;
+            result.error = {{"code", "OUTCOME_UNKNOWN"},
+                            {"message", "SAP logon completed but its saved session identity changed; attach it again"}};
+            return result;
+        }
+        if (selected.value.server_session_key.empty()) {
+            try {
+                const Connection updated = conn_mgr_->set_session_key(selected.value, key);
+                if (pending_owner_launch_ && pending_owner_launch_->id == selected.value.id &&
+                    pending_owner_launch_->cache_generation == selected.value.cache_generation)
+                    pending_owner_launch_ = updated;
+            }
+            catch (...) {
+                result.status = Result::Status::Error;
+                result.error = {{"code", "OUTCOME_UNKNOWN"},
+                                {"message", "SAP logon completed but its saved session could not be updated"}};
+                return result;
+            }
+            if (connection_changed_hook_) {
+                try { connection_changed_hook_(selected.value.id); }
+                catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+                catch (...) { spdlog::error("saved connection notification failed"); }
+            }
+        }
     }
 
     result = {};
@@ -573,14 +879,16 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
         return result;
     }
 
-    if (close_session) {
+    if (close_session || !expected_mcp_session_.empty()) {
         auto selected = resolve_and_validate_connection(connection_id);
         if (selected.status != ResultT<Connection>::Status::Success) {
             return result_from_error(selected);
         }
-        auto closed = engine_->close_current_session();
-        if (closed.status != Result::Status::Success) {
-            return closed;
+        if (close_session) {
+            auto closed = engine_->close_current_session();
+            if (closed.status != Result::Status::Success) {
+                return closed;
+            }
         }
         conn = selected.value;
     }
@@ -606,7 +914,7 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
     return result;
 }
 
-Result CommandHandler::handle_connections_list(bool cleanup)
+Result CommandHandler::handle_connections_list(bool cleanup, bool validate)
 {
     Result result;
 
@@ -630,7 +938,7 @@ Result CommandHandler::handle_connections_list(bool cleanup)
     // Build connection list with validation status
     json conn_list = json::array();
     for (const auto& conn : connections) {
-        bool valid = engine_->validate_session(conn.session_id, conn.server_session_key);
+        bool valid = validate && engine_->validate_session(conn.session_id, conn.server_session_key);
 
         conn_list.push_back({
             {"id", conn.id},
@@ -1740,7 +2048,8 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
 Result CommandHandler::handle_screen_read(bool include_children, std::optional<int> connection_id,
                                            bool expand_tabs, const ScreenFilterOptions& filters,
                                            bool skip_trees, bool compact, int max_rows,
-                                           const std::string& only_tab, bool probe_all, int row_offset)
+                                           const std::string& only_tab, bool probe_all, int row_offset,
+                                           const std::string& tree_reader)
 {
     // Resolve and validate connection
     auto conn_result = resolve_and_validate_connection(connection_id);
@@ -1752,6 +2061,7 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
                  include_children, expand_tabs, skip_trees, conn_result.value.id);
 
     engine_->set_probe_all(probe_all);
+    engine_->set_tree_reader(tree_reader);
     engine_->set_row_offset(row_offset);
     engine_->set_grid_rows_needed(screen_filters_need_grid_rows(filters));
     Result result;
@@ -1774,6 +2084,20 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
         }
     }
 
+    return result;
+}
+
+Result CommandHandler::handle_object_tree_dump(std::optional<int> connection_id, const std::string& id,
+                                               const std::vector<std::string>& props)
+{
+    auto conn_result = resolve_and_validate_connection(connection_id);
+    if (conn_result.status != ResultT<Connection>::Status::Success) {
+        return result_from_error(conn_result);
+    }
+    auto result = engine_->dump_object_tree(id, props);
+    if (result.status == Result::Status::Success) {
+        result.data["connection_id"] = conn_result.value.id;
+    }
     return result;
 }
 

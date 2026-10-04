@@ -366,6 +366,37 @@ TEST_CASE("credential state flags, roles and profiles are not redacted", "[priva
     }
 }
 
+TEST_CASE("USR02 / USH02 / USRPWDHISTORY credential-hash names are redacted, state and date names are not",
+          "[privacy][redaction]") {
+    const std::vector<std::string> secret = {"BCODE", "CODVN", "PASSCODE", "OCOD1", "OCOD2", "OCOD3", "OCOD4",
+                                             "OCOD5", "PWDSALTEDHASH", "PWDHISTORY", "PWDSALT"};
+    for (const auto& name : secret) {
+        for (const auto& spelling : {name, "USR02-" + name, "wnd[0]/usr/txtUSR02-" + name}) {
+            INFO(spelling);
+            CHECK(sensitive_name_reason(spelling) == "field name matches secret pattern");
+            CHECK(sensitive_name_reason(spelling, StateExemption::Allow) == "field name matches secret pattern");
+            CHECK(sensitive_input_field_reason("GuiTextField", "wnd[0]/usr/txtUSR02-" + name, "") ==
+                  "field name matches secret pattern");
+        }
+        // grid / list column titles
+        nlohmann::json table = {{"columns", {"BNAME", name}}, {"rows", nlohmann::json::array({nlohmann::json::array({"DDIC", "0123456789ABCDEF"})})}};
+        redact_sensitive_header_rows(table);
+        INFO(name);
+        CHECK(table["rows"][0][0] == "DDIC");
+        CHECK(table["rows"][0][1] == "[REDACTED: field name matches secret pattern]");
+        // positioned report/grid cell holding the technical name
+        CHECK(sensitive_cell_reason(name, false) == "field name matches secret pattern");
+    }
+    for (const char* name : {"PWDSTATE", "PWDCHGDATE", "USR02-PWDSTATE", "USR02-PWDCHGDATE", "BNAME", "USTYP"}) {
+        INFO(name);
+        CHECK(sensitive_name_reason(name).empty());
+        CHECK(sensitive_input_field_reason("GuiTextField", std::string("wnd[0]/usr/txt") + name, "").empty());
+        nlohmann::json table = {{"columns", {"BNAME", name}}, {"rows", nlohmann::json::array({nlohmann::json::array({"DDIC", "01.10.2026"})})}};
+        redact_sensitive_header_rows(table);
+        CHECK(table["rows"][0][1] == "01.10.2026");
+    }
+}
+
 TEST_CASE("secret-bearing fields stay redacted with a reason", "[privacy][redaction]") {
     CHECK(sensitive_input_field_reason("GuiPasswordField", "wnd[0]/usr/pwdRSYST-BCODE", "") ==
           "password input field");
@@ -444,4 +475,100 @@ TEST_CASE("a grid dropped by an only selector never needed its rows", "[screen][
     cli::apply_screen_filters(b, filters);
     CHECK(a.at("elements") == b.at("elements"));
     CHECK(a.at("elements").at(0).at("id") == "g/btn_X");
+}
+
+// Found by a live Codex hunt: SM21's ALV grid (2,732 rows) only exposes the rows around its viewport; a
+// read at offset 100 or 500 returned an empty page until something scrolled the grid there.
+TEST_CASE("read_grid_rows_loading scrolls a lazily loading grid to the rows it needs", "[table][grid][window][paging]") {
+    const std::vector<std::string> columns{"A"};
+    struct LazyGrid {
+        int loaded_from = 0;
+        int loaded_until = 100;   // rows [loaded_from, loaded_until) are readable
+        int scrolls = 0;
+        std::string read(int row) const {
+            return row >= loaded_from && row < loaded_until ? "r" + std::to_string(row) : std::string();
+        }
+        void scroll(int row) { ++scrolls; loaded_from = row; loaded_until = row + 100; }
+    };
+    SECTION("an offset beyond the loaded rows scrolls once and returns real rows") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 3, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 500, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 3);
+        CHECK(rows.at(0).at(0) == "r500");
+        CHECK(rows.at(2).at(0) == "r502");
+        CHECK(g.scrolls == 1);
+    }
+    SECTION("a window that spans several load chunks scrolls chunk by chunk") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 250, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 0, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 250);
+        CHECK(rows.front().at(0) == "r0");
+        CHECK(rows.back().at(0) == "r249");
+        CHECK(g.scrolls >= 1);
+        CHECK(g.scrolls <= 4);
+    }
+    SECTION("rows already loaded cost no scroll") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 20, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 10, [&](int r) { g.scroll(r); });
+        REQUIRE(rows.size() == 20);
+        CHECK(g.scrolls == 0);
+    }
+    SECTION("without a scroll callback the old behaviour stays (blank rows are returned for trimming)") {
+        LazyGrid g;
+        const auto rows = read_grid_rows_loading(2732, 1, 3, columns,
+            [&](int r, const std::string&) { return g.read(r); }, 500, nullptr);
+        REQUIRE(rows.size() == 3);
+        CHECK(rows.at(0).at(0).empty());
+    }
+    SECTION("a scroll that loads nothing stops after one attempt per blank run") {
+        int scrolls = 0;
+        const auto rows = read_grid_rows_loading(1000, 1, 5, columns,
+            [](int, const std::string&) { return std::string(); }, 600, [&](int) { ++scrolls; });
+        REQUIRE(rows.size() == 5);
+        CHECK(scrolls == 1);
+    }
+    SECTION("a failing scroll is ignored") {
+        const auto rows = read_grid_rows_loading(1000, 1, 5, columns,
+            [](int, const std::string&) { return std::string(); }, 600, [](int) { throw std::runtime_error("no"); });
+        CHECK(rows.size() == 5);
+    }
+    SECTION("rows that are genuinely blank inside a loaded grid are not chased beyond the row count") {
+        int scrolls = 0;
+        const auto rows = read_grid_rows_loading(10, 1, 50, columns,
+            [](int r, const std::string&) { return r < 4 ? std::string("x") : std::string(); }, 0, [&](int) { ++scrolls; });
+        CHECK(rows.size() == 10);
+        CHECK(scrolls <= 1);
+    }
+}
+
+// Found by a live Codex hunt: the SE16 result for TVARVC (one row) is a classic list whose preamble line
+// ("Displayed Fields: 6 of 9 ... List Width") has as many cells as the real header row; the header choice
+// "row with most text" picked the preamble, so the data row aligned with nothing and no table_data appeared.
+TEST_CASE("a classic list header is the row the data rows align with, not just the busiest row", "[table][userarea][header]") {
+    using Cells = std::vector<std::tuple<int, int, std::string>>;
+    const Cells tvarvc = {
+        {0, 0, "Table:"}, {16, 0, "TVARVC"},
+        {0, 1, "Displayed Fields:"}, {19, 1, " 6"}, {22, 1, "of"}, {26, 1, " 9 "}, {36, 1, "Fixed Columns:"}, {74, 1, "List Width"},
+        {3, 3, "MANDT"}, {9, 3, "NAME"}, {40, 3, "TYPE"}, {45, 3, "NUMB"}, {50, 3, "SIGN"}, {55, 3, "OPTI"},
+        {3, 5, "001"}, {9, 5, "SAP_SCMA_DETAIL_LIST"}, {40, 5, "P"}, {45, 5, "0000"}};
+    CHECK(ScreenReader::is_tabular_userarea(tvarvc));
+
+    std::map<int, std::set<int>> occupied;
+    for (const auto& [col, row, text] : tvarvc) occupied[row].insert(col);
+    CHECK(ScreenReader::choose_list_header_row(occupied) == 3);
+
+    SECTION("a normal list keeps its busiest row as header") {
+        std::map<int, std::set<int>> list = {{0, {0, 10, 20, 30}}, {1, {0, 10, 20, 30}}, {2, {0, 10, 20}}};
+        CHECK(ScreenReader::choose_list_header_row(list) == 0);
+    }
+    SECTION("rows without any aligned follower fall back to the row with most cells") {
+        std::map<int, std::set<int>> list = {{0, {0, 5}}, {1, {1, 7, 9}}, {2, {2, 8}}};
+        CHECK(ScreenReader::choose_list_header_row(list) == 1);
+    }
+    SECTION("empty input") {
+        CHECK(ScreenReader::choose_list_header_row({}) == -1);
+    }
 }

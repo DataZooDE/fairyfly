@@ -115,8 +115,20 @@ inline bool is_known_secret_field_name(const std::string& name) {
     const std::string key = normalize_sensitive_name(name);
     for (const auto* known : {"bapipwd", "newpassword", "oldpassword", "confirmpassword",
                               "repeatpassword", "codvn", "bcode", "passcode", "pwdsaltedhash",
-                              "passwordhash", "newpwd", "oldpwd"}) {
+                              "passwordhash", "newpwd", "oldpwd",
+                              // USR02 / USH02 / USRPWDHISTORY hash columns (PWDSTATE, PWDCHGDATE are state, not secret)
+                              "ocod1", "ocod2", "ocod3", "ocod4", "ocod5", "pwdsalt", "pwdhistory"}) {
         if (key == known) return true;
+    }
+    // Table-qualified technical names ("USR02-OCOD1", "USR02.BCODE"): judge the field part after the last separator.
+    const auto separator = name.find_last_of("-.~");
+    if (separator != std::string::npos && separator + 1 < name.size() && separator > 0 &&
+        name.find_first_of(" \t") == std::string::npos) {
+        const std::string field = normalize_sensitive_name(name.substr(separator + 1));
+        for (const auto* known : {"codvn", "bcode", "passcode", "pwdsaltedhash", "ocod1", "ocod2", "ocod3", "ocod4",
+                                  "ocod5", "pwdsalt", "pwdhistory"}) {
+            if (field == known) return true;
+        }
     }
     return false;
 }

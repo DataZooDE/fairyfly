@@ -14,6 +14,12 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"connection","list"});
+        cmd_->footer(R"HELP(Usage notes:
+Lists saved Fairyfly connections. Use a live saved numeric ID as --connection.
+CONNECTION_NOT_FOUND means the saved file is missing; INVALID_CONNECTION can mean its SAP session ended.
+Recover with session list and session attach --session-id using a currently live session.
+Example: fairyfly connection list
+)HELP");
         cmd_->add_flag("--cleanup", cleanup_, "Remove invalid connection files");
         add_output_option(cmd_, output_format_);
         return cmd_;

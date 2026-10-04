@@ -1,6 +1,7 @@
 #include "include/commands/command_base.h"
 #include "include/cli_handler.h"
 #include "include/constants.h"
+#include "include/object_tree_diag.h"
 #include "include/screen_reader.h"
 #include <spdlog/spdlog.h>
 #include <optional>
@@ -22,6 +23,18 @@ public:
 
         // Add "read" subcommand
         read_cmd_ = add_leaf(app, {"screen", "read"});
+        read_cmd_->footer(R"HELP(Usage notes:
+Returns the current screen and its controls. For targeted discovery prefer screen find.
+JSON includes data.transaction, data.elements and data.trees; a GuiShell may be a
+Tree or GridView. Trees contain tree_nodes; grids/tables have rows. Do not infer
+that a collapsed tree is empty. Use element get --list-nodes and expand parent keys.
+--no-tabs skips tab expansion. --compact preserves JSON IDs while reducing duplication.
+Grid/table reads are bounded: follow next_offset for further rows.
+Examples:
+  fairyfly screen read --connection 3 --no-tabs --compact
+  fairyfly screen read --connection 3 --type GuiShell --no-tabs
+  fairyfly screen read --connection 3 --only-tables --max-rows 100 --offset 0
+)HELP");
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
         read_cmd_->add_option("--tab", only_tab_, "Expand only this tab (tab ID or its trailing part, e.g. tabpTAB2)")
@@ -29,6 +42,9 @@ public:
         read_cmd_->add_flag("--skip-trees", skip_trees_, "Skip tree extraction (workaround for problematic trees)");
         read_cmd_->add_flag("--probe-all", probe_all_,
             "Exhaustively probe every container by FindById (slower; restores pre-gating behavior; also FAIRYFLY_PROBE_ALL=1)");
+        read_cmd_->add_option("--tree-reader", tree_reader_,
+            "Screen tree reader: legacy (default), bulk (one GetObjectTree call, errors when unavailable) or auto (bulk with per-read fallback); default from FAIRYFLY_SCREEN_READER")
+            ->check(CLI::IsMember({"legacy", "bulk", "auto"}))->group("");
         read_cmd_->add_flag("--compact", compact_, "Compact output. markdown: hide IDs, collapse empty fields. json/toon: hierarchy and per-tab elements become id arrays, empty/null/false element fields omitted");
         read_cmd_->add_option("--max-rows", max_rows_, "Maximum grid/table rows to read (default 20, maximum 200)")
             ->check(CLI::Range(1, constants::MAX_REQUESTED_TABLE_ROWS));
@@ -38,6 +54,12 @@ public:
         read_cmd_->add_option("--connection", read_conn_id_, "Connection ID to use");
         read_cmd_->add_option("--output", read_output_format_, "Output format: json, markdown, toon")
             ->check(CLI::IsMember({"json", "markdown", "toon"}));
+        // Hidden diagnostics for the bulk screen reader (raw, unredacted; FAIRYFLY_DIAG=1 only).
+        read_cmd_->add_flag("--dump-object-tree", dump_object_tree_,
+            "Diagnostic: raw GuiSession.GetObjectTree dump (needs FAIRYFLY_DIAG=1)")->group("");
+        read_cmd_->add_option("--object-tree-id", object_tree_id_, "Diagnostic: element id for --dump-object-tree (default: active window)")->group("");
+        read_cmd_->add_option("--object-tree-props", object_tree_props_, "Diagnostic: comma separated property names for --dump-object-tree")
+            ->delimiter(',')->group("");
 
         // Filter options
         read_cmd_->add_flag("--only-buttons", filters_.only_buttons, "Show only GuiButton elements");
@@ -51,6 +73,11 @@ public:
         read_cmd_->add_flag("--first", filters_.first_match_only, "Return only first matching element");
 
         find_cmd_ = add_leaf(app, {"screen", "find"});
+        find_cmd_->footer(R"HELP(Usage notes:
+Find control IDs without reading unrelated values. Default limit is one;
+request more when several shells match, then inspect each subtype before acting.
+Example: fairyfly screen find --type GuiShell --limit 20 --connection 3
+)HELP");
         find_cmd_->add_option("--id-contains", find_id_contains_, "Element ID substring (case-sensitive)");
         find_cmd_->add_option("--name-contains", find_name_contains_, "Control name substring (ASCII case-insensitive)");
         find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
@@ -64,7 +91,13 @@ public:
 
         // Add "capture" subcommand
         capture_cmd_ = add_leaf(app, {"screen", "capture"});
-        capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout");
+        capture_cmd_->footer(R"HELP(Usage notes:
+Capture the screen when visual context is needed. Crop coordinates use native pixels;
+provide x, y, width and height together. Cropping happens before scaling.
+Example: fairyfly screen capture --file screen.png --connection 3
+)HELP");
+        capture_cmd_->add_option("--file,-f", screenshot_file_, "Output file path or '-' for stdout. With --format base64 the file receives the data:image/png;base64,... text "
+                          "and the result carries filepath instead of the string");
         capture_cmd_->add_option("--format", screenshot_format_, "Output format: png, base64")
             ->check(CLI::IsMember({"png", "base64"}));
         capture_cmd_->add_option("--scale", screenshot_scale_,
@@ -81,6 +114,16 @@ public:
     }
 
     Result execute(cli::CommandHandler& handler) override {
+        if (*read_cmd_ && dump_object_tree_) {
+            if (!diag::diag_enabled_from_environment()) {
+                Result denied;
+                denied.status = Result::Status::Error;
+                denied.error["code"] = "DIAG_DISABLED";
+                denied.error["message"] = "The object tree dump is raw and unredacted; set FAIRYFLY_DIAG=1 to use it";
+                return denied;
+            }
+            return handler.handle_object_tree_dump(read_conn_id_, object_tree_id_, object_tree_props_);
+        }
         if (*read_cmd_) {
             bool should_expand_tabs = !no_tabs_ || !only_tab_.empty();
 
@@ -96,7 +139,8 @@ public:
             }
 
             return handler.handle_screen_read(read_children_, read_conn_id_, should_expand_tabs,
-                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_, row_offset_);
+                                              filters_, skip_trees_, compact_, max_rows_, only_tab_, probe_all_, row_offset_,
+                                              tree_reader_);
         }
         else if (*find_cmd_) {
             sap::ScreenFindOptions query;
@@ -156,6 +200,10 @@ private:
     bool skip_trees_ = false;
     bool compact_ = false;
     bool probe_all_ = false;
+    std::string tree_reader_;
+    bool dump_object_tree_ = false;
+    std::string object_tree_id_;
+    std::vector<std::string> object_tree_props_;
     int max_rows_ = constants::MAX_TABLE_ROWS;
     int row_offset_ = 0;
     std::optional<int> read_conn_id_;

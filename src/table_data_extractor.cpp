@@ -41,6 +41,54 @@ std::vector<std::vector<std::string>> read_grid_rows(
     return rows;
 }
 
+std::vector<std::vector<std::string>> read_grid_rows_loading(
+    int row_count, int col_count, int max_rows,
+    const std::vector<std::string>& column_names,
+    const std::function<std::string(int, const std::string&)>& read_cell,
+    int row_offset, const std::function<void(int)>& scroll_to) {
+    auto rows = read_grid_rows(row_count, col_count, max_rows, column_names, read_cell, row_offset);
+    if (!scroll_to) return rows;
+    const int first = (std::max)(0, row_offset);
+    const auto blank_row = [](const std::vector<std::string>& values) {
+        return std::all_of(values.begin(), values.end(), [](const std::string& v) {
+            return v.find_first_not_of(" \t\r\n") == std::string::npos;
+        });
+    };
+    const auto read_row = [&](int row) {
+        std::vector<std::string> values;
+        values.reserve((std::max)(0, col_count));
+        for (int col = 0; col < col_count; ++col) {
+            if (col >= static_cast<int>(column_names.size())) {
+                values.emplace_back();
+                continue;
+            }
+            try {
+                values.push_back(read_cell(row, column_names[col]));
+            } catch (const std::exception&) {
+                values.emplace_back();
+            }
+        }
+        return values;
+    };
+    constexpr int kMaxScrolls = 40;
+    for (int scrolls = 0; scrolls < kMaxScrolls; ++scrolls) {
+        size_t blank_from = rows.size();
+        while (blank_from > 0 && blank_row(rows[blank_from - 1])) --blank_from;
+        if (blank_from >= rows.size()) break;                        // no trailing blank rows
+        const int target = first + static_cast<int>(blank_from);
+        if (target >= row_count) break;                              // the grid really ends here
+        try {
+            scroll_to(target);
+        } catch (const std::exception& error) {
+            spdlog::debug("Grid scroll to row {} failed: {}", target, error.what());
+            break;
+        }
+        for (size_t i = blank_from; i < rows.size(); ++i) rows[i] = read_row(first + static_cast<int>(i));
+        if (blank_row(rows[blank_from])) break;                      // nothing loaded: stop chasing
+    }
+    return rows;
+}
+
 std::vector<ComGuiElementPtr> enumerate_collection(const SapGuiCollection<ComGuiElement>& collection,
                                                     int limit) {
     std::vector<ComGuiElementPtr> items;
@@ -151,11 +199,26 @@ TableData TableDataExtractor::extract_grid_data(ComGuiElementPtr element) const 
 
         const auto column_names = get_column_names(element);
         if (options_.include_headers) data.columns = column_names;
-        data.rows = read_grid_rows(row_count, col_count, options_.max_rows, column_names,
-                                   [&](int row, const std::string& column) {
-                                       return element->get_cell_value(row, column);
-                                   },
-                                   options_.row_offset);
+        // ALV grids load rows lazily around their viewport: scroll to the rows the window needs, then put the
+        // original scroll position back (a read must not leave the grid moved).
+        int original_first_row = -1;
+        bool scrolled = false;
+        data.rows = read_grid_rows_loading(
+            row_count, col_count, options_.max_rows, column_names,
+            [&](int row, const std::string& column) { return element->get_cell_value(row, column); },
+            options_.row_offset,
+            [&](int row) {
+                if (original_first_row < 0) original_first_row = element->get_property_int(L"FirstVisibleRow");
+                scrolled = true;
+                element->set_int_property(L"FirstVisibleRow", row);
+            });
+        if (scrolled && original_first_row >= 0) {
+            try {
+                element->set_int_property(L"FirstVisibleRow", original_first_row);
+            } catch (const std::exception& error) {
+                spdlog::debug("Could not restore the grid scroll position: {}", error.what());
+            }
+        }
         data.row_offset = (std::max)(0, options_.row_offset);
         data.empty_rows_trimmed = trim_trailing_empty_rows(data.rows);
 

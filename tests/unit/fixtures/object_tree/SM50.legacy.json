@@ -1,0 +1,2894 @@
+{
+ "child_count": 6,
+ "compact": false,
+ "element_count": 51,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 14,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[71]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[80]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[81]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[82]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[83]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+   "name": "btn[86]",
+   "text": "",
+   "tooltip": "Print   (Ctrl+P)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[71]",
+   "name": "btn[71]",
+   "text": "",
+   "tooltip": "Search   (Ctrl+F)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[80]",
+   "name": "btn[80]",
+   "text": "",
+   "tooltip": "First Page   (Ctrl+Page up)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[81]",
+   "name": "btn[81]",
+   "text": "",
+   "tooltip": "Previous Page   (Page up)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[82]",
+   "name": "btn[82]",
+   "text": "",
+   "tooltip": "Next Page   (Page down)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[83]",
+   "name": "btn[83]",
+   "text": "",
+   "tooltip": "Last Page   (Ctrl+Page down)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 22,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[47]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[34]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[94]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[42]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[44]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[29]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[26]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[27]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[28]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[38]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[41]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[33]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[36]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[20]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[9]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[16]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[35]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[48]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+   "name": "btn[8]",
+   "text": "",
+   "tooltip": "Refresh   (F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[47]",
+   "name": "btn[47]",
+   "text": "",
+   "tooltip": "WP Info   (Ctrl+Shift+F11)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[34]",
+   "name": "btn[34]",
+   "text": "",
+   "tooltip": "System-Wide List   (Ctrl+F10)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[94]",
+   "name": "btn[94]",
+   "text": "Own Work Processes",
+   "tooltip": "@UQ@Own Work Processes   (Shift+F10)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[42]",
+   "name": "btn[42]",
+   "text": "Active Work Processes",
+   "tooltip": "@UQ@Active Work Processes   (Ctrl+Shift+F6)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[44]",
+   "name": "btn[44]",
+   "text": "",
+   "tooltip": "Display Trace File   (Ctrl+Shift+F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[29]",
+   "name": "btn[29]",
+   "text": "",
+   "tooltip": "First Column   (Ctrl+F5)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[26]",
+   "name": "btn[26]",
+   "text": "",
+   "tooltip": "One Column to Left   (Ctrl+F2)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[27]",
+   "name": "btn[27]",
+   "text": "",
+   "tooltip": "One Column to Right   (Ctrl+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[28]",
+   "name": "btn[28]",
+   "text": "",
+   "tooltip": "Last Column   (Ctrl+F4)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[38]",
+   "name": "btn[38]",
+   "text": "",
+   "tooltip": "Set Filter   (Ctrl+Shift+F2)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[41]",
+   "name": "btn[41]",
+   "text": "",
+   "tooltip": "Sort in Ascending Order   (Ctrl+Shift+F5)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+   "name": "btn[40]",
+   "text": "",
+   "tooltip": "Sort in Descending Order   (Ctrl+Shift+F4)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+   "name": "btn[32]",
+   "text": "",
+   "tooltip": "Change Layout...   (Ctrl+F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[33]",
+   "name": "btn[33]",
+   "text": "",
+   "tooltip": "Select Layout...   (Ctrl+F9)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[36]",
+   "name": "btn[36]",
+   "text": "",
+   "tooltip": "Save Layout...   (Ctrl+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[20]",
+   "name": "btn[20]",
+   "text": "",
+   "tooltip": "Sending...   (Shift+F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[9]",
+   "name": "btn[9]",
+   "text": "",
+   "tooltip": "Local File...   (F9)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[16]",
+   "name": "btn[16]",
+   "text": "",
+   "tooltip": "Spreadsheet...   (Shift+F4)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[35]",
+   "name": "btn[35]",
+   "text": "",
+   "tooltip": "List Status   (Ctrl+F11)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[48]",
+   "name": "btn[48]",
+   "text": "",
+   "tooltip": "Application Help Call   (Ctrl+Shift+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "Work Processes of AS Instance vhcala4hci_A4H_00",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "Administration",
+   "text": "Administration",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 15,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[11]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[12]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[13]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[14]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 6,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "List",
+   "text": "List",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+   "name": "Settings",
+   "text": "Settings",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[0]/shell",
+   "name": "shell",
+   "subtype": "HTMLViewer",
+   "text": "Last Update  \n03.10.2026, 01:12:19  \nTotal Number of Work Processes  \n32  \nDialog  \n24 / 23 (Total/Free) , Average Load = ( 0,001 / 0,024 / 0,012)  \nUpdate  \n1 / 1 (Total/Free)  \nBackground  \n5 / 4 (Total/Free) , Average Load = ( 1,000 / 1,001 / 1,001)  \nSpool  \n1 / 1 (Total/Free)  \nUpdate Task 2  \n1 / 1 (Total/Free)  ",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "",
+   "type": "GuiStatusbar",
+   "visible": true
+  },
+  {
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell",
+   "subtype": "GridView",
+   "table_data": {
+    "columns": [
+     "WP_INDEX",
+     "WP_TYPE_DISP",
+     "PID",
+     "STATE_DISP",
+     "STATE_INFO_DISP",
+     "FAILURES",
+     "SEM_LOCKED",
+     "SEM_LOCKING",
+     "CPU",
+     "ELAPSED_TIME",
+     "PRIORITY_DISP",
+     "WAIT_FOR_PRIORITY_DISP",
+     "WP_PROGRAM",
+     "TENANT_DISP",
+     "USER_NAME",
+     "CURRENT_ACTION_DISP",
+     "ACTION_INFO"
+    ],
+    "current_cell_column": "WP_INDEX",
+    "current_cell_row": 0,
+    "empty_rows_trimmed": 0,
+    "first_visible_column": "WP_TYPE_DISP",
+    "first_visible_row": 0,
+    "offset": 0,
+    "returned": 32,
+    "rows": [
+     [
+      "0",
+      "DIA",
+      "3.768",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:09",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "1",
+      "DIA",
+      "153.852",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:04",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "2",
+      "DIA",
+      "3.770",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:11",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "3",
+      "DIA",
+      "3.771",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:10",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "4",
+      "DIA",
+      "3.772",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:28",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "5",
+      "DIA",
+      "3.773",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:20",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "6",
+      "DIA",
+      "3.774",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:24",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "7",
+      "DIA",
+      "3.775",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:10",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "8",
+      "DIA",
+      "3.776",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:27",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "9",
+      "DIA",
+      "3.777",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:34",
+      "",
+      "",
+      "Medium",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "10",
+      "DIA",
+      "153.821",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:04",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "11",
+      "DIA",
+      "3.779",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:24",
+      "",
+      "",
+      "Medium",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "12",
+      "DIA",
+      "3.780",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:18",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "13",
+      "DIA",
+      "3.781",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:32",
+      "",
+      "",
+      "High",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "14",
+      "DIA",
+      "3.782",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:30",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "15",
+      "DIA",
+      "3.783",
+      "Running",
+      "",
+      "",
+      "",
+      "",
+      "00:00:50",
+      "",
+      "High",
+      "",
+      "CL_SERVER_INFO================CP",
+      "001",
+      "DEVELOPER",
+      "",
+      ""
+     ],
+     [
+      "16",
+      "DIA",
+      "3.784",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:26",
+      "",
+      "",
+      "High",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "17",
+      "DIA",
+      "156.312",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:06",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "18",
+      "DIA",
+      "156.313",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:07",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "19",
+      "DIA",
+      "3.787",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:01:03",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "20",
+      "DIA",
+      "154.553",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:16",
+      "",
+      "",
+      "Medium",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "21",
+      "DIA",
+      "3.789",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:01:57",
+      "",
+      "",
+      "Low",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "22",
+      "DIA",
+      "156.600",
+      "Waiting",
+      "",
+      "1",
+      "",
+      "",
+      "00:00:16",
+      "",
+      "",
+      "High",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "23",
+      "DIA",
+      "3.791",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:03:59",
+      "",
+      "",
+      "High",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "24",
+      "UPD",
+      "3.792",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:04",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "25",
+      "BTC",
+      "3.793",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:16",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "26",
+      "BTC",
+      "3.794",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:02:10",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "27",
+      "BTC",
+      "3.795",
+      "On Hold",
+      "ABAP WAIT",
+      "",
+      "",
+      "",
+      "00:00:50",
+      "1",
+      "",
+      "",
+      "DHCDCR_OBSERVE_LOGTAB",
+      "001",
+      "DEVELOPER",
+      "",
+      ""
+     ],
+     [
+      "28",
+      "BTC",
+      "3.796",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:14",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "29",
+      "BTC",
+      "3.797",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:01:16",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "30",
+      "SPO",
+      "3.798",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:10",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ],
+     [
+      "31",
+      "UPD2",
+      "3.799",
+      "Waiting",
+      "",
+      "",
+      "",
+      "",
+      "00:00:03",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+     ]
+    ],
+    "total": 32,
+    "total_row_count": 32,
+    "visible_row_count": 30
+   },
+   "type": "GuiShell"
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+    "name": "btn[86]",
+    "text": "",
+    "tooltip": "Print   (Ctrl+P)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[71]",
+    "name": "btn[71]",
+    "text": "",
+    "tooltip": "Search   (Ctrl+F)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[80]",
+    "name": "btn[80]",
+    "text": "",
+    "tooltip": "First Page   (Ctrl+Page up)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[81]",
+    "name": "btn[81]",
+    "text": "",
+    "tooltip": "Previous Page   (Page up)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[82]",
+    "name": "btn[82]",
+    "text": "",
+    "tooltip": "Next Page   (Page down)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[83]",
+    "name": "btn[83]",
+    "text": "",
+    "tooltip": "Last Page   (Ctrl+Page down)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+    "name": "btn[8]",
+    "text": "",
+    "tooltip": "Refresh   (F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[47]",
+    "name": "btn[47]",
+    "text": "",
+    "tooltip": "WP Info   (Ctrl+Shift+F11)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[34]",
+    "name": "btn[34]",
+    "text": "",
+    "tooltip": "System-Wide List   (Ctrl+F10)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[94]",
+    "name": "btn[94]",
+    "text": "Own Work Processes",
+    "tooltip": "@UQ@Own Work Processes   (Shift+F10)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[42]",
+    "name": "btn[42]",
+    "text": "Active Work Processes",
+    "tooltip": "@UQ@Active Work Processes   (Ctrl+Shift+F6)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[44]",
+    "name": "btn[44]",
+    "text": "",
+    "tooltip": "Display Trace File   (Ctrl+Shift+F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[29]",
+    "name": "btn[29]",
+    "text": "",
+    "tooltip": "First Column   (Ctrl+F5)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[26]",
+    "name": "btn[26]",
+    "text": "",
+    "tooltip": "One Column to Left   (Ctrl+F2)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[27]",
+    "name": "btn[27]",
+    "text": "",
+    "tooltip": "One Column to Right   (Ctrl+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[28]",
+    "name": "btn[28]",
+    "text": "",
+    "tooltip": "Last Column   (Ctrl+F4)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[38]",
+    "name": "btn[38]",
+    "text": "",
+    "tooltip": "Set Filter   (Ctrl+Shift+F2)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[41]",
+    "name": "btn[41]",
+    "text": "",
+    "tooltip": "Sort in Ascending Order   (Ctrl+Shift+F5)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+    "name": "btn[40]",
+    "text": "",
+    "tooltip": "Sort in Descending Order   (Ctrl+Shift+F4)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+    "name": "btn[32]",
+    "text": "",
+    "tooltip": "Change Layout...   (Ctrl+F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[33]",
+    "name": "btn[33]",
+    "text": "",
+    "tooltip": "Select Layout...   (Ctrl+F9)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[36]",
+    "name": "btn[36]",
+    "text": "",
+    "tooltip": "Save Layout...   (Ctrl+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[20]",
+    "name": "btn[20]",
+    "text": "",
+    "tooltip": "Sending...   (Shift+F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[9]",
+    "name": "btn[9]",
+    "text": "",
+    "tooltip": "Local File...   (F9)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[16]",
+    "name": "btn[16]",
+    "text": "",
+    "tooltip": "Spreadsheet...   (Shift+F4)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[35]",
+    "name": "btn[35]",
+    "text": "",
+    "tooltip": "List Status   (Ctrl+F11)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[48]",
+    "name": "btn[48]",
+    "text": "",
+    "tooltip": "Application Help Call   (Ctrl+Shift+F12)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "Work Processes of AS Instance vhcala4hci_A4H_00",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "Administration",
+    "text": "Administration",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 15,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[11]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[12]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[13]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[14]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[4]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 6,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[5]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "List",
+    "text": "List",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "name": "Settings",
+    "text": "Settings",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[0]/shell",
+    "name": "shell",
+    "subtype": "HTMLViewer",
+    "text": "Last Update  \n03.10.2026, 01:12:19  \nTotal Number of Work Processes  \n32  \nDialog  \n24 / 23 (Total/Free) , Average Load = ( 0,001 / 0,024 / 0,012)  \nUpdate  \n1 / 1 (Total/Free)  \nBackground  \n5 / 4 (Total/Free) , Average Load = ( 1,000 / 1,001 / 1,001)  \nSpool  \n1 / 1 (Total/Free)  \nUpdate Task 2  \n1 / 1 (Total/Free)  ",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "",
+    "type": "GuiStatusbar",
+    "visible": true
+   }
+  ],
+  "tables": [
+   {
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell",
+    "subtype": "GridView",
+    "table_data": {
+     "columns": [
+      "WP_INDEX",
+      "WP_TYPE_DISP",
+      "PID",
+      "STATE_DISP",
+      "STATE_INFO_DISP",
+      "FAILURES",
+      "SEM_LOCKED",
+      "SEM_LOCKING",
+      "CPU",
+      "ELAPSED_TIME",
+      "PRIORITY_DISP",
+      "WAIT_FOR_PRIORITY_DISP",
+      "WP_PROGRAM",
+      "TENANT_DISP",
+      "USER_NAME",
+      "CURRENT_ACTION_DISP",
+      "ACTION_INFO"
+     ],
+     "current_cell_column": "WP_INDEX",
+     "current_cell_row": 0,
+     "empty_rows_trimmed": 0,
+     "first_visible_column": "WP_TYPE_DISP",
+     "first_visible_row": 0,
+     "offset": 0,
+     "returned": 32,
+     "rows": [
+      [
+       "0",
+       "DIA",
+       "3.768",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:09",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "1",
+       "DIA",
+       "153.852",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:04",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "2",
+       "DIA",
+       "3.770",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:11",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "3",
+       "DIA",
+       "3.771",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:10",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "4",
+       "DIA",
+       "3.772",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:28",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "5",
+       "DIA",
+       "3.773",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:20",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "6",
+       "DIA",
+       "3.774",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:24",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "7",
+       "DIA",
+       "3.775",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:10",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "8",
+       "DIA",
+       "3.776",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:27",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "9",
+       "DIA",
+       "3.777",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:34",
+       "",
+       "",
+       "Medium",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "10",
+       "DIA",
+       "153.821",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:04",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "11",
+       "DIA",
+       "3.779",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:24",
+       "",
+       "",
+       "Medium",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "12",
+       "DIA",
+       "3.780",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:18",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "13",
+       "DIA",
+       "3.781",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:32",
+       "",
+       "",
+       "High",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "14",
+       "DIA",
+       "3.782",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:30",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "15",
+       "DIA",
+       "3.783",
+       "Running",
+       "",
+       "",
+       "",
+       "",
+       "00:00:50",
+       "",
+       "High",
+       "",
+       "CL_SERVER_INFO================CP",
+       "001",
+       "DEVELOPER",
+       "",
+       ""
+      ],
+      [
+       "16",
+       "DIA",
+       "3.784",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:26",
+       "",
+       "",
+       "High",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "17",
+       "DIA",
+       "156.312",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:06",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "18",
+       "DIA",
+       "156.313",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:07",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "19",
+       "DIA",
+       "3.787",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:01:03",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "20",
+       "DIA",
+       "154.553",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:16",
+       "",
+       "",
+       "Medium",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "21",
+       "DIA",
+       "3.789",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:01:57",
+       "",
+       "",
+       "Low",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "22",
+       "DIA",
+       "156.600",
+       "Waiting",
+       "",
+       "1",
+       "",
+       "",
+       "00:00:16",
+       "",
+       "",
+       "High",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "23",
+       "DIA",
+       "3.791",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:03:59",
+       "",
+       "",
+       "High",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "24",
+       "UPD",
+       "3.792",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:04",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "25",
+       "BTC",
+       "3.793",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:16",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "26",
+       "BTC",
+       "3.794",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:02:10",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "27",
+       "BTC",
+       "3.795",
+       "On Hold",
+       "ABAP WAIT",
+       "",
+       "",
+       "",
+       "00:00:50",
+       "1",
+       "",
+       "",
+       "DHCDCR_OBSERVE_LOGTAB",
+       "001",
+       "DEVELOPER",
+       "",
+       ""
+      ],
+      [
+       "28",
+       "BTC",
+       "3.796",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:14",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "29",
+       "BTC",
+       "3.797",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:01:16",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "30",
+       "SPO",
+       "3.798",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:10",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ],
+      [
+       "31",
+       "UPD2",
+       "3.799",
+       "Waiting",
+       "",
+       "",
+       "",
+       "",
+       "00:00:03",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       "",
+       ""
+      ]
+     ],
+     "total": 32,
+     "total_row_count": 32,
+     "visible_row_count": 30
+    },
+    "type": "GuiShell"
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 14,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[86]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[71]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[80]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[81]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[82]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[83]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 22,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[8]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[47]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[34]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[94]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[42]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[44]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[29]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[26]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[27]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[28]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[38]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[41]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[33]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[36]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[20]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[9]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[16]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[35]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[48]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "title": "Work Processes of AS Instance vhcala4hci_A4H_00",
+ "transaction": "SM50"
+}

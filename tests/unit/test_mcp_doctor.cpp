@@ -7,6 +7,20 @@
 
 using namespace fairyfly::config;
 
+TEST_CASE("mcp doctor distinguishes SAP logon screens from authenticated sessions", "[mcp_doctor]") {
+    using Tri = SapState::Tri;
+    CHECK(classify_logged_in_users({}, true) == Tri::No);
+    CHECK(classify_logged_in_users({std::string{}}, true) == Tri::No);
+    CHECK(classify_logged_in_users({std::string{}, std::string{"DEVELOPER"}}, true) == Tri::Yes);
+    CHECK(classify_logged_in_users({std::nullopt}, true) == Tri::Unknown);
+    CHECK(classify_logged_in_users({std::string{}}, false) == Tri::Unknown);
+    CHECK(classify_logged_in_users({std::string{"DEVELOPER"}}, false) == Tri::Yes);
+    CHECK(owner_sap_identity_allowed("A4H", "001", "DEVELOPER", {}));
+    CHECK(owner_sap_identity_allowed("A4H", "001", "DEVELOPER", {"A4H/001/DEVELOPER"}));
+    CHECK_FALSE(owner_sap_identity_allowed("A4H", "001", "OTHER", {"A4H/001/DEVELOPER"}));
+    CHECK_FALSE(owner_sap_identity_allowed("A4H", "000", "DEVELOPER", {"A4H/001/DEVELOPER"}));
+}
+
 namespace {
 
 struct FakeProbes : DoctorProbes {

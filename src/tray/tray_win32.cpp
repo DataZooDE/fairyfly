@@ -69,13 +69,21 @@ HICON draw_circle_icon(COLORREF color) {
     return icon;
 }
 
-HICON load_state_icon(IconState state) {
-    int id = IDI_TRAY_STOPPED;
+/// True when the taskbar uses the light theme (Windows 10 1903+). Missing value: dark, the older default.
+bool taskbar_is_light() {
+    DWORD value = 0, size = sizeof(value);
+    const LONG rc = RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                                 L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
+    return rc == ERROR_SUCCESS && value != 0;
+}
+
+HICON load_state_icon(IconState state, bool light) {
+    int id = light ? IDI_TRAY_STOPPED_LIGHT : IDI_TRAY_STOPPED;
     COLORREF color = RGB(140, 140, 140);
     switch (state) {
-    case IconState::Running: id = IDI_TRAY_RUNNING; color = RGB(46, 160, 67); break;
-    case IconState::Warning: id = IDI_TRAY_WARNING; color = RGB(224, 168, 0); break;
-    case IconState::Error: id = IDI_TRAY_ERROR; color = RGB(214, 48, 49); break;
+    case IconState::Running: id = light ? IDI_TRAY_RUNNING_LIGHT : IDI_TRAY_RUNNING; color = RGB(37, 180, 147); break;
+    case IconState::Warning: id = light ? IDI_TRAY_WARNING_LIGHT : IDI_TRAY_WARNING; color = RGB(224, 168, 0); break;
+    case IconState::Error: id = light ? IDI_TRAY_ERROR_LIGHT : IDI_TRAY_ERROR; color = RGB(214, 48, 49); break;
     case IconState::Stopped: break;
     }
     HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(id), IMAGE_ICON,
@@ -121,7 +129,8 @@ public:
             DispatchMessageW(&msg);
         }
         hwnd_ = nullptr;
-        for (auto& icon : icons_) icon = nullptr;
+        for (auto& set : icons_)
+            for (auto& icon : set) icon = nullptr;
         return true;
     }
 
@@ -180,6 +189,14 @@ private:
             }
             return 0;
         case kMsgRefresh: update_icon(); return 0;
+        case WM_SETTINGCHANGE:
+            // Taskbar switched between light and dark: swap to the matching icon set.
+            if (lparam && wcscmp(reinterpret_cast<const wchar_t*>(lparam), L"ImmersiveColorSet") == 0 &&
+                taskbar_is_light() != light_taskbar_) {
+                light_taskbar_ = !light_taskbar_;
+                update_icon(true);
+            }
+            return 0;
         case kMsgBalloon: {
             std::deque<std::pair<std::string, std::string>> pending;
             {
@@ -209,12 +226,13 @@ private:
     }
 
     HICON icon_for_state(IconState state) {
-        HICON& slot = icons_[static_cast<size_t>(state)];
-        if (!slot) slot = load_state_icon(state);
+        HICON& slot = icons_[light_taskbar_ ? 1 : 0][static_cast<size_t>(state)];
+        if (!slot) slot = load_state_icon(state, light_taskbar_);
         return slot;
     }
 
     bool add_icon() {
+        light_taskbar_ = taskbar_is_light();
         const TrayView view = listener_->view();
         NOTIFYICONDATAW nid = base_data();
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
@@ -226,9 +244,9 @@ private:
         return Shell_NotifyIconW(NIM_ADD, &nid) == TRUE;
     }
 
-    void update_icon() {
+    void update_icon(bool force = false) {
         const TrayView view = listener_->view();
-        if (view.icon == current_icon_ && view.tooltip == current_tip_) return;
+        if (!force && view.icon == current_icon_ && view.tooltip == current_tip_) return;
         NOTIFYICONDATAW nid = base_data();
         nid.uFlags = NIF_ICON | NIF_TIP;
         nid.hIcon = icon_for_state(view.icon);
@@ -293,7 +311,8 @@ private:
     std::atomic<HWND> hwnd_{nullptr};
     std::atomic<bool> quit_requested_{false};
     UINT taskbar_created_ = 0;
-    HICON icons_[4] = {nullptr, nullptr, nullptr, nullptr};
+    HICON icons_[2][4] = {};   // [dark, light taskbar][IconState]
+    bool light_taskbar_ = false;
     IconState current_icon_ = IconState::Stopped;
     std::string current_tip_;
     std::mutex mutex_;

@@ -122,4 +122,22 @@ CloseAttempt attempt_close(int window_index, SendFn send_key, CloseFn close_wind
     return attempt;
 }
 
+/// Some SAP dialogs accept SendVKey without throwing but remain open. Only after observing that
+/// outcome, try GuiModalWindow.Close; never call Close on the main window.
+template <typename CloseFn>
+CloseAttempt fallback_close_when_still_open(int before_index, int after_index, CloseAttempt attempt,
+                                            CloseFn close_window) {
+    if (attempt.method != CloseMethod::Vkey ||
+        classify_close_outcome(before_index, after_index) != CloseOutcome::StillOpen)
+        return attempt;
+    try {
+        close_window();
+        attempt.method = CloseMethod::WindowClose;
+    } catch (const std::exception& e) {
+        attempt.method = CloseMethod::Unsupported;
+        attempt.close_error = e.what();
+    }
+    return attempt;
+}
+
 } // namespace fairyfly::sap

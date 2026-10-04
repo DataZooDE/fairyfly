@@ -1,0 +1,1486 @@
+{
+ "child_count": 7,
+ "compact": false,
+ "element_count": 34,
+ "elements": [
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 8,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+   "name": "tbar[0]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+   "name": "btn[0]",
+   "text": "",
+   "tooltip": "Enter   (Enter)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+   "name": "btn[3]",
+   "text": "Back",
+   "tooltip": "Back   (F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+   "name": "btn[15]",
+   "text": "Exit",
+   "tooltip": "Exit   (Shift+F3)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+   "name": "btn[12]",
+   "text": "Cancel",
+   "tooltip": "Cancel   (F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+   "name": "btn[419]",
+   "text": "",
+   "tooltip": "New GUI Window",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+   "name": "btn[418]",
+   "text": "",
+   "tooltip": "Generates shortcut",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+   "name": "btn[446]",
+   "text": "",
+   "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "fillable",
+    "readable"
+   ],
+   "changeable": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+   "name": "okcd",
+   "text": "",
+   "type": "GuiOkCodeField",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 6,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[18]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+    "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[17]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+   "name": "tbar[1]",
+   "text": "",
+   "type": "GuiToolbar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+   "name": "btnvhmore",
+   "text": "More",
+   "tooltip": "More (Alt+F12)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[18]",
+   "name": "btn[18]",
+   "text": "",
+   "tooltip": "Previous Object   (Shift+F6)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+   "name": "btn[19]",
+   "text": "",
+   "tooltip": "Next Object   (Shift+F7)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+   "name": "btn[40]",
+   "text": "",
+   "tooltip": "Display Navigation Window   (Ctrl+Shift+F4)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+   "name": "btn[32]",
+   "text": "",
+   "tooltip": "Online Help   (Ctrl+F8)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[17]",
+   "name": "btn[17]",
+   "text": "Edit Object",
+   "tooltip": "Edit Object...   (Shift+F5)",
+   "type": "GuiButton",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "container_type": "titlebar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+   "name": "titl",
+   "text": "Object Navigator",
+   "type": "GuiTitlebar",
+   "visible": true
+  },
+  {
+   "button_count": 1,
+   "capabilities": [],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell",
+   "name": "shell",
+   "subtype": "Toolbar",
+   "text": "SAP.Toolbar.1",
+   "toolbar_buttons": [
+    {
+     "button_type": "CheckBox",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell/btn_1",
+     "name": "1",
+     "text": "Repository Browser",
+     "tooltip": "",
+     "type": "GuiButton",
+     "visible": true
+    }
+   ],
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[2]/shell",
+   "name": "shell",
+   "subtype": "ComboBox",
+   "text": "Inactive Objects",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[4]/shell",
+   "name": "shell",
+   "subtype": "Inputfield",
+   "text": "DEVELOPER",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "button_count": 2,
+   "capabilities": [],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell",
+   "name": "shell",
+   "subtype": "Toolbar",
+   "text": "SAP.Toolbar.1",
+   "toolbar_buttons": [
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell/btn_F4",
+     "name": "F4",
+     "text": "",
+     "tooltip": "Value Help",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell/btn_DISPLAY",
+     "name": "DISPLAY",
+     "text": "",
+     "tooltip": "Display Object",
+     "type": "GuiButton",
+     "visible": true
+    }
+   ],
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "button_count": 8,
+   "capabilities": [],
+   "changeable": false,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell",
+   "name": "shell",
+   "subtype": "Toolbar",
+   "text": "SAP.Toolbar.1",
+   "toolbar_buttons": [
+    {
+     "button_type": "ButtonAndMenu",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": false,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_BACK_TB",
+     "name": "WB_BACK_TB",
+     "text": "",
+     "tooltip": "Previous tree",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "ButtonAndMenu",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": false,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_FORWARD",
+     "name": "WB_FORWARD",
+     "text": "",
+     "tooltip": "Next tree",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_EXPAND_ALL",
+     "name": "EXPAND_ALL",
+     "text": "",
+     "tooltip": "Expand Subtree",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_COLLAPSE_ALL",
+     "name": "COLLAPSE_ALL",
+     "text": "",
+     "tooltip": "Collapse Subtree",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_FIND",
+     "name": "FIND",
+     "text": "",
+     "tooltip": "Find...",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_UPPERHIER",
+     "name": "UPPERHIER",
+     "text": "",
+     "tooltip": "Superordinate object list",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Menu",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_BOOKMARK_SELECT",
+     "name": "WB_BOOKMARK_SELECT",
+     "text": "",
+     "tooltip": "Favorites",
+     "type": "GuiButton",
+     "visible": true
+    },
+    {
+     "button_type": "Button",
+     "capabilities": [
+      "clickable"
+     ],
+     "changeable": true,
+     "enabled": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_TREE_REFRESH",
+     "name": "WB_TREE_REFRESH",
+     "text": "",
+     "tooltip": "Refresh Tree Display",
+     "type": "GuiButton",
+     "visible": true
+    }
+   ],
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+   ],
+   "container_type": "toolbar",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+   "name": "mbar",
+   "text": "",
+   "type": "GuiMenubar",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 3,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+   "name": "Workbench",
+   "text": "Workbench",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 1,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+   "name": "Edit",
+   "text": "Edit",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 1,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+   "name": "Goto",
+   "text": "Goto",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 5,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+   "name": "Utilities",
+   "text": "Utilities",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 9,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+   "name": "Environment",
+   "text": "Environment",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 12,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+   "name": "System",
+   "text": "System",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "clickable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+    "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+   "name": "Help",
+   "text": "Help",
+   "type": "GuiMenu",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "container"
+   ],
+   "changeable": false,
+   "container_type": "form",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+   "name": "usr",
+   "text": "",
+   "type": "GuiUserArea",
+   "visible": true
+  },
+  {
+   "capabilities": [],
+   "changeable": false,
+   "content_available": true,
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlIMAGE/shellcont/shell",
+   "name": "shell",
+   "subtype": "HTMLViewer",
+   "text": "￼\nWelcome to the ABAP Workbench\n￼\nAre you ready for the next generation of ABAP development?\nGet to know ABAP in Eclipse-Community and find out more.\nDownload ABAP Development Tools here.",
+   "type": "GuiShell",
+   "visible": true
+  },
+  {
+   "capabilities": [
+    "readable"
+   ],
+   "changeable": false,
+   "child_count": 7,
+   "children": [
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+    "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+   ],
+   "container_type": "container",
+   "enabled": true,
+   "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+   "name": "sbar",
+   "text": "",
+   "type": "GuiStatusbar",
+   "visible": true
+  },
+  {
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[2]/shell",
+   "node_count": 2,
+   "subtype": "Tree",
+   "tree_nodes": [
+    {
+     "available_columns": [
+      "HierarchyHeader",
+      "COL2"
+     ],
+     "column_values": [
+      "",
+      ""
+     ],
+     "key": "          1",
+     "path": "1",
+     "text": "Inactive Objects DEVELOPER"
+    },
+    {
+     "available_columns": [
+      "HierarchyHeader",
+      "COL2"
+     ],
+     "column_values": [
+      "",
+      ""
+     ],
+     "key": "          2",
+     "path": "1\\1",
+     "text": "Local Objects"
+    }
+   ],
+   "type": "GuiShell"
+  }
+ ],
+ "hierarchy": {
+  "buttons": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+    "name": "btn[0]",
+    "text": "",
+    "tooltip": "Enter   (Enter)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+    "name": "btn[3]",
+    "text": "Back",
+    "tooltip": "Back   (F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+    "name": "btn[15]",
+    "text": "Exit",
+    "tooltip": "Exit   (Shift+F3)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+    "name": "btn[12]",
+    "text": "Cancel",
+    "tooltip": "Cancel   (F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+    "name": "btn[419]",
+    "text": "",
+    "tooltip": "New GUI Window",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+    "name": "btn[418]",
+    "text": "",
+    "tooltip": "Generates shortcut",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+    "name": "btn[446]",
+    "text": "",
+    "tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+    "name": "btnvhmore",
+    "text": "More",
+    "tooltip": "More (Alt+F12)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[18]",
+    "name": "btn[18]",
+    "text": "",
+    "tooltip": "Previous Object   (Shift+F6)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+    "name": "btn[19]",
+    "text": "",
+    "tooltip": "Next Object   (Shift+F7)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+    "name": "btn[40]",
+    "text": "",
+    "tooltip": "Display Navigation Window   (Ctrl+Shift+F4)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+    "name": "btn[32]",
+    "text": "",
+    "tooltip": "Online Help   (Ctrl+F8)",
+    "type": "GuiButton",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[17]",
+    "name": "btn[17]",
+    "text": "Edit Object",
+    "tooltip": "Edit Object...   (Shift+F5)",
+    "type": "GuiButton",
+    "visible": true
+   }
+  ],
+  "other": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+    "name": "okcd",
+    "text": "",
+    "type": "GuiOkCodeField",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "container_type": "titlebar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/titl",
+    "name": "titl",
+    "text": "Object Navigator",
+    "type": "GuiTitlebar",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[2]/shell",
+    "name": "shell",
+    "subtype": "ComboBox",
+    "text": "Inactive Objects",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[4]/shell",
+    "name": "shell",
+    "subtype": "Inputfield",
+    "text": "DEVELOPER",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 3,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+    "name": "Workbench",
+    "text": "Workbench",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 1,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+    "name": "Edit",
+    "text": "Edit",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 1,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+    "name": "Goto",
+    "text": "Goto",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 5,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[4]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+    "name": "Utilities",
+    "text": "Utilities",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 9,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+    "name": "Environment",
+    "text": "Environment",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 12,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+    "name": "System",
+    "text": "System",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+    "name": "Help",
+    "text": "Help",
+    "type": "GuiMenu",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "container"
+    ],
+    "changeable": false,
+    "container_type": "form",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "name": "usr",
+    "text": "",
+    "type": "GuiUserArea",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "content_available": true,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/cntlIMAGE/shellcont/shell",
+    "name": "shell",
+    "subtype": "HTMLViewer",
+    "text": "￼\nWelcome to the ABAP Workbench\n￼\nAre you ready for the next generation of ABAP development?\nGet to know ABAP in Eclipse-Community and find out more.\nDownload ABAP Development Tools here.",
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+     "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]"
+    ],
+    "container_type": "container",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+    "name": "sbar",
+    "text": "",
+    "type": "GuiStatusbar",
+    "visible": true
+   },
+   {
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[2]/shell",
+    "node_count": 2,
+    "subtype": "Tree",
+    "tree_nodes": [
+     {
+      "available_columns": [
+       "HierarchyHeader",
+       "COL2"
+      ],
+      "column_values": [
+       "",
+       ""
+      ],
+      "key": "          1",
+      "path": "1",
+      "text": "Inactive Objects DEVELOPER"
+     },
+     {
+      "available_columns": [
+       "HierarchyHeader",
+       "COL2"
+      ],
+      "column_values": [
+       "",
+       ""
+      ],
+      "key": "          2",
+      "path": "1\\1",
+      "text": "Local Objects"
+     }
+    ],
+    "type": "GuiShell"
+   }
+  ],
+  "toolbar": [
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 8,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+    "name": "tbar[0]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 6,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[18]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[40]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[32]",
+     "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[17]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+    "name": "tbar[1]",
+    "text": "",
+    "type": "GuiToolbar",
+    "visible": true
+   },
+   {
+    "button_count": 1,
+    "capabilities": [],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell",
+    "name": "shell",
+    "subtype": "Toolbar",
+    "text": "SAP.Toolbar.1",
+    "toolbar_buttons": [
+     {
+      "button_type": "CheckBox",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[0]/shell/btn_1",
+      "name": "1",
+      "text": "Repository Browser",
+      "tooltip": "",
+      "type": "GuiButton",
+      "visible": true
+     }
+    ],
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "button_count": 2,
+    "capabilities": [],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell",
+    "name": "shell",
+    "subtype": "Toolbar",
+    "text": "SAP.Toolbar.1",
+    "toolbar_buttons": [
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell/btn_F4",
+      "name": "F4",
+      "text": "",
+      "tooltip": "Value Help",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[0]/shell/shellcont[5]/shell/btn_DISPLAY",
+      "name": "DISPLAY",
+      "text": "",
+      "tooltip": "Display Object",
+      "type": "GuiButton",
+      "visible": true
+     }
+    ],
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "button_count": 8,
+    "capabilities": [],
+    "changeable": false,
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell",
+    "name": "shell",
+    "subtype": "Toolbar",
+    "text": "SAP.Toolbar.1",
+    "toolbar_buttons": [
+     {
+      "button_type": "ButtonAndMenu",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": false,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_BACK_TB",
+      "name": "WB_BACK_TB",
+      "text": "",
+      "tooltip": "Previous tree",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "ButtonAndMenu",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": false,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_FORWARD",
+      "name": "WB_FORWARD",
+      "text": "",
+      "tooltip": "Next tree",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_EXPAND_ALL",
+      "name": "EXPAND_ALL",
+      "text": "",
+      "tooltip": "Expand Subtree",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_COLLAPSE_ALL",
+      "name": "COLLAPSE_ALL",
+      "text": "",
+      "tooltip": "Collapse Subtree",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_FIND",
+      "name": "FIND",
+      "text": "",
+      "tooltip": "Find...",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_UPPERHIER",
+      "name": "UPPERHIER",
+      "text": "",
+      "tooltip": "Superordinate object list",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Menu",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_BOOKMARK_SELECT",
+      "name": "WB_BOOKMARK_SELECT",
+      "text": "",
+      "tooltip": "Favorites",
+      "type": "GuiButton",
+      "visible": true
+     },
+     {
+      "button_type": "Button",
+      "capabilities": [
+       "clickable"
+      ],
+      "changeable": true,
+      "enabled": true,
+      "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[1]/shell/btn_WB_TREE_REFRESH",
+      "name": "WB_TREE_REFRESH",
+      "text": "",
+      "tooltip": "Refresh Tree Display",
+      "type": "GuiButton",
+      "visible": true
+     }
+    ],
+    "type": "GuiShell",
+    "visible": true
+   },
+   {
+    "capabilities": [
+     "clickable"
+    ],
+    "changeable": false,
+    "child_count": 7,
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+     "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]"
+    ],
+    "container_type": "toolbar",
+    "enabled": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+    "name": "mbar",
+    "text": "",
+    "type": "GuiMenubar",
+    "visible": true
+   }
+  ]
+ },
+ "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+ "title": "Object Navigator",
+ "transaction": "SE80",
+ "trees": [
+  {
+   "id": "/app/con[0]/ses[0]/wnd[0]/shellcont/shell/shellcont[1]/shell/shellcont[2]/shell",
+   "node_count": 2,
+   "subtype": "Tree",
+   "tree_nodes": [
+    {
+     "available_columns": [
+      "HierarchyHeader",
+      "COL2"
+     ],
+     "column_values": [
+      "",
+      ""
+     ],
+     "key": "          1",
+     "path": "1",
+     "text": "Inactive Objects DEVELOPER"
+    },
+    {
+     "available_columns": [
+      "HierarchyHeader",
+      "COL2"
+     ],
+     "column_values": [
+      "",
+      ""
+     ],
+     "key": "          2",
+     "path": "1\\1",
+     "text": "Local Objects"
+    }
+   ],
+   "type": "GuiShell"
+  }
+ ]
+}

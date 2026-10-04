@@ -9,6 +9,7 @@
 #include "screen_reader.h"
 #include "element_metadata_extractor.h"
 #include <memory>
+#include <cstdint>
 #include <optional>
 
 namespace fairyfly {
@@ -36,8 +37,10 @@ private:
     std::unique_ptr<ScreenshotHandler> screenshot_handler_;
     std::unique_ptr<ScreenReader> screen_reader_;
     bool probe_all_ = false;
+    std::string tree_reader_;
     int row_offset_ = 0;
     bool grid_rows_needed_ = true;
+    bool owner_window_guard_ = false;
     sap::SelectionInputPolicy selection_input_policy_;
 
     // Helper to ensure connection exists
@@ -54,12 +57,18 @@ private:
 
     std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> find_session_by_id(
         const std::string& session_id) const;
+    bool owner_window_allowed(const ComGuiSessionPtr& session) const noexcept;
 
 public:
     /// Constructor - initializes COM but doesn't connect to SAP
     ComAutomationEngine();
 
     ~ComAutomationEngine() override = default;
+
+    void set_owner_window_guard(bool enabled) noexcept { owner_window_guard_ = enabled; }
+    bool current_session_owner_window_allowed() const noexcept {
+        return current_session_ && owner_window_allowed(current_session_);
+    }
 
     // Connection management - two modes
     Result attach_by_click(int timeout_seconds = 10) override;
@@ -106,7 +115,9 @@ public:
     Result read_screen_with_tabs(bool skip_trees = false, int max_rows = 20,
                                  const std::string& only_tab = "") override;
     Result find_screen(const ScreenFindOptions& query) override;
+    Result dump_object_tree(const std::string& id, const std::vector<std::string>& props) override;
     void set_probe_all(bool probe_all) override { probe_all_ = probe_all; }
+    void set_tree_reader(const std::string& mode) override { tree_reader_ = mode; }
     void set_row_offset(int row_offset) override { row_offset_ = row_offset < 0 ? 0 : row_offset; }
     void set_grid_rows_needed(bool needed) override { grid_rows_needed_ = needed; }
     bool set_selection_input_policy(const sap::SelectionInputPolicy& policy) override { selection_input_policy_ = policy; return true; }
@@ -121,6 +132,8 @@ public:
     /// changes anything. Empty facts when the session is gone, the server key differs or COM fails.
     audit::SapFacts peek_session_facts(const std::string& session_id,
                                        const std::string& server_session_key = "") const noexcept;
+    /// Stable live window handle used only to distinguish keyless prelogin windows.
+    std::uintptr_t peek_session_window_handle(const std::string& session_id) const noexcept;
     /// Description (SAP Logon entry name) of the connection that owns `session_id`; empty when unknown. Read-only.
     std::string peek_session_connection_description(const std::string& session_id) const noexcept;
 

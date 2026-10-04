@@ -1,0 +1,3307 @@
+{
+ "id": "/app/con[0]/ses[0]/wnd[0]",
+ "props": [
+  "Id",
+  "Type",
+  "Name",
+  "Text",
+  "DisplayedText",
+  "Changeable",
+  "SubType",
+  "AccTooltip",
+  "DefaultTooltip",
+  "Tooltip",
+  "LeftLabel",
+  "RightLabel"
+ ],
+ "tree": {
+  "children": [
+   {
+    "children": [
+     {
+      "children": [
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Create User",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Create User",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Change",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Change",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[2]",
+           "LeftLabel": "",
+           "Name": "Display",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Display",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[3]",
+           "LeftLabel": "",
+           "Name": "Save",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Save",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Copy",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Copy",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[5]",
+           "LeftLabel": "",
+           "Name": "Delete",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Delete",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[6]",
+           "LeftLabel": "",
+           "Name": "Rename",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Rename",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[7]",
+           "LeftLabel": "",
+           "Name": "Locks",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Locks",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[8]",
+           "LeftLabel": "",
+           "Name": "Change Password",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Change Password",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[9]",
+           "LeftLabel": "",
+           "Name": "menu[9]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]/menu[10]",
+           "LeftLabel": "",
+           "Name": "Exit",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Exit",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+         "LeftLabel": "",
+         "Name": "User",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "User",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Cancel",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Cancel",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[1]",
+         "LeftLabel": "",
+         "Name": "Edit",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Edit",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[0]",
+           "LeftLabel": "",
+           "Name": "References",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "References",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[1]",
+           "LeftLabel": "",
+           "Name": "External User ID (UID)",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "External User ID (UID)",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]/menu[2]",
+           "LeftLabel": "",
+           "Name": "Back",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Back",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[2]",
+         "LeftLabel": "",
+         "Name": "Goto",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Goto",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Information System",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Information System",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Change Documents for Users",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Change Documents for Users",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[3]",
+         "LeftLabel": "",
+         "Name": "Information",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Information",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Mass Changes",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Mass Changes",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Maintain Profiles",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Maintain Profiles",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[2]",
+           "LeftLabel": "",
+           "Name": "Maintain Authorization",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Maintain Authorization",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Maintain",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Maintain",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Display",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Display",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[3]",
+           "LeftLabel": "",
+           "Name": "User Groups",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Groups",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Maintain Security Policies",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Maintain Security Policies",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[5]",
+           "LeftLabel": "",
+           "Name": "Maintain Roles",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Maintain Roles",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[6]",
+           "LeftLabel": "",
+           "Name": "Organizational Assignment",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Organizational Assignment",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[7]",
+           "LeftLabel": "",
+           "Name": "Maintain Company Address",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Maintain Company Address",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]/menu[8]",
+           "LeftLabel": "",
+           "Name": "Distribution Log",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Distribution Log",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[4]",
+         "LeftLabel": "",
+         "Name": "Environment",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Environment",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[0]",
+           "LeftLabel": "",
+           "Name": "New GUI Window",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "New GUI Window",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[1]",
+           "LeftLabel": "",
+           "Name": "Close GUI Window",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Close GUI Window",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Hold Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Hold Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Set Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Set Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "false",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Delete Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Delete Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]/menu[3]",
+             "LeftLabel": "",
+             "Name": "User Data",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "User Data",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Expand Favorites",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Expand Favorites",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[2]",
+           "LeftLabel": "",
+           "Name": "User Profile",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Profile",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Reporting",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Reporting",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[1]",
+             "LeftLabel": "",
+             "Name": "QuickViewer",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "QuickViewer",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Output Control",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Output Control",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[3]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Extended Table Maintenance",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Extended Table Maintenance",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[3]/menu[1]",
+               "LeftLabel": "",
+               "Name": "View Cluster Maintenance",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "View Cluster Maintenance",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[3]",
+             "LeftLabel": "",
+             "Name": "Table Maintenance",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Table Maintenance",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Sessions",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Sessions",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Logs",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Logs",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Recorder",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Recorder",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[3]",
+               "LeftLabel": "",
+               "Name": "Restart Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Restart Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[4]",
+               "LeftLabel": "",
+               "Name": "Delete Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Delete Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[5]",
+               "LeftLabel": "",
+               "Name": "Next Transaction",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Next Transaction",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[6]",
+               "LeftLabel": "",
+               "Name": "Process in Foreground",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Process in Foreground",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[7]",
+               "LeftLabel": "",
+               "Name": "Display Errors Only",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Display Errors Only",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[8]",
+               "LeftLabel": "",
+               "Name": "Expert Mode On",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Expert Mode On",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[9]",
+               "LeftLabel": "",
+               "Name": "Expert Mode Off",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Expert Mode Off",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]/menu[10]",
+               "LeftLabel": "",
+               "Name": "Cancel",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Cancel",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Batch Input",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Batch Input",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[5]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Recorder",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Recorder",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[5]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Process in Foreground",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Process in Foreground",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[5]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Display Errors Only",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Display Errors Only",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[5]/menu[3]",
+               "LeftLabel": "",
+               "Name": "Cancel",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Cancel",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[5]",
+             "LeftLabel": "",
+             "Name": "Fast Entry",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Fast Entry",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[6]",
+             "LeftLabel": "",
+             "Name": "Direct Input",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Direct Input",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[7]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Define Job",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Define Job",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[7]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Job Overview",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Job Overview",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[7]",
+             "LeftLabel": "",
+             "Name": "Jobs",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Jobs",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]/menu[8]",
+             "LeftLabel": "",
+             "Name": "Queue",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Queue",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[3]",
+           "LeftLabel": "",
+           "Name": "Services",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Services",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Debug Dynpro",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug Dynpro",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Debug ABAP",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug ABAP",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[2]",
+             "LeftLabel": "",
+             "Name": "Debug System",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Debug System",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[3]",
+             "LeftLabel": "",
+             "Name": "Resource Usage",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Resource Usage",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[4]",
+             "LeftLabel": "",
+             "Name": "Autom. Queue: Synchronous Processing",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Autom. Queue: Synchronous Processing",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[5]",
+             "LeftLabel": "",
+             "Name": "Performance Trace",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Performance Trace",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[6]",
+             "LeftLabel": "",
+             "Name": "Context Trace",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Context Trace",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[7]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Execute",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Execute",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[7]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Switch On",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Switch On",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[7]/menu[2]",
+               "LeftLabel": "",
+               "Name": "Switch Off",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Switch Off",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[7]",
+             "LeftLabel": "",
+             "Name": "Runtime Analysis",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Runtime Analysis",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[8]",
+             "LeftLabel": "",
+             "Name": "Display Authorization Check",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Display Authorization Check",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[9]/menu[0]",
+               "LeftLabel": "",
+               "Name": "Create Memory Snapshot",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Create Memory Snapshot",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[9]/menu[1]",
+               "LeftLabel": "",
+               "Name": "Compare Memory Snapshots",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Compare Memory Snapshots",
+               "Tooltip": "",
+               "Type": "GuiMenu"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]/menu[9]",
+             "LeftLabel": "",
+             "Name": "Memory Analysis",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Memory Analysis",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Utilities",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Utilities",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[5]",
+           "LeftLabel": "",
+           "Name": "Services for Object",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Services for Object",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "children": [
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]/menu[0]",
+             "LeftLabel": "",
+             "Name": "Object History",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Object History",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           },
+           {
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]/menu[1]",
+             "LeftLabel": "",
+             "Name": "Edit Objects",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "Edit Objects",
+             "Tooltip": "",
+             "Type": "GuiMenu"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[6]",
+           "LeftLabel": "",
+           "Name": "My Objects",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "My Objects",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[7]",
+           "LeftLabel": "",
+           "Name": "Own Spool Requests",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Own Spool Requests",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[8]",
+           "LeftLabel": "",
+           "Name": "Own Jobs",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Own Jobs",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[9]",
+           "LeftLabel": "",
+           "Name": "Short Message",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Short Message",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[10]",
+           "LeftLabel": "",
+           "Name": "Status...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Status...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]/menu[11]",
+           "LeftLabel": "",
+           "Name": "Log Off",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Log Off",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[5]",
+         "LeftLabel": "",
+         "Name": "System",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "System",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[0]",
+           "LeftLabel": "",
+           "Name": "Product Assistance",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Product Assistance",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[1]",
+           "LeftLabel": "",
+           "Name": "SAP Help Portal",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "SAP Help Portal",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[2]",
+           "LeftLabel": "",
+           "Name": "menu[2]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[3]",
+           "LeftLabel": "",
+           "Name": "SAP Support Portal",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "SAP Support Portal",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[4]",
+           "LeftLabel": "",
+           "Name": "Create Support Message",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Create Support Message",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[5]",
+           "LeftLabel": "",
+           "Name": "menu[5]",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]/menu[6]",
+           "LeftLabel": "",
+           "Name": "Settings...",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Settings...",
+           "Tooltip": "",
+           "Type": "GuiMenu"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[6]",
+         "LeftLabel": "",
+         "Name": "Help",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Help",
+         "Tooltip": "",
+         "Type": "GuiMenu"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "false",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/mbar",
+       "LeftLabel": "",
+       "Name": "mbar",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiMenubar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[0]",
+         "LeftLabel": "",
+         "Name": "btn[0]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Enter   (Enter)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[3]",
+         "LeftLabel": "",
+         "Name": "btn[3]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Back",
+         "Tooltip": "Back   (F3)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[15]",
+         "LeftLabel": "",
+         "Name": "btn[15]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Exit",
+         "Tooltip": "Exit   (Shift+F3)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[12]",
+         "LeftLabel": "",
+         "Name": "btn[12]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Cancel",
+         "Tooltip": "Cancel   (F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[419]",
+         "LeftLabel": "",
+         "Name": "btn[419]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "New GUI Window",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[418]",
+         "LeftLabel": "",
+         "Name": "btn[418]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Generates shortcut",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[446]",
+         "LeftLabel": "",
+         "Name": "btn[446]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "SAP GUI settings and actions (Ctrl+Alt+F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]/okcd",
+         "LeftLabel": "",
+         "Name": "okcd",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiOkCodeField"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[0]",
+       "LeftLabel": "",
+       "Name": "tbar[0]",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiToolbar"
+      }
+     },
+     {
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/titl",
+       "LeftLabel": "",
+       "Name": "titl",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "Display Users",
+       "Tooltip": "",
+       "Type": "GuiTitlebar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btnvhmore",
+         "LeftLabel": "",
+         "Name": "btnvhmore",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "More",
+         "Tooltip": "More (Alt+F12)",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]/btn[19]",
+         "LeftLabel": "",
+         "Name": "btn[19]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Display/Change   (Shift+F7)",
+         "Type": "GuiButton"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/tbar[1]",
+       "LeftLabel": "",
+       "Name": "tbar[1]",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiToolbar"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "User",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+         "LeftLabel": "",
+         "Name": "SUID_ST_BNAME-BNAME",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "User",
+         "Tooltip": "",
+         "Type": "GuiLabel"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "User Name in User Master Record",
+         "DisplayedText": "DEVELOPER   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_BNAME-BNAME",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+         "Name": "SUID_ST_BNAME-BNAME",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "DEVELOPER",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/btnIDADTYPE_INFO",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+         "Name": "IDADTYPE_INFO",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "Information",
+         "Type": "GuiButton"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "User with Classic Address                                                       ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtG_IDADTYPE",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_BNAME-BNAME",
+         "Name": "G_IDADTYPE",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "User with Classic Address",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "Changed By",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "LeftLabel": "",
+         "Name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Changed By",
+         "Tooltip": "",
+         "Type": "GuiLabel"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "Last Changed By",
+         "DisplayedText": "DEVELOPER   ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "Name": "SUID_ST_NODE_ADMINDATA-MODIFIER",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "DEVELOPER",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "Modification date",
+         "DisplayedText": "26.03.2024",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODDATE",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "Name": "SUID_ST_NODE_ADMINDATA-MODDATE",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "26.03.2024",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "Modification time",
+         "DisplayedText": "16:45:45",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-MODTIME",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "Name": "SUID_ST_NODE_ADMINDATA-MODTIME",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "16:45:45",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "Status",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-MODIFIER",
+         "Name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Status",
+         "Tooltip": "",
+         "Type": "GuiLabel"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "Status of the Identity Processing",
+         "DisplayedText": "Saved                  ",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/txtSUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+         "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/lblSUID_ST_NODE_ADMINDATA-SAVE_STATUS_ID",
+         "Name": "SUID_ST_NODE_ADMINDATA-SAVE_STATUS_TEXT",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "Saved",
+         "Tooltip": "",
+         "Type": "GuiTextField"
+        }
+       },
+       {
+        "children": [
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDOCU",
+           "LeftLabel": "",
+           "Name": "DOCU",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Documentation",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "children": [
+           {
+            "children": [
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Person",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT001",
+               "LeftLabel": "",
+               "Name": "%#AUTOTEXT001",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Person",
+               "Tooltip": "",
+               "Type": "GuiBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Title",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Title",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Title text",
+               "DisplayedText": "                                                                                                                                                                                                                                                               ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "Name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "                                                                                                                                                                                                                                                               ",
+               "Tooltip": "",
+               "Type": "GuiComboBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-PERSON_DETAIL",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_MEDI",
+               "Name": "GS_ADDR_OTHERS-PERSON_DETAIL",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "More Fields",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Last Name",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Last Name",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Last Name",
+               "DisplayedText": "Doe                                     ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_LAST",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_LAST",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Doe",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "First Name",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "First Name",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First Name",
+               "DisplayedText": "John                                    ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_FIRST",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "John",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Academic Title",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Academic Title",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Academic Title: Written Form",
+               "DisplayedText": "                    ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/ctxtSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+               "Name": "SUID_ST_NODE_PERSON_NAME_EXT-TITLE_ACA1T",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiCTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Full Name",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Full Name",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Full Name of Person",
+               "DisplayedText": "John Doe                                                                        ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+               "Name": "SUID_ST_NODE_PERSON_NAME-NAME_TEXT",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "John Doe",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Language",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Language",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Language Key",
+               "DisplayedText": "English                                                                                                                                                                                                                                                        ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_PERSON_NAME-LANGU",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_PERSON_NAME-LANGU",
+               "Name": "SUID_ST_NODE_PERSON_NAME-LANGU",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "English                                                                                                                                                                                                                                                        ",
+               "Tooltip": "",
+               "Type": "GuiComboBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Work Center",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT007",
+               "LeftLabel": "",
+               "Name": "%#AUTOTEXT007",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Work Center",
+               "Tooltip": "",
+               "Type": "GuiBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Function",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Function",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Function",
+               "DisplayedText": "                                        ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FUNCTION",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FUNCTION",
+               "Name": "SUID_ST_NODE_WORKPLACE-FUNCTION",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Department",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Department",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Department",
+               "DisplayedText": "                                        ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEPARTMENT",
+               "Name": "SUID_ST_NODE_WORKPLACE-DEPARTMENT",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Room Number",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Room Number",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Room or Apartment Number",
+               "DisplayedText": "          ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "Name": "SUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Floor",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-ROOMNUMBER",
+               "Name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Floor",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Floor in building",
+               "DisplayedText": "          ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-FLOOR",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+               "Name": "SUID_ST_NODE_WORKPLACE-FLOOR",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Building code",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-FLOOR",
+               "Name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Building code",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Building (number or code)",
+               "DisplayedText": "          ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_WORKPLACE-BUILDING",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-BUILDING",
+               "Name": "SUID_ST_NODE_WORKPLACE-BUILDING",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Communication",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/box%#AUTOTEXT003",
+               "LeftLabel": "",
+               "Name": "%#AUTOTEXT003",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Communication",
+               "Tooltip": "",
+               "Type": "GuiBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Telephone",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Telephone",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First Telephone No.: Dialing Code + Number",
+               "DisplayedText": "                              ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "Name": "SUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Extension",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_NUMBER",
+               "Name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Extension",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First Telephone No.: Extension",
+               "DisplayedText": "          ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "Name": "SUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_TEL",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-TEL_EXTENS",
+               "Name": "GS_ADDR_OTHERS-ICON_TEL",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "Other Telephone Numbers",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Mobile Phone",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Mobile Phone",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First Cell Phone Number: Dialing Code + Number",
+               "DisplayedText": "                              ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "Name": "SUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_MOB",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-MOB_NUMBER",
+               "Name": "GS_ADDR_OTHERS-ICON_MOB",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "Other Cell Phone Numbers",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Fax",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Fax",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First Fax No.: Area Code + Number",
+               "DisplayedText": "                              ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "Name": "SUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Extension",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_NUMBER",
+               "Name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Extension",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "First fax no.: extension",
+               "DisplayedText": "          ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "Name": "SUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_FAX",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-FAX_EXTENS",
+               "Name": "GS_ADDR_OTHERS-ICON_FAX",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "Other Fax Numbers",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "E-Mail Address",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "E-Mail Address",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "E-Mail Address",
+               "DisplayedText": "                                                                                                                                                                                                                                                 ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "Name": "SUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-ICON_SMTP",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_COMM_DATA-SMTP_ADDR",
+               "Name": "GS_ADDR_OTHERS-ICON_SMTP",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "Other E-Mail Addresses",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Method",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Method",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "Communication Method (Key) (Business Address Services)",
+               "DisplayedText": "                                                                                                                                                                                                                                                               ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cmbSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "Name": "SUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "                                                                                                                                                                                                                                                               ",
+               "Tooltip": "",
+               "Type": "GuiComboBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "Other Communication...",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-MCOM",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_WORKPLACE-DEFLT_COMM",
+               "Name": "GS_ADDR_OTHERS-MCOM",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Other Communication...",
+               "Tooltip": "",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Company",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/boxGS_ADDR_OTHERS-COM_ORG_FRAME",
+               "LeftLabel": "",
+               "Name": "GS_ADDR_OTHERS-COM_ORG_FRAME",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Company",
+               "Tooltip": "",
+               "Type": "GuiBox"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/btnGS_ADDR_OTHERS-COMPANY_INFO",
+               "LeftLabel": "",
+               "Name": "GS_ADDR_OTHERS-COMPANY_INFO",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "Display Full Company Address",
+               "Type": "GuiButton"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Company",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+               "LeftLabel": "",
+               "Name": "SUID_ST_NODE_ORGANIZATION-COMPANY",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Company",
+               "Tooltip": "",
+               "Type": "GuiLabel"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "false",
+               "DefaultTooltip": "",
+               "DisplayedText": "Itelo1 /   / DE                                                                                                                     ",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/txtGS_ADDR_OTHERS-COMP_NAME",
+               "LeftLabel": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/lblSUID_ST_NODE_ORGANIZATION-COMPANY",
+               "Name": "GS_ADDR_OTHERS-COMP_NAME",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "Itelo1 /   / DE",
+               "Tooltip": "",
+               "Type": "GuiTextField"
+              }
+             },
+             {
+              "properties": {
+               "AccTooltip": "",
+               "Changeable": "true",
+               "DefaultTooltip": "",
+               "DisplayedText": "",
+               "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900/cntlG_ADDR_STATUS_TOOLBAR",
+               "LeftLabel": "",
+               "Name": "G_ADDR_STATUS_TOOLBAR",
+               "RightLabel": "",
+               "SubType": "",
+               "Text": "",
+               "Tooltip": "",
+               "Type": "GuiCustomControl"
+              }
+             }
+            ],
+            "properties": {
+             "AccTooltip": "",
+             "Changeable": "true",
+             "DefaultTooltip": "",
+             "DisplayedText": "",
+             "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR/ssubMAINAREA:SAPLSUID_MAINTENANCE:1900",
+             "LeftLabel": "",
+             "Name": "MAINAREA:SAPLSUID_MAINTENANCE:1900",
+             "RightLabel": "",
+             "SubType": "",
+             "Text": "",
+             "Tooltip": "",
+             "Type": "GuiScrollContainer"
+            }
+           }
+          ],
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "true",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpADDR",
+           "LeftLabel": "",
+           "Name": "ADDR",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Address",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO",
+           "LeftLabel": "",
+           "Name": "LOGO",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Logon Data",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpSNC",
+           "LeftLabel": "",
+           "Name": "SNC",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "SNC",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpDEFA",
+           "LeftLabel": "",
+           "Name": "DEFA",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Defaults",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPARAM",
+           "LeftLabel": "",
+           "Name": "PARAM",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Parameters",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpACTG",
+           "LeftLabel": "",
+           "Name": "ACTG",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Roles",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPROF",
+           "LeftLabel": "",
+           "Name": "PROF",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Profiles",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpGRUP",
+           "LeftLabel": "",
+           "Name": "GRUP",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Groups",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpPERS",
+           "LeftLabel": "",
+           "Name": "PERS",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Personalization",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLAW",
+           "LeftLabel": "",
+           "Name": "LAW",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "Lic. Data",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         },
+         {
+          "properties": {
+           "AccTooltip": "",
+           "Changeable": "false",
+           "DefaultTooltip": "",
+           "DisplayedText": "",
+           "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpUSAT",
+           "LeftLabel": "",
+           "Name": "USAT",
+           "RightLabel": "",
+           "SubType": "",
+           "Text": "User Attributes",
+           "Tooltip": "",
+           "Type": "GuiTab"
+          }
+         }
+        ],
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "true",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1",
+         "LeftLabel": "",
+         "Name": "TABSTRIP1",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiTabStrip"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "true",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/usr",
+       "LeftLabel": "",
+       "Name": "usr",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiUserArea"
+      }
+     },
+     {
+      "children": [
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[0]",
+         "LeftLabel": "",
+         "Name": "pane[0]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[1]",
+         "LeftLabel": "",
+         "Name": "pane[1]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "A4H (1) 001",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[2]",
+         "LeftLabel": "",
+         "Name": "pane[2]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[3]",
+         "LeftLabel": "",
+         "Name": "pane[3]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "OVR",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[4]",
+         "LeftLabel": "",
+         "Name": "pane[4]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "                    ",
+         "Tooltip": "SAP GUI Scripting: Script is running",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[5]",
+         "LeftLabel": "",
+         "Name": "pane[5]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": " SERVER ",
+         "Tooltip": "",
+         "Type": "GuiStatusPane"
+        }
+       },
+       {
+        "properties": {
+         "AccTooltip": "",
+         "Changeable": "false",
+         "DefaultTooltip": "",
+         "DisplayedText": "",
+         "Id": "/app/con[0]/ses[0]/wnd[0]/sbar/pane[6]",
+         "LeftLabel": "",
+         "Name": "pane[6]",
+         "RightLabel": "",
+         "SubType": "",
+         "Text": "KANA",
+         "Tooltip": "Secure Network Communication is not enabled",
+         "Type": "GuiStatusPane"
+        }
+       }
+      ],
+      "properties": {
+       "AccTooltip": "",
+       "Changeable": "false",
+       "DefaultTooltip": "",
+       "DisplayedText": "",
+       "Id": "/app/con[0]/ses[0]/wnd[0]/sbar",
+       "LeftLabel": "",
+       "Name": "sbar",
+       "RightLabel": "",
+       "SubType": "",
+       "Text": "",
+       "Tooltip": "",
+       "Type": "GuiStatusbar"
+      }
+     }
+    ],
+    "properties": {
+     "AccTooltip": "",
+     "Changeable": "true",
+     "DefaultTooltip": "",
+     "DisplayedText": "",
+     "Id": "/app/con[0]/ses[0]/wnd[0]",
+     "LeftLabel": "",
+     "Name": "wnd[0]",
+     "RightLabel": "",
+     "SubType": "",
+     "Text": "Display Users",
+     "Tooltip": "",
+     "Type": "GuiMainWindow"
+    }
+   }
+  ]
+ }
+}
