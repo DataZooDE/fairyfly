@@ -23,6 +23,7 @@ permissions:
 
 jobs:
   build:
+    timeout-minutes: 90
     runs-on: windows-2022
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
@@ -88,6 +89,7 @@ jobs:
   sign:
     needs: build
     if: needs.build.outputs.signing == 'true'
+    timeout-minutes: 30
     runs-on: windows-2022
     steps:
     - name: Download the unsigned build
@@ -130,6 +132,7 @@ jobs:
     needs: [ build, sign ]
     # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
     if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    timeout-minutes: 90
     runs-on: ubuntu-latest
     permissions:
       contents: write

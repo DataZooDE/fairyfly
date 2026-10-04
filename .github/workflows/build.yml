@@ -10,10 +10,15 @@ on:
 env:
   VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build-windows:
     # Pinned: windows-latest moved to an image without Visual Studio 2022, so the
     # "Visual Studio 17 2022" CMake generator below could not find any instance (2026-09-29).
+    timeout-minutes: 30
     runs-on: windows-2022
 
     steps:
