@@ -1,172 +1,173 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/fairyfly_logo_dark.svg">
+    <img src="assets/logo/fairyfly_logo_light.svg" alt="fairyfly logo: precision AI agent for SAP" width="200">
+  </picture>
+</p>
+
 # fairyfly
 
-fairyfly is a Windows command-line tool for automating SAP GUI through the SAP GUI Scripting COM API. It can attach to an open session, navigate to a transaction, interact with controls, and read the current screen as structured data. `fairyfly mcp` exposes these operations to AI clients as an MCP server over stdio (see [MCP server](#mcp-server)).
+**Let AI agents work in SAP through the SAP GUI your people already use.**
 
-## Current CLI
+fairyfly lets AI agents such as Claude, and your own scripts, read and operate SAP GUI for Windows screens. It runs
+on a Windows machine next to SAP GUI. It can open a transaction, read the screen as structured data, fill in a
+selection, click a button and report back. The agent works as the logged-on SAP user with that user's own
+authorizations, so no new services or interfaces have to be built in SAP.
 
-Since 0.2.0 the CLI is a noun/verb tree (see [docs/MIGRATION_CLI.md](docs/MIGRATION_CLI.md) for the old flat command names, which no longer exist):
+## Why fairyfly
 
-| Group | Commands |
+When a suitable, approved API exists, use it. Often it does not: building a "proper" SAP integration for an AI agent
+then means OData services, RFC users, BAPIs or an SAP BTP project, with design, development, transports, security
+review and budget. Teams that want to try an agent this week, or that cannot get an API approved, are stuck.
+
+fairyfly takes the other route. It uses **SAP GUI Scripting**, the automation interface built into SAP GUI for
+Windows, so the agent sees what a user sees:
+
+- **No backend development.** Nothing is installed or developed in the SAP system. Transactions the user can open,
+  including custom Z-transactions and classic reports, can be automated right away. As with any automation, validate
+  each workflow before relying on it; fairyfly works on SAP GUI for Windows screens, not on Fiori or browser apps.
+- **Works within existing permissions.** The agent acts as the logged-on SAP user, and SAP's own authorization checks
+  apply to every step. Rights are granted and withdrawn with standard SAP user administration.
+- **Safe by default for agents.** The MCP server for agents starts in read-only guard mode: it refuses Save, Delete,
+  Post, Release and similar actions and does not type into fields until you explicitly allow write mode. Commands
+  and tool calls are recorded in a local audit trail (on by default).
+- **Agent-ready.** fairyfly includes an [MCP](https://modelcontextprotocol.io) server, so Claude Code, Claude Desktop
+  and other MCP clients can use it right away, on the same machine or securely over the network.
+
+One SAP setting is required: an SAP administrator has to allow SAP GUI Scripting on the system (profile parameter
+`sapgui/user_scripting`). [docs/SETUP.md](docs/SETUP.md) explains this step and how to limit scripting to selected
+users.
+
+## How it works
+
+~~~text
+  AI agent (Claude Code, Claude Desktop,    your scripts and
+  any MCP client)                           automation jobs
+          |  MCP (local, or HTTPS + token)        |  command line, JSON output
+          v                                       v
+  +------------------------------------------------------------+
+  |  fairyfly.exe  (Windows, in the user's desktop session)    |
+  |  read-only guard - redaction - audit trail - access tokens |
+  +------------------------------------------------------------+
+          |  SAP GUI Scripting (COM)
+          v
+  SAP GUI for Windows  --->  your SAP system (ECC, S/4HANA, BW, ...)
+~~~
+
+fairyfly reads each screen into structured data (fields, buttons, tables, grids, tabs and status messages) that an
+agent can reason about, and turns the agent's decisions into ordinary SAP GUI actions. Details are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## What you can do with it
+
+Ask the agent in plain language. In read-only guard mode, the agent can navigate, read and click through screens:
+
+- "Open ST22 and tell me which short dumps occurred today and in which programs."
+- "Which RFC destinations in SM59 point to the production system?"
+- "Show me the work processes in SM50 and tell me which ones are busy."
+
+Tasks that type into a selection screen need write mode, or a remote access token that allows selection input
+([MCP.md](docs/MCP.md#tokens-and-scopes)):
+
+- "Check SM37 for jobs that failed since yesterday and summarize why."
+- "Show me the logon data and roles of user JDOE in SU01."
+- "Fill in the selection screen of report ZSALES for company code 1000 and give me the totals."
+
+The same operations are available as commands for scripts and scheduled jobs.
+
+## Quick start
+
+**You need:** Windows 10/11 or Windows Server, SAP GUI for Windows with scripting enabled, and an SAP user that can
+log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
+
+**1. Get fairyfly.** Download `fairyfly.exe` from the
+[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) once a release is published (a single file,
+no installer), or [build it from source](docs/BUILDING.md). Put it in a folder of your choice, for example
+`C:\Tools\fairyfly\`, and add that folder to your `PATH` (the examples below assume `fairyfly` is found; otherwise
+use the full path `C:\Tools\fairyfly\fairyfly.exe`).
+
+**2. Check the machine.** Start SAP GUI, log on to your system, then run:
+
+~~~powershell
+fairyfly doctor
+~~~
+
+`doctor` checks that SAP GUI is running, that scripting is enabled and that an SAP session is open, and suggests a
+fix for every problem it finds.
+
+**3. Connect your AI agent.** For Claude Code on the same machine:
+
+~~~powershell
+claude mcp add fairyfly -- C:\Tools\fairyfly\fairyfly.exe mcp
+~~~
+
+Then ask Claude something like *"Use fairyfly to read the current SAP screen and tell me what you see,"* or
+*"Open ST22 and summarize today's short dumps."* For Claude Desktop, other MCP clients and write mode, see
+[docs/MCP.md](docs/MCP.md).
+
+**Prefer the command line?** The same steps as commands:
+
+~~~powershell
+fairyfly session list                                     # open SAP GUI sessions and their ids
+fairyfly session attach --session-id "/app/con[0]/ses[0]" # save one; the result has its connection_id
+fairyfly transaction start SM37 --connection 0            # open a transaction
+fairyfly screen read --connection 0 --output markdown     # read the screen (JSON is the default)
+~~~
+
+The [CLI guide](docs/CLI.md) covers every command, `batch` mode for many steps in one process, and the output
+formats (JSON, Markdown, TOON).
+
+## Safety and control
+
+fairyfly operates a real SAP system, so control is built in at every level:
+
+| Control | What it means |
 |---|---|
-| `session` | `list`, `attach`, `launch`, `login`, `disconnect` |
-| `connection` | `list` |
-| `screen` | `read`, `find`, `capture` |
-| `menu` | `list`, `select` |
-| `element` | `get`, `click`, `fill`, `f4` |
-| `key` | `send` |
-| `popup` | `close` |
-| `transaction` | `start` |
-| `credentials` | `list`, `set`, `delete`, `import-env` |
-| `mcp` | starts the MCP server (stdio, or `--http`, `--tray`); `mcp tools [--markdown]`, `mcp token`, `mcp setup`, `mcp teardown`, `mcp cert export`, `mcp config`, `mcp client-config`, `mcp doctor` |
-| root verbs | `doctor`, `batch` |
+| **SAP authorizations** | The agent can never do more than the logged-on SAP user is allowed to do. |
+| **Read-only guard** | The MCP server starts in read-only guard mode (the CLI with `--read-only`): navigation and reading work; buttons, menus and keys for saving, deleting, posting and similar actions are refused, and typing is off. The guard recognises actions by ids and (English) texts, so it is a strong guard rail, not a guarantee. Write mode is switched on explicitly (`mcp --allow-write`); `FAIRYFLY_READ_ONLY=1` prevents enabling it. |
+| **No passwords through the agent** | SAP logon uses credentials stored in the Windows Credential Manager. The logon tools take a credential name, never a password, and passwords never appear in results, logs or the audit trail. |
+| **Audit trail** | On by default: every command and tool call is recorded locally (which tool, SAP system, user, transaction, result). Screen contents and entered values are never recorded. |
+| **Sensitive values redacted** | Passwords, password hashes and similar fields are masked in the structured screen data fairyfly returns. Screenshots are images and are not redacted. |
+| **Remote access only with tokens** | Network access uses HTTPS and named access tokens. Each token can be limited to specific tools, SAP systems, transactions, client addresses and an expiry date. |
+| **No telemetry** | fairyfly only talks to SAP GUI on the same machine and to the MCP clients you connect. |
 
-Global options (`--log-level`, `-v`, `--output`, `--verbose-errors`, `--read-only`, `--no-audit`, `--audit-required`, `--version`) work before and after the noun/verb: `fairyfly screen read --read-only` is the same as `fairyfly --read-only screen read`. `fairyfly --help` groups the commands by section; `fairyfly <group> --help` lists the verbs.
+Text read from SAP screens is passed to the agent as untrusted data, to reduce prompt-injection risk. Read
+[docs/SECURITY.md](docs/SECURITY.md) before using fairyfly on a production system.
 
-Typical use with an already open SAP session:
+## Agents on another machine
 
-~~~powershell
-.\build\bin\Release\fairyfly.exe doctor
-.\build\bin\Release\fairyfly.exe session attach
-.\build\bin\Release\fairyfly.exe transaction start SM59
-.\build\bin\Release\fairyfly.exe screen read --output markdown
-.\build\bin\Release\fairyfly.exe screen read
-~~~
+Is your agent running on Linux, macOS or in a container? `fairyfly mcp --http` turns the Windows machine into a
+secure MCP endpoint. One setup command creates the certificate and network configuration, and a tray icon keeps the
+server running in the background. See [docs/MCP_REMOTE.md](docs/MCP_REMOTE.md).
 
-JSON output and `error` logging are the defaults, so routine commands need neither `--output json` nor `--log-level error`. Use `--log-level info` for operational messages or `--verbose` for debug logging.
+## Documentation
 
-When `session list` shows multiple SAP GUI sessions, use `session attach --session-id "/app/con[0]/ses[1]"` to save that exact session without mouse selection. Subsequent commands can target the returned numeric connection-file ID with `--connection`.
+| Guide | What it covers |
+|---|---|
+| [Setup](docs/SETUP.md) | Requirements, enabling SAP GUI Scripting, first connection, credentials, troubleshooting |
+| [AI agents (MCP)](docs/MCP.md) | Connecting Claude Code, Claude Desktop and other MCP clients; tools; read-only and write mode |
+| [Remote access](docs/MCP_REMOTE.md) | HTTPS endpoint, access tokens, client configuration, operations |
+| [Command line](docs/CLI.md) | All commands, output formats, batch mode, audit trail |
+| [Security](docs/SECURITY.md) | Security model, threat model, data handling, release integrity |
+| [Architecture](docs/ARCHITECTURE.md) | How fairyfly is built and where it stores what |
+| [Building from source](docs/BUILDING.md) | Toolchain, build, tests, releases |
 
-The CLI also supports TOON output, including formatted errors. Use --help on any command for current options. Screen reads can filter by element type, text, ID, or editability, and can skip tab or tree extraction when a screen is slow or problematic. Grid and table reads return up to 20 rows by default (`--offset N` starts at row N; the output reports `next_offset`, drops trailing empty padding rows and counts them as `empty_rows_trimmed`; `Total Rows` is the control's row count, `Visible Rows (viewport)` the rows SAP shows in its own viewport, `Returned Rows` the rows listed; `--text-contains` keeps only the matching rows; `--only-fields` and the other `--only-*` selectors report the grids they dropped as `suppressed`, `--only-tables` returns just the tables; redacted values read `[REDACTED: <reason>]`); use `screen read --max-rows 64` to request more (up to 200), with a longer read time on large screens. For classic `GuiUserArea` lists such as SE16, that limit applies to rows exposed by the current SAP GUI viewport; scroll to read later backend hits. TextEdit shells appear in JSON and Markdown screen reads. On a `GuiShell` with subtype `AbapEditor`, `element get <element-id>` returns up to 200 redacted source lines as `value`, together with total/read line counts and a truncation flag. `screen read` and `screen find` probe only the FindById paths that Children is known to miss; if a screen has controls reachable only by ID inside a container that lists other children, pass `--probe-all` (or set `FAIRYFLY_PROBE_ALL=1`) to restore exhaustive probing of every container, at the cost of extra COM calls. `FAIRYFLY_SCREEN_READER=auto|bulk|legacy` selects how `screen read` gathers a screen. The default (`auto`) reads the whole screen tree with one `GuiSession.GetObjectTree` call (SAP GUI 7.70 PL3 or later; identical content, about 35% less time on screen reads) and silently falls back to the per-element COM reader for that read when the bulk call is unavailable or misbehaves (the reason is then in `diagnostics.screen_reader`); `bulk` does the same but reports the structured error `OBJECT_TREE_UNAVAILABLE` instead of falling back (for measurements); `legacy` always reads element by element. `--probe-all`, `screen find` and reads without structure always use the per-element reader, and an SAP GUI fault on the bulk call switches the bulk reader off for the rest of the process. An unknown `screen read --tab` value returns `TAB_NOT_FOUND` (with `tab_id`, `reason: not_found` and `available_tabs`; the value is a tab id or its trailing part such as `tabpLOGO`); when a tab exists but cannot be read, `screen read --tab` returns `TAB_LOAD_FAILED` (with `tab_id` and `reason` `not_found` or `busy_timeout`) after restoring the original tab; a full tab expansion reports the failing tabs in an additive `tabs_failed` list and fails only if every tab failed.
+The full index is in [docs/README.md](docs/README.md). `fairyfly --help` always shows the commands of the version
+you have.
 
-For a control search without a full screen extraction, use `screen find --id-contains RSRD1-TBMA_VAL --connection 0`. The command can combine an ID substring, an ASCII case-insensitive `--name-contains`, and exact `--type`, and returns up to `--limit` matches (default 1, maximum 100). It searches the active window's controls, stops after the match limit, and reads text only from matching simple controls. Grid and tree matches return control identity, not their rows or nodes; use `screen read` for that content. Search does not expand other tabs or search text values, and stops after 500 distinct controls with `scan_limit_reached=true`. The result reports `scanned_count` and whether the match limit was reached. When the complete ID is known, direct `element get <element-id>` is faster. Checkbox and radio-button matches (and `element get`) also report `selected`.
+## Status and limits
 
-`element click <grid> --row N --column COL --doubleclick` double-clicks a GridView cell (SetCurrentCell then DoubleClickCurrentCell); without `--row`/`--column` it returns GRID_ROW_OPTIONS_REQUIRED. `key send <key> [--window @active|wnd[N]]` sends a virtual key (`enter`, `f1`..`f12`, `shift+f1`..`shift+f12`, or a raw VKey number 0-99); an unknown key returns INVALID_VKEY. `popup close [--vkey 12]` sends F12 to the active popup and verifies the popup closed (NO_POPUP when only the main window is open, POPUP_STILL_OPEN when it stays). `menu list` lists the menu bar as a tree of `{id, text, enabled, children}` without selecting anything; `menu select "Runtime Errors/Display"` explicitly selects an item by text path (case-insensitive, `&` accelerators ignored).
-
-Use `element fill <element-id> --clear` to empty a text field or TextEdit shell. This works in Windows PowerShell 5.1, which can omit an empty quoted positional argument when launching a native executable.
-
-`element fill` echoes the typed `value` as the control shows it (max 200 characters; `[REDACTED: reason]` for password and credential fields), reports a `field` object (`type`, `max_length`, `input_kind` date/time/numeric, `format_hint` such as `DD.MM.YYYY` or `unknown`, `format_warning` only when SAP itself normalised the typed value into another date shape (a hint read from the previous field text never warns); nothing is rejected) and a status bar message only when it changed during the fill.
-
-`element get` and `element fill`/`click` on an element that lives on a tab page that is not selected return `ELEMENT_ON_INACTIVE_TAB` (with `tab_id` and `tab_text`) instead of a bare COM error; `element get --activate-tab` selects the tab for the read and restores the previous one. `element get` and `screen find` add the `tooltip` of buttons, tabs, checkboxes and radio buttons (icon-only buttons have no text).
-
-`screen capture` crops (`--x --y --width --height`) are always in native window pixels and applied before `--scale`; the result reports `native_size`, `crop` and `output_size`, and a crop completely outside the window is `INVALID_ARGUMENT` with the native size. `screen read --text-contains` reports `tabs_searched`, `tabs_skipped` and a `text_filter_note` when tabs were not searched; `session list` / `session attach` report `server_time: null` with `server_time_source: "unavailable"` (the scripting API has no SAP server clock) plus the PC clock as `client_time`.
-
-`session disconnect --connection <id>` removes Fairyfly's saved connection while leaving SAP GUI open. Add `--close-session` to close that SAP GUI session before removing its saved connection.
-
-`session launch <connection>` uses native SAP GUI COM by default and never reads credentials. For a fresh logon screen, run `session login --connection <id>`; see "Credentials and login" below. If launch opens a connection but no session appears, it returns `SESSION_NOT_READY`. `session launch <connection> --allow-sapshcut` explicitly enables a separate fallback that opens the SAP Logon entry without credentials when native COM cannot (the child command line is only `-sysname=<name> -maxgui`); use `session login` or `session launch --login` for authentication afterward. If SAP GUI Security asks for a shortcut decision, launch returns `SAP_GUI_SECURITY_PROMPT`; no session is attached until SAP GUI permits the connection. The local `trial.env` file (legacy plaintext credentials) stays ignored by Git; keep it private and migrate it as described below.
-
-`batch [--file PATH] [--stop-on-error]` reads one command per line from stdin (or a file) and runs all of them in one process with one shared SAP handler, which avoids re-initialising COM for every call. A line is the CLI arguments without the program name: a JSON array of argv strings (`["transaction","start","SM37"]`) or shell-style words (double quotes; backslash escapes a space, quote or backslash). Blank lines and lines starting with `#` are ignored. Each line prints one compact JSON result (always JSON); a failing line does not stop the batch unless `--stop-on-error` is given, and the exit code is 1 if any line failed. Nested `batch` returns BATCH_NESTED, malformed lines return BATCH_PARSE_ERROR.
-
-The global `--read-only` flag (or `FAIRYFLY_READ_ONLY=1`) refuses state-changing actions with READ_ONLY_REFUSED (the error includes element id, text, tooltip and matched rule): buttons, menus and toolbar ids for Save, Delete, Release, Stop, Post, Activate, Lock/Unlock, Create, Change, Cancel job and Execute in background, ids containing `&DELETE`/`&SAVE`/`&RELEASE` or `tbar[0]/btn[11]`, `key send`/`popup close` outside an allowlist (only F1, F3, F4, F7, F8, F12, Shift+F3, raw page keys 80-83, and Enter on the main window only; Enter with a popup active is refused), grid/tree double-clicks whose element or cell/node text matches those words (a double-click can still trigger an application action the guard cannot see), menu paths with `&` accelerators normalized and the resolved menu item text re-checked, synthetic toolbar buttons judged by their tooltip/text, `menu select` paths, tree context-menu items, and `element fill` entirely unless `--allow-fill` is given. Navigation (`transaction start`, Back, Refresh, Display, Details, Job log, grid row select and double-click) stays allowed. `fairyfly --read-only batch` applies the guard to every line.
-
-`element click --wait-for-window` compares only the active window id, title, transaction and status bar text. A click that changes only field or grid contents (for example a "Next page" control) is reported as `screen_changed:false` after the full `--timeout`; use `element get` or `screen read` to confirm such changes.
-
-## Credentials and login
-
-Credentials live in the Windows Credential Manager under `fairyfly:<connection name>` (user, client, language and password; the password is never listed or printed).
-
-~~~powershell
-fairyfly credentials set Bigfox --user DEVELOPER --client 001      # prompts for the password (or add --password-stdin)
-fairyfly credentials list
-fairyfly credentials delete Bigfox
-fairyfly credentials import-env trial.env --connection Bigfox --delete-file   # migrate a legacy plaintext file
-~~~
-
-After importing, rotate the SAP password: the old one sat in plaintext on disk. `credentials set` and `import-env` need a console or piped stdin and return CREDENTIALS_PROMPT_UNAVAILABLE inside `batch`; they are allowed under `--read-only` (they do not touch SAP) but are audited.
-
-`session login [--connection <id>]` takes credentials from exactly one source: `--credentials-stdin` (colon-separated `Username`, `Password`, `System ID`, optional `Language` and `New Password` lines), `--credentials-file PATH` (deprecated, prints a warning), `--credential NAME` (a stored entry), or, with no flag, the stored entry named like the saved connection. There is no implicit `./trial.env` fallback. The result reports `credential_source` and any warnings, never the password.
-
-`session launch <connection> --login [--credential NAME]` launches, waits for the session, then logs in through the scripting API (also after `--allow-sapshcut`; a password never goes on a sapshcut command line). The result keeps the launch fields and adds a `login` object (`transaction`, `credential_source`, `warnings`). If the launch worked but the login failed, the login error code is returned with `connection_open: true` and the launch data under `error.launch`; the connection is left open. `--login` is allowed under `--read-only` because authentication is not a business-state change.
-
-`session login --multiple-logon fail|keep|end|terminate` (also on `session launch --login`) controls what happens when the user is already logged on and SAP shows "License Information for Multiple Logons". `fail` (default) leaves the dialog open and returns `LOGON_NOT_COMPLETED` with `reason: multiple_logon_dialog`, a hint and the dialog texts. `keep` continues without ending other logons (success adds `multiple_logon`). `terminate` ends the new logon and returns `MULTIPLE_LOGON_TERMINATED` (SAP closes the session). `end` ends the user's other logons (unsaved data there is lost); it is never the default and is refused under `--read-only`.
-
-## Audit trail
-
-Every invocation, and every line inside `batch`, appends one JSON record to `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (UTC month). Audit is on by default.
-
-- Control: `--no-audit`, `--audit-required` (fail with AUDIT_UNAVAILABLE when the file cannot be written), `FAIRYFLY_AUDIT=0|off|required`, `FAIRYFLY_AUDIT_FILE=<path>`. `--audit-required` wins over any disable.
-- Record fields: timestamp, pid, command, redacted argv, connection, SAP system/client/user/transaction, read_only, batch_line, status, error_code, exit code, duration_ms.
-- Never logged: error messages, screen content, cell values, passwords or other secrets (secret-looking option values and `element fill` values are replaced by a placeholder), the Windows user name and the host name. Search terms are kept.
-- Append failures print a single warning and never break a command, unless audit is required.
-- The file is append-only by convention, not tamper-proof: any process of the same Windows user can edit it.
-
-## MCP server
-
-`fairyfly mcp` is a Model Context Protocol server with 21 `gui_*` tools named `gui_<noun>_<verb>` after the CLI path (`gui_screen_read`, `gui_element_click`, `gui_transaction_start`, ..., `gui_batch`, and `gui_element_fill` in write mode). It starts in read-only guard mode; `mcp --allow-write` enables write mode, `mcp --tools screen,element` exposes only some tool families, and `FAIRYFLY_READ_ONLY=1` is a hard cap. Every tool call is audited (`audit_source: "mcp"`); no tool accepts a password. Two transports:
-
-- **stdio** (default): a local MCP client launches it. Do not run it in an interactive console.
-- **HTTP/HTTPS** (`mcp --http`): `POST /mcp` served by http.sys (127.0.0.1:8383 plain for development, HTTPS on 8443 after `mcp setup`) for remote clients (for example Claude Code on Linux), with named bearer tokens (`mcp token create|list|revoke|rotate`, stored hashed in the Windows Credential Manager) that carry scopes per tool family, a read-only flag, SAP system and T-code allowlists, a rate limit, an IP binding and an expiry. TLS is terminated in the kernel by http.sys: `mcp setup` (one elevated step) creates the certificate, URL reservation and TLS binding, `mcp teardown` removes them, `mcp cert export` gives clients the certificate; a server-level `--allow-ip` list and token IP binding judge the real peer address (no proxy trust). It serves both MCP HTTP protocol generations (legacy 2025-06-18/2025-11-25 and stateless 2026-07-28) with optional SSE. SAP GUI needs an interactive desktop, so it is a console app, or with `--tray` a system-tray app with logon autostart, not a Windows service. Also: YAML config (`mcp config init|show|validate|path`), paste-ready client snippets (`mcp client-config`) and `mcp doctor`.
-
-~~~powershell
-claude mcp add fairyfly -- C:\path\to\fairyfly.exe mcp                      # local, stdio
-fairyfly mcp token create linux-reader --scope session.list,session.attach,screen   # remote: create a token (shown once)
-fairyfly mcp --http                                                          # remote: serve on 127.0.0.1:8383
-~~~
-
-Setup for Claude Code, Claude Desktop and MCP Inspector, the full tool list (`fairyfly mcp tools`), options, safety model, audit trail and troubleshooting are in [docs/MCP.md](docs/MCP.md); example configs are under docs/examples/. The remote deployment (architecture, threat model, protocol and status codes, client cookbook, Linux check list) is in [docs/MCP_REMOTE.md](docs/MCP_REMOTE.md), with [docs/MCP_SETUP.md](docs/MCP_SETUP.md) for setup, doctor and teardown and [docs/MCP_TRAY.md](docs/MCP_TRAY.md) for the tray, YAML config, client-config and doctor. Live checks: `tests/integration/mcp_smoke.ps1` (stdio) and `tests/integration/mcp_http_smoke.ps1` (HTTP).
-
-## Build
-
-Requirements: Windows, SAP GUI for Windows with scripting enabled for live automation, Visual Studio 2022 C++ tools, CMake 3.20+, and vcpkg. Set VCPKG_ROOT to your vcpkg checkout. The project uses C++20 and the x64-windows-static triplet.
-
-~~~powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-cmake --build build --config Release --target fairyfly --parallel
-~~~
-
-Run `build/bin/Release/fairyfly.exe` after a Release build. CMake stages this copy automatically. An older direct Visual Studio output file once failed to attach to SAP GUI on this workstation; refreshing it and relinking restored the direct path, while the staged copy remains the documented execution path.
-
-For unit tests:
-
-~~~powershell
-cmake --build build --config Release --target unit_tests --parallel
-ctest --test-dir build -C Release --output-on-failure
-~~~
-
-The Makefile provides build shortcuts. Routine builds target the CLI; test targets build the unit test executable. See [the build guide](docs/BUILD_OPTIMIZATION.md) for current performance notes.
-
-## Project layout
-
-- src/commands/ contains the CLI commands.
-- src/com/ and src/com_automation_engine.cpp wrap SAP GUI COM operations.
-- src/screen_reader.cpp, screen_element_collector.cpp, and the formatters extract and render screen data.
-- tests/unit/ contains Catch2 tests; tests/integration/ contains scripts requiring a live SAP GUI session.
-- CMakeLists.txt builds the shared fairyfly_core static library and the CLI.
-
-## Status
-
-The CLI and its test suite are under active development. Version 2026.09.30. The MCP server offers stdio and, for remote use, HTTPS through http.sys (stateless 2026-07-28 and legacy protocol eras); cross-platform SAP GUI support remains future work. See [open work](docs/OPEN_WORK.md) for pending build measurements and behavior checks. The source tree and --help output are the authority for available commands; historical investigation notes in this repository may describe earlier behavior.
-
-SAP automation runs under the permissions of the connected SAP user. Enabling GUI scripting may require both client and server configuration. Review actions before using the CLI on a production system.
-
-## Download
-
-Release builds of `fairyfly.exe` (Windows x64, statically linked, no installer) are published on the
-[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) together with a `SHA256SUMS` file.
-fairyfly drives the SAP GUI that is installed on the same machine through the documented SAP GUI Scripting COM
-interface (it needs a running SAP GUI with scripting enabled), and it can expose that session to AI clients as an
-MCP server (stdio or HTTPS). It is not a security tool: it automates the user's own SAP session with the user's own
-credentials, and every token, scope and read-only restriction of the MCP server narrows what a client may do.
+- Windows only. SAP GUI Scripting needs the interactive desktop of a logged-on Windows user, so fairyfly runs as a
+  normal program or tray app, not as a Windows service.
+- The current version is `2026.09.30` (calendar versioning). fairyfly is under active development; changes are
+  listed in the [changelog](CHANGELOG.md).
+- fairyfly drives the screen like a person does: an action on one SAP window happens one step at a time, and large
+  screens take a few seconds to read.
 
 ## License
 
 fairyfly is licensed under the [Business Source License 1.1](LICENSE) (licensor: DataZoo GmbH), the same terms as
-[DataZooDE/erpl](https://github.com/DataZooDE/erpl): you may copy, modify, redistribute and make production use of
-the work, except that it may not be offered to third parties on a hosted or embedded basis; five years after the
-first publication the code changes to the MPL 2.0. The third-party libraries it is built with, and their licences,
-are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Code signing
-
-Windows release builds of `fairyfly.exe` are produced from this repository's source by the GitHub Actions workflow
-[`release.yml`](.github/workflows/release.yml) on a GitHub-hosted runner, from a version tag (`vYYYY.MM.DD`), and are
-published with a `SHA256SUMS` file; verify a download with `Get-FileHash fairyfly.exe` against it. Releases are
-Authenticode-signed when a signing certificate is configured for the repository (see [docs/SIGNING.md](docs/SIGNING.md)):
-then `signtool verify /pa /v fairyfly.exe` (or the file's Properties > Digital Signatures tab) shows the publisher.
-The product name is `fairyfly` and the product version is the calendar version of the release (for example `2026.09.30`),
-identical in the file's version information, in `fairyfly --version` and in the release tag.
-
-Privacy: this program will not transfer any information to other networked systems unless specifically requested by
-the user or the person installing or operating it. fairyfly has no telemetry. It only talks to the SAP GUI on the same
-machine and, when the user starts `fairyfly mcp --http`, to the MCP clients that connect to the address and port the
-user configured; credentials are stored only in the Windows Credential Manager and are never written to logs or the
-audit trail.
+[DataZooDE/erpl](https://github.com/DataZooDE/erpl). You may copy, modify, redistribute and use it in production. You
+may not offer it to third parties as a hosted or embedded service. On the Change Date defined in the license, the
+code changes to the MPL 2.0. Third-party libraries and their licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

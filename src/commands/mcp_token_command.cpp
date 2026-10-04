@@ -24,12 +24,18 @@ public:
         token_->require_subcommand(1);
 
         create_ = token_->add_subcommand("create", "Create a token (shown once)");
+        create_->footer(R"HELP(Usage notes:
+The secret is printed once; store it securely. Choose the minimum scopes needed.
+Example: fairyfly mcp token create reader --scope session,connection,screen,element --read-only
+)HELP");
         create_->fallthrough();
         create_->add_option("name", args_.name, "Token name (letters, digits, . _ -)")->required();
         create_->add_option("--scope", args_.scopes,
                             fairyfly::auth::scope_help_text())
             ->delimiter(',');
         create_->add_option("--system", args_.systems, "Allowed SAP systems SID/CLIENT, e.g. A4H/001 (globs allowed)")->delimiter(',');
+        create_->add_option("--sap-identity", args_.sap_identities,
+                            "Exact SAP identities SID/CLIENT/USER, e.g. A4H/001/ALICE (required for multi-user owner endpoints)")->delimiter(',');
         create_->add_option("--tcode", args_.tcodes, "Allowed T-codes, e.g. SE16,SM* (globs allowed). With --allow-selection-input only list transactions whose execution is read-only: Enter/F8 on a selection screen runs the report, and fairyfly cannot know what a custom report does")->delimiter(',');
         create_->add_flag("--allow-navigation", args_.allow_navigation,
                           "With --tcode: also allow gui_menu_select and navigating keys (F3, F12, ...); default is fail-closed");
@@ -48,21 +54,36 @@ public:
         add_output_option(create_, output_);
 
         list_ = token_->add_subcommand("list", "List tokens (never shows secrets or hashes)");
+        list_->footer(R"HELP(Usage notes:
+Example: fairyfly mcp token list
+)HELP");
         list_->fallthrough();
         add_output_option(list_, output_);
 
         revoke_ = token_->add_subcommand("revoke", "Revoke a token immediately");
+        revoke_->footer(R"HELP(Usage notes:
+Existing clients using this token will lose access.
+Example: fairyfly mcp token revoke reader
+)HELP");
         revoke_->fallthrough();
         revoke_->add_option("name", args_.name, "Token name")->required();
         add_output_option(revoke_, output_);
 
         delete_ = token_->add_subcommand("delete", "Remove a token record for good (also a revoked one); needs --yes");
+        delete_->footer(R"HELP(Usage notes:
+Removes the stored token record. Explicit --yes is required.
+Example: fairyfly mcp token delete reader --yes
+)HELP");
         delete_->fallthrough();
         delete_->add_option("name", args_.name, "Token name")->required();
         delete_->add_flag("--yes", args_.yes, "Confirm the deletion");
         add_output_option(delete_, output_);
 
         rotate_ = token_->add_subcommand("rotate", "Issue a new secret for a token; the old one stops working at once");
+        rotate_->footer(R"HELP(Usage notes:
+Update clients with the returned secret; the prior secret immediately stops working.
+Example: fairyfly mcp token rotate reader
+)HELP");
         rotate_->fallthrough();
         rotate_->add_option("name", args_.name, "Token name")->required();
         add_output_option(rotate_, output_);

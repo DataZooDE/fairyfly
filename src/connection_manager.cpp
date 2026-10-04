@@ -206,7 +206,7 @@ private:
 #endif
 };
 
-void save_connection_file(const fs::path& target, const Connection& conn) {
+void save_connection_file(const fs::path& target, const Connection& conn, bool replace = true) {
     static std::atomic_uint64_t sequence{0};
     fs::path temporary = target;
     temporary += fmt::format(".{}.{}.tmp",
@@ -221,14 +221,18 @@ void save_connection_file(const fs::path& target, const Connection& conn) {
         file.close();
 
 #ifdef _WIN32
-        if (!MoveFileExW(temporary.c_str(), target.c_str(),
-                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD flags = MOVEFILE_WRITE_THROUGH | (replace ? MOVEFILE_REPLACE_EXISTING : 0);
+        if (!MoveFileExW(temporary.c_str(), target.c_str(), flags)) {
             const DWORD error = GetLastError();
             throw std::system_error(static_cast<int>(error), std::system_category(),
-                                    "Replacing SAP connection file");
+                                    replace ? "Replacing SAP connection file" : "Creating SAP connection file");
         }
 #else
-        fs::rename(temporary, target);
+        if (replace) fs::rename(temporary, target);
+        else {
+            fs::create_hard_link(temporary, target);  // fails atomically if target already exists
+            fs::remove(temporary);
+        }
 #endif
     } catch (...) {
         std::error_code cleanup_error;
@@ -597,6 +601,36 @@ Connection ConnectionManager::create_or_update_connection(
     return conn;
 }
 
+Connection ConnectionManager::create_new_connection(
+    const std::string& session_id, const std::string& connection_id,
+    const std::string& description, const std::string& connection_string,
+    const std::string& window_title, const std::string& server_session_key) {
+    if (session_id.empty() || connection_id.empty())
+        throw SystemError("Cannot save a SAP connection without a live session identity");
+    CacheWriteLock lock(working_directory_);
+    for (const auto& candidate : list_connections()) {
+        if (candidate.session_id == session_id &&
+            (server_session_key.empty() || candidate.server_session_key.empty() ||
+             candidate.server_session_key == server_session_key))
+            throw SystemError("SAP session path already has a saved connection");
+    }
+    Connection conn;
+    conn.id = get_next_connection_id();
+    conn.cache_generation = new_cache_generation();
+    conn.session_id = session_id;
+    conn.server_session_key = server_session_key;
+    conn.connection_id = connection_id;
+    conn.connection_description = description;
+    conn.connection_string = connection_string;
+    conn.window_title = window_title;
+    conn.created_at = get_current_timestamp();
+    conn.last_validated = conn.created_at;
+    const fs::path path = fs::path(working_directory_) / conn.get_file_path();
+    try { save_connection_file(path, conn, false); }
+    catch (const std::exception& e) { throw SystemError("Could not save SAP connection file: " + std::string(e.what())); }
+    return conn;
+}
+
 void ConnectionManager::touch_connection(const Connection& expected) {
     TraceGuard trace("ConnectionManager::touch_connection");
     (void)trace;
@@ -680,6 +714,12 @@ bool ConnectionManager::delete_connection_if_unchanged(const Connection& expecte
         spdlog::error("Failed to conditionally delete connection file {}: {}", path.string(), e.what());
         return false;
     }
+}
+
+bool ConnectionManager::matches_connection_generation(const Connection& expected) const {
+    CacheWriteLock lock(working_directory_);
+    const auto current = load_connection(expected.id);
+    return current && same_cache_identity(expected, *current);
 }
 
 ConnectionPartition partition_connections(

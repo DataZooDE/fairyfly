@@ -9,6 +9,7 @@
 #include "screen_reader.h"
 #include "element_metadata_extractor.h"
 #include <memory>
+#include <cstdint>
 #include <optional>
 
 namespace fairyfly {
@@ -39,6 +40,7 @@ private:
     std::string tree_reader_;
     int row_offset_ = 0;
     bool grid_rows_needed_ = true;
+    bool owner_window_guard_ = false;
     sap::SelectionInputPolicy selection_input_policy_;
 
     // Helper to ensure connection exists
@@ -55,12 +57,18 @@ private:
 
     std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> find_session_by_id(
         const std::string& session_id) const;
+    bool owner_window_allowed(const ComGuiSessionPtr& session) const noexcept;
 
 public:
     /// Constructor - initializes COM but doesn't connect to SAP
     ComAutomationEngine();
 
     ~ComAutomationEngine() override = default;
+
+    void set_owner_window_guard(bool enabled) noexcept { owner_window_guard_ = enabled; }
+    bool current_session_owner_window_allowed() const noexcept {
+        return current_session_ && owner_window_allowed(current_session_);
+    }
 
     // Connection management - two modes
     Result attach_by_click(int timeout_seconds = 10) override;
@@ -124,6 +132,8 @@ public:
     /// changes anything. Empty facts when the session is gone, the server key differs or COM fails.
     audit::SapFacts peek_session_facts(const std::string& session_id,
                                        const std::string& server_session_key = "") const noexcept;
+    /// Stable live window handle used only to distinguish keyless prelogin windows.
+    std::uintptr_t peek_session_window_handle(const std::string& session_id) const noexcept;
     /// Description (SAP Logon entry name) of the connection that owns `session_id`; empty when unknown. Read-only.
     std::string peek_session_connection_description(const std::string& session_id) const noexcept;
 

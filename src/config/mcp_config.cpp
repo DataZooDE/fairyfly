@@ -76,11 +76,15 @@ std::vector<KeySpec> build_specs() {
     add(make("server.tls", ValueType::Bool, Value{false},
              "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"));
     add(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
-             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback is always allowed"));
+             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback exempt by default"));
+    add(make("server.allow_ip_include_loopback", ValueType::Bool, Value{false},
+             "Require loopback clients to match a nonempty server.allow_ip list too"));
     add(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"));
     add(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
              "Extra accepted Host header values (loopback names are always accepted)"));
     add(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"));
+    add(make("owner.sap_identities", ValueType::StringList, Value{Vec{}},
+             "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint (empty = legacy unrestricted mode)"));
 
     add(make("mode.read_only", ValueType::Bool, Value{false}, "Force the read-only guard (the guard is also the default without allow_write)"));
     add(make("mode.allow_write", ValueType::Bool, Value{false}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"));
@@ -152,6 +156,11 @@ bool validate_value(const KeySpec& spec, const Value& value, std::string* error)
             for (const auto& u : unknown) names += (names.empty() ? "" : ", ") + u;
             return fail("unknown tool family: " + names);
         }
+    } else if (spec.type == ValueType::StringList && spec.key == "owner.sap_identities") {
+        static const std::regex identity(R"(^[A-Z0-9_-]+/[0-9]{3}/[A-Z0-9_.-]+$)");
+        for (const auto& entry : std::get<Vec>(value))
+            if (!std::regex_match(entry, identity))
+                return fail("each identity must be an exact uppercase SID/three-digit-client/USER (no wildcards)");
     }
     return true;
 }
@@ -282,7 +291,7 @@ struct Walker {
                   root.Mark().line + 1);
             return;
         }
-        static const std::vector<std::string> sections = {"server", "mode", "limits", "tools", "tray", "audit", "auth"};
+        static const std::vector<std::string> sections = {"server", "mode", "limits", "tools", "tray", "audit", "auth", "owner"};
         for (const auto& kv : root) {
             const std::string name = kv.first.Scalar();
             const int line = kv.first.Mark().line + 1;
@@ -456,9 +465,17 @@ McpConfig env_layer(const EnvLookup& env, std::vector<ConfigIssue>* issues) {
         if (trim(text).empty()) continue;
         std::string why;
         if (auto value = parse_value(spec, text, &why)) {
-            layer.values[spec.key] = std::move(*value);
+            // A separator-only override must not silently erase a configured owner gate.
+            if (spec.key == "owner.sap_identities" && std::get<Vec>(*value).empty()) {
+                if (issues) issues->push_back({Severity::Error, "CONFIG_OWNER_ENV_INVALID",
+                    "environment variable " + spec.env + " ignored: expected at least one SAP identity", 0, spec.key});
+            } else {
+                layer.values[spec.key] = std::move(*value);
+            }
         } else if (issues) {
-            issues->push_back({Severity::Warning, "CONFIG_ENV_INVALID",
+            const bool owner = spec.key == "owner.sap_identities";
+            issues->push_back({owner ? Severity::Error : Severity::Warning,
+                               owner ? "CONFIG_OWNER_ENV_INVALID" : "CONFIG_ENV_INVALID",
                                "environment variable " + spec.env + " ignored: " + why, 0, spec.key});
         }
     }
@@ -504,8 +521,10 @@ void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     if (auto v = c.get_bool("server.sse")) o.sse = *v;
     if (auto v = c.get_bool("server.tls")) o.tls = *v;
     if (auto v = c.get_list("server.allow_ip")) o.allow_ip = *v;
+    if (auto v = c.get_bool("server.allow_ip_include_loopback")) o.allow_ip_include_loopback = *v;
     if (auto v = c.get_list("server.allowed_hosts")) o.allowed_hosts = *v;
     if (auto v = c.get_list("server.cors_origins")) o.cors_origins = *v;
+    if (auto v = c.get_list("owner.sap_identities")) o.owner_sap_identities = *v;
     // insecure_no_auth and insecure_http are deliberately NOT config keys: authentication can only be switched off
     // with --insecure-no-auth and plain HTTP on a non-loopback host allowed with --insecure-http, on the command
     // line, never from a file or the environment.

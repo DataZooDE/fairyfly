@@ -15,6 +15,11 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"popup","close"});
+        cmd_->footer(R"HELP(Usage notes:
+Cancels the active popup and verifies it closed. Read the popup first to decide whether
+cancelling is appropriate; this does not close the main SAP window.
+Example: fairyfly popup close --connection 3
+)HELP");
         cmd_->add_option("--vkey", vkey_, "SAP VKey to send to the popup (default 12 = F12/Cancel)")
             ->default_val(12)
             ->check(CLI::Range(0, 99));

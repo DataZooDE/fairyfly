@@ -34,6 +34,13 @@ struct SapState {
     std::string detail;
 };
 
+// A visible SAP GUI window can still be the unauthenticated logon screen.
+// nullopt means its login facts could not be read reliably.
+SapState::Tri classify_logged_in_users(const std::vector<std::optional<std::string>>& users,
+                                       bool enumeration_complete) noexcept;
+bool owner_sap_identity_allowed(const std::string& system, const std::string& client,
+                                const std::string& user, const std::vector<std::string>& identities);
+
 struct DesktopState {
     std::optional<unsigned> session_id;       ///< ProcessIdToSessionId
     bool interactive_window_station = true;   ///< WinSta0

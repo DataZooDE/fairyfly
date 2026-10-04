@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <exception>
+#include <mutex>
 
 #include <spdlog/spdlog.h>
 
@@ -9,9 +10,23 @@ namespace fairyfly::mcp {
 
 namespace {
 std::atomic<bool> g_failed{false};
+std::mutex g_append_mutex;
 
 void record_result(bool ok) noexcept {
-    if (!ok) g_failed.store(true);
+    g_failed.store(!ok);
+}
+
+bool append_record(audit::AuditSink* sink, const audit::AuditRecord& record) noexcept {
+    // Keep the append and failure state in the same order across session lanes.
+    std::lock_guard<std::mutex> lock(g_append_mutex);
+    try {
+        const bool ok = sink->append(record);
+        record_result(ok);
+        return ok;
+    } catch (...) {
+        record_result(false);
+        return false;
+    }
 }
 } // namespace
 
@@ -32,7 +47,8 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.command = rec.command;
             out.argv = audit::redact_argv(rec.argv);
             out.connection = rec.connection;
-            if (peek_handler) {
+            if (rec.sap && rec.sap->any()) out.sap = *rec.sap;
+            else if (peek_handler) {
                 if (cli::CommandHandler* handler = peek_handler()) {
                     audit::SapFacts facts = handler->audit_facts();
                     if (facts.any()) out.sap = std::move(facts);
@@ -46,6 +62,7 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.client = rec.client;
             out.request_id = rec.request_id;
             out.principal = rec.principal;
+            out.token_id = rec.token_id;
             out.remote_addr = rec.remote_addr;
             out.transport = rec.transport;
             out.era = rec.era;
@@ -54,7 +71,7 @@ AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
             out.facts_pre_ms = rec.facts_pre_ms;
             out.invoke_ms = rec.invoke_ms;
             out.facts_post_ms = rec.facts_post_ms;
-            record_result(sink->append(out));
+            (void)append_record(sink, out);
         } catch (const std::exception& e) {
             record_result(false);
             try { spdlog::warn("MCP audit hook failed: {}", e.what()); } catch (...) {}
@@ -73,9 +90,7 @@ bool append_serve_event(audit::AuditSink* sink, const std::string& status, bool 
         out.command = "mcp";
         out.read_only = read_only;
         out.status = status;
-        const bool ok = sink->append(out);
-        record_result(ok);
-        return ok;
+        return append_record(sink, out);
     } catch (...) {
         record_result(false);
         return false;

@@ -2,13 +2,14 @@
 
 This page covers the operator side of the remote MCP server on the Windows VM: the system-tray mode,
 the YAML config file, autostart, `mcp client-config` and `mcp doctor`. The HTTP protocol and the HTTPS setup are
-described elsewhere (docs/MCP.md, docs/MCP_REMOTE.md, docs/MCP_SETUP.md).
+described in [MCP.md](MCP.md), [MCP_REMOTE.md](MCP_REMOTE.md) and [MCP_SETUP.md](MCP_SETUP.md).
+For password and SSO/SNC logon of multiple SAP users, see [MCP_SAP_AUTHENTICATION.md](MCP_SAP_AUTHENTICATION.md).
 
 ## Why a console app with a tray, not a Windows service
 
-SAP GUI scripting needs the interactive desktop of a logged-on user. A service runs in Session 0 and
-cannot see SAP GUI. So `fairyfly mcp` is a normal process started by the VM user; `--tray` only hides
-its console and adds a notification-area icon.
+SAP GUI scripting needs the interactive desktop of a logged-on user, and a service runs in Session 0 without one
+(see [ARCHITECTURE.md](ARCHITECTURE.md#why-not-a-windows-service)). `--tray` only hides the console of the normal
+process and adds a notification-area icon.
 
 ## Tray mode
 
@@ -20,15 +21,17 @@ prints the child pid and exits with 0. The child frees its console, logs to
 `%LOCALAPPDATA%\fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start prints or
 pops up "already running" (named mutex `Local\fairyfly-tray`) and exits 0.
 
-Icon colors: green = running, yellow = running with warnings, grey = stopped, red = error. The icon is
-re-added when Explorer restarts (`TaskbarCreated`). Left-click shows a status balloon (endpoint, mode,
-counters, warnings). Warnings are also shown in a balloon once when the server is up.
+The icon is the fairyfly butterfly, recoloured by state: teal = running, amber = running with warnings,
+grey = stopped, red = error. It follows the taskbar theme (white spine on a dark taskbar, navy on a light one) and
+switches live when the theme changes. Sources: `assets/logo/`, regenerated with `python assets/generate_icons.py`
+(Pillow). The icon is re-added when Explorer restarts (`TaskbarCreated`). Left-click shows a status balloon (endpoint, mode,
+session routing when enabled, counters, warnings). Warnings are also shown in a balloon once when the server is up.
 
 Right-click menu:
 
 | Item | Effect |
 |---|---|
-| status line | endpoint and mode (read-only / write mode) |
+| status line | endpoint and mode (read-only / write mode); an owner-restricted endpoint also shows `parallel SAP windows` |
 | Warnings (n) | submenu with the posture warnings of the server |
 | Start / Stop / Restart | Stop finishes the running call and stops accepting; the process and the tray stay |
 | Read-only mode (check) | turning it OFF asks "Allow the MCP server to change SAP data?"; locked when `FAIRYFLY_READ_ONLY=1` |
@@ -41,12 +44,10 @@ YAML and the logs never contain a token.
 
 ### Threading (for developers)
 
-The COM/STA executor of the server stays on the process main thread (`IServerRunner::run_blocking()`).
-The tray UI runs on a second thread with its own message pump and talks to the server only through
-`IServerControl`. See the header comment of `src/include/tray/tray.h`. Every OS effect (window/icon,
-registry, processes, files, mutex, message boxes, clipboard) is behind an interface with fakes in the
-unit tests; the real implementations are exercised by hidden manual tests
-(`unit_tests.exe "[tray_manual]"`, see the checklist below).
+The COM executor stays on the main thread; the tray UI runs on its own thread and talks to the server only through
+`IServerControl` (header comment of `src/include/tray/tray.h`, and [ARCHITECTURE.md](ARCHITECTURE.md#why-not-a-windows-service)).
+The real OS implementations are exercised by hidden manual tests (`unit_tests.exe "[tray_manual]"`, see the
+checklist below).
 
 ## Autostart
 
@@ -95,7 +96,8 @@ Keys (every active line of the generated template equals the default):
 |---|---|---|
 | `server.host` / `server.port` | 127.0.0.1 / 8383 | URL prefix host: `127.0.0.1` (loopback), `+` (all interfaces, TLS recommended) or a host name; `localhost` is treated as 127.0.0.1 |
 | `server.tls` | false | TLS via http.sys; the certificate binding is created by `fairyfly mcp setup` (which also writes the file with `tls: true`) |
-| `server.allow_ip[]` | empty | client allow-list (addresses or CIDR); empty = any, loopback is always allowed |
+| `server.allow_ip[]` | empty | client allow-list (addresses or CIDR); empty = any, loopback exempt by default |
+| `server.allow_ip_include_loopback` | false | when true, loopback must match a nonempty `server.allow_ip` list too |
 | `server.transport` | stdio | `stdio` or `http` |
 | `server.sse` | true | allow SSE streaming on tools/call |
 | `server.allowed_hosts[]` / `server.cors_origins[]` | empty | extra Host values / browser origins |
@@ -138,7 +140,8 @@ provides its probe. Exit code 1 when any check fails.
 
 ## Manual checklist (desktop, not CI)
 
-1. `unit_tests.exe "[tray_manual][icon]"`: icon appears, cycles green/yellow/grey/red, balloon shows.
+1. `unit_tests.exe "[tray_manual][icon]"`: icon appears, cycles green/yellow/grey/red, balloon shows (plain circles:
+   the test binary does not link the icon resources; `fairyfly mcp --tray` shows the butterfly).
 2. Restart Explorer (`taskkill /f /im explorer.exe`, then start it): the icon comes back.
 3. `fairyfly mcp --tray --http` from a console: pid printed, console returns, icon appears; running it again
    says "already running".

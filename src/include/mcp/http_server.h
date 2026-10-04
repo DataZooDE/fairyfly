@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,7 @@ struct HttpServerConfig {
     int call_timeout_ms = 120000;
     int worker_threads = 16;
     bool tls = false;                      ///< HTTPS binding (http.sys terminates TLS)
-    std::vector<std::string> allow_ip;     ///< client allow-list (addresses/CIDR); loopback always allowed; empty = all
+    std::vector<std::string> allow_ip;     ///< client allow-list (addresses/CIDR); empty = all
     bool insecure_http = false;            ///< allow plain HTTP on a non-loopback host (flag only)
 };
 
@@ -71,6 +72,15 @@ public:
 
     HttpEndpoint& endpoint();
     CallExecutor& executor();
+    /// Owns the routed lanes through shutdown; configure before run().
+    void set_session_router(std::shared_ptr<SessionExecutorPool> pool, HttpEndpoint::SessionRouter router,
+                            HttpEndpoint::SessionRouter recheck_router = {});
+    /// Interrupt blocked private worker calls before routed lanes are joined.
+    /// Configure before bind; invoked once on shutdown, including destruction.
+    void set_session_shutdown(std::function<void()> shutdown);
+    /// Apply mode changes to routed lanes synchronously, before set_read_only
+    /// returns; the global handler is still updated on its COM executor.
+    void set_session_mode_hook(std::function<void(bool)> hook);
     /// Multi-line startup banner (also written to stderr by run_mcp_http).
     std::vector<std::string> posture_lines() const;
 
@@ -82,12 +92,15 @@ public:
 
 private:
     struct Impl;
+    std::mutex routing_mu_;
+    bool routing_locked_ = false;
     std::unique_ptr<Impl> impl_;
     HttpServerConfig config_;
     std::atomic<bool> read_only_;
     std::atomic<bool> stop_{false};
     std::atomic<bool> restart_{false};
     std::atomic<bool> running_{false};
+    std::atomic<bool> session_routed_{false};
 };
 
 /// Scheme-aware endpoint URL for banners/status: https://<first allowed host or +>:<port><path> when `tls`,
@@ -105,6 +118,9 @@ struct HttpRunArgs {
     std::function<std::unique_ptr<ToolProvider>(bool read_only)> make_provider;
     /// Main thread: propagate the mode to the CLI handler (handler.set_read_only).
     std::function<void(bool read_only)> apply_read_only;
+    /// Configure session routing while the server is still unbound. The
+    /// callback may install a session pool and router with set_session_router.
+    std::function<void(McpHttpServer&)> configure_session_routing;
     /// Phase 4 (tray) hook: receives the running server's IServerControl before the loop starts.
     std::function<void(IServerControl&)> on_control;
     /// Overrides the authenticator (tests); default make_http_authenticator(options.insecure_no_auth).

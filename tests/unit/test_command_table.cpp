@@ -63,6 +63,7 @@ std::string join(const Argv& parts, const std::string& sep) {
 
 TEST_CASE("command table: every entry resolves to a registered CLI path", "[command_table]") {
     for (const auto& spec : ct::all_commands()) {
+        if (spec.mcp_only) continue;
         INFO(spec.path_string());
         Argv args = spec.path;
         args.push_back("--help");
@@ -293,7 +294,8 @@ TEST_CASE("mcp tools table lists every tool and matches docs/MCP.md", "[command_
         INFO(spec.tool_name);
         CHECK(markdown.find("`" + spec.tool_name + "`") != std::string::npos);
         CHECK(plain.find(spec.tool_name) != std::string::npos);
-        CHECK(markdown.find("`fairyfly " + spec.path_string() + "`") != std::string::npos);
+        if (spec.mcp_only) CHECK(markdown.find("| `" + spec.tool_name + "` | " + spec.family + " | MCP only |") != std::string::npos);
+        else CHECK(markdown.find("`fairyfly " + spec.path_string() + "`") != std::string::npos);
     }
     CHECK(markdown.find("sap_") == std::string::npos);
     CHECK(markdown.find("| `gui_element_fill` | element | `fairyfly element fill` | yes |") != std::string::npos);

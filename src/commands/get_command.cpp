@@ -15,6 +15,19 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","get"});
+        cmd_->footer(R"HELP(Usage notes:
+Read a control identified by screen find or screen read.
+For trees, --list-nodes returns data.nodes with key and text. Collapsed parents may
+have unloaded children: this is not a complete backend inventory. Expand a returned
+parent with element click --tree-action expand --node-key, then list again.
+Quote node keys exactly, including leading spaces. TREE below is the observed tree ID.
+For an inactive tab, --activate-tab reads the field and restores the prior tab.
+Examples:
+  fairyfly element get "wnd[0]/usr/ctxtFIELD" --connection 3
+  fairyfly element get "TREE" --list-nodes --connection 3
+  fairyfly element click "TREE" --tree-action expand --node-key "          1" --connection 3
+  fairyfly element get "TREE" --list-nodes --connection 3
+)HELP");
         cmd_->add_option("element", element_, "Element ID")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

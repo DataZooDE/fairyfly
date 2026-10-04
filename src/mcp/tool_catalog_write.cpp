@@ -136,11 +136,42 @@ ToolSpec make_fill_spec() {
     return spec;
 }
 
+ToolSpec make_lease_spec() {
+    ToolSpec spec;
+    spec.def.name = "gui_session_lease";
+    spec.family = command_table::find_by_tool(spec.def.name)->family;
+    spec.def.title = "Manage a SAP session lease";
+    spec.def.description = "Acquire an exclusive lease for one saved SAP GUI session before navigation or writes. "
+        "Pass its lease_id on each state-changing call. Renew before expiry and release when finished. "
+        "Only available to authenticated clients of an owner-restricted HTTP endpoint.";
+    spec.def.input_schema = catalog::make_schema({
+        {"action", {{"type", "string"}, {"enum", json::array({"acquire", "renew", "release"})}}},
+        {"connection", catalog::connection_property()},
+        {"lease_id", {{"type", "string"}, {"minLength", 1}, {"description", "Required for renew and release."}}}
+    }, {"action", "connection"});
+    spec.def.annotations = json{{"title", spec.def.title}, {"readOnlyHint", true},
+                                {"destructiveHint", false}, {"idempotentHint", false}, {"openWorldHint", false}};
+    spec.def.meta = json{{"anthropic/maxResultSizeChars", 60000}};
+    spec.write_tool = false;  // Coordination is required for navigation even on a read-only endpoint.
+    spec.output = ToolOutput::Json;
+    const json schema = spec.def.input_schema;
+    spec.build_argv = [schema](const json& raw, const Policy&) {
+        const json args = raw.is_null() ? json::object() : raw;
+        validate_tool_arguments(args, schema);
+        const std::string action = args.at("action").get<std::string>();
+        if (action != "acquire" && !args.contains("lease_id"))
+            throw std::invalid_argument("'lease_id' is required for renew and release");
+        return std::vector<std::string>{"session", "lease"};  // audit label only; never passed to the CLI
+    };
+    return spec;
+}
+
 } // namespace
 
 std::vector<ToolSpec> write_tool_specs() {
     std::vector<ToolSpec> specs;
     specs.push_back(make_fill_spec());
+    specs.push_back(make_lease_spec());
     return specs;
 }
 

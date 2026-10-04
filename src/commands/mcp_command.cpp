@@ -9,6 +9,14 @@ namespace commands {
 
 CLI::App* McpCommand::setup_cli(CLI::App& app) {
     cmd_ = noun_app(app, "mcp");
+    cmd_->footer(R"HELP(Usage notes:
+Starts an MCP server; this is a long-running command.
+For agents using MCP, inspect tools/list and their schemas. Tool families can be filtered.
+Read-only guard mode is the server default; HTTP requires token/config setup.
+Examples:
+  fairyfly mcp --tools session,connection,screen,element,transaction
+  fairyfly mcp tools --markdown
+)HELP");
     cmd_->add_flag("--read-only", options_.read_only,
                    "Read-only guard mode (default): state-changing actions are refused, write tools are hidden; FAIRYFLY_READ_ONLY=1 forces it");
     cmd_->add_flag("--allow-write", options_.allow_write,
@@ -35,8 +43,10 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
                    "HTTP only: serve HTTPS; http.sys terminates TLS with the certificate bound by 'fairyfly mcp setup'");
     cmd_->add_option("--allow-ip", options_.allow_ip,
                      "HTTP only: accept clients only from these addresses or CIDR blocks (comma separated; "
-                     "loopback is always allowed; default: any)")
+                     "loopback exempt by default; empty = any)")
         ->delimiter(',');
+    cmd_->add_flag("--allow-ip-include-loopback", options_.allow_ip_include_loopback,
+                   "HTTP only: require loopback peers to match a nonempty --allow-ip list too");
     cmd_->add_flag("--insecure-http", options_.insecure_http,
                    "HTTP only: allow plain HTTP on a non-loopback host (dangerous; flag only, never from config)");
     cmd_->add_option("--allowed-hosts", options_.allowed_hosts,
@@ -57,6 +67,10 @@ CLI::App* McpCommand::setup_cli(CLI::App& app) {
                      }() + ". Default: all families");
 
     tools_cmd_ = add_leaf(app, {"mcp", "tools"});
+    tools_cmd_->footer(R"HELP(Usage notes:
+Prints the registered MCP tool catalog without starting a server.
+Example: fairyfly mcp tools --markdown
+)HELP");
     tools_cmd_->add_flag("--markdown", tools_markdown_, "Print the tool table as Markdown");
     setup_mcp_extras(*cmd_, extras_);
     return cmd_;

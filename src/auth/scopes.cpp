@@ -70,6 +70,7 @@ bool scopes_allow(const std::set<std::string>& granted, bool all, const std::str
 }
 
 std::string missing_scope_hint(const std::string& family, const std::string& tool_name) {
+    if (tool_name == "gui_session_lease") return "'session.lease' (or '*')";
     const std::string verb = verb_scope_of_tool(tool_name);
     if (verb.empty()) return "'" + family + "'";
     return "'" + verb + "' (or '" + family + "')";

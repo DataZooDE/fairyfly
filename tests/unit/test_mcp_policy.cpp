@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -40,8 +41,11 @@ const EnvFn no_env = [](const char*) { return std::string(); };
 
 ToolSpec fill_spec() {
     auto specs = write_tool_specs();
-    REQUIRE(specs.size() == 1);
-    return specs[0];
+    const auto found = std::find_if(specs.begin(), specs.end(), [](const ToolSpec& spec) {
+        return spec.def.name == "gui_element_fill";
+    });
+    REQUIRE(found != specs.end());
+    return *found;
 }
 
 std::vector<std::string> fill_argv(const json& args, const Policy& p = Policy{}) {

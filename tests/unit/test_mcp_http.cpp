@@ -21,6 +21,8 @@
 #include "include/mcp/http_server.h"
 #include "include/mcp/json_rpc.h"
 #include "include/mcp/protocol_session.h"
+#include "include/mcp/session_worker_provider.h"
+#include "include/mcp/tool_catalog.h"
 #include "support/raw_http_client.h"
 
 using namespace fairyfly::mcp;
@@ -44,7 +46,8 @@ public:
         return out;  // deliberately NOT sorted
     }
     bool has_tool(const std::string& name) const override {
-        return name == "gui_element_fill" || ToolProvider::has_tool(name);  // hidden write tool
+        return name == "gui_element_fill" || name == "gui_session_attach" || name == "gui_session_disconnect" ||
+               name == "gui_session_login" || name == "gui_session_launch" || ToolProvider::has_tool(name);
     }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
         {
@@ -100,7 +103,7 @@ public:
 class TokenAuth : public IAuthenticator {
 public:
     AuthOutcome authenticate(const AuthRequest& r) override {
-        last = r;
+        { std::lock_guard<std::mutex> lock(auth_mutex); last = r; }
         AuthOutcome o;
         if (r.authorization == "Bearer good") {
             o.ok = true;
@@ -120,6 +123,7 @@ public:
         return o;
     }
     AuthRequest last;
+    std::mutex auth_mutex;
 };
 
 /// Runs the CallExecutor loop on a helper thread (stands in for the COM main thread).
@@ -201,6 +205,644 @@ public:
 };
 
 } // namespace
+
+TEST_CASE("HTTP queued calls reauthenticate before execution", "[mcp][http][auth][revocation]") {
+    class RevokingAuth final : public TokenAuth {
+    public:
+        AuthOutcome authenticate(const AuthRequest& request) override {
+            if (revoked.load()) {
+                AuthOutcome denied;
+                denied.error_code = "TOKEN_REVOKED";
+                denied.message = "token revoked";
+                denied.http_status = 401;
+                return denied;
+            }
+            return TokenAuth::authenticate(request);
+        }
+        std::atomic<bool> revoked{false};
+    } auth;
+    FakeProvider provider;
+    CallExecutor exec(16, 5000);
+    HttpEndpointOptions opts;
+    opts.server.name = "fairyfly";
+    opts.server.version = "1";
+    opts.poll_ms = 10;
+    HttpEndpoint endpoint(opts, exec, provider, &auth);
+    HttpRequest request;
+    request.method = "POST";
+    request.path = "/mcp";
+    request.headers["Host"] = "127.0.0.1:8383";
+    request.headers["Content-Type"] = "application/json";
+    request.headers["Authorization"] = "Bearer good";
+    request.peer_addr = "127.0.0.1";
+    request.body = Fixture::rpc("tools/call", {{"name", "gui_a_tool"}, {"arguments", json::object()}}).dump();
+    auto response = std::async(std::launch::async, [&] { return endpoint.handle(request); });
+    for (int i = 0; i < 1000 && exec.queued() == 0; ++i) std::this_thread::sleep_for(1ms);
+    const bool queued = exec.queued() == 1;
+    auth.revoked = true;
+    std::thread loop([&] { exec.run(); });
+    const auto result = response.get();
+    exec.request_stop();
+    loop.join();
+    CHECK(queued);
+    CHECK(body_of(result).dump().find("TOKEN_REVOKED") != std::string::npos);
+    CHECK(provider.calls == 0);
+}
+
+TEST_CASE("HTTP routes separate SAP sessions to overlapping lanes", "[mcp][http][parallel]") {
+    struct SignallingProvider : FakeProvider {
+        std::promise<void> entered;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            entered.set_value();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    Fixture f;
+    SessionExecutorPool lanes(2, 2, 5000);
+    auto slow_provider = std::make_shared<SignallingProvider>();
+    auto fast_provider = std::make_shared<FakeProvider>();
+    auto entered = slow_provider->entered.get_future();
+    f.endpoint.set_session_router(&lanes, [slow_provider, fast_provider](const Principal&, const std::string& name,
+                                                                         const json& args) {
+        HttpEndpoint::SessionRoute route;
+        if (name != "gui_slow") return route;
+        route.handled = true;
+        route.identity = args.at("connection").get<std::string>();
+        route.provider = route.identity == "A" ? std::static_pointer_cast<ToolProvider>(slow_provider)
+                                                : std::static_pointer_cast<ToolProvider>(fast_provider);
+        return route;
+    });
+    auto slow = std::async(std::launch::async, [&] {
+        return f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"},
+            {"arguments", {{"connection", "A"}, {"ms", 1500}}}}, 1)));
+    });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    auto fast = std::async(std::launch::async, [&] {
+        return f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"},
+            {"arguments", {{"connection", "B"}, {"ms", 10}}}}, 2)));
+    });
+    CHECK(fast.wait_for(500ms) == std::future_status::ready);
+    CHECK(body_of(fast.get())["result"]["isError"] != true);
+    CHECK(body_of(slow.get())["result"]["isError"] != true);
+    CHECK(f.provider.calls == 0);
+}
+
+TEST_CASE("HTTP serializes changed identities of the same GUI window", "[mcp][http][parallel]") {
+    struct HoldingProvider : FakeProvider {
+        std::promise<void> entered;
+        std::promise<void> release;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            entered.set_value();
+            release.get_future().wait();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    Fixture f;
+    SessionExecutorPool lanes(2, 2, 5000);
+    auto first_provider = std::make_shared<HoldingProvider>();
+    auto second_provider = std::make_shared<FakeProvider>();
+    auto entered = first_provider->entered.get_future();
+    f.endpoint.set_session_router(&lanes, [first_provider, second_provider](const Principal&,
+        const std::string&, const json& args) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = args.at("identity").get<std::string>();
+        route.lane_key = "window:/app/con[0]/ses[0]";
+        route.provider = route.identity == "old" ? std::static_pointer_cast<ToolProvider>(first_provider)
+                                                : std::static_pointer_cast<ToolProvider>(second_provider);
+        return route;
+    });
+    auto first = std::async(std::launch::async, [&] {
+        return f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"},
+            {"arguments", {{"identity", "old"}}}}, 1)));
+    });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    auto second = std::async(std::launch::async, [&] {
+        return f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"},
+            {"arguments", {{"identity", "new"}}}}, 2)));
+    });
+    CHECK(second.wait_for(50ms) == std::future_status::timeout);
+    CHECK(second_provider->calls == 0);
+    first_provider->release.set_value();
+    CHECK(body_of(first.get())["result"]["isError"] != true);
+    CHECK(body_of(second.get())["result"]["isError"] != true);
+    CHECK(second_provider->calls == 1);
+}
+
+TEST_CASE("HTTP session route refusal creates no execution lane", "[mcp][http][parallel]") {
+    Fixture f;
+    SessionExecutorPool lanes(1, 2, 5000);
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.error_code = "OWNER_SESSION_UNAVAILABLE";
+        route.error_message = "session unavailable";
+        return route;
+    });
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"},
+        {"arguments", {{"connection", "A"}}}})));
+    CHECK(body_of(response)["error"]["data"]["code"] == "OWNER_SESSION_UNAVAILABLE");
+    CHECK(lanes.queued("A") == 0);
+    CHECK(f.provider.calls == 0);
+
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string&, const json&) {
+        return HttpEndpoint::SessionRoute{}; // an omitted session tool must fail closed
+    });
+    const auto omitted = f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+        {"arguments", {{"connection", "A"}}}})));
+    CHECK(body_of(omitted)["error"]["data"]["code"] == "SESSION_ROUTE_REQUIRED");
+    CHECK(f.provider.calls == 0);
+
+    auto fake_provider = std::make_shared<FakeProvider>();
+    f.endpoint.set_session_router(&lanes, [fake_provider](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = "A";
+        route.provider = fake_provider;
+        route.error_code = "OWNER_SESSION_UNAVAILABLE";
+        return route;
+    });
+    const auto contradictory = f.endpoint.handle(f.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+        {"arguments", {{"connection", "A"}}}})));
+    CHECK(body_of(contradictory)["error"]["data"]["code"] == "OWNER_SESSION_UNAVAILABLE");
+    CHECK(fake_provider->calls == 0);
+}
+
+TEST_CASE("explicit attach uses the global control executor in routed mode", "[mcp][http][parallel]") {
+    Fixture f;
+    SessionExecutorPool lanes(1, 2, 5000);
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string&, const json&) {
+        return HttpEndpoint::SessionRoute{};
+    });
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call",
+        {{"name", "gui_session_attach"}, {"arguments", {{"session_id", "/app/con[0]/ses[0]"}}}})));
+    CHECK(body_of(response)["result"]["isError"] != true);
+    CHECK(f.provider.last_name == "gui_session_attach");
+    CHECK(f.provider.calls == 1);
+}
+
+TEST_CASE("router can designate a claimed prelogin close as global control", "[mcp][http][parallel][prelogin]") {
+    Fixture f;
+    SessionExecutorPool lanes(1, 2, 5000);
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string& name, const json&) {
+        HttpEndpoint::SessionRoute route;
+        if (name == "gui_session_disconnect") route.global_control = true;
+        return route;
+    });
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call",
+        {{"name", "gui_session_disconnect"}, {"arguments", {{"connection", 7}, {"close_session", true}}}})));
+    CHECK(body_of(response)["result"]["isError"] != true);
+    CHECK(f.provider.last_name == "gui_session_disconnect");
+}
+
+TEST_CASE("login uses the global control executor in routed mode", "[mcp][http][parallel]") {
+    Fixture f;
+    SessionExecutorPool lanes(1, 2, 5000);
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string&, const json&) {
+        return HttpEndpoint::SessionRoute{};
+    });
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call",
+        {{"name", "gui_session_login"}, {"arguments", {{"connection", 7}}}})));
+    CHECK(body_of(response)["result"]["isError"] != true);
+    CHECK(f.provider.last_name == "gui_session_login");
+    CHECK(f.provider.calls == 1);
+}
+
+TEST_CASE("launch uses the global control executor in routed mode", "[mcp][http][parallel]") {
+    Fixture f;
+    SessionExecutorPool lanes(1, 2, 5000);
+    f.endpoint.set_session_router(&lanes, [](const Principal&, const std::string&, const json&) {
+        return HttpEndpoint::SessionRoute{};
+    });
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call",
+        {{"name", "gui_session_launch"}, {"arguments", {{"name", "A4H Logon"}}}})));
+    CHECK(body_of(response)["result"]["isError"] != true);
+    CHECK(f.provider.last_name == "gui_session_launch");
+    CHECK(f.provider.calls == 1);
+}
+
+TEST_CASE("HTTP routed job rejects a changed session identity at dequeue", "[mcp][http][parallel]") {
+    struct SignallingProvider : FakeProvider {
+        std::promise<void> entered;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            if (args.value("ms", 0) > 100) entered.set_value();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    Fixture f;
+    SessionExecutorPool lanes(2, 2, 5000);
+    auto session = std::make_shared<SignallingProvider>();
+    auto entered = session->entered.get_future();
+    std::atomic<bool> replaced{false};
+    f.endpoint.set_session_router(&lanes, [session, &replaced](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = replaced ? "replacement" : "original";
+        route.provider = session;
+        return route;
+    });
+    auto request = [&](int id, int ms) {
+        return f.post(Fixture::rpc("tools/call", {{"name", "gui_slow"}, {"arguments", {{"ms", ms}}}}, id));
+    };
+    auto first = std::async(std::launch::async, [&] { return f.endpoint.handle(request(1, 500)); });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    auto second = std::async(std::launch::async, [&] { return f.endpoint.handle(request(2, 0)); });
+    for (int i = 0; i < 1000 && lanes.queued("original") == 0; ++i) std::this_thread::sleep_for(1ms);
+    REQUIRE(lanes.queued("original") == 1);
+    replaced = true;
+    CHECK(body_of(second.get()).dump().find("SESSION_ROUTE_CHANGED") != std::string::npos);
+    (void)first.get();
+    CHECK(session->calls == 1);
+}
+
+TEST_CASE("HTTP server stops and joins its routed lanes before destruction", "[mcp][http][parallel][shutdown]") {
+    struct HeldProvider final : FakeProvider {
+        std::promise<void> entered;
+        std::shared_future<void> release;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            entered.set_value();
+            release.wait();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    FakeProvider global;
+    auto auth = std::make_unique<TokenAuth>();
+    auto pool = std::make_shared<SessionExecutorPool>(1, 2, 5000);
+    auto provider = std::make_shared<HeldProvider>();
+    std::promise<void> release;
+    provider->release = release.get_future().share();
+    auto entered = provider->entered.get_future();
+    HttpServerConfig config;
+    config.endpoint = Fixture::prepare({});
+    auto server = std::make_unique<McpHttpServer>(config, global, std::move(auth));
+    server->set_session_router(pool, [provider](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = "session-A";
+        route.provider = provider;
+        return route;
+    });
+    Fixture request_factory;
+    auto call = request_factory.post(Fixture::rpc("tools/call", {{"name", "gui_slow"}, {"arguments", json::object()}}));
+    auto response = std::async(std::launch::async, [&] { return server->endpoint().handle(call); });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    server->request_stop();
+    CHECK(response.wait_for(1s) == std::future_status::ready);
+    CHECK(response.get().status == 503);
+    auto destroyed = std::async(std::launch::async, [&] { server.reset(); });
+    CHECK(destroyed.wait_for(50ms) == std::future_status::timeout);
+    release.set_value();
+    CHECK(destroyed.wait_for(1s) == std::future_status::ready);
+    destroyed.get();
+}
+
+TEST_CASE("HTTP server interrupts private workers before joining routed lanes", "[mcp][http][parallel][shutdown]") {
+    struct BlockingProvider final : FakeProvider {
+        std::promise<void> entered;
+        std::shared_future<void> released;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            entered.set_value();
+            released.wait();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    FakeProvider global;
+    auto provider = std::make_shared<BlockingProvider>();
+    std::promise<void> release;
+    provider->released = release.get_future().share();
+    auto entered = provider->entered.get_future();
+    auto server = std::make_unique<McpHttpServer>(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    CHECK_FALSE(server->status().parallel_sessions);
+    auto pool = std::make_shared<SessionExecutorPool>(1, 2, 5000);
+    server->set_session_router(pool, [provider](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = "session-A";
+        route.provider = provider;
+        return route;
+    });
+    CHECK(server->status().parallel_sessions);
+    int stops = 0;
+    server->set_session_shutdown([&] { ++stops; release.set_value(); });
+    Fixture request_factory;
+    auto request = request_factory.post(Fixture::rpc("tools/call", {{"name", "gui_slow"}}));
+    auto response = std::async(std::launch::async, [&] { return server->endpoint().handle(request); });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    auto destroyed = std::async(std::launch::async, [&] { server.reset(); });
+    REQUIRE(destroyed.wait_for(1s) == std::future_status::ready);
+    destroyed.get();
+    (void)response.get();
+    CHECK(stops == 1);
+}
+
+TEST_CASE("HTTP mode change invalidates routed providers before returning", "[mcp][http][parallel]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    std::vector<bool> observed;
+    server.set_session_mode_hook([&](bool read_only) { observed.push_back(read_only); });
+    server.set_read_only(false);
+    REQUIRE(observed.size() == 1);
+    CHECK_FALSE(observed[0]);
+    server.set_read_only(true);
+    REQUIRE(observed.size() == 2);
+    CHECK(observed[1]);
+}
+
+TEST_CASE("HTTP owner runtime routes a checked session call to its private worker", "[mcp][http][parallel][runtime]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    SessionWorkerRuntimeConfig config;
+    config.policy.owner_sap_identities = {"A4H/001/ALICE"};
+    config.specs = all_tool_specs();
+    config.leases = std::make_shared<SessionLeases>(60s);
+    config.routing = std::make_shared<SessionRoutingState>();
+    config.policy_state = std::make_shared<SessionPolicyState>();
+    config.rate_limiter = std::make_shared<KeyedRateLimiter>();
+    config.probe = [](std::optional<int> connection) {
+        return json{{"status", "success"}, {"data", {{"connection_id", connection.value_or(7)},
+            {"session_identity", "/app/con[0]/ses[0]|key|generation"},
+            {"system", "A4H"}, {"client", "001"}, {"user", "ALICE"},
+            {"connection_name", "A4H Logon"}}}};
+    };
+    int actions = 0;
+    config.invoke = [&](const WorkerCall& call, const std::function<void()>& before_send) {
+        before_send();
+        ++actions;
+        CHECK(call.connection == 7);
+        return json{{"status", "success"}, {"data", {{"title", "Easy Access"}}}};
+    };
+    config.shutdown = [] {};
+    configure_session_worker_routing(server, std::move(config));
+    Fixture factory;
+    auto request = factory.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+        {"arguments", {{"connection", 7}, {"no_tabs", true}}}}));
+    const auto response = server.endpoint().handle(request);
+    CHECK(response.status == 200);
+    CHECK(actions == 1);
+    CHECK(global.calls == 0);
+}
+
+TEST_CASE("HTTP owner runtime invalidates a replaced saved connection", "[mcp][http][parallel][runtime]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    SessionWorkerRuntimeConfig config;
+    config.policy.owner_sap_identities = {"A4H/001/ALICE"};
+    config.specs = all_tool_specs();
+    config.leases = std::make_shared<SessionLeases>(60s);
+    config.routing = std::make_shared<SessionRoutingState>();
+    config.policy_state = std::make_shared<SessionPolicyState>();
+    config.rate_limiter = std::make_shared<KeyedRateLimiter>();
+    auto changed = std::make_shared<std::function<void(int)>>();
+    config.on_connection_changed = changed;
+    std::string identity = "/app/con[0]/ses[0]|key|old";
+    config.probe = [&](std::optional<int>) {
+        return json{{"status", "success"}, {"data", {{"connection_id", 7},
+            {"session_identity", identity}, {"system", "A4H"}, {"client", "001"},
+            {"user", "ALICE"}, {"connection_name", "A4H Logon"}}}};
+    };
+    int actions = 0;
+    config.invoke = [&](const WorkerCall&, const std::function<void()>& gate) {
+        gate();
+        ++actions;
+        return json{{"status", "success"}, {"data", {{"title", "Ready"}}}};
+    };
+    config.shutdown = [] {};
+    configure_session_worker_routing(server, std::move(config));
+    Fixture factory;
+    const auto request = factory.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+        {"arguments", {{"connection", 7}, {"no_tabs", true}}}}));
+    CHECK(body_of(server.endpoint().handle(request))["result"]["isError"] != true);
+    identity = "/app/con[0]/ses[0]|key|new";
+    REQUIRE(static_cast<bool>(*changed));
+    (*changed)(7);
+    CHECK(body_of(server.endpoint().handle(request))["result"]["isError"] != true);
+    CHECK(actions == 2);
+}
+
+TEST_CASE("HTTP endpoint uses a fresh route verifier at session dequeue", "[mcp][http][parallel]") {
+    Fixture fixture;
+    SessionExecutorPool lanes(1, 2, 5000);
+    auto provider = std::make_shared<FakeProvider>();
+    int admissions = 0, rechecks = 0;
+    fixture.endpoint.set_session_router(&lanes,
+        [&](const Principal&, const std::string&, const json&) {
+            ++admissions;
+            return HttpEndpoint::SessionRoute{true, "session-A", provider};
+        },
+        [&](const Principal&, const std::string&, const json&) {
+            ++rechecks;
+            return HttpEndpoint::SessionRoute{true, "session-A", provider};
+        });
+    auto request = fixture.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"}}));
+    CHECK(fixture.endpoint.handle(request).status == 200);
+    CHECK(admissions == 1);
+    CHECK(rechecks == 1);
+}
+
+TEST_CASE("HTTP owner runtime overlaps different session workers", "[mcp][http][parallel][runtime]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    SessionWorkerRuntimeConfig config;
+    config.policy.owner_sap_identities = {"A4H/001/ALICE"};
+    config.specs = all_tool_specs();
+    config.leases = std::make_shared<SessionLeases>(60s);
+    config.routing = std::make_shared<SessionRoutingState>();
+    config.policy_state = std::make_shared<SessionPolicyState>();
+    config.rate_limiter = std::make_shared<KeyedRateLimiter>();
+    config.probe = [](std::optional<int> connection) {
+        const int id = connection.value_or(7);
+        return json{{"status", "success"}, {"data", {{"connection_id", id},
+            {"session_identity", "/app/con[0]/ses[" + std::to_string(id) + "]|key|generation"},
+            {"system", "A4H"}, {"client", "001"}, {"user", "ALICE"},
+            {"connection_name", "A4H Logon"}}}};
+    };
+    std::promise<void> first_entered, first_release;
+    auto released = first_release.get_future().share();
+    config.invoke = [&](const WorkerCall& call, const std::function<void()>& before_send) {
+        before_send();
+        if (call.connection == 7) { first_entered.set_value(); released.wait(); }
+        return json{{"status", "success"}, {"data", {{"title", "Ready"}}}};
+    };
+    config.shutdown = [&] { try { first_release.set_value(); } catch (...) {} };
+    configure_session_worker_routing(server, std::move(config));
+    Fixture factory;
+    auto request = [&](int connection) {
+        return factory.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+            {"arguments", {{"connection", connection}, {"no_tabs", true}}}}));
+    };
+    auto first = std::async(std::launch::async, [&] { return server.endpoint().handle(request(7)); });
+    REQUIRE(first_entered.get_future().wait_for(1s) == std::future_status::ready);
+    auto second = std::async(std::launch::async, [&] { return server.endpoint().handle(request(8)); });
+    const bool overlapped = second.wait_for(1s) == std::future_status::ready;
+    first_release.set_value();
+    CHECK(overlapped);
+    CHECK(first.get().status == 200);
+    CHECK(second.get().status == 200);
+    CHECK(global.calls == 0);
+}
+
+TEST_CASE("HTTP owner runtime queues behind a long same-session action", "[mcp][http][parallel][runtime]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    SessionWorkerRuntimeConfig config;
+    config.policy.owner_sap_identities = {"A4H/001/ALICE"};
+    config.specs = all_tool_specs();
+    config.leases = std::make_shared<SessionLeases>(60s);
+    config.routing = std::make_shared<SessionRoutingState>();
+    config.policy_state = std::make_shared<SessionPolicyState>();
+    config.rate_limiter = std::make_shared<KeyedRateLimiter>();
+    std::atomic<int> probes{0}, actions{0};
+    config.probe = [&](std::optional<int>) {
+        ++probes;
+        return json{{"status", "success"}, {"data", {{"connection_id", 7},
+            {"session_identity", "/app/con[0]/ses[0]|key|generation"},
+            {"system", "A4H"}, {"client", "001"}, {"user", "ALICE"},
+            {"connection_name", "A4H Logon"}}}};
+    };
+    std::promise<void> entered, release;
+    auto released = release.get_future().share();
+    config.invoke = [&](const WorkerCall&, const std::function<void()>& before_send) {
+        before_send();
+        if (++actions == 1) { entered.set_value(); released.wait(); }
+        return json{{"status", "success"}, {"data", {{"title", "Ready"}}}};
+    };
+    config.shutdown = [&] { try { release.set_value(); } catch (...) {} };
+    configure_session_worker_routing(server, std::move(config));
+    Fixture factory;
+    auto request = factory.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"},
+        {"arguments", {{"connection", 7}, {"no_tabs", true}}}}));
+    auto first = std::async(std::launch::async, [&] { return server.endpoint().handle(request); });
+    REQUIRE(entered.get_future().wait_for(1s) == std::future_status::ready);
+    const int before_second = probes.load();
+    auto second = std::async(std::launch::async, [&] { return server.endpoint().handle(request); });
+    CHECK(second.wait_for(5500ms) == std::future_status::timeout);
+    CHECK(probes == before_second); // admission used cache while the first worker was busy
+    release.set_value();
+    CHECK(first.get().status == 200);
+    CHECK(second.get().status == 200);
+    CHECK(actions == 2);
+}
+
+TEST_CASE("HTTP route admission refreshes a revoked token before consulting SAP", "[mcp][http][parallel][revocation]") {
+    class RevokingAuth final : public TokenAuth {
+    public:
+        AuthOutcome authenticate(const AuthRequest& request) override {
+            if (revoked.load()) {
+                AuthOutcome denied;
+                denied.error_code = "TOKEN_REVOKED";
+                return denied;
+            }
+            return TokenAuth::authenticate(request);
+        }
+        std::atomic<bool> revoked{false};
+    };
+    CallExecutor exec(2, 5000);
+    FakeProvider global;
+    RevokingAuth auth;
+    HttpEndpoint endpoint(Fixture::prepare({}), exec, global, &auth);
+    SessionExecutorPool lanes(1, 2, 5000);
+    std::atomic<int> route_calls{0};
+    endpoint.set_session_router(&lanes, [&](const Principal&, const std::string&, const json&) {
+        ++route_calls;
+        return HttpEndpoint::SessionRoute{};
+    });
+    Fixture request_factory;
+    auto request = request_factory.post(Fixture::rpc("tools/call", {{"name", "gui_screen_read"}}));
+    const auto admitted = endpoint.preauthenticate(request);
+    REQUIRE_FALSE(admitted.rejection.has_value());
+    auth.revoked = true;
+    const auto response = endpoint.handle_authenticated(request, admitted.principal);
+    CHECK(body_of(response)["error"]["data"]["code"] == "TOKEN_REVOKED");
+    CHECK(route_calls == 0);
+    CHECK(global.calls == 0);
+}
+
+TEST_CASE("HTTP server refuses incomplete session routing configuration", "[mcp][http][parallel][shutdown]") {
+    FakeProvider global;
+    McpHttpServer server(HttpServerConfig{}, global, std::make_unique<TokenAuth>());
+    auto pool = std::make_shared<SessionExecutorPool>(1, 1, 5000);
+    auto router = [](const Principal&, const std::string&, const json&) { return HttpEndpoint::SessionRoute{}; };
+    CHECK_THROWS_AS(server.set_session_router(nullptr, router), std::invalid_argument);
+    CHECK_THROWS_AS(server.set_session_router(pool, {}), std::invalid_argument);
+}
+
+TEST_CASE("HTTP runner configures session routing before bind", "[mcp][http][parallel]") {
+    struct Configured : std::exception {};
+    bool configured = false;
+    HttpRunArgs args;
+    args.make_provider = [](bool) { return std::make_unique<FakeProvider>(); };
+    args.authenticator = std::make_unique<TokenAuth>();
+    args.configure_session_routing = [&](McpHttpServer& server) {
+        configured = true;
+        auto pool = std::make_shared<SessionExecutorPool>(1, 1, 5000);
+        server.set_session_router(pool, [](const Principal&, const std::string&, const json&) {
+            return HttpEndpoint::SessionRoute{};
+        });
+        throw Configured{}; // keep this test independent of URL reservations
+    };
+    CHECK_THROWS_AS(run_mcp_http(std::move(args)), Configured);
+    CHECK(configured);
+}
+
+TEST_CASE("HTTP routed job reauthenticates after waiting in its session lane", "[mcp][http][parallel][revocation]") {
+    class RevokingAuth final : public TokenAuth {
+    public:
+        AuthOutcome authenticate(const AuthRequest& request) override {
+            if (revoked.load()) {
+                AuthOutcome denied;
+                denied.error_code = "TOKEN_REVOKED";
+                return denied;
+            }
+            return TokenAuth::authenticate(request);
+        }
+        std::atomic<bool> revoked{false};
+    } auth;
+    struct SignallingProvider : FakeProvider {
+        std::promise<void> entered;
+        ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
+            if (args.value("ms", 0) > 100) entered.set_value();
+            return FakeProvider::call_tool(name, args, ctx);
+        }
+    };
+    FakeProvider global;
+    CallExecutor exec(2, 5000);
+    HttpEndpointOptions opts;
+    opts.server.name = "fairyfly";
+    opts.server.version = "1";
+    opts.poll_ms = 10;
+    HttpEndpoint endpoint(opts, exec, global, &auth);
+    SessionExecutorPool lanes(1, 2, 5000);
+    auto session = std::make_shared<SignallingProvider>();
+    auto entered = session->entered.get_future();
+    endpoint.set_session_router(&lanes, [session](const Principal&, const std::string&, const json&) {
+        HttpEndpoint::SessionRoute route;
+        route.handled = true;
+        route.identity = "A";
+        route.provider = session;
+        return route;
+    });
+    auto request = [&](int id, int ms) {
+        HttpRequest r;
+        r.method = "POST";
+        r.path = "/mcp";
+        r.headers["Host"] = "127.0.0.1:8383";
+        r.headers["Content-Type"] = "application/json";
+        r.headers["Authorization"] = "Bearer good";
+        r.peer_addr = "127.0.0.1";
+        r.body = Fixture::rpc("tools/call", {{"name", "gui_slow"}, {"arguments", {{"ms", ms}}}}, id).dump();
+        return r;
+    };
+    auto first = std::async(std::launch::async, [&] { return endpoint.handle(request(1, 500)); });
+    REQUIRE(entered.wait_for(1s) == std::future_status::ready);
+    auto second = std::async(std::launch::async, [&] { return endpoint.handle(request(2, 0)); });
+    for (int i = 0; i < 1000 && lanes.queued("A") == 0; ++i) std::this_thread::sleep_for(1ms);
+    REQUIRE(lanes.queued("A") == 1);
+    auth.revoked = true;
+    CHECK(body_of(second.get()).dump().find("TOKEN_REVOKED") != std::string::npos);
+    (void)first.get();
+    CHECK(session->calls == 1);
+    CHECK(global.calls == 0);
+}
 
 // ---- SSE framing (pure) -------------------------------------------------------------------------
 
@@ -321,9 +963,11 @@ TEST_CASE("HTTP Host and Origin checks", "[mcp][http]") {
 // ---- server-level IP allow-list ----------------------------------------------------------------------
 
 TEST_CASE("HTTP server allow-list: ADDRESS_NOT_ALLOWED matrix", "[mcp][http][allow_ip]") {
-    const auto status_for = [](const std::vector<std::string>& allow, const std::string& peer, const char* forwarded = nullptr) {
+    const auto status_for = [](const std::vector<std::string>& allow, const std::string& peer,
+                               const char* forwarded = nullptr, bool exempt_loopback = true) {
         HttpEndpointOptions o;
         o.allow_ip = allow;
+        o.allow_ip_include_loopback = !exempt_loopback;
         Fixture f(5000, 16, o);
         auto req = f.post(Fixture::rpc("ping"));
         req.peer_addr = peer;
@@ -338,6 +982,12 @@ TEST_CASE("HTTP server allow-list: ADDRESS_NOT_ALLOWED matrix", "[mcp][http][all
     SECTION("loopback always passes, IPv4 and IPv6 and IPv4-mapped") {
         for (const char* peer : {"127.0.0.1", "127.9.9.9", "::1", "[::1]", "::ffff:127.0.0.1"})
             CHECK(status_for({"192.0.2.0/24"}, peer).first == 200);
+    }
+    SECTION("strict allow-list applies to loopback peers as well") {
+        CHECK(status_for({"192.0.2.0/24"}, "127.0.0.1", nullptr, false).second == "ADDRESS_NOT_ALLOWED");
+        CHECK(status_for({"127.0.0.0/8"}, "127.0.0.1", nullptr, false).first == 200);
+        CHECK(status_for({"::1"}, "::1", nullptr, false).first == 200);
+        CHECK(status_for({}, "127.0.0.1", nullptr, false).second == "ADDRESS_NOT_ALLOWED");
     }
     SECTION("a non-loopback peer must match a CIDR") {
         const std::vector<std::string> allow = {"192.168.1.0/24", "fd00::/8"};
@@ -1082,6 +1732,26 @@ TEST_CASE("SSE: client disconnect sets the call's cancelled flag", "[mcp][http][
     CHECK(f.provider.saw_cancel.load());
 }
 
+TEST_CASE("JSON client disconnect removes a queued tool call", "[mcp][http][cancel]") {
+    Fixture f;
+    auto slow = f.post(Fixture::rpc("tools/call", json{{"name", "gui_slow"}, {"arguments", json{{"ms", 500}}}}, 40));
+    auto first = std::async(std::launch::async, [&] { return f.endpoint.handle(slow); });
+    const auto started = std::chrono::steady_clock::now() + 2s;
+    while (f.provider.calls == 0 && std::chrono::steady_clock::now() < started) std::this_thread::sleep_for(5ms);
+    REQUIRE(f.provider.calls == 1);
+
+    std::atomic<bool> connected{true};
+    auto queued = f.post(Fixture::rpc("tools/call", json{{"name", "gui_screen_read"}}, 41));
+    queued.connected = [&] { return connected.load(); };
+    auto second = std::async(std::launch::async, [&] { return f.endpoint.handle(queued); });
+    std::this_thread::sleep_for(40ms);
+    connected = false;
+    CHECK(second.wait_for(300ms) == std::future_status::ready);
+    if (second.wait_for(0ms) == std::future_status::ready) CHECK(second.get().status == 499);
+    first.get();
+    CHECK(f.provider.calls == 1);
+}
+
 // ---- IServerControl + loopback (http.sys, fixed dev prefix) ------------------------------------------------
 //
 // These tests bind http://127.0.0.1:18383/mcp/ through the real http.sys adapter. http.sys needs a URL ACL for
@@ -1393,6 +2063,29 @@ TEST_CASE("Loopback http.sys: SSE client disconnect cancels the call", "[httpsys
     CHECK(provider.saw_cancel.load());
 }
 
+TEST_CASE("Loopback http.sys: JSON client disconnect cancels the call", "[httpsys][loopback][cancel]") {
+    FakeProvider provider;
+    McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
+    BIND_OR_SKIP(server);
+    run_with_client(server, [&] {
+        {
+            fairyfly::test::RawHttpClient c;
+            if (!c.connect(kDevPort)) return;
+            c.send(fairyfly::test::RawHttpClient::post(
+                "/mcp", R"({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"gui_wait_cancel"}})",
+                std::string(kGoodAuth) + "Accept: application/json\r\n"));
+            const auto started = std::chrono::steady_clock::now() + 2s;
+            while (std::chrono::steady_clock::now() < started) {
+                { std::lock_guard<std::mutex> lock(provider.m); if (provider.calls > 0) break; }
+                std::this_thread::sleep_for(10ms);
+            }
+        }  // socket closed while the tool is running
+        const auto until = std::chrono::steady_clock::now() + 2500ms;
+        while (!provider.saw_cancel && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(20ms);
+    });
+    CHECK(provider.saw_cancel.load());
+}
+
 TEST_CASE("Loopback http.sys: restart request and prefix collision", "[httpsys][loopback][control]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
@@ -1434,7 +2127,7 @@ TEST_CASE("IServerControl: read-only cap, posture banner", "[mcp][http][control]
     CHECK(banner.find("stateless 2026-07-28") != std::string::npos);
     CHECK(banner.find("sse:") != std::string::npos);
     CHECK(banner.find("FAIRYFLY_READ_ONLY") != std::string::npos);
-    CHECK(banner.find("client ip allow-list: any (loopback always allowed)") != std::string::npos);
+    CHECK(banner.find("client ip allow-list: any") != std::string::npos);
     for (const char* gone : {"IIS", "proxy", "Proxy", "reverse"}) CHECK(banner.find(gone) == std::string::npos);
 }
 
@@ -1468,6 +2161,9 @@ TEST_CASE("posture banner and status are scheme-aware", "[mcp][http][banner]") {
         CHECK(banner.find("reachable from the network: TLS on, tokens required") != std::string::npos);
         CHECK(banner.find("consider --allow-ip") == std::string::npos);  // an allow-list is configured
         CHECK(server.status().endpoint == "https://sap.example.com:8443/mcp");
+        config.endpoint.allow_ip_include_loopback = true;
+        McpHttpServer strict(config, provider, std::make_unique<TokenAuth>());
+        CHECK(join(strict.posture_lines()).find("(includes loopback)") != std::string::npos);
     }
     {
         HttpServerConfig config;

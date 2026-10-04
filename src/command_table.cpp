@@ -13,6 +13,7 @@ struct Row {
     const char* help_group;
     bool tool;
     const char* family_override;  // nullptr = the noun
+    bool mcp_only = false;
 };
 
 std::string join(const std::vector<std::string>& parts, const std::string& sep) {
@@ -31,6 +32,7 @@ const std::vector<Row>& rows() {
         {{"session", "launch"}, "Launch SAP Logon connection", "SESSION", true, nullptr},
         {{"session", "login"}, "Log into a launched SAP GUI session", "SESSION", true, nullptr},
         {{"session", "disconnect"}, "Remove a saved connection; optionally close its SAP GUI session", "SESSION", true, nullptr},
+        {{"session", "lease"}, "Acquire, renew or release an MCP session lease", "SESSION", true, nullptr, true},
         {{"connection", "list"}, "List and manage saved fairyfly connections", "CONNECTION", true, nullptr},
         {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr},
         {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr},
@@ -63,6 +65,7 @@ std::vector<CommandSpec> build_commands() {
         spec.path = row.path;
         spec.summary = row.summary;
         spec.help_group = row.help_group;
+        spec.mcp_only = row.mcp_only;
         if (row.tool) {
             spec.tool_name = derived_tool_name(row.path);
             spec.family = row.family_override ? row.family_override : row.path.front();

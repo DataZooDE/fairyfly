@@ -42,6 +42,8 @@ add_executable(unit_tests
     unit/test_mcp_http.cpp
     unit/test_http_sys_mapping.cpp
     unit/test_command_table.cpp
+    unit/test_command_registry_threads.cpp
+    unit/test_agent_help.cpp
     unit/test_setup_validators.cpp
     unit/test_auth.cpp
     unit/test_auth_policy.cpp
@@ -55,6 +57,15 @@ add_executable(unit_tests
     unit/test_mcp_tool_metadata.cpp
     unit/test_mcp_usability.cpp
     unit/test_mcp_selection_input.cpp
+    unit/test_mcp_session_leases.cpp
+    unit/test_mcp_session_executor_pool.cpp
+    unit/test_mcp_session_worker_protocol.cpp
+    unit/test_mcp_session_route_plan.cpp
+    unit/test_mcp_session_route_coordinator.cpp
+    unit/test_mcp_session_worker_process.cpp
+    unit/test_window_owner.cpp
+    unit/test_mcp_session_worker_broker.cpp
+    unit/test_mcp_session_worker_provider.cpp
     unit/test_selection_input_guard.cpp
     unit/test_round2_usability.cpp
     unit/test_tray_win32_manual.cpp
@@ -66,6 +77,15 @@ add_executable(unit_tests
 add_executable(connection_cache_worker EXCLUDE_FROM_ALL unit/connection_cache_worker.cpp)
 target_link_libraries(connection_cache_worker PRIVATE fairyfly_core)
 add_dependencies(unit_tests connection_cache_worker)
+
+add_executable(mcp_worker_fixture EXCLUDE_FROM_ALL unit/mcp_worker_fixture.cpp)
+target_link_libraries(mcp_worker_fixture PRIVATE fairyfly_core)
+add_dependencies(unit_tests mcp_worker_fixture)
+add_dependencies(unit_tests fairyfly)
+
+# Manual live SAP gate: independent COM STAs in one process (read-only; excluded from normal tests).
+add_executable(sap_sta_parallel_probe EXCLUDE_FROM_ALL integration/sap_sta_parallel_probe.cpp)
+target_link_libraries(sap_sta_parallel_probe PRIVATE fairyfly_core)
 
 # Recorded SAP screens (object trees and legacy reads) used by the bulk reader parity tests
 target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures")

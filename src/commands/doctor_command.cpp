@@ -13,6 +13,10 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"doctor"});
+        cmd_->footer(R"HELP(Usage notes:
+Use when SAP GUI attachment or scripting fails; inspect reported prerequisites.
+Example: fairyfly doctor
+)HELP");
         return cmd_;
     }
 

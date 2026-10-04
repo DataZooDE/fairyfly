@@ -106,6 +106,10 @@ void setup_mcp_setup_commands(CLI::App& mcp, McpExtras& x) {
     };
 
     s.setup = mcp.add_subcommand("setup", "One-time machine setup of the https listener: certificate, URL reservation, TLS binding (one UAC prompt)");
+    s.setup->footer(R"HELP(Usage notes:
+Review --dry-run before applying machine setup. Applying can require elevation.
+Example: fairyfly mcp setup --hostname host.example --self-signed --dry-run
+)HELP");
     s.setup->fallthrough();
     Options& o = s.options;
     s.setup->add_option("--hostname", o.hostname, "Host name clients use (default: this machine's lower-cased DNS name)");
@@ -113,7 +117,7 @@ void setup_mcp_setup_commands(CLI::App& mcp, McpExtras& x) {
     s.setup->add_flag("--self-signed", o.self_signed, "Create (or reuse) a self-signed certificate 'fairyfly-mcp <host>' in LocalMachine\\My");
     s.setup->add_option("--cert-thumbprint", o.thumbprint, "Use the certificate with this SHA-1 thumbprint from LocalMachine\\My");
     s.setup->add_flag("--no-tls", o.no_tls, "Development: plain HTTP on 127.0.0.1 only (URL reservation, no certificate)");
-    s.setup->add_option("--allow-ip", o.allow_ip, "Client addresses/CIDR blocks allowed to connect (written to mcp.yaml; loopback always allowed)")->delimiter(',');
+    s.setup->add_option("--allow-ip", o.allow_ip, "Client addresses/CIDR blocks allowed to connect (written to mcp.yaml; loopback exempt by default)")->delimiter(',');
     s.setup->add_option("--user", o.user, "Account that runs the server (DOMAIN\\user; default: the current user)");
     s.setup->add_flag("--open-firewall", o.open_firewall, "Also create the inbound firewall rule 'fairyfly MCP HTTPS <port>'");
     s.setup->add_flag("--force-binding", o.force_binding, "Replace a TLS binding on the port that belongs to another application");
@@ -131,6 +135,10 @@ void setup_mcp_setup_commands(CLI::App& mcp, McpExtras& x) {
     s.setup->add_flag("--plan-force-binding", s.apply_args.force_binding, "(internal) --force-binding was approved")->group("");
 
     s.teardown = mcp.add_subcommand("teardown", "Remove what 'mcp setup' created (manifest driven, idempotent, one UAC prompt)");
+    s.teardown->footer(R"HELP(Usage notes:
+Review the manifest-based removal plan before applying.
+Example: fairyfly mcp teardown --dry-run
+)HELP");
     s.teardown->fallthrough();
     TeardownOptions& t = s.teardown_options;
     s.teardown->add_option("--hostname", t.hostname, "Host name (only needed without a setup manifest)");
@@ -146,6 +154,10 @@ void setup_mcp_setup_commands(CLI::App& mcp, McpExtras& x) {
     s.cert->fallthrough();
     s.cert->require_subcommand(1);
     s.cert_export = s.cert->add_subcommand("export", "Export the public certificate for clients (with trust hints per platform)");
+    s.cert_export->footer(R"HELP(Usage notes:
+Exports the public certificate for client trust configuration.
+Example: fairyfly mcp cert export --format pem --out fairyfly.pem
+)HELP");
     s.cert_export->fallthrough();
     s.cert_export->add_option("--out", s.cert_out, "Target file (default %LOCALAPPDATA%\\fairyfly\\fairyfly-mcp-<host>.cer)");
     s.cert_export->add_option("--format", s.cert_format, "der (default) or pem")->check(CLI::IsMember({"der", "pem"}));

@@ -22,7 +22,7 @@ try {
 $global:LASTEXITCODE = 0
 $argv = @($args)
 # The workflow now calls noun/verb commands; map them back to the short labels the checks below use.
-$legacy = @{ 'session list' = 'list'; 'connection list' = 'connections'; 'session launch' = 'launch'; 'session login' = 'login'; 'session disconnect' = 'disconnect'; 'element get' = 'get'; 'element click' = 'click'; 'element fill' = 'fill'; 'transaction start' = 'tcode' }
+$legacy = @{ 'session list' = 'list'; 'connection list' = 'connections'; 'session launch' = 'launch'; 'session login' = 'login'; 'session disconnect' = 'disconnect'; 'element get' = 'get'; 'element click' = 'click'; 'element fill' = 'fill'; 'transaction start' = 'tcode'; 'credentials set' = 'credset'; 'credentials delete' = 'creddel' }
 if ($argv.Count -gt 1 -and $legacy.ContainsKey("$($argv[0]) $($argv[1])")) { $argv = @($legacy["$($argv[0]) $($argv[1])"]) + @($argv | Select-Object -Skip 2) }
 $command = $argv[0]
 $target = if ($argv.Count -gt 1) { $argv[1] } else { '' }
@@ -30,6 +30,11 @@ $scopeIndex = [Array]::IndexOf($argv, '--connection')
 $scope = if ($scopeIndex -ge 0) { $argv[$scopeIndex + 1] } else { '' }
 $record = "$command|$target|$scope"
 Add-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG -Value $record
+if ($command -eq 'credset' -and $env:FAIRYFLY_SU01_MOCK_CREDSET_BAD_OUTPUT -eq '1') {
+    # Simulate a successful credential write followed by broken CLI output.
+    Write-Output '{'
+    return
+}
 $data = @{}
 $status = 'success'
 $errorDetail = $null
@@ -57,6 +62,16 @@ if ($command -eq 'list') {
         }
     } else {
         $data = @{ transaction = 'SESSION_MANAGER' }
+    }
+} elseif ($command -eq 'credset') {
+    $lines = @($input)
+    if ($target -ne "FFTEST-$env:FAIRYFLY_SU01_MOCK_USER" -or
+        -not ($lines -match '^Cc3![0-9a-f]{14}$')) {
+        $status = 'error'; $errorDetail = @{ message = 'Temporary credential was not piped through stdin' }
+    }
+} elseif ($command -eq 'creddel') {
+    if ($target -ne "FFTEST-$env:FAIRYFLY_SU01_MOCK_USER") {
+        $status = 'error'; $errorDetail = @{ message = 'Wrong temporary credential deleted' }
     }
 } elseif ($command -eq 'disconnect') {
     $data = @{ session_closed = $true; file_deleted = $true }
@@ -135,6 +150,42 @@ if ($command -eq 'list') {
     if ($calls -match 'Bb2![0-9a-f]{14}') { throw 'Changed password leaked into mock CLI arguments or output' }
     Write-Host 'PASS: changed password authenticated in a second session before user deletion.'
 
+    $gate = Join-Path $work 'mcp_gate_mock.ps1'
+    @'
+param([string]$Username, [string]$CredentialName, [int]$AdminConnectionId, [string]$ConnectionName, [string]$FairyflyPath)
+if ($Username -ne $env:FAIRYFLY_SU01_MOCK_USER -or
+    $CredentialName -ne "FFTEST-$Username" -or $AdminConnectionId -ne 8 -or
+    $ConnectionName -ne 'Bigfox') { throw 'Wrong disposable-user gate arguments' }
+Add-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG -Value "gate|$Username|$AdminConnectionId"
+'@ | Set-Content -LiteralPath $gate
+    Remove-Item -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG
+    $output = & $scriptPath -FairyflyPath $mock -LoginFromTrialEnv -VerifyChangedPasswordLogin `
+        -McpGateScript $gate -Username $env:FAIRYFLY_SU01_MOCK_USER `
+        -FirstName $env:FAIRYFLY_SU01_MOCK_FIRST -LastName $env:FAIRYFLY_SU01_MOCK_LAST 2>&1 | Out-String
+    $calls = @(Get-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG)
+    $joined = $calls -join "`n"
+    if ($joined -notmatch '(?s)credset\|FFTEST-ZFFSU01T001.*gate\|ZFFSU01T001\|8.*click\|wnd\[0\]/tbar\[1\]/btn\[14\].*creddel\|FFTEST-ZFFSU01T001') {
+        throw "MCP gate did not run between verified login and test-user deletion with credential cleanup: $output"
+    }
+    Write-Host 'PASS: disposable-user MCP gate ran before user deletion and removed its stored credential.'
+
+    Remove-Item -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG
+    $env:FAIRYFLY_SU01_MOCK_CREDSET_BAD_OUTPUT = '1'
+    try {
+        & $scriptPath -FairyflyPath $mock -LoginFromTrialEnv -VerifyChangedPasswordLogin `
+            -McpGateScript $gate -Username $env:FAIRYFLY_SU01_MOCK_USER `
+            -FirstName $env:FAIRYFLY_SU01_MOCK_FIRST -LastName $env:FAIRYFLY_SU01_MOCK_LAST 2>&1 | Out-String | Out-Null
+    } catch {}
+    Remove-Item Env:FAIRYFLY_SU01_MOCK_CREDSET_BAD_OUTPUT
+    $calls = @(Get-Content -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG)
+    if (-not ($calls -match '^credset\|FFTEST-ZFFSU01T001\|') -or
+        -not ($calls -match '^creddel\|FFTEST-ZFFSU01T001\|') -or
+        -not ($calls -match '^click\|wnd\[0\]/tbar\[1\]/btn\[14\]\|') -or
+        ($calls -match '^gate\|')) {
+        throw 'Post-write credential failure did not clean the credential and SAP user'
+    }
+    Write-Host 'PASS: post-write credential output failure cleaned the temporary secret and SAP user.'
+
     Remove-Item -LiteralPath $env:FAIRYFLY_SU01_MOCK_LOG
     $env:FAIRYFLY_SU01_MOCK_LOGIN_FAIL = '1'
     try {
@@ -147,8 +198,8 @@ if ($command -eq 'list') {
     if ($calls -match '^(tcode|fill|click|get)\|') { throw 'Failed-login path performed SU01 actions' }
     Write-Host 'PASS: failed launch-mode login closed the owned session without SU01 actions.'
 } finally {
-    Remove-Item Env:FAIRYFLY_SU01_MOCK_LOG,Env:FAIRYFLY_SU01_MOCK_USER,Env:FAIRYFLY_SU01_MOCK_FIRST,Env:FAIRYFLY_SU01_MOCK_LAST,Env:FAIRYFLY_SU01_OFFLINE_ONLY,Env:FAIRYFLY_SU01_MOCK_LOGIN_FAIL -ErrorAction SilentlyContinue
-    foreach ($file in @('calls.txt', 'fairyfly_mock.ps1')) {
+    Remove-Item Env:FAIRYFLY_SU01_MOCK_LOG,Env:FAIRYFLY_SU01_MOCK_USER,Env:FAIRYFLY_SU01_MOCK_FIRST,Env:FAIRYFLY_SU01_MOCK_LAST,Env:FAIRYFLY_SU01_OFFLINE_ONLY,Env:FAIRYFLY_SU01_MOCK_LOGIN_FAIL,Env:FAIRYFLY_SU01_MOCK_CREDSET_BAD_OUTPUT -ErrorAction SilentlyContinue
+    foreach ($file in @('calls.txt', 'fairyfly_mock.ps1', 'mcp_gate_mock.ps1')) {
         $known = Join-Path $work $file
         if (Test-Path -LiteralPath $known) { Remove-Item -LiteralPath $known -Force }
     }

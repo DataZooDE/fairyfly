@@ -15,6 +15,7 @@ struct CommandSpec {
     std::string help_group;         ///< uppercase root help section, e.g. "ELEMENT"
     std::string tool_name;          ///< MCP tool name ("gui_element_click"); empty = CLI-only
     std::string family;             ///< tool family (the noun; "system" for doctor, "batch" for batch)
+    bool mcp_only = false;          ///< broker-native MCP tool with no CLI command
 
     bool is_tool() const { return !tool_name.empty(); }
     std::string path_string() const;  ///< path joined by a space, e.g. "element click"

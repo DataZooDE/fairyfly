@@ -5,6 +5,24 @@
 
 namespace fairyfly::config {
 
+SapState::Tri classify_logged_in_users(const std::vector<std::optional<std::string>>& users,
+                                       bool enumeration_complete) noexcept {
+    bool unknown = !enumeration_complete;
+    for (const auto& user : users) {
+        if (user && !user->empty()) return SapState::Tri::Yes;
+        if (!user) unknown = true;
+    }
+    return unknown ? SapState::Tri::Unknown : SapState::Tri::No;
+}
+
+bool owner_sap_identity_allowed(const std::string& system, const std::string& client,
+                                const std::string& user, const std::vector<std::string>& identities) {
+    if (identities.empty()) return true;
+    if (system.empty() || client.empty() || user.empty()) return false;
+    const std::string identity = system + "/" + client + "/" + user;
+    return std::find(identities.begin(), identities.end(), identity) != identities.end();
+}
+
 namespace {
 
 std::string lower(std::string s) {

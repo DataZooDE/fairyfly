@@ -851,6 +851,20 @@ TEST_CASE("Popup close falls back to window Close when SendVKey throws", "[com][
     }
 }
 
+TEST_CASE("Popup close falls back when SendVKey returns but the modal stays open", "[com][window][close]") {
+    using fairyfly::sap::attempt_close;
+    using fairyfly::sap::fallback_close_when_still_open;
+    using fairyfly::sap::CloseMethod;
+    ScopedDispatchCacheReset cache_reset;
+    auto* dispatch = new TextFieldDispatch(L"GuiModalWindow", 14400);
+    ComGuiWindow window(IDispatchPtr(dispatch, true));
+    auto attempt = attempt_close(1, [&] { window.send_vkey(12); }, [&] { window.close(); });
+    REQUIRE(attempt.method == CloseMethod::Vkey);
+    attempt = fallback_close_when_still_open(1, 1, attempt, [&] { window.close(); });
+    CHECK(attempt.method == CloseMethod::WindowClose);
+    CHECK(dispatch->close_calls == 1);
+}
+
 TEST_CASE("Menu tree enumeration nests children and never selects", "[com][menu]") {
     ScopedDispatchCacheReset cache_reset;
     auto* bar = new TextFieldDispatch(L"GuiMenubar", 14600, L"wnd[0]/mbar");

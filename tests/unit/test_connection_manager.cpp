@@ -183,6 +183,33 @@ TEST_CASE("ConnectionManager distinguishes reused SAP session paths", "[connecti
     REQUIRE(fs::remove(temp_dir));
 }
 
+TEST_CASE("ConnectionManager owner launch creates only a fresh session receipt", "[connection_manager]") {
+    const auto temp_dir = std::filesystem::temp_directory_path() /
+        ("fairyfly-owner-launch-create-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(std::filesystem::create_directory(temp_dir));
+    ConnectionManager manager(temp_dir.string());
+    const auto first = manager.create_new_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "A4H Logon", "", "", "key-one");
+    CHECK(manager.matches_connection_generation(first));
+    CHECK_THROWS(manager.create_new_connection(
+        "/app/con[0]/ses[0]", "/app/con[0]", "A4H Logon", "", "", "key-one"));
+    CHECK(manager.load_connection(first.id).has_value());
+    CHECK(manager.delete_connection_if_unchanged(first));
+    CHECK_FALSE(manager.matches_connection_generation(first));
+    CHECK_FALSE(manager.load_connection(first.id).has_value());
+    const auto prelogin = manager.create_new_connection(
+        "/app/con[1]/ses[0]", "/app/con[1]", "A4H Logon", "", "", "");
+    CHECK_THROWS(manager.create_new_connection(
+        "/app/con[1]/ses[0]", "/app/con[1]", "A4H Logon", "", "", "new-key"));
+    const auto logged_in = manager.set_session_key(prelogin, "new-key");
+    CHECK_FALSE(manager.matches_connection_generation(prelogin));
+    CHECK(manager.matches_connection_generation(logged_in));
+    CHECK_FALSE(manager.delete_connection_if_unchanged(prelogin));
+    CHECK(manager.delete_connection_if_unchanged(logged_in));
+    REQUIRE(std::filesystem::remove(temp_dir));
+}
+
 TEST_CASE("Legacy connection files remain mutable and do not collide with new IDs", "[connection_manager]") {
     const fs::path original_directory = fs::current_path();
     const fs::path temp_dir = fs::temp_directory_path() /

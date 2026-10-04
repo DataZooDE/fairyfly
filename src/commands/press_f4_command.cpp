@@ -15,6 +15,10 @@ public:
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","f4"});
+        cmd_->footer(R"HELP(Usage notes:
+Open search help on a field found by screen read --only-f4-fields, then read the popup.
+Example: fairyfly element f4 "wnd[0]/usr/ctxtFIELD" --connection 3
+)HELP");
         cmd_->add_option("element", element_, "Element ID of GuiCTextField (e.g., wnd[0]/usr/ctxtFIELD or @active/usr/ctxtFIELD)")
             ->required();
         cmd_->add_option("--connection", conn_id_, "Connection ID to use");

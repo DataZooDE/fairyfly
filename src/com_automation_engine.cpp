@@ -18,6 +18,7 @@
 #include "include/table_data_extractor.h"
 #include "include/cli_handler.h"
 #include "include/string_utils.h"
+#include "include/system/window_owner.h"
 #include "include/base64.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
@@ -160,9 +161,27 @@ ComGuiSessionPtr ComAutomationEngine::ensure_session() {
         if (conn->get_session_count() == 0) {
             throw ComException("No sessions available in connection");
         }
-        bind_session(conn, conn->get_session(0));
+        auto session = conn->get_session(0);
+        if (!owner_window_allowed(session))
+            throw ComException("SAP GUI window is unavailable to this Windows logon");
+        bind_session(conn, std::move(session));
     }
+    if (!owner_window_allowed(current_session_))
+        throw ComException("SAP GUI window is unavailable to this Windows logon");
     return current_session_;
+}
+
+bool ComAutomationEngine::owner_window_allowed(const ComGuiSessionPtr& session) const noexcept {
+    if (!owner_window_guard_) return true;
+    try {
+        if (!session) return false;
+        const auto window = session->get_active_window();
+        if (!window) return false;
+        // SAP's Handle is a signed COM Long; Windows sign-extends user handles.
+        const auto raw = window->get_int_property(L"Handle");
+        const auto handle = system::sap_com_long_to_window_handle(raw);
+        return system::window_owned_by_current_logon(handle);
+    } catch (...) { return false; }
 }
 
 Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
@@ -587,6 +606,7 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
     try {
         auto sess = find_session_by_id(session_id).second;
         if (!sess) return facts;
+        if (!owner_window_allowed(sess)) return facts;
         if (!server_session_key.empty() && sess->get_server_session_key() != server_session_key) return facts;
         bool timed_out = false;
         facts = read_facts_bounded(
@@ -604,6 +624,7 @@ audit::SapFacts ComAutomationEngine::peek_session_facts(const std::string& sessi
             FactsBudget{}, FactsClock{}, &timed_out);
         if (timed_out)
             spdlog::warn("peek_session_facts: session {} stayed busy for 5 s, facts unknown", session_id);
+        if (!owner_window_allowed(sess)) return audit::SapFacts{};
     } catch (...) {
         return audit::SapFacts{};
     }
@@ -614,17 +635,29 @@ std::string ComAutomationEngine::peek_session_connection_description(const std::
     try {
         auto found = find_session_by_id(session_id);
         if (!found.first || !found.second) return {};
+        if (!owner_window_allowed(found.second)) return {};
         return found.first->get_description();
     } catch (...) {
         return {};
     }
 }
 
+std::uintptr_t ComAutomationEngine::peek_session_window_handle(const std::string& session_id) const noexcept {
+    try {
+        auto sess = find_session_by_id(session_id).second;
+        if (!sess || !owner_window_allowed(sess)) return 0;
+        auto window = sess->get_active_window();
+        if (!window) return 0;
+        const auto handle = system::sap_com_long_to_window_handle(window->get_int_property(L"Handle"));
+        return system::window_owned_by_current_logon(handle) ? handle : 0;
+    } catch (...) { return 0; }
+}
+
 bool ComAutomationEngine::validate_session(const std::string& session_id,
                                            const std::string& server_session_key) const {
     try {
         auto session = find_session_by_id(session_id).second;
-        return session && (server_session_key.empty() ||
+        return session && owner_window_allowed(session) && (server_session_key.empty() ||
                            session->get_server_session_key() == server_session_key);
     } catch (const std::exception& e) {
         spdlog::debug("Cannot validate session {}: {}", session_id, e.what());
@@ -642,6 +675,7 @@ bool ComAutomationEngine::select_session(const std::string& session_id,
     try {
         auto [conn, sess] = find_session_by_id(session_id);
         if (!sess) return false;
+        if (!owner_window_allowed(sess)) return false;
         if (!server_session_key.empty() &&
             sess->get_server_session_key() != server_session_key) return false;
         bind_session(std::move(conn), std::move(sess));

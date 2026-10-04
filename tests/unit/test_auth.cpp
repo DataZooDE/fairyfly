@@ -742,6 +742,39 @@ TEST_CASE("auth: real Credential Manager round trip (manual)", "[.][auth][realcr
     CHECK(store.find_by_id(created.meta.id)->revoked);
 }
 
+TEST_CASE("auth: strict token lookup distinguishes rotation from unreadable records", "[auth][token]") {
+    struct FailingReadBackend final : SecretBackend {
+        InMemorySecretBackend values;
+        bool fail_get = false;
+        std::optional<std::string> get(const std::string& name) override {
+            if (fail_get) throw std::runtime_error("temporary credential read failure");
+            return values.get(name);
+        }
+        void put(const std::string& name, const std::string& value) override { values.put(name, value); }
+        bool remove(const std::string& name) override { return values.remove(name); }
+        std::vector<std::string> list_names() override { return values.list_names(); }
+    };
+    auto backend = std::make_shared<FailingReadBackend>();
+    TokenStore store(backend);
+    NewToken request;
+    request.name = "lease-holder";
+    request.scopes = {"session"};
+    const auto old = store.create(request);
+    const auto first_scan = store.scan_fresh();
+    CHECK(first_scan.complete);
+    CHECK(first_scan.by_id.count(old.meta.id) == 1);
+    CHECK(store.lookup_fresh(old.meta.id).status == TokenLookupStatus::Found);
+    backend->fail_get = true;
+    CHECK_FALSE(store.scan_fresh().complete);
+    CHECK(store.lookup_fresh(old.meta.id).status == TokenLookupStatus::Unavailable);
+    backend->fail_get = false;
+    const auto current = store.rotate(request.name);
+    CHECK(store.lookup_fresh(old.meta.id).status == TokenLookupStatus::Absent);
+    CHECK(store.lookup_fresh(current.meta.id).status == TokenLookupStatus::Found);
+    REQUIRE(store.remove(request.name));
+    CHECK(store.lookup_fresh(current.meta.id).status == TokenLookupStatus::Absent);
+}
+
 // ---- CLI logic -------------------------------------------------------------------------------
 TEST_CASE("auth: token CLI create defaults, output and confirmation", "[auth][cli]") {
     Env env;
@@ -887,6 +920,35 @@ TEST_CASE("auth: --connections restriction is validated, stored, listed and reac
     CHECK(r.data["connections"] == nlohmann::json::array({"DEV*", "QAS"}));
 }
 
+TEST_CASE("auth: SAP identities are exact token grants and survive storage and rotation", "[auth][token][sap-identity]") {
+    Env env;
+    NewToken token;
+    token.scopes = {"session"};
+    token.sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
+    const auto created = env.create("sap-owner", token);
+    CHECK(created.meta.to_public_json()["sap_identities"] == token.sap_identities);
+    CHECK(env.store().list()[0].sap_identities == token.sap_identities);
+    const auto authenticated = env.auth->authenticate(request_with(created.token));
+    REQUIRE(authenticated.ok);
+    CHECK(authenticated.principal.sap_identities == token.sap_identities);
+    auto store = env.store();
+    store.rotate("sap-owner");
+    CHECK(store.list()[0].sap_identities == token.sap_identities);
+    token.name = "invalid";
+    for (const auto& invalid : {"A4H/001/*", "A4H/001", "A4H/001/alice", "A4H/001/ALICE/EXTRA"}) {
+        token.sap_identities = {invalid};
+        CHECK_THROWS_AS(store.create(token), AuthError);
+    }
+    TokenCliArgs args;
+    args.action = "create";
+    args.name = "cli-sap-owner";
+    args.scopes = {"session"};
+    args.sap_identities = {"A4H/001/ALICE,A4H/001/BOB"};
+    const auto result = run_token_action(args, store);
+    REQUIRE(result.status == Result::Status::Success);
+    CHECK(result.data["sap_identities"] == nlohmann::json::array({"A4H/001/ALICE", "A4H/001/BOB"}));
+}
+
 TEST_CASE("auth: --rate-family is validated, stored, and reaches the principal", "[auth][token][ratefamily]") {
     Env env;
     NewToken t;
@@ -944,7 +1006,8 @@ TEST_CASE("auth: a malformed stored rate_families makes the record unusable, not
 
 TEST_CASE("auth: any malformed restriction field makes the record unusable, never unrestricted", "[auth][token][malformed]") {
     const std::vector<std::pair<const char*, const char*>> fields = {
-        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"}};
+        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"},
+        {"u", "sap_identities"}};
     const std::vector<nlohmann::json> bad_values = {
         nlohmann::json("DEV*"),                        // wrong type: string
         nlohmann::json(5),                             // wrong type: number
@@ -988,7 +1051,8 @@ TEST_CASE("auth: any malformed restriction field makes the record unusable, neve
 
 TEST_CASE("auth: records mixing compact and long-form restriction keys are unusable", "[auth][token][malformed][mixed]") {
     const std::vector<std::pair<const char*, const char*>> fields = {
-        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"}};
+        {"k", "connections"}, {"y", "sap_systems"}, {"t", "tcodes"}, {"s", "scopes"}, {"p", "allowed_ips"},
+        {"u", "sap_identities"}};
     for (const auto& field : fields) {
         // compact v:2 record carrying a long-form restriction key (which the compact parser would ignore)
         Env env;
