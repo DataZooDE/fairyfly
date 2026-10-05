@@ -1412,7 +1412,16 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             current->session_identity == owner_pre_facts->session_identity) {
             const std::string guard = screen_guard_for(*current);
             if (!guard.empty() && guard == screen_guard_for(*owner_pre_facts)) {
-                if (!shaped.structured || !shaped.structured->is_object()) shaped.structured = json::object();
+                if (!shaped.structured || !shaped.structured->is_object()) {
+                    // A text (Markdown) result has no structured part. Clients such as Claude Code hand
+                    // structuredContent to the model when it is present, so a guard-only object would hide the
+                    // screen: carry the text along.
+                    std::string text;
+                    for (const auto& item : shaped.content)
+                        if (item.is_object() && item.value("type", "") == "text") text += item.value("text", "");
+                    shaped.structured = json::object();
+                    (*shaped.structured)["text"] = text;
+                }
                 (*shaped.structured)["screen_guard"] = guard;
             }
         }
