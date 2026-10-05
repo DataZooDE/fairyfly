@@ -474,6 +474,7 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
 | `SYSTEM_UNKNOWN` / `SYSTEM_DENIED` | a token with `--system` needs a target whose system is known (an open session; a launch needs the entry name in the token's `--connections` list as well, see docs/MCP.md; otherwise start it on the desktop and attach); or wrong system. `CONNECTION_DENIED`: the connection name is not in the token's `--connections` |
 | `RATE_LIMITED` | over the token's `--rate` (or the server default 120/min); combine steps with `gui_batch` |
 | `NO_SESSIONS`, `MULTIPLE_SESSIONS` | no SAP session, or several open; `gui_session_list` then `gui_session_attach` with `session_id` |
+| `SAP_LOGON_NOT_RUNNING` on `gui_session_launch` | owner-mode endpoint and SAP Logon (`saplogon.exe`) is not running in the interactive session; start it (it can stay minimized) and launch again. Owner-mode endpoints never fall back to an embedded SAP GUI inside the tray: its windows would be out of reach for the session workers |
 | Screenshot is black, calls fail after a while | the desktop is locked or the RDP session is disconnected; `tscon`, disable lock, see MCP_TRAY.md |
 | SSE events arrive in one burst | an intermediary (proxy, WAF, antivirus HTTPS inspection) buffers the stream; connect directly |
 | Startup: `BIND_FAILED` (exit 2), reason `no_url_reservation` | no URL ACL for this user and prefix: run `fairyfly mcp setup` (elevated once), or as an administrator `netsh http add urlacl url=<prefix> user=<DOMAIN\user>` |

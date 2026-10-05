@@ -275,6 +275,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         bool native_connection_opened = false;
         bool backend_scripting_disabled = false;
         bool used_sapshcut = false;
+        bool sap_logon_missing = false;
         std::string native_error;
         try {
             if (!app_) {
@@ -307,20 +308,31 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
                     });
                 }
             }
+        } catch (const SapLogonNotRunningException& e) {
+            sap_logon_missing = true;
+            native_error = e.what();
+            spdlog::warn("Launch refused: {}", native_error);
         } catch (const std::exception& e) {
             native_error = e.what();
             spdlog::debug("Native COM OpenConnection attempt failed: {}", native_error);
         }
 
-        if (!session_created && (native_connection_opened || !allow_sapshcut)) {
+        if (!session_created && (native_connection_opened || !allow_sapshcut || sap_logon_missing)) {
             result.status = Result::Status::Error;
-            result.error["code"] = native_connection_opened ? "SESSION_NOT_READY" : "CONNECTION_OPEN_FAILED";
-            result.error["message"] = native_connection_opened
-                ? "SAP connection opened but no session is available"
-                : "Native SAP connection did not open";
+            result.error["code"] = native_connection_opened ? "SESSION_NOT_READY"
+                                   : sap_logon_missing      ? "SAP_LOGON_NOT_RUNNING"
+                                                            : "CONNECTION_OPEN_FAILED";
+            result.error["message"] = native_connection_opened ? "SAP connection opened but no session is available"
+                                      : sap_logon_missing
+                                          ? "SAP Logon (saplogon.exe) is not running on this desktop; start it, then retry"
+                                          : "Native SAP connection did not open";
             result.error["connection_name"] = connection_name;
             if (backend_scripting_disabled) {
                 result.error["detail"] = "SAP reports that backend GUI scripting is disabled for this connection";
+            }
+            if (sap_logon_missing) {
+                result.error["hint"] = "Start SAP Logon in the interactive Windows session that runs this server "
+                                       "(it can stay minimized), then call the launch again.";
             }
             if (!native_error.empty()) result.error["native_error"] = native_error;
             result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(

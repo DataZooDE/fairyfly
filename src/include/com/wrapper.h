@@ -31,6 +31,13 @@ public:
     using ComException::ComException;
 };
 
+/// SAP Logon is not reachable through the running object table, and the embedded SapGui.ScriptingCtrl fallback is
+/// switched off for this process (see ComGuiApplication::set_embedded_fallback_allowed).
+class SapLogonNotRunningException : public ComException {
+public:
+    using ComException::ComException;
+};
+
 // get_dispid_via_typeinfo is now provided by sap_gui_base.h
 
 // Forward declarations
@@ -481,8 +488,15 @@ public:
 
     /// Create SAP GUI application COM wrapper
     /// Initializes COM library and creates root SAPGUI object
-    /// Throws ComException if SAP GUI not installed or not accessible
+    /// Throws ComException if SAP GUI not installed or not accessible, SapLogonNotRunningException when SAP Logon
+    /// is not running and the embedded fallback is switched off.
     static ComGuiApplicationPtr create();
+
+    /// Whether create() may fall back to an embedded SapGui.ScriptingCtrl inside this process when SAP Logon is not
+    /// running (default: yes). Its windows belong to this process and are invisible to other processes through the
+    /// running object table, so owner-mode MCP endpoints, whose session workers attach through it, switch it off.
+    static void set_embedded_fallback_allowed(bool allowed);
+    static bool embedded_fallback_allowed();
 
     // Base class get_id(), get_type(), get_name() inherited from SapGuiObject
 

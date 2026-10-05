@@ -20,9 +20,9 @@ runs in one Windows VM and is recorded with VirtualBox's own recording function.
 - A Release build (`build\bin\Release\fairyfly.exe`), Windows Terminal (`winget install --id Microsoft.WindowsTerminal -e`),
   Claude Code (`claude`) logged in.
 - SAP Logon must be running before the tray handles the first launch (`prepare.ps1` and `launch_agents.ps1` start it
-  minimized). Without it SAP GUI scripting falls back to an embedded `SapGui.ScriptingCtrl` inside the tray, whose
-  windows the parallel-session workers cannot reach: the agents log on but never get control
-  (`OWNER_IDENTITY_UNKNOWN`).
+  minimized). Without it the owner-mode tray refuses `gui_session_launch` with `SAP_LOGON_NOT_RUNNING`. (Builds before
+  2026-10-05 fell back to an embedded `SapGui.ScriptingCtrl` inside the tray instead: the agents logged on but never
+  got control, `OWNER_IDENTITY_UNKNOWN`.)
 - The scenarios are in `demo_common.ps1` (`$DemoScenarios`, one screen column each; SM37 is a commented-out fourth).
 - Transactions used (all read-only, no typing): SM04, SM50, SM59, optionally SM37 (ST22 was dropped: its dump lists are often
   empty and typing a wider selection is refused in read-only mode) (default selection for the own user only; an

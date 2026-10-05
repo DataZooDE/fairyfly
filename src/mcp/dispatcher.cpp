@@ -1191,8 +1191,13 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 catch (...) { spdlog::error("owner launch rollback failed for saved connection {}", *id); }
             }
         };
-        if (result.status != Result::Status::Success && !id)
+        if (result.status != Result::Status::Success && !id) {
+            // SAP Logon missing is a fact about this desktop, not about anyone's session: say what to fix.
+            if (result.error.is_object() && result.error.value("code", "") == "SAP_LOGON_NOT_RUNNING")
+                return fail("SAP_LOGON_NOT_RUNNING", result.error.value("message", "SAP Logon is not running"),
+                            result.error.value("hint", ""));
             return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP connection is unavailable");
+        }
         const std::string session = launch_data.is_object() && launch_data.contains("session_id") &&
             launch_data["session_id"].is_string() ? launch_data["session_id"].get<std::string>() : std::string();
         if (!id || session.empty() || !checked_launch_facts || !facts_provider_ || !target_resolver_) {
