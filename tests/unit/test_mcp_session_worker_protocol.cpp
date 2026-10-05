@@ -3,9 +3,35 @@
 #include <stdexcept>
 #include <sstream>
 
+#include "include/mcp/sap_gui_hosting.h"
 #include "include/mcp/session_worker_protocol.h"
 
+#ifdef _WIN32
+#include "include/com/wrapper.h"
+#endif
+
 using namespace fairyfly::mcp;
+
+TEST_CASE("Owner-mode HTTP endpoints refuse the embedded SAP GUI fallback", "[mcp][worker-protocol][sap-logon]") {
+    // Session workers attach through the running object table; windows of an embedded SapGui.ScriptingCtrl live in
+    // the tray process and could never be driven.
+    CHECK_FALSE(embedded_sap_gui_allowed(true, {"A4H/001/DEVELOPER"}));
+    CHECK_FALSE(embedded_sap_gui_allowed(true, {"A4H/001/ALICE", "A4H/001/BOB"}));
+    CHECK(embedded_sap_gui_allowed(true, {}));                      // plain HTTP: one process drives everything
+    CHECK(embedded_sap_gui_allowed(false, {}));                     // stdio
+    CHECK(embedded_sap_gui_allowed(false, {"A4H/001/DEVELOPER"}));  // owner identities only apply to HTTP
+}
+
+#ifdef _WIN32
+TEST_CASE("The embedded SAP GUI fallback switch is process-wide and defaults to allowed", "[mcp][sap-logon]") {
+    using fairyfly::sap::ComGuiApplication;
+    CHECK(ComGuiApplication::embedded_fallback_allowed());
+    ComGuiApplication::set_embedded_fallback_allowed(false);
+    CHECK_FALSE(ComGuiApplication::embedded_fallback_allowed());
+    ComGuiApplication::set_embedded_fallback_allowed(true);   // restore for the other tests in this process
+    CHECK(ComGuiApplication::embedded_fallback_allowed());
+}
+#endif
 
 namespace {
 json valid_call() {

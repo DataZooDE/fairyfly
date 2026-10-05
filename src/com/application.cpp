@@ -5,6 +5,7 @@
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
+#include <atomic>
 #include <iostream>
 #include <chrono>
 #include <windows.h>
@@ -12,9 +13,17 @@
 namespace fairyfly {
 namespace sap {
 
+namespace {
+std::atomic<bool> g_embedded_fallback_allowed{true};
+}
+
 // ============================================================================
 // ComGuiApplication Implementation
 // ============================================================================
+
+void ComGuiApplication::set_embedded_fallback_allowed(bool allowed) { g_embedded_fallback_allowed = allowed; }
+
+bool ComGuiApplication::embedded_fallback_allowed() { return g_embedded_fallback_allowed; }
 
 ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count)
     : SapGuiObject(sap_gui_app), com_uninit_count_(com_uninit_count) {
@@ -90,6 +99,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
             hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
         }
 
+        const bool sap_logon_found = sap_gui != nullptr;
         if (sap_gui) {
             spdlog::debug("SAPGUI ROT entry obtained successfully - SAP GUI is running");
 
@@ -129,6 +139,18 @@ ComGuiApplicationPtr ComGuiApplication::create() {
 
             sap_gui->Release();
             sap_gui = nullptr;
+        }
+
+        if (!embedded_fallback_allowed()) {
+            // The embedded control would host the SAP GUI windows inside this process, where the owner-mode
+            // session workers (which attach through the running object table) can never reach them.
+            if (sap_logon_found)
+                throw ComException("SAP Logon is running, but its scripting engine is not available (is scripting "
+                                   "enabled in the SAP GUI options?); this server does not fall back to an embedded "
+                                   "SAP GUI.", hr);
+            throw SapLogonNotRunningException(
+                "SAP Logon (saplogon.exe) is not running on this desktop, and this server does not fall back to an "
+                "embedded SAP GUI. Start SAP Logon in the interactive session, then retry.", hr);
         }
 
         spdlog::debug("Method 1 (GetObject + GetScriptingEngine) failed, trying CreateObject as fallback");

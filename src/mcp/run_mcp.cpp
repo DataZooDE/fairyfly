@@ -13,6 +13,8 @@
 #include <io.h>
 #include <stdio.h>
 #include <windows.h>
+
+#include "include/com/wrapper.h"
 #endif
 
 #include "include/command_table.h"
@@ -22,6 +24,7 @@
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/http_server.h"
 #include "include/mcp/mcp_audit.h"
+#include "include/mcp/sap_gui_hosting.h"
 #include "include/mcp/server.h"
 #include "include/mcp/session_worker_broker.h"
 #include "include/mcp/session_worker_provider.h"
@@ -129,6 +132,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     policy.max_calls_per_minute = options.max_calls_per_minute;
     policy.audit_required = sink && sink->mode() == audit::Mode::Required;
     policy.owner_sap_identities = options.owner_sap_identities;
+#ifdef _WIN32
+    // Owner-mode workers attach to SAP GUI through the running object table: never host SAP GUI windows in-process.
+    sap::ComGuiApplication::set_embedded_fallback_allowed(embedded_sap_gui_allowed(http, options.owner_sap_identities));
+#endif
     auto on_connection_changed = std::make_shared<std::function<void(int)>>();
     auto on_login_lane_reserve =
         std::make_shared<std::function<std::shared_ptr<void>(const std::string&,

@@ -2564,6 +2564,41 @@ TEST_CASE("owner launch rolls back its saved generation when postcheck fails", "
     CHECK(f.launch_rollbacks == std::vector<int>{7});
 }
 
+TEST_CASE("owner launch reports SAP_LOGON_NOT_RUNNING instead of a generic refusal", "[auth][dispatch][owner-identity][sap-logon]") {
+    // Without SAP Logon the tray refuses the embedded SAP GUI fallback. That failure says nothing about other users'
+    // sessions, so the caller learns what to fix; any other failed launch stays the generic owner refusal.
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"session"});
+    p.connections = {"A4H Logon"};
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "A4H Logon";
+        return target;
+    });
+    std::string launch_code = "SAP_LOGON_NOT_RUNNING";
+    f.handler = [&](const Argv&) {
+        Result result;
+        result.status = Result::Status::Error;
+        result.error = {{"code", launch_code}, {"message", "SAP Logon (saplogon.exe) is not running on this desktop"},
+                        {"hint", "Start SAP Logon, then call the launch again."}};
+        return result;
+    };
+    const auto refused = d->call_tool("gui_session_launch", {{"name", "A4H Logon"}}, ctx_for(p));
+    CHECK(refused.is_error);
+    CHECK(text_of(refused).find("SAP_LOGON_NOT_RUNNING") != std::string::npos);
+    CHECK(text_of(refused).find("OWNER_SESSION_UNAVAILABLE") == std::string::npos);
+    CHECK(f.launch_rollbacks.empty());
+
+    launch_code = "CONNECTION_OPEN_FAILED";
+    const auto generic = d->call_tool("gui_session_launch", {{"name", "A4H Logon"}}, ctx_for(p));
+    CHECK(generic.is_error);
+    CHECK(text_of(generic).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK(text_of(generic).find("CONNECTION_OPEN_FAILED") == std::string::npos);
+}
+
 TEST_CASE("owner launch keeps a verified prelogin connection after credential refusal", "[auth][dispatch][owner-identity]") {
     Fixture f;
     Policy policy = write_mode();
