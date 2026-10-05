@@ -170,7 +170,7 @@ you have.
 
 - Windows only. SAP GUI Scripting needs the interactive desktop of a logged-on Windows user, so fairyfly runs as a
   normal program or tray app, not as a Windows service.
-- The current version is `2026.09.30` (calendar versioning). fairyfly is under active development; changes are
+- The current version is `2026.10.05` (calendar versioning). fairyfly is under active development; changes are
   listed in the [changelog](CHANGELOG.md).
 - fairyfly drives the screen like a person does: an action on one SAP window happens one step at a time, and large
   screens take a few seconds to read.

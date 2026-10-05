@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2026.10.05 (2026-10-05)
+
+First published release. It also contains everything listed under 2026.09.30 below, which was prepared but never tagged.
 
 ### Parallel sessions
 
