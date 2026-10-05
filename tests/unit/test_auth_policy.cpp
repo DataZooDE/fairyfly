@@ -3186,6 +3186,30 @@ TEST_CASE("dispatcher: owner screen guard rejects navigation after the observed 
     CHECK(f.calls.size() == 1);
 }
 
+TEST_CASE("dispatcher: owner screen read keeps the screen text in structuredContent next to the guard", "[auth][dispatch][screen-guard]") {
+    // Clients such as Claude Code hand structuredContent to the model when it is present; a structured result that
+    // held only the guard made every owner-mode screen read look empty.
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "SM50"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "ses-1|server-key|generation-1";
+    f.facts->program = "SAPLTHFB";
+    f.facts->screen_number = "1000";
+    Principal agent = token("agent", {"screen"});
+    agent.id = "token-a";
+
+    const auto read = d->call_tool("gui_screen_read", {{"connection", 1}, {"no_tabs", true}}, ctx_for(agent));
+    REQUIRE_FALSE(read.is_error);
+    REQUIRE(read.structured.has_value());
+    REQUIRE(read.structured->contains("screen_guard"));
+    REQUIRE(read.structured->contains("text"));
+    CHECK(read.structured->at("text").get<std::string>() == text_of(read));
+    CHECK_FALSE(text_of(read).empty());
+}
+
 TEST_CASE("dispatcher: T-code block survives a saved connection generation change", "[auth][dispatch][session-state]") {
     Fixture f;
     Policy policy = write_mode();

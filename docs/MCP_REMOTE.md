@@ -182,7 +182,9 @@ before its 60-second expiry and release it when finished. A lease is bound to th
 and token issuance ID. Observational reads need no lease: use `gui_screen_read` with `no_tabs=true`;
 the default tab expansion and `gui_element_get` with `activate_tab=true` select tabs and require a lease.
 An owner-mode `gui_screen_read` also returns a `screen_guard` in `structuredContent` when SAP reports a known
-transaction, program and screen number. Pass that value as `expected_screen_guard` on a later session action
+transaction, program and screen number. For a Markdown result, `structuredContent` then also carries the screen
+text as `text`, because clients such as Claude Code show the model only `structuredContent` when it is present.
+Pass the `screen_guard` value as `expected_screen_guard` on a later session action
 to reject it with `SCREEN_CHANGED` if the session or dynpro changed while the client was deciding or waiting.
 This is an optional precondition; it cannot detect edits that leave the same dynpro identity unchanged, so keep
 the lease for multi-step writes.

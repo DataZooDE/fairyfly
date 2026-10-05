@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Parallel sessions
+
+- Owner-mode HTTP `gui_screen_read`: `structuredContent` held only `screen_guard`, and Claude Code, which hands `structuredContent` to the model when present, saw every screen read as empty (found while rehearsing the multi-agent README demo). A Markdown result now carries the screen text in `structuredContent.text` next to `screen_guard`.
+
 ### Fixes from the Codex live bug hunts (2026-10-03)
 
 - `--read-only` no longer lets a click on the Yes/OK button of a popup through (found live: Yes on the SU01 Delete Users dialog deleted the user); popup buttons are allowed only when they dismiss or navigate, also in the `@active/...` id form. Clicking a check box or radio button of a selection screen stays allowed under `--read-only` (documented decision).
