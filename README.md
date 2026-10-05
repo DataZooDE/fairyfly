@@ -14,6 +14,17 @@ on a Windows machine next to SAP GUI. It can open a transaction, read the screen
 selection, click a button and report back. The agent works as the logged-on SAP user with that user's own
 authorizations, so no new services or interfaces have to be built in SAP.
 
+<p align="center">
+  <a href="assets/demo/fairyfly-demo.webp" title="Open the full-size demo">
+    <img src="assets/demo/fairyfly-demo-preview.webp" width="100%"
+         alt="Demo: three Claude Code agents each open their own SAP GUI window through fairyfly, log on, run SM04, SM50 and SM59 in parallel and report back">
+  </a>
+  <br>
+  <sub>Three Claude Code agents, three SAP GUI windows, in parallel and read-only: each agent opens and logs on to its
+  own window, runs a Basis transaction (SM04, SM50, SM59) and answers in plain language. Real recording, sped up 2.5x.
+  <b>Click for the full-size version.</b></sub>
+</p>
+
 ## Why fairyfly
 
 When a suitable, approved API exists, use it. Often it does not: building a "proper" SAP integration for an AI agent
