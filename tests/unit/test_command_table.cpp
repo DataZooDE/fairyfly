@@ -236,7 +236,7 @@ TEST_CASE("family list parsing and command_of_argv", "[command_table]") {
     CHECK(ct::command_of_argv({}).empty());
 }
 
-TEST_CASE("--tools filter removes tools from list and call", "[command_table][mcp]") {
+TEST_CASE("mcp --tools filter removes tools from list and call", "[command_table][mcp]") {
     const auto filtered = mcp::retain_families(mcp::all_tool_specs(), {"screen", "system"});
     REQUIRE_FALSE(filtered.empty());
     for (const auto& spec : filtered) CHECK((spec.family == "screen" || spec.family == "system"));
