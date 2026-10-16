@@ -38,6 +38,7 @@ Right-click menu:
 | Open log / audit trail folder / config file | default shell action |
 | Tokens > List / Create | opens a console running `fairyfly mcp token list` / `token create` |
 | Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (a background `link run`), Pause / Resume, Health check (`link status` in a console) |
+| Check for updates | opens a console running `fairyfly update check` (the tray also checks once in the background and shows a notice; `FAIRYFLY_UPDATE_CHECK=0` turns that off) |
 | Quit | stops the server and ends the process |
 
 Tokens are only ever shown by the token command in that console (once, at creation). The tray, the

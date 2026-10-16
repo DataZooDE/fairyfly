@@ -128,10 +128,60 @@ jobs:
         path: unsigned/fairyfly.exe
         if-no-files-found: error
 
-  release:
+  package:
+    # per-user MSI around the exe that is released (signed when signing is configured); docs/LINK.md, packaging/
     needs: [ build, sign ]
-    # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
     if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    timeout-minutes: 30
+    runs-on: windows-2022
+    steps:
+    - name: Checkout the tagged source (packaging/)
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.RELEASE_TAG }}
+
+    - name: Download the released fairyfly.exe
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ needs.sign.result == 'success' && 'fairyfly-signed' || 'fairyfly-unsigned' }}
+        path: exe
+
+    - name: Build the MSI
+      run: |
+        dotnet tool install --global wix --version 5.0.2
+        $msiVersion = (& ./packaging/msi_version.ps1 -Version "${{ env.RELEASE_TAG }}").Trim()
+        New-Item -ItemType Directory -Force msi | Out-Null
+        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=exe/fairyfly.exe -d MsiVersion=$msiVersion -o msi/fairyfly.msi
+        if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
+      shell: pwsh
+
+    - name: Sign the MSI with Azure Artifact Signing
+      if: needs.build.outputs.signing == 'true'
+      uses: azure/trusted-signing-action@v0
+      with:
+        azure-tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+        azure-client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files-folder: msi
+        files-folder-filter: msi
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+
+    - name: Upload the MSI
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-msi
+        path: msi/fairyfly.msi
+        if-no-files-found: error
+
+  release:
+    needs: [ build, sign, package ]
+    # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
+    if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') && needs.package.result == 'success' }}
     timeout-minutes: 90
     runs-on: ubuntu-latest
     permissions:
@@ -143,14 +193,20 @@ jobs:
         name: ${{ needs.sign.result == 'success' && 'fairyfly-signed' || 'fairyfly-unsigned' }}
         path: dist
 
+    - name: Download the MSI
+      uses: actions/download-artifact@v4
+      with:
+        name: fairyfly-msi
+        path: dist
+
     - name: Checksums and release
       env:
         GH_TOKEN: ${{ github.token }}
         SIGNED: ${{ needs.sign.result == 'success' }}
       run: |
         cd dist
-        sha256sum fairyfly.exe > SHA256SUMS
+        sha256sum fairyfly.exe fairyfly.msi > SHA256SUMS
         cat SHA256SUMS
         if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed (Azure Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
-        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64. ${SIGNNOTE} See the README (Code signing policy) for how to verify."
-        gh release create "$RELEASE_TAG" fairyfly.exe SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
+        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable) and fairyfly.msi (per-user installer). ${SIGNNOTE} See the README (Code signing policy) for how to verify."
+        gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"

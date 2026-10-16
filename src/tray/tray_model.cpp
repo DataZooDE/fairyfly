@@ -92,6 +92,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
         cloud.children.push_back(item("Pair again (console)", TrayAction::LinkPair));
     }
     model.items.push_back(std::move(cloud));
+    model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
 
     model.items.push_back(item("Quit", TrayAction::Quit));

@@ -18,7 +18,7 @@ jobs:
   build-windows:
     # Pinned: windows-latest moved to an image without Visual Studio 2022, so the
     # "Visual Studio 17 2022" CMake generator below could not find any instance (2026-09-29).
-    timeout-minutes: 30
+    timeout-minutes: 40
     runs-on: windows-2022
 
     steps:
@@ -104,11 +104,54 @@ jobs:
         }
       shell: pwsh
 
+    - name: Per-user MSI - build, install, check, uninstall (real installer run)
+      env:
+        FAIRYFLY_GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        dotnet tool install --global wix --version 5.0.2
+        $msiVersion = (& ./packaging/msi_version.ps1).Trim()
+        Write-Host "MSI version $msiVersion"
+        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=$msiVersion -o build/fairyfly.msi
+        if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
+
+        $p = Start-Process msiexec.exe -ArgumentList @('/i', "$PWD\build\fairyfly.msi", '/qn', '/l*v', "$PWD\build\msi-install.log") -Wait -PassThru
+        if ($p.ExitCode -ne 0) { Get-Content build/msi-install.log -Tail 50; Write-Error "install failed: $($p.ExitCode)"; exit 1 }
+        $exe = Join-Path $env:LOCALAPPDATA 'Programs\fairyfly\fairyfly.exe'
+        if (-not (Test-Path $exe)) { Write-Error "not installed at $exe"; exit 1 }
+        $v = (& $exe --version | Out-String).Trim()
+        $expected = (& build/Release/fairyfly.exe --version | Out-String).Trim()
+        if ($v -ne $expected) { Write-Error "installed version '$v', expected '$expected'"; exit 1 }
+        $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+        if ($userPath -notlike "*Programs\fairyfly*") { Write-Error "user PATH not extended: $userPath"; exit 1 }
+        $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\fairyfly (tray).lnk'
+        if (-not (Test-Path $lnk)) { Write-Error "Start-menu shortcut missing: $lnk"; exit 1 }
+        $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        if ($target.Arguments -ne 'mcp --tray') { Write-Error "shortcut arguments '$($target.Arguments)'"; exit 1 }
+        if (Test-Path 'HKLM:\Software\DataZoo\fairyfly') { Write-Error "per-user MSI wrote HKLM"; exit 1 }
+        & $exe update check
+        Write-Host "installed OK: $exe $v"
+
+        $p = Start-Process msiexec.exe -ArgumentList @('/x', "$PWD\build\fairyfly.msi", '/qn', '/l*v', "$PWD\build\msi-uninstall.log") -Wait -PassThru
+        if ($p.ExitCode -ne 0) { Write-Error "uninstall failed: $($p.ExitCode)"; exit 1 }
+        if (Test-Path $exe) { Write-Error "still present after uninstall"; exit 1 }
+        if (Test-Path $lnk) { Write-Error "shortcut still present after uninstall"; exit 1 }
+        if ([Environment]::GetEnvironmentVariable('PATH', 'User') -like "*Programs\fairyfly*") { Write-Error "PATH entry not removed"; exit 1 }
+        Write-Host "uninstalled OK"
+      shell: pwsh
+
+    - name: Update channel (real GitHub releases, live)
+      env:
+        FAIRYFLY_GITHUB_TOKEN: ${{ github.token }}
+      run: '& "build/Release/unit_tests.exe" "[update-live]"'
+      shell: pwsh
+
     - name: Upload fairyfly.exe artifact
       uses: actions/upload-artifact@v4
       with:
         name: fairyfly-windows-x64
-        path: build/Release/fairyfly.exe
+        path: |
+          build/Release/fairyfly.exe
+          build/fairyfly.msi
         retention-days: 90
         if-no-files-found: error
 

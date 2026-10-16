@@ -18,6 +18,13 @@
 - Tray (`mcp --tray`): a **Cloud link** submenu with the pairing, the link state, Connect/Pair again, Start link,
   Pause/Resume and a health check.
 - `tests/integration/link_live.ps1`: a live check through a real gateway (read call, audit, pause, resume).
+- `fairyfly update check|apply`: updates from the project's GitHub releases, verified against `SHA256SUMS` and the
+  Authenticode signer (a signed installation only accepts the same signer) before `fairyfly.exe` is replaced (the old
+  one stays as `fairyfly.exe.old`). The tray checks once in the background (`FAIRYFLY_UPDATE_CHECK=0` turns it off)
+  and has a "Check for updates" item.
+- `fairyfly.msi`: a per-user installer (`packaging/fairyfly.wxs`, WiX 5): `%LOCALAPPDATA%\Programs\fairyfly`, the
+  user's `PATH` and a Start-menu entry for the tray. The CI installs and uninstalls it; releases carry it, signed when
+  signing is configured, and list it in `SHA256SUMS`.
 - `third_party/libffl`: the link protocol library, vendored from the gateway (`scripts/sync_libffl.py`). It adds
   OpenSSL to the vcpkg dependencies.
 

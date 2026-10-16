@@ -162,6 +162,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/screen_command.cpp
     src/commands/mcp_command.cpp
     src/commands/link_command.cpp
+    src/commands/update_command.cpp
     src/commands/menu_command.cpp
     src/commands/command_groups.cpp
     src/commands/cli_app.cpp
@@ -192,6 +193,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/main_thread_tools.cpp
     src/link/link_runner.cpp
     src/link/link_control.cpp
+    src/update/update_model.cpp
+    src/update/updater.cpp
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp
@@ -283,6 +286,7 @@ if(WIN32)
         ws2_32
         httpapi
         crypt32
+        wintrust
         winhttp
         shell32
         ws2_32

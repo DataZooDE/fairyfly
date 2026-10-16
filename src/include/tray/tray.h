@@ -23,10 +23,12 @@
 // small interface below; unit tests use fakes, the Win32 implementations live in src/tray/tray_win32.cpp
 // and are exercised by hidden manual tests only.
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,6 +48,7 @@ enum class TrayAction {
     OpenLog, OpenAuditFolder, OpenConfig,
     TokenList, TokenCreate,
     LinkPair, LinkStart, LinkPause, LinkResume, LinkStatus,   ///< "Cloud link" submenu (D10)
+    UpdateCheck,                                               ///< `fairyfly update check` in a console
     Quit,
 };
 
@@ -83,7 +86,7 @@ struct TrayMenuModel {
 };
 
 /// Builds the menu exactly as specified: status line, warnings submenu, separator, Start/Stop/Restart,
-/// read-only toggle, separator, Open log/audit folder/config, Tokens, Cloud link, separator, Quit.
+/// read-only toggle, separator, Open log/audit folder/config, Tokens, Cloud link, Check for updates, separator, Quit.
 TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state);
 IconState icon_for(const mcp::ServerStatus& status, const TrayState& state);
 /// Text of the balloon shown on left-click (status + warnings). Never contains secrets.
@@ -232,6 +235,10 @@ struct TrayServices {
     FileOpener* opener = nullptr;
     ProcessLauncher* launcher = nullptr;
     LinkControl* link = nullptr;   ///< optional: without it the Cloud link submenu only offers pairing
+    /// optional: asks the update channel once, in the background, after update_check_delay; returns the newer
+    /// version or nullopt. Runs on its own thread; may block (network) and is never waited for on Quit.
+    std::function<std::optional<std::string>()> latest_update;
+    std::chrono::milliseconds update_check_delay{30000};
 };
 
 /// Turns menu actions into effects. Runs on the UI thread; status() calls are thread-safe.
@@ -247,6 +254,8 @@ public:
     void on_tick() override;
 
     TrayState& state() { return state_; }
+    /// Thread-safe: the background update check found a newer release; shown once per version.
+    void announce_update(const std::string& version);
 
 private:
     void notify(const std::string& text);
@@ -257,6 +266,8 @@ private:
     TrayPaths paths_;
     TrayState state_;
     bool announced_ = false;
+    std::mutex update_mu_;
+    std::string announced_update_;
 };
 
 /// Runs the tray around `runner`: single-instance guard, UI thread, server on the calling (main)

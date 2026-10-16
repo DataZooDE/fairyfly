@@ -60,6 +60,16 @@ pairing), pairing, the DPAPI state and the link agent:
   verification cannot drift between the gateway and fairyfly.
 - Never edit the copy here; change the gateway and sync.
 
+## Install and update
+
+- `fairyfly.msi` (per user, no administrator rights): installs to `%LOCALAPPDATA%\Programs\fairyfly`, extends the
+  user's `PATH` and adds the Start-menu entry "fairyfly (tray)". Source: `packaging/fairyfly.wxs`. The CI builds it,
+  installs it on the runner, checks the result and uninstalls it again.
+- `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
+  when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the
+  installed one. An unsigned self-built installation accepts an unsigned release only with `--allow-unsigned`.
+- The tray announces a newer release once (`FAIRYFLY_UPDATE_CHECK=0` turns that off).
+
 ## Live test
 
 `tests/integration/link_live.ps1` runs `link run` against a real gateway and a logged-in SAP GUI. It calls the

@@ -91,6 +91,15 @@ void TrayController::notify(const std::string& text) {
     if (services_.host) services_.host->balloon("fairyfly MCP", text);
 }
 
+void TrayController::announce_update(const std::string& version) {
+    {
+        std::lock_guard<std::mutex> l(update_mu_);
+        if (announced_update_ == version) return;
+        announced_update_ = version;
+    }
+    notify("fairyfly " + version + " is available. Install it with: fairyfly update apply");
+}
+
 void TrayController::on_tick() {
     if (services_.link) state_.link = services_.link->view();
     if (announced_) return;
@@ -140,6 +149,7 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::TokenList: console({"mcp", "token", "list"}); break;
     case TrayAction::TokenCreate: console({"mcp", "token", "create"}); break;
     case TrayAction::LinkPair: console({"link", "pair"}); break;
+    case TrayAction::UpdateCheck: console({"update", "check"}); break;
     case TrayAction::LinkStatus: console({"link", "status"}); break;
     case TrayAction::LinkStart: {
         bool ok = false;
@@ -217,12 +227,40 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
         return 1;
     }
 
+    // background update check: owns only a shared slot, so a late answer after Quit goes nowhere
+    struct UpdateSlot {
+        std::mutex m;
+        std::condition_variable cv;
+        TrayController* controller = nullptr;
+        bool quit = false;
+    };
+    auto slot = std::make_shared<UpdateSlot>();
+    slot->controller = &controller;
+    if (services.latest_update) {
+        std::thread([slot, probe = services.latest_update, delay = services.update_check_delay] {
+            {
+                std::unique_lock<std::mutex> l(slot->m);
+                if (slot->cv.wait_for(l, delay, [&] { return slot->quit; })) return;
+            }
+            std::optional<std::string> v;
+            try { v = probe(); } catch (...) {}
+            std::lock_guard<std::mutex> l(slot->m);
+            if (v && slot->controller) slot->controller->announce_update(*v);
+        }).detach();
+    }
+
     int code = 1;
     try {
         code = runner.run_blocking();
     } catch (...) {
         code = 1;
     }
+    {
+        std::lock_guard<std::mutex> l(slot->m);
+        slot->controller = nullptr;
+        slot->quit = true;
+    }
+    slot->cv.notify_all();
     services.host->post_quit();
     ui.join();
     return code;
