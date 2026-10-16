@@ -18,6 +18,7 @@ New to fairyfly? Start with the [project README](../README.md): what fairyfly is
 | [MCP_SETUP.md](MCP_SETUP.md) | Reference for `mcp setup`, `mcp teardown`, `mcp cert export` and the http.sys checks of `mcp doctor` |
 | [MCP_TRAY.md](MCP_TRAY.md) | Tray mode, autostart, `mcp.yaml` configuration, client config snippets, `mcp doctor` |
 | [MCP_SAP_AUTHENTICATION.md](MCP_SAP_AUTHENTICATION.md) | Several SAP users behind one endpoint; password, SSO and SNC logon |
+| [LINK.md](LINK.md) | `fairyfly link`: pairing this desktop with the fairyfly cloud gateway (QR code), serving its AI assistants outbound-only, audit and approvals |
 
 ## Understand fairyfly
 

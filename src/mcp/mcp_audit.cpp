@@ -35,14 +35,14 @@ void mcp_audit_reset_failure() noexcept { g_failed.store(false); }
 
 AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
                               const std::function<cli::CommandHandler*()>& peek_handler,
-                              bool read_only) {
+                              bool read_only, const std::string& source) {
     if (!sink || !sink->enabled()) return [](const McpCallRecord&) {};
     (void)read_only;  // McpCallRecord::read_only is authoritative per call
-    return [sink, peek_handler](const McpCallRecord& rec) {
+    return [sink, peek_handler, source](const McpCallRecord& rec) {
         try {
             audit::AuditRecord out;
             out.ts = std::chrono::system_clock::now();
-            out.source = "mcp";
+            out.source = source;
             out.tool = rec.tool;
             out.command = rec.command;
             out.argv = audit::redact_argv(rec.argv);

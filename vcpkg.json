@@ -8,6 +8,7 @@
     "cli11",
     "cimg",
     "libpng",
+    "openssl",
     "nlohmann-json",
     "spdlog",
     "catch2",

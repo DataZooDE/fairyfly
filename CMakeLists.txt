@@ -68,6 +68,22 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)  # libffl: TLS to the cloud gateway, ES256 verification of call assertions
+
+# libffl (third_party/libffl, vendored from the gateway with scripts/sync_libffl.py - do not edit the copy):
+# ffl/1 link protocol, call assertion verification, pairing, DPAPI-protected device state, the link agent.
+# Shared with the gateway so protocol and verification cannot drift (D10).
+include(${CMAKE_SOURCE_DIR}/third_party/libffl/SOURCES.cmake)
+add_library(ffl STATIC ${LIBFFL_SOURCES})
+target_include_directories(ffl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/src)
+target_include_directories(ffl SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/cpp-httplib
+                                              ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/qrcodegen)
+target_compile_definitions(ffl PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_TCP_NODELAY=true
+                                      CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH=8454144)
+target_link_libraries(ffl PUBLIC OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp spdlog::spdlog)
+if(WIN32)
+    target_link_libraries(ffl PUBLIC ws2_32 mswsock crypt32 user32 shell32)
+endif()
 
 # Platform-specific settings
 if(WIN32)
@@ -145,6 +161,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/list_command.cpp
     src/commands/screen_command.cpp
     src/commands/mcp_command.cpp
+    src/commands/link_command.cpp
     src/commands/menu_command.cpp
     src/commands/command_groups.cpp
     src/commands/cli_app.cpp
@@ -172,6 +189,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/dispatcher.cpp
     src/mcp/mcp_audit.cpp
     src/mcp/run_mcp.cpp
+    src/link/main_thread_tools.cpp
+    src/link/link_runner.cpp
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp
@@ -239,6 +258,7 @@ target_include_directories(fairyfly_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 # Link library dependencies
 target_link_libraries(fairyfly_core PUBLIC
+    ffl
     CLI11::CLI11
     CImg::CImg
     ZLIB::ZLIB

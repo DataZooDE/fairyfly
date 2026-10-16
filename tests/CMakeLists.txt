@@ -42,6 +42,7 @@ add_executable(unit_tests
     unit/test_mcp_http.cpp
     unit/test_http_sys_mapping.cpp
     unit/test_command_table.cpp
+    unit/test_link_bridge.cpp
     unit/test_command_registry_threads.cpp
     unit/test_agent_help.cpp
     unit/test_setup_validators.cpp

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link (`fairyfly link`)
+
+- New noun `link` (`pair`, `status`, `run`, `unpair`; docs/LINK.md):
+  - It connects this desktop to the fairyfly cloud gateway, outbound only, so AI assistants connected there can use
+    the SAP GUI.
+  - `link run` serves the calls through fairyfly's own MCP dispatcher in-process, with the same read-only, family
+    and policy guards as `mcp`, plus the gateway's per-call grant.
+  - Changes need the person's approval on the desktop or on the phone.
+  - Calls are audited with `audit_source: "link"`.
+- Pairing shows a QR code and a number; nothing is saved before the person at the desktop confirms the account and
+  organisation shown.
+- `third_party/libffl`: the link protocol library, vendored from the gateway (`scripts/sync_libffl.py`). It adds
+  OpenSSL to the vcpkg dependencies.
+
 ## 2026.10.05 (2026-10-05)
 
 First published release. It also contains everything listed under 2026.09.30 below, which was prepared but never tagged.
