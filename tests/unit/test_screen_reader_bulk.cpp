@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include "include/bulk_screen_reader.h"
+#include "include/com/utf8.h"
 #include "include/com/wrapper.h"
 #include "include/object_tree.h"
 #include "include/screen_element_collector.h"
@@ -1043,9 +1044,7 @@ json tree_node_of(Node* node) {
     for (const wchar_t* name : kProps) {
         const auto it = node->strings.find(name);
         if (it == node->strings.end()) continue;
-        std::string value;
-        for (wchar_t ch : it->second) value.push_back(static_cast<char>(ch));
-        props[std::string(name, name + wcslen(name))] = value;
+        props[com::wide_to_utf8(name)] = com::wide_to_utf8(it->second);
     }
     if (const auto it = node->bools.find(L"Changeable"); it != node->bools.end())
         props["Changeable"] = it->second ? "true" : "false";
