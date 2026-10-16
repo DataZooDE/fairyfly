@@ -92,6 +92,7 @@ void TrayController::notify(const std::string& text) {
 }
 
 void TrayController::on_tick() {
+    if (services_.link) state_.link = services_.link->view();
     if (announced_) return;
     const auto status = control_.status();
     if (!status.running && status.warnings.empty()) return;
@@ -138,6 +139,30 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::OpenConfig: open(paths_.config_file, "config file"); break;
     case TrayAction::TokenList: console({"mcp", "token", "list"}); break;
     case TrayAction::TokenCreate: console({"mcp", "token", "create"}); break;
+    case TrayAction::LinkPair: console({"link", "pair"}); break;
+    case TrayAction::LinkStatus: console({"link", "status"}); break;
+    case TrayAction::LinkStart: {
+        bool ok = false;
+        if (services_.launcher) {
+            LaunchRequest request;   // runs in the background like the tray itself; it reads the pairing state
+            request.command_line = join_command_line(paths_.exe, {"link", "run"});
+            request.detached = true;
+            ok = services_.launcher->launch(request).has_value();
+        }
+        if (!ok) notify("Could not start the cloud link");
+        break;
+    }
+    case TrayAction::LinkPause:
+    case TrayAction::LinkResume: {
+        const bool pause = action == TrayAction::LinkPause;
+        if (services_.link && services_.link->set_paused(pause)) {
+            state_.link = services_.link->view();
+            notify(pause ? "Cloud link paused: the AI assistant cannot reach this desktop" : "Cloud link resumed");
+        } else {
+            notify(pause ? "Could not pause the cloud link" : "Could not resume the cloud link");
+        }
+        break;
+    }
     case TrayAction::Quit:
         control_.request_stop();
         if (runner_) runner_->request_quit();

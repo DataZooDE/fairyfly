@@ -16,7 +16,7 @@ Shows a QR code and a number. Scan it with your phone, sign in, type the number;
 that the account and organisation shown are yours. Nothing is saved before that confirmation.
 Example: fairyfly link pair --gateway https://app.fairyfly.cloud
 )HELP");
-    pair_cmd_->add_option("--gateway", options_.gateway, "Web address of the fairyfly service")->required();
+    pair_cmd_->add_option("--gateway", options_.gateway, "Web address of the fairyfly service (default: FAIRYFLY_LINK_GATEWAY, else asked)");
     pair_cmd_->add_option("--qr-png", options_.qr_png, "Also write the QR code as a PNG file");
     pair_cmd_->add_option("--timeout", options_.pair_timeout_s, "Seconds to wait for the phone (default 300)");
     add_state(pair_cmd_);
@@ -42,6 +42,21 @@ Example: fairyfly link run
         ->check(CLI::IsMember({"desktop", "no"}));
     add_state(run_cmd_);
 
+    pause_cmd_ = add_leaf(app, {"link", "pause"});
+    pause_cmd_->footer(R"HELP(Usage notes:
+Disconnects a running link from the gateway until resumed: the AI assistant cannot reach this
+desktop meanwhile. Works from any console; the running link notices within a second.
+Example: fairyfly link pause
+)HELP");
+    add_state(pause_cmd_);
+
+    resume_cmd_ = add_leaf(app, {"link", "resume"});
+    resume_cmd_->footer(R"HELP(Usage notes:
+Lets a paused link connect to the gateway again.
+Example: fairyfly link resume
+)HELP");
+    add_state(resume_cmd_);
+
     unpair_cmd_ = add_leaf(app, {"link", "unpair"});
     unpair_cmd_->footer(R"HELP(Usage notes:
 Forgets the pairing on this desktop. Remove the desktop in the web app as well.
@@ -61,10 +76,12 @@ Result LinkCommand::execute(cli::CommandHandler&) {
     if (pair_cmd_ && *pair_cmd_) return link::link_pair(options());
     if (status_cmd_ && *status_cmd_) return link::link_status(options());
     if (unpair_cmd_ && *unpair_cmd_) return link::link_unpair(options());
+    if (pause_cmd_ && *pause_cmd_) return link::link_pause(options());
+    if (resume_cmd_ && *resume_cmd_) return link::link_resume(options());
     Result result;
     result.status = Result::Status::Error;
     result.error["code"] = "NO_SUBCOMMAND";
-    result.error["message"] = "No link subcommand specified (pair, status, run or unpair)";
+    result.error["message"] = "No link subcommand specified (pair, status, run, pause, resume or unpair)";
     return result;
 }
 

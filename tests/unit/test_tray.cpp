@@ -120,7 +120,40 @@ struct FakeGuard : SingleInstance {
     bool exists() override { return other_running; }
 };
 
+struct FakeLink : LinkControl {
+    LinkView current;
+    std::vector<bool> paused_calls;
+    bool ok = true;
+    LinkView view() override { return current; }
+    bool set_paused(bool p) override {
+        paused_calls.push_back(p);
+        if (ok) current.paused = p;
+        return ok;
+    }
+};
+
+LinkView paired(const std::string& state, bool paused = false) {
+    LinkView v;
+    v.paired = true;
+    v.organisation = "Acme Purchasing";
+    v.account = "pat@acme.example";
+    v.state = state;
+    v.paused = paused;
+    return v;
+}
+
+std::vector<std::string> link_labels(const TrayMenuModel& m) {
+    for (const auto& i : m.items)
+        if (i.label == "Cloud link") {
+            std::vector<std::string> out;
+            for (const auto& c : i.children) out.push_back(c.label + (c.enabled ? "" : " [off]"));
+            return out;
+        }
+    return {};
+}
+
 struct Fixture {
+    FakeLink link;
     FakeControl control;
     FakeHost host;
     FakeOpener opener;
@@ -138,6 +171,7 @@ struct Fixture {
         services.host = &host;
         services.opener = &opener;
         services.launcher = &launcher;
+        services.link = &link;
         return TrayController(control, &runner, services, paths, state);
     }
 };
@@ -150,7 +184,7 @@ TEST_CASE("tray menu: running read-only server with warnings", "[tray][menu]") {
     CHECK(top_labels(m) == std::vector<std::string>{
         "Running: http://127.0.0.1:8383/mcp (read-only)", "Warnings (2)", "---",
         "Start", "Stop", "Restart", "Read-only mode", "---",
-        "Open log", "Open audit trail folder", "Open config file", "Tokens", "---", "Quit"});
+        "Open log", "Open audit trail folder", "Open config file", "Tokens", "Cloud link", "---", "Quit"});
     CHECK(m.icon == IconState::Warning);
     CHECK_FALSE(m.items[0].enabled);
     REQUIRE(m.items[1].children.size() == 2);
@@ -368,7 +402,7 @@ TEST_CASE("tray controller: left click text and view", "[tray][controller]") {
     auto controller = f.make();
     CHECK(controller.left_click_text().find("write mode") != std::string::npos);
     CHECK(controller.view().icon == IconState::Warning);
-    CHECK(controller.menu().items.size() == 14);
+    CHECK(controller.menu().items.size() == 15);
 }
 
 // ================= entry decisions =================
@@ -524,4 +558,76 @@ TEST_CASE("run_with_tray: UI creation failure does not start the server", "[tray
 
 TEST_CASE("tray: runner factory registration point", "[tray]") {
     CHECK_FALSE(static_cast<bool>(runner_factory()));   // nothing registered in the unit-test binary
+}
+
+// ================= cloud link (D10) =================
+TEST_CASE("tray menu: cloud link submenu for each link state", "[tray][menu][link]") {
+    TrayState st;
+    CHECK(link_labels(build_menu(make_status(true, true), st)) ==
+          std::vector<std::string>{"Not connected to the fairyfly cloud [off]", "Connect to cloud... (pair in a console)"});
+    st.link = paired("connected");
+    CHECK(link_labels(build_menu(make_status(true, true), st)) ==
+          std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected [off]", "Start link [off]", "Pause",
+                                   "Health check (console)", "Pair again (console)"});
+    st.link = paired("paused", true);
+    CHECK(link_labels(build_menu(make_status(true, true), st)) ==
+          std::vector<std::string>{"Acme Purchasing (pat@acme.example): paused [off]", "Start link [off]", "Resume",
+                                   "Health check (console)", "Pair again (console)"});
+    st.link = paired("not running");
+    auto m = build_menu(make_status(true, true), st);
+    CHECK(link_labels(m)[0] == "Acme Purchasing (pat@acme.example): not running [off]");
+    CHECK(find_item(m, TrayAction::LinkStart)->enabled);
+    // paused but not running: starting is allowed (it stays disconnected until resumed)
+    st.link = paired("not running", true);
+    CHECK(find_item(build_menu(make_status(true, true), st), TrayAction::LinkStart)->enabled);
+    CHECK(find_item(build_menu(make_status(true, true), st), TrayAction::LinkResume));
+}
+
+TEST_CASE("tray controller: cloud link actions", "[tray][controller][link]") {
+    Fixture f;
+    auto controller = f.make();
+    // the tick reads the link's view (pairing state + the running link's status file)
+    f.link.current = paired("connected");
+    controller.on_tick();
+    CHECK(controller.state().link.paired);
+    CHECK(link_labels(controller.menu())[0] == "Acme Purchasing (pat@acme.example): connected [off]");
+
+    controller.on_action(TrayAction::LinkPause);
+    REQUIRE(f.link.paused_calls == std::vector<bool>{true});
+    CHECK(controller.state().link.paused);
+    controller.on_action(TrayAction::LinkResume);
+    CHECK(f.link.paused_calls == std::vector<bool>{true, false});
+
+    f.link.ok = false;
+    controller.on_action(TrayAction::LinkPause);
+    CHECK(f.host.balloons.back().find("Could not pause") != std::string::npos);
+
+    controller.on_action(TrayAction::LinkStart);  // a detached `fairyfly link run`, no console
+    REQUIRE(f.launcher.requests.size() == 1);
+    CHECK(f.launcher.requests[0].command_line == "\"C:\\Program Files\\fairyfly\\fairyfly.exe\" link run");
+    CHECK(f.launcher.requests[0].detached);
+    CHECK_FALSE(f.launcher.requests[0].new_console);
+
+    controller.on_action(TrayAction::LinkPair);  // pairing needs the person at the desktop: a console
+    controller.on_action(TrayAction::LinkStatus);
+    REQUIRE(f.launcher.requests.size() == 3);
+    CHECK(f.launcher.requests[1].command_line.find("link pair") != std::string::npos);
+    CHECK(f.launcher.requests[1].new_console);
+    CHECK(f.launcher.requests[2].command_line.find("link status") != std::string::npos);
+
+    f.launcher.pid = std::nullopt;
+    controller.on_action(TrayAction::LinkStart);
+    CHECK(f.host.balloons.back().find("Could not start the cloud link") != std::string::npos);
+}
+
+TEST_CASE("tray controller: no link control means the submenu only offers pairing", "[tray][controller][link]") {
+    Fixture f;
+    TrayServices services;
+    services.host = &f.host;
+    services.launcher = &f.launcher;
+    TrayController controller(f.control, &f.runner, services, f.paths);
+    controller.on_tick();
+    controller.on_action(TrayAction::LinkPause);  // nothing to pause: no crash, a notice
+    CHECK_FALSE(f.host.balloons.empty());
+    CHECK(link_labels(controller.menu()).size() == 2);
 }

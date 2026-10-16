@@ -25,6 +25,8 @@ private:
     CLI::App* status_cmd_ = nullptr;
     CLI::App* run_cmd_ = nullptr;
     CLI::App* unpair_cmd_ = nullptr;
+    CLI::App* pause_cmd_ = nullptr;
+    CLI::App* resume_cmd_ = nullptr;
     link::LinkOptions options_;
     std::string tools_filter_;
 };

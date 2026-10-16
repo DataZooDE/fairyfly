@@ -6,6 +6,7 @@
 
 #include "include/audit_log.h"
 #include "include/commands/mcp_extras.h"
+#include "include/link/link_runner.h"
 #include "include/tray/tray.h"
 #include "include/tray/tray_win32.h"
 
@@ -190,6 +191,8 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray_services.host = host.get();
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();
+    auto link_control = link::make_link_control();
+    tray_services.link = link_control.get();
 
     tray::TrayPaths paths;
     paths.log_file = log_file;

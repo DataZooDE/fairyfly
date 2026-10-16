@@ -45,7 +45,17 @@ enum class TrayAction {
     ToggleReadOnly,
     OpenLog, OpenAuditFolder, OpenConfig,
     TokenList, TokenCreate,
+    LinkPair, LinkStart, LinkPause, LinkResume, LinkStatus,   ///< "Cloud link" submenu (D10)
     Quit,
+};
+
+/// What the tray shows about the desktop's cloud link (`fairyfly link`), read from the pairing state and the running
+/// link's status file. Never contains keys or tokens.
+struct LinkView {
+    bool paired = false;
+    std::string organisation, account;
+    std::string state = "not running";   ///< connected | paused | not running
+    bool paused = false;
 };
 
 /// State that belongs to the tray itself (not to the server).
@@ -53,6 +63,7 @@ struct TrayState {
     bool hard_read_only = false;   ///< FAIRYFLY_READ_ONLY=1: the toggle is locked
     std::string last_error;        ///< non-empty: the server failed (red icon)
     bool start_notice = true;      ///< balloon once when the server is up (always shown when it has warnings)
+    LinkView link;                 ///< refreshed on every tick
 };
 
 struct MenuItem {
@@ -72,7 +83,7 @@ struct TrayMenuModel {
 };
 
 /// Builds the menu exactly as specified: status line, warnings submenu, separator, Start/Stop/Restart,
-/// read-only toggle, separator, Open log/audit folder/config, Tokens, separator, Quit.
+/// read-only toggle, separator, Open log/audit folder/config, Tokens, Cloud link, separator, Quit.
 TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state);
 IconState icon_for(const mcp::ServerStatus& status, const TrayState& state);
 /// Text of the balloon shown on left-click (status + warnings). Never contains secrets.
@@ -140,6 +151,14 @@ public:
     virtual ~SingleInstance() = default;
     virtual bool acquire() = 0;   ///< true = we are the only instance and now hold the guard
     virtual bool exists() = 0;    ///< probe without acquiring (another instance holds it)
+};
+
+/// The desktop's cloud link as the tray sees it (implemented in src/link, a fake in tests).
+class LinkControl {
+public:
+    virtual ~LinkControl() = default;
+    virtual LinkView view() = 0;
+    virtual bool set_paused(bool paused) = 0;   ///< `fairyfly link pause|resume`; a running link follows within a second
 };
 
 class Clipboard {
@@ -212,6 +231,7 @@ struct TrayServices {
     TrayHost* host = nullptr;
     FileOpener* opener = nullptr;
     ProcessLauncher* launcher = nullptr;
+    LinkControl* link = nullptr;   ///< optional: without it the Cloud link submenu only offers pairing
 };
 
 /// Turns menu actions into effects. Runs on the UI thread; status() calls are thread-safe.

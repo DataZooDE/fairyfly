@@ -191,6 +191,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/run_mcp.cpp
     src/link/main_thread_tools.cpp
     src/link/link_runner.cpp
+    src/link/link_control.cpp
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp

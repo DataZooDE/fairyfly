@@ -9,12 +9,29 @@ organisation has connected there can use your SAP GUI:
 
 | Command | What it does |
 |---|---|
-| `fairyfly link pair --gateway https://app.example` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
+| `fairyfly link pair [--gateway https://app.example]` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
 | `fairyfly link status` | Paired or not, with device, account, organisation and gateway |
 | `fairyfly link run [--allow-write] [--tools session,screen] [--approve desktop\|no]` | Connects and serves tool calls until Ctrl+C |
+| `fairyfly link pause` | Disconnects a running link until resumed: the AI assistant cannot reach this desktop meanwhile (the gateway answers `DEVICE_OFFLINE`). Works from any console; the running link follows within a second |
+| `fairyfly link resume` | Lets a paused link connect again |
 | `fairyfly link unpair` | Forgets the pairing here (remove the desktop in the web app too) |
 
-The state file is `%LOCALAPPDATA%\fairyfly\link\state.json`. The device key inside it is protected with DPAPI.
+Without `--gateway`, `link pair` uses `FAIRYFLY_LINK_GATEWAY`, and otherwise asks for the address.
+
+Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
+- `state.json`: the pairing. The device key inside it is protected with DPAPI.
+- `state.json.paused`: exists while the link is paused.
+- `state.json.status.json`: written by the running link (`connected`, `paused`, `stopped`, with its process id and
+  time). `link status` and the tray read it; a status older than 60 s means the link is not running.
+
+## Tray
+
+`fairyfly mcp --tray` has a **Cloud link** submenu:
+- the pairing (organisation, account) and the link's state;
+- **Connect to cloud...** or **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
+- **Start link**: a background `fairyfly link run`;
+- **Pause** / **Resume**;
+- **Health check**: `link status` in a console.
 
 ## What runs where
 
@@ -43,9 +60,10 @@ pairing), pairing, the DPAPI state and the link agent:
   verification cannot drift between the gateway and fairyfly.
 - Never edit the copy here; change the gateway and sync.
 
-## Not yet
+## Live test
 
-- A tray menu item "Connect to cloud" (QR window, status, pause).
-- Installer and auto-update integration.
-
-Until then, `link run` runs in a console like `mcp`.
+`tests/integration/link_live.ps1` runs `link run` against a real gateway and a logged-in SAP GUI. It calls the
+gateway's MCP endpoint with an access token and checks:
+- tools/list and a read call through the gateway;
+- the local audit record (`audit_source: "link"`, request id, principal, no screen content);
+- pause (`DEVICE_OFFLINE`), resume, and the status after the link ends.

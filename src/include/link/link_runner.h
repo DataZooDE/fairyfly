@@ -3,9 +3,12 @@
 //   link pair    QR + number pairing with a phone; the person at the desktop confirms the account
 //   link status  shows the pairing (device, account, organisation, gateway)
 //   link run     serves the cloud's tool calls through fairyfly's own MCP dispatcher, in-process
+//   link pause   disconnects a running link until `link resume` (the cloud cannot reach this desktop meanwhile)
+//   link resume  lets a paused link connect again
 //   link unpair  forgets the pairing on this desktop
 // The protocol code is libffl (third_party/libffl), shared with the gateway so it cannot drift.
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +16,7 @@
 #include "include/cli_handler.h"
 #include "include/commands/global_options.h"
 #include "include/core.h"
+#include "include/tray/tray.h"
 
 namespace fairyfly::link {
 
@@ -35,6 +39,11 @@ struct LinkOptions {
 Result link_pair(const LinkOptions& options);
 Result link_status(const LinkOptions& options);
 Result link_unpair(const LinkOptions& options);
+Result link_pause(const LinkOptions& options);
+Result link_resume(const LinkOptions& options);
+
+/// The tray's view of the link (pairing state + the running link's status file) and its pause switch.
+std::unique_ptr<tray::LinkControl> make_link_control(const std::string& state_path = {});
 
 /// Runs until Ctrl+C. Returns the process exit code. Calls are audited with source "link".
 int run_link(const LinkOptions& options, const std::function<cli::CommandHandler&()>& get_handler,

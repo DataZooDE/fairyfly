@@ -53,6 +53,8 @@ const std::vector<Row>& rows() {
         {{"link", "pair"}, "Pair this desktop with the fairyfly cloud gateway (QR code + number)", "LINK", false, nullptr},
         {{"link", "status"}, "Show the cloud pairing of this desktop", "LINK", false, nullptr},
         {{"link", "run"}, "Serve the cloud gateway's tool calls through fairyfly's dispatcher", "LINK", false, nullptr},
+        {{"link", "pause"}, "Disconnect the cloud link until resumed", "LINK", false, nullptr},
+        {{"link", "resume"}, "Let a paused cloud link connect again", "LINK", false, nullptr},
         {{"link", "unpair"}, "Forget the cloud pairing on this desktop", "LINK", false, nullptr},
         {{"mcp"}, "Start the MCP server (stdio)", "MCP SERVER", false, nullptr},
         {{"mcp", "tools"}, "Print the MCP tool table", "MCP SERVER", false, nullptr},

@@ -9,6 +9,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "include/link/link_control.h"
 #include "include/link/main_thread_tools.h"
 #include "include/mcp/run_mcp.h"
 #include "include/version.h"
@@ -67,8 +68,16 @@ std::string default_state_path() {
     return (std::filesystem::path(base) / "fairyfly" / "link" / "state.json").string();
 }
 
-Result link_pair(const LinkOptions& o) {
-    if (o.gateway.empty()) return error("INVALID_ARGUMENT", "--gateway is required, e.g. https://app.fairyfly.cloud");
+Result link_pair(const LinkOptions& options) {
+    LinkOptions o = options;
+    if (o.gateway.empty()) o.gateway = ffy::env_or("FAIRYFLY_LINK_GATEWAY");
+    if (o.gateway.empty()) {  // started from the tray: ask in the console
+        std::cerr << "Web address of the fairyfly service (from your administrator, e.g. https://app.fairyfly.cloud): " << std::flush;
+        std::getline(std::cin, o.gateway);
+        while (!o.gateway.empty() && (o.gateway.back() == ' ' || o.gateway.back() == '\r')) o.gateway.pop_back();
+    }
+    if (o.gateway.rfind("https://", 0) != 0 && o.gateway.rfind("http://127.0.0.1", 0) != 0 && o.gateway.rfind("http://localhost", 0) != 0)
+        return error("INVALID_ARGUMENT", "the gateway address must start with https://, e.g. https://app.fairyfly.cloud");
     try {
         ffy::link::PairingClient pc(o.gateway, host_name(), "Windows", fairyfly::FAIRYFLY_VERSION);
         auto shown = pc.start();
@@ -99,7 +108,8 @@ Result link_status(const LinkOptions& o) {
         Result r;
         r.status = Result::Status::Success;
         r.data = {{"paired", true}, {"device", st.device_id}, {"account", st.email}, {"organisation_id", st.tenant},
-                  {"organisation", st.tenant_name}, {"gateway", st.link_url}, {"pinned_gateway_keys", st.gateway_keys.size()}, {"state", state_path(o)}};
+                  {"organisation", st.tenant_name}, {"gateway", st.link_url}, {"pinned_gateway_keys", st.gateway_keys.size()}, {"state", state_path(o)},
+                  {"paused", is_paused(state_path(o))}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
         return r;
     } catch (const std::exception&) {
         Result r;
@@ -117,6 +127,52 @@ Result link_unpair(const LinkOptions& o) {
     r.status = Result::Status::Success;
     r.data = {{"removed", removed}, {"note", "also remove the desktop in the web app (Overview -> Desktops) so the gateway forgets it"}};
     return r;
+}
+
+Result link_pause(const LinkOptions& o) {
+    if (!set_paused(state_path(o), true)) return error("PAUSE_FAILED", "could not write " + pause_marker(state_path(o)).string());
+    Result r;
+    r.status = Result::Status::Success;
+    r.data = {{"paused", true}, {"link", describe(read_status(state_path(o)), ffy::now_unix())},
+              {"note", "a running link disconnects within a second; the AI assistant cannot reach this desktop until: fairyfly link resume"}};
+    return r;
+}
+
+Result link_resume(const LinkOptions& o) {
+    if (!set_paused(state_path(o), false)) return error("RESUME_FAILED", "could not remove " + pause_marker(state_path(o)).string());
+    Result r;
+    r.status = Result::Status::Success;
+    r.data = {{"paused", false}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
+    return r;
+}
+
+namespace {
+class StateLinkControl : public tray::LinkControl {
+public:
+    explicit StateLinkControl(std::string path) : path_(std::move(path)) {}
+    tray::LinkView view() override {
+        tray::LinkView v;
+        v.paused = is_paused(path_);
+        try {
+            auto st = ffy::link::load_state(path_);
+            v.paired = true;
+            v.organisation = st.tenant_name.empty() ? st.tenant : st.tenant_name;
+            v.account = st.email;
+        } catch (const std::exception&) {
+            return v;  // not paired (or the state is unreadable for this Windows user)
+        }
+        v.state = describe(read_status(path_), ffy::now_unix());
+        return v;
+    }
+    bool set_paused(bool paused) override { return fairyfly::link::set_paused(path_, paused); }
+
+private:
+    std::string path_;
+};
+}  // namespace
+
+std::unique_ptr<tray::LinkControl> make_link_control(const std::string& path) {
+    return std::make_unique<StateLinkControl>(path.empty() ? default_state_path() : path);
 }
 
 int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
@@ -138,7 +194,10 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     g_stop = false;
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
-    std::thread net([&] { agent.run(g_stop); });  // the link (outbound WebSocket); tool calls come back via `tools`
+    // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
+    const std::string sp = state_path(o);
+    std::thread net([&] { supervise(sp, [&agent](const std::atomic<bool>& net_stop) { agent.run(net_stop); }, g_stop); });
+    if (is_paused(sp)) std::cerr << "fairyfly link: paused - it connects after: fairyfly link resume" << std::endl;
 
     mcp::ServeOptions so;
     so.transport = "link";
