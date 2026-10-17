@@ -1,0 +1,47 @@
+<!--
+  Per-user installer of fairyfly (D10 install and update), built with WiX v5:
+    wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=26.10.5 -o fairyfly.msi
+  - Installs fairyfly.exe to %LOCALAPPDATA%\Programs\fairyfly without administrator rights (the tray, the link and
+    SAP GUI all run as the user on the interactive desktop).
+  - Appends that folder to the user's PATH and adds a Start-menu entry "fairyfly (tray)" (fairyfly in tray mode).
+  - MsiVersion: MSI versions are major.minor.build with major < 256, so the calendar version YYYY.MM.DD becomes
+    (YYYY-2000).MM.DD, e.g. 2026.10.05 -> 26.10.5 (packaging/msi_version.ps1).
+  - Upgrades replace older versions (MajorUpgrade, same UpgradeCode); `fairyfly update apply` may also update the exe
+    in place between MSI releases.
+  - Software distribution: deploy the MSI per user (e.g. Intune "user" context); it never writes HKLM.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="fairyfly" Manufacturer="DataZoo GmbH" Version="$(var.MsiVersion)"
+           UpgradeCode="{AEC9807E-BC74-4802-8816-25F3AB39BA29}" Scope="perUser" Compressed="yes" InstallerVersion="500">
+    <SummaryInformation Description="fairyfly - SAP GUI automation CLI, MCP server and cloud link" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of fairyfly is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="fairyfly" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <ComponentGroup Id="Main">
+      <!-- files in the user profile: the key path is an HKCU value (ICE38), folders are removed on uninstall (ICE64) -->
+      <Component Id="FairyflyExe" Directory="INSTALLFOLDER" Guid="{3F7B6A15-2C4E-4D7B-9E1A-8B5C6D7E8F90}">
+        <File Id="FairyflyExeFile" Source="$(var.ExePath)" Name="fairyfly.exe" KeyPath="no" />
+        <RegistryValue Root="HKCU" Key="Software\DataZoo\fairyfly" Name="installed" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsDir" Directory="ProgramsDir" On="uninstall" />
+      </Component>
+      <Component Id="TrayShortcut" Directory="ProgramMenuFolder" Guid="{8D2E4F61-7A3B-4C9D-B1E2-F3A4B5C6D7E8}">
+        <Shortcut Id="TrayShortcutLnk" Name="fairyfly (tray)" Description="fairyfly MCP server and cloud link in the system tray"
+                  Target="[INSTALLFOLDER]fairyfly.exe" Arguments="mcp --tray" WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\DataZoo\fairyfly" Name="shortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="fairyfly">
+      <ComponentGroupRef Id="Main" />
+    </Feature>
+  </Package>
+</Wix>

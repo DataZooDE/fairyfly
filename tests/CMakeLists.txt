@@ -1,6 +1,7 @@
 # Test configuration
 
 find_package(Catch2 3 CONFIG REQUIRED)
+find_package(ZXing CONFIG REQUIRED)  # decodes the QR codes link pair draws (test_link_console.cpp)
 
 # Unit tests (link against shared fairyfly_core library to avoid recompilation)
 add_executable(unit_tests
@@ -42,6 +43,10 @@ add_executable(unit_tests
     unit/test_mcp_http.cpp
     unit/test_http_sys_mapping.cpp
     unit/test_command_table.cpp
+    unit/test_link_bridge.cpp
+    unit/test_link_control.cpp
+    unit/test_link_console.cpp
+    unit/test_update.cpp
     unit/test_command_registry_threads.cpp
     unit/test_agent_help.cpp
     unit/test_setup_validators.cpp
@@ -81,6 +86,13 @@ add_dependencies(unit_tests connection_cache_worker)
 add_executable(mcp_worker_fixture EXCLUDE_FROM_ALL unit/mcp_worker_fixture.cpp)
 target_link_libraries(mcp_worker_fixture PRIVATE fairyfly_core)
 add_dependencies(unit_tests mcp_worker_fixture)
+
+# Shows the pairing QR code in a new console and reads the screen back (test_link_console.cpp).
+if(WIN32)
+    add_executable(link_console_fixture EXCLUDE_FROM_ALL unit/link_console_fixture.cpp)
+    target_link_libraries(link_console_fixture PRIVATE fairyfly_core)
+    add_dependencies(unit_tests link_console_fixture)
+endif()
 add_dependencies(unit_tests fairyfly)
 
 # Manual live SAP gate: independent COM STAs in one process (read-only; excluded from normal tests).
@@ -94,6 +106,7 @@ target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CU
 target_link_libraries(unit_tests PRIVATE
     fairyfly_core
     Catch2::Catch2
+    ZXing::ZXing
 )
 if(WIN32)
     target_link_libraries(unit_tests PRIVATE shell32)

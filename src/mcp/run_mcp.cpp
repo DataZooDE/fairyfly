@@ -85,7 +85,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     }
 
     const bool http = options.http || options.transport == "http";
-    if (!http && options.transport != "stdio") {
+    const bool link = !http && options.transport == "link";  // fairyfly link run: calls from the cloud gateway
+    if (!http && !link && options.transport != "stdio") {
         Result nyi;
         nyi.status = Result::Status::NotImplemented;
         nyi.error["code"] = "NOT_IMPLEMENTED";
@@ -114,7 +115,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     }
 
 #ifdef _WIN32
-    if (!http && _isatty(_fileno(stdin))) {
+    if (!http && !link && _isatty(_fileno(stdin))) {
         std::cerr << "fairyfly mcp speaks MCP (JSON-RPC) over stdin/stdout and must be launched by an MCP "
                      "client, not from an interactive console. Configure it as a stdio server, e.g. "
                      "command: fairyfly, args: [\"mcp\"]." << std::endl;
@@ -163,7 +164,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
                                                                : std::function<cli::CommandHandler*()>([] { return nullptr; });
     AuditHook hook;
     if (sink && sink->enabled()) {
-        hook = make_mcp_audit_hook(sink, peek, read_only);
+        hook = make_mcp_audit_hook(sink, peek, read_only, link ? "link" : "mcp");
     }
 
     ServerOptions server_options;
@@ -337,6 +338,21 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         const int http_exit = run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
         append_serve_event(sink, "stopped", read_only);
         return http_exit;
+    }
+
+    if (link) {
+        if (!hooks || !hooks->link_loop) return refuse("INVALID_ARGUMENT", "transport 'link' is started by `fairyfly link run`");
+        CommandDispatcher link_dispatcher(make_registry_invoker(lazy_handler), policy, hook,
+                                          retain_families(all_tool_specs(), options.families));
+        // a call the gateway granted read-only runs with the handler's read-only guard on, even when this
+        // desktop allows writes (--allow-write); the server value is restored after the call
+        link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
+        if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
+            return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        append_serve_event(sink, "started", read_only);
+        const int link_exit = hooks->link_loop(link_dispatcher);
+        append_serve_event(sink, "stopped", read_only);
+        return link_exit;
     }
 
     CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,

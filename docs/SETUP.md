@@ -17,9 +17,23 @@ Nothing has to be installed in the SAP system, and fairyfly needs no runtime (no
 
 ## 1. Get fairyfly
 
-**Download.** Once a release is published, `fairyfly.exe` (Windows x64, a single statically linked file, no
-installer) is on the [GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) together with a
-`SHA256SUMS` file. Check the download:
+**Installer (per user).** Releases from 2026-10 on also carry `fairyfly.msi`. It installs to
+`%LOCALAPPDATA%\Programs\fairyfly` without administrator rights, adds that folder to your `PATH` and adds a Start-menu
+entry "fairyfly (tray)". Uninstall it under Settings -> Apps. For software distribution, deploy it in the user context
+(for example Intune "user"); it never writes to HKLM.
+
+**Update.** `fairyfly update check` asks the releases page whether a newer version exists. `fairyfly update apply`
+installs it:
+- it downloads the release, checks it against `SHA256SUMS` and checks its Authenticode signature (a signed
+  installation only accepts the same signer);
+- only then it replaces `fairyfly.exe`; the previous one stays as `fairyfly.exe.old` until the next update.
+
+The tray checks once in the background and shows a notice when an update is available (`FAIRYFLY_UPDATE_CHECK=0`
+turns that off).
+
+**Download.** Once a release is published, `fairyfly.exe` (Windows x64, a single statically linked file) is on the
+[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) together with a `SHA256SUMS` file. Check the
+download:
 
 ~~~powershell
 Get-FileHash .\fairyfly.exe        # compare with the line in SHA256SUMS

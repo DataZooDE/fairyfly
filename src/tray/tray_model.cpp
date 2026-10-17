@@ -76,6 +76,23 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     tokens.children.push_back(item("List tokens (console)", TrayAction::TokenList));
     tokens.children.push_back(item("Create token (console)", TrayAction::TokenCreate));
     model.items.push_back(std::move(tokens));
+
+    // Cloud link (D10): the outbound connection to the fairyfly cloud gateway, a separate `fairyfly link run`.
+    MenuItem cloud = item("Cloud link", TrayAction::None);
+    const LinkView& lv = state.link;
+    if (!lv.paired) {
+        cloud.children.push_back(item("Not connected to the fairyfly cloud", TrayAction::None, false));
+        cloud.children.push_back(item("Connect to cloud... (pair in a console)", TrayAction::LinkPair));
+    } else {
+        cloud.children.push_back(item(lv.organisation + " (" + lv.account + "): " + lv.state, TrayAction::None, false));
+        cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == "not running"));
+        if (lv.paused) cloud.children.push_back(item("Resume", TrayAction::LinkResume));
+        else cloud.children.push_back(item("Pause", TrayAction::LinkPause));
+        cloud.children.push_back(item("Health check (console)", TrayAction::LinkStatus));
+        cloud.children.push_back(item("Pair again (console)", TrayAction::LinkPair));
+    }
+    model.items.push_back(std::move(cloud));
+    model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
 
     model.items.push_back(item("Quit", TrayAction::Quit));
