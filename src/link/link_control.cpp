@@ -93,6 +93,7 @@ void supervise(const std::string& state_path, const std::function<void(const std
         auto now = std::chrono::steady_clock::now();
         if (s != last || now - last_write >= o.heartbeat) {
             write_status(state_path, s);
+            if (s != last && o.on_change) o.on_change(s);
             last = s;
             last_write = now;
         }

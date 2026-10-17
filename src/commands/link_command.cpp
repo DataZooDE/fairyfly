@@ -18,6 +18,8 @@ Example: fairyfly link pair --gateway https://app.fairyfly.cloud
 )HELP");
     pair_cmd_->add_option("--gateway", options_.gateway, "Web address of the fairyfly service (default: FAIRYFLY_LINK_GATEWAY, else asked)");
     pair_cmd_->add_option("--qr-png", options_.qr_png, "Also write the QR code as a PNG file");
+    pair_cmd_->add_option("--qr-style", options_.qr_style, "QR code in the console: auto (block characters where the console can show them, else ASCII) | blocks | ascii")
+        ->check(CLI::IsMember({"auto", "blocks", "ascii"}));
     pair_cmd_->add_option("--timeout", options_.pair_timeout_s, "Seconds to wait for the phone (default 300)");
     add_state(pair_cmd_);
 
@@ -72,7 +74,9 @@ link::LinkOptions LinkCommand::options() const {
     return o;
 }
 
-Result LinkCommand::execute(cli::CommandHandler&) {
+Result LinkCommand::execute(cli::CommandHandler&) { return execute_without_sap(); }
+
+Result LinkCommand::execute_without_sap() {
     if (pair_cmd_ && *pair_cmd_) return link::link_pair(options());
     if (status_cmd_ && *status_cmd_) return link::link_status(options());
     if (unpair_cmd_ && *unpair_cmd_) return link::link_unpair(options());

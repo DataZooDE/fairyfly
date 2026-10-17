@@ -7,7 +7,9 @@
 //   link resume  lets a paused link connect again
 //   link unpair  forgets the pairing on this desktop
 // The protocol code is libffl (third_party/libffl), shared with the gateway so it cannot drift.
+#include <atomic>
 #include <functional>
+#include <iosfwd>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,6 +30,7 @@ struct LinkOptions {
     // pair
     std::string gateway;          ///< web address of the service, e.g. https://app.fairyfly.cloud
     std::string qr_png;           ///< also write the QR code as a PNG file
+    std::string qr_style = "auto";  ///< auto | blocks | ascii (see link_console.h)
     int pair_timeout_s = 300;
     // run
     bool allow_write = false;     ///< like `mcp --allow-write`; each write still needs the gateway's grant and an approval
@@ -36,7 +39,22 @@ struct LinkOptions {
     std::string approve = "desktop";  ///< desktop (dialog) | no
 };
 
-Result link_pair(const LinkOptions& options);
+/// Where `link pair` talks to the person: by default the console (stderr through WriteConsoleW, stdin) and Ctrl+C.
+struct PairIo {
+    std::ostream* out = nullptr;              ///< nullptr: the console
+    std::istream* in = nullptr;               ///< nullptr: std::cin
+    const std::atomic<bool>* stop = nullptr;  ///< nullptr: set by Ctrl+C while pairing
+};
+
+/// Shows "Contacting <gateway>..." at once, then the QR code, the code and the number; waits for the phone and the
+/// confirmation at the desktop. Ctrl+C (or *io.stop) ends it within a fraction of a second: PAIRING_CANCELLED.
+/// io.stop (or Ctrl+C) is looked at before each prompt; a prompt already reading the console is ended by Ctrl+C
+/// itself (the console aborts the read), not by io.stop.
+Result link_pair(const LinkOptions& options, const PairIo& io = {});
+
+/// Threads that `link pair` or `link run` gave up waiting for after Ctrl+C and that are still running. main()
+/// ends the process with std::_Exit when there are any, so they cannot race static destructors and atexit handlers.
+int background_threads();
 Result link_status(const LinkOptions& options);
 Result link_unpair(const LinkOptions& options);
 Result link_pause(const LinkOptions& options);

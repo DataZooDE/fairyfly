@@ -18,6 +18,23 @@ organisation has connected there can use your SAP GUI:
 
 Without `--gateway`, `link pair` uses `FAIRYFLY_LINK_GATEWAY`, and otherwise asks for the address.
 
+What the console shows:
+- `link pair` prints `Contacting <gateway>…` at once, then the QR code, the typed code and the number.
+- The QR code uses block characters where the console can show them. Elsewhere (stderr redirected to a file or pipe,
+  or a raster font whose code page has no block characters) it falls back to ASCII (`##`).
+  - `--qr-style blocks|ascii` overrides that choice.
+  - `--qr-png FILE` also writes the code as a picture.
+- Text reaches a Windows console through `WriteConsoleW`, so its code page (437, 1252, ...) does not matter.
+- `link run` prints one line for each change:
+  - `connected to <host> as <account> in '<organisation>' – Ctrl+C stops`;
+  - when the connection is lost, the reason and when it reconnects, then `reconnected to <host>`;
+  - pause and resume.
+- Ctrl+C stops both commands within a second; a second Ctrl+C ends the process at once. A cancelled pairing saves
+  nothing (`PAIRING_CANCELLED`).
+- `pair`, `status`, `pause`, `resume` and `unpair` never touch SAP GUI: unlike the SAP commands, they run without
+  attaching to SAP GUI first.
+- `--log-level debug` also shows how long the gateway took to answer, and libffl's own log messages.
+
 Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 - `state.json`: the pairing. The device key inside it is protected with DPAPI.
 - `state.json.paused`: exists while the link is paused.
@@ -77,3 +94,8 @@ gateway's MCP endpoint with an access token and checks:
 - tools/list and a read call through the gateway;
 - the local audit record (`audit_source: "link"`, request id, principal, no screen content);
 - pause (`DEVICE_OFFLINE`), resume, and the status after the link ends.
+
+It uses this desktop's real pairing (`%LOCALAPPDATA%\fairyfly\link\state.json`) and its pause marker:
+- Stop a `link run` that is already running first. Otherwise there are two connections for the same device, and the
+  test's pause disconnects both.
+- It needs an access token in `FFY_ACCESS_TOKEN` and a logged-in SAP GUI session with scripting enabled.

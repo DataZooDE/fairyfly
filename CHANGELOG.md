@@ -18,6 +18,14 @@
 - Tray (`mcp --tray`): a **Cloud link** submenu with the pairing, the link state, Connect/Pair again, Start link,
   Pause/Resume and a health check.
 - `tests/integration/link_live.ps1`: a live check through a real gateway (read call, audit, pause, resume).
+- What the console shows:
+  - The pairing QR code reaches a Windows console intact whatever its code page (`WriteConsoleW`; it used to come
+    out as mojibake in cp437/1252 consoles). Where block characters cannot be shown it falls back to ASCII;
+    `--qr-style auto|blocks|ascii` overrides that.
+  - `link pair` prints `Contacting <gateway>…` at once.
+  - `link run` prints its connection state (connected, lost and reconnecting, paused, resumed, stopped).
+  - Ctrl+C stops both within a second.
+  - `link pair|status|pause|resume|unpair` no longer attach to SAP GUI before they start.
 - `fairyfly update check|apply`: updates from the project's GitHub releases, verified against `SHA256SUMS` and the
   Authenticode signer (a signed installation only accepts the same signer) before `fairyfly.exe` is replaced (the old
   one stays as `fairyfly.exe.old`). The tray checks once in the background (`FAIRYFLY_UPDATE_CHECK=0` turns it off)

@@ -292,9 +292,17 @@ namespace {
         }
 
         // `link run` is special-cased like `mcp`: it runs fairyfly's dispatcher for calls from the cloud gateway.
+        // The other link verbs run here too, without SAP.
         for (const auto& command : CommandRegistry::instance().all_commands()) {
             auto* link_command = dynamic_cast<LinkCommand*>(command.get());
-            if (!link_command || !link_command->run_invoked()) continue;
+            if (!link_command || !link_command->was_invoked()) continue;
+            if (!link_command->run_invoked()) {
+                // pair, status, pause, resume, unpair need no SAP: the shared handler would attach to SAP GUI first
+                command_result = link_command->execute_without_sap();
+                note_result(audit_out, command_result);
+                print_result();
+                return command_result.status == Result::Status::Success ? 0 : 1;
+            }
             if (batch_mode) {
                 command_result.status = Result::Status::Error;
                 command_result.error["code"] = "LINK_UNAVAILABLE";

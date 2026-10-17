@@ -17,6 +17,7 @@
   Prerequisites:
     - Windows PowerShell 5.1, SAP GUI with scripting enabled, a logged-in session (SAP Easy Access, no popup);
     - this desktop paired once by a person: `fairyfly link pair --gateway <address>` (QR + number on the phone);
+    - no other `fairyfly link run` on this desktop (it uses the real pairing and its pause marker; exit 2 otherwise);
     - an access token for the gateway's MCP endpoint of the same user, e.g. from the web app's connector wizard
       ("Run test" shows how) or from your AI platform's OAuth flow. Pass it in the environment variable
       FFY_ACCESS_TOKEN; it is never printed or written anywhere.
@@ -72,6 +73,11 @@ function Ffy([string[]]$argv) {
 $status = Ffy @('link', 'status')
 if (-not $status -or -not $status.data.paired) { Write-Host "This desktop is not paired: run fairyfly link pair --gateway $Gateway"; exit 2 }
 Pass "paired as $($status.data.account) in $($status.data.organisation)"
+# a second link for the same device would compete with the running one, and the pause below would disconnect it too
+if ($status.data.link -ne 'not running') {
+    Write-Host "A fairyfly link is already running here ($($status.data.link)); stop it first, then run this test"
+    exit 2
+}
 if ($status.data.paused) { & $Exe link resume | Out-Null }
 
 $rpcId = 0

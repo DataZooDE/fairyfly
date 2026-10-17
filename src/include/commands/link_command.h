@@ -16,6 +16,9 @@ public:
     Result execute(cli::CommandHandler& handler) override;
     bool was_invoked() const override { return cmd_ && *cmd_; }
     bool run_invoked() const { return run_cmd_ && *run_cmd_; }
+    /// pair, status, pause, resume, unpair: they never touch SAP, so cli_entry.cpp runs them without the shared
+    /// CommandHandler (creating it attaches to SAP GUI over COM, which can stall while SAP GUI is busy).
+    Result execute_without_sap();
     /// Parsed options (valid after parsing); --tools is folded into families.
     link::LinkOptions options() const;
 

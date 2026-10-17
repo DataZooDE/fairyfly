@@ -32,6 +32,8 @@ struct SupervisorOptions {
     std::chrono::milliseconds poll{500};            ///< how often the marker is checked
     std::chrono::milliseconds restart_delay{2000};  ///< back-off when the agent ended by itself
     std::chrono::seconds heartbeat{15};             ///< status refresh while nothing changes
+    /// Called on the supervising thread when the state changes ("connected" while the agent runs, "paused").
+    std::function<void(const std::string& state)> on_change;
 };
 
 /// Runs `agent(net_stop)` (libffl's Agent::run) on a thread while the link is not paused; pausing sets net_stop and
