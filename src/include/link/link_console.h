@@ -1,0 +1,96 @@
+#pragma once
+// What `fairyfly link pair|run` shows the person at the desktop (D10). A Windows console decodes the bytes written
+// to it with its code page (437 or 1252 on most desktops), so UTF-8 text such as the QR code's block characters
+// came out as mojibake. Text here goes to a console through WriteConsoleW (UTF-16, independent of the code page)
+// and to a file or pipe as UTF-8; the QR code falls back to pure ASCII where block characters cannot be shown.
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <streambuf>
+#include <string>
+#include <string_view>
+
+#include <spdlog/common.h>
+
+#include "qr.hpp"  // libffl: ffy::qr::Matrix
+
+namespace fairyfly::link {
+
+enum class QrStyle {
+    Blocks,  ///< UTF-8 half blocks, two module rows per line (libffl's ffy::qr::to_terminal)
+    Ascii,   ///< "##" for a light module, two spaces for a dark one, one module row per line
+};
+
+/// Both styles draw the light modules (scans on dark terminals, where the text is light) with a 2-module quiet zone.
+std::string render_qr(const ffy::qr::Matrix& matrix, QrStyle style);
+
+/// `--qr-style`: "blocks", "ascii", or "auto" (blocks when stderr is a console whose font can show them).
+QrStyle choose_qr_style(const std::string& requested);
+
+/// Writes UTF-8 text to the stream behind `handle` (a Windows HANDLE; nullptr = stderr): WriteConsoleW when it is a
+/// console, the UTF-8 bytes otherwise. False when nothing could be written.
+bool write_utf8(std::string_view text, void* handle = nullptr);
+
+/// True when `handle` (nullptr = stderr) is a console whose font and code page can show U+2580, U+2584 and U+2588.
+bool console_shows_blocks(void* handle = nullptr);
+
+/// std::ostream onto write_utf8(stderr): libffl's prompts (std::ostream&) reach the console intact as well.
+/// Output is passed on at every flush (std::endl, std::flush) and when the stream is destroyed.
+class ConsoleStream : public std::ostream {
+public:
+    ConsoleStream();
+    ~ConsoleStream() override;
+
+private:
+    class Buf : public std::streambuf {
+    public:
+        ~Buf() override;
+    protected:
+        int_type overflow(int_type ch) override;
+        std::streamsize xsputn(const char* s, std::streamsize n) override;
+        int sync() override;
+    private:
+        std::string pending_;
+    };
+    Buf buf_;
+};
+
+/// The status lines of `fairyfly link run`. libffl's agent reports its connection only through spdlog (info "link
+/// up: ...", warn "link down ..., reconnecting in N ms", info "gateway asked to reconnect (...)"); the printer turns
+/// those into one line per change for the person at the desktop.
+class LinkStatusPrinter {
+public:
+    using Writer = std::function<void(const std::string& line)>;
+    /// host: gateway host shown (fairyfly.io); account/organisation from the pairing.
+    LinkStatusPrinter(std::string host, std::string account, std::string organisation, Writer writer);
+
+    void starting(bool paused);
+    void paused();
+    void resumed();
+    void stopping();
+    void stopped();
+    /// One libffl log message (spdlog payload, without level or time).
+    void on_agent_log(std::string_view message);
+
+    /// The connected line, e.g. "connected to fairyfly.io as a@b.example in 'acme' - Ctrl+C stops".
+    std::string connected_line() const;
+
+private:
+    void emit(const std::string& line);
+    std::string host_, account_, organisation_;
+    Writer writer_;
+    std::mutex mu_;
+    bool ever_connected_ = false, up_ = false, stopping_ = false;
+    std::string last_down_;
+};
+
+/// spdlog sink for the default logger during `link run`: hands every message to a LinkStatusPrinter.
+spdlog::sink_ptr make_status_sink(std::shared_ptr<LinkStatusPrinter> printer);
+
+/// Host part of a ws(s)/http(s) URL ("wss://fairyfly.io/link" -> "fairyfly.io"); the input when it has none.
+std::string url_host(const std::string& url);
+
+}  // namespace fairyfly::link

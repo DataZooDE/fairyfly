@@ -92,8 +92,9 @@ The same operations are available as commands for scripts and scheduled jobs.
 log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
 
 **1. Get fairyfly.** Download `fairyfly.exe` from the
-[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) once a release is published (a single file,
-no installer), or [build it from source](docs/BUILDING.md). Put it in a folder of your choice, for example
+[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) once a release is published (a single file;
+newer releases also offer a per-user `fairyfly.msi`, and `fairyfly update apply` updates in place), or
+[build it from source](docs/BUILDING.md). Put it in a folder of your choice, for example
 `C:\Tools\fairyfly\`, and add that folder to your `PATH` (the examples below assume `fairyfly` is found; otherwise
 use the full path `C:\Tools\fairyfly\fairyfly.exe`).
 

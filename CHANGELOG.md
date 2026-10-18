@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link (`fairyfly link`)
+
+- New noun `link` (`pair`, `status`, `run`, `pause`, `resume`, `unpair`; docs/LINK.md):
+  - It connects this desktop to the fairyfly cloud gateway, outbound only, so AI assistants connected there can use
+    the SAP GUI.
+  - `link run` serves the calls through fairyfly's own MCP dispatcher in-process, with the same read-only, family
+    and policy guards as `mcp`, plus the gateway's per-call grant.
+  - Changes need the person's approval on the desktop or on the phone.
+  - Calls are audited with `audit_source: "link"`.
+- Pairing shows a QR code and a number; nothing is saved before the person at the desktop confirms the account and
+  organisation shown.
+- `link pause` / `link resume`: a paused link is disconnected, so the AI assistant cannot reach the desktop until it is
+  resumed. The running link follows a marker file next to the pairing state and writes its status beside it.
+- Tray (`mcp --tray`): a **Cloud link** submenu with the pairing, the link state, Connect/Pair again, Start link,
+  Pause/Resume and a health check.
+- `tests/integration/link_live.ps1`: a live check through a real gateway (read call, audit, pause, resume).
+- What the console shows:
+  - The pairing QR code reaches a Windows console intact whatever its code page (`WriteConsoleW`; it used to come
+    out as mojibake in cp437/1252 consoles). Where block characters cannot be shown it falls back to ASCII;
+    `--qr-style auto|blocks|ascii` overrides that.
+  - `link pair` prints `Contacting <gateway>…` at once.
+  - `link run` prints its connection state (connected, lost and reconnecting, paused, resumed, stopped).
+  - Ctrl+C stops both within a second.
+  - `link pair|status|pause|resume|unpair` no longer attach to SAP GUI before they start.
+- `fairyfly update check|apply`: updates from the project's GitHub releases, verified against `SHA256SUMS` and the
+  Authenticode signer (a signed installation only accepts the same signer) before `fairyfly.exe` is replaced (the old
+  one stays as `fairyfly.exe.old`). The tray checks once in the background (`FAIRYFLY_UPDATE_CHECK=0` turns it off)
+  and has a "Check for updates" item.
+- `fairyfly.msi`: a per-user installer (`packaging/fairyfly.wxs`, WiX 5): `%LOCALAPPDATA%\Programs\fairyfly`, the
+  user's `PATH` and a Start-menu entry for the tray. The CI installs and uninstalls it; releases carry it, signed when
+  signing is configured, and list it in `SHA256SUMS`.
+- `third_party/libffl`: the link protocol library, vendored from the gateway (`scripts/sync_libffl.py`). It adds
+  OpenSSL to the vcpkg dependencies.
+
 ## 2026.10.05 (2026-10-05)
 
 First published release. It also contains everything listed under 2026.09.30 below, which was prepared but never tagged.

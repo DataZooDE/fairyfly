@@ -6,6 +6,9 @@
 
 #include "include/audit_log.h"
 #include "include/commands/mcp_extras.h"
+#include "include/link/link_runner.h"
+#include "include/update/updater.h"
+#include "include/version.h"
 #include "include/tray/tray.h"
 #include "include/tray/tray_win32.h"
 
@@ -190,6 +193,15 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray_services.host = host.get();
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();
+    auto link_control = link::make_link_control();
+    tray_services.link = link_control.get();
+    // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0 turns it off
+    const std::string update_check = env_or_empty("FAIRYFLY_UPDATE_CHECK");
+    if (update_check != "0" && update_check != "off" && update_check != "false")
+        tray_services.latest_update = []() -> std::optional<std::string> {
+            auto c = update::check(FAIRYFLY_VERSION);
+            return c.available ? std::optional<std::string>(c.latest) : std::nullopt;
+        };
 
     tray::TrayPaths paths;
     paths.log_file = log_file;

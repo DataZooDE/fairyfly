@@ -13,6 +13,9 @@ struct HttpRunHooks {
     std::function<void(IServerControl&)> on_control;
     bool* restart_requested = nullptr;
     bool keep_logging = false;
+    /// `fairyfly link run` (transport "link", D10): instead of a transport loop, run_mcp hands the configured
+    /// dispatcher to this loop, on the calling (main, COM) thread. Its return value is the exit code.
+    std::function<int(ToolProvider& provider)> link_loop;
 };
 
 /// Validates options, wires policy/audit/dispatcher/transport/server and runs the MCP server.

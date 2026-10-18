@@ -21,6 +21,7 @@
 #include "include/commands/command_registry.h"
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
+#include "include/commands/link_command.h"
 #include "include/commands/mcp_command.h"
 #include "include/commands/cli_app.h"
 #include "include/mcp/run_mcp.h"
@@ -288,6 +289,35 @@ namespace {
                 return *handled;
             g_skip_invocation_audit = true;
             return mcp::run_mcp(serve_options, get_handler, global_opts, g_audit.sink, peek);
+        }
+
+        // `link run` is special-cased like `mcp`: it runs fairyfly's dispatcher for calls from the cloud gateway.
+        // The other link verbs run here too, without SAP.
+        for (const auto& command : CommandRegistry::instance().all_commands()) {
+            auto* link_command = dynamic_cast<LinkCommand*>(command.get());
+            if (!link_command || !link_command->was_invoked()) continue;
+            if (!link_command->run_invoked()) {
+                // pair, status, pause, resume, unpair need no SAP: the shared handler would attach to SAP GUI first
+                command_result = link_command->execute_without_sap();
+                note_result(audit_out, command_result);
+                print_result();
+                return command_result.status == Result::Status::Success ? 0 : 1;
+            }
+            if (batch_mode) {
+                command_result.status = Result::Status::Error;
+                command_result.error["code"] = "LINK_UNAVAILABLE";
+                command_result.error["message"] = "link run cannot run inside a batch";
+                note_result(audit_out, command_result);
+                print_result();
+                return 1;
+            }
+            link::LinkOptions link_options = link_command->options();
+            link_options.read_only = link_options.read_only || global_opts.read_only;
+            std::function<CommandHandler*()> peek = [] {
+                return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
+            };
+            g_skip_invocation_audit = true;
+            return link::run_link(link_options, get_handler, global_opts, g_audit.sink, peek);
         }
 
         CommandHandler& handler = get_handler();

@@ -1,8 +1,25 @@
 #include "include/cli_entry.h"
 #include "include/com/utf8.h"
+#include "include/link/link_runner.h"
 #include "include/mcp/session_worker_main.h"
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
+
+namespace {
+/// A `link` worker given up on Ctrl+C (a TLS connect or HTTP call in libffl cannot be interrupted) may still run:
+/// then the process ends without static destructors and atexit handlers (OpenSSL's cleanup) it could race with.
+int finish(int code) {
+    if (fairyfly::link::background_threads() == 0) return code;
+    std::cout.flush();
+    std::cerr.flush();
+    std::fflush(nullptr);
+    std::_Exit(code);
+}
+}  // namespace
+
 #ifdef _WIN32
 #include <windows.h>
 
@@ -21,12 +38,12 @@ int wmain(int argc, wchar_t** wargv) {
     if (hDesk) SetThreadDesktop(hDesk);
     if (argc == 2 && utf8_args[1] == "--mcp-session-worker")
         return fairyfly::mcp::run_session_worker_stdio();
-    return fairyfly::cli::run_cli(argc, arg_ptrs.data());
+    return finish(fairyfly::cli::run_cli(argc, arg_ptrs.data()));
 }
 #else
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--mcp-session-worker")
         return fairyfly::mcp::run_session_worker_stdio();
-    return fairyfly::cli::run_cli(argc, argv);
+    return finish(fairyfly::cli::run_cli(argc, argv));
 }
 #endif

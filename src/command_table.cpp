@@ -50,6 +50,14 @@ const std::vector<Row>& rows() {
         {{"credentials", "set"}, "Store a credential (the password is prompted for or read from stdin)", "CREDENTIALS", false, nullptr},
         {{"credentials", "delete"}, "Delete a stored credential", "CREDENTIALS", false, nullptr},
         {{"credentials", "import-env"}, "Import a colon-separated credential file into the store", "CREDENTIALS", false, nullptr},
+        {{"link", "pair"}, "Pair this desktop with the fairyfly cloud gateway (QR code + number)", "LINK", false, nullptr},
+        {{"link", "status"}, "Show the cloud pairing of this desktop", "LINK", false, nullptr},
+        {{"link", "run"}, "Serve the cloud gateway's tool calls through fairyfly's dispatcher", "LINK", false, nullptr},
+        {{"link", "pause"}, "Disconnect the cloud link until resumed", "LINK", false, nullptr},
+        {{"link", "resume"}, "Let a paused cloud link connect again", "LINK", false, nullptr},
+        {{"link", "unpair"}, "Forget the cloud pairing on this desktop", "LINK", false, nullptr},
+        {{"update", "check"}, "Check whether a newer fairyfly release exists", "UPDATE", false, nullptr},
+        {{"update", "apply"}, "Download, verify and install the latest fairyfly release", "UPDATE", false, nullptr},
         {{"mcp"}, "Start the MCP server (stdio)", "MCP SERVER", false, nullptr},
         {{"mcp", "tools"}, "Print the MCP tool table", "MCP SERVER", false, nullptr},
         {{"doctor"}, "Run comprehensive preflight environment and scripting diagnostics", "SYSTEM", true, "system"},
@@ -109,6 +117,8 @@ const std::vector<GroupSpec>& groups() {
         {"popup", "POPUP", "Handle popup windows"},
         {"transaction", "TRANSACTION", "Start SAP transactions"},
         {"credentials", "CREDENTIALS", "Manage SAP logon credentials in the Windows Credential Manager"},
+        {"link", "LINK", "Connect this desktop to the fairyfly cloud gateway (outbound only)"},
+        {"update", "UPDATE", "Check for and install new fairyfly releases"},
         {"mcp", "MCP SERVER", "Model Context Protocol server (stdio) and its tool table"},
     };
     return table;

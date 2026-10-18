@@ -10,9 +10,10 @@ namespace fairyfly::mcp {
 /// Builds the AuditHook that appends one audit::AuditRecord per MCP call to `sink`
 /// (nullptr or disabled sink => no-op hook). `peek_handler` returns the handler if it already
 /// exists (never creates it) so SAP facts can be attached.
+/// `source` is the audit_source of the records: "mcp", or "link" for calls from the cloud gateway (D10).
 AuditHook make_mcp_audit_hook(audit::AuditSink* sink,
                               const std::function<cli::CommandHandler*()>& peek_handler,
-                              bool read_only);
+                              bool read_only, const std::string& source = "mcp");
 
 /// True when the most recent append made through a hook or append_serve_event failed.
 /// Thread-safe; a successful denial append clears the failure and permits a later
