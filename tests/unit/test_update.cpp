@@ -131,6 +131,71 @@ TEST_CASE("update: the install decision", "[update]") {
     CHECK(decide(garbage).verdict == Verdict::Refuse);
 }
 
+namespace {
+const std::string kExe = "https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.05/fairyfly.exe";
+/// GitHub: every request to the download path redirects to a freshly signed release-assets URL.
+struct FakeGithub {
+    std::vector<int> asset_status;  // what the asset host answers, one entry per attempt (then 200)
+    int download_calls = 0, asset_calls = 0;
+    std::vector<std::string> urls;
+    HttpGet get() {
+        return [this](const ffy::HttpRequest& rq) {
+            urls.push_back(rq.url);
+            ffy::HttpResponse r;
+            if (rq.url == kExe) {
+                r.status = 302;
+                r.headers["location"] = "https://release-assets.githubusercontent.com/github-production-release-asset/1/x?sig=" + std::to_string(++download_calls);
+                return r;
+            }
+            const int n = asset_calls++;
+            r.status = n < int(asset_status.size()) ? asset_status[size_t(n)] : 200;
+            r.body = r.status == 200 ? "MZ..." : "";
+            if (r.status == 400) r.headers["x-ms-error-code"] = "InvalidQueryParameterValue";
+            return r;
+        };
+    }
+};
+}  // namespace
+
+TEST_CASE("update: a failed download from GitHub's asset host starts again from the release URL", "[update]") {
+    // seen on 2026-10-17/18: release-assets.githubusercontent.com answered 400 now and then for a fresh signed URL
+    FakeGithub gh;
+    gh.asset_status = {400, 503};
+    std::vector<int> waited;
+    CHECK(fetch(kExe, 1u << 20, 5, gh.get(), [&](int ms) { waited.push_back(ms); }) == "MZ...");
+    CHECK(gh.download_calls == 3);  // a new signed URL each time
+    CHECK(gh.asset_calls == 3);
+    CHECK(waited == std::vector<int>{2000, 5000});
+}
+
+TEST_CASE("update: download retries are limited and the error names the asset host's reason", "[update]") {
+    FakeGithub gh;
+    gh.asset_status = {400, 400, 400, 400, 400};
+    int waits = 0;
+    try {
+        fetch(kExe, 1u << 20, 5, gh.get(), [&](int) { waits++; });
+        FAIL("no exception");
+    } catch (const std::exception& e) {
+        const std::string what = e.what();
+        CHECK(what.find("HTTP 400") != std::string::npos);
+        CHECK(what.find("x-ms-error-code: InvalidQueryParameterValue") != std::string::npos);
+    }
+    CHECK(gh.asset_calls == kFetchAttempts);
+    CHECK(waits == kFetchAttempts - 1);
+}
+
+TEST_CASE("update: a 404 is final, and the API is not retried", "[update]") {
+    FakeGithub gh;
+    gh.asset_status = {404};
+    CHECK_THROWS(fetch(kExe, 1u << 20, 5, gh.get(), [](int) {}));
+    CHECK(gh.asset_calls == 1);
+
+    int calls = 0;
+    auto api = [&](const ffy::HttpRequest&) { calls++; ffy::HttpResponse r; r.status = 503; return r; };
+    CHECK_THROWS(fetch("https://api.github.com/repos/DataZooDE/fairyfly/releases/latest", 1u << 20, 5, api, [](int) {}));
+    CHECK(calls == 1);
+}
+
 // ---- the real update channel (hidden: needs internet; run with  unit_tests "[update-live]") ----
 
 TEST_CASE("update live: the real latest GitHub release parses, its download follows GitHub's redirects and matches SHA256SUMS",
