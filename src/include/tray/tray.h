@@ -66,6 +66,7 @@ struct TrayState {
     bool hard_read_only = false;   ///< FAIRYFLY_READ_ONLY=1: the toggle is locked
     std::string last_error;        ///< non-empty: the server failed (red icon)
     bool start_notice = true;      ///< balloon once when the server is up (always shown when it has warnings)
+    bool start_link = false;       ///< `--start-link` / tray.start_link: start `link run` on the first tick
     LinkView link;                 ///< refreshed on every tick
 };
 
@@ -259,6 +260,7 @@ public:
 
 private:
     void notify(const std::string& text);
+    bool start_link();   ///< a detached `fairyfly link run`; false when it could not be launched
 
     mcp::IServerControl& control_;
     IServerRunner* runner_;
@@ -266,6 +268,7 @@ private:
     TrayPaths paths_;
     TrayState state_;
     bool announced_ = false;
+    bool link_start_checked_ = false;
     std::mutex update_mu_;
     std::string announced_update_;
 };

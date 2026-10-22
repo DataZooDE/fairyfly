@@ -50,6 +50,13 @@ Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 - **Pause** / **Resume**;
 - **Health check**: `link status` in a console.
 
+To start the link together with the tray, use `fairyfly mcp --tray --http --start-link`, or set `tray.start_link: true`
+in `mcp.yaml`. For autostart at logon, set the YAML key: the Run value only carries the config path. The tray checks
+once, shortly after it starts. It starts a plain `fairyfly link run` only if the desktop is paired and no link is
+running (a paused link is left alone). If the desktop is not paired, it shows a notice instead. As with **Start
+link**, the link is a separate process: it does not get the tray's flags (`--allow-write`, `--tools`), and it keeps
+running when the tray quits.
+
 ## What runs where
 
 - `link run` serves calls through **fairyfly's own MCP dispatcher, in-process**. No local HTTP endpoint and no local

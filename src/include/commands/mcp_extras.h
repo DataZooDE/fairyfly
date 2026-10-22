@@ -22,6 +22,7 @@ struct McpExtras {
     // options of the mcp app
     std::string config_path;   ///< -c/--config
     bool tray = false;
+    bool start_link = false;   ///< --start-link (read through the config layers as tray.start_link)
     bool install_autostart = false;
     bool remove_autostart = false;
     // subcommands

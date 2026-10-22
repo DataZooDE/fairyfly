@@ -620,6 +620,56 @@ TEST_CASE("tray controller: cloud link actions", "[tray][controller][link]") {
     CHECK(f.host.balloons.back().find("Could not start the cloud link") != std::string::npos);
 }
 
+TEST_CASE("tray controller: --start-link starts the link once, only when paired and not running", "[tray][controller][link]") {
+    TrayState start;
+    start.start_link = true;
+    start.start_notice = false;
+
+    {   // paired, not running: one detached `link run`, the next ticks leave it alone
+        Fixture f;
+        f.link.current = paired("not running");
+        auto controller = f.make(start);
+        controller.on_tick();
+        controller.on_tick();
+        REQUIRE(f.launcher.requests.size() == 1);
+        CHECK(f.launcher.requests[0].command_line == "\"C:\\Program Files\\fairyfly\\fairyfly.exe\" link run");
+        CHECK(f.launcher.requests[0].detached);
+        CHECK(f.host.balloons.empty());
+    }
+    {   // already connected or paused: nothing is started
+        for (const char* state : {"connected", "paused"}) {
+            Fixture f;
+            f.link.current = paired(state, std::string(state) == "paused");
+            auto controller = f.make(start);
+            controller.on_tick();
+            CHECK(f.launcher.requests.empty());
+        }
+    }
+    {   // not paired: a notice instead of a launch
+        Fixture f;
+        auto controller = f.make(start);
+        controller.on_tick();
+        CHECK(f.launcher.requests.empty());
+        REQUIRE(f.host.balloons.size() == 1);
+        CHECK(f.host.balloons[0].find("not paired") != std::string::npos);
+    }
+    {   // the launch fails: a notice
+        Fixture f;
+        f.link.current = paired("not running");
+        f.launcher.pid = std::nullopt;
+        auto controller = f.make(start);
+        controller.on_tick();
+        CHECK(f.host.balloons.back().find("Could not start the cloud link") != std::string::npos);
+    }
+    {   // without the option the tick never starts the link
+        Fixture f;
+        f.link.current = paired("not running");
+        auto controller = f.make();
+        controller.on_tick();
+        CHECK(f.launcher.requests.empty());
+    }
+}
+
 TEST_CASE("tray controller: no link control means the submenu only offers pairing", "[tray][controller][link]") {
     Fixture f;
     TrayServices services;

@@ -100,8 +100,24 @@ void TrayController::announce_update(const std::string& version) {
     notify("fairyfly " + version + " is available. Install it with: fairyfly update apply");
 }
 
+bool TrayController::start_link() {
+    if (!services_.launcher) return false;
+    LaunchRequest request;   // runs in the background like the tray itself; it reads the pairing state
+    request.command_line = join_command_line(paths_.exe, {"link", "run"});
+    request.detached = true;
+    return services_.launcher->launch(request).has_value();
+}
+
 void TrayController::on_tick() {
     if (services_.link) state_.link = services_.link->view();
+    if (state_.start_link && !link_start_checked_) {
+        // once per tray process; a link that already runs (or is paused) is left alone
+        link_start_checked_ = true;
+        if (!services_.link || !state_.link.paired)
+            notify("Cloud link not started: this desktop is not paired (Cloud link > Connect to cloud)");
+        else if (state_.link.state == "not running" && !start_link())
+            notify("Could not start the cloud link");
+    }
     if (announced_) return;
     const auto status = control_.status();
     if (!status.running && status.warnings.empty()) return;
@@ -151,17 +167,9 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::LinkPair: console({"link", "pair"}); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
     case TrayAction::LinkStatus: console({"link", "status"}); break;
-    case TrayAction::LinkStart: {
-        bool ok = false;
-        if (services_.launcher) {
-            LaunchRequest request;   // runs in the background like the tray itself; it reads the pairing state
-            request.command_line = join_command_line(paths_.exe, {"link", "run"});
-            request.detached = true;
-            ok = services_.launcher->launch(request).has_value();
-        }
-        if (!ok) notify("Could not start the cloud link");
+    case TrayAction::LinkStart:
+        if (!start_link()) notify("Could not start the cloud link");
         break;
-    }
     case TrayAction::LinkPause:
     case TrayAction::LinkResume: {
         const bool pause = action == TrayAction::LinkPause;
