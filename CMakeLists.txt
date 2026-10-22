@@ -194,6 +194,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/link_runner.cpp
     src/link/link_control.cpp
     src/link/link_console.cpp
+    src/link/link_tray_entry.cpp
     src/update/update_model.cpp
     src/update/updater.cpp
     src/mcp/http_tray_runner.cpp
@@ -240,6 +241,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/config/mcp_doctor.cpp
     src/tray/tray_model.cpp
     src/tray/tray_controller.cpp
+    src/tray/link_tray.cpp
     src/tray/tray_win32.cpp
     src/commands/mcp_config_command.cpp
     src/commands/mcp_client_config_command.cpp

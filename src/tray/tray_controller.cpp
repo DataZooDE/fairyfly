@@ -58,6 +58,18 @@ std::string autostart_command(const std::string& exe, const std::string& config_
     return out;
 }
 
+std::string link_autostart_command(const std::string& exe, const std::vector<std::string>& args) {
+    std::vector<std::string> kept;
+    bool tray = false;
+    for (const auto& a : args) {
+        if (a == "--install-autostart" || a == "--remove-autostart") continue;
+        tray = tray || a == "--tray";
+        kept.push_back(a);
+    }
+    if (!tray) kept.push_back("--tray");
+    return join_command_line(exe, kept);
+}
+
 std::string console_command_line(const std::string& exe, const std::vector<std::string>& args) {
     return "cmd.exe /k \"" + join_command_line(exe, args) + "\"";
 }
@@ -100,24 +112,8 @@ void TrayController::announce_update(const std::string& version) {
     notify("fairyfly " + version + " is available. Install it with: fairyfly update apply");
 }
 
-bool TrayController::start_link() {
-    if (!services_.launcher) return false;
-    LaunchRequest request;   // runs in the background like the tray itself; it reads the pairing state
-    request.command_line = join_command_line(paths_.exe, {"link", "run"});
-    request.detached = true;
-    return services_.launcher->launch(request).has_value();
-}
-
 void TrayController::on_tick() {
     if (services_.link) state_.link = services_.link->view();
-    if (state_.start_link && !link_start_checked_) {
-        // once per tray process; a link that already runs (or is paused) is left alone
-        link_start_checked_ = true;
-        if (!services_.link || !state_.link.paired)
-            notify("Cloud link not started: this desktop is not paired (Cloud link > Connect to cloud)");
-        else if (state_.link.state == "not running" && !start_link())
-            notify("Could not start the cloud link");
-    }
     if (announced_) return;
     const auto status = control_.status();
     if (!status.running && status.warnings.empty()) return;
@@ -167,9 +163,17 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::LinkPair: console({"link", "pair"}); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
     case TrayAction::LinkStatus: console({"link", "status"}); break;
-    case TrayAction::LinkStart:
-        if (!start_link()) notify("Could not start the cloud link");
+    case TrayAction::LinkStart: {
+        bool ok = false;
+        if (services_.launcher) {
+            LaunchRequest request;   // the link tray: its own icon and Quit; it reads the pairing state
+            request.command_line = join_command_line(paths_.exe, {"link", "run", "--tray"});
+            request.detached = true;
+            ok = services_.launcher->launch(request).has_value();
+        }
+        if (!ok) notify("Could not start the cloud link");
         break;
+    }
     case TrayAction::LinkPause:
     case TrayAction::LinkResume: {
         const bool pause = action == TrayAction::LinkPause;
@@ -192,16 +196,9 @@ void TrayController::on_action(TrayAction action) {
 }
 
 // ---- run_with_tray -------------------------------------------------------------------------------
-int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& guard, TrayPaths paths,
-                  TrayState state) {
-    if (!services.host) return 1;
-    if (!guard.acquire()) {
-        services.host->message_box("fairyfly MCP", "The fairyfly MCP tray is already running.");
-        return 0;
-    }
+namespace detail {
 
-    TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
-
+bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui) {
     struct Ready {
         std::mutex m;
         std::condition_variable cv;
@@ -214,26 +211,40 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
             ok = value;
             cv.notify_all();
         }
-    } ready;
-
-    // UI thread: window + icon + message pump. The main thread below stays the COM/STA server thread.
-    std::thread ui([&] {
+    };
+    auto ready = std::make_shared<Ready>();
+    ui = std::thread([&host, &listener, ready] {
         try {
-            services.host->run(controller, [&](bool ok) { ready.set(ok); });
+            host.run(listener, [ready](bool ok) { ready->set(ok); });
         } catch (...) {
         }
-        ready.set(false);   // no-op when run() already reported
+        ready->set(false);   // no-op when run() already reported
     });
-
     {
-        std::unique_lock<std::mutex> lock(ready.m);
-        ready.cv.wait(lock, [&] { return ready.signalled; });
+        std::unique_lock<std::mutex> lock(ready->m);
+        ready->cv.wait(lock, [&] { return ready->signalled; });
     }
-    if (!ready.ok) {
-        services.host->post_quit();
-        ui.join();
-        return 1;
+    if (ready->ok) return true;
+    host.post_quit();
+    ui.join();
+    return false;
+}
+
+} // namespace detail
+
+int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& guard, TrayPaths paths,
+                  TrayState state) {
+    if (!services.host) return 1;
+    if (!guard.acquire()) {
+        services.host->message_box("fairyfly MCP", "The fairyfly MCP tray is already running.");
+        return 0;
     }
+
+    TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
+
+    // UI thread: window + icon + message pump. The main thread below stays the COM/STA server thread.
+    std::thread ui;
+    if (!detail::start_ui(*services.host, controller, ui)) return 1;
 
     // background update check: owns only a shared slot, so a late answer after Quit goes nowhere
     struct UpdateSlot {
@@ -293,16 +304,16 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
 
     if (entry.install_autostart) {
         if (!services.registry) return fail("TRAY_AUTOSTART_FAILED: no registry access");
-        const std::string command = autostart_command(entry.exe, entry.config_path);
-        if (!services.registry->set(kAutostartValueName, command)) return fail("TRAY_AUTOSTART_FAILED: could not write the Run key");
+        const std::string command = entry.autostart_line.empty() ? autostart_command(entry.exe, entry.config_path) : entry.autostart_line;
+        if (!services.registry->set(entry.autostart_name, command)) return fail("TRAY_AUTOSTART_FAILED: could not write the Run key");
         result.outcome = TrayEntryOutcome::AutostartDone;
-        say("Autostart registered (HKCU Run \\ " + std::string(kAutostartValueName) + "): " + command +
+        say("Autostart registered (HKCU Run \\ " + entry.autostart_name + "): " + command +
             "\nIt only starts while this user is logged on to an interactive desktop (see docs/MCP_TRAY.md).");
         return result;
     }
     if (entry.remove_autostart) {
         if (!services.registry) return fail("TRAY_AUTOSTART_FAILED: no registry access");
-        if (!services.registry->remove(kAutostartValueName)) return fail("TRAY_AUTOSTART_FAILED: could not remove the Run value");
+        if (!services.registry->remove(entry.autostart_name)) return fail("TRAY_AUTOSTART_FAILED: could not remove the Run value");
         result.outcome = TrayEntryOutcome::AutostartDone;
         say("Autostart removed.");
         return result;
@@ -316,7 +327,7 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
     }
     if (services.guard && services.guard->exists()) {
         result.outcome = TrayEntryOutcome::AlreadyRunning;
-        say("fairyfly MCP tray is already running.");
+        say(entry.name + " is already running.");
         return result;
     }
     const RelaunchPlan plan = plan_relaunch(entry.exe, entry.args, entry.tray_requested, entry.is_child, entry.has_console);
@@ -332,7 +343,7 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
     const auto pid = services.launcher->launch(request);
     if (!pid) return fail("TRAY_RELAUNCH_FAILED: could not start the detached tray process");
     result.outcome = TrayEntryOutcome::Relaunched;
-    say("fairyfly MCP tray started (pid " + std::to_string(*pid) + ").");
+    say(entry.name + " started (pid " + std::to_string(*pid) + ").");
     return result;
 }
 

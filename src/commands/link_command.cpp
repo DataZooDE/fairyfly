@@ -36,12 +36,18 @@ Connects to the gateway (outbound WebSocket) and serves the AI assistant's tool 
 fairyfly's own MCP dispatcher. Read-only unless --allow-write; even then every change needs the
 gateway's grant and an approval (this desktop's dialog or the phone). Calls are audited with
 audit_source "link". Stop with Ctrl+C.
+--tray runs the link alone in the system tray (Pause/Resume, Health check, Quit); it needs no
+MCP server and no HTTP endpoint. --install-autostart registers it, with the same options, at logon.
 Example: fairyfly link run
+Example: fairyfly link run --tray --install-autostart
 )HELP");
     run_cmd_->add_flag("--allow-write", options_.allow_write, "Allow changes in SAP (each still needs a grant and an approval)");
     run_cmd_->add_option("--tools", tools_filter_, "Only these tool families, e.g. session,screen");
     run_cmd_->add_option("--approve", options_.approve, "Desktop approval of changes: desktop (dialog) | no")
         ->check(CLI::IsMember({"desktop", "no"}));
+    run_cmd_->add_flag("--tray", options_.tray, "Run in the system tray (detached from the console); no MCP server");
+    run_cmd_->add_flag("--install-autostart", options_.install_autostart, "With --tray: start the link tray at logon (HKCU Run key)");
+    run_cmd_->add_flag("--remove-autostart", options_.remove_autostart, "With --tray: remove the logon autostart");
     add_state(run_cmd_);
 
     pause_cmd_ = add_leaf(app, {"link", "pause"});

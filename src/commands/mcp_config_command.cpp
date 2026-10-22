@@ -48,7 +48,6 @@ const std::vector<FlagMap>& flag_map() {
         {"default_connection", {"--default-connection"}},
         {"format", {"--format"}},
         {"tray.enabled", {"--tray"}},
-        {"tray.start_link", {"--start-link"}},
     };
     return map;
 }
@@ -212,7 +211,6 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray::TrayState state;
     state.hard_read_only = truthy(env_or_empty("FAIRYFLY_READ_ONLY"));
     if (auto v = layers.get_bool("tray.start_minimized_notice")) state.start_notice = *v;
-    if (auto v = layers.get_bool("tray.start_link")) state.start_link = *v;
     return tray::run_with_tray(*runner, tray_services, *guard, std::move(paths), std::move(state));
 }
 
@@ -261,7 +259,6 @@ void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     x.mcp_app = &mcp;
     mcp.add_option("-c,--config", x.config_path, "Config file (default: %LOCALAPPDATA%\\fairyfly\\mcp.yaml; also FAIRYFLY_MCP_CONFIG)");
     mcp.add_flag("--tray", x.tray, "Run in the system tray (detached from the console); needs the HTTP transport");
-    mcp.add_flag("--start-link", x.start_link, "With --tray: also start the cloud link (a background 'fairyfly link run')");
     mcp.add_flag("--install-autostart", x.install_autostart, "With --tray: start the tray at logon (HKCU Run key)");
     mcp.add_flag("--remove-autostart", x.remove_autostart, "With --tray: remove the logon autostart");
 

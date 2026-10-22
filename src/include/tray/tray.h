@@ -23,6 +23,7 @@
 // small interface below; unit tests use fakes, the Win32 implementations live in src/tray/tray_win32.cpp
 // and are exercised by hidden manual tests only.
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -31,6 +32,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "include/mcp/principal.h"
@@ -66,7 +68,6 @@ struct TrayState {
     bool hard_read_only = false;   ///< FAIRYFLY_READ_ONLY=1: the toggle is locked
     std::string last_error;        ///< non-empty: the server failed (red icon)
     bool start_notice = true;      ///< balloon once when the server is up (always shown when it has warnings)
-    bool start_link = false;       ///< `--start-link` / tray.start_link: start `link run` on the first tick
     LinkView link;                 ///< refreshed on every tick
 };
 
@@ -112,9 +113,14 @@ RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string
 inline constexpr const char* kTrayChildEnv = "FAIRYFLY_TRAY_CHILD";
 inline constexpr const char* kTrayMutexName = "Local\\fairyfly-tray";
 inline constexpr const char* kAutostartValueName = "fairyfly-mcp";
+inline constexpr const char* kLinkTrayMutexName = "Local\\fairyfly-link-tray";
+inline constexpr const char* kLinkAutostartValueName = "fairyfly-link";
 
 /// Value of HKCU\...\Run\fairyfly-mcp: "<exe>" mcp --tray [-c "<config>"].
 std::string autostart_command(const std::string& exe, const std::string& config_path);
+/// Value of HKCU\...\Run\fairyfly-link: "<exe>" and the `link run --tray` arguments (argv without the program
+/// name) without --install-autostart/--remove-autostart; --tray is added when missing.
+std::string link_autostart_command(const std::string& exe, const std::vector<std::string>& args);
 /// `cmd.exe /k` command line that runs `fairyfly <args>` in a console that stays open.
 std::string console_command_line(const std::string& exe, const std::vector<std::string>& args);
 
@@ -260,7 +266,6 @@ public:
 
 private:
     void notify(const std::string& text);
-    bool start_link();   ///< a detached `fairyfly link run`; false when it could not be launched
 
     mcp::IServerControl& control_;
     IServerRunner* runner_;
@@ -268,7 +273,6 @@ private:
     TrayPaths paths_;
     TrayState state_;
     bool announced_ = false;
-    bool link_start_checked_ = false;
     std::mutex update_mu_;
     std::string announced_update_;
 };
@@ -288,6 +292,9 @@ struct TrayEntry {
     std::string exe;
     std::vector<std::string> args;   ///< argv without the program name
     std::string config_path;         ///< for the autostart command; may be empty
+    std::string autostart_name = kAutostartValueName;   ///< the Run value
+    std::string autostart_line;      ///< non-empty: registered instead of autostart_command(exe, config_path)
+    std::string name = "fairyfly MCP tray";   ///< in the console messages
 };
 
 struct TrayEntryServices {
@@ -314,5 +321,53 @@ struct TrayEntryResult {
 /// Pure decision + effects behind interfaces (no server, no UI): autostart install/remove, relaunch,
 /// already-running detection.
 TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryServices& services);
+
+// ---- Link tray (`fairyfly link run --tray`) --------------------------------------------------------
+// The cloud link on its own, without the MCP server: `link run` stays on the main (COM) thread, the tray UI runs on
+// its own thread and sees the link only through LinkControl (the pairing state and the status file).
+
+/// Status line, Pause/Resume, Health check, Pair again, Open log/audit trail folder, Check for updates, Quit.
+TrayMenuModel build_link_menu(const LinkView& link);
+
+struct LinkTrayServices {
+    TrayHost* host = nullptr;
+    FileOpener* opener = nullptr;
+    ProcessLauncher* launcher = nullptr;
+    LinkControl* link = nullptr;
+    std::function<void()> stop_link;   ///< thread-safe: makes the running `link run` return
+};
+
+class LinkTrayController : public TrayListener {
+public:
+    LinkTrayController(LinkTrayServices services, TrayPaths paths);
+
+    TrayMenuModel menu() override;
+    TrayView view() override;
+    void on_action(TrayAction action) override;
+    std::string left_click_text() override;
+    void on_tick() override;
+
+    const LinkView& link() const { return link_; }
+    bool quit_requested() const { return quit_requested_; }
+
+private:
+    void notify(const std::string& text);
+
+    LinkTrayServices services_;
+    TrayPaths paths_;
+    LinkView link_;
+    std::string last_state_;   ///< the state seen on the previous tick, for the change notices
+    std::atomic<bool> quit_requested_{false};
+};
+
+/// Runs the link tray around `run_link` (called on the calling thread, the COM thread): single-instance guard, UI
+/// thread, and a message box when the link ends by itself with an error. Returns the exit code of `run_link`.
+int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices services, SingleInstance& guard,
+                       TrayPaths paths);
+
+namespace detail {
+/// Starts the UI thread (window, icon, message pump) and waits until it is up. False: no UI, the thread has ended.
+bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui);
+} // namespace detail
 
 } // namespace fairyfly::tray

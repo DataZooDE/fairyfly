@@ -37,6 +37,9 @@ struct LinkOptions {
     bool read_only = false;
     std::vector<std::string> families;
     std::string approve = "desktop";  ///< desktop (dialog) | no
+    bool tray = false;               ///< `link run --tray`: the link with its own tray icon, logging to link.log
+    bool install_autostart = false;  ///< with --tray: start the link tray at logon (HKCU Run fairyfly-link)
+    bool remove_autostart = false;
 };
 
 /// Where `link pair` talks to the person: by default the console (stderr through WriteConsoleW, stdin) and Ctrl+C.
@@ -63,8 +66,15 @@ Result link_resume(const LinkOptions& options);
 /// The tray's view of the link (pairing state + the running link's status file) and its pause switch.
 std::unique_ptr<tray::LinkControl> make_link_control(const std::string& state_path = {});
 
-/// Runs until Ctrl+C. Returns the process exit code. Calls are audited with source "link".
+/// Runs until Ctrl+C (or request_stop()). Returns the process exit code. Calls are audited with source "link".
 int run_link(const LinkOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
              const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);
+/// Thread-safe: makes a running run_link() return, like Ctrl+C (the tray's Quit).
+void request_stop();
+
+/// `link run --tray` (and its --install-autostart/--remove-autostart): relaunches detached from the console, then runs
+/// run_link() on this thread under the link tray. No MCP server, no HTTP. Returns the process exit code.
+int run_link_tray(const LinkOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
+                  const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);
 
 }  // namespace fairyfly::link

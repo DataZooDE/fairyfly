@@ -106,7 +106,6 @@ std::vector<KeySpec> build_specs() {
 
     add(make("tray.enabled", ValueType::Bool, Value{false}, "Run with the system tray icon (same as --tray)"));
     add(make("tray.start_minimized_notice", ValueType::Bool, Value{true}, "Show a balloon when the tray starts"));
-    add(make("tray.start_link", ValueType::Bool, Value{false}, "Start the cloud link ('fairyfly link run') with the tray (same as --start-link)"));
     add(make("tray.autostart", ValueType::Bool, Value{false}, "Documentation of intent only; use 'mcp --tray --install-autostart' to register"));
 
     add(make("audit.enabled", ValueType::Bool, Value{true}, "Write the audit trail (--no-audit / FAIRYFLY_AUDIT override)"));

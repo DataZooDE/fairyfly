@@ -12,6 +12,7 @@ organisation has connected there can use your SAP GUI:
 | `fairyfly link pair [--gateway https://app.example]` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
 | `fairyfly link status` | Paired or not, with device, account, organisation and gateway |
 | `fairyfly link run [--allow-write] [--tools session,screen] [--approve desktop\|no]` | Connects and serves tool calls until Ctrl+C |
+| `fairyfly link run --tray [--install-autostart\|--remove-autostart]` | The same link in the system tray, without the MCP server (see [Tray](#tray)) |
 | `fairyfly link pause` | Disconnects a running link until resumed: the AI assistant cannot reach this desktop meanwhile (the gateway answers `DEVICE_OFFLINE`). Works from any console; the running link follows within a second |
 | `fairyfly link resume` | Lets a paused link connect again |
 | `fairyfly link unpair` | Forgets the pairing here (remove the desktop in the web app too) |
@@ -43,19 +44,37 @@ Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 
 ## Tray
 
-`fairyfly mcp --tray` has a **Cloud link** submenu:
+`fairyfly link run --tray` runs the link in the system tray. It has its own icon and does not start the MCP server
+or an HTTP endpoint.
+- It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session.
+- A desktop that is not paired is refused in the console with `LINK_NOT_PAIRED`; pair it first.
+- The icon is green while connected, yellow while paused and grey otherwise.
+- A notice appears when the link starts, pauses, resumes or stops.
+- The menu has:
+  - the pairing (organisation, account) and the link's state;
+  - **Pause** / **Resume**;
+  - **Health check**: `link status` in a console;
+  - **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
+  - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
+  - **Quit**, which disconnects the link and ends the process.
+- The other `link run` options apply as usual: `fairyfly link run --tray --allow-write --tools session,screen`.
+- If the link ends with an error, a message box points to the log.
+
+Autostart at logon:
+
+    fairyfly link run --tray --install-autostart [--allow-write] [--tools ...]
+    fairyfly link run --tray --remove-autostart
+
+This writes or removes the value `fairyfly-link` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The
+value holds the `link run --tray` command with the options given, without the autostart flag. It is independent
+of the MCP tray's `fairyfly-mcp` value.
+
+`fairyfly mcp --tray` also has a **Cloud link** submenu:
 - the pairing (organisation, account) and the link's state;
 - **Connect to cloud...** or **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
-- **Start link**: a background `fairyfly link run`;
+- **Start link**: starts the link tray (`fairyfly link run --tray`);
 - **Pause** / **Resume**;
 - **Health check**: `link status` in a console.
-
-To start the link together with the tray, use `fairyfly mcp --tray --http --start-link`, or set `tray.start_link: true`
-in `mcp.yaml`. For autostart at logon, set the YAML key: the Run value only carries the config path. The tray checks
-once, shortly after it starts. It starts a plain `fairyfly link run` only if the desktop is paired and no link is
-running (a paused link is left alone). If the desktop is not paired, it shows a notice instead. As with **Start
-link**, the link is a separate process: it does not get the tray's flags (`--allow-write`, `--tools`), and it keeps
-running when the tray quits.
 
 ## What runs where
 

@@ -37,7 +37,7 @@ Right-click menu:
 | Read-only mode (check) | turning it OFF asks "Allow the MCP server to change SAP data?"; locked when `FAIRYFLY_READ_ONLY=1` |
 | Open log / audit trail folder / config file | default shell action |
 | Tokens > List / Create | opens a console running `fairyfly mcp token list` / `token create` |
-| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (a background `link run`), Pause / Resume, Health check (`link status` in a console). `--start-link` (or `tray.start_link: true`) starts the link with the tray |
+| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (the separate link tray, `link run --tray`), Pause / Resume, Health check (`link status` in a console) |
 | Check for updates | opens a console running `fairyfly update check` (the tray also checks once in the background and shows a notice; `FAIRYFLY_UPDATE_CHECK=0` turns that off) |
 | Quit | stops the server and ends the process |
 
@@ -108,7 +108,6 @@ Keys (every active line of the generated template equals the default):
 | `tools.families[]` | all | expose only these families |
 | `default_connection`, `format` | unset, markdown | defaults for tool calls |
 | `tray.enabled` / `start_minimized_notice` / `autostart` | false / true / false | tray behavior (`autostart` documents intent; use `--install-autostart`) |
-| `tray.start_link` | false | start the cloud link (a background `fairyfly link run`) when the tray starts; same as `--start-link` |
 | `audit.enabled` / `required` / `file` | true / false / default | audit trail settings |
 | `auth.token_prefix` | ffy | prefix of generated tokens |
 
