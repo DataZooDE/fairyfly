@@ -1,10 +1,12 @@
 #include "include/update/updater.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -22,7 +24,14 @@ namespace fairyfly::update {
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
-std::string fetch(const std::string& start, size_t max_body, int max_redirects) {
+namespace {
+/// A failure of GitHub's asset host that a new signed URL may not have (seen: 400 now and then, 2026-10-17/18).
+struct AssetHostError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+bool worth_retrying(int status) { return status == 400 || status == 403 || status == 408 || status == 429 || status >= 500; }
+
+std::string fetch_once(const std::string& start, size_t max_body, int max_redirects, const HttpGet& get) {
     std::string url = start;
     for (int hop = 0; hop <= max_redirects; hop++) {
         if (hop > 0 && !download_host_allowed(url)) throw std::runtime_error("update download redirected to a host that is not GitHub's: " + url);
@@ -35,16 +44,49 @@ std::string fetch(const std::string& start, size_t max_body, int max_redirects) 
             if (const char* t = std::getenv("FAIRYFLY_GITHUB_TOKEN"); t && *t) rq.headers.push_back({"Authorization", std::string("Bearer ") + t});
         rq.timeout_ms = 30000;
         rq.max_body = max_body;
-        auto r = ffy::http_do(rq);
+        ffy::HttpResponse r;
+        try {
+            r = get(rq);
+        } catch (const std::exception& e) {
+            if (hop > 0) throw AssetHostError(e.what());
+            throw;
+        }
         if (r.status == 301 || r.status == 302 || r.status == 303 || r.status == 307 || r.status == 308) {
             url = r.header("location");
             if (url.empty()) throw std::runtime_error("redirect without a location from " + rq.url);
             continue;
         }
-        if (r.status != 200) throw std::runtime_error("HTTP " + std::to_string(r.status) + " from " + rq.url);
+        if (r.status != 200) {
+            std::string why = "HTTP " + std::to_string(r.status);
+            // which part answered: Azure blob storage behind GitHub's CDN (Fastly)
+            std::string detail;
+            for (const char* h : {"x-ms-error-code", "x-cache", "x-served-by"})
+                if (const auto v = r.header(h); !v.empty()) detail += (detail.empty() ? "" : ", ") + std::string(h) + ": " + v;
+            if (!detail.empty()) why += " (" + detail + ")";
+            why += " from " + rq.url;
+            if (hop > 0 && worth_retrying(r.status)) throw AssetHostError(why);
+            throw std::runtime_error(why);
+        }
         return r.body;
     }
     throw std::runtime_error("too many redirects from " + start);
+}
+}  // namespace
+
+std::string fetch(const std::string& start, size_t max_body, int max_redirects, const HttpGet& get, const std::function<void(int ms)>& wait) {
+    for (int attempt = 1;; attempt++) {
+        try {
+            return fetch_once(start, max_body, max_redirects, get);
+        } catch (const AssetHostError&) {
+            if (attempt >= kFetchAttempts) throw;
+            wait(kFetchWaitsMs[attempt - 1]);
+        }
+    }
+}
+
+std::string fetch(const std::string& start, size_t max_body, int max_redirects) {
+    return fetch(start, max_body, max_redirects, [](const ffy::HttpRequest& rq) { return ffy::http_do(rq); },
+                 [](int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
 }
 
 CheckResult check(const std::string& current_version, const std::string& api_url) {
