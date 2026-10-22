@@ -35,6 +35,12 @@ public:
     bool has_tool(const std::string& name) const override { return find_spec(name) != nullptr; }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override;
     void set_client_info(const json& client_info) override;
+    /// Switches between read-only and write mode (the link tray's "Allow changes in SAP"). Call it between calls, on
+    /// the thread that runs them; the caller enforces the hard read-only cap.
+    void set_read_only(bool read_only) {
+        policy_.read_only = read_only;
+        policy_.allow_write = !read_only;
+    }
 
     /// Replaces the rate-limit decision (default: RateLimiter(policy.max_calls_per_minute)).
     /// Test seam; the gate returns false to refuse the call with RATE_LIMITED.

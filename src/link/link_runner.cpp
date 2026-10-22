@@ -18,6 +18,7 @@
 
 #include "include/link/link_console.h"
 #include "include/link/link_control.h"
+#include "include/config/mcp_config.h"
 #include "include/link/main_thread_tools.h"
 #include "include/mcp/run_mcp.h"
 #include "include/version.h"
@@ -40,6 +41,43 @@ void on_signal(int) { g_stop = true; }
 std::atomic<bool> g_pair_stop{false};
 void on_pair_signal(int) { g_pair_stop = true; }
 std::atomic<int> g_background{0};  // see background_threads()
+
+bool env_read_only() {
+    const std::string v = config::process_env()("FAIRYFLY_READ_ONLY");
+    return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
+}
+
+/// The running link's write mode, for the link tray (same process). Set up by run_link while it serves.
+struct WriteMode {
+    std::mutex m;
+    std::shared_ptr<MainThreadTools> tools;            // null while no link is serving
+    std::function<bool(bool read_only)> set_read_only;  // run_mcp's switch, main thread only
+    std::atomic<bool> allowed{false};
+    std::atomic<bool> locked{false};
+    std::atomic<bool> reconnect{false};  // read by the supervisor
+};
+WriteMode g_write_mode;
+
+class RunningWriteMode : public tray::LinkWriteMode {
+public:
+    bool allowed() override { return g_write_mode.allowed; }
+    bool locked() override { return g_write_mode.locked; }
+    bool set_allowed(bool allowed) override {
+        if (allowed && g_write_mode.locked) return false;
+        std::lock_guard<std::mutex> l(g_write_mode.m);
+        if (!g_write_mode.tools || !g_write_mode.set_read_only) return false;
+        return g_write_mode.tools->post([allowed] {
+            std::function<bool(bool)> set;
+            {
+                std::lock_guard<std::mutex> l(g_write_mode.m);
+                set = g_write_mode.set_read_only;
+            }
+            if (!set || !set(!allowed)) return;
+            g_write_mode.allowed = allowed;
+            g_write_mode.reconnect = true;  // the gateway learns the new tool catalog on the next connect
+        });
+    }
+};
 
 /// Installs a signal handler and puts the previous one back.
 class SignalScope {
@@ -287,6 +325,8 @@ std::unique_ptr<tray::LinkControl> make_link_control(const std::string& path) {
 
 void request_stop() { g_stop = true; }
 
+std::unique_ptr<tray::LinkWriteMode> make_write_mode_control() { return std::make_unique<RunningWriteMode>(); }
+
 int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
              audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
     ffy::link::State st;
@@ -335,6 +375,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     cfg.local = tools;
     cfg.version = fairyfly::FAIRYFLY_VERSION;
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : ffy::link::desktop_approver();
+    // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
+    // otherwise it uses its built-in catalog
+    cfg.publish_catalog = true;
     auto net = std::make_shared<Net>(st, cfg);
     net->state_path = sp;
     g_stop = false;
@@ -343,6 +386,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     printer->starting(is_paused(sp));
     // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
     SupervisorOptions supervision;
+    g_write_mode.reconnect = false;
+    supervision.reconnect = &g_write_mode.reconnect;
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {
             if (state == "paused") printer->paused();
@@ -364,7 +409,14 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     so.families = o.families;
     mcp::HttpRunHooks hooks;
     hooks.keep_logging = true;  // the logger above; run_mcp would replace it
-    hooks.link_loop = [&](mcp::ToolProvider& provider) -> int {
+    hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>& set_read_only) -> int {
+        {
+            std::lock_guard<std::mutex> l(g_write_mode.m);
+            g_write_mode.tools = tools;
+            g_write_mode.set_read_only = set_read_only;
+            g_write_mode.allowed = o.allow_write && !o.read_only && !env_read_only();
+            g_write_mode.locked = o.read_only || env_read_only();
+        }
         tools->set_handlers([&provider] { return tools_json(provider); },
                             [&provider](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {
                                 mcp::CallContext ctx;
@@ -384,6 +436,11 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         spdlog::info("fairyfly link: serving {} for {} ({})", st.tenant_name.empty() ? st.tenant : st.tenant_name, st.email, st.device_id);
         tools->pump(g_stop);  // this is the main (COM) thread
         tools->shutdown();
+        {
+            std::lock_guard<std::mutex> l(g_write_mode.m);
+            g_write_mode.tools.reset();
+            g_write_mode.set_read_only = nullptr;
+        }
         return 0;
     };
     const int rc = mcp::run_mcp(so, get_handler, global, sink, peek, &hooks);

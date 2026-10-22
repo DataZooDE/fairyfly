@@ -108,6 +108,10 @@ void supervise(const std::string& state_path, const std::function<void(const std
                 halt();
                 next_start = std::chrono::steady_clock::now() + o.restart_delay;
             }
+            if (o.reconnect && o.reconnect->exchange(false) && cur) {
+                halt();
+                next_start = std::chrono::steady_clock::now();
+            }
             if (!cur && std::chrono::steady_clock::now() >= next_start) {
                 cur = std::make_unique<Running>();
                 Running* r = cur.get();

@@ -30,7 +30,23 @@ json MainThreadTools::rpc(const std::string& method, const json& params, int tim
     return job->result;
 }
 
+bool MainThreadTools::post(std::function<void()> fn) {
+    auto job = std::make_shared<Job>();
+    job->fn = std::move(fn);
+    {
+        std::lock_guard<std::mutex> l(mu_);
+        if (shutdown_) return false;
+        queue_.push_back(job);
+    }
+    work_cv_.notify_one();
+    return true;
+}
+
 json MainThreadTools::run(Job& job) {
+    if (job.fn) {
+        job.fn();
+        return json();
+    }
     if (job.method == "tools/list") return {{"jsonrpc", "2.0"}, {"id", 1}, {"result", {{"tools", list_ ? list_() : json::array()}}}};
     if (job.method != "tools/call") return {{"jsonrpc", "2.0"}, {"id", 1}, {"error", {{"code", -32601}, {"message", "method not served over the link"}}}};
     if (!call_) throw ffy::Error("fairyfly link: no dispatcher");

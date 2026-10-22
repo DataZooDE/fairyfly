@@ -190,6 +190,7 @@ void TrayController::on_action(TrayAction action) {
         if (runner_) runner_->request_quit();
         if (services_.host) services_.host->post_quit();
         break;
+    case TrayAction::LinkToggleWrites:   // the link tray's own switch (link_tray.cpp)
     case TrayAction::None: break;
     }
     if (services_.host) services_.host->refresh();

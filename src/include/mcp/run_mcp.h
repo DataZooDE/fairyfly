@@ -15,7 +15,9 @@ struct HttpRunHooks {
     bool keep_logging = false;
     /// `fairyfly link run` (transport "link", D10): instead of a transport loop, run_mcp hands the configured
     /// dispatcher to this loop, on the calling (main, COM) thread. Its return value is the exit code.
-    std::function<int(ToolProvider& provider)> link_loop;
+    /// `set_read_only` switches the dispatcher and the handler between read-only and write mode (main thread, between
+    /// calls; audited); it returns false for write mode under --read-only / FAIRYFLY_READ_ONLY.
+    std::function<int(ToolProvider& provider, const std::function<bool(bool read_only)>& set_read_only)> link_loop;
 };
 
 /// Validates options, wires policy/audit/dispatcher/transport/server and runs the MCP server.

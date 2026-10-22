@@ -50,6 +50,7 @@ enum class TrayAction {
     OpenLog, OpenAuditFolder, OpenConfig,
     TokenList, TokenCreate,
     LinkPair, LinkStart, LinkPause, LinkResume, LinkStatus,   ///< "Cloud link" submenu (D10)
+    LinkToggleWrites,                                          ///< link tray: "Allow changes in SAP"
     UpdateCheck,                                               ///< `fairyfly update check` in a console
     Quit,
 };
@@ -169,6 +170,16 @@ public:
     virtual ~LinkControl() = default;
     virtual LinkView view() = 0;
     virtual bool set_paused(bool paused) = 0;   ///< `fairyfly link pause|resume`; a running link follows within a second
+};
+
+/// The running link's write mode (the link tray only; in the same process as `link run`).
+class LinkWriteMode {
+public:
+    virtual ~LinkWriteMode() = default;
+    virtual bool allowed() = 0;   ///< changes in SAP are allowed (write mode)
+    virtual bool locked() = 0;    ///< --read-only / FAIRYFLY_READ_ONLY: write mode cannot be turned on
+    /// Asks the link to switch; it applies between calls and reconnects so the gateway sees the new tools.
+    virtual bool set_allowed(bool allowed) = 0;
 };
 
 class Clipboard {
@@ -326,14 +337,23 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
 // The cloud link on its own, without the MCP server: `link run` stays on the main (COM) thread, the tray UI runs on
 // its own thread and sees the link only through LinkControl (the pairing state and the status file).
 
-/// Status line, Pause/Resume, Health check, Pair again, Open log/audit trail folder, Check for updates, Quit.
-TrayMenuModel build_link_menu(const LinkView& link);
+/// Write mode of the link as the menu shows it.
+struct LinkWritesView {
+    bool available = false;   ///< false: no write-mode switch (the item is not shown)
+    bool allowed = false;
+    bool locked = false;
+};
+
+/// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again, Open log/audit trail folder, Check for
+/// updates, Quit.
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {});
 
 struct LinkTrayServices {
     TrayHost* host = nullptr;
     FileOpener* opener = nullptr;
     ProcessLauncher* launcher = nullptr;
     LinkControl* link = nullptr;
+    LinkWriteMode* writes = nullptr;   ///< optional: "Allow changes in SAP"
     std::function<void()> stop_link;   ///< thread-safe: makes the running `link run` return
 };
 
@@ -352,6 +372,7 @@ public:
 
 private:
     void notify(const std::string& text);
+    LinkWritesView writes_view();
 
     LinkTrayServices services_;
     TrayPaths paths_;

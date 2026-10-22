@@ -786,3 +786,100 @@ TEST_CASE("Registry invoker maps CLI parse errors to INVALID_ARGUMENT without a 
     CHECK(unknown.error["code"] == "INVALID_ARGUMENT");
     CHECK_FALSE(handler_requested);
 }
+
+TEST_CASE("Dispatcher: auto_attach attaches to the only open session when nothing is attached", "[mcp][dispatcher][auto_attach]") {
+    auto list_with = [](int n) {
+        json sessions = json::array();
+        for (int i = 0; i < n; ++i)
+            sessions.push_back({{"id", "/app/con[0]/ses[" + std::to_string(i) + "]"}, {"active_window_title", "SAP Easy Access"}});
+        return ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", sessions}}})}, {"total_sessions", n}});
+    };
+    auto no_connections = [] {
+        return err("NO_CONNECTIONS", "No connection files found in current directory",
+                   {{"suggestions", json::array({"Run 'fairyfly session attach' to attach to a running SAP window"})}});
+    };
+    Policy auto_attach;
+    auto_attach.auto_attach = true;
+
+    {   // one session: list, attach, the read again
+        Fixture f;
+        bool attached = false;
+        f.handler = [&](const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session list") return list_with(1);
+            if (command == "session attach") { attached = true; return ok({{"connection_file_id", 0}}); }
+            return attached ? ok({{"elements", json::array()}}) : no_connections();
+        };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE_FALSE(r.is_error);
+        REQUIRE(f.calls.size() == 4);
+        CHECK(f.calls[1] == Argv{"session", "list"});
+        CHECK(f.calls[2] == Argv{"session", "attach", "--session-id", "/app/con[0]/ses[0]"});
+        CHECK(f.calls[3] == f.calls[0]);
+        CHECK(d.sticky_connection() == 0);
+        REQUIRE(f.records.size() == 1);   // one audited call: the read
+        CHECK(f.records[0].status == "success");
+    }
+    {   // several sessions: none is picked, the assistant gets the list and what to do
+        Fixture f;
+        f.handler = [&](const Argv& argv) {
+            return fairyfly::command_table::command_of_argv(argv) == "session list" ? list_with(2) : no_connections();
+        };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        const std::string text = text_of(r);
+        CHECK(text.rfind("ERROR MULTIPLE_SESSIONS", 0) == 0);
+        CHECK(text.find("/app/con[0]/ses[1]") != std::string::npos);
+        CHECK(text.find("hint: call gui_session_attach with one session_id") != std::string::npos);
+        CHECK(f.calls.size() == 2);
+    }
+    {   // no session: ask the person at the desktop
+        Fixture f;
+        f.handler = [&](const Argv& argv) {
+            return fairyfly::command_table::command_of_argv(argv) == "session list" ? list_with(0) : no_connections();
+        };
+        auto d = f.make(auto_attach);
+        const std::string text = text_of(d.call_tool("gui_screen_read", json::object(), ctx_with_id()));
+        CHECK(text.rfind("ERROR NO_SESSIONS", 0) == 0);
+        CHECK(text.find("person at the desktop to start SAP Logon") != std::string::npos);
+    }
+    {   // an explicit connection is never replaced by an attach
+        Fixture f;
+        f.handler = [&](const Argv&) { return no_connections(); };
+        auto d = f.make(auto_attach);
+        CHECK(d.call_tool("gui_screen_read", json{{"connection", 4}}, ctx_with_id()).is_error);
+        CHECK(f.calls.size() == 1);
+    }
+}
+
+TEST_CASE("Dispatcher: without auto_attach NO_CONNECTIONS gets an assistant hint instead of console commands", "[mcp][dispatcher][auto_attach]") {
+    Fixture f;
+    f.handler = [](const Argv&) {
+        return err("NO_CONNECTIONS", "No connection files found in current directory",
+                   {{"suggestions", json::array({"Run 'fairyfly session attach' to attach to a running SAP window"})}});
+    };
+    auto d = f.make();
+    const std::string text = text_of(d.call_tool("gui_screen_read", json::object(), ctx_with_id()));
+    CHECK(f.calls.size() == 1);
+    CHECK(text.find("hint: no SAP GUI session is attached: call gui_session_attach") != std::string::npos);
+    CHECK(text.find("Run 'fairyfly session attach'") == std::string::npos);
+}
+
+TEST_CASE("Dispatcher: read-only refusals name how this server allows changes; set_read_only switches the mode", "[mcp][dispatcher]") {
+    Fixture f;
+    Policy link;
+    link.allow_write_hint = "use 'Allow changes in SAP' in the link tray";
+    auto d = f.make(link);
+    auto r = d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id());
+    CHECK(text_of(r).find("use 'Allow changes in SAP' in the link tray") != std::string::npos);
+    CHECK(text_of(r).find("mcp --allow-write") == std::string::npos);
+
+    d.set_read_only(false);
+    const auto listed = d.list_tools();
+    CHECK(std::any_of(listed.begin(), listed.end(), [](const ToolDef& t) { return t.name == "gui_element_fill"; }));
+    CHECK_FALSE(d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id()).is_error);
+    d.set_read_only(true);
+    CHECK(d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id()).is_error);
+}

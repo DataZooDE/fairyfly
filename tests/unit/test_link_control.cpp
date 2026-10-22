@@ -122,3 +122,29 @@ TEST_CASE("link control: status of a link that is not running", "[link]") {
     CHECK(describe(nlohmann::json(), 0) == "not running");
     fs::remove_all(st.parent_path());
 }
+
+TEST_CASE("link control: a reconnect request closes the link and opens it again at once", "[link]") {
+    auto st = temp_state();
+    std::atomic<int> starts{0}, running{0};
+    std::atomic<bool> stop{false}, reconnect{false};
+    auto agent = [&](const std::atomic<bool>& net_stop) {
+        starts++;
+        running++;
+        while (!net_stop) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        running--;
+    };
+    SupervisorOptions so;
+    so.poll = std::chrono::milliseconds(10);
+    so.restart_delay = std::chrono::seconds(30);   // a reconnect must not wait for the back-off
+    so.reconnect = &reconnect;
+    std::thread sup([&] { supervise(st.string(), agent, stop, so); });
+
+    CHECK(eventually([&] { return running == 1 && starts == 1; }));
+    reconnect = true;
+    CHECK(eventually([&] { return starts == 2 && running == 1; }));
+    CHECK_FALSE(reconnect);   // consumed
+
+    stop = true;
+    sup.join();
+    fs::remove_all(st.parent_path());
+}
