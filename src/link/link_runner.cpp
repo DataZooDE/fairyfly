@@ -285,6 +285,8 @@ std::unique_ptr<tray::LinkControl> make_link_control(const std::string& path) {
     return std::make_unique<StateLinkControl>(path.empty() ? default_state_path() : path);
 }
 
+void request_stop() { g_stop = true; }
+
 int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
              audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
     ffy::link::State st;
@@ -299,14 +301,23 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // spdlog, so its messages go to the status printer as well as, filtered by --log-level, to stderr.
     const std::string sp = state_path(o);
     auto printer = std::make_shared<LinkStatusPrinter>(url_host(st.link_url), st.email, st.tenant_name.empty() ? st.tenant : st.tenant_name,
-                                                       [](const std::string& line) { write_utf8(line + "\n"); });
+                                                       [tray = o.tray](const std::string& line) {
+                                                           if (!tray) write_utf8(line + "\n");  // the tray shows the state itself
+                                                       });
     {
         const auto user_level = spdlog::get_level();  // --log-level / FFLYLOG_LEVEL, applied by the CLI
-        auto to_stderr = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-        to_stderr->set_level(user_level);
+        std::vector<spdlog::sink_ptr> sinks;
+        if (o.tray) {
+            sinks = spdlog::default_logger()->sinks();  // link.log (run_link_tray), no console
+        } else {
+            auto to_stderr = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+            to_stderr->set_level(user_level);
+            sinks.push_back(to_stderr);
+        }
         auto status = make_status_sink(printer);
         status->set_level(spdlog::level::info);
-        auto logger = std::make_shared<spdlog::logger>("fairyfly_link", spdlog::sinks_init_list{to_stderr, status});
+        sinks.push_back(status);
+        auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
         logger->set_level(std::min(user_level, spdlog::level::info));
         spdlog::set_default_logger(logger);
     }

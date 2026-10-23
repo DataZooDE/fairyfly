@@ -14,7 +14,7 @@ std::unique_ptr<TrayHost> make_win32_tray_host();
 std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
-std::unique_ptr<SingleInstance> make_win32_single_instance();
+std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name = kTrayMutexName);
 std::unique_ptr<Clipboard> make_win32_clipboard();
 
 /// Full path of the running fairyfly.exe.
@@ -27,7 +27,7 @@ bool process_has_console();
 bool is_tray_child_process();
 /// Detaches from the console (tray child; no-op without one).
 void detach_console();
-/// Routes spdlog to <logs>\mcp.log with size rotation (3 files x 5 MB) and returns the file path.
-std::string route_logging_to_file();
+/// Routes spdlog to <logs>\<file_name> with size rotation (3 files x 5 MB) and returns the file path.
+std::string route_logging_to_file(const std::string& file_name = "mcp.log");
 
 } // namespace fairyfly::tray

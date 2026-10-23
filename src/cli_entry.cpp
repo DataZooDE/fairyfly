@@ -317,6 +317,8 @@ namespace {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
             };
             g_skip_invocation_audit = true;
+            if (link_options.tray || link_options.install_autostart || link_options.remove_autostart)
+                return link::run_link_tray(link_options, get_handler, global_opts, g_audit.sink, peek);
             return link::run_link(link_options, get_handler, global_opts, g_audit.sink, peek);
         }
 

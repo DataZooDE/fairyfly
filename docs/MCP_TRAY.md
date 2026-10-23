@@ -37,7 +37,7 @@ Right-click menu:
 | Read-only mode (check) | turning it OFF asks "Allow the MCP server to change SAP data?"; locked when `FAIRYFLY_READ_ONLY=1` |
 | Open log / audit trail folder / config file | default shell action |
 | Tokens > List / Create | opens a console running `fairyfly mcp token list` / `token create` |
-| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (a background `link run`), Pause / Resume, Health check (`link status` in a console) |
+| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (the separate link tray, `link run --tray`), Pause / Resume, Health check (`link status` in a console) |
 | Check for updates | opens a console running `fairyfly update check` (the tray also checks once in the background and shows a notice; `FAIRYFLY_UPDATE_CHECK=0` turns that off) |
 | Quit | stops the server and ends the process |
 

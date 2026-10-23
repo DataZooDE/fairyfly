@@ -406,12 +406,13 @@ private:
 
 class Win32SingleInstance : public SingleInstance {
 public:
+    explicit Win32SingleInstance(std::string name) : name_(std::move(name)) {}
     ~Win32SingleInstance() override {
         if (handle_) CloseHandle(handle_);
     }
     bool acquire() override {
         if (handle_) return true;
-        HANDLE h = CreateMutexW(nullptr, FALSE, utf8_to_wide(kTrayMutexName).c_str());
+        HANDLE h = CreateMutexW(nullptr, FALSE, utf8_to_wide(name_).c_str());
         if (!h) return false;
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
             CloseHandle(h);
@@ -422,13 +423,14 @@ public:
     }
     bool exists() override {
         if (handle_) return false;
-        HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, utf8_to_wide(kTrayMutexName).c_str());
+        HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, utf8_to_wide(name_).c_str());
         if (!h) return false;
         CloseHandle(h);
         return true;
     }
 
 private:
+    std::string name_;
     HANDLE handle_ = nullptr;
 };
 
@@ -460,7 +462,9 @@ std::unique_ptr<TrayHost> make_win32_tray_host() { return std::make_unique<Win32
 std::unique_ptr<FileOpener> make_win32_file_opener() { return std::make_unique<Win32FileOpener>(); }
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher() { return std::make_unique<Win32ProcessLauncher>(); }
 std::unique_ptr<RegistryRunKey> make_win32_run_key() { return std::make_unique<Win32RunKey>(); }
-std::unique_ptr<SingleInstance> make_win32_single_instance() { return std::make_unique<Win32SingleInstance>(); }
+std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name) {
+    return std::make_unique<Win32SingleInstance>(name);
+}
 std::unique_ptr<Clipboard> make_win32_clipboard() { return std::make_unique<Win32Clipboard>(); }
 
 std::string current_exe_path() {
@@ -485,11 +489,11 @@ bool is_tray_child_process() { return config::process_env()(kTrayChildEnv) == "1
 
 void detach_console() { FreeConsole(); }
 
-std::string route_logging_to_file() {
+std::string route_logging_to_file(const std::string& file_name) {
     const auto dir = log_directory(config::process_env());
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    const auto file = dir / "mcp.log";
+    const auto file = dir / file_name;
     try {
         auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(file.string(), 5 * 1024 * 1024, 3);
         auto logger = std::make_shared<spdlog::logger>("fairyfly", sink);
