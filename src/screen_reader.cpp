@@ -1,5 +1,6 @@
 #include "include/object_tree.h"
 #include "include/screen_reader.h"
+#include "include/session_info.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/element_metadata_extractor.h"
@@ -1763,7 +1764,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         result.status = Result::Status::Success;
         result.data["screen_id"] = window->get_id();
         result.data["title"] = window->get_title();
-        result.data["transaction"] = session_->get_transaction_code();
+        result.data.update(screen_header_info(*session_));  // system, client, user, transaction
         attach_status_bar(result, read_action_status(session_, window->get_id()));
         result.data["child_count"] = window->get_child_count();
 
@@ -2063,7 +2064,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.status = Result::Status::Success;
         result.data["screen_id"] = window_id;
         result.data["title"] = window->get_title();
-        result.data["transaction"] = session_->get_transaction_code();
+        result.data.update(screen_header_info(*session_));  // system, client, user, transaction
         attach_status_bar(result, read_action_status(session_, window_id));
         result.data["child_count"] = window->get_child_count();
 
