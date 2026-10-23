@@ -108,7 +108,7 @@ jobs:
         if (Test-Path $src) {
           New-Item -ItemType Directory -Force build/winget-test | Out-Null
           Get-ChildItem $src -Recurse -File | Where-Object { $_.FullName -notmatch '\\(www|winget-dl)\\' } |
-            ForEach-Object { Copy-Item $_.FullName (Join-Path build/winget-test ($_.FullName.Substring($src.Length + 1) -replace '[\\/]', '_')) }
+            ForEach-Object { Copy-Item $_.FullName (Join-Path build/winget-test ("$($_.Directory.Name)_$($_.Name)")) }
         }
       shell: pwsh
 

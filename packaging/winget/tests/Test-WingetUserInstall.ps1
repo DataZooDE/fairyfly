@@ -107,9 +107,12 @@ Write-Host "winget $wingetVersion at $wingetExe"
 Step 'winget settings --enable LocalManifestFiles (admin setting, elevated)'
 & $wingetExe settings --enable LocalManifestFiles
 Assert ($LASTEXITCODE -eq 0) 'LocalManifestFiles enabled'
-# verbose MSI logs for every msiexec run on this runner (written to the installing user's %TEMP%)
-New-Item 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Force | Out-Null
-Set-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer' -Name Logging -Value 'voicewarmupx'
+$msiPolicyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer'
+$msiPolicy = Get-ItemProperty $msiPolicyKey -ErrorAction SilentlyContinue
+Write-Host "Windows Installer machine policy: $(if ($msiPolicy) { ($msiPolicy.PSObject.Properties | Where-Object Name -notlike 'PS*' | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ', ' } else { '(not configured)' })"
+$os = Get-CimInstance Win32_OperatingSystem
+$isServer = $os.ProductType -ne 1
+Write-Host "OS: $($os.Caption) $($os.Version), server SKU: $isServer"
 
 Step 'Render the manifests (New-WingetManifest.ps1, local installer URL)'
 $installerUrl = "http://127.0.0.1:$Port/fairyfly.msi"
@@ -163,11 +166,24 @@ try {
     Assert ($elevatedCode -ne 0) 'winget refuses the install from an administrator context'
     Assert (-not (Test-Path $installedExe)) 'nothing was installed by the refused elevated attempt'
 
+    # verbose MSI log (/l*v) through winget's --custom; the path has no spaces (8.3 TEMP)
+    $installArgs = { param($log) "`"$wingetExe`" install $common --scope user --custom `"/l*v $log`"" }
+    if ($isServer -and ($null -eq $msiPolicy -or $null -eq $msiPolicy.DisableMSI)) {
+        Step 'Windows Server default: per-user MSI installs by non-admins are blocked (DisableMSI not configured)'
+        $code = Run-Unelevated (& $installArgs (Join-Path $WorkDir 'msi-install-serverdefault.log')) 'winget-install-serverdefault'
+        $blockedLog = (Get-Content (Join-Path $WorkDir 'msi-install-serverdefault.log'), (Join-Path $WorkDir 'winget-install-serverdefault.out.txt') -ErrorAction SilentlyContinue) -join "`n"
+        $blockedLog -split "`r?`n" | Select-String 'DisableMSI|1625|policy' | Select-Object -First 8 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
+        Assert ($code -ne 0 -and $blockedLog -match '1625') 'unelevated install refused with 1625 "forbidden by system policy" on the Server default'
+        Assert (-not (Test-Path $installedExe)) 'nothing installed by the refused attempt'
+        # DisableMSI=0 ("never"): Windows Installer enabled for all users, the default of Windows 10/11
+        New-Item $msiPolicyKey -ErrorAction SilentlyContinue | Out-Null
+        Set-ItemProperty $msiPolicyKey -Name DisableMSI -Value 0 -Type DWord
+        Write-Host 'set HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer DisableMSI=0 (as on Windows 10/11 clients)'
+    }
+
     Step 'winget install --manifest from an UNELEVATED process (same user, no admin rights)'
     $wingetLog = Join-Path $WorkDir 'msi-install.log'
-    $code = Run-Unelevated "`"$wingetExe`" install $common --scope user --log `"$wingetLog`"" 'winget-install'
-    Get-ChildItem $env:TEMP -Filter 'MSI*.LOG' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 3 |
-        ForEach-Object { Copy-Item $_.FullName (Join-Path $WorkDir "policy-$($_.Name)") }
+    $code = Run-Unelevated (& $installArgs $wingetLog) 'winget-install'
     Assert ($code -eq 0) 'winget install (unelevated) exit code 0'
 
     Step 'Per-user install checks'
@@ -202,7 +218,7 @@ try {
     Assert (Test-Path $lnk) 'Start-menu shortcut in the user profile'
 
     Step 'MSI log: per-user, unprivileged install'
-    $logs = @($wingetLog) + @(Get-ChildItem $WorkDir -Filter 'policy-MSI*.LOG' | ForEach-Object FullName) | Where-Object { Test-Path $_ }
+    $logs = @($wingetLog) | Where-Object { Test-Path $_ }
     Assert ($logs.Count -gt 0) "MSI logs: $($logs -join ', ')"
     $log = ($logs | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
     $log -split "`r?`n" | Select-String -Pattern 'ALLUSERS|Privileged|AdminUser|user privileges|elevated privileges|per-machine|Per-machine|MSIINSTALLPERUSER|Installation success or error status|Installation completed' |
@@ -215,7 +231,7 @@ try {
     if ($log -match "Running product '[^']+' with (user|elevated) privileges[^\r\n]*") { Write-Host "  log: $($Matches[0])"; Assert ($Matches[1] -eq 'user') 'log: product ran with user privileges' }
 
     Step 'winget uninstall --manifest (unelevated)'
-    $code = Run-Unelevated "`"$wingetExe`" uninstall $common --log `"$(Join-Path $WorkDir 'msi-uninstall.log')`"" 'winget-uninstall'
+    $code = Run-Unelevated "`"$wingetExe`" uninstall $common --custom `"/l*v $(Join-Path $WorkDir 'msi-uninstall.log')`"" 'winget-uninstall'
     Assert ($code -eq 0) 'winget uninstall (unelevated) exit code 0'
     Assert (-not (Test-Path $installDir)) "install folder removed: $installDir"
     Assert ((Get-UserPathRaw) -notlike '*Programs\fairyfly*') 'user PATH entry removed'
