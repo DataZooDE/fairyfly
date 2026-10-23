@@ -97,7 +97,7 @@ if (-not $wingetOk) {
     $depList = ($deps | ForEach-Object { "'$_'" }) -join ','
     powershell.exe -NoProfile -NonInteractive -Command "`$ErrorActionPreference='Stop'; Add-AppxProvisionedPackage -Online -PackagePath '$dl\winget.msixbundle' -DependencyPackagePath $depList -LicensePath '$dl\license.xml' | Out-Null; Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe"
     if ($LASTEXITCODE -ne 0) { throw "installing App Installer failed: $LASTEXITCODE" }
-    $env:PATH = "$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:PATH"
+    if ($env:PATH -notlike "*$env:LOCALAPPDATA\Microsoft\WindowsApps*") { $env:PATH = "$env:PATH;$env:LOCALAPPDATA\Microsoft\WindowsApps" }
     $winget = Get-Command winget -ErrorAction Stop
 }
 $wingetExe = $winget.Source
@@ -135,7 +135,9 @@ Assert ((Get-UserPathRaw) -notlike '*Programs\fairyfly*') 'user PATH has no fair
 Assert ($env:PATH -notlike '*Programs\fairyfly*') 'this process PATH has no fairyfly entry (so the later PATH check is meaningful)'
 
 Step "Serve the MSI at $installerUrl"
-$python = (Get-Command python -ErrorAction Stop).Source
+# a real Python (the hosted tool cache), not the Microsoft Store stub in WindowsApps
+$python = (Get-Command python -All -CommandType Application | Where-Object Source -notlike '*\WindowsApps\*' | Select-Object -First 1).Source
+if (-not $python) { throw 'no Python for the local HTTP server' }
 Write-Host "python: $python $(& $python --version 2>&1)"
 $server = Start-Process $python -ArgumentList @('-m', 'http.server', "$Port", '--bind', '127.0.0.1', '--directory', $wwwDir) -PassThru -WindowStyle Hidden `
     -RedirectStandardError (Join-Path $WorkDir 'http.err.txt') -RedirectStandardOutput (Join-Path $WorkDir 'http.out.txt')
