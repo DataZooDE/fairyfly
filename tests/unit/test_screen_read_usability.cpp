@@ -572,3 +572,21 @@ TEST_CASE("a classic list header is the row the data rows align with, not just t
         CHECK(ScreenReader::choose_list_header_row({}) == -1);
     }
 }
+
+TEST_CASE("Screen markdown header names the SAP system, client and user", "[screen][session-info]") {
+    json data = {{"screen_id", "/app/con[0]/ses[0]/wnd[0]"}, {"title", "SAP Easy Access"}, {"transaction", "SESSION_MANAGER"},
+                 {"system", "A4H"}, {"client", "001"}, {"user", "DEVELOPER"}, {"elements", json::array()}};
+    const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+    CHECK(md.find("**System:** `A4H` / client `001` / user `DEVELOPER`") != std::string::npos);
+
+    SECTION("before logon the user is reported as not logged on") {
+        data["user"] = "";
+        data["transaction"] = "S000";
+        const auto logon = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+        CHECK(logon.find("**System:** `A4H` / client `001` / not logged on") != std::string::npos);
+    }
+    SECTION("no system line when the session facts are unknown") {
+        const json bare = {{"screen_id", "wnd[0]"}, {"title", "X"}, {"elements", json::array()}};
+        CHECK(fairyfly::cli::ScreenMarkdownFormatter::format(bare).find("**System:**") == std::string::npos);
+    }
+}
