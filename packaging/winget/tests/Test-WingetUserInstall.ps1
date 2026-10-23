@@ -209,8 +209,19 @@ try {
     $inPf = $pf | ForEach-Object { Get-ChildItem $_ -Filter '*fairyfly*' -Depth 1 -ErrorAction SilentlyContinue }
     Assert (-not $inPf) "nothing named fairyfly under $($pf -join ', ')"
     $hklm = @(Find-UninstallEntries 'HKLM' $productCode)
-    Assert ($hklm.Count -eq 0) 'no HKLM uninstall entry'
     $hkcu = @(Find-UninstallEntries 'HKCU' $productCode)
+    foreach ($e in $hklm + $hkcu) {
+        Write-Host ("  uninstall entry {0}: DisplayName={1} DisplayVersion={2} InstallLocation={3} UninstallString={4}" -f $e.Name, $e.GetValue('DisplayName'), $e.GetValue('DisplayVersion'), $e.GetValue('InstallLocation'), $e.GetValue('UninstallString'))
+    }
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $packed = -join (($productCode.Trim('{}') -replace '-', '') | ForEach-Object {
+        $g = $_; $parts = @($g.Substring(0, 8), $g.Substring(8, 4), $g.Substring(12, 4))
+        ($parts | ForEach-Object { -join ($_.ToCharArray()[($_.Length - 1)..0]) }) -join ''
+        for ($i = 16; $i -lt 32; $i += 2) { $g[$i + 1]; $g[$i] }
+    })
+    $userData = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Installer\UserData\$sid\Products\$packed\InstallProperties"
+    Write-Host "  Windows Installer per-user registration (the service's store for this user's SID): $userData exists=$(Test-Path $userData)"
+    Assert ($hklm.Count -eq 0) 'no HKLM uninstall entry (HKLM\...\Uninstall and WOW6432Node)'
     Assert ($hkcu.Count -eq 1 -and $hkcu[0].PSChildName -eq $productCode) "HKCU uninstall entry $($hkcu.Name)"
     Write-Host ("  DisplayName={0} DisplayVersion={1} Publisher={2} InstallLocation={3}" -f $hkcu[0].GetValue('DisplayName'), $hkcu[0].GetValue('DisplayVersion'), $hkcu[0].GetValue('Publisher'), $hkcu[0].GetValue('InstallLocation'))
     Assert (Test-Path 'HKCU:\Software\DataZoo\fairyfly') 'HKCU\Software\DataZoo\fairyfly written'
