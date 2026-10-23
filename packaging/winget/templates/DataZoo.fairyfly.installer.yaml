@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# Rendered by packaging/winget/New-WingetManifest.ps1 for fairyfly {{PackageVersion}}.
+# Per-user WiX MSI (packaging/fairyfly.wxs): %LOCALAPPDATA%\Programs\fairyfly, HKCU only, user PATH; no admin rights.
+
+PackageIdentifier: DataZoo.fairyfly
+PackageVersion: {{PackageVersion}}
+Platform:
+- Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+InstallerType: wix
+Scope: user
+InstallModes:
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+ElevationRequirement: elevationProhibited
+Commands:
+- fairyfly
+ProductCode: '{{ProductCode}}'
+ReleaseDate: {{ReleaseDate}}
+AppsAndFeaturesEntries:
+- DisplayName: fairyfly
+  Publisher: DataZoo GmbH
+  DisplayVersion: {{MsiVersion}}
+  ProductCode: '{{ProductCode}}'
+  UpgradeCode: '{{UpgradeCode}}'
+Installers:
+- Architecture: x64
+  InstallerUrl: {{InstallerUrl}}
+  InstallerSha256: {{InstallerSha256}}
+ManifestType: installer
+ManifestVersion: 1.10.0
