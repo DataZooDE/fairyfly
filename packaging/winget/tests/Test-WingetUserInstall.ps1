@@ -136,13 +136,18 @@ Assert ($env:PATH -notlike '*Programs\fairyfly*') 'this process PATH has no fair
 
 Step "Serve the MSI at $installerUrl"
 $python = (Get-Command python -ErrorAction Stop).Source
+Write-Host "python: $python $(& $python --version 2>&1)"
 $server = Start-Process $python -ArgumentList @('-m', 'http.server', "$Port", '--bind', '127.0.0.1', '--directory', $wwwDir) -PassThru -WindowStyle Hidden `
     -RedirectStandardError (Join-Path $WorkDir 'http.err.txt') -RedirectStandardOutput (Join-Path $WorkDir 'http.out.txt')
 try {
     $deadline = (Get-Date).AddSeconds(30)
     while ($true) {
-        try { $r = Invoke-WebRequest $installerUrl -Method Head -UseBasicParsing; if ($r.StatusCode -eq 200) { break } } catch {}
-        if ((Get-Date) -gt $deadline) { throw 'local HTTP server did not come up' }
+        try { $r = Invoke-WebRequest $installerUrl -Method Head -UseBasicParsing -TimeoutSec 5; if ($r.StatusCode -eq 200) { break } } catch { $lastError = $_.Exception.Message }
+        if ((Get-Date) -gt $deadline -or $server.HasExited) {
+            Write-Host "server exited: $($server.HasExited) $(if ($server.HasExited) { $server.ExitCode }); last error: $lastError"
+            Get-Content (Join-Path $WorkDir 'http.err.txt'), (Join-Path $WorkDir 'http.out.txt') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  http> $_" }
+            throw 'local HTTP server did not come up'
+        }
         Start-Sleep -Milliseconds 500
     }
     Pass 'HTTP server serves fairyfly.msi'
