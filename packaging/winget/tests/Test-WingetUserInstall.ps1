@@ -254,7 +254,7 @@ try {
     if ($log -match "Running product '[^']+' with (user|elevated) privileges[^\r\n]*") { Write-Host "  log: $($Matches[0])"; Assert ($Matches[1] -eq 'user') 'log: product ran with user privileges' }
 
     Step 'winget uninstall --manifest (unelevated)'
-    $code = Run-Unelevated "`"$wingetExe`" uninstall --manifest `"$manifestDir`" --silent --disable-interactivity --log `"$(Join-Path $WorkDir 'msi-uninstall.log')`"" 'winget-uninstall'
+    $code = Run-Unelevated "`"$wingetExe`" uninstall --manifest `"$manifestDir`" --silent --disable-interactivity --accept-source-agreements --log `"$(Join-Path $WorkDir 'msi-uninstall.log')`"" 'winget-uninstall'
     Assert ($code -eq 0) 'winget uninstall (unelevated) exit code 0'
     Assert (-not (Test-Path $installDir)) "install folder removed: $installDir"
     Assert ((Get-UserPathRaw) -notlike '*Programs\fairyfly*') 'user PATH entry removed'
