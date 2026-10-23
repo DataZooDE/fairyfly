@@ -3,10 +3,13 @@
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <thread>
 
+#include "crypto.hpp"
 #include "http_client.hpp"
 #include "policy.hpp"
 #include "ws_client.hpp"
@@ -125,7 +128,8 @@ static proto::Frame fail(const std::string& id, const std::string& code, const s
     return f;
 }
 
-proto::Frame Agent::process(const proto::Frame& req) {
+Agent::Outcome Agent::serve(const proto::Frame& req) {
+    auto fail = [](const std::string& id, const std::string& code, const std::string& msg) { return Outcome{link::fail(id, code, msg), {}}; };
     assertion::Claims c;
     try {
         c = ver_.verify(req.assertion, st_.device_id, req.id);
@@ -181,16 +185,197 @@ proto::Frame Agent::process(const proto::Frame& req) {
     int64_t budget = req.deadline_ms > 0 ? std::min<int64_t>(req.deadline_ms + 1000, 130000) : 125000;
     try {
         CallInfo info{st_.tenant, c.sub, c.client, req.id, g.allow_write};
+        // audit trail: only while the notice is up (policy on) and when this call asks for it
+        bool record = false;
+        StepRequest sr;
+        std::string withheld;
+        if (cfg_.recorder && req.trail.is_object()) {
+            bool blur_policy = true;
+            {
+                std::lock_guard<std::mutex> l(mu_);
+                record = trail_.on;
+                blur_policy = trail_.blur;
+            }
+            if (record) {
+                sr.request_id = req.id; sr.tool = tool; sr.args = args; sr.info = info;
+                sr.shots = req.trail.contains("shots") && req.trail["shots"].is_boolean() && req.trail["shots"].get<bool>();
+                // either says blur: blur (a policy change racing a call errs on the private side)
+                sr.blur = blur_policy || !req.trail.contains("blur") || !req.trail["blur"].is_boolean() || req.trail["blur"].get<bool>();
+                if (sr.shots && sr.blur && !cfg_.recorder->can_blur()) {
+                    sr.shots = false;
+                    withheld = "blur_unsupported";
+                }
+                sr.local = [this, info](const std::string& t, const json& a) { return call_local("tools/call", {{"name", t}, {"arguments", a}}, 15000, info); };
+                try { cfg_.recorder->before(sr); } catch (const std::exception& e) { spdlog::warn("trail: before {} failed: {}", tool, e.what()); }
+            }
+        }
         json out = call_local("tools/call", {{"name", tool}, {"arguments", args}}, int(budget), info);
         spdlog::info("served: tool={} user={} client={}", tool, c.sub, c.client);
-        proto::Frame f;
-        f.t = proto::TRes; f.id = req.id; f.rpc = std::move(out);
-        return f;
+        Outcome o;
+        if (record) {
+            StepRecord rec;
+            try {
+                rec = cfg_.recorder->after(sr, out.contains("result") ? out["result"] : json::object());
+            } catch (const std::exception& e) {
+                spdlog::warn("trail: after {} failed: {}", tool, e.what());
+            }
+            if (rec.withheld.empty()) rec.withheld = withheld;
+            o.trail = trail_frames(sr, std::move(rec));
+        }
+        // field changes reported by local fairyfly are for the audit trail only, never for the assistant
+        if (out.contains("result") && out["result"].is_object() && out["result"].contains("_meta") && out["result"]["_meta"].is_object()) {
+            out["result"]["_meta"].erase("fairyfly/changes");
+            if (out["result"]["_meta"].empty()) out["result"].erase("_meta");
+        }
+        o.res.t = proto::TRes; o.res.id = req.id; o.res.rpc = std::move(out);
+        return o;
     } catch (const std::exception& e) {
         spdlog::warn("local call failed: tool={} err={}", tool, e.what());
         return fail(req.id, "LOCAL_ERROR", e.what());
     }
 }
+
+// ---- audit trail ----------------------------------------------------------------------------------------------------
+
+namespace {
+std::string clip(const std::string& s, size_t n) {
+    if (s.size() <= n) return s;
+    size_t k = n;
+    while (k > 0 && (static_cast<unsigned char>(s[k]) & 0xC0) == 0x80) k--;  // not inside a UTF-8 sequence
+    return s.substr(0, k);
+}
+bool image_ok(const std::string& mime, const std::string& b) {
+    if (mime == "image/png") return b.size() > 8 && b.compare(0, 8, std::string("\x89PNG\r\n\x1a\n", 8)) == 0;
+    if (mime == "image/webp") return b.size() > 12 && b.compare(0, 4, "RIFF") == 0 && b.compare(8, 4, "WEBP") == 0;
+    return false;
+}
+}  // namespace
+
+std::vector<proto::Frame> Agent::trail_frames(const StepRequest& s, StepRecord rec) {
+    json changes = json::array();
+    for (auto& c : rec.changes) {
+        if (changes.size() >= proto::kStepMaxChanges) break;
+        // never a password; no bank data while blurring is on (the same rule as for the screenshots)
+        bool mask = proto::password_field(c.field, c.label) || (s.blur && proto::bank_field(c.field, c.label));
+        changes.push_back({{"field", clip(c.field, proto::kStepMaxText)}, {"label", clip(c.label, proto::kStepMaxText)},
+                           {"old", mask ? std::string(proto::kMasked) : clip(c.old_value, proto::kStepMaxText)},
+                           {"new", mask ? std::string(proto::kMasked) : clip(c.new_value, proto::kStepMaxText)}});
+    }
+    std::vector<Screenshot> shots;
+    std::string withheld = rec.withheld;
+    if (s.shots)
+        for (auto& sh : rec.shots) {
+            bool dup = false;
+            for (auto& x : shots) dup = dup || x.kind == sh.kind;
+            if ((sh.kind != "before" && sh.kind != "after") || dup || !image_ok(sh.mime, sh.bytes)) {
+                if (withheld.empty()) withheld = "bad_type";
+                continue;
+            }
+            if (sh.bytes.size() > proto::kShotMaxBytes) {
+                withheld = "too_large";
+                continue;
+            }
+            shots.push_back(std::move(sh));
+        }
+    json meta = json::array();
+    for (auto& sh : shots) meta.push_back({{"kind", sh.kind}, {"mime", sh.mime}, {"bytes", sh.bytes.size()}, {"sha256", hex_encode(sha256(sh.bytes))}});
+    proto::Frame st;
+    st.t = proto::TStep; st.id = s.request_id;
+    st.step = {{"v", 1}, {"description", clip(rec.description, 300)}, {"changes", changes}, {"blurred", std::max(0, rec.blurred)}, {"shots", meta}, {"withheld", withheld}};
+    while (st.dump().size() > proto::kStepMaxBytes && !st.step["changes"].empty()) {  // drop changes from the end
+        st.step["changes"].erase(st.step["changes"].size() - 1);
+        st.step["truncated"] = true;
+    }
+    std::vector<proto::Frame> out{st};
+    for (auto& sh : shots)
+        for (size_t off = 0, seq = 0; off < sh.bytes.size(); off += proto::kShotChunkBytes, seq++) {
+            proto::Frame f;
+            f.t = proto::TShot; f.id = s.request_id; f.kind = sh.kind; f.seq = int(seq);
+            f.data = b64std_encode(std::string_view(sh.bytes).substr(off, proto::kShotChunkBytes));
+            f.last = off + proto::kShotChunkBytes >= sh.bytes.size();
+            out.push_back(std::move(f));
+        }
+    return out;
+}
+
+void Agent::set_trail_policy(const proto::TrailPolicy& p) {
+    {
+        std::lock_guard<std::mutex> l(mu_);
+        if (p.to_json() == trail_.to_json()) return;
+        trail_ = p;
+    }
+    if (p.on) spdlog::warn("audit trail ON: your administrator records the steps assistants take on this desktop{}", p.mode == "every" ? ", with screenshots" : "");
+    else spdlog::info("audit trail off");
+    if (cfg_.recorder) cfg_.recorder->policy(p);
+}
+
+std::vector<std::string> Agent::caps() const {
+    if (!cfg_.recorder) return {};
+    std::vector<std::string> c{proto::kCapTrail};
+    if (cfg_.recorder->can_blur()) c.push_back(proto::kCapTrailBlur);
+    return c;
+}
+
+namespace {
+class McpRecorder : public Recorder {
+public:
+    void policy(const proto::TrailPolicy& p) override {
+        if (p.on)
+            std::cerr << "\n*** fairyfly: your administrator turned on the audit trail for this desktop. Every step an AI assistant takes here is "
+                         "recorded" << (p.mode == "every" ? ", with screenshots of the SAP screen" : ", with screenshots of steps that change SAP")
+                      << " (kept " << p.retention_days << " days). ***\n" << std::flush;
+        else
+            std::cerr << "\n*** fairyfly: the audit trail for this desktop is off. ***\n" << std::flush;
+    }
+    bool can_blur() const override { return false; }
+    void before(const StepRequest& s) override {
+        if (!s.shots) return;
+        auto shot = capture(s, "before");
+        std::lock_guard<std::mutex> l(mu_);
+        if (pending_.size() > 64) pending_.clear();  // a step whose after() never came
+        if (shot) pending_[s.request_id] = std::move(*shot);
+    }
+    StepRecord after(const StepRequest& s, const json& result) override {
+        StepRecord r;
+        r.description = s.tool;
+        for (auto k : {"code", "id"})
+            if (s.args.contains(k) && s.args[k].is_string()) r.description += " " + s.args[k].get<std::string>();
+        if (result.is_object() && result.contains("_meta") && result["_meta"].is_object() && result["_meta"].contains("fairyfly/changes") &&
+            result["_meta"]["fairyfly/changes"].is_array())
+            for (auto& c : result["_meta"]["fairyfly/changes"])
+                if (c.is_object())
+                    r.changes.push_back({c.value("field", ""), c.value("label", ""), c.value("old", ""), c.value("new", "")});
+        if (!s.shots) return r;
+        {
+            std::lock_guard<std::mutex> l(mu_);
+            if (auto i = pending_.find(s.request_id); i != pending_.end()) {
+                r.shots.push_back(std::move(i->second));
+                pending_.erase(i);
+            }
+        }
+        if (auto a = capture(s, "after")) r.shots.push_back(std::move(*a));
+        return r;
+    }
+
+private:
+    static std::optional<Screenshot> capture(const StepRequest& s, const char* kind) {
+        try {
+            json r = s.local("gui_screen_capture", json::object());
+            if (!r.contains("result") || !r["result"].contains("content") || !r["result"]["content"].is_array()) return std::nullopt;
+            for (auto& c : r["result"]["content"])
+                if (c.is_object() && c.value("type", "") == "image" && c.contains("data") && c["data"].is_string())
+                    return Screenshot{kind, c.value("mimeType", "image/png"), b64std_decode(c["data"].get<std::string>())};
+        } catch (const std::exception& e) {
+            spdlog::warn("trail: screenshot failed: {}", e.what());
+        }
+        return std::nullopt;
+    }
+    std::mutex mu_;
+    std::map<std::string, Screenshot> pending_;
+};
+}  // namespace
+
+std::shared_ptr<Recorder> mcp_recorder() { return std::make_shared<McpRecorder>(); }
 
 // ---- connection loop ----------------------------------------------------------------------------------------------------
 
@@ -240,6 +425,7 @@ bool Agent::session(const std::atomic<bool>& stop) {
 
     proto::Frame hello;
     hello.t = proto::THello; hello.device_id = st_.device_id; hello.tenant = st_.tenant; hello.proto = proto::kVersion; hello.agent_version = cfg_.version; hello.nonce_c = rand_hex(16);
+    hello.caps = caps();
     if (!ws->send_text(hello.dump())) return false;
     auto m = ws->read(64 * 1024);
     auto ch = m ? proto::Frame::parse(*m) : std::nullopt;
@@ -255,6 +441,7 @@ bool Agent::session(const std::atomic<bool>& stop) {
     last_rx = now_ms();
     ready = true;
     spdlog::info("link up: device={} gateway={}", st_.device_id, st_.link_url);
+    set_trail_policy(proto::TrailPolicy::from_json(rd->trail));  // a gateway without the audit trail: off
 
     if (refresh_local() && cfg_.publish_catalog) {
         proto::Frame cf;
@@ -273,14 +460,17 @@ bool Agent::session(const std::atomic<bool>& stop) {
             { std::lock_guard<std::mutex> l(mu_); inflight_[f->id] = cancelled; }
             active_++;
             std::thread([this, f = *f, cancelled, w = ws.get()] {
-                proto::Frame res = process(f);
-                if (!*cancelled) w->send_text(res.dump());
+                Outcome o = serve(f);
+                if (!*cancelled) w->send_text(o.res.dump());
+                for (auto& t : o.trail) w->send_text(t.dump());  // the record follows the answer
                 { std::lock_guard<std::mutex> l(mu_); inflight_.erase(f.id); }
                 active_--;
             }).detach();
         } else if (f->t == proto::TCancel) {
             std::lock_guard<std::mutex> l(mu_);
             if (auto i = inflight_.find(f->id); i != inflight_.end()) *i->second = true;
+        } else if (f->t == proto::TTrail) {
+            set_trail_policy(proto::TrailPolicy::from_json(f->trail));
         } else if (f->t == proto::TGoaway) {
             spdlog::info("gateway asked to reconnect ({})", f->kind);
             ws->close();
