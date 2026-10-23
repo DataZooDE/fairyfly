@@ -88,13 +88,15 @@ if (-not $wingetOk) {
     $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest "$base/DesktopAppInstaller_Dependencies.zip" -OutFile "$dl\deps.zip"
     Invoke-WebRequest "$base/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle" -OutFile "$dl\winget.msixbundle"
+    Invoke-WebRequest "$base/e53e159d00e04f729cc2180cffd1c02e_License1.xml" -OutFile "$dl\license.xml"
     Expand-Archive "$dl\deps.zip" "$dl\deps" -Force
     $deps = Get-ChildItem "$dl\deps" -Recurse -Filter *.appx | Where-Object { $_.FullName -match '\\x64\\' } | ForEach-Object FullName
     Write-Host "dependencies: $($deps -join ', ')"
-    # the Appx module does not load in PowerShell 7 on Server 2022; Windows PowerShell has it
+    # provisioned with its license (an unlicensed Add-AppxPackage fails with "No applicable app licenses found"),
+    # then registered for this user; the Appx/DISM modules do not load in PowerShell 7 here, Windows PowerShell has them
     $depList = ($deps | ForEach-Object { "'$_'" }) -join ','
-    powershell.exe -NoProfile -NonInteractive -Command "`$ErrorActionPreference='Stop'; Add-AppxPackage -Path '$dl\winget.msixbundle' -DependencyPath $depList -ForceApplicationShutdown"
-    if ($LASTEXITCODE -ne 0) { throw "Add-AppxPackage (App Installer) failed: $LASTEXITCODE" }
+    powershell.exe -NoProfile -NonInteractive -Command "`$ErrorActionPreference='Stop'; Add-AppxProvisionedPackage -Online -PackagePath '$dl\winget.msixbundle' -DependencyPackagePath $depList -LicensePath '$dl\license.xml' | Out-Null; Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe"
+    if ($LASTEXITCODE -ne 0) { throw "installing App Installer failed: $LASTEXITCODE" }
     $env:PATH = "$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:PATH"
     $winget = Get-Command winget -ErrorAction Stop
 }
