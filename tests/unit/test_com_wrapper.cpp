@@ -16,6 +16,7 @@
 #include "include/action_argument_checks.h"
 #include "include/sensitive_data.h"
 #include "include/action_status.h"
+#include "include/session_info.h"
 #include <nlohmann/json.hpp>
 #include <chrono>
 #include <exception>
@@ -695,6 +696,60 @@ private:
     ULONG references_ = 1;
     bool info_;
     SessionIdentityDispatch* child_ = nullptr;
+};
+
+// GuiSession fake for the session-info tests: Busy (bool) and Info (a GuiSessionInfo fake).
+class SessionInfoHolderDispatch final : public IDispatch {
+public:
+    SessionInfoHolderDispatch(IDispatch* info, bool busy) : info_(info), busy_(busy) {}
+    ~SessionInfoHolderDispatch() { if (info_) info_->Release(); }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+        if (!object) return E_POINTER;
+        *object = nullptr;
+        if (iid != IID_IUnknown && iid != IID_IDispatch) return E_NOINTERFACE;
+        *object = static_cast<IDispatch*>(this);
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG remaining = --references_;
+        if (!remaining) delete this;
+        return remaining;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* count) override {
+        if (!count) return E_POINTER;
+        *count = 0;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, ITypeInfo**) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID, DISPID* ids) override {
+        if (!names || !ids || count != 1) return E_INVALIDARG;
+        if (std::wcscmp(names[0], L"Info") == 0) *ids = 1;
+        else if (std::wcscmp(names[0], L"Busy") == 0) *ids = 2;
+        else return DISP_E_UNKNOWNNAME;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags,
+                                     DISPPARAMS*, VARIANT* result, EXCEPINFO*, UINT*) override {
+        if (!(flags & DISPATCH_PROPERTYGET) || !result) return DISP_E_MEMBERNOTFOUND;
+        VariantInit(result);
+        if (id == 1) {
+            info_reads++;
+            info_->AddRef();
+            result->vt = VT_DISPATCH;
+            result->pdispVal = info_;
+        } else if (id == 2) {
+            result->vt = VT_BOOL;
+            result->boolVal = busy_ ? VARIANT_TRUE : VARIANT_FALSE;
+        } else return DISP_E_MEMBERNOTFOUND;
+        return S_OK;
+    }
+    int info_reads = 0;
+private:
+    ULONG references_ = 1;
+    IDispatch* info_;
+    bool busy_;
 };
 
 struct DispatchCacheAccess : SapGuiObject {
@@ -3748,4 +3803,68 @@ TEST_CASE("Combo box fill accepts the key or the displayed value", "[com][combob
             CHECK(std::string(e.what()).find("English") != std::string::npos);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Session info: gui_session_list / session list and the gui_screen_read header name the SAP system, client and user.
+// ---------------------------------------------------------------------------------------------------------------
+namespace {
+ComGuiSessionPtr make_info_session(std::map<std::wstring, std::wstring> info_values, bool busy,
+                                SessionInfoHolderDispatch** holder_out = nullptr) {
+    auto* info = new StringPropertyDispatch(std::move(info_values));
+    auto* holder = new SessionInfoHolderDispatch(info, busy);
+    if (holder_out) *holder_out = holder;
+    return std::make_shared<ComGuiSession>(IDispatchPtr(holder, true));  // test-owned extra ref keeps holder alive
+}
+} // namespace
+
+TEST_CASE("Session list entry reports system, client, user, transaction, language, app server and description",
+          "[com][session-info]") {
+    ScopedDispatchCacheReset cache_reset;
+    const auto session = make_info_session({{L"SystemName", L"A4H"}, {L"Client", L"001"}, {L"User", L"DEVELOPER"},
+                                            {L"Transaction", L"SE80"}, {L"Language", L"EN"},
+                                            {L"ApplicationServer", L"vhcala4hci_A4H_00"}}, false);
+    const nlohmann::json entry = session_list_info(*session, "Bigfox");
+    CHECK(entry == nlohmann::json{{"system", "A4H"}, {"client", "001"}, {"user", "DEVELOPER"},
+                                  {"transaction", "SE80"}, {"language", "EN"},
+                                  {"app_server", "vhcala4hci_A4H_00"}, {"description", "Bigfox"}});
+}
+
+TEST_CASE("Session list entry before logon keeps the system and an empty user", "[com][session-info]") {
+    ScopedDispatchCacheReset cache_reset;
+    const auto session = make_info_session({{L"SystemName", L"A4H"}, {L"Client", L"001"}, {L"User", L""},
+                                            {L"Transaction", L"S000"}, {L"Language", L""},
+                                            {L"ApplicationServer", L"vhcala4hci_A4H_00"},
+                                            // GuiSessionInfo has no password member; a fake one must not leak.
+                                            {L"Password", L"SECRET-PW-123"}}, false);
+    const nlohmann::json entry = session_list_info(*session, "Bigfox");
+    CHECK(entry["system"] == "A4H");
+    CHECK(entry["client"] == "001");
+    CHECK(entry["user"] == "");
+    CHECK(entry["transaction"] == "S000");
+    CHECK(entry.size() == 7);
+    CHECK(entry.dump().find("SECRET-PW-123") == std::string::npos);
+}
+
+TEST_CASE("Session list entry does not read Info from a busy session", "[com][session-info]") {
+    ScopedDispatchCacheReset cache_reset;
+    SessionInfoHolderDispatch* holder = nullptr;
+    const auto session = make_info_session({{L"SystemName", L"A4H"}, {L"Client", L"001"}}, true, &holder);
+    const nlohmann::json entry = session_list_info(*session, "Bigfox");
+    CHECK(holder->info_reads == 0);
+    CHECK(entry["description"] == "Bigfox");
+    for (const char* key : {"system", "client", "user", "transaction", "language", "app_server"}) {
+        INFO(key);
+        REQUIRE(entry.contains(key));
+        CHECK(entry[key].is_null());
+    }
+}
+
+TEST_CASE("Screen read header names system, client, user and transaction", "[com][session-info][screen]") {
+    ScopedDispatchCacheReset cache_reset;
+    const auto session = make_info_session({{L"SystemName", L"A4H"}, {L"Client", L"001"}, {L"User", L"DEVELOPER"},
+                                            {L"Transaction", L"SM37"}, {L"Language", L"EN"},
+                                            {L"ApplicationServer", L"vhcala4hci_A4H_00"}}, false);
+    CHECK(screen_header_info(*session) == nlohmann::json{{"system", "A4H"}, {"client", "001"},
+                                                        {"user", "DEVELOPER"}, {"transaction", "SM37"}});
 }

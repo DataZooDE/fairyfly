@@ -2,6 +2,7 @@
 #include "include/element_errors.h"
 #include "include/object_tree_diag.h"
 #include "include/session_facts.h"
+#include "include/session_info.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
@@ -2190,6 +2191,8 @@ nlohmann::json ComAutomationEngine::get_application_info() const
                         sess_obj["type_as_number"] = session->get_type_as_number();
                         sess_obj["busy"] = session->is_busy();
                         sess_obj["alive"] = session->is_alive();
+                        // system/client/user/transaction/language/app_server (GuiSessionInfo) + description
+                        sess_obj.update(session_list_info(*session, conn_obj.value("description", "")));
                         sess_obj["server_session_key_available"] =
                             !session->get_server_session_key().empty();
                         // The scripting API has no server clock; see server_clock.h for the top-level fallback.

@@ -239,6 +239,23 @@ For each of 18 read-only screens the script navigates once with `-NewExe`, then 
 
 `-FullCompare` additionally deep-compares, per screen, the parsed JSON of `data.elements` (matched by id), `data.hierarchy`, `data.tabs` and `data.status_bar` between the two builds after stripping `duration_ms` and timestamp fields (`timestamp`, `*_timestamp`, `*_at`). In this mode the read runs without `--no-tabs` so that `data.tabs` is populated (the tab elements then also count in the id sets). Each difference is printed as a path-level line (`elements[id=/app/...].text: OLD = "a" <> NEW = "b"`, up to 20 per screen) and the exit code is 1. Use it for output-identity gates, for example `-Screens ST22-list,SM37-joblist,SU01-display,SE16-TADIR,RZ11-detail,SM50 -FullCompare`. Without the switch the behaviour is unchanged.
 
+## Session info: system, client and user (session_info_live.ps1)
+
+Checks that `session list` (gui_session_list) reports `system`, `client`, `user`, `transaction`, `language`,
+`app_server` and `description` per session, and that `screen read` (gui_screen_read) carries `system`, `client`,
+`user` and `transaction` in its JSON header and a `**System:**` line in its Markdown header, before and after logon.
+Expected for Bigfox: `A4H` / `001`; `user` is empty on the logon screen. The password field's value must not appear.
+
+Needs SAP Logon with the entry `Bigfox` and a Credential Manager entry for it (`fairyfly credentials set Bigfox`).
+The script opens its own window with `session launch Bigfox`, logs on with `session login --credential Bigfox
+--multiple-logon keep` and closes the window at the end (`-KeepSession` leaves it open). Exit 0 passed, 1 a check
+failed, 2 launch or login failed.
+
+~~~powershell
+powershell -NoProfile -File tests\integration\session_info_live.ps1
+powershell -NoProfile -File tests\integration\session_info_live.ps1 -ExpectUser DEVELOPER -KeepSession
+~~~
+
 ## MCP smoke test (mcp_smoke.ps1)
 
 `tests\integration\mcp_smoke.ps1` is a PowerShell 5.1 script that spawns `fairyfly mcp`, speaks newline-delimited JSON-RPC to it and checks the MCP server end to end. It is not registered with CTest and not part of the Bigfox regression suite.

@@ -59,6 +59,16 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         oss << "**Transaction:** `" << transaction << "`\n\n";
     }
 
+    // SAP system / client / user of the session (GuiSessionInfo); omitted when unknown (busy or unreadable).
+    const auto fact = [&](const char* key) {
+        return data.contains(key) && data[key].is_string() ? data[key].get<std::string>() : std::string();
+    };
+    const std::string system = fact("system"), client = fact("client"), user = fact("user");
+    if (!system.empty() || !client.empty()) {
+        oss << "**System:** `" << system << "` / client `" << client << "` / "
+            << (user.empty() ? std::string("not logged on") : "user `" + user + "`") << "\n\n";
+    }
+
     if (!compact) {
         oss << "**Screen ID:** `" << screen_id << "`\n\n";
     }
