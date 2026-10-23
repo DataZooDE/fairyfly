@@ -33,6 +33,10 @@
 - `fairyfly.msi`: a per-user installer (`packaging/fairyfly.wxs`, WiX 5): `%LOCALAPPDATA%\Programs\fairyfly`, the
   user's `PATH` and a Start-menu entry for the tray. The CI installs and uninstalls it; releases carry it, signed when
   signing is configured, and list it in `SHA256SUMS`.
+- winget: manifests for `DataZoo.fairyfly` (schema 1.10.0, `Scope: user`, `ElevationRequirement:
+  elevationProhibited`) rendered per release by `packaging/winget/New-WingetManifest.ps1` from the MSI (SHA-256 and
+  ProductCode through the Windows Installer API) and attached to each release. CI (`winget.yml`) validates them and
+  installs and uninstalls fairyfly with `winget` from an unelevated process on Windows Server 2022.
 - `third_party/libffl`: the link protocol library, vendored from the gateway (`scripts/sync_libffl.py`). It adds
   OpenSSL to the vcpkg dependencies.
 

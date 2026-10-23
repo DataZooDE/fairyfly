@@ -22,6 +22,13 @@ Nothing has to be installed in the SAP system, and fairyfly needs no runtime (no
 entry "fairyfly (tray)". Uninstall it under Settings -> Apps. For software distribution, deploy it in the user context
 (for example Intune "user"); it never writes to HKLM.
 
+**winget (per user).** `winget install DataZoo.fairyfly --scope user` once the package is accepted in
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). Until then each release carries the three manifest
+files (`DataZoo.fairyfly*.yaml`): put them in one folder and run `winget install --manifest <folder>` (an administrator
+enables local manifests once with `winget settings --enable LocalManifestFiles`). Run winget from a non-elevated
+terminal; the package is per user and winget refuses it in an administrator context. The manifests come from
+`packaging/winget/`.
+
 **Update.** `fairyfly update check` asks the releases page whether a newer version exists. `fairyfly update apply`
 installs it:
 - it downloads the release, checks it against `SHA256SUMS` and checks its Authenticode signature (a signed

@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# Rendered by packaging/winget/New-WingetManifest.ps1 for fairyfly {{PackageVersion}}.
+
+PackageIdentifier: DataZoo.fairyfly
+PackageVersion: {{PackageVersion}}
+PackageLocale: en-US
+Publisher: DataZoo GmbH
+PublisherUrl: https://github.com/DataZooDE
+PublisherSupportUrl: https://github.com/DataZooDE/fairyfly/issues
+Author: DataZoo GmbH
+PackageName: fairyfly
+PackageUrl: https://github.com/DataZooDE/fairyfly
+License: BUSL-1.1
+LicenseUrl: https://github.com/DataZooDE/fairyfly/blob/{{Tag}}/LICENSE
+Copyright: Copyright (c) DataZoo GmbH
+ShortDescription: Lets AI agents and scripts read and operate SAP GUI for Windows screens (CLI and MCP server).
+Description: |-
+  fairyfly lets AI agents such as Claude, and your own scripts, read and operate SAP GUI for Windows screens
+  through the SAP GUI Scripting API. It opens transactions, reads screens as structured data, fills in selections
+  and clicks buttons as the logged-on SAP user, with that user's own authorizations. It is a command-line tool and
+  an MCP server (stdio or HTTPS), with an optional tray app and cloud link.
+  This package installs per user into %LOCALAPPDATA%\Programs\fairyfly without administrator rights.
+Moniker: fairyfly
+Tags:
+- sap
+- sap-gui
+- automation
+- mcp
+- ai-agents
+- cli
+ReleaseNotesUrl: https://github.com/DataZooDE/fairyfly/releases/tag/{{Tag}}
+Documentations:
+- DocumentLabel: Documentation
+  DocumentUrl: https://github.com/DataZooDE/fairyfly/blob/{{Tag}}/docs/README.md
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

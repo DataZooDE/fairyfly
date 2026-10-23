@@ -91,12 +91,31 @@ The same operations are available as commands for scripts and scheduled jobs.
 **You need:** Windows 10/11 or Windows Server, SAP GUI for Windows with scripting enabled, and an SAP user that can
 log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
 
-**1. Get fairyfly.** Download `fairyfly.exe` from the
-[GitHub releases page](https://github.com/DataZooDE/fairyfly/releases) once a release is published (a single file;
-newer releases also offer a per-user `fairyfly.msi`, and `fairyfly update apply` updates in place), or
-[build it from source](docs/BUILDING.md). Put it in a folder of your choice, for example
-`C:\Tools\fairyfly\`, and add that folder to your `PATH` (the examples below assume `fairyfly` is found; otherwise
-use the full path `C:\Tools\fairyfly\fairyfly.exe`).
+**1. Install fairyfly.** Every way below installs for the current user only and needs **no administrator rights**.
+
+- **winget** (once `DataZoo.fairyfly` is accepted in the community repository
+  [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)):
+
+  ~~~powershell
+  winget install DataZoo.fairyfly --scope user
+  ~~~
+
+  Until then, install with winget from the manifests attached to each
+  [release](https://github.com/DataZooDE/fairyfly/releases) (`DataZoo.fairyfly.yaml`,
+  `DataZoo.fairyfly.installer.yaml`, `DataZoo.fairyfly.locale.en-US.yaml`): put the three files in one folder and run
+  `winget install --manifest <folder>`. Local manifests must be allowed once by an administrator
+  (`winget settings --enable LocalManifestFiles`). Run winget from a normal, non-elevated terminal: the package is
+  per-user, so winget refuses to install it from an administrator prompt.
+- **MSI**: download `fairyfly.msi` from the [releases page](https://github.com/DataZooDE/fairyfly/releases) and run it,
+  or install silently with `msiexec /i fairyfly.msi /qn`. It installs to `%LOCALAPPDATA%\Programs\fairyfly`, adds
+  that folder to your user `PATH` (open a new terminal afterwards), adds a Start-menu entry *fairyfly (tray)* and
+  writes only to `HKCU`. Uninstall it under *Settings > Apps* (or `msiexec /x fairyfly.msi /qn`).
+- **Single file**: download `fairyfly.exe`, put it in a folder of your choice, for example `C:\Tools\fairyfly\`, and
+  add that folder to your `PATH`.
+
+`fairyfly update apply` updates an installed fairyfly in place. You can also
+[build it from source](docs/BUILDING.md). The examples below assume `fairyfly` is found on the `PATH`; otherwise use
+the full path, e.g. `%LOCALAPPDATA%\Programs\fairyfly\fairyfly.exe`.
 
 **2. Check the machine.** Start SAP GUI, log on to your system, then run:
 

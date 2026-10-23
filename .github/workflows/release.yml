@@ -1,7 +1,8 @@
 name: Release fairyfly
 
 # Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with Azure Artifact
-# Signing (see docs/SIGNING.md) and publishes it with SHA256SUMS.
+# Signing (see docs/SIGNING.md) and publishes it with the per-user MSI, the winget manifests of DataZoo.fairyfly
+# (packaging/winget/) and SHA256SUMS.
 # Tag format: vYYYY.MM.DD (calendar version = ProductVersion of fairyfly.exe). Without the Azure signing secrets
 # the release is published unsigned.
 
@@ -178,6 +179,28 @@ jobs:
         path: msi/fairyfly.msi
         if-no-files-found: error
 
+    - name: Render the winget manifests for the released MSI
+      # after signing: InstallerSha256 must be the hash of the published fairyfly.msi
+      run: |
+        ./packaging/winget/New-WingetManifest.ps1 -Version "${{ env.RELEASE_TAG }}" -MsiPath msi/fairyfly.msi -OutDir winget
+        Get-ChildItem winget | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName }
+      shell: pwsh
+
+    - name: Validate the winget manifests
+      run: |
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if (-not $winget) { Write-Host "::warning::winget is not on this runner image; manifests not validated here (winget.yml validates them on every packaging PR)"; exit 0 }
+        & $winget.Source validate --manifest winget --disable-interactivity
+        if ($LASTEXITCODE -ne 0) { Write-Error "winget validate failed: $LASTEXITCODE"; exit 1 }
+      shell: pwsh
+
+    - name: Upload the winget manifests
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-winget
+        path: winget/*.yaml
+        if-no-files-found: error
+
   release:
     needs: [ build, sign, package ]
     # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
@@ -199,14 +222,51 @@ jobs:
         name: fairyfly-msi
         path: dist
 
+    - name: Download the winget manifests
+      uses: actions/download-artifact@v4
+      with:
+        name: fairyfly-winget
+        path: dist
+
     - name: Checksums and release
       env:
         GH_TOKEN: ${{ github.token }}
         SIGNED: ${{ needs.sign.result == 'success' }}
       run: |
         cd dist
-        sha256sum fairyfly.exe fairyfly.msi > SHA256SUMS
+        sha256sum fairyfly.exe fairyfly.msi DataZoo.fairyfly*.yaml > SHA256SUMS
         cat SHA256SUMS
         if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed (Azure Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
-        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable) and fairyfly.msi (per-user installer). ${SIGNNOTE} See the README (Code signing policy) for how to verify."
-        gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
+        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable), fairyfly.msi (per-user installer, no admin rights) and the winget manifests DataZoo.fairyfly*.yaml (put the three files in one folder, then: winget install --manifest <folder>). ${SIGNNOTE} See the README (Install, Code signing policy)."
+        gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi DataZoo.fairyfly.yaml DataZoo.fairyfly.installer.yaml DataZoo.fairyfly.locale.en-US.yaml SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
+
+  winget-pkgs:
+    # OFF by default. Opens a pull request for DataZoo.fairyfly in microsoft/winget-pkgs from the published release.
+    # Enable only with the maintainers' explicit OK: repository variable WINGET_PKGS_SUBMIT=true and secret
+    # WINGET_PKGS_TOKEN (classic PAT with public_repo of the account whose fork of winget-pkgs is used).
+    needs: release
+    if: ${{ vars.WINGET_PKGS_SUBMIT == 'true' }}
+    timeout-minutes: 20
+    runs-on: windows-2022
+    steps:
+    - name: Download the manifests of the published release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $version = "${{ env.RELEASE_TAG }}".TrimStart('v')
+        $dir = "manifests/d/DataZoo/fairyfly/$version"
+        New-Item -ItemType Directory -Force $dir | Out-Null
+        gh release download "${{ env.RELEASE_TAG }}" --repo "${{ github.repository }}" --pattern 'DataZoo.fairyfly*.yaml' --dir $dir
+        Get-ChildItem $dir
+      shell: pwsh
+
+    - name: Submit to microsoft/winget-pkgs (wingetcreate)
+      env:
+        WINGET_PKGS_TOKEN: ${{ secrets.WINGET_PKGS_TOKEN }}
+      run: |
+        if (-not $env:WINGET_PKGS_TOKEN) { Write-Error "WINGET_PKGS_TOKEN is not set"; exit 1 }
+        Invoke-WebRequest https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe -OutFile wingetcreate.exe
+        $version = "${{ env.RELEASE_TAG }}".TrimStart('v')
+        ./wingetcreate.exe submit --token $env:WINGET_PKGS_TOKEN --prtitle "New version: DataZoo.fairyfly version $version" "manifests/d/DataZoo/fairyfly/$version"
+        if ($LASTEXITCODE -ne 0) { Write-Error "wingetcreate submit failed: $LASTEXITCODE"; exit 1 }
+      shell: pwsh
