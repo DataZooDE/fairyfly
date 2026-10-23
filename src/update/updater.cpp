@@ -38,7 +38,10 @@ std::string fetch_once(const std::string& start, size_t max_body, int max_redire
         ffy::HttpRequest rq;
         rq.url = url;
         const bool api = url.rfind("https://api.github.com/", 0) == 0;
-        rq.headers = {{"User-Agent", "fairyfly-update"}, {"Accept", api ? "application/vnd.github+json" : "application/octet-stream"}};
+        // No User-Agent of our own: libffl's http_do always sends one, a second made the request carry two. An explicit
+        // Accept-Encoding, or cpp-httplib sends the header empty. GitHub's asset origin (http.sys) rejects some
+        // requests with 400 "Invalid Header" (2026-10-23); the request now looks like a plain client's.
+        rq.headers = {{"Accept", api ? "application/vnd.github+json" : "application/octet-stream"}, {"Accept-Encoding", "identity"}};
         // optional, for rate limits on shared machines (CI); sent to the API only, never to a download host
         if (api)
             if (const char* t = std::getenv("FAIRYFLY_GITHUB_TOKEN"); t && *t) rq.headers.push_back({"Authorization", std::string("Bearer ") + t});

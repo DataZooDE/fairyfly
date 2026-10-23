@@ -1,0 +1,124 @@
+name: winget per-user install
+
+# Proves the winget path end to end on a real Windows runner: build fairyfly.exe and the per-user MSI, render the
+# winget manifests (packaging/winget/New-WingetManifest.ps1), `winget validate`, refuse the install from an elevated
+# process (ElevationRequirement: elevationProhibited), `winget install --manifest` from an unelevated process of the
+# same user (MSI served from a local HTTP server), check the per-user footprint, `winget uninstall`, check it is gone.
+# packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/winget.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+env:
+  VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  winget-user-install:
+    timeout-minutes: 60
+    runs-on: windows-2022
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # fairyfly.exe only depends on the sources; packaging-only changes reuse the exe built for the same sources
+    - name: Restore fairyfly.exe built from these sources
+      id: exe-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: build/Release/fairyfly.exe
+        key: ffy-exe-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('src/**', 'third_party/**', 'assets/**', 'CMakeLists.txt', 'vcpkg.json', 'cmake/**') }}
+
+    - name: Setup vcpkg
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        git checkout ${{ env.VCPKG_COMMIT }}
+        .\bootstrap-vcpkg.bat
+      shell: pwsh
+
+    - name: Cache vcpkg (same key as build.yml)
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/vcpkg_installed
+          ${{ github.workspace }}/vcpkg/packages
+          ${{ github.workspace }}/vcpkg/buildtrees
+          ${{ github.workspace }}/vcpkg/downloads
+        key: vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+          vcpkg-${{ runner.os }}-
+
+    - name: Setup MSVC
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Build fairyfly.exe (Release, static)
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      run: |
+        $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        cmake -B build -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+        cmake --build build --config Release --target fairyfly --parallel
+      shell: pwsh
+
+    - name: Save fairyfly.exe for later runs (also when the winget checks fail)
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: build/Release/fairyfly.exe
+        key: ${{ steps.exe-cache.outputs.cache-primary-key }}
+
+    - name: Build the per-user MSI (WiX 5)
+      run: |
+        dotnet tool install --global wix --version 5.0.2
+        $msiVersion = (& ./packaging/msi_version.ps1).Trim()
+        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=$msiVersion -o build/fairyfly.msi
+        if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
+        Write-Host "fairyfly $(& build/Release/fairyfly.exe --version) -> MSI $msiVersion"
+      shell: pwsh
+
+    - name: winget validate + install/uninstall as an unelevated user
+      run: |
+        $version = (& build/Release/fairyfly.exe --version | Out-String).Trim()
+        ./packaging/winget/tests/Test-WingetUserInstall.ps1 -MsiPath build/fairyfly.msi -Version $version -WorkDir "$env:TEMP\ffy-winget-test"
+      shell: pwsh
+
+    - name: Collect manifests and logs
+      if: always()
+      run: |
+        $src = "$env:TEMP\ffy-winget-test"
+        if (Test-Path $src) {
+          New-Item -ItemType Directory -Force build/winget-test | Out-Null
+          Get-ChildItem $src -Recurse -File | Where-Object { $_.FullName -notmatch '\\(www|winget-dl)\\' } |
+            ForEach-Object { Copy-Item $_.FullName (Join-Path build/winget-test ("$($_.Directory.Name)_$($_.Name)")) }
+        }
+      shell: pwsh
+
+    - name: Upload manifests and logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: winget-test
+        path: |
+          build/winget-test/
+          build/fairyfly.msi
+        if-no-files-found: warn
+        retention-days: 14
