@@ -20,7 +20,10 @@ Nothing has to be installed in the SAP system, and fairyfly needs no runtime (no
 **Installer (per user).** Releases from 2026-10 on also carry `fairyfly.msi`. It installs to
 `%LOCALAPPDATA%\Programs\fairyfly` without administrator rights, adds that folder to your `PATH` and adds a Start-menu
 entry "fairyfly (tray)". Uninstall it under Settings -> Apps. For software distribution, deploy it in the user context
-(for example Intune "user"); it never writes to HKLM.
+(for example Intune "user"); the package itself writes no HKLM values (Windows Installer keeps its own product
+registration and the Apps entry). On Windows Server, non-administrators can install it only when the policy
+*Turn off Windows Installer* is set to *Never* (`HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer`,
+`DisableMSI=0`); the Server default refuses per-user installs with error 1625. Windows 10/11 allow them by default.
 
 **winget (per user).** `winget install DataZoo.fairyfly --scope user` once the package is accepted in
 [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). Until then each release carries the three manifest

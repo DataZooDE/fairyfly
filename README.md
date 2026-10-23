@@ -105,11 +105,13 @@ log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
   `DataZoo.fairyfly.installer.yaml`, `DataZoo.fairyfly.locale.en-US.yaml`): put the three files in one folder and run
   `winget install --manifest <folder>`. Local manifests must be allowed once by an administrator
   (`winget settings --enable LocalManifestFiles`). Run winget from a normal, non-elevated terminal: the package is
-  per-user, so winget refuses to install it from an administrator prompt.
+  per-user, so winget refuses to install it from an administrator prompt. On Windows Server (for example a terminal
+  server), Windows Installer refuses per-user installs by non-administrators unless the machine policy
+  *Turn off Windows Installer* is set to *Never* (`DisableMSI=0`); Windows 10/11 allow them by default.
 - **MSI**: download `fairyfly.msi` from the [releases page](https://github.com/DataZooDE/fairyfly/releases) and run it,
   or install silently with `msiexec /i fairyfly.msi /qn`. It installs to `%LOCALAPPDATA%\Programs\fairyfly`, adds
-  that folder to your user `PATH` (open a new terminal afterwards), adds a Start-menu entry *fairyfly (tray)* and
-  writes only to `HKCU`. Uninstall it under *Settings > Apps* (or `msiexec /x fairyfly.msi /qn`).
+  that folder to your user `PATH` (open a new terminal afterwards) and adds a Start-menu entry *fairyfly (tray)*; its
+  own settings go to `HKCU` only. Uninstall it under *Settings > Apps* (or `msiexec /x fairyfly.msi /qn`).
 - **Single file**: download `fairyfly.exe`, put it in a folder of your choice, for example `C:\Tools\fairyfly\`, and
   add that folder to your `PATH`.
 

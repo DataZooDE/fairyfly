@@ -4,8 +4,10 @@
 .DESCRIPTION
   Renders the manifests for -MsiPath, runs `winget validate`, serves the MSI from a local HTTP server and installs it
   with `winget install --manifest` from an UNELEVATED process of the same user (Invoke-Unelevated.ps1). It then checks
-  that the install is per user (folder, PATH, HKCU only, no Program Files, no HKLM uninstall entry, MSI log without
-  per-machine markers), uninstalls with winget and checks that everything is gone.
+  that the install is per user (folder, PATH, HKCU values, nothing in Program Files, registered for the user's SID and
+  not per machine, MSI log without elevation or per-machine markers), uninstalls with winget and checks that
+  everything is gone. On Windows Server it first shows that the default policy refuses per-user MSI installs by
+  non-admins (1625) and then sets DisableMSI=0, the Windows 10/11 default.
   It changes the machine (winget setting LocalManifestFiles, MSI logging policy, installs and removes fairyfly):
   run it on a throw-away CI runner, not on a workstation.
 .PARAMETER MsiPath
@@ -221,9 +223,19 @@ try {
     })
     $userData = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Installer\UserData\$sid\Products\$packed\InstallProperties"
     Write-Host "  Windows Installer per-user registration (the service's store for this user's SID): $userData exists=$(Test-Path $userData)"
-    Assert ($hklm.Count -eq 0) 'no HKLM uninstall entry (HKLM\...\Uninstall and WOW6432Node)'
-    Assert ($hkcu.Count -eq 1 -and $hkcu[0].PSChildName -eq $productCode) "HKCU uninstall entry $($hkcu.Name)"
-    Write-Host ("  DisplayName={0} DisplayVersion={1} Publisher={2} InstallLocation={3}" -f $hkcu[0].GetValue('DisplayName'), $hkcu[0].GetValue('DisplayVersion'), $hkcu[0].GetValue('Publisher'), $hkcu[0].GetValue('InstallLocation'))
+    # Windows Installer (the msiserver service, as SYSTEM) keeps the Add/Remove Programs entry of EVERY MSI product
+    # under HKLM\...\Uninstall\{ProductCode}, per-user products included; the package itself never writes HKLM.
+    # Per-user vs per-machine is decided by the product's registration: UserData\<user SID> (per-user) versus
+    # UserData\S-1-5-18 (per-machine), and by the Installer API's AssignmentType (0 = per-user, 1 = per-machine).
+    Assert ($hkcu.Count -eq 0) 'no HKCU uninstall key (Windows Installer does not use one for MSI products)'
+    Assert ($hklm.Count -eq 1 -and $hklm[0].PSChildName -eq $productCode) 'the only uninstall entry is the Windows Installer ARP entry {ProductCode}'
+    Assert (Test-Path $userData) "product registered for this user's SID only: UserData\$sid"
+    Assert (-not (Test-Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products\$packed")) 'no per-machine registration (UserData\S-1-5-18)'
+    $msiApi = New-Object -ComObject WindowsInstaller.Installer
+    $assignment = $msiApi.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $msiApi, @($productCode, 'AssignmentType'))
+    $location = $msiApi.GetType().InvokeMember('ProductInfo', 'GetProperty', $null, $msiApi, @($productCode, 'InstallLocation'))
+    Write-Host "  Installer API: AssignmentType=$assignment InstallLocation=$location"
+    Assert ("$assignment" -eq '0') 'Installer API: AssignmentType 0 = per-user product'
     Assert (Test-Path 'HKCU:\Software\DataZoo\fairyfly') 'HKCU\Software\DataZoo\fairyfly written'
     Assert (-not (Test-Path 'HKLM:\Software\DataZoo')) 'HKLM\Software\DataZoo not written'
     Assert (Test-Path $lnk) 'Start-menu shortcut in the user profile'
@@ -247,7 +259,8 @@ try {
     Assert (-not (Test-Path $installDir)) "install folder removed: $installDir"
     Assert ((Get-UserPathRaw) -notlike '*Programs\fairyfly*') 'user PATH entry removed'
     Assert (-not (Test-Path 'HKCU:\Software\DataZoo\fairyfly')) 'HKCU\Software\DataZoo\fairyfly removed'
-    Assert (@(Find-UninstallEntries 'HKCU' $productCode).Count -eq 0) 'HKCU uninstall entry removed'
+    Assert (@(Find-UninstallEntries 'HKLM' $productCode).Count -eq 0) 'Windows Installer ARP entry removed'
+    Assert (-not (Test-Path $userData)) 'per-user product registration removed'
     Assert (-not (Test-Path $lnk)) 'Start-menu shortcut removed'
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
