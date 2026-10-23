@@ -4,6 +4,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <thread>
+
+#include <httplib.h>
 
 #include <nlohmann/json.hpp>
 
@@ -194,6 +197,45 @@ TEST_CASE("update: a 404 is final, and the API is not retried", "[update]") {
     auto api = [&](const ffy::HttpRequest&) { calls++; ffy::HttpResponse r; r.status = 503; return r; };
     CHECK_THROWS(fetch("https://api.github.com/repos/DataZooDE/fairyfly/releases/latest", 1u << 20, 5, api, [](int) {}));
     CHECK(calls == 1);
+}
+
+TEST_CASE("update: the download request keeps the signed query byte for byte, one User-Agent, no empty header", "[update]") {
+    // GitHub's asset URLs are signed (sig=, jwt=) and contain "&&", "%3B", "%20" and "+"; any re-encoding breaks them.
+    // Since 2026-10-23 the asset origin (http.sys behind Fastly) answers some requests with 400 "Invalid Header";
+    // the request must look like a plain client's: a single User-Agent and no header without a value.
+    httplib::Server srv;
+    std::string target, accept_encoding = "<none>";
+    size_t user_agents = 0;
+    std::vector<std::string> empty_headers;
+    srv.Get("/asset", [&](const httplib::Request& req, httplib::Response& res) {
+        target = req.target;
+        user_agents = req.get_header_value_count("User-Agent");
+        if (req.has_header("Accept-Encoding")) accept_encoding = req.get_header_value("Accept-Encoding");
+        for (const auto& [k, v] : req.headers)
+            if (v.empty()) empty_headers.push_back(k);
+        res.set_content("ok", "application/octet-stream");
+    });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    std::thread t([&] { srv.listen_after_bind(); });
+    const std::string query =
+        "sp=r&rsct=application%2Foctet-stream&&sktid=398a&rscd=attachment%3B+filename%3DSHA256SUMS&jwt=eyJ0.eyJp-c_d"
+        "&response-content-disposition=attachment%3B%20filename%3DSHA256SUMS";
+    std::string body;
+    try {
+        body = fetch("http://127.0.0.1:" + std::to_string(port) + "/asset?" + query, 1u << 20);  // hop 0: no host check
+    } catch (...) {
+        srv.stop();
+        t.join();
+        throw;
+    }
+    srv.stop();
+    t.join();
+    CHECK(body == "ok");
+    CHECK(target == "/asset?" + query);
+    CHECK(user_agents == 1);
+    INFO("headers without a value: " << empty_headers.size());
+    CHECK(empty_headers.empty());
+    CHECK(accept_encoding == "identity");
 }
 
 // ---- the real update channel (hidden: needs internet; run with  unit_tests "[update-live]") ----
