@@ -34,9 +34,9 @@ jobs:
       uses: actions/checkout@v4
 
     # fairyfly.exe only depends on the sources; packaging-only changes reuse the exe built for the same sources
-    - name: Cache fairyfly.exe for these sources
+    - name: Restore fairyfly.exe built from these sources
       id: exe-cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: build/Release/fairyfly.exe
         key: ffy-exe-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('src/**', 'third_party/**', 'assets/**', 'CMakeLists.txt', 'vcpkg.json', 'cmake/**') }}
@@ -78,6 +78,13 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
         cmake --build build --config Release --target fairyfly --parallel
       shell: pwsh
+
+    - name: Save fairyfly.exe for later runs (also when the winget checks fail)
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: build/Release/fairyfly.exe
+        key: ${{ steps.exe-cache.outputs.cache-primary-key }}
 
     - name: Build the per-user MSI (WiX 5)
       run: |

@@ -91,7 +91,10 @@ if (-not $wingetOk) {
     Expand-Archive "$dl\deps.zip" "$dl\deps" -Force
     $deps = Get-ChildItem "$dl\deps" -Recurse -Filter *.appx | Where-Object { $_.FullName -match '\\x64\\' } | ForEach-Object FullName
     Write-Host "dependencies: $($deps -join ', ')"
-    Add-AppxPackage -Path "$dl\winget.msixbundle" -DependencyPath $deps -ForceApplicationShutdown
+    # the Appx module does not load in PowerShell 7 on Server 2022; Windows PowerShell has it
+    $depList = ($deps | ForEach-Object { "'$_'" }) -join ','
+    powershell.exe -NoProfile -NonInteractive -Command "`$ErrorActionPreference='Stop'; Add-AppxPackage -Path '$dl\winget.msixbundle' -DependencyPath $depList -ForceApplicationShutdown"
+    if ($LASTEXITCODE -ne 0) { throw "Add-AppxPackage (App Installer) failed: $LASTEXITCODE" }
     $env:PATH = "$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:PATH"
     $winget = Get-Command winget -ErrorAction Stop
 }
