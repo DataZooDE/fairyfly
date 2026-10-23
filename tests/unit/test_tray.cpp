@@ -848,3 +848,62 @@ TEST_CASE("run_link_with_tray: a failing link shows a message; a second instance
         CHECK(f.host.boxes[0].find("already running") != std::string::npos);
     }
 }
+
+namespace {
+struct FakeWrites : LinkWriteMode {
+    bool is_allowed = false, is_locked = false, ok = true;
+    std::vector<bool> requests;
+    bool allowed() override { return is_allowed; }
+    bool locked() override { return is_locked; }
+    bool set_allowed(bool a) override {
+        requests.push_back(a);
+        if (ok) is_allowed = a;
+        return ok;
+    }
+};
+} // namespace
+
+TEST_CASE("link tray: Allow changes in SAP asks first, switches the link, is locked by the read-only cap", "[tray][link_tray]") {
+    LinkWritesView writes;
+    writes.available = true;
+    auto m = build_link_menu(paired("connected"), writes);
+    const MenuItem* allow = find_item(m, TrayAction::LinkToggleWrites);
+    REQUIRE(allow != nullptr);
+    CHECK(allow->checkable);
+    CHECK_FALSE(allow->checked);
+    CHECK(m.tooltip.find("(read-only)") != std::string::npos);
+    writes.allowed = true;
+    CHECK(find_item(build_link_menu(paired("connected"), writes), TrayAction::LinkToggleWrites)->checked);
+    writes.locked = true;
+    allow = find_item(build_link_menu(paired("connected"), writes), TrayAction::LinkToggleWrites);
+    CHECK_FALSE(allow->enabled);
+    CHECK_FALSE(allow->checked);
+    CHECK(find_item(build_link_menu(paired("connected")), TrayAction::LinkToggleWrites) == nullptr);   // no switch: no item
+
+    Fixture f;
+    FakeWrites fake;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.writes = &fake;
+    LinkTrayController controller(services, f.paths);
+
+    f.host.confirm_answer = false;   // turning writes on asks first
+    controller.on_action(TrayAction::LinkToggleWrites);
+    CHECK(fake.requests.empty());
+    REQUIRE(f.host.confirms.size() == 1);
+    CHECK(f.host.confirms[0].find("change data in SAP") != std::string::npos);
+
+    f.host.confirm_answer = true;
+    controller.on_action(TrayAction::LinkToggleWrites);
+    CHECK(fake.requests == std::vector<bool>{true});
+    CHECK(f.host.balloons.back().find("Changes in SAP allowed") != std::string::npos);
+
+    controller.on_action(TrayAction::LinkToggleWrites);   // back to read-only: no question
+    CHECK(fake.requests == std::vector<bool>{true, false});
+    CHECK(f.host.confirms.size() == 2);
+
+    fake.is_locked = true;
+    controller.on_action(TrayAction::LinkToggleWrites);
+    CHECK(fake.requests.size() == 2);
+}

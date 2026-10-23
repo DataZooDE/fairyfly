@@ -133,6 +133,10 @@ struct Policy {
     bool audit_required = false;
     /// Exact SID/CLIENT/USER identities that remote clients may operate; empty disables this opt-in gate.
     std::vector<std::string> owner_sap_identities;
+    /// stdio and link: a call that finds no saved connection attaches to the only open SAP GUI session and runs again.
+    bool auto_attach = false;
+    /// How the person at the desktop allows changes, in read-only refusals (empty: restart with `mcp --allow-write`).
+    std::string allow_write_hint;
 };
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).

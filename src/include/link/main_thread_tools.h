@@ -33,6 +33,9 @@ public:
     nlohmann::json rpc(const std::string& method, const nlohmann::json& params, int timeout_ms, const ffy::link::CallInfo& info) override;
     bool per_call_read_only() const override { return true; }
 
+    /// Any thread: queues `fn` to run on the main thread between calls; does not wait. False after shutdown.
+    bool post(std::function<void()> fn);
+
     /// Main thread: runs queued calls until `stop` becomes true (checks it at least every 200 ms).
     void pump(const std::atomic<bool>& stop);
     /// Main thread: runs at most one queued call, waiting up to `wait`. True if one ran.
@@ -45,6 +48,7 @@ private:
         std::string method;
         nlohmann::json params;
         ffy::link::CallInfo info;
+        std::function<void()> fn;  ///< set: a posted task instead of an rpc
         nlohmann::json result;
         std::string error;
         bool done = false, abandoned = false;

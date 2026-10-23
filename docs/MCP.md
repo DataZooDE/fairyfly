@@ -255,6 +255,8 @@ The file is append-only by convention, not tamper-proof.
 - The last successful `gui_session_attach` or `gui_session_launch` becomes the sticky default of the calling principal: later calls of the same principal without `connection` use it (over HTTP each token has its own default, the local stdio principal has one). `--default-connection N` sets a server-wide default at start. The sticky default is only a targeting convenience: all principals still drive the same SAP GUI (one shared session per connection, one call at a time), so one client navigating changes the screen the next client sees.
 - Pass `connection` to target another saved connection. `gui_connection_list` and `gui_session_list` show what exists.
 - `gui_session_attach` without `session_id` attaches automatically when exactly one session is open; with several it fails with MULTIPLE_SESSIONS and lists them, so call it again with a `session_id` from `gui_session_list`.
+- Automatic attach (stdio server and `fairyfly link run`, not HTTP): a call that acts on a connection, gives no `connection`, and finds no saved connection attaches to the only open SAP GUI session itself and runs again. That session becomes the sticky default. So the first `gui_screen_read` works without a `gui_session_attach`, even for a client that is not offered that tool. With no open session the call fails with `NO_SESSIONS`; with several, `MULTIPLE_SESSIONS` lists them and nothing is chosen. The call is audited once, as the tool that was called.
+- Errors about attaching (`NO_CONNECTIONS`, `INVALID_CONNECTION`, `NO_SESSIONS`, `MULTIPLE_SESSIONS`) carry a `hint` for the AI assistant instead of console commands: which tool to call, or what to ask the person at the desktop.
 
 ## What the model sees
 

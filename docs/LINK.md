@@ -53,6 +53,10 @@ or an HTTP endpoint.
 - The menu has:
   - the pairing (organisation, account) and the link's state;
   - **Pause** / **Resume**;
+  - **Allow changes in SAP** (a check mark): switches the running link between read-only and write mode without a
+    restart. Turning it on asks first. The link then reconnects and offers its new tool list again. The switch is
+    audited (`read_only` / `write_mode`). It is off at start unless `--allow-write` was given, and it is locked by
+    `--read-only` / `FAIRYFLY_READ_ONLY=1`. Every change still needs the gateway's grant and an approval;
   - **Health check**: `link status` in a console;
   - **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
   - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
@@ -78,11 +82,20 @@ of the MCP tray's `fairyfly-mcp` value.
 
 ## What runs where
 
+- Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
+  itself (with several open, the assistant is told to pick one or to ask you). See "Automatic attach" in
+  [MCP.md](MCP.md).
+- Which tools the AI assistant sees is decided by the gateway: your organisation's policy for the user can offer fewer
+  tools than this desktop serves (for example only reading tools, without `gui_transaction_start`). Navigation and
+  `gui_session_attach` then have to be granted there; the desktop's read-only mode only hides `gui_element_fill`.
+- The link offers this desktop's tool list on every connect. The gateway keeps it only from an account in its
+  `catalog_publishers` list; otherwise it describes the tools from its own built-in catalog.
+
 - `link run` serves calls through **fairyfly's own MCP dispatcher, in-process**. No local HTTP endpoint and no local
   bearer token are involved.
 - The same guards apply as for `fairyfly mcp`, in the same order:
   1. `--read-only` / `FAIRYFLY_READ_ONLY=1` (hard cap);
-  2. read-only unless `--allow-write`;
+  2. read-only unless `--allow-write` (or **Allow changes in SAP** in the link tray);
   3. `--tools` families;
   4. the policy limits.
 - Each call additionally carries the gateway's grant. A call the gateway granted read-only runs with fairyfly's

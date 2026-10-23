@@ -56,6 +56,46 @@ Result error_from(const std::string& code, const std::string& message) {
     return r;
 }
 
+/// The open SAP GUI sessions of a `session list` result: [{session_id, connection, window_title}].
+json open_sessions(const Result& listed) {
+    json sessions = json::array();
+    const json& conns = listed.data.is_object() && listed.data.contains("connections") ? listed.data["connections"] : json::array();
+    if (!conns.is_array()) return sessions;
+    for (const auto& c : conns) {
+        if (!c.is_object() || !c.contains("sessions") || !c["sessions"].is_array()) continue;
+        for (const auto& s : c["sessions"])
+            sessions.push_back({{"session_id", s.value("id", "")},
+                                {"connection", c.value("description", "")},
+                                {"window_title", s.contains("active_window_title") && s["active_window_title"].is_string()
+                                                     ? s["active_window_title"] : json("")}});
+    }
+    return sessions;
+}
+
+/// Errors whose CLI suggestions ("Run 'fairyfly session attach'") mean nothing to an AI assistant get a hint that names
+/// a tool or what to ask the person at the desktop.
+void add_assistant_hint(Result& result, const Policy& policy) {
+    if (!result.error.is_object() || !result.error.contains("code") || !result.error["code"].is_string()) return;
+    const std::string code = result.error["code"].get<std::string>();
+    std::string hint;
+    if (code == "NO_CONNECTIONS")
+        hint = "no SAP GUI session is attached: call gui_session_attach (it picks the only open session), or ask the person "
+               "at the desktop to open SAP GUI and log on";
+    else if (code == "INVALID_CONNECTION")
+        hint = "the attached SAP session was closed: call gui_session_list and gui_session_attach, or ask the person at the "
+               "desktop to log on again";
+    else if (code == "NO_SESSIONS")
+        hint = "ask the person at the desktop to start SAP Logon and log on, then call the tool again";
+    else if (code == "MULTIPLE_SESSIONS")
+        hint = "call gui_session_attach with one session_id; if that tool is not available to you, ask the person at the "
+               "desktop which SAP window to use, or to close the others";
+    else if (code == "READ_ONLY_REFUSED" || code == "TOOL_UNAVAILABLE_READ_ONLY")
+        hint = policy.allow_write_hint.empty() ? "" : "this desktop runs read-only: " + policy.allow_write_hint;
+    if (hint.empty()) return;
+    result.error["hint"] = hint;
+    result.error.erase("suggestions");  // console commands for a person at a terminal
+}
+
 std::string result_error_code(const Result& result) {
     const json full = result.to_json();
     if (full.contains("error") && full["error"].is_object() && full["error"].contains("code") &&
@@ -678,17 +718,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             code = result_error_code(listed);
             return shape_result(listed, *spec, policy_, "", nullptr);
         }
-        json sessions = json::array();
-        const json& conns = listed.data.is_object() && listed.data.contains("connections") ? listed.data["connections"] : json::array();
-        if (conns.is_array())
-            for (const auto& c : conns) {
-                if (!c.is_object() || !c.contains("sessions") || !c["sessions"].is_array()) continue;
-                for (const auto& s : c["sessions"])
-                    sessions.push_back({{"session_id", s.value("id", "")},
-                                        {"connection", c.value("description", "")},
-                                        {"window_title", s.contains("active_window_title") && s["active_window_title"].is_string()
-                                                             ? s["active_window_title"] : json("")}});
-            }
+        const json sessions = open_sessions(listed);
         if (sessions.empty())
             return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
         if (sessions.size() > 1)
@@ -984,6 +1014,36 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         catch (...) { return fail("OWNER_IDENTITY_UNKNOWN", "the session list cannot be verified"); }
     } else {
         result = invoke_selected(argv);
+        // 5b. auto-attach (stdio, link): a call that finds no saved connection attaches to the only open SAP GUI
+        // session and runs again, so the first gui_screen_read works without a gui_session_attach.
+        if (policy_.auto_attach && !ctx.http && !worker_bound && accepts_connection && !record.connection &&
+            result.status != Result::Status::Success && result_error_code(result) == "NO_CONNECTIONS") {
+            const Result listed = invoke({"session", "list"});
+            const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
+            if (listed.status != Result::Status::Success) {
+                // keep NO_CONNECTIONS: SAP GUI could not be asked
+            } else if (sessions.empty()) {
+                result = error_from("NO_SESSIONS", "no SAP GUI session is open on this desktop");
+            } else if (sessions.size() > 1) {
+                result = error_from("MULTIPLE_SESSIONS", std::to_string(sessions.size()) +
+                                                             " SAP GUI sessions are open and none is attached. Sessions: " +
+                                                             dump_compact(sessions));
+            } else {
+                const std::string session_id = sessions[0].value("session_id", "");
+                Result attached = invoke({"session", "attach", "--session-id", session_id});
+                if (attached.status != Result::Status::Success) {
+                    result = attached;
+                } else {
+                    if (attached.data.is_object() && attached.data.contains("connection_file_id"))
+                        if (auto id = int_from_json(attached.data["connection_file_id"])) {
+                            set_sticky_connection(principal_key(principal), *id, "");
+                            record.connection = id;
+                        }
+                    spdlog::info("{}: attached to the only open SAP GUI session {}", name, session_id);
+                    result = invoke_selected(argv);
+                }
+            }
+        }
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts) {
@@ -1399,6 +1459,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
 
     // 6. shape
+    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_);
     ToolSpec shaped_spec = *spec;
     if (spec->output == ToolOutput::Markdown) {
         std::string format = policy_.default_format;

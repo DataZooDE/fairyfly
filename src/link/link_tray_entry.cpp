@@ -54,6 +54,8 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();
     tray_services.link = link_control.get();
+    auto write_mode = make_write_mode_control();
+    tray_services.writes = write_mode.get();
     tray_services.stop_link = [] { request_stop(); };
 
     tray::TrayPaths paths;

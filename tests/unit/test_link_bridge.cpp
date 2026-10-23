@@ -121,3 +121,17 @@ TEST_CASE("link bridge: a signed call from the gateway reaches the dispatcher on
     CHECK(got.request_id == "inst.1");
     CHECK_FALSE(got.write_granted);
 }
+
+TEST_CASE("link bridge: posted tasks run on the pumping thread between calls", "[link]") {
+    MainThreadTools tools;
+    std::thread::id ran_on, pumping;
+    REQUIRE(tools.post([&] { ran_on = std::this_thread::get_id(); }));
+    std::thread main([&] {
+        pumping = std::this_thread::get_id();
+        tools.pump_once(std::chrono::milliseconds(2000));
+    });
+    main.join();
+    CHECK(ran_on == pumping);
+    tools.shutdown();
+    CHECK_FALSE(tools.post([] {}));
+}

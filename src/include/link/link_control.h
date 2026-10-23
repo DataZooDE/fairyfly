@@ -34,6 +34,9 @@ struct SupervisorOptions {
     std::chrono::seconds heartbeat{15};             ///< status refresh while nothing changes
     /// Called on the supervising thread when the state changes ("connected" while the agent runs, "paused").
     std::function<void(const std::string& state)> on_change;
+    /// Set by anyone, cleared by the supervisor: closes the connection and opens it again at once (the gateway then
+    /// receives the current tool catalog, e.g. after "Allow changes in SAP").
+    std::atomic<bool>* reconnect = nullptr;
 };
 
 /// Runs `agent(net_stop)` (libffl's Agent::run) on a thread while the link is not paused; pausing sets net_stop and

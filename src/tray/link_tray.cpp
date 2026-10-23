@@ -25,7 +25,7 @@ std::string who(const LinkView& link) { return link.organisation + " (" + link.a
 
 } // namespace
 
-TrayMenuModel build_link_menu(const LinkView& link) {
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes) {
     TrayMenuModel model;
     if (link.state == "connected") model.icon = IconState::Running;
     else if (link.state == "paused") model.icon = IconState::Warning;
@@ -36,6 +36,14 @@ TrayMenuModel build_link_menu(const LinkView& link) {
         model.items.push_back(separator());
         if (link.paused) model.items.push_back(item("Resume", TrayAction::LinkResume));
         else model.items.push_back(item("Pause", TrayAction::LinkPause));
+        if (writes.available) {
+            MenuItem allow = item(writes.locked ? "Allow changes in SAP (off: FAIRYFLY_READ_ONLY / --read-only)"
+                                                : "Allow changes in SAP",
+                                  TrayAction::LinkToggleWrites, !writes.locked);
+            allow.checkable = true;
+            allow.checked = writes.allowed && !writes.locked;
+            model.items.push_back(std::move(allow));
+        }
         model.items.push_back(item("Health check (console)", TrayAction::LinkStatus));
         model.items.push_back(item("Pair again (console)", TrayAction::LinkPair));
     } else {
@@ -51,6 +59,7 @@ TrayMenuModel build_link_menu(const LinkView& link) {
     model.items.push_back(item("Quit", TrayAction::Quit));
 
     std::string tooltip = "fairyfly link: " + link.state;
+    if (writes.available) tooltip += writes.allowed && !writes.locked ? " (changes allowed)" : " (read-only)";
     if (link.paired) tooltip += " - " + who(link);
     if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
     model.tooltip = tooltip;
@@ -60,14 +69,23 @@ TrayMenuModel build_link_menu(const LinkView& link) {
 LinkTrayController::LinkTrayController(LinkTrayServices services, TrayPaths paths)
     : services_(std::move(services)), paths_(std::move(paths)) {}
 
-TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_); }
+LinkWritesView LinkTrayController::writes_view() {
+    LinkWritesView v;
+    if (!services_.writes) return v;
+    v.available = true;
+    v.allowed = services_.writes->allowed();
+    v.locked = services_.writes->locked();
+    return v;
+}
+
+TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view()); }
 
 TrayView LinkTrayController::view() {
-    const auto model = build_link_menu(link_);
+    const auto model = build_link_menu(link_, writes_view());
     return {model.icon, model.tooltip};
 }
 
-std::string LinkTrayController::left_click_text() { return build_link_menu(link_).tooltip; }
+std::string LinkTrayController::left_click_text() { return build_link_menu(link_, writes_view()).tooltip; }
 
 void LinkTrayController::notify(const std::string& text) {
     if (services_.host) services_.host->balloon("fairyfly link", text);
@@ -103,6 +121,19 @@ void LinkTrayController::on_action(TrayAction action) {
         const bool pause = action == TrayAction::LinkPause;
         if (services_.link && services_.link->set_paused(pause)) link_.paused = pause;   // the notice follows on the tick
         else notify(pause ? "Could not pause the cloud link" : "Could not resume the cloud link");
+        break;
+    }
+    case TrayAction::LinkToggleWrites: {
+        if (!services_.writes || services_.writes->locked()) break;
+        const bool allow = !services_.writes->allowed();
+        if (allow && services_.host &&
+            !services_.host->confirm("fairyfly link",
+                                     "Allow AI assistants to change data in SAP through the cloud link?\n\nEach change still "
+                                     "needs your organisation's grant and an approval (this desktop's dialog or the phone)."))
+            break;
+        if (!services_.writes->set_allowed(allow)) notify("Could not change the link's mode");
+        else notify(allow ? "Changes in SAP allowed; the link reconnects with the write tools"
+                          : "Read-only: the link reconnects without the write tools");
         break;
     }
     case TrayAction::LinkStatus: console({"link", "status"}); break;

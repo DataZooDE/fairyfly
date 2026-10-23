@@ -71,6 +71,8 @@ int run_link(const LinkOptions& options, const std::function<cli::CommandHandler
              const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);
 /// Thread-safe: makes a running run_link() return, like Ctrl+C (the tray's Quit).
 void request_stop();
+/// The write mode of the run_link() in this process ("Allow changes in SAP" in the link tray).
+std::unique_ptr<tray::LinkWriteMode> make_write_mode_control();
 
 /// `link run --tray` (and its --install-autostart/--remove-autostart): relaunches detached from the console, then runs
 /// run_link() on this thread under the link tray. No MCP server, no HTTP. Returns the process exit code.

@@ -133,6 +133,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     policy.max_calls_per_minute = options.max_calls_per_minute;
     policy.audit_required = sink && sink->mode() == audit::Mode::Required;
     policy.owner_sap_identities = options.owner_sap_identities;
+    policy.auto_attach = !http;  // stdio and link; an HTTP endpoint keeps explicit attaches (tokens, owner routing)
+    if (link)
+        policy.allow_write_hint = "the person at the desktop can allow changes with 'Allow changes in SAP' in the fairyfly "
+                                  "link tray, or by restarting with `fairyfly link run --allow-write`";
 #ifdef _WIN32
     // Owner-mode workers attach to SAP GUI through the running object table: never host SAP GUI windows in-process.
     sap::ComGuiApplication::set_embedded_fallback_allowed(embedded_sap_gui_allowed(http, options.owner_sap_identities));
@@ -143,14 +147,16 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
                                                          const std::function<bool()>&)>>();
     auto control_probe_gate = std::make_shared<std::shared_timed_mutex>();
 
-    // Configure the shared handler once, on first use, from the main (COM) thread.
+    // Configure the shared handler once, on first use, from the main (COM) thread. The mode can change later (the
+    // link tray's "Allow changes in SAP"): a handler created after that starts in the current mode.
     auto configured = std::make_shared<bool>(false);
-    std::function<cli::CommandHandler&()> lazy_handler = [get_handler, configured, read_only, http, on_connection_changed,
+    auto current_read_only = std::make_shared<bool>(read_only);
+    std::function<cli::CommandHandler&()> lazy_handler = [get_handler, configured, current_read_only, http, on_connection_changed,
                                                          owners = options.owner_sap_identities]() -> cli::CommandHandler& {
         cli::CommandHandler& handler = get_handler();
         if (!*configured) {
             handler.set_batch_mode(true);
-            handler.set_read_only(read_only);
+            handler.set_read_only(*current_read_only);
             if (http) handler.set_attach_owner_identities(owners);
             handler.set_connection_changed_hook([on_connection_changed](int id) {
                 if (*on_connection_changed) (*on_connection_changed)(id);
@@ -349,8 +355,18 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
         if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
             return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        const bool hard_read_only = options.read_only || env_flag_read_only();
+        const auto set_read_only = [&](bool ro) {
+            if (!ro && hard_read_only) return false;
+            link_dispatcher.set_read_only(ro);
+            *current_read_only = ro;
+            if (cli::CommandHandler* handler = peek()) handler->set_read_only(ro);
+            append_serve_event(sink, ro ? "read_only" : "write_mode", ro);
+            spdlog::info("fairyfly link: {}", ro ? "read-only" : "changes in SAP allowed");
+            return true;
+        };
         append_serve_event(sink, "started", read_only);
-        const int link_exit = hooks->link_loop(link_dispatcher);
+        const int link_exit = hooks->link_loop(link_dispatcher, set_read_only);
         append_serve_event(sink, "stopped", read_only);
         return link_exit;
     }

@@ -36,7 +36,8 @@ Connects to the gateway (outbound WebSocket) and serves the AI assistant's tool 
 fairyfly's own MCP dispatcher. Read-only unless --allow-write; even then every change needs the
 gateway's grant and an approval (this desktop's dialog or the phone). Calls are audited with
 audit_source "link". Stop with Ctrl+C.
---tray runs the link alone in the system tray (Pause/Resume, Health check, Quit); it needs no
+--tray runs the link alone in the system tray (Pause/Resume, Allow changes in SAP, Health check,
+Quit); it needs no
 MCP server and no HTTP endpoint. --install-autostart registers it, with the same options, at logon.
 Example: fairyfly link run
 Example: fairyfly link run --tray --install-autostart
