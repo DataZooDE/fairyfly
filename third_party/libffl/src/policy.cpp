@@ -95,7 +95,22 @@ Engine Engine::load(const std::string& text) {
     } catch (const YAML::Exception& ex) {
         throw Error(std::string("policy: ") + ex.what());
     }
-    if (e.def_.tools.empty()) e.def_.tools = {"session.list", "connection.list", "screen.read", "screen.find", "element.get", "menu.list", "gui_doctor"};
+    // Without default tools the agent may read and navigate (attach, start a transaction, click, keys, menus, popups,
+    // F4) but not write: allow_write stays false and gui_element_fill, screenshots and the dangerous tools (credentials,
+    // launch, login, batch) are not granted.
+    if (e.def_.tools.empty())
+        e.def_.tools = {"session.list", "session.attach", "connection.list", "screen.read", "screen.find", "element.get",
+                        "element.click", "element.f4", "menu.list", "menu.select", "key.send", "popup.close",
+                        "transaction.start", "gui_doctor"};
+    // No policy text at all (the SaaS edition): also fill fields and run batches, and writes are allowed, but only
+    // where a tenant switch caps them (builtin_default(): a tenant is read-only unless it allows writes; a gateway
+    // without tenants stays read-only). Every write still needs the desktop's write mode and an approval.
+    if (trim(text).empty()) {
+        e.builtin_ = true;
+        e.def_.tools.push_back("element.fill");
+        e.def_.tools.push_back("gui_batch");
+        e.def_.allow_write = true;
+    }
     if (e.def_.approval.empty()) e.def_.approval = "device";
     return e;
 }
@@ -155,6 +170,83 @@ bool tcode_allowed(const std::vector<std::string>& allowed, const std::string& c
     for (auto& a : allowed)
         if (iequals(a, c)) return true;
     return false;
+}
+
+namespace {
+
+bool is_okcd(const std::string& id) {
+    std::string l = lower(id);
+    return l == "okcd" || (l.size() >= 5 && l.compare(l.size() - 5, 5, "/okcd") == 0);
+}
+
+// One step: the call itself, or one item of a batch.
+CallCheck check_step(const Grants& g, const std::string& tool, const nlohmann::json& args) {
+    CallCheck r;
+    if (tool == "gui_transaction_start" && !tcode_allowed(g.tcodes, args.is_object() ? args.value("code", std::string()) : "")) {
+        r.code = "TCODE_DENIED";
+        r.message = "this transaction is not allowed for you";
+    } else if (tool == "gui_screen_capture" && !g.screenshots) {
+        r.code = "POLICY_DENIED";
+        r.message = "screenshots are not enabled for this user";
+    } else if (tool == "gui_element_fill") {
+        r.writes = true;
+        if (!g.tcodes.empty()) {
+            // typing a transaction into the command field would get around the transaction list
+            std::vector<const nlohmann::json*> targets;
+            if (args.is_object() && args.contains("fields") && args["fields"].is_array())
+                for (auto& f : args["fields"]) targets.push_back(&f);
+            else
+                targets.push_back(&args);
+            for (auto* t : targets)
+                for (const char* k : {"element", "id", "element_id"})
+                    if (t->is_object() && t->contains(k) && (*t)[k].is_string() && is_okcd((*t)[k].get<std::string>())) {
+                        r.code = "TCODE_DENIED";
+                        r.message = "typing into the command field is not allowed while your transactions are restricted; "
+                                    "use gui_transaction_start";
+                    }
+        }
+    }
+    return r;
+}
+
+}  // namespace
+
+CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::json& args) {
+    if (tool != "gui_batch") return check_step(g, tool, args);
+    CallCheck r;
+    auto bad = [&](const std::string& msg) {
+        r.code = "BATCH_INVALID";
+        r.message = msg;
+        return r;
+    };
+    if (!args.is_object() || !args.contains("items") || !args["items"].is_array() || args["items"].empty() ||
+        args["items"].size() > kMaxBatchItems)
+        return bad("gui_batch needs 'items': 1 to " + std::to_string(kMaxBatchItems) + " tool calls");
+    std::size_t n = 0;
+    for (auto& item : args["items"]) {
+        ++n;
+        const std::string at = "batch item " + std::to_string(n) + ": ";
+        if (!item.is_object() || !item.contains("tool") || !item["tool"].is_string() || item["tool"].get<std::string>().empty())
+            return bad(at + "needs a 'tool' name");
+        const std::string t = item["tool"];
+        const nlohmann::json a = item.contains("arguments") ? item["arguments"] : nlohmann::json::object();
+        if (!a.is_object()) return bad(at + "'arguments' must be an object");
+        if (t == "gui_batch") return bad(at + "gui_batch cannot be nested");
+        if (is_dangerous(t) || !tool_allowed(g.tools, t)) {
+            r.code = "POLICY_DENIED";
+            r.message = at + t + " is not permitted for this user";
+            return r;
+        }
+        auto step = check_step(g, t, a);
+        if (!step.ok()) {
+            r.code = step.code;
+            r.message = at + step.message;
+            return r;
+        }
+        r.writes = r.writes || step.writes;
+        if (std::find(r.tools.begin(), r.tools.end(), t) == r.tools.end()) r.tools.push_back(t);
+    }
+    return r;
 }
 
 }  // namespace ffy::policy
