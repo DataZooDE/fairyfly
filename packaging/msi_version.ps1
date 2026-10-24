@@ -18,7 +18,7 @@ if (-not $Version) {
     if ($header -notmatch 'FAIRYFLY_VERSION\s*=\s*"([0-9.]+)"') { throw 'FAIRYFLY_VERSION not found in version.h' }
     $Version = $Matches[1]
 }
-if ($Version -notmatch '^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\.([1-9]\d{0,4}))?$') { throw "not a calendar version: $Version" }
+if ($Version -cnotmatch '^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\.([1-9]\d{0,4}))?$') { throw "not a calendar version: $Version" }
 $y = [int]$Matches[1]; $m = [int]$Matches[2]; $d = [int]$Matches[3]; $n = $Matches[4]
 if ($y - 2000 -lt 0 -or $y - 2000 -gt 255) { throw "year out of the MSI range: $Version" }
 if ($m -lt 1 -or $m -gt 12 -or $d -lt 1 -or $d -gt [datetime]::DaysInMonth($y, $m)) { throw "not a date: $Version" }

@@ -121,5 +121,47 @@ foreach ($bad in '2026.10.24.0', '2026.10.24.01', '2026.10.24.100', 'v2026.10.24
     Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
 }
 
+Write-Host "`n=== check_release_tag.ps1 (release.yml's tag check) ==="
+# the updater (src/update/update_model.cpp parse_release) only takes a lowercase v: the check must be case-sensitive;
+# N is 1..99 as for set_version/msi_version (MSI (YYYY-2000).MM.(DD*100+N)), though the updater still reads up to 65535
+$tagCheck = Join-Path $packaging 'check_release_tag.ps1'
+foreach ($case in @('v2026.10.24', '2026.10.24'), @('v2026.10.24.1', '2026.10.24.1'), @('v2026.10.24.99', '2026.10.24.99')) {
+    $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
+    Check ($r.Error -eq '') "check_release_tag accepts $($case[0]) for $($case[1])$(if ($r.Error) { " error: $($r.Error)" })"
+}
+foreach ($case in @('V2026.10.24.1', '2026.10.24.1'), @('V2026.10.24', '2026.10.24'), @('v2026.10.24', '2026.10.24.1'),
+                  @('v2026.10.24.1', '2026.10.24'), @('2026.10.24', '2026.10.24'), @('v2026.10.24.0', '2026.10.24.0'),
+                  @('v2026.10.24.100', '2026.10.24.100'), @('v2026.10.24.65535', '2026.10.24.65535'),
+                  @('v2026.10.24.65536', '2026.10.24.65536'), @('vv2026.10.24', 'v2026.10.24'), @('v2026.10.24 ', '2026.10.24'),
+                  @('', '2026.10.24')) {
+    $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
+    Check ($r.Error -ne '') "check_release_tag refuses '$($case[0])' for $($case[1]) ($($r.Error))"
+}
+# a tag with an uppercase V is no tag the updater takes: msi_version.ps1 and New-WingetManifest.ps1 refuse it too
+foreach ($bad in 'V2026.10.24', 'V2026.10.24.1') {
+    $r = Try-Run { & $msiVersion -Version $bad }
+    Check ($r.Error -ne '' -and $r.Out -eq '') "msi_version refuses '$bad' ($($r.Error))"
+    $r = Try-Run { & $generator -Version $bad -MsiPath $noMsi -OutDir $outDir }
+    Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
+}
+
+Write-Host "`n=== cmake/calendar_version.cmake (what configuring checks in CMakeLists.txt) ==="
+$cmakeCheck = Join-Path $packaging '..\cmake\calendar_version.cmake'
+function Invoke-CMakeCheck([string]$v) {
+    $out = & cmake "-DVERSION=$v" -P $cmakeCheck 2>&1 | Out-String
+    [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Out = $out.Trim() }
+}
+foreach ($v in '2026.10.24', '2026.10.5', '2026.10.05', '2026.10.24.1', '2026.10.24.99', '2024.2.29', '2000.2.29', '2026.12.31', '2026.1.31', '2026.4.30') {
+    $r = Invoke-CMakeCheck $v
+    Check $r.Ok "configure accepts the version $v$(if (-not $r.Ok) { ": $($r.Out)" })"
+}
+foreach ($v in '2026.2.30', '2026.02.30', '2026.2.29', '1900.2.29', '2100.2.29', '2026.4.31', '2026.6.31', '2026.9.31', '2026.11.31',
+               '2026.1.32', '2026.13.1', '2026.0.1', '2026.1.0', '2026.00.10', '1999.12.31', '2026.10.24.0', '2026.10.24.100', '2026.10.24.65535', '2026.10.24.65536',
+               '2026.10.24.01', '2026.10', '26.10.24', '2026.10.24-1', 'v2026.10.24') {
+    $r = Invoke-CMakeCheck $v
+    Check (-not $r.Ok -and $r.Out -match 'calendar version|not a date|1\.\.99') "configure refuses the version $v ($(($r.Out -split "`n")[-1]))"
+}
+
 if ($failures) { Write-Host "`n$failures check(s) FAILED"; exit 1 }
 Write-Host "`nALL VERSION SCRIPT CHECKS PASSED"
+exit 0   # not the exit code of the last cmake -P run above (an expected refusal)
