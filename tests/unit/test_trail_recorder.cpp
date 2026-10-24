@@ -929,6 +929,7 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
         ffy::link::State s;
         s.device_id = "dev_t"; s.issuer = "gw"; s.tenant = "acme"; s.tenant_name = "ACME"; s.email = "lee@acme.example";
         s.link_url = "wss://gw.example/link"; s.key = ffy::ec_generate();
+        s.gateway_keys = {ffy::jwk_from_ec(ffy::ec_generate())};  // load_state wants a complete pairing
         ffy::link::save_state(s, own.state_path);
     }
     write_status(own.state_path, "connected", json{{"trail", on_policy().to_json()}});
