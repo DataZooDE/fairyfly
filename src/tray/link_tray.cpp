@@ -1,6 +1,8 @@
 // The link tray (`fairyfly link run --tray`): the cloud link on its own, without the MCP server.
 #include <thread>
 
+#include <spdlog/spdlog.h>
+
 #include "include/tray/tray.h"
 
 namespace fairyfly::tray {
@@ -25,7 +27,9 @@ std::string who(const LinkView& link) { return link.organisation + " (" + link.a
 
 } // namespace
 
-TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes) {
+std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
+
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp) {
     TrayMenuModel model;
     if (link.state == "connected") model.icon = IconState::Running;
     else if (link.state == "paused") model.icon = IconState::Warning;
@@ -48,9 +52,17 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         model.items.push_back(item("Health check (console)", TrayAction::LinkStatus));
         model.items.push_back(item("Pair again (console)", TrayAction::LinkPair));
     } else {
-        model.items.push_back(item("Not connected to the fairyfly cloud", TrayAction::None, false));
+        model.items.push_back(item("Not paired with the fairyfly cloud yet", TrayAction::None, false));
         model.items.push_back(separator());
-        model.items.push_back(item("Connect to cloud... (pair in a console)", TrayAction::LinkPair));
+        model.items.push_back(item("Pair with the fairyfly cloud... (console)", TrayAction::LinkPair));
+    }
+    if (mcp.available) {
+        model.items.push_back(separator());
+        MenuItem start = item(mcp.running ? "Local MCP server running" : "Start local MCP server", TrayAction::StartMcpServer,
+                              !mcp.running);
+        start.checkable = true;
+        start.checked = mcp.running;
+        model.items.push_back(std::move(start));
     }
     model.items.push_back(separator());
     model.items.push_back(item("Open log", TrayAction::OpenLog));
@@ -59,7 +71,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(separator());
     model.items.push_back(item("Quit", TrayAction::Quit));
 
-    std::string tooltip = "fairyfly link: " + link.state;
+    std::string tooltip = "fairyfly link: " + (link.paired ? link.state : std::string("not paired - right-click to pair"));
     if (writes.available) tooltip += writes.allowed && !writes.locked ? " (changes allowed)" : " (read-only)";
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
@@ -80,7 +92,14 @@ LinkWritesView LinkTrayController::writes_view() {
     return v;
 }
 
-TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view()); }
+McpTrayView LinkTrayController::mcp_view() {
+    McpTrayView v;
+    v.available = services_.launcher != nullptr;
+    v.running = services_.mcp_tray && services_.mcp_tray->exists();
+    return v;
+}
+
+TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view(), mcp_view()); }
 
 TrayView LinkTrayController::view() {
     const auto model = build_link_menu(link_, writes_view());
@@ -144,6 +163,22 @@ void LinkTrayController::on_action(TrayAction action) {
     }
     case TrayAction::LinkStatus: console({"link", "status"}); break;
     case TrayAction::LinkPair: console({"link", "pair"}); break;
+    case TrayAction::StartMcpServer: {
+        // one MCP tray per user: its own guard says whether it runs (the menu may be older than that)
+        if (services_.mcp_tray && services_.mcp_tray->exists()) {
+            notify("The local MCP server is already running (its own tray icon)");
+            break;
+        }
+        bool ok = false;
+        if (services_.launcher) {
+            LaunchRequest request;   // detached: the MCP tray has its own icon, Quit and log (mcp.log)
+            request.command_line = join_command_line(paths_.exe, mcp_tray_args());
+            request.detached = true;
+            ok = services_.launcher->launch(request).has_value();
+        }
+        notify(ok ? "Starting the local MCP server; it gets its own tray icon" : "Could not start the local MCP server");
+        break;
+    }
     case TrayAction::OpenLog: open(paths_.log_file, "the log"); break;
     case TrayAction::OpenAuditFolder: open(paths_.audit_dir, "the audit trail folder"); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
@@ -167,7 +202,33 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     const std::string log_file = paths.log_file.string();
     LinkTrayController controller(services, std::move(paths));
     std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) return 1;
+    if (!detail::start_ui(*services.host, controller, ui)) {
+        services.host->message_box("fairyfly link", "The fairyfly link tray could not create its tray window. Details are in the log: " +
+                                                        log_file);
+        return 1;
+    }
+
+    // Not paired (e.g. the first start from the Start menu): `link run` would only fail. Stay in the tray, point to
+    // "Pair with the fairyfly cloud" and start the link as soon as `link pair` has written the pairing state.
+    if (services.link && !services.link->view().paired) {
+        spdlog::info("link tray: this desktop is not paired yet; waiting for `fairyfly link pair`");
+        spdlog::default_logger()->flush();
+        services.host->balloon("fairyfly link", "This desktop is not paired yet. Right-click the fairyfly icon and choose "
+                                                "\"Pair with the fairyfly cloud...\".");
+        while (!controller.quit_requested() && !services.link->view().paired)
+            std::this_thread::sleep_for(services.pairing_poll);
+        if (controller.quit_requested()) {
+            services.host->post_quit();
+            ui.join();
+            return 0;
+        }
+        spdlog::info("link tray: paired; starting the link");
+    }
+    if (controller.quit_requested()) {   // Quit right after the pairing appeared
+        services.host->post_quit();
+        ui.join();
+        return 0;
+    }
 
     int code = 1;
     try {

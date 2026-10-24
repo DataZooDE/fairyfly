@@ -46,8 +46,13 @@ Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 
 `fairyfly link run --tray` runs the link in the system tray. It has its own icon and does not start the MCP server
 or an HTTP endpoint.
+- The Start-menu entry **fairyfly** (installed by `fairyfly.msi` / winget) runs exactly this command.
 - It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session.
-- A desktop that is not paired is refused in the console with `LINK_NOT_PAIRED`; pair it first.
+- A desktop that is not paired still gets the tray (grey icon): a notice says so, and the menu offers
+  **Pair with the fairyfly cloud...** (`link pair` in a console, which asks for the service's web address unless
+  `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
+- An error while starting (for example a failed relaunch) is shown in a message box, not only in the
+  console, which closes at once when the tray was started from the Start menu or the autostart.
 - The icon is green while connected, yellow while paused and grey otherwise.
 - A notice appears when the link starts, pauses, resumes or stops.
 - The menu has:
@@ -61,6 +66,10 @@ or an HTTP endpoint.
     `--read-only` / `FAIRYFLY_READ_ONLY=1`. Every change still needs the gateway's grant and an approval;
   - **Health check**: `link status` in a console;
   - **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
+  - **Start local MCP server**: starts the MCP server in its own tray (`fairyfly mcp --tray --http`, plain HTTP on
+    `127.0.0.1:8383` unless the config file says otherwise; see [MCP_TRAY.md](MCP_TRAY.md)). While it runs the item is
+    checked and disabled (it follows the MCP tray's single-instance guard `Local\fairyfly-tray`); quit it from its own
+    icon;
   - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
   - **Quit**, which disconnects the link and ends the process.
 - The other `link run` options apply as usual: `fairyfly link run --tray --allow-write --tools session,screen`.
@@ -186,7 +195,8 @@ pairing), pairing, the DPAPI state and the link agent:
 ## Install and update
 
 - `fairyfly.msi` (per user, no administrator rights): installs to `%LOCALAPPDATA%\Programs\fairyfly`, extends the
-  user's `PATH` and adds the Start-menu entry "fairyfly (tray)". Source: `packaging/fairyfly.wxs`. The CI builds it,
+  user's `PATH` and adds the Start-menu entry "fairyfly" (the link tray, `link run --tray`; up to 2026.10.23 it was
+  "fairyfly (tray)", which an MSI or winget upgrade removes; `update apply` only swaps the exe). Source: `packaging/fairyfly.wxs`. The CI builds it,
   installs it on the runner, checks the result and uninstalls it again.
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
   when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the

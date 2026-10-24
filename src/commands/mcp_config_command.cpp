@@ -143,6 +143,15 @@ bool truthy(const std::string& v) {
     return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
 }
 
+// A startup error of the tray started from the Start menu, the autostart or the link tray would only reach a console
+// that closes at once (or none): it is shown in a message box as well.
+int startup_error(bool tray_mode, const std::string& code, const std::string& message, int exit_code) {
+    if (!tray_mode || !tray::startup_error_needs_dialog_here()) return report_error("text", code, message, exit_code);
+    auto host = tray::make_win32_tray_host();
+    return tray::report_startup_error("fairyfly MCP", code, message, exit_code, true, host.get(),
+                                      [](const std::string& line) { std::cerr << line << std::endl; });
+}
+
 int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& options, const LoadedConfig& loaded) {
     (void)layers;
     const std::string exe = tray::current_exe_path();
@@ -166,15 +175,20 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     // Autostart install/remove and the relaunch decision. The HTTP requirement is checked first so the
     // user hears about it in the console, not in an invisible child.
     if (!x.install_autostart && !x.remove_autostart && options.transport != "http")
-        return report_error("text", "TRAY_REQUIRES_HTTP",
-                            "The tray needs the HTTP transport (--http, or server.transport: http in the config file)", 2);
+        return startup_error(true, "TRAY_REQUIRES_HTTP",
+                             "The tray needs the HTTP transport (--http, or server.transport: http in the config file)", 2);
     entry.install_autostart = x.install_autostart;
     entry.remove_autostart = x.remove_autostart;
     const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
+    if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
+        tray::make_win32_tray_host()->message_box("fairyfly MCP", decided.message);   // nobody reads this console
+    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning && tray::startup_error_needs_dialog_here())
+        tray::make_win32_tray_host()->message_box("fairyfly MCP", "The fairyfly MCP tray is already running: its icon is in the notification area.");
     if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
 
     // From here on this process is the tray: no console, logs to file, server on the main thread.
     if (entry.is_child) tray::detach_console();
+    tray::clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
     const std::string log_file = tray::route_logging_to_file();
 
     auto& factory = tray::runner_factory();
@@ -185,7 +199,7 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
         return 2;
     }
     std::unique_ptr<tray::IServerRunner> runner = factory(options);
-    if (!runner) return 2;
+    if (!runner) return startup_error(true, "TRAY_SERVER_UNAVAILABLE", "The MCP server could not be created; details are in " + log_file, 2);
 
     auto host = tray::make_win32_tray_host();
     auto opener = tray::make_win32_file_opener();
@@ -328,20 +342,20 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
     const auto env = process_env();
     const LoadedConfig loaded = load_config(x.config_path, env);
     const std::string label = loaded.path.path.string();
-    if (loaded.read_error) return report_error("text", "CONFIG_READ_FAILED", "Cannot read " + label, 2);
+    if (loaded.read_error) return startup_error(x.tray, "CONFIG_READ_FAILED", "Cannot read " + label, 2);
     if (loaded.path.explicit_request && !loaded.exists)
-        return report_error("text", "CONFIG_NOT_FOUND", "Config file not found: " + label, 2);
+        return startup_error(x.tray, "CONFIG_NOT_FOUND", "Config file not found: " + label, 2);
     for (const auto& i : loaded.parsed.issues) {
         if (i.severity == Severity::Error) std::cerr << format_issue(i, label) << std::endl;
         else spdlog::warn("{}", format_issue(i, label));
     }
-    if (!loaded.parsed.ok()) return report_error("text", loaded.parsed.first_error_code(), label + " is invalid; run 'fairyfly mcp config validate'", 2);
+    if (!loaded.parsed.ok()) return startup_error(x.tray, loaded.parsed.first_error_code(), label + " is invalid; run 'fairyfly mcp config validate'", 2);
 
     std::vector<ConfigIssue> env_issues;
     env_layer(env, &env_issues);
     for (const auto& issue : env_issues) {
         if (issue.severity == Severity::Error)
-            return report_error("text", issue.code, issue.message, 2);
+            return startup_error(x.tray, issue.code, issue.message, 2);
         spdlog::warn("{}", format_issue(issue));
     }
     const McpConfig layers = merged_layers(loaded.parsed.config, flags_layer(*x.mcp_app), env);

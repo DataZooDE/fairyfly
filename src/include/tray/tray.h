@@ -52,6 +52,7 @@ enum class TrayAction {
     LinkPair, LinkStart, LinkPause, LinkResume, LinkStatus,   ///< "Cloud link" submenu (D10)
     LinkToggleWrites,                                          ///< link tray: "Allow changes in SAP"
     UpdateCheck,                                               ///< `fairyfly update check` in a console
+    StartMcpServer,                                            ///< link tray: the local MCP server in its own tray
     Quit,
 };
 
@@ -134,6 +135,16 @@ std::string autostart_command(const std::string& exe, const std::string& config_
 std::string link_autostart_command(const std::string& exe, const std::vector<std::string>& args);
 /// `cmd.exe /k` command line that runs `fairyfly <args>` in a console that stays open.
 std::string console_command_line(const std::string& exe, const std::vector<std::string>& args);
+
+/// Arguments (without the program) that start the local MCP server in its own tray from the link tray: the tray
+/// needs the HTTP transport, so `mcp --tray` alone would refuse to start (TRAY_REQUIRES_HTTP).
+std::vector<std::string> mcp_tray_args();
+
+/// A startup error of a tray mode (`mcp --tray`, `link run --tray`) must reach the person. The console only does when
+/// it stays open after this process ends, i.e. a shell shares it. Started from the Start menu, the autostart or the
+/// link tray the console is this process's own (or there is none) and vanishes with it: then a message box as well.
+/// `console_processes` = the processes attached to this console (GetConsoleProcessList), 0 without one.
+bool startup_error_needs_dialog(bool is_tray_child, bool has_console, unsigned console_processes);
 
 /// %LOCALAPPDATA%\fairyfly\logs (fallback: temp dir), used for mcp.log.
 std::filesystem::path log_directory(const std::function<std::string(const char*)>& env);
@@ -234,6 +245,11 @@ public:
     /// Modal information box ("already running"); may be called without a running message loop.
     virtual void message_box(const std::string& title, const std::string& text) = 0;
 };
+
+/// Prints "error <code>: <message>" through `print` and, with `dialog` and a host, shows it in a message box titled
+/// `title`. Returns `exit_code`.
+int report_startup_error(const std::string& title, const std::string& code, const std::string& message, int exit_code,
+                         bool dialog, TrayHost* host, const std::function<void(const std::string&)>& print);
 
 /// The runner of the server (phase 1 implements it).
 class IServerRunner {
@@ -348,6 +364,12 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
 // The cloud link on its own, without the MCP server: `link run` stays on the main (COM) thread, the tray UI runs on
 // its own thread and sees the link only through LinkControl (the pairing state and the status file).
 
+/// The local MCP server's tray as the link tray's menu shows it ("Start local MCP server").
+struct McpTrayView {
+    bool available = false;   ///< false: no item (nothing to start it with)
+    bool running = false;     ///< its single-instance guard is held: the item is checked and disabled
+};
+
 /// Write mode of the link as the menu shows it.
 struct LinkWritesView {
     bool available = false;   ///< false: no write-mode switch (the item is not shown)
@@ -355,9 +377,9 @@ struct LinkWritesView {
     bool locked = false;
 };
 
-/// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again, Open log/audit trail folder, Check for
-/// updates, Quit.
-TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {});
+/// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again (unpaired: Pair with the fairyfly cloud),
+/// Start local MCP server, Open log/audit trail folder, Check for updates, Quit.
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {}, const McpTrayView& mcp = {});
 
 struct LinkTrayServices {
     TrayHost* host = nullptr;
@@ -365,7 +387,10 @@ struct LinkTrayServices {
     ProcessLauncher* launcher = nullptr;
     LinkControl* link = nullptr;
     LinkWriteMode* writes = nullptr;   ///< optional: "Allow changes in SAP"
+    SingleInstance* mcp_tray = nullptr;   ///< optional probe of the MCP tray's guard (kTrayMutexName); never acquired
     std::function<void()> stop_link;   ///< thread-safe: makes the running `link run` return
+    /// Unpaired at start: how often run_link_with_tray looks whether `link pair` (from the menu) has paired the desktop.
+    std::chrono::milliseconds pairing_poll{1000};
 };
 
 class LinkTrayController : public TrayListener {
@@ -384,6 +409,7 @@ public:
 private:
     void notify(const std::string& text);
     LinkWritesView writes_view();
+    McpTrayView mcp_view();
 
     LinkTrayServices services_;
     TrayPaths paths_;
@@ -394,7 +420,9 @@ private:
 };
 
 /// Runs the link tray around `run_link` (called on the calling thread, the COM thread): single-instance guard, UI
-/// thread, and a message box when the link ends by itself with an error. Returns the exit code of `run_link`.
+/// thread, and a message box when the link ends by itself with an error. An unpaired desktop does not end the tray: it
+/// says so in a balloon, offers "Pair with the fairyfly cloud" and starts `run_link` once the pairing state appears
+/// (Quit before that returns 0). Returns the exit code of `run_link`.
 int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices services, SingleInstance& guard,
                        TrayPaths paths);
 

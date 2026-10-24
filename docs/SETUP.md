@@ -19,7 +19,8 @@ Nothing has to be installed in the SAP system, and fairyfly needs no runtime (no
 
 **Installer (per user).** Releases from 2026-10 on also carry `fairyfly.msi`. It installs to
 `%LOCALAPPDATA%\Programs\fairyfly` without administrator rights, adds that folder to your `PATH` and adds a Start-menu
-entry "fairyfly (tray)". Uninstall it under Settings -> Apps. For software distribution, deploy it in the user context
+entry "fairyfly": the cloud link tray (`fairyfly link run --tray`, see [LINK.md](LINK.md#tray)). On an unpaired desktop its
+menu offers *Pair with the fairyfly cloud...*; *Start local MCP server* starts the MCP tray as well. Uninstall it under Settings -> Apps. For software distribution, deploy it in the user context
 (for example Intune "user"); the package itself writes no HKLM values (Windows Installer keeps its own product
 registration and the Apps entry). On Windows Server, non-administrators can install it only when the policy
 *Turn off Windows Installer* is set to *Never* (`HKLM\SOFTWARE\Policies\Microsoft\Windows\Installer`,

@@ -197,6 +197,7 @@ void TrayController::on_action(TrayAction action) {
         if (services_.host) services_.host->post_quit();
         break;
     case TrayAction::LinkToggleWrites:   // the link tray's own switch (link_tray.cpp)
+    case TrayAction::StartMcpServer:     // the link tray's item; this IS the MCP server
     case TrayAction::None: break;
     }
     if (services_.host) services_.host->refresh();
@@ -247,11 +248,16 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
         return 0;
     }
 
+    const std::string log_file = paths.log_file.string();
     TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
 
     // UI thread: window + icon + message pump. The main thread below stays the COM/STA server thread.
     std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) return 1;
+    if (!detail::start_ui(*services.host, controller, ui)) {
+        services.host->message_box("fairyfly MCP", "The fairyfly MCP tray could not create its tray window. Details are in the log: " +
+                                                       log_file);
+        return 1;
+    }
 
     // background update check: owns only a shared slot, so a late answer after Quit goes nowhere
     struct UpdateSlot {
@@ -290,6 +296,19 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
     services.host->post_quit();
     ui.join();
     return code;
+}
+
+// ---- Startup errors ------------------------------------------------------------------------------
+bool startup_error_needs_dialog(bool is_tray_child, bool has_console, unsigned console_processes) {
+    if (is_tray_child || !has_console) return true;
+    return console_processes <= 1;   // only this process: the console window closes when it ends
+}
+
+int report_startup_error(const std::string& title, const std::string& code, const std::string& message, int exit_code,
+                         bool dialog, TrayHost* host, const std::function<void(const std::string&)>& print) {
+    if (print) print("error " + code + ": " + message);
+    if (dialog && host) host->message_box(title, code + ": " + message);
+    return exit_code;
 }
 
 // ---- Entry decision ------------------------------------------------------------------------------

@@ -747,9 +747,106 @@ TEST_CASE("link tray menu: no MCP server items, state per link", "[tray][link_tr
 
     CHECK(build_link_menu(paired("not running")).icon == IconState::Stopped);
     m = build_link_menu(LinkView{});
-    CHECK(top_labels(m)[0] == "Not connected to the fairyfly cloud");
-    CHECK(find_item(m, TrayAction::LinkPair) != nullptr);
+    CHECK(top_labels(m)[0] == "Not paired with the fairyfly cloud yet");
     CHECK(find_item(m, TrayAction::LinkPause) == nullptr);
+}
+
+TEST_CASE("link tray menu: an unpaired desktop is led to pairing", "[tray][link_tray][menu]") {
+    const auto m = build_link_menu(LinkView{});
+    const MenuItem* pair = find_item(m, TrayAction::LinkPair);
+    REQUIRE(pair != nullptr);
+    CHECK(pair->enabled);
+    CHECK(pair->label == "Pair with the fairyfly cloud... (console)");
+    CHECK(top_labels(m)[2] == pair->label);   // the first action under the status line
+    CHECK(m.tooltip == "fairyfly link: not paired - right-click to pair");
+    CHECK(m.icon == IconState::Stopped);
+}
+
+TEST_CASE("link tray menu: Start local MCP server, checked and disabled while it runs", "[tray][link_tray][menu]") {
+    CHECK(find_item(build_link_menu(paired("connected")), TrayAction::StartMcpServer) == nullptr);   // nothing to start it with
+    McpTrayView mcp;
+    mcp.available = true;
+    auto m = build_link_menu(paired("connected"), {}, mcp);
+    const MenuItem* start = find_item(m, TrayAction::StartMcpServer);
+    REQUIRE(start != nullptr);
+    CHECK(start->label == "Start local MCP server");
+    CHECK(start->enabled);
+    CHECK_FALSE(start->checked);
+    CHECK(top_labels(m) == std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected", "---", "Pause",
+                                                    "Health check (console)", "Pair again (console)", "---",
+                                                    "Start local MCP server", "---", "Open log", "Open audit trail folder",
+                                                    "Check for updates (console)", "---", "Quit"});
+    mcp.running = true;
+    const auto running_menu = build_link_menu(paired("connected"), {}, mcp);   // find_item points into it
+    start = find_item(running_menu, TrayAction::StartMcpServer);
+    REQUIRE(start != nullptr);
+    CHECK(start->label == "Local MCP server running");
+    CHECK_FALSE(start->enabled);
+    CHECK(start->checkable);
+    CHECK(start->checked);
+    CHECK(find_item(build_link_menu(LinkView{}, {}, mcp), TrayAction::StartMcpServer) != nullptr);   // also unpaired
+    CHECK(mcp_tray_args() == std::vector<std::string>{"mcp", "--tray", "--http"});
+}
+
+TEST_CASE("link tray controller: Start local MCP server launches `mcp --tray --http` once", "[tray][link_tray][controller]") {
+    Fixture f;
+    FakeGuard mcp_guard;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.launcher = &f.launcher;
+    services.link = &f.link;
+    services.mcp_tray = &mcp_guard;
+    LinkTrayController controller(services, f.paths);
+
+    const MenuItem* start = find_item(controller.menu(), TrayAction::StartMcpServer);
+    REQUIRE(start != nullptr);
+    CHECK(start->enabled);
+    controller.on_action(TrayAction::StartMcpServer);
+    REQUIRE(f.launcher.requests.size() == 1);
+    CHECK(f.launcher.requests[0].command_line == "\"C:\\Program Files\\fairyfly\\fairyfly.exe\" mcp --tray --http");
+    CHECK(f.launcher.requests[0].detached);   // its own tray, no console
+    CHECK_FALSE(f.launcher.requests[0].new_console);
+    CHECK(f.host.balloons.back().find("local MCP server") != std::string::npos);
+    CHECK_FALSE(mcp_guard.held);   // the link tray only probes the MCP tray's guard
+
+    mcp_guard.other_running = true;   // the MCP tray holds its guard now
+    const auto menu = controller.menu();
+    start = find_item(menu, TrayAction::StartMcpServer);
+    REQUIRE(start != nullptr);
+    CHECK_FALSE(start->enabled);
+    CHECK(start->checked);
+    controller.on_action(TrayAction::StartMcpServer);   // a stale menu click: not a second server
+    CHECK(f.launcher.requests.size() == 1);
+    CHECK(f.host.balloons.back().find("already running") != std::string::npos);
+
+    mcp_guard.other_running = false;
+    f.launcher.pid = std::nullopt;
+    controller.on_action(TrayAction::StartMcpServer);
+    CHECK(f.host.balloons.back() == "fairyfly link|Could not start the local MCP server");
+}
+
+TEST_CASE("tray startup errors reach the person: console only when it stays open", "[tray][startup_error]") {
+    CHECK_FALSE(startup_error_needs_dialog(false, true, 2));   // a shell shares the console: it reads the error there
+    CHECK(startup_error_needs_dialog(false, true, 1));         // Start menu / autostart: the console closes with us
+    CHECK(startup_error_needs_dialog(false, false, 0));        // started detached (the link tray's menu)
+    CHECK(startup_error_needs_dialog(true, false, 0));         // the detached tray child
+    CHECK(startup_error_needs_dialog(true, true, 3));          // the child never owns a console a person reads
+
+    FakeHost host;
+    std::vector<std::string> printed;
+    auto print = [&](const std::string& s) { printed.push_back(s); };
+    CHECK(report_startup_error("fairyfly MCP", "TRAY_REQUIRES_HTTP", "The tray needs the HTTP transport", 2, true, &host,
+                               print) == 2);
+    REQUIRE(printed.size() == 1);
+    CHECK(printed[0] == "error TRAY_REQUIRES_HTTP: The tray needs the HTTP transport");
+    REQUIRE(host.boxes.size() == 1);
+    CHECK(host.boxes[0] == "fairyfly MCP|TRAY_REQUIRES_HTTP: The tray needs the HTTP transport");
+
+    CHECK(report_startup_error("fairyfly link", "X", "y", 1, false, &host, print) == 1);
+    CHECK(printed.size() == 2);
+    CHECK(host.boxes.size() == 1);   // in a shell's console: no box
+    CHECK(report_startup_error("fairyfly link", "X", "y", 1, true, nullptr, print) == 1);   // no host: printed only
+    CHECK(printed.size() == 3);
 }
 
 TEST_CASE("link tray controller: notices on state changes, pause, consoles, quit", "[tray][link_tray][controller]") {
@@ -802,6 +899,7 @@ TEST_CASE("link tray controller: notices on state changes, pause, consoles, quit
 TEST_CASE("run_link_with_tray: the link runs on the calling thread, Quit stops it", "[tray][link_tray][run]") {
     Fixture f;
     FakeGuard guard;
+    f.link.current = paired("connected");
     std::atomic<bool> stop{false};
     LinkTrayServices services;
     services.host = &f.host;
@@ -822,6 +920,105 @@ TEST_CASE("run_link_with_tray: the link runs on the calling thread, Quit stops i
     CHECK(ran_on == main_thread);   // `link run` keeps the main (COM) thread
     CHECK(guard.held);
     CHECK(f.host.boxes.empty());
+}
+
+namespace {
+/// A link whose pairing state another thread changes (the console's `link pair`).
+struct SharedLink : LinkControl {
+    std::mutex m;
+    LinkView current;
+    LinkView view() override { std::lock_guard<std::mutex> l(m); return current; }
+    bool set_paused(bool) override { return true; }
+    void set(const LinkView& v) { std::lock_guard<std::mutex> l(m); current = v; }
+};
+} // namespace
+
+TEST_CASE("run_link_with_tray: unpaired, the tray stays up, leads to pairing and starts the link once paired", "[tray][link_tray][run]") {
+    Fixture f;
+    FakeGuard guard;
+    SharedLink link;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.launcher = &f.launcher;
+    services.link = &link;
+    services.pairing_poll = std::chrono::milliseconds(5);
+    std::atomic<bool> stop{false};
+    services.stop_link = [&] { stop = true; };
+    std::atomic<int> runs{0};
+    int runs_before_pairing = -1;
+    bool pair_offered = false;   // asserted on the test thread (Catch2 assertions are not thread-safe)
+    auto driver = drive(f.host, [&](TrayListener& l) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        runs_before_pairing = runs;   // not paired: `link run` would only fail
+        const auto menu = l.menu();
+        const MenuItem* pair = find_item(menu, TrayAction::LinkPair);
+        pair_offered = pair != nullptr && pair->enabled;
+        l.on_action(TrayAction::LinkPair);   // `link pair` in a console
+        link.set(paired("not running"));     // ... and the person paired
+        for (int i = 0; i < 500 && runs == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        l.on_action(TrayAction::Quit);
+    });
+    const int code = run_link_with_tray(
+        [&] {
+            ++runs;
+            for (int i = 0; i < 500 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return 0;
+        },
+        services, guard, f.paths);
+    driver.join();
+    CHECK(code == 0);
+    CHECK(runs_before_pairing == 0);
+    CHECK(pair_offered);
+    CHECK(runs == 1);
+    REQUIRE_FALSE(f.host.balloons.empty());
+    CHECK(f.host.balloons[0].find("not paired") != std::string::npos);
+    CHECK(f.host.balloons[0].find("Pair with the fairyfly cloud") != std::string::npos);
+    REQUIRE(f.launcher.requests.size() == 1);
+    CHECK(f.launcher.requests[0].command_line.find("link pair") != std::string::npos);
+    CHECK(f.launcher.requests[0].new_console);
+    CHECK(f.host.boxes.empty());
+}
+
+TEST_CASE("run_link_with_tray: Quit while unpaired ends the tray without starting the link", "[tray][link_tray][run]") {
+    Fixture f;
+    FakeGuard guard;
+    SharedLink link;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &link;
+    services.pairing_poll = std::chrono::milliseconds(5);
+    auto driver = drive(f.host, [&](TrayListener& l) { l.on_action(TrayAction::Quit); });
+    bool ran = false;
+    const int code = run_link_with_tray([&] { ran = true; return 2; }, services, guard, f.paths);
+    driver.join();
+    CHECK(code == 0);
+    CHECK_FALSE(ran);
+    CHECK(f.host.boxes.empty());
+}
+
+TEST_CASE("run_link_with_tray and run_with_tray: a tray that cannot start says so", "[tray][run][startup_error]") {
+    {
+        Fixture f;
+        FakeGuard guard;
+        f.host.run_ok = false;
+        LinkTrayServices services;
+        services.host = &f.host;
+        bool ran = false;
+        CHECK(run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths) == 1);
+        CHECK_FALSE(ran);
+        REQUIRE(f.host.boxes.size() == 1);
+        CHECK(f.host.boxes[0].find("tray") != std::string::npos);
+    }
+    {
+        Fixture f;
+        FakeGuard guard;
+        f.host.run_ok = false;
+        TrayServices services;
+        services.host = &f.host;
+        CHECK(run_with_tray(f.runner, services, guard, f.paths) == 1);
+        REQUIRE(f.host.boxes.size() == 1);
+        CHECK(f.host.boxes[0].find("tray") != std::string::npos);
+    }
 }
 
 TEST_CASE("run_link_with_tray: a failing link shows a message; a second instance only a notice", "[tray][link_tray][run]") {
