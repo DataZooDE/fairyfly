@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 2026.10.24 (2026-10-24)
+
+### Fill a whole screen in one call
+
+- `gui_element_fill` takes `fields` (up to 50 `{element, value}` entries of one screen, grid cells and checkboxes
+  too) and an optional `then_key` (`enter` or `f8`), CLI `fairyfly element fill --fields <json|@file> [--then-key
+  enter|f8] [--keep-going]`. Every field runs through the same checks as a single fill (read-only, selection-input
+  and `--tcode` token rules per field); the key is pressed only on the main window and only when every field
+  succeeded. Save, Back and Cancel stay separate calls. The audit trail records `--fields` as `<redacted>`.
+- `gui_screen_read` with `only=editable` lists empty input fields with their ids (no longer compact by default), so a
+  blank entry screen can be filled. The tool descriptions, `gui_batch` and the server instructions point the model to
+  the one-call fill; a second single-field fill within two minutes returns a hint to use `fields`.
+- Cloud link (libffl from gateway v0.5.5): every step of a `gui_batch` is checked on the desktop too (granted, not
+  dangerous, not nested, transactions per step); a batch or screen fill that writes needs write mode and one approval.
+
+### Update
+
+- `fairyfly update` failed for every release download with "Failed to read connection": github.com's redirect to a
+  release asset now carries a ~9 KB `Content-Security-Policy` header, above cpp-httplib's 8 KiB limit. The limit is
+  raised to 64 KiB. A dropped connection on a download host is now retried like an HTTP error.
 
 ### Start menu and trays
 
