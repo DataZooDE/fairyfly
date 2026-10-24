@@ -444,10 +444,11 @@ namespace Ffy { public static class Msi {
             $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$($c.Msi)`" /qn /l*v `"$log`"" "msi-chain-$i"
             Assert ($code -eq 0) "$($c.Version) (MSI $($ci.MsiVersion), $($ci.ProductCode)) installed, unelevated msiexec exit 0"
             $logText = Get-Content $log -Raw
-            $logText -split "`r?`n" | Select-String 'FindRelatedProducts|RemoveExistingProducts|ProductVersion =|Installation success or error status' |
+            $logText -split "`r?`n" | Select-String 'WIX_UPGRADE_DETECTED|Migrating feature settings|RemoveExistingProducts. Return|Property\(S\): ProductVersion =|Installation success or error status' |
                 Select-Object -First 12 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
             if ($previous) {
-                Assert ($logText -match "FindRelatedProducts: Found application: $([regex]::Escape($previous.ProductCode))") "FindRelatedProducts found $($previous.Version)'s product $($previous.ProductCode) (an upgrade, not an install beside it)"
+                # FindRelatedProducts sets WIX_UPGRADE_DETECTED (MajorUpgrade) to the product it will remove
+                Assert ($logText -match "Adding WIX_UPGRADE_DETECTED property\. Its value is '$([regex]::Escape($previous.ProductCode))'") "FindRelatedProducts found $($previous.Version)'s product $($previous.ProductCode) (an upgrade, not an install beside it)"
                 Assert ([Ffy.Msi]::State($previous.ProductCode) -eq -1) "the previous product $($previous.ProductCode) ($($previous.Version)) is no longer registered (ProductState -1)"
             }
             $related = @(Get-RelatedProducts)
