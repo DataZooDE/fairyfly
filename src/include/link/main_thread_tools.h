@@ -35,6 +35,10 @@ public:
 
     /// Any thread: queues `fn` to run on the main thread between calls; does not wait. False after shutdown.
     bool post(std::function<void()> fn);
+    /// Any thread: queues `fn` like post() and waits until it has run on the main thread (the audit trail reads the
+    /// screen there). False when it did not finish within `timeout_ms` (a task that has not started then never
+    /// runs) or after shutdown. `fn` must own what it writes: after a timeout it may still be running.
+    bool invoke(std::function<void()> fn, int timeout_ms);
 
     /// Main thread: runs queued calls until `stop` becomes true (checks it at least every 200 ms).
     void pump(const std::atomic<bool>& stop);

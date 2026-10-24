@@ -12,6 +12,13 @@ namespace fairyfly::link {
 
 int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
                   audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
+    // before anything else: autostart and the tray's Pause act on the pairing state and the shared Run value
+    if (auto refused = link_state_guard(o)) {
+        std::cerr << refused->to_json().dump() << std::endl;
+        if (tray::startup_error_needs_dialog_here())   // started from the Start menu or the autostart: nobody reads stderr
+            tray::make_win32_tray_host()->message_box("fairyfly link", refused->error.value("message", std::string("the pairing state was refused")));
+        return 2;
+    }
     const std::string exe = tray::current_exe_path();
     tray::TrayEntry entry;
     entry.tray_requested = true;

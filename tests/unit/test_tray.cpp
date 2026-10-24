@@ -1104,3 +1104,78 @@ TEST_CASE("link tray: Allow changes in SAP asks first, switches the link, is loc
     controller.on_action(TrayAction::LinkToggleWrites);
     CHECK(fake.requests.size() == 2);
 }
+
+// ================= audit trail notice (docs/LINK.md "Audit trail") =================
+namespace {
+LinkView with_trail(LinkView v, bool on, const std::string& mode = "every") {
+    v.trail_on = on;
+    v.trail_mode = mode;
+    v.trail_retention_days = 90;
+    return v;
+}
+bool has_label(const std::vector<std::string>& labels, const std::string& text) {
+    for (const auto& l : labels)
+        if (l.find(text) != std::string::npos) return true;
+    return false;
+}
+} // namespace
+
+TEST_CASE("tray: the audit trail is visible in the Cloud link submenu while it is on", "[tray][menu][trail]") {
+    TrayState state;
+    state.link = with_trail(paired("connected"), true);
+    auto labels = link_labels(build_menu(make_status(true, true), state));
+    CHECK(has_label(labels, "Audit trail on \xE2\x80\x94 your admin records steps and screenshots on this desktop [off]"));
+    state.link = with_trail(paired("connected"), false);
+    CHECK_FALSE(has_label(link_labels(build_menu(make_status(true, true), state)), "Audit trail"));
+    CHECK(trail_menu_text(state.link).empty());
+    CHECK(trail_menu_text(with_trail(paired("connected"), true, "changes")).find("changes") != std::string::npos);
+}
+
+TEST_CASE("link tray: persistent audit-trail entry, tooltip, and a balloon when it turns on or off", "[tray][link_tray][trail]") {
+    auto m = build_link_menu(with_trail(paired("connected"), true));
+    CHECK(has_label(top_labels(m), "Audit trail on \xE2\x80\x94 your admin records steps and screenshots on this desktop"));
+    CHECK(m.tooltip.find("audit trail on") != std::string::npos);
+    CHECK(m.tooltip.size() <= 127);
+    LinkView long_names = with_trail(paired("connected"), true);
+    long_names.organisation = std::string(120, 'O');
+    CHECK(build_link_menu(long_names).tooltip.find("audit trail on") != std::string::npos);   // never cut off
+    CHECK_FALSE(has_label(top_labels(build_link_menu(paired("connected"))), "Audit trail"));
+
+    Fixture f;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    LinkTrayController controller(services, f.paths);
+    f.link.current = paired("connected");
+    controller.on_tick();
+    const auto base = f.host.balloons.size();
+    f.link.current = with_trail(paired("connected"), true);
+    controller.on_tick();
+    controller.on_tick();
+    REQUIRE(f.host.balloons.size() == base + 1);
+    CHECK(f.host.balloons.back() ==
+          "fairyfly link|Audit trail on: your administrator records the steps AI assistants take on this desktop, with screenshots (kept 90 days)");
+    f.link.current = with_trail(paired("connected"), false);
+    controller.on_tick();
+    REQUIRE(f.host.balloons.size() == base + 2);
+    CHECK(f.host.balloons.back().find("Audit trail off") != std::string::npos);
+}
+
+TEST_CASE("mcp tray: a balloon when the cloud link's audit trail turns on or off", "[tray][controller][trail]") {
+    Fixture f;
+    f.control.current = make_status(false, true);   // the MCP server is not running: only the trail speaks
+    auto controller = f.make();
+    controller.on_tick();
+    CHECK(f.host.balloons.empty());
+    f.link.current = with_trail(paired("connected"), true, "changes");
+    controller.on_tick();
+    REQUIRE(f.host.balloons.size() == 1);
+    CHECK(f.host.balloons[0].find("fairyfly MCP|Audit trail on") == 0);
+    CHECK(f.host.balloons[0].find("of the steps that change SAP") != std::string::npos);
+    controller.on_tick();
+    CHECK(f.host.balloons.size() == 1);
+    f.link.current = paired("connected");
+    controller.on_tick();
+    REQUIRE(f.host.balloons.size() == 2);
+    CHECK(f.host.balloons[1].find("Audit trail off") != std::string::npos);
+}

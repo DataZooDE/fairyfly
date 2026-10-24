@@ -113,7 +113,13 @@ void TrayController::announce_update(const std::string& version) {
 }
 
 void TrayController::on_tick() {
-    if (services_.link) state_.link = services_.link->view();
+    if (services_.link) {
+        state_.link = services_.link->view();
+        if (state_.link.trail_on != last_trail_) {   // the person at the desktop must see when it turns on or off
+            notify(trail_balloon_text(state_.link));
+            last_trail_ = state_.link.trail_on;
+        }
+    }
     if (announced_) return;
     const auto status = control_.status();
     if (!status.running && status.warnings.empty()) return;

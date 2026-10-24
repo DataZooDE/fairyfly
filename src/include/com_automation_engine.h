@@ -122,6 +122,7 @@ public:
     void set_grid_rows_needed(bool needed) override { grid_rows_needed_ = needed; }
     bool set_selection_input_policy(const sap::SelectionInputPolicy& policy) override { selection_input_policy_ = policy; return true; }
     Result capture_screenshot(const cli::ScreenshotOptions& options) override;
+    std::shared_ptr<sap::ComGuiSession> attached_com_session() const override;
 
     // Getters for testing/debugging
     ComGuiApplicationPtr get_app() const { return app_; }
