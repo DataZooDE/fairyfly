@@ -128,7 +128,7 @@ static proto::Frame fail(const std::string& id, const std::string& code, const s
     return f;
 }
 
-Agent::Outcome Agent::serve(const proto::Frame& req) {
+Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel) {
     auto fail = [](const std::string& id, const std::string& code, const std::string& msg) { return Outcome{link::fail(id, code, msg), {}}; };
     assertion::Claims c;
     try {
@@ -174,6 +174,9 @@ Agent::Outcome Agent::serve(const proto::Frame& req) {
     if (have_fill && !g.allow_write && !cfg_.allow_local_write_mode && !tools_->per_call_read_only())
         return deny("LOCAL_WRITE_MODE", "local fairyfly runs in write mode but the policy grants read-only; restart fairyfly without --allow-write");
     if (checked.writes && !g.allow_write) return deny("WRITE_DENIED", "write tools are not granted");
+    // a transaction list binds the screen only where fairyfly applies it per call (the gateway checks the same caps)
+    if (!cfg_.local_enforces_tcodes && policy::needs_desktop_tcodes(g, tool, checked))
+        return deny("TCODE_UNSUPPORTED", "your transactions are restricted, and the fairyfly on this desktop cannot enforce that; update fairyfly");
     if (g.allow_write && (checked.writes || lt.destructive) && g.approval != "none") {
         // phone: the user approved this call with a passkey; the gateway put the approval id into the signed
         // assertion. phone_or_desktop: without it the desktop dialog decides. device/desktop: the dialog decides.
@@ -185,7 +188,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req) {
 
     int64_t budget = req.deadline_ms > 0 ? std::min<int64_t>(req.deadline_ms + 1000, 130000) : 125000;
     try {
-        CallInfo info{st_.tenant, c.sub, c.client, req.id, g.allow_write};
+        CallInfo info{st_.tenant, c.sub, c.client, req.id, g.allow_write, g.tcodes, cancel};
         // audit trail: only while the notice is up (policy on) and when this call asks for it
         bool record = false;
         StepRequest sr;
@@ -311,9 +314,13 @@ void Agent::set_trail_policy(const proto::TrailPolicy& p) {
 }
 
 std::vector<std::string> Agent::caps() const {
-    if (!cfg_.recorder) return {};
-    std::vector<std::string> c{proto::kCapTrail};
-    if (cfg_.recorder->can_blur()) c.push_back(proto::kCapTrailBlur);
+    std::vector<std::string> c;
+    if (cfg_.recorder) {
+        c.push_back(proto::kCapTrail);
+        if (cfg_.recorder->can_blur()) c.push_back(proto::kCapTrailBlur);
+    }
+    if (cfg_.local_enforces_tcodes) c.push_back(proto::kCapTcodes);
+    if (cfg_.local_honours_cancel) c.push_back(proto::kCapCancel);
     return c;
 }
 
@@ -461,8 +468,9 @@ bool Agent::session(const std::atomic<bool>& stop) {
             { std::lock_guard<std::mutex> l(mu_); inflight_[f->id] = cancelled; }
             active_++;
             std::thread([this, f = *f, cancelled, w = ws.get()] {
-                Outcome o = serve(f);
-                if (!*cancelled) w->send_text(o.res.dump());
+                Outcome o = serve(f, cancelled);
+                // also after a cancel: a gateway that waits for it learns which steps ran; others ignore the late reply
+                w->send_text(o.res.dump());
                 for (auto& t : o.trail) w->send_text(t.dump());  // the record follows the answer
                 { std::lock_guard<std::mutex> l(mu_); inflight_.erase(f.id); }
                 active_--;

@@ -33,6 +33,13 @@ inline constexpr const char* TShot = "shot";    // desktop -> gateway: one chunk
 
 inline constexpr const char* kCapTrail = "trail/1";           // records steps and screenshots
 inline constexpr const char* kCapTrailBlur = "trail-blur/1";  // can blur password and bank fields on screenshots
+// The desktop applies the grant's transaction list (grants.tcodes in the assertion) to every call with fairyfly's own
+// --tcode rules: the open transaction must be listed, no menus, only keys that stay in the transaction, a re-check after
+// the call. The gateway sends calls under a transaction list to screen tools only to desktops that announce it.
+inline constexpr const char* kCapTcodes = "tcodes/1";
+// A cancel frame stops the call on the desktop (a batch runs no further step) and the desktop still sends the res,
+// with the steps that ran; the gateway waits a moment for it after a timeout.
+inline constexpr const char* kCapCancel = "cancel/1";
 inline constexpr size_t kShotMaxBytes = 4u << 20;             // one screenshot, encoded (PNG or WebP)
 inline constexpr size_t kShotChunkBytes = 512u << 10;         // raw bytes per shot frame (base64 in the frame)
 inline constexpr size_t kStepMaxBytes = 128u << 10;           // one step frame
