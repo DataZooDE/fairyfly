@@ -1,5 +1,6 @@
 #include "link_pair.hpp"
 
+#include <algorithm>
 #include <istream>
 #include <ostream>
 
@@ -91,6 +92,11 @@ bool confirm_pairing(const State& st, std::istream& in, std::ostream& out) {
     std::string answer;
     if (!std::getline(in, answer)) return false;
     return lower(trim(answer)) == "yes";
+}
+
+std::string format_pairing_number(const std::string& match) {
+    if (match.size() != 6 || !std::all_of(match.begin(), match.end(), [](char c) { return c >= '0' && c <= '9'; })) return match;
+    return match.substr(0, 3) + " " + match.substr(3);
 }
 
 }  // namespace ffy::link
