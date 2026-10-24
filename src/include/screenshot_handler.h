@@ -31,6 +31,10 @@ public:
     /// Capture screenshot with options
     Result capture(const cli::ScreenshotOptions& options);
 
+    /// The window as PNG bytes (GuiFrameWindow.HardCopyToMemory), in memory only. Empty when the window is gone;
+    /// throws std::runtime_error when SAP GUI refuses.
+    static std::vector<uint8_t> hard_copy_png(const ComGuiWindowPtr& window);
+
     /// Extract SAFEARRAY bytes from VARIANT (used for HardCopyToMemory)
     static std::vector<uint8_t> extract_safearray_bytes(VARIANT& var);
 

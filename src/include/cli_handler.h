@@ -256,6 +256,8 @@ public:
 
     // Getters
     const SessionId& get_current_session() const { return current_session_; }
+    /// The attached SAP GUI session (the audit trail of `fairyfly link run` reads its screen); nullptr when none.
+    std::shared_ptr<sap::ComGuiSession> attached_com_session() const { return engine_ ? engine_->attached_com_session() : nullptr; }
     ConnectionManager* get_connection_manager() { return conn_mgr_.get(); }
 };
 

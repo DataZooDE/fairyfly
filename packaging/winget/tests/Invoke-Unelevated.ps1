@@ -7,13 +7,19 @@
   (what `runas /trustlevel:0x20000` does): the Administrators group becomes deny-only, admin privileges are removed
   and the integrity level is set to Medium. No account is created and no password is used.
   stdout and stderr go to -OutFile; the exit code of the command is returned (and printed).
+  With -NoWait the command line runs as given (no cmd.exe, no redirection) in a NEW CONSOLE, as Explorer starts a
+  console program from a Start-menu shortcut, in -WorkingDirectory; the process id is returned at once.
 .EXAMPLE
   ./Invoke-Unelevated.ps1 -CommandLine 'whoami /groups' -OutFile out.txt
+.EXAMPLE
+  ./Invoke-Unelevated.ps1 -CommandLine '"C:\...\fairyfly.exe" link run --tray' -WorkingDirectory C:\... -NoWait
 #>
 param(
     [Parameter(Mandatory)][string]$CommandLine,
-    [Parameter(Mandatory)][string]$OutFile,
-    [int]$TimeoutSeconds = 600
+    [string]$OutFile,
+    [int]$TimeoutSeconds = 600,
+    [switch]$NoWait,
+    [string]$WorkingDirectory
 )
 $ErrorActionPreference = 'Stop'
 
@@ -26,7 +32,7 @@ namespace Ffy {
 public static class Unelevated {
     const uint SAFER_SCOPEID_USER = 2, SAFER_LEVELID_NORMALUSER = 0x20000, SAFER_LEVEL_OPEN = 1;
     const int TokenIntegrityLevel = 25;
-    const uint SE_GROUP_INTEGRITY = 0x20, CREATE_NO_WINDOW = 0x08000000, CREATE_UNICODE_ENVIRONMENT = 0x400;
+    const uint SE_GROUP_INTEGRITY = 0x20, CREATE_NO_WINDOW = 0x08000000, CREATE_NEW_CONSOLE = 0x10, CREATE_UNICODE_ENVIRONMENT = 0x400;
     const uint INFINITE = 0xFFFFFFFF, WAIT_TIMEOUT = 0x102;
 
     [StructLayout(LayoutKind.Sequential)] struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
@@ -51,7 +57,10 @@ public static class Unelevated {
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
 
-    public static int Run(string commandLine, string cwd, int timeoutSeconds) {
+    public static int Run(string commandLine, string cwd, int timeoutSeconds) { return Run(commandLine, cwd, timeoutSeconds, true); }
+
+    /// wait = false: started in a new console (like Explorer starts a console program), returns the process id.
+    public static int Run(string commandLine, string cwd, int timeoutSeconds, bool wait) {
         IntPtr level, token, medium;
         if (!SaferCreateLevel(SAFER_SCOPEID_USER, SAFER_LEVELID_NORMALUSER, SAFER_LEVEL_OPEN, out level, IntPtr.Zero))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "SaferCreateLevel");
@@ -66,16 +75,21 @@ public static class Unelevated {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation(Medium)");
         LocalFree(medium);
 
-        var si = new STARTUPINFO(); si.cb = Marshal.SizeOf(si); si.lpDesktop = "";
+        var si = new STARTUPINFO(); si.cb = Marshal.SizeOf(si);
+        si.lpDesktop = wait ? "" : "winsta0\\default";   // the tray needs the interactive desktop (Explorer's taskbar)
         PROCESS_INFORMATION pi;
-        uint flags = CREATE_NO_WINDOW;
+        uint flags = wait ? CREATE_NO_WINDOW : CREATE_NEW_CONSOLE;
         if (!CreateProcessAsUser(token, null, commandLine, IntPtr.Zero, IntPtr.Zero, false, flags, IntPtr.Zero, cwd, ref si, out pi)) {
             int err = Marshal.GetLastWin32Error();
             // ERROR_PRIVILEGE_NOT_HELD: fall back to the secondary logon service (needs SeImpersonatePrivilege only)
+            // (not for !wait: the secondary logon service builds the environment from the profile, and the caller's
+            // environment, e.g. an isolated LOCALAPPDATA, must reach the child)
+            if (err == 1314 && !wait) throw new Win32Exception(err, "CreateProcessAsUser (no fallback without waiting)");
             if (err != 1314 || !CreateProcessWithTokenW(token, 0, null, commandLine, flags, IntPtr.Zero, cwd, ref si, out pi))
                 throw new Win32Exception(err == 1314 ? Marshal.GetLastWin32Error() : err, "CreateProcess with the basic-user token");
         }
         CloseHandle(token);
+        if (!wait) { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); return pi.dwProcessId; }
         try {
             uint ms = timeoutSeconds <= 0 ? INFINITE : (uint)timeoutSeconds * 1000;
             if (WaitForSingleObject(pi.hProcess, ms) == WAIT_TIMEOUT) { TerminateProcess(pi.hProcess, 1460); throw new TimeoutException(commandLine); }
@@ -88,6 +102,13 @@ public static class Unelevated {
 '@
 }
 
+if ($NoWait) {
+    $cwd = if ($WorkingDirectory) { $WorkingDirectory } else { (Get-Location).Path }
+    $id = [Ffy.Unelevated]::Run($CommandLine, $cwd, 0, $false)
+    Write-Host "  (started unelevated in a new console, pid $id, cwd $cwd)"
+    return $id
+}
+if (-not $OutFile) { throw '-OutFile is required unless -NoWait is given' }
 $OutFile = [IO.Path]::GetFullPath($OutFile)
 if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 # cmd.exe does the redirection so the child needs no inherited handles

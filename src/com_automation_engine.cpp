@@ -2132,6 +2132,11 @@ Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& opt
     return screenshot_handler_->capture(options);
 }
 
+std::shared_ptr<sap::ComGuiSession> ComAutomationEngine::attached_com_session() const {
+    if (!current_session_ || !owner_window_allowed(current_session_)) return nullptr;
+    return current_session_;
+}
+
 nlohmann::json ComAutomationEngine::get_application_info() const
 {
     json info;

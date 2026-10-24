@@ -85,6 +85,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
         cloud.children.push_back(item("Connect to cloud... (pair in a console)", TrayAction::LinkPair));
     } else {
         cloud.children.push_back(item(lv.organisation + " (" + lv.account + "): " + lv.state, TrayAction::None, false));
+        if (lv.trail_on) cloud.children.push_back(item(trail_menu_text(lv), TrayAction::None, false));
         cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == "not running"));
         if (lv.paused) cloud.children.push_back(item("Resume", TrayAction::LinkResume));
         else cloud.children.push_back(item("Pause", TrayAction::LinkPause));
@@ -106,6 +107,20 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     if (tip.size() > 127) tip.resize(127);
     model.tooltip = std::move(tip);
     return model;
+}
+
+std::string trail_menu_text(const LinkView& link) {
+    if (!link.trail_on) return {};
+    std::string s = "Audit trail on \xE2\x80\x94 your admin records steps and screenshots on this desktop";
+    if (link.trail_mode == "changes") s += " (screenshots of changes)";
+    return s;
+}
+
+std::string trail_balloon_text(const LinkView& link) {
+    if (!link.trail_on) return "Audit trail off: the steps assistants take on this desktop are no longer recorded";
+    return "Audit trail on: your administrator records the steps AI assistants take on this desktop, with screenshots" +
+           std::string(link.trail_mode == "changes" ? " of the steps that change SAP" : "") + " (kept " +
+           std::to_string(link.trail_retention_days) + " days)";
 }
 
 std::string status_balloon_text(const mcp::ServerStatus& status) {

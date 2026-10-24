@@ -15,7 +15,11 @@ process and adds a notification-area icon.
 
     fairyfly mcp --tray [-c C:\path\mcp.yaml]
 
-The tray needs the HTTP transport (`--http`, or `server.transport: http` in the YAML). Started from a
+The tray needs the HTTP transport (`--http`, or `server.transport: http` in the YAML); without it the start is
+refused with `TRAY_REQUIRES_HTTP`. The Start-menu entry *fairyfly* starts the cloud link tray, not this one: its
+menu item **Start local MCP server** runs `fairyfly mcp --tray --http` ([LINK.md](LINK.md#tray)). Startup errors
+(`TRAY_REQUIRES_HTTP`, an invalid config file, a failed relaunch, no tray window) are shown in a message box when no
+shell console would show them (started from the Start menu, the autostart or the link tray). Started from a
 console, the process relaunches itself detached (no window, `FAIRYFLY_TRAY_CHILD=1` marks the child),
 prints the child pid and exits with 0. The child frees its console, logs to
 `%LOCALAPPDATA%\fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start prints or
@@ -24,7 +28,7 @@ pops up "already running" (named mutex `Local\fairyfly-tray`) and exits 0.
 The icon is the fairyfly butterfly, recoloured by state: teal = running, amber = running with warnings,
 grey = stopped, red = error. It follows the taskbar theme (white spine on a dark taskbar, navy on a light one) and
 switches live when the theme changes. Sources: `assets/logo/`, regenerated with `python assets/generate_icons.py`
-(Pillow). The icon is re-added when Explorer restarts (`TaskbarCreated`). Left-click shows a status balloon (endpoint, mode,
+(Pillow). The icon is re-added when Explorer restarts (`TaskbarCreated`); when there is no taskbar yet (an autostart right after logon) the tray keeps running and adds the icon as soon as it can (`tray: notification icon added` in the log). Left-click shows a status balloon (endpoint, mode,
 session routing when enabled, counters, warnings). Warnings are also shown in a balloon once when the server is up.
 
 Right-click menu:
@@ -37,7 +41,7 @@ Right-click menu:
 | Read-only mode (check) | turning it OFF asks "Allow the MCP server to change SAP data?"; locked when `FAIRYFLY_READ_ONLY=1` |
 | Open log / audit trail folder / config file | default shell action |
 | Tokens > List / Create | opens a console running `fairyfly mcp token list` / `token create` |
-| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (the separate link tray, `link run --tray`), Pause / Resume, Health check (`link status` in a console) |
+| Cloud link > ... | the desktop's link to the fairyfly cloud (docs/LINK.md): pairing and state; Connect to cloud / Pair again (`link pair` in a console), Start link (the separate link tray, `link run --tray`), Pause / Resume, Health check (`link status` in a console); while the link runs with the audit trail on, the entry *Audit trail on — your admin records steps and screenshots on this desktop* and a balloon when it turns on or off (docs/LINK.md, "Audit trail") |
 | Check for updates | opens a console running `fairyfly update check` (the tray also checks once in the background and shows a notice; `FAIRYFLY_UPDATE_CHECK=0` turns that off) |
 | Quit | stops the server and ends the process |
 

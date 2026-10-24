@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Start menu and trays
+
+- The Start-menu entry "fairyfly (tray)" did nothing: it ran `mcp --tray`, which refuses to start without the HTTP
+  transport (`TRAY_REQUIRES_HTTP`) and printed that to a console that closed at once (found on a Windows 10 VM with
+  2026.10.23). The entry is now **fairyfly** and starts the cloud link tray (`fairyfly link run --tray`). An MSI or
+  winget upgrade removes the old entry; `fairyfly update apply` only replaces the exe, so after it the old entry stays
+  (it now shows the `TRAY_REQUIRES_HTTP` message): install the MSI once, or delete the entry. Pins of the old entry
+  on the taskbar or Start have to be pinned again.
+- The link tray no longer refuses an unpaired desktop (`LINK_NOT_PAIRED`). It starts with a grey icon and a notice,
+  offers **Pair with the fairyfly cloud...** (`link pair` in a console) and starts the link as soon as the pairing is
+  saved.
+- The link tray's menu has **Start local MCP server**: it starts the MCP server in its own tray
+  (`fairyfly mcp --tray --http`). While that tray runs, the item is checked and disabled (single-instance guard
+  `Local\fairyfly-tray`).
+- Startup errors of `mcp --tray` and `link run --tray` (`TRAY_REQUIRES_HTTP`, an invalid config file, a failed relaunch,
+  a tray window that cannot be created) are shown in a message box when no shell console would show them (Start
+  menu, autostart, started from the link tray).
+- When the taskbar is not there yet (an autostart right after logon) a tray keeps running and adds its icon later,
+  instead of ending; notices wait for the icon, and after 60 s without one a message box says so. A second start
+  from the Start menu says "already running" in a message box. Consoles opened from a tray no longer inherit
+  `FAIRYFLY_TRAY_CHILD`.
+- `fairyfly.msi`: `AllowSameVersionUpgrades`, so a rebuilt MSI of the same version replaces the installed one instead
+  of being installed beside it.
+- CI (`winget.yml`): after the unelevated install it starts the Start-menu shortcut the way Explorer does (new console,
+  its working directory, an isolated `LOCALAPPDATA`) and requires the tray to be running 10 s later. It also upgrades
+  the 2026.10.23 MSI and checks that "fairyfly (tray)" is gone.
+
+### Cloud link: audit trail with screenshots
+
+- `fairyfly link run` supports the gateway's per-desktop audit trail (docs/LINK.md, "Audit trail"; announces
+  `trail/1` and `trail-blur/1`). While an admin has it on, every step an AI assistant takes on this desktop is
+  recorded with a short description, screenshots of the SAP window before and after it, and the field changes
+  (old → new) of steps that change SAP.
+- Password fields are always, bank fields (IBAN, account number, bank key, SWIFT/BIC, card numbers, account holder)
+  by default filled solid on the screenshots before they leave the desktop, and their values masked (`••••`) in the
+  field changes. A screenshot whose sensitive field cannot be located is not sent.
+- The person at the desktop sees it: a console line in `link run`, an entry and a balloon in the link tray and the
+  `mcp --tray` Cloud link submenu, and `audit_trail` in `fairyfly link status`.
+- `link pair` and `link run` print the state file they use first; `FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1` makes every
+  `link` verb refuse the default state in `%LOCALAPPDATA%\fairyfly\link\` (tests and test installations).
+- `tests/integration/link_trail_live.ps1`: live check on a separate test pairing (blurring of the current SAP
+  screen, notice, status, recorded steps through a gateway).
+
 ## 2026.10.23 (2026-10-23)
 
 ### Cloud link (`fairyfly link`)

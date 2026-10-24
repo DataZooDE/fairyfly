@@ -47,6 +47,7 @@ add_executable(unit_tests
     unit/test_link_bridge.cpp
     unit/test_link_control.cpp
     unit/test_link_console.cpp
+    unit/test_trail_recorder.cpp
     unit/test_update.cpp
     unit/test_command_registry_threads.cpp
     unit/test_agent_help.cpp
