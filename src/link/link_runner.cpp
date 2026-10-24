@@ -533,6 +533,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
     // otherwise it uses its built-in catalog
     cfg.publish_catalog = true;
+    // the dispatcher applies the grant's transaction list and the gateway's cancel to every call (link_call_context)
+    cfg.local_enforces_tcodes = true;
+    cfg.local_honours_cancel = true;
     // The audit trail (docs/LINK.md "Audit trail"): libffl announces it and asks for steps only while the gateway's
     // policy is on; the recorder reads SAP on the main thread through `tools`, shows the notice and puts the policy
     // into the status file for the tray.

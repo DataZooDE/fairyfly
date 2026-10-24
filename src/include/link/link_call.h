@@ -16,9 +16,10 @@ namespace fairyfly::link {
 inline mcp::CallContext link_call_context(const ffy::link::CallInfo& info, const std::atomic<bool>& stop) {
     mcp::CallContext ctx;
     ctx.request_id = info.request_id;
-    ctx.cancelled = [&stop] { return stop.load(); };
+    ctx.cancelled = [&stop, cancel = info.cancel] { return stop.load() || (cancel && cancel->load()); };
     ctx.principal.name = "link:" + info.tenant + "/" + info.user;
     ctx.principal.read_only = !info.write_granted;
+    ctx.principal.tcodes = info.tcodes;  // the gateway's sentinel "-none-" matches no transaction: nothing on a screen
     ctx.principal.authenticated = true;
     return ctx;
 }

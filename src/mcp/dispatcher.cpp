@@ -74,7 +74,20 @@ json open_sessions(const Result& listed) {
 
 /// Errors whose CLI suggestions ("Run 'fairyfly session attach'") mean nothing to an AI assistant get a hint that names
 /// a tool or what to ask the person at the desktop.
-void add_assistant_hint(Result& result, const Policy& policy) {
+/// Why a call runs read-only, for the assistant: the call's own grant (over the link: the organisation's switch in the
+/// fairyfly web app), this desktop's mode (the link tray, --allow-write), or both. Empty when no hint is configured.
+std::string read_only_hint(const Policy& policy, bool principal_read_only) {
+    std::string grant, desktop;
+    if (principal_read_only && !policy.grant_write_hint.empty()) grant = "this call was granted read-only: " + policy.grant_write_hint;
+    if (policy.read_only && !policy.allow_write_hint.empty()) desktop = "this desktop runs read-only: " + policy.allow_write_hint;
+    // the desktop hint alone when the cause is unknown (no grant hint, e.g. a read-only HTTP token): as before
+    if (grant.empty() && desktop.empty() && !principal_read_only && !policy.allow_write_hint.empty())
+        desktop = "this desktop runs read-only: " + policy.allow_write_hint;
+    if (!grant.empty() && !desktop.empty()) return grant + "; and " + desktop;
+    return grant.empty() ? desktop : grant;
+}
+
+void add_assistant_hint(Result& result, const Policy& policy, bool principal_read_only) {
     if (!result.error.is_object() || !result.error.contains("code") || !result.error["code"].is_string()) return;
     const std::string code = result.error["code"].get<std::string>();
     std::string hint;
@@ -90,7 +103,7 @@ void add_assistant_hint(Result& result, const Policy& policy) {
         hint = "call gui_session_attach with one session_id; if that tool is not available to you, ask the person at the "
                "desktop which SAP window to use, or to close the others";
     else if (code == "READ_ONLY_REFUSED" || code == "TOOL_UNAVAILABLE_READ_ONLY")
-        hint = policy.allow_write_hint.empty() ? "" : "this desktop runs read-only: " + policy.allow_write_hint;
+        hint = read_only_hint(policy, principal_read_only);
     if (hint.empty()) return;
     result.error["hint"] = hint;
     result.error.erase("suggestions");  // console commands for a person at a terminal
@@ -563,7 +576,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         const PolicyDecision authz = auth::authorize_call(scoped_doctor_principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); },
                                                           &input_context);
-        if (!authz.allowed) return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
+        if (!authz.allowed)
+            return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message,
+                        authz.code == "READ_ONLY" ? read_only_hint(policy_, principal.read_only) : std::string());
         if (selection_input && input_context.initial) selection_initial = *input_context.initial;
         // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
@@ -1459,7 +1474,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
 
     // 6. shape
-    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_);
+    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
     if (name == "gui_element_fill" && result.status == Result::Status::Success && !args.contains("fields") &&
         result.data.is_object()) {
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1652,14 +1667,14 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     json summary = json::array();
     std::string body;
     json images = json::array();
-    bool any_failed = false, stopped = false, left_allowlist = false;
+    bool any_failed = false, stopped = false, left_allowlist = false, cancelled = false;
     const std::size_t total = items.size();
     std::size_t index = 0;
     for (const auto& item : items) {
         ++index;
         const std::string tool = item["tool"].get<std::string>();
         if (stopped || (ctx.cancelled && ctx.cancelled())) {
-            if (!stopped) any_failed = true;
+            if (!stopped) any_failed = cancelled = true;
             stopped = true;
             summary.push_back({{"tool", tool}, {"ok", false}, {"skipped", true}});
             if (ctx.report_progress) {
@@ -1695,6 +1710,12 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     out.content.push_back(json{{"type", "text"}, {"text", dump_compact(summary) + body}});
     for (const auto& image : images) out.content.push_back(image);
     if (left_allowlist) out.structured = json{{"tcode_left_allowlist", true}};
+    if (cancelled) {
+        // the caller cancelled (over the link: the gateway's time limit): it reports exactly which steps ran
+        if (!out.structured) out.structured = json::object();
+        (*out.structured)["cancelled"] = true;
+        (*out.structured)["items"] = summary;
+    }
     return out;
 }
 
