@@ -27,9 +27,9 @@ hosts), otherwise nothing is saved; a stored pairing with another address is ref
 with `LINK_STATE_INSECURE` (pair again).
 
 One link per pairing: `link run`, in a console or in the link tray, holds a lock for its pairing state file while it
-serves. A second one for the same file is refused with `LINK_ALREADY_RUNNING` (quit the first: tray Quit, console
-Ctrl+C). The link tray does not fail in that case: it says so in a notice and connects once the console's link
-ends. `link pair` reports the next step accordingly: nothing when the link tray is running (it connects by
+serves. A second one for the same file is refused with `LINK_ALREADY_RUNNING` and exit code 3 (quit the first: tray
+Quit, console Ctrl+C). The link tray does not fail in that case, also when the console's link started just before
+the tray's: it says so in a notice and connects once the console's link ends. `link pair` reports the next step accordingly: nothing when the link tray is running (it connects by
 itself), and a restart when a link for this pairing is already running with the previous pairing.
 
 What the console shows:

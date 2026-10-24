@@ -11,8 +11,8 @@
 .PARAMETER Version
   Release tag or calendar version (v2026.10.05 or 2026.10.05; a further release on the same day v2026.10.05.1).
   PackageVersion is the calendar version (2026.10.05.1, which winget orders after 2026.10.05 and before 2026.10.06);
-  AppsAndFeaturesEntries DisplayVersion is the MSI ProductVersion (26.10.5.1), which is what Windows shows in
-  Add/Remove Programs (asserted by tests/Test-WingetUserInstall.ps1).
+  AppsAndFeaturesEntries DisplayVersion is the MSI ProductVersion (26.10.501, packaging/msi_version.ps1), which is
+  what Windows shows in Add/Remove Programs (asserted by tests/Test-WingetUserInstall.ps1).
 .PARAMETER MsiPath
   The fairyfly.msi that is (or will be) the release asset.
 .PARAMETER OutDir
@@ -34,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 $UpgradeCode = '{AEC9807E-BC74-4802-8816-25F3AB39BA29}'   # packaging/fairyfly.wxs, never changes
 $Manufacturer = 'DataZoo GmbH'
 
-if ($Version -cnotmatch '^v?(\d{4})\.(\d{2})\.(\d{2})(\.[1-9]\d{0,4})?$') { throw "not a calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N): $Version" }
+if ($Version -cnotmatch '^v?(\d{4})\.(\d{2})\.(\d{2})(\.[1-9]\d?)?$') { throw "not a calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N, N 1..99): $Version" }
 $packageVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3])$($Matches[4])"
 $releaseDate = "$($Matches[1])-$($Matches[2])-$($Matches[3])"
 $tag = "v$packageVersion"

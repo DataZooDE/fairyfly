@@ -486,7 +486,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     if (auto refused = claim_link_run(state_path(o), run_lock)) {
         spdlog::error("LINK_ALREADY_RUNNING: {}", refused->error.value("message", std::string()));   // the tray's link.log
         std::cerr << refused->to_json().dump() << std::endl;
-        return 2;
+        return tray::kLinkAlreadyRunningExitCode;   // the link tray waits on it (run_link_with_tray)
     }
     ffy::link::State st;
     try {

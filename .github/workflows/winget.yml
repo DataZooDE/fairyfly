@@ -6,8 +6,10 @@ name: winget per-user install
 # same user (MSI served from a local HTTP server), start the Start-menu shortcut as Explorer would and check the tray
 # stays up, check the per-user footprint, `winget uninstall`, check it is gone, then upgrade the previous release's MSI.
 # Then the same-day release chain: the exe is also built as <version>.N+1 (a second release on the same day, e.g.
-# 2026.10.24.1) and as the next day's version; their MSIs must upgrade base -> same-day -> next-day with exactly one
-# product registered each time. packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks,
+# 2026.10.24.1) and as the next day's version; their MSIs must upgrade the released v2026.10.24.1 MSI (old version
+# scheme 26.10.DD[.N]) -> base -> same-day -> next-day -> a rebuilt next-day MSI with exactly one product registered
+# each time, and each replaced MSI (and, for a base YYYY.MM.DD.N, a YYYY.MM.DD MSI) must be refused as a downgrade
+# (MSI version (YYYY-2000).MM.(DD*100+N), packaging/msi_version.ps1). packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks,
 # packaging/tests/Test-VersionScripts.ps1 those of the version scripts.
 
 on:
@@ -154,14 +156,25 @@ jobs:
       run: ./packaging/tests/Test-VersionScripts.ps1
       shell: pwsh
 
+    # the version-script checks failing must not hide the install checks: one run shows both
     - name: Build the per-user MSIs (WiX 5)
+      if: ${{ !cancelled() }}
       run: |
         dotnet tool install --global wix --version 5.0.2
-        foreach ($b in @{ exe = 'build/Release/fairyfly.exe'; msi = 'build/fairyfly.msi' },
-                       @{ exe = 'build/variants/same-day/fairyfly.exe'; msi = 'build/variants/same-day/fairyfly.msi' },
-                       @{ exe = 'build/variants/next-day/fairyfly.exe'; msi = 'build/variants/next-day/fairyfly.msi' }) {
-          $version = (& $b.exe --version | Out-String).Trim()
+        $base = (& build/Release/fairyfly.exe --version | Out-String).Trim()
+        $builds = @(@{ exe = 'build/Release/fairyfly.exe'; msi = 'build/fairyfly.msi' },
+                    @{ exe = 'build/variants/same-day/fairyfly.exe'; msi = 'build/variants/same-day/fairyfly.msi' },
+                    @{ exe = 'build/variants/next-day/fairyfly.exe'; msi = 'build/variants/next-day/fairyfly.msi' },
+                    # the same version built again (a new ProductCode): it must still replace the installed one
+                    @{ exe = 'build/variants/next-day/fairyfly.exe'; msi = 'build/variants/next-day-rebuilt/fairyfly.msi' })
+        # base YYYY.MM.DD.N: an MSI of YYYY.MM.DD (the base exe inside; it must be refused, so it is never installed)
+        if ($base -match '^(\d{4}\.\d{2}\.\d{2})\.\d+$') {
+          $builds += @{ exe = 'build/Release/fairyfly.exe'; msi = 'build/variants/same-day-older/fairyfly.msi'; version = $Matches[1] }
+        }
+        foreach ($b in $builds) {
+          $version = if ($b.version) { $b.version } else { (& $b.exe --version | Out-String).Trim() }
           $msiVersion = (& ./packaging/msi_version.ps1 -Version $version).Trim()
+          New-Item -ItemType Directory -Force (Split-Path $b.msi) | Out-Null
           wix build packaging/fairyfly.wxs -arch x64 -d ExePath=$($b.exe) -d MsiVersion=$msiVersion -o $b.msi
           if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
           Write-Host "fairyfly $version -> MSI $msiVersion ($($b.msi))"
@@ -169,12 +182,15 @@ jobs:
       shell: pwsh
 
     - name: winget validate + install/uninstall as an unelevated user
+      if: ${{ !cancelled() }}
       run: |
         $version = (& build/Release/fairyfly.exe --version | Out-String).Trim()
-        $chain = foreach ($name in 'same-day', 'next-day') {
+        $nextDay = (& build/variants/next-day/fairyfly.exe --version | Out-String).Trim()
+        $chain = @(foreach ($name in 'same-day', 'next-day') {
           "$((& build/variants/$name/fairyfly.exe --version | Out-String).Trim())=build/variants/$name/fairyfly.msi"
-        }
-        ./packaging/winget/tests/Test-WingetUserInstall.ps1 -MsiPath build/fairyfly.msi -Version $version -WorkDir "$env:TEMP\ffy-winget-test" -UpgradeChain $chain
+        }) + "$nextDay=build/variants/next-day-rebuilt/fairyfly.msi"
+        $older = if ($version -match '^(\d{4}\.\d{2}\.\d{2})\.\d+$') { "$($Matches[1])=build/variants/same-day-older/fairyfly.msi" } else { '' }
+        ./packaging/winget/tests/Test-WingetUserInstall.ps1 -MsiPath build/fairyfly.msi -Version $version -WorkDir "$env:TEMP\ffy-winget-test" -UpgradeChain $chain -SameDayOlder $older
       shell: pwsh
 
     - name: Collect manifests and logs

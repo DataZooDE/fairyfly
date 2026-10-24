@@ -244,6 +244,26 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     } catch (...) {
         code = 1;
     }
+    // A console link claimed the pairing between link_busy() and run_link's own claim (claim_link_run): wait for it
+    // as above, then connect.
+    while (code == kLinkAlreadyRunningExitCode && services.link_busy && !controller.quit_requested()) {
+        spdlog::info("link tray: a console link took this pairing just before ours; waiting until it ends");
+        spdlog::default_logger()->flush();
+        services.host->balloon("fairyfly link", "A link for this desktop is already running in a console. The tray "
+                                                "connects as soon as it ends (Ctrl+C there).");
+        do {
+            std::this_thread::sleep_for(services.pairing_poll);
+        } while (!controller.quit_requested() && services.link_busy());
+        if (controller.quit_requested()) {
+            code = 0;
+            break;
+        }
+        try {
+            code = run_link();
+        } catch (...) {
+            code = 1;
+        }
+    }
     if (code != 0 && !controller.quit_requested())
         services.host->message_box("fairyfly link", "The cloud link stopped (exit code " + std::to_string(code) +
                                                         "). Details are in the log: " + log_file);

@@ -609,6 +609,21 @@ TEST_CASE("link run: a second link for the same pairing is refused", "[link][run
     CHECK_FALSE(claim_link_run(state, second).has_value());
 }
 
+TEST_CASE("link run: a refused second link exits with its own code (the tray waits on it)", "[link][run]") {
+    const TempDir dir("run-lock-exit");
+    LinkOptions o;
+    o.state_path = (dir / "state.json").string();
+    std::unique_ptr<fairyfly::tray::SingleInstance> first;
+    REQUIRE_FALSE(claim_link_run(o.state_path, first).has_value());   // a console link serves this pairing
+    CHECK(fairyfly::tray::kLinkAlreadyRunningExitCode != 0);
+    CHECK(fairyfly::tray::kLinkAlreadyRunningExitCode != 1);
+    CHECK(fairyfly::tray::kLinkAlreadyRunningExitCode != 2);   // 2: not paired, refused state, ...
+    CHECK(run_link(o, nullptr, {}, nullptr, nullptr) == fairyfly::tray::kLinkAlreadyRunningExitCode);
+    first.reset();
+    o.state_path = (dir / "missing.json").string();   // not paired: still 2
+    CHECK(run_link(o, nullptr, {}, nullptr, nullptr) == 2);
+}
+
 TEST_CASE("link pair: the next step never asks for a second link", "[link][pair]") {
     CHECK_THAT(pair_next_step(false, false), ContainsSubstring("fairyfly link run"));
     const std::string tray = pair_next_step(true, false);

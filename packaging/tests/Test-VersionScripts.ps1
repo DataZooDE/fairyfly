@@ -4,9 +4,10 @@
   packaging/msi_version.ps1 (calendar version -> MSI ProductVersion), packaging/set_version.ps1 (on a copy of the
   version files) and the version check of packaging/winget/New-WingetManifest.ps1.
 .DESCRIPTION
-  Versions are YYYY.MM.DD or YYYY.MM.DD.N (N = 1..65535) for a further release on the same day. The MSI keeps N as
-  its fourth field: 2026.10.24.1 -> 26.10.24.1 (Windows Installer ignores that field when it compares versions; the
-  package's AllowSameVersionUpgrades makes 26.10.24.1 replace 26.10.24, proven by Test-WingetUserInstall.ps1).
+  Versions are YYYY.MM.DD or YYYY.MM.DD.N (N = 1..99) for a further release on the same day. Windows Installer
+  compares only the first three fields of a ProductVersion, so the MSI puts N into the third one, DD*100+N:
+  2026.10.24 -> 26.10.2400, 2026.10.24.1 -> 26.10.2401 (a same-day downgrade is refused, proven by
+  Test-WingetUserInstall.ps1). Up to 2026.10.24.1 the MSIs were 26.10.DD[.N]; every new MSI version is above them.
 #>
 $ErrorActionPreference = 'Stop'
 $packaging = Split-Path $PSScriptRoot -Parent
@@ -14,6 +15,7 @@ $failures = 0
 function Check([bool]$cond, [string]$msg) {
     if ($cond) { Write-Host "PASS: $msg" } else { Write-Host "FAIL: $msg"; $script:failures++ }
 }
+function Pass([string]$msg) { Write-Host "PASS: $msg" }
 function Try-Run([scriptblock]$block) {
     try { return [pscustomobject]@{ Out = (& $block | Out-String).Trim(); Error = '' } }
     catch { return [pscustomobject]@{ Out = ''; Error = $_.Exception.Message } }
@@ -22,25 +24,43 @@ function Try-Run([scriptblock]$block) {
 Write-Host '=== msi_version.ps1 ==='
 $msiVersion = Join-Path $packaging 'msi_version.ps1'
 $good = [ordered]@{
-    '2026.10.24'        = '26.10.24'
-    'v2026.10.24'       = '26.10.24'
-    '2026.10.05'        = '26.10.5'
-    '2026.9.30'         = '26.9.30'
-    '2026.10.24.1'      = '26.10.24.1'
-    'v2026.10.24.1'     = '26.10.24.1'
-    '2026.10.24.12'     = '26.10.24.12'
-    '2026.10.24.65535'  = '26.10.24.65535'
-    '2255.12.31'        = '255.12.31'
+    '2026.10.24'        = '26.10.2400'
+    'v2026.10.24'       = '26.10.2400'
+    '2026.10.05'        = '26.10.500'
+    '2026.9.30'         = '26.9.3000'
+    '2026.10.24.1'      = '26.10.2401'
+    'v2026.10.24.1'     = '26.10.2401'
+    '2026.10.24.12'     = '26.10.2412'
+    '2026.10.24.99'     = '26.10.2499'
+    '2026.10.31.99'     = '26.10.3199'
+    '2255.12.31'        = '255.12.3100'
 }
 foreach ($k in $good.Keys) {
     $r = Try-Run { & $msiVersion -Version $k }
     Check ($r.Out -eq $good[$k]) "msi_version $k -> '$($r.Out)' (expected $($good[$k]))$(if ($r.Error) { " error: $($r.Error)" })"
 }
-foreach ($bad in '2026.10.24.0', '2026.10.24.01', '2026.10.24.65536', '2026.10.24.', '2026.10.24.1.1', '2026.10.24-1',
+foreach ($bad in '2026.10.24.0', '2026.10.24.01', '2026.10.24.100', '2026.10.24.65535', '2026.10.24.65536', '2026.10.24.', '2026.10.24.1.1', '2026.10.24-1',
                  '2026.10.24.x', '1999.01.01', '2256.01.01', '2026.10', '2026.13.01', '2026.10.32.1', 'vv2026.10.24') {
     $r = Try-Run { & $msiVersion -Version $bad }
     Check ($r.Error -ne '' -and $r.Out -eq '') "msi_version refuses '$bad' ($($r.Error))"
 }
+# Windows Installer orders products by the first three fields only: every release must be above the one before in
+# them, starting from the MSIs released with the old scheme (26.10.23, 26.10.24, 26.10.24.1 = 26.10.24 for MSI)
+function Msi3([string]$v) { $p = $v.Split('.'); [version]"$($p[0]).$($p[1]).$($p[2])" }
+$order = @('=26.10.23', '=26.10.24', '=26.10.24.1', '2026.10.24.2', '2026.10.24.3', '2026.10.24.99', '2026.10.25', '2026.10.25.1',
+           '2026.10.31.99', '2026.11.01', '2026.12.31.99', '2027.01.01')
+$prev = $null
+foreach ($v in $order) {
+    $m = if ($v.StartsWith('=')) { $v.Substring(1) } else { (Try-Run { & $msiVersion -Version $v }).Out }
+    if ($prev) {
+        $up = (Msi3 $m) -gt (Msi3 $prev.Msi)
+        $same = (Msi3 $m) -eq (Msi3 $prev.Msi)
+        if ($prev.Old -and $v.StartsWith('=') -and $same) { Pass "old scheme: $m counts as $($prev.Msi) for Windows Installer (the bug)" }
+        else { Check $up "MSI $m ($($v.TrimStart('='))) is above $($prev.Msi) ($($prev.V)) in the first three fields: an upgrade, the reverse a downgrade" }
+    }
+    $prev = [pscustomobject]@{ V = $v.TrimStart('='); Msi = $m; Old = $v.StartsWith('=') }
+}
+
 $header = Get-Content (Join-Path $packaging '..\src\include\version.h') -Raw
 $null = $header -match 'FAIRYFLY_VERSION\s*=\s*"([0-9.]+)"'
 $fromHeader = $Matches[1]
@@ -72,7 +92,7 @@ try {
         Check ($r.Error -eq '' -and (Read-Versions) -eq "$want|$plain|$plain") "set_version $v -> version.h|CMakeLists.txt|vcpkg.json = $(Read-Versions)$(if ($r.Error) { " error: $($r.Error)" })"
     }
     $before = Read-Versions
-    foreach ($bad in '2026.10.24.0', '2026.10.24.65536', '2026.02.30', '2026.10.24-1', '26.10.24') {
+    foreach ($bad in '2026.10.24.0', '2026.10.24.100', '2026.10.24.65536', '2026.02.30', '2026.10.24-1', '26.10.24') {
         $r = Try-Run { & $setVersion -Version $bad -Root $tmp }
         Check ($r.Error -ne '' -and (Read-Versions) -eq $before) "set_version refuses '$bad' and changes nothing ($($r.Error))"
     }
@@ -92,11 +112,11 @@ Write-Host "`n=== New-WingetManifest.ps1 version check ==="
 $generator = Join-Path $packaging 'winget\New-WingetManifest.ps1'
 $noMsi = Join-Path ([IO.Path]::GetTempPath()) 'ffy-no-such.msi'
 $outDir = Join-Path ([IO.Path]::GetTempPath()) 'ffy-no-manifest'
-foreach ($v in 'v2026.10.24', '2026.10.24.1', 'v2026.10.24.1') {
+foreach ($v in 'v2026.10.24', '2026.10.24.1', 'v2026.10.24.1', '2026.10.24.99') {
     $r = Try-Run { & $generator -Version $v -MsiPath $noMsi -OutDir $outDir }
     Check ($r.Error -ne '' -and $r.Error -notmatch 'not a calendar version') "New-WingetManifest accepts the version $v (then: $($r.Error))"
 }
-foreach ($bad in '2026.10.24.0', '2026.10.24.01', 'v2026.10.24.1.1', '2026.10.5') {
+foreach ($bad in '2026.10.24.0', '2026.10.24.01', '2026.10.24.100', 'v2026.10.24.1.1', '2026.10.5') {
     $r = Try-Run { & $generator -Version $bad -MsiPath $noMsi -OutDir $outDir }
     Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
 }

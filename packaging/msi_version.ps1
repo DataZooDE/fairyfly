@@ -1,11 +1,13 @@
 <#
 .SYNOPSIS
-  Prints the MSI ProductVersion for fairyfly's calendar version: YYYY.MM.DD -> (YYYY-2000).MM.DD (MSI major < 256),
-  and a further release on the same day YYYY.MM.DD.N -> (YYYY-2000).MM.DD.N.
+  Prints the MSI ProductVersion for fairyfly's calendar version YYYY.MM.DD[.N]: (YYYY-2000).MM.(DD*100+N), e.g.
+  2026.10.24 -> 26.10.2400, a further release on the same day 2026.10.24.1 -> 26.10.2401 (N = 1..99).
 .DESCRIPTION
-  Windows Installer ignores the 4th field when it compares versions, so 26.10.24.1 counts as 26.10.24: the package's
-  MajorUpgrade AllowSameVersionUpgrades="yes" (packaging/fairyfly.wxs) makes it replace the installed 26.10.24 (a new
-  ProductCode per build), and 26.10.25 replaces either. Add/Remove Programs shows the full string (26.10.24.1).
+  Windows Installer compares only the first three fields of a ProductVersion (major < 256, minor < 256,
+  build < 65536), so N goes into the third one: 26.10.2401 replaces 26.10.2400, and 26.10.2400 is refused over
+  26.10.2401 as a downgrade (MajorUpgrade in packaging/fairyfly.wxs). Add/Remove Programs shows this string, which is
+  also the winget DisplayVersion (New-WingetManifest.ps1). Up to 2026.10.24.1 the MSI was (YYYY-2000).MM.DD[.N]
+  (26.10.24.1, where Windows Installer ignored N); every version of this scheme is above those.
 .PARAMETER Version
   Calendar version or tag (default: FAIRYFLY_VERSION from src/include/version.h).
 #>
@@ -20,7 +22,5 @@ if ($Version -cnotmatch '^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:\.([1-9]\d{0,4}))?$'
 $y = [int]$Matches[1]; $m = [int]$Matches[2]; $d = [int]$Matches[3]; $n = $Matches[4]
 if ($y - 2000 -lt 0 -or $y - 2000 -gt 255) { throw "year out of the MSI range: $Version" }
 if ($m -lt 1 -or $m -gt 12 -or $d -lt 1 -or $d -gt [datetime]::DaysInMonth($y, $m)) { throw "not a date: $Version" }
-if ($n -and [int]$n -gt 65535) { throw "same-day release number out of the MSI range (65535): $Version" }
-$msi = "{0}.{1}.{2}" -f ($y - 2000), $m, $d
-if ($n) { $msi += ".$([int]$n)" }
-$msi
+if ($n -and [int]$n -gt 99) { throw "same-day release number out of the MSI range (DD*100+N, N 1..99): $Version" }
+"{0}.{1}.{2}" -f ($y - 2000), $m, ($d * 100 + [int]$n)
