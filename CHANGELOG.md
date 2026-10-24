@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.24.1 (2026-10-24)
 
 ### Releases
 
@@ -10,6 +10,18 @@
   carries N as its 4th field, the MSI version is `26.10.24.1` and replaces an installed `26.10.24` (and is replaced by
   the next day's MSI), the winget package version is `2026.10.24.1`. `packaging/set_version.ps1` sets the version in
   `version.h`, `CMakeLists.txt` and `vcpkg.json`; configuring fails when they differ.
+
+### Cloud link: pairing and one link per pairing
+
+- `link pair` without `--gateway` and `FAIRYFLY_LINK_GATEWAY` asks for the service with `https://fairyfly.io`
+  filled in: Enter accepts it, or edit it (in a console the address stands in the input line; from a pipe it is
+  shown in brackets and an empty answer takes it). `--gateway` and `FAIRYFLY_LINK_GATEWAY` still decide without a
+  question.
+- `link run` (also the link tray's link) holds a per-pairing lock while it serves; a second link for the same pairing
+  state is refused with `LINK_ALREADY_RUNNING` instead of fighting the first over the connection. The link tray
+  waits (with a notice) while a console link serves its pairing and connects once that one ends.
+- `link pair`'s `next` no longer says `fairyfly link run` when the link tray is running (it connects by itself) or a
+  link for this pairing already runs (restart it to use the new pairing).
 
 ## 2026.10.24 (2026-10-24)
 
@@ -31,18 +43,6 @@
 - `fairyfly update` failed for every release download with "Failed to read connection": github.com's redirect to a
   release asset now carries a ~9 KB `Content-Security-Policy` header, above cpp-httplib's 8 KiB limit. The limit is
   raised to 64 KiB. A dropped connection on a download host is now retried like an HTTP error.
-
-### Cloud link: pairing and one link per pairing
-
-- `link pair` without `--gateway` and `FAIRYFLY_LINK_GATEWAY` asks for the service with `https://fairyfly.io`
-  filled in: Enter accepts it, or edit it (in a console the address stands in the input line; from a pipe it is
-  shown in brackets and an empty answer takes it). `--gateway` and `FAIRYFLY_LINK_GATEWAY` still decide without a
-  question.
-- `link run` (also the link tray's link) holds a per-pairing lock while it serves; a second link for the same pairing
-  state is refused with `LINK_ALREADY_RUNNING` instead of fighting the first over the connection. The link tray
-  waits (with a notice) while a console link serves its pairing and connects once that one ends.
-- `link pair`'s `next` no longer says `fairyfly link run` when the link tray is running (it connects by itself) or a
-  link for this pairing already runs (restart it to use the new pairing).
 
 ### Start menu and trays
 
@@ -159,7 +159,6 @@ First published release. It also contains everything listed under 2026.09.30 bel
 - DISPID lookup: a validated process-wide `Type` DISPID and type-first resolution for fresh wrappers; `Changeable` is read once per wrapper and `DisplayedText` misses on GuiShell are cached. Status bar reads need 5 round trips (3 with a known window id; message id/number only when a message exists). Dead response serialisation in `run_cli` removed.
 - `tests/integration/compare_builds.ps1 -FullCompare` deep-compares elements, hierarchy, tabs and status bar between two builds; `-Screens` no longer clobbers the session id.
 - Measured on Bigfox (10 Basis tasks, 45 invocations, best of 3, debug logging off): 26.5 s to 21.9 s (-17%); screen content identical on 18 screens.
-
 
 ## 2026.09.30 (2026-10-02)
 
