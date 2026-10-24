@@ -3,7 +3,7 @@
   Sets fairyfly's calendar version in the three files that carry it: src/include/version.h (FAIRYFLY_VERSION, what
   `fairyfly --version` prints), CMakeLists.txt (project VERSION: the exe's version resource) and vcpkg.json.
 .DESCRIPTION
-  Versions are YYYY.MM.DD, or YYYY.MM.DD.N (N = 1..65535, no leading zero) for the N-th further release on the same
+  Versions are YYYY.MM.DD, or YYYY.MM.DD.N (N = 1..99, no leading zero; the MSI version holds DD*100+N) for the N-th further release on the same
   day: 2026.10.24 < 2026.10.24.1 < 2026.10.24.2 < 2026.10.25. Each file must contain its version line exactly once.
   version.h gets the zero-padded form (2026.10.05, what --version prints and the tag uses); CMakeLists.txt and
   vcpkg.json get the plain numbers (2026.10.5: vcpkg refuses leading zeros).
@@ -22,8 +22,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Version = $Version -replace '^[vV]', ''
-if ($Version -notmatch '^(\d{4})\.(\d{2})\.(\d{2})(?:\.([1-9]\d{0,4}))?$' -or ($Matches[4] -and [int]$Matches[4] -gt 65535)) {
-    throw "not a calendar version YYYY.MM.DD or YYYY.MM.DD.N (N 1..65535): $Version"
+if ($Version -notmatch '^(\d{4})\.(\d{2})\.(\d{2})(?:\.([1-9]\d?))?$') {
+    throw "not a calendar version YYYY.MM.DD or YYYY.MM.DD.N (N 1..99): $Version"
 }
 $date = [datetime]::MinValue
 if (-not [datetime]::TryParseExact("$($Matches[1])-$($Matches[2])-$($Matches[3])", 'yyyy-MM-dd', [cultureinfo]::InvariantCulture,
