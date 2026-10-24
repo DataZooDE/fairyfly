@@ -777,7 +777,8 @@ TEST_CASE("link tray menu: Start local MCP server, checked and disabled while it
                                                     "Start local MCP server", "---", "Open log", "Open audit trail folder",
                                                     "Check for updates (console)", "---", "Quit"});
     mcp.running = true;
-    start = find_item(build_link_menu(paired("connected"), {}, mcp), TrayAction::StartMcpServer);
+    const auto running_menu = build_link_menu(paired("connected"), {}, mcp);   // find_item points into it
+    start = find_item(running_menu, TrayAction::StartMcpServer);
     REQUIRE(start != nullptr);
     CHECK(start->label == "Local MCP server running");
     CHECK_FALSE(start->enabled);

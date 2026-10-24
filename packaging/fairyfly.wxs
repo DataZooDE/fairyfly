@@ -4,8 +4,9 @@
   - Installs fairyfly.exe to %LOCALAPPDATA%\Programs\fairyfly without administrator rights (the tray, the link and
     SAP GUI all run as the user on the interactive desktop).
   - Appends that folder to the user's PATH and adds the Start-menu entry "fairyfly": the cloud link tray
-    (`fairyfly link run --tray`; unpaired it leads to pairing, its menu can start the local MCP server tray).
-    Up to 2026.10.23 the entry was "fairyfly (tray)" (`mcp --tray`, which exits at once without --http); it lives in
+    (fairyfly link run with the tray option; unpaired it leads to pairing, its menu can start the local MCP server
+    tray). Up to 2026.10.23 the entry was "fairyfly (tray)" (the MCP tray without the HTTP option, which exits at
+    once); it lives in
     the same component, so an upgrade (MajorUpgrade removes the old product first) replaces it.
   - MsiVersion: MSI versions are major.minor.build with major < 256, so the calendar version YYYY.MM.DD becomes
     (YYYY-2000).MM.DD, e.g. 2026.10.05 -> 26.10.5 (packaging/msi_version.ps1).
