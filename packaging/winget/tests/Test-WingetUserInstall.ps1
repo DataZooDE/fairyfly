@@ -6,7 +6,10 @@
   with `winget install --manifest` from an UNELEVATED process of the same user (Invoke-Unelevated.ps1). It then checks
   that the install is per user (folder, PATH, HKCU values, nothing in Program Files, registered for the user's SID and
   not per machine, MSI log without elevation or per-machine markers), uninstalls with winget and checks that
-  everything is gone. On Windows Server it first shows that the default policy refuses per-user MSI installs by
+  everything is gone. Finally it upgrades the previous release's MSI (-PreviousMsiUrl) with this one through
+  msiexec (the old Start-menu entry "fairyfly (tray)" must go) and uninstalls again. After the winget install it starts the Start-menu
+  shortcut exactly as Explorer would (unelevated, new console, its working directory, an isolated LOCALAPPDATA so no
+  real pairing is touched) and checks that the tray is still running 10 s later. On Windows Server it first shows that the default policy refuses per-user MSI installs by
   non-admins (1625) and then sets DisableMSI=0, the Windows 10/11 default.
   It changes the machine (winget setting LocalManifestFiles, MSI logging policy, installs and removes fairyfly):
   run it on a throw-away CI runner, not on a workstation.
@@ -20,7 +23,9 @@ param(
     [Parameter(Mandatory)][string]$Version,
     [string]$WorkDir = (Join-Path $env:TEMP 'ffy-winget-test'),
     [int]$Port = 8765,
-    [string]$WingetRelease = 'v1.29.380'
+    [string]$WingetRelease = 'v1.29.380',
+    # the last release whose Start-menu entry was "fairyfly (tray)" (mcp --tray); '' skips the upgrade check
+    [string]$PreviousMsiUrl = 'https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.23/fairyfly.msi'
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -40,7 +45,20 @@ function Run-Unelevated([string]$cmd, [string]$name) {
 
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\fairyfly'
 $installedExe = Join-Path $installDir 'fairyfly.exe'
-$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\fairyfly (tray).lnk'
+$startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+$lnk = Join-Path $startMenu 'fairyfly.lnk'
+$oldLnk = Join-Path $startMenu 'fairyfly (tray).lnk'   # up to v2026.10.23: `mcp --tray`, which exits at once without --http
+$shortcutArguments = 'link run --tray'
+function Get-FairyflyShortcuts {
+    $shell = New-Object -ComObject WScript.Shell
+    Get-ChildItem $startMenu -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
+        $s = $shell.CreateShortcut($_.FullName)
+        [pscustomobject]@{ Path = $_.FullName; Name = $_.Name; TargetPath = $s.TargetPath; Arguments = $s.Arguments; WorkingDirectory = $s.WorkingDirectory }
+    } | Where-Object { $_.TargetPath -ieq $installedExe }
+}
+function Get-FairyflyProcesses {
+    @(Get-CimInstance Win32_Process -Filter "Name = 'fairyfly.exe'" | Where-Object { $_.ExecutablePath -ieq $installedExe })
+}
 $uninstallRoots = @{
     HKLM = @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')
     HKCU = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall')
@@ -188,6 +206,43 @@ try {
     $code = Run-Unelevated (& $installArgs $wingetLog) 'winget-install'
     Assert ($code -eq 0) 'winget install (unelevated) exit code 0'
 
+    Step 'Start-menu shortcut: started as Explorer starts it, the tray stays up'
+    $shortcuts = @(Get-FairyflyShortcuts)
+    foreach ($sc in $shortcuts) { Write-Host "  $($sc.Name): TargetPath=$($sc.TargetPath) Arguments='$($sc.Arguments)' WorkingDirectory=$($sc.WorkingDirectory)" }
+    Assert ($shortcuts.Count -eq 1) 'exactly one Start-menu shortcut starts fairyfly.exe'
+    $sc = $shortcuts[0]
+    Assert (@(Get-FairyflyProcesses).Count -eq 0) 'no fairyfly process before the shortcut is started'
+    # an isolated profile folder: no pairing, logs or audit trail of the runner's user are read or written
+    $trayHome = Join-Path $WorkDir 'shortcut-localappdata'
+    New-Item -ItemType Directory -Force $trayHome | Out-Null
+    $savedLocalAppData = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $trayHome
+    try {
+        $started = & $unelevated -CommandLine "`"$($sc.TargetPath)`" $($sc.Arguments)" -WorkingDirectory $sc.WorkingDirectory -NoWait
+    } finally { $env:LOCALAPPDATA = $savedLocalAppData }
+    Start-Sleep -Seconds 10
+    $alive = @(Get-FairyflyProcesses)
+    foreach ($p in $alive) {
+        $gp = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+        Write-Host "  running: pid $($p.ProcessId) (parent $($p.ParentProcessId), session $($p.SessionId)) window '$($gp.MainWindowTitle)': $($p.CommandLine)"
+    }
+    Get-Process explorer -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  explorer pid $($_.Id) session $($_.SessionId)" }
+    Write-Host "  this script: session $((Get-Process -Id $PID).SessionId)"
+    Get-ChildItem $trayHome -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "  --- $($_.FullName)"; Get-Content $_.FullName -Tail 20 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $_" } }
+    Assert ($alive.Count -ge 1) "the shortcut's fairyfly (started pid $started) is still running after 10 s (a tray app stays up)"
+    Assert ($sc.Arguments -eq $shortcutArguments) "shortcut Arguments = '$shortcutArguments' (the cloud link tray)"
+    Assert ($sc.Name -eq (Split-Path $lnk -Leaf)) "shortcut name $($sc.Name)"
+    Assert ($sc.WorkingDirectory.TrimEnd('\') -ieq $installDir) "shortcut WorkingDirectory = $installDir"
+    Assert (@($alive | Where-Object { $_.CommandLine -like "*$shortcutArguments*" }).Count -ge 1) "the running process is the link tray ($shortcutArguments)"
+    Assert (@($alive | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowTitle }).Count -eq 0) 'no visible window (no error message box): it sits in the tray'
+    Assert (Test-Path (Join-Path $trayHome 'fairyfly\logs\link.log')) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
+    Assert (-not (Test-Path (Join-Path $trayHome 'fairyfly\link\state.json'))) 'nothing was paired'
+    $alive | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $deadline = (Get-Date).AddSeconds(15)
+    while (@(Get-FairyflyProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+    Assert (@(Get-FairyflyProcesses).Count -eq 0) 'tray stopped before the uninstall'
+
     Step 'Per-user install checks'
     Assert (Test-Path $installedExe) "fairyfly.exe installed at $installedExe"
     $exeVersion = (& $installedExe --version | Out-String).Trim()
@@ -262,6 +317,25 @@ try {
     Assert (@(Find-UninstallEntries 'HKLM' $productCode).Count -eq 0) 'Windows Installer ARP entry removed'
     Assert (-not (Test-Path $userData)) 'per-user product registration removed'
     Assert (-not (Test-Path $lnk)) 'Start-menu shortcut removed'
+
+    if ($PreviousMsiUrl) {
+        Step "Upgrade from the previous release ($PreviousMsiUrl) with msiexec, unelevated"
+        $prevMsi = Join-Path $WorkDir 'previous.msi'
+        $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest $PreviousMsiUrl -OutFile $prevMsi -UseBasicParsing
+        $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$prevMsi`" /qn /l*v `"$(Join-Path $WorkDir 'msi-install-previous.log')`"" 'msi-install-previous'
+        Assert ($code -eq 0) 'previous release installed (unelevated msiexec)'
+        Assert (Test-Path $oldLnk) 'the previous release has the Start-menu entry "fairyfly (tray)"'
+        $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$MsiPath`" /qn /l*v `"$(Join-Path $WorkDir 'msi-upgrade.log')`"" 'msi-upgrade'
+        Assert ($code -eq 0) 'this MSI upgrades it (unelevated msiexec, MajorUpgrade)'
+        Assert (-not (Test-Path $oldLnk)) 'upgrade removed the old Start-menu entry "fairyfly (tray)"'
+        Assert (Test-Path $lnk) "upgrade added the Start-menu entry $(Split-Path $lnk -Leaf)"
+        $arp = @(Find-UninstallEntries 'HKLM' $productCode)
+        Assert ($arp.Count -eq 1 -and $arp[0].PSChildName -eq $productCode) 'one fairyfly product after the upgrade (the old one was removed, not installed beside it)'
+        $code = Run-Unelevated "start `"`" /wait msiexec.exe /x `"$MsiPath`" /qn /l*v `"$(Join-Path $WorkDir 'msi-upgrade-uninstall.log')`"" 'msi-upgrade-uninstall'
+        Assert ($code -eq 0) 'uninstalled again (unelevated msiexec /x)'
+        Assert (-not (Test-Path $installDir) -and -not (Test-Path $lnk) -and -not (Test-Path $oldLnk)) 'nothing left after the upgrade check'
+    }
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
 }
