@@ -552,6 +552,48 @@ TEST_CASE("link run lock: one name per pairing state file", "[link][run]") {
     CHECK(a != link_run_lock_name("C:\\Tools\\fairyfly-test\\state.json"));
 }
 
+#ifdef _WIN32
+TEST_CASE("link run lock: the same file through a junction, an 8.3 name or another case gets the same name", "[link][run]") {
+    // The name used to come from the path text alone: a junction, a short name or a non-ASCII case difference gave a
+    // second lock for the same pairing file, so two links could serve one pairing.
+    namespace fs = std::filesystem;
+    const TempDir root("lock-identity");
+    const fs::path real = root.path / "real";
+    const fs::path dir = real / L"Pairing Ärger-Ölweg long directory";
+    fs::create_directories(dir);
+    const fs::path state = dir / "state.json";
+    const fs::path missing = dir / "not-yet.json";
+    const auto name = [](const fs::path& p) { return link_run_lock_name(p.string()); };
+
+    // not paired yet: the name does not change when the file appears (the link tray computes it before pairing)
+    const std::string before = name(state);
+    std::ofstream(state) << "{}";
+    const std::string a = name(state);
+    CHECK(a == before);
+    CHECK(a == name(root.path / "real" / L"pAIRING äRGER-öLWEG LONG DIRECTORY" / "STATE.JSON"));   // case, also non-ASCII
+    CHECK(a == name(fs::path(root.path.wstring() + L"\\real\\.\\x\\..\\" + dir.filename().wstring() + L"\\state.json")));
+    CHECK(a != name(missing));
+    CHECK(a != name(real / "state.json"));
+
+    // a junction to the directory holding it
+    const fs::path junction = root.path / "jn";
+    const std::wstring cmd = L"cmd /c mklink /J \"" + junction.wstring() + L"\" \"" + real.wstring() + L"\" >NUL";
+    REQUIRE(_wsystem(cmd.c_str()) == 0);
+    REQUIRE(fs::exists(junction / dir.filename() / "state.json"));
+    CHECK(a == name(junction / dir.filename() / "state.json"));
+    CHECK(name(missing) == name(junction / dir.filename() / "not-yet.json"));
+    CHECK(name(missing) == name(junction / L"PAIRING ÄRGER-ÖLWEG LONG DIRECTORY" / "not-yet.json"));
+
+    // the 8.3 short name of the directory
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = GetShortPathNameW(dir.c_str(), buf, MAX_PATH * 2);
+    const std::wstring shortened = n ? std::wstring(buf, n) : std::wstring();
+    fs::remove(junction);   // a junction is removed without its target
+    if (shortened.empty() || shortened == dir.wstring()) SKIP("8.3 short names are disabled on this volume");
+    CHECK(a == name(fs::path(shortened) / "state.json"));
+}
+#endif
+
 TEST_CASE("link run: a second link for the same pairing is refused", "[link][run]") {
     const TempDir dir("run-lock");
     const std::string state = (dir / "state.json").string();

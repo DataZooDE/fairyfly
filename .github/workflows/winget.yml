@@ -18,6 +18,7 @@ on:
       - 'src/include/version.h'
       - 'src/version_info.rc.in'
       - 'CMakeLists.txt'
+      - 'cmake/**'
       - 'vcpkg.json'
       - 'src/tray/**'
       - 'src/include/tray/**'

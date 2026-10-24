@@ -28,9 +28,8 @@ endif()
 # (packaging/set_version.ps1 sets all three; configuring fails when they differ). Here and in vcpkg.json the plain
 # numbers (2026.10.5), in version.h the zero-padded form (2026.10.05) that --version prints and the tag uses.
 project(fairyfly VERSION 2026.10.24.1 LANGUAGES CXX)
-if(NOT PROJECT_VERSION MATCHES "^[0-9][0-9][0-9][0-9]\\.[0-9]+\\.[0-9]+(\\.[1-9][0-9]*)?$")
-    message(FATAL_ERROR "project VERSION ${PROJECT_VERSION} is not a calendar version YYYY.MM.DD or YYYY.MM.DD.N")
-endif()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/calendar_version.cmake)
+fairyfly_check_calendar_version("${PROJECT_VERSION}")   # a real date (2026.2.30 is refused), N <= 65535
 math(EXPR _ff_minor "${PROJECT_VERSION_MINOR}")
 math(EXPR _ff_patch "${PROJECT_VERSION_PATCH}")
 if(_ff_minor LESS 10)

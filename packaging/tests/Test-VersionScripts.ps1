@@ -123,5 +123,22 @@ foreach ($bad in 'V2026.10.24', 'V2026.10.24.1') {
     Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
 }
 
+Write-Host "`n=== cmake/calendar_version.cmake (what configuring checks in CMakeLists.txt) ==="
+$cmakeCheck = Join-Path $packaging '..\cmake\calendar_version.cmake'
+function Invoke-CMakeCheck([string]$v) {
+    $out = & cmake "-DVERSION=$v" -P $cmakeCheck 2>&1 | Out-String
+    [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Out = $out.Trim() }
+}
+foreach ($v in '2026.10.24', '2026.10.5', '2026.10.05', '2026.10.24.1', '2026.10.24.65535', '2024.2.29', '2000.2.29', '2026.12.31', '2026.1.31', '2026.4.30') {
+    $r = Invoke-CMakeCheck $v
+    Check $r.Ok "configure accepts the version $v$(if (-not $r.Ok) { ": $($r.Out)" })"
+}
+foreach ($v in '2026.2.30', '2026.02.30', '2026.2.29', '1900.2.29', '2100.2.29', '2026.4.31', '2026.6.31', '2026.9.31', '2026.11.31',
+               '2026.1.32', '2026.13.1', '2026.0.1', '2026.1.0', '2026.00.10', '1999.12.31', '2026.10.24.0', '2026.10.24.65536',
+               '2026.10.24.01', '2026.10', '26.10.24', '2026.10.24-1', 'v2026.10.24') {
+    $r = Invoke-CMakeCheck $v
+    Check (-not $r.Ok -and $r.Out -match 'calendar version|not a date|65535') "configure refuses the version $v ($(($r.Out -split "`n")[-1]))"
+}
+
 if ($failures) { Write-Host "`n$failures check(s) FAILED"; exit 1 }
 Write-Host "`nALL VERSION SCRIPT CHECKS PASSED"
