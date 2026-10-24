@@ -25,6 +25,7 @@
 #include <spdlog/spdlog.h>
 
 #include "include/link/link_console.h"
+#include "include/link/link_call.h"
 #include "include/link/link_control.h"
 #include "include/config/mcp_config.h"
 #include "include/link/main_thread_tools.h"
@@ -602,14 +603,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         }
         tools->set_handlers([&provider] { return tools_json(provider); },
                             [&provider](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {
-                                mcp::CallContext ctx;
-                                ctx.request_id = info.request_id;
-                                ctx.cancelled = [] { return g_stop.load(); };
-                                // the AI assistant acting for this user of this organisation; read-only unless the
-                                // gateway granted a write for exactly this call
-                                ctx.principal.name = "link:" + info.tenant + "/" + info.user;
-                                ctx.principal.read_only = !info.write_granted;
-                                ctx.principal.authenticated = true;
+                                mcp::CallContext ctx = link_call_context(info, g_stop);
                                 provider.set_client_info({{"name", info.client}, {"version", "fairyfly-link"}});
                                 mcp::ToolResult r = provider.call_tool(name, args, ctx);
                                 json out = {{"content", r.content}, {"isError", r.is_error}};
