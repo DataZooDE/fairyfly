@@ -15,7 +15,6 @@ inline constexpr int64_t kMaxLifetimeSec = 120;
 
 struct Claims {
     std::string iss, aud, sub, jti, req, client, tenant;
-    std::string approval;  // id of a write approval the user gave on the phone with a passkey (D9); empty if none
     int64_t iat = 0, exp = 0;
     policy::Grants grants;
 };

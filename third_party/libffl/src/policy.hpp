@@ -69,7 +69,9 @@ bool tcode_allowed(const std::vector<std::string>& allowed, const std::string& c
 struct CallCheck {
     std::string code, message;
     std::vector<std::string> tools;
+    std::vector<std::string> steps;  // every step tool of a batch, in order (for the audit record)
     bool writes = false;  // a gui_element_fill, on its own or as a step
+    bool read_only_refused = false;  // a step fairyfly's read-only guard refuses (keys, popups, menus, buttons): needs a write grant
     bool ok() const { return code.empty(); }
 };
 constexpr std::size_t kMaxBatchItems = 20;

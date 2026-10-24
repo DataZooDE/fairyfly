@@ -233,6 +233,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/link_control.cpp
     src/link/link_console.cpp
     src/link/link_tray_entry.cpp
+    src/link/desktop_approval.cpp
+    src/link/desktop_approval_win32.cpp
     src/link/trail_recorder.cpp
     src/link/trail_screen_source.cpp
     src/update/update_model.cpp

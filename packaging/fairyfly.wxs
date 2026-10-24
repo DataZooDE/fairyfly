@@ -65,7 +65,12 @@
       </Component>
       <Component Id="TrayShortcut" Directory="ProgramMenuFolder" Guid="{8D2E4F61-7A3B-4C9D-B1E2-F3A4B5C6D7E8}">
         <Shortcut Id="TrayShortcutLnk" Name="fairyfly" Description="fairyfly cloud link in the system tray (pairing, local MCP server from its menu)"
-                  Target="[INSTALLFOLDER]fairyfly-tray.exe" Arguments="link run --tray" WorkingDirectory="INSTALLFOLDER" />
+                  Target="[INSTALLFOLDER]fairyfly-tray.exe" Arguments="link run --tray" WorkingDirectory="INSTALLFOLDER">
+          <!-- the approval notifications: fairyfly's AppUserModelID and the COM class that answers them from the
+               notification centre (src/include/link/desktop_approval_win32.h) -->
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="DataZoo.fairyfly" />
+          <ShortcutProperty Key="System.AppUserModel.ToastActivatorCLSID" Value="{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}" />
+        </Shortcut>
         <!-- the entry up to 2026.10.23; a MajorUpgrade removes it anyway, this also covers a repair or reinstall -->
         <RemoveFile Id="RemoveOldTrayLnk" Name="fairyfly (tray).lnk" On="install" />
         <RegistryValue Root="HKCU" Key="Software\DataZoo\fairyfly" Name="shortcut" Type="integer" Value="1" KeyPath="yes" />

@@ -212,9 +212,18 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 - When the gateway's time limit cancels a call (`cancel/1`), a running batch stops before its next step and still
   answers; its result lists the steps that ran (structuredContent `cancelled`, `items`), and the gateway names them in
   its `CALL_TIMEOUT`.
-- A change needs the person's approval:
-  - on this desktop (a dialog, `--approve desktop`, the default), or
-  - with a passkey on the phone (the gateway puts the approval into the signed call).
+- A change needs the approval of the person at this desktop (`--approve desktop`, the default; there is no phone
+  approval since 2026-10-24, the desktop where SAP GUI runs is the second factor):
+  - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and
+    **Details**; it stays on screen until answered and can be answered from the notification centre too;
+  - **Details** (or a click on the notification) opens the approval window: the assistant, the account it acts for,
+    the SAP system, client and transaction, every step numbered, a countdown; **Deny** is the default button and Esc;
+  - no answer in 90 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
+    one after another, never together. A yes allows further changes for the window the gateway sets (5 minutes)
+    without asking again;
+  - with notifications turned off for fairyfly (or without the Start-menu entry's registration) the window opens at
+    once. `--approve no` denies every change. Each decision is in the log (`approval <n>: approved|denied|expired|
+    locked`). Source: `src/link/desktop_approval.cpp` (decisions), `src/link/desktop_approval_win32.cpp` (UI).
 - Every call is written to fairyfly's audit trail with `audit_source: "link"`, the principal `link:<organisation
   id>/<user>`, the AI client and the gateway's request id, so it can be matched with the cloud audit.
 - Calls arrive on the link's network threads and are handed to the main (COM) thread one at a time

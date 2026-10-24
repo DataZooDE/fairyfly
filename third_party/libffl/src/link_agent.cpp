@@ -9,6 +9,7 @@
 #include <sstream>
 #include <thread>
 
+#include "approval_summary.hpp"
 #include "crypto.hpp"
 #include "http_client.hpp"
 #include "policy.hpp"
@@ -108,15 +109,21 @@ bool Agent::refresh_local() {
 
 // ---- enforcement -------------------------------------------------------------------------------------------------------
 
-bool Agent::approved(const assertion::Claims& c, const std::string& tool) {
+bool Agent::approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args) {
     {
         std::lock_guard<std::mutex> l(mu_);
         if (now_unix() < approved_until_) return true;
     }
-    std::string client = c.client.empty() ? "unknown client" : c.client.substr(0, 24);
-    std::string text = "An AI assistant (" + client + ") acting for " + c.sub + " wants to change data in your SAP session using '" + tool +
-                       "'.\n\nAllow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?";
-    if (!cfg_.approver->approve(text)) return false;
+    ApprovalPrompt p;
+    p.client = c.client.empty() ? "unknown client" : c.client.substr(0, 24);
+    p.user = c.sub;
+    p.tool = tool;
+    p.summary = approval::summarize(tool, args).value_or(tool);  // serve() refused what does not fit
+    p.steps = approval::steps(tool, args);
+    p.window_s = cfg_.approve_window_s;
+    p.text = "An AI assistant (" + p.client + ") acting for " + c.sub + " wants to change data in your SAP session:\n\n" + p.summary +
+             "\n\nAllow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?";
+    if (!cfg_.approver->approve_change(p)) return false;
     std::lock_guard<std::mutex> l(mu_);
     approved_until_ = now_unix() + cfg_.approve_window_s;
     return true;
@@ -173,17 +180,17 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     // The read-only promise: a read-only grant must not run against a write-mode fairyfly.
     if (have_fill && !g.allow_write && !cfg_.allow_local_write_mode && !tools_->per_call_read_only())
         return deny("LOCAL_WRITE_MODE", "local fairyfly runs in write mode but the policy grants read-only; restart fairyfly without --allow-write");
-    if (checked.writes && !g.allow_write) return deny("WRITE_DENIED", "write tools are not granted");
+    // a fill, or a step fairyfly's read-only guard refuses (it runs with the guard on under a read-only grant)
+    if ((checked.writes || checked.read_only_refused) && !g.allow_write) return deny("WRITE_DENIED", "write tools are not granted");
     // a transaction list binds the screen only where fairyfly applies it per call (the gateway checks the same caps)
     if (!cfg_.local_enforces_tcodes && policy::needs_desktop_tcodes(g, tool, checked))
         return deny("TCODE_UNSUPPORTED", "your transactions are restricted, and the fairyfly on this desktop cannot enforce that; update fairyfly");
     if (g.allow_write && (checked.writes || lt.destructive) && g.approval != "none") {
-        // phone: the user approved this call with a passkey; the gateway put the approval id into the signed
-        // assertion. phone_or_desktop: without it the desktop dialog decides. device/desktop: the dialog decides.
-        bool phone_ok = !c.approval.empty() && (g.approval == "phone" || g.approval == "phone_or_desktop");
-        if (g.approval == "phone" && !phone_ok) return deny("APPROVAL_REQUIRED", "this change needs your approval on the phone");
-        if (!phone_ok && !approved(c, tool)) return deny("APPROVAL_DENIED", "the person at the desktop did not approve the change");
-        if (phone_ok) spdlog::info("write approved on the phone: tool={} approval={}", tool, c.approval);
+        // the person at this desktop decides; every mode but "none" asks here (also "phone" / "phone_or_desktop" of a
+        // gateway from before 2026-10-24: there is no phone approval any more, an "approval" claim is ignored)
+        if (!approval::summarize(tool, args))
+            return deny("BATCH_TOO_LONG_TO_APPROVE", "this call is too long to show at the desktop for approval; split it into several smaller calls");
+        if (!approved(c, tool, args)) return deny("APPROVAL_DENIED", "the person at the desktop did not approve the change");
     }
 
     int64_t budget = req.deadline_ms > 0 ? std::min<int64_t>(req.deadline_ms + 1000, 130000) : 125000;

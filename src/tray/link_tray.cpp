@@ -170,7 +170,7 @@ void LinkTrayController::on_action(TrayAction action) {
         if (allow && services_.host &&
             !services_.host->confirm("fairyfly link",
                                      "Allow AI assistants to change data in SAP through the cloud link?\n\nEach change still "
-                                     "needs your organisation's grant and an approval (this desktop's dialog or the phone)."))
+                                     "needs your organisation's grant and your approval at this desktop."))
             break;
         if (!services_.writes->set_allowed(allow)) notify("Could not change the link's mode");
         else notify(allow ? "Changes in SAP allowed; the link reconnects with the write tools"
