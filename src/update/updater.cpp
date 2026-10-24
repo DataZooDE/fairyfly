@@ -51,7 +51,9 @@ std::string fetch_once(const std::string& start, size_t max_body, int max_redire
         try {
             r = get(rq);
         } catch (const std::exception& e) {
-            if (hop > 0) throw AssetHostError(e.what());
+            // a dropped connection is never GitHub's answer: start the download again (seen on github.com itself,
+            // "Failed to read connection", 2026-10-24); the API keeps failing at once
+            if (hop > 0 || !api) throw AssetHostError(e.what());
             throw;
         }
         if (r.status == 301 || r.status == 302 || r.status == 303 || r.status == 307 || r.status == 308) {

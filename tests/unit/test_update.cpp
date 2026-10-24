@@ -187,6 +187,31 @@ TEST_CASE("update: download retries are limited and the error names the asset ho
     CHECK(waits == kFetchAttempts - 1);
 }
 
+TEST_CASE("update: a dropped connection is retried on GitHub and on the asset host, not on the API", "[update]") {
+    // seen on 2026-10-24: github.com itself closed the connection ("Failed to read connection") for SHA256SUMS
+    FakeGithub gh;
+    int dropped = 0;
+    auto inner = gh.get();
+    auto flaky = [&](const ffy::HttpRequest& rq) {
+        if (dropped < 2) {
+            dropped++;
+            throw std::runtime_error("http GET " + rq.url + ": Failed to read connection");
+        }
+        return inner(rq);
+    };
+    std::vector<int> waited;
+    CHECK(fetch(kExe, 1u << 20, 5, flaky, [&](int ms) { waited.push_back(ms); }) == "MZ...");
+    CHECK(waited == std::vector<int>{2000, 5000});
+
+    int calls = 0;
+    auto api = [&](const ffy::HttpRequest&) -> ffy::HttpResponse {
+        calls++;
+        throw std::runtime_error("Failed to read connection");
+    };
+    CHECK_THROWS(fetch("https://api.github.com/repos/DataZooDE/fairyfly/releases/latest", 1u << 20, 5, api, [](int) {}));
+    CHECK(calls == 1);
+}
+
 TEST_CASE("update: a 404 is final, and the API is not retried", "[update]") {
     FakeGithub gh;
     gh.asset_status = {404};
