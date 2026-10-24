@@ -25,12 +25,6 @@ using sap::ComGuiSessionPtr;
 constexpr int kMaxWalkNodes = 3000;
 constexpr int kMaxWalkDepth = 40;
 
-/// "wnd[0]/usr/txtX" from "/app/con[0]/ses[0]/wnd[0]/usr/txtX" (the form gui_screen_read reports and the gateway shows).
-std::string relative_id(const std::string& id) {
-    auto i = id.find("wnd[");
-    return i == std::string::npos ? id : id.substr(i);
-}
-
 bool input_type(const std::string& type) {
     return type == "GuiTextField" || type == "GuiCTextField" || type == "GuiPasswordField" || type == "GuiComboBox";
 }
@@ -57,13 +51,30 @@ std::optional<Rect> strict_rect(const sap::SapGuiObject& o) {
     return Rect{*x, *y, *w, *h};
 }
 
-std::vector<std::string> grid_columns(const ComGuiSessionPtr& session, const std::string& id) {
-    try {
-        auto e = session->find_element_by_id(id);
-        if (e) return e->get_column_order();
-    } catch (const std::exception&) {
+/// Containers whose content GetObjectTree does not list (object_tree.h is_phase3_skipped_container): their controls
+/// are reached element by element.
+bool control_host(const std::string& type) {
+    return type == "GuiCustomControl" || type == "GuiContainerShell" || type == "GuiSplitterShell" || type == "GuiDockShell" ||
+           type == "GuiGOSShell" || type == "GuiContainerCtrl" || type == "GuiSplitterContainer";
+}
+
+/// Columns of grids and column trees. A grid whose columns cannot be read is opaque (blurred as a whole): a grid
+/// without any column does not exist.
+void read_columns(Field& f, const ComGuiElementPtr& e, const std::string& subtype) {
+    if (f.type != "GuiShell" || !e) return;
+    if (subtype == "GridView") {
+        try {
+            f.columns = e->get_column_order();
+        } catch (const std::exception&) {
+            f.columns.clear();
+        }
+        if (f.columns.empty()) f.opaque = true;
+    } else if (subtype == "Tree") {
+        try {
+            f.columns = e->get_tree_column_names();
+        } catch (const std::exception&) {
+        }
     }
-    return {};
 }
 
 class ComScreenSource : public ScreenSource {
@@ -76,7 +87,7 @@ public:
             auto session = session_ ? session_() : nullptr;
             if (!session) return s;
             try {
-                if (session->is_busy()) session->wait_for_completion(5000);
+                if (session->is_busy()) session->wait_for_completion(2000);
             } catch (const std::exception&) {
             }
             auto window = session->get_active_window();
@@ -94,7 +105,7 @@ public:
             s.window = strict_rect(*window);
 
             std::vector<std::string> full_ids;
-            if (!from_tree(session, window_full, s, full_ids) && !from_walk(session, window, s, full_ids)) return s;
+            if (!from_tree(session, window_full, s, full_ids) && !from_walk(window, s, full_ids)) return s;
             // the rectangles of the fields to blur, read one by one (only a handful per screen)
             for (size_t i = 0; i < s.fields.size(); i++) {
                 if (!needs_rect || !needs_rect(s.fields[i])) continue;
@@ -113,11 +124,14 @@ public:
         return s;
     }
 
-    std::string capture_png() override {
+    std::string capture_png(const std::string& window_id) override {
         try {
             auto session = session_ ? session_() : nullptr;
             if (!session) return {};
-            auto bytes = sap::ScreenshotHandler::hard_copy_png(session->get_active_window());
+            auto window = session->get_active_window();
+            // the rectangles were read from `window_id`: a popup that opened since then must not get them
+            if (!window || relative_id(window->get_id()) != window_id) return {};
+            auto bytes = sap::ScreenshotHandler::hard_copy_png(window);
             return std::string(bytes.begin(), bytes.end());
         } catch (const std::exception& e) {
             spdlog::warn("audit trail: screenshot failed: {}", e.what());
@@ -178,50 +192,76 @@ private:
                 if (f.tooltip.empty()) f.tooltip = n->prop(p);
             f.input = input_type(f.type);
             if (f.type != "GuiPasswordField") f.value = n->prop("Text");
-            if (f.type == "GuiShell" && n->prop("SubType") == "GridView") f.columns = grid_columns(session, n->id);
+            const bool host = (control_host(f.type) || sap::is_phase3_skipped_container(n->type, n->id)) && n->children.empty();
+            if (f.type == "GuiShell") {
+                try {
+                    read_columns(f, session->find_element_by_id(n->id), n->prop("SubType"));
+                } catch (const std::exception&) {
+                    if (n->prop("SubType") == "GridView") f.opaque = true;
+                }
+            }
             s.fields.push_back(std::move(f));
             full_ids.push_back(n->id);
+            if (host && s.fields.back().type != "GuiShell") {
+                // the tree stops at control containers: walk their content over COM; what cannot be read is blurred
+                const size_t at = s.fields.size() - 1;
+                int nodes = 0;
+                bool ok = false;
+                try {
+                    auto e = session->find_element_by_id(n->id);
+                    ok = e != nullptr;
+                    const int count = ok ? e->get_child_count() : 0;
+                    for (int i = 0; i < count && ok; i++) ok = walk(e->get_child(i), 1, s, full_ids, nodes);
+                } catch (const std::exception&) {
+                    ok = false;
+                }
+                if (!ok) s.fields[at].opaque = true;
+            }
             for (auto it = n->children.rbegin(); it != n->children.rend(); ++it) stack.push_back(&*it);
         }
         return true;
     }
 
+    /// One element and its descendants over COM (bounded). False when it could not be read completely.
+    bool walk(const ComGuiElementPtr& e, int depth, ScreenState& s, std::vector<std::string>& full_ids, int& nodes) {
+        if (!e) return false;
+        if (++nodes > kMaxWalkNodes || depth > kMaxWalkDepth) return false;
+        Field f;
+        const std::string full = e->get_id();
+        f.id = relative_id(full);
+        f.type = e->get_type();
+        try { f.name = e->get_name(); } catch (const std::exception&) {}
+        try { f.label = e->get_label(); } catch (const std::exception&) {}
+        try { f.tooltip = e->get_tooltip(); } catch (const std::exception&) {}
+        f.input = input_type(f.type);
+        if (f.input && f.type != "GuiPasswordField") {
+            try { f.value = e->get_text(); } catch (const std::exception&) {}
+        }
+        if (f.type == "GuiShell") {
+            std::string subtype;
+            try { subtype = e->get_subtype(); } catch (const std::exception&) {}
+            read_columns(f, e, subtype);
+        }
+        s.fields.push_back(std::move(f));
+        full_ids.push_back(full);
+        const int n = e->get_child_count();
+        for (int i = 0; i < n; i++)
+            if (!walk(e->get_child(i), depth + 1, s, full_ids, nodes)) return false;
+        return true;
+    }
+
     /// SAP GUI without GetObjectTree: element by element (bounded; a screen that does not fit is incomplete).
-    bool from_walk(const ComGuiSessionPtr& session, const sap::ComGuiWindowPtr& window, ScreenState& s, std::vector<std::string>& full_ids) {
+    bool from_walk(const sap::ComGuiWindowPtr& window, ScreenState& s, std::vector<std::string>& full_ids) {
         s.fields.clear();
         full_ids.clear();
         int nodes = 0;
         bool ok = true;
-        std::function<void(const ComGuiElementPtr&, int)> visit = [&](const ComGuiElementPtr& e, int depth) {
-            if (!ok || !e) return;
-            if (++nodes > kMaxWalkNodes || depth > kMaxWalkDepth) {
-                ok = false;
-                return;
-            }
-            Field f;
-            const std::string full = e->get_id();
-            f.id = relative_id(full);
-            f.type = e->get_type();
-            try { f.name = e->get_name(); } catch (const std::exception&) {}
-            try { f.label = e->get_label(); } catch (const std::exception&) {}
-            try { f.tooltip = e->get_tooltip(); } catch (const std::exception&) {}
-            f.input = input_type(f.type);
-            if (f.input && f.type != "GuiPasswordField") {
-                try { f.value = e->get_text(); } catch (const std::exception&) {}
-            }
-            if (f.type == "GuiShell" && e->get_subtype() == "GridView") f.columns = e->get_column_order();
-            s.fields.push_back(std::move(f));
-            full_ids.push_back(full);
-            const int n = e->get_child_count();
-            for (int i = 0; i < n && ok; i++) visit(e->get_child(i), depth + 1);
-        };
         try {
             const int n = window->get_child_count();
-            for (int i = 0; i < n && ok; i++) visit(window->get_child(i), 1);
+            for (int i = 0; i < n && ok; i++) ok = walk(window->get_child(i), 1, s, full_ids, nodes);
         } catch (const std::exception&) {
             ok = false;
         }
-        (void)session;
         if (!ok) {
             s.fields.clear();
             full_ids.clear();

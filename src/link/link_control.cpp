@@ -139,9 +139,12 @@ void supervise(const std::string& state_path, const std::function<void(const std
 
 bool in_default_state_dir(const std::string& state_path, const std::string& default_dir) {
     if (state_path.empty()) return true;  // resolves to the default
-    std::error_code ec;
-    auto norm = [&](const std::string& p) {
-        auto a = fs::weakly_canonical(fs::absolute(fs::path(p), ec), ec);
+    auto norm = [](const std::string& p) {
+        std::error_code ec;
+        const fs::path abs = fs::absolute(fs::path(p), ec);
+        if (ec) return std::string();
+        fs::path a = fs::weakly_canonical(abs, ec);
+        if (ec || a.empty()) a = abs;  // never let an error make a path look harmless
         std::string s = a.lexically_normal().generic_string();
 #ifdef _WIN32
         for (auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -150,6 +153,7 @@ bool in_default_state_dir(const std::string& state_path, const std::string& defa
         return s;
     };
     const std::string p = norm(state_path), d = norm(default_dir);
+    if (p.empty() || d.empty()) return true;  // cannot tell: refuse
     return p == d || (p.size() > d.size() && p.compare(0, d.size(), d) == 0 && p[d.size()] == '/');
 }
 

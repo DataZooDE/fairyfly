@@ -43,7 +43,10 @@ struct Field {
     std::string value;    ///< Text (never filled for password fields)
     bool input = false;   ///< a field a user types into (text, combo, check box, radio button)
     std::optional<Rect> rect;            ///< screen rectangle; nullopt when it could not be read
-    std::vector<std::string> columns;    ///< grids (GuiShell GridView): technical column names
+    std::vector<std::string> columns;    ///< grids (GuiShell GridView) and column trees: technical column names
+    /// What it shows could not be read (a control container whose content the tree does not list and the walk could
+    /// not reach, a grid whose columns could not be read): blurred as a whole, whatever the blur setting.
+    bool opaque = false;
 };
 
 /// What the window looked like at one moment. `complete` is false when the elements could not be enumerated: a
@@ -71,8 +74,9 @@ public:
     /// The active window of the session the link's calls use and its elements, with the screen rectangles of the
     /// elements for which `needs_rect` is true (the ones to blur). Never throws: an error yields complete == false.
     virtual ScreenState state(const std::function<bool(const Field&)>& needs_rect) = 0;
-    /// The active window as PNG bytes (GuiFrameWindow.HardCopyToMemory), empty when it cannot be captured.
-    virtual std::string capture_png() = 0;
+    /// The active window as PNG bytes (GuiFrameWindow.HardCopyToMemory), empty when it cannot be captured or when
+    /// the active window is no longer `window_id` (a popup opened after state() was read).
+    virtual std::string capture_png(const std::string& window_id) = 0;
     /// The current value of one element (gui_element_fill's target); a grid cell when row/column are given.
     /// nullopt when it cannot be read.
     virtual std::optional<std::string> value(const std::string& element_id, std::optional<int> row, const std::string& column) = 0;
@@ -97,9 +101,10 @@ struct BlurPlan {
 };
 /// Pixels added around every rectangle: SAP GUI draws a field's frame and focus ring just outside it.
 inline constexpr int kBlurPadding = 3;
-/// The image must have the window's aspect ratio within this tolerance, otherwise element positions cannot be
-/// mapped onto it reliably (and a screen with sensitive fields is dropped).
-inline constexpr double kAspectTolerance = 0.01;
+/// The image must have the window's proportions: scaled by the image width, the window height may differ from the
+/// image height by at most this many pixels, otherwise element positions cannot be mapped onto it reliably (and a
+/// screen with sensitive fields is dropped). The scale itself must lie in [0.5, 4] (display scaling).
+inline constexpr int kAspectTolerancePx = 2;
 
 /// Maps the sensitive fields of `screen` onto an image of `image_width` x `image_height` pixels captured from
 /// screen.window: image = (screen - window origin) * (image size / window size).
@@ -190,6 +195,10 @@ private:
     };
     std::map<std::string, Pending> pending_;  ///< request id -> the "before" of a step whose after() is still to come
 };
+
+/// "wnd[0]/usr/txtX" from "/app/con[0]/ses[0]/wnd[0]/usr/txtX" (the form gui_screen_read reports and the gateway
+/// shows); other ids unchanged.
+std::string relative_id(const std::string& id);
 
 /// The element a gui_element_fill call targets (args element | id | element_id), and its grid cell.
 struct FillTarget {

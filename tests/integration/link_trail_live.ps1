@@ -53,6 +53,9 @@
   Unpair the test state at the end (remove the test desktop in the web app as well).
 .PARAMETER Fill
   Optional element id to fill in part 2 (e.g. wnd[0]/usr/txtSOME-FIELD on a test screen), with -FillValue.
+.PARAMETER KeepScreenshots
+  Keep the trail-check PNGs at the end (the unblurred-bank "noblur" one shows real bank data; by default both are
+  deleted when the script ends).
 .PARAMETER DryRun
   Print the plan and exit.
 #>
@@ -67,6 +70,7 @@ param(
     [switch]$Unpair,
     [string]$Fill = '',
     [string]$FillValue = '',
+    [switch]$KeepScreenshots,
     [switch]$DryRun
 )
 
@@ -213,7 +217,8 @@ if (-not $Gateway) {
             Check ($fill.result -and -not $fill.result.isError) "gui_element_fill through the gateway"
         }
         $logText = Get-Content $log -Raw
-        Check (-not ($FillValue -and $logText.Contains($FillValue))) "the link's console/log holds no field value"
+        $outText = Get-Content $outLog -Raw -ErrorAction SilentlyContinue
+        Check (-not ($FillValue -and ($logText.Contains($FillValue) -or "$outText".Contains($FillValue)))) "the link's console and log hold no field value"
         Check (Ask "In $Gateway open Audit log > this session > View: does the step 'Read screen ...' have before and after screenshots with the password and bank fields blurred$(if ($Fill) { ', and the fill step the change old -> new' })?") "the session review shows the recorded steps"
 
         Write-Host "`nNow turn the audit trail OFF for this test desktop."
@@ -233,6 +238,10 @@ if (-not $Gateway) {
 }
 
 Remove-Item Env:FAIRYFLY_AUDIT_FILE, Env:FAIRYFLY_LINK_FORBID_DEFAULT_STATE -ErrorAction SilentlyContinue
+if (-not $KeepScreenshots) {
+    Get-ChildItem $OutDir -Recurse -Filter 'trail-check*.png' -ErrorAction SilentlyContinue | Remove-Item -Force
+    Write-Host "Deleted the trail-check screenshots (they can show SAP data); -KeepScreenshots keeps them"
+}
 Write-Host "Output: $OutDir"
 if ($script:failures -gt 0) { Write-Host "$script:failures check(s) failed"; exit 1 }
 Write-Host "all checks passed"

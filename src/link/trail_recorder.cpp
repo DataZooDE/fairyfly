@@ -40,7 +40,12 @@ bool is_bank(const Field& f) {
 
 bool must_blur(const Field& f, bool blur) {
     if (window_type(f.type)) return false;  // the window itself: its children decide
-    return is_password(f) || (blur && is_bank(f));
+    return f.opaque || is_password(f) || (blur && is_bank(f));
+}
+
+std::string relative_id(const std::string& id) {
+    auto i = id.find("wnd[");
+    return i == std::string::npos ? id : id.substr(i);
 }
 
 // ---- blurring -------------------------------------------------------------------------------------------------------
@@ -63,7 +68,8 @@ BlurPlan plan_blur(const ScreenState& screen, int image_width, int image_height,
     if (!screen.window || screen.window->empty()) return drop("the window's position is unknown");
     const Rect& w = *screen.window;
     const double sx = double(image_width) / w.width, sy = double(image_height) / w.height;
-    if (std::abs(sx - sy) / std::max(sx, sy) > kAspectTolerance) return drop("the image does not match the window's size");
+    if (sx < 0.5 || sx > 4.0 || std::abs(w.height * sx - image_height) > kAspectTolerancePx)
+        return drop("the image does not match the window's size");
     for (const Field* f : sensitive) {
         if (!f->rect || f->rect->empty()) return drop("a password or bank field's position is unknown");
         const Rect& r = *f->rect;
@@ -75,7 +81,13 @@ BlurPlan plan_blur(const ScreenState& screen, int image_width, int image_height,
         y0 = std::max(y0, 0);
         x1 = std::min(x1, image_width);
         y1 = std::min(y1, image_height);
-        if (x1 <= x0 || y1 <= y0) continue;  // outside the captured window: not on the screenshot
+        if (x1 <= x0 || y1 <= y0) {
+            // not on the screenshot: only acceptable when it lies outside the window on the screen as well (scrolled
+            // away); otherwise the mapping is wrong and nothing can be trusted
+            const bool outside = r.x + r.width <= w.x || r.y + r.height <= w.y || r.x >= w.x + w.width || r.y >= w.y + w.height;
+            if (!outside) return drop("a password or bank field could not be mapped onto the screenshot");
+            continue;
+        }
         plan.rects.push_back({x0, y0, x1 - x0, y1 - y0});
         plan.blurred++;
     }
@@ -137,7 +149,7 @@ std::optional<Image> decode_png(const std::string& bytes) {
         png_image_free(&img);
         return std::nullopt;
     }
-    if (img.width == 0 || img.height == 0 || img.width > 16384 || img.height > 16384) {
+    if (img.width == 0 || img.height == 0 || img.width > 8192 || img.height > 8192) {
         png_image_free(&img);
         return std::nullopt;
     }
@@ -218,7 +230,10 @@ std::vector<ffy::link::FieldChange> diff_fields(const ScreenState& before, const
         if (i == old.end() || i->second->value == f.value) continue;
         if (is_password(f) || is_password(*i->second)) continue;  // its Text is never read: no change to report
         if (out.size() >= proto::kStepMaxChanges) break;
-        out.push_back({f.id, f.label.empty() ? i->second->label : f.label, masked_value(f, i->second->value, blur), masked_value(f, f.value, blur)});
+        // masked when either state says sensitive (a label can appear or change with the screen)
+        const bool mask = blur && (is_bank(f) || is_bank(*i->second));
+        out.push_back({f.id, f.label.empty() ? i->second->label : f.label, mask ? std::string(proto::kMasked) : i->second->value,
+                       mask ? std::string(proto::kMasked) : f.value});
     }
     return out;
 }
@@ -391,13 +406,14 @@ std::optional<TrailRecorder::Snapshot> TrailRecorder::snapshot(const ffy::link::
     const bool ran = o_.run_on_main([out, source, blur, shot, target] {
         try {
             out->state = source->state([shot, blur](const Field& f) { return shot && must_blur(f, blur); });
-            if (shot) out->raw_png = source->capture_png();
-            if (target) {
-                std::string id = target->element;
+            if (shot) out->raw_png = source->capture_png(out->state.window_id);
+            if (target && out->state.complete) {
+                std::string id = relative_id(target->element);
                 if (id.rfind("@active", 0) == 0 && !out->state.window_id.empty()) id = out->state.window_id + id.substr(7);
+                // only a field found on the screen: its label decides the masking (and a password is never read)
                 const Field* f = find_field(&out->state, id);
-                if (f && is_password(*f)) out->target_value = std::string();  // never read a password
-                else out->target_value = source->value(id, target->row, target->column);
+                if (f && is_password(*f)) out->target_value = std::string();
+                else if (f) out->target_value = source->value(f->id, target->row, target->column);
             }
         } catch (const std::exception& e) {
             spdlog::warn("audit trail: reading the screen failed: {}", e.what());
@@ -466,23 +482,30 @@ ffy::link::StepRecord TrailRecorder::after(const ffy::link::StepRequest& s, cons
         if (changes_sap(s.tool) && before && now) {
             if (s.tool == "gui_element_fill") {
                 if (auto t = fill_target(s.args); t && before->target_value && now->target_value) {
-                    std::string id = t->element;
+                    std::string id = relative_id(t->element);
                     if (id.rfind("@active", 0) == 0 && !now->state.window_id.empty()) id = now->state.window_id + id.substr(7);
-                    const Field* f = find_field(&now->state, id);
-                    if (!f) f = find_field(&before->state, id);
+                    const Field* f = find_field(&before->state, id);
+                    const Field* g = find_field(&now->state, id);
+                    if (!f) f = g;
                     Field target = f ? *f : Field{};
                     if (!f) target.id = id;
-                    std::string field = f ? f->id : id;
-                    std::string label = target.label;
-                    if (t->row) {  // a grid cell: the column names the field
+                    std::string field = target.id;
+                    std::string label = target.label.empty() && g ? g->label : target.label;
+                    Field cell;  // a grid cell: its column names the field
+                    if (t->row) {
                         field += "[" + std::to_string(*t->row) + "," + t->column + "]";
-                        target.id = field;
-                        target.columns = {t->column};
+                        cell.id = field;
+                        cell.columns = {t->column};
                         if (label.empty()) label = t->column;
                     }
-                    if (*before->target_value != *now->target_value || is_password(target))
-                        rec.changes.push_back({field, label, masked_value(target, *before->target_value, s.blur),
-                                               masked_value(target, *now->target_value, s.blur)});
+                    const Field& subject = t->row ? cell : target;
+                    // masked when the field is sensitive on either screen (before or after the change)
+                    const bool pw = is_password(subject) || (!t->row && g && is_password(*g));
+                    const bool bank = is_bank(subject) || (!t->row && g && is_bank(*g));
+                    const bool mask = pw || (s.blur && bank);
+                    if (*before->target_value != *now->target_value || pw)
+                        rec.changes.push_back({field, label, mask ? std::string(proto::kMasked) : *before->target_value,
+                                               mask ? std::string(proto::kMasked) : *now->target_value});
                 }
             }
             for (auto& c : diff_fields(before->state, now->state, s.blur)) {

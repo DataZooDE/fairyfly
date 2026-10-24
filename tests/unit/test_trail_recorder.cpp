@@ -135,11 +135,11 @@ struct FakeSource : ScreenSource {
         }
         return s;
     }
-    std::string capture_png() override {
+    std::string capture_png(const std::string& window_id) override {
         std::lock_guard<std::mutex> l(mu);
         threads.push_back(std::this_thread::get_id());
         captures++;
-        if (fail_capture) return {};
+        if (fail_capture || window_id != screen.window_id) return {};
         return encode_png(image);
     }
     std::optional<std::string> value(const std::string& id, std::optional<int>, const std::string&) override {
@@ -243,6 +243,15 @@ TEST_CASE("trail fields: password and bank fields are recognised by SAP name, co
     }
     // the window itself is never one rectangle to fill: its fields are
     CHECK_FALSE(must_blur(field("wnd[0]", "GuiMainWindow", {}, "Bank Account"), true));
+    // content that could not be read (a control container, a grid without readable columns): always as a whole
+    Field opaque = field("wnd[0]/usr/cntlCONTAINER", "GuiCustomControl", {});
+    CHECK_FALSE(must_blur(opaque, true));
+    opaque.opaque = true;
+    CHECK(must_blur(opaque, true));
+    CHECK(must_blur(opaque, false));
+    // full scripting ids become the relative form the gateway shows and matches
+    CHECK(relative_id("/app/con[0]/ses[0]/wnd[0]/usr/txtLFBK-BANKN") == "wnd[0]/usr/txtLFBK-BANKN");
+    CHECK(relative_id("wnd[1]/usr/pwdX") == "wnd[1]/usr/pwdX");
 }
 
 // ---- blurring -------------------------------------------------------------------------------------------------------
@@ -287,6 +296,14 @@ TEST_CASE("trail blur: the pixels of password and bank fields are filled, everyt
     CHECK(is_fill(big, 259, 139));
     CHECK_FALSE(is_fill(big, 30, 30));
 
+    // an opaque container is filled as a whole
+    ScreenState hidden = s;
+    hidden.fields = {field("wnd[0]/usr/cntlCC", "GuiCustomControl", Rect{120, 200, 100, 50})};
+    hidden.fields[0].opaque = true;
+    auto h = plan_blur(hidden, 400, 300, false);
+    REQUIRE_FALSE(h.drop);
+    CHECK(h.blurred == 1);
+
     // a field outside the captured window is not on the screenshot: nothing to fill, nothing counted
     ScreenState away = s;
     away.fields = {field("wnd[0]/usr/pwdX", "GuiPasswordField", Rect{2000, 2000, 50, 10})};
@@ -325,6 +342,9 @@ TEST_CASE("trail blur: a screenshot whose sensitive field cannot be located is d
     nowin.window.reset();
     CHECK(plan_blur(nowin, 400, 300, true).drop);
     CHECK(plan_blur(logon_screen(), 400, 260, true).drop);  // e.g. only the client area was captured
+    CHECK(plan_blur(logon_screen(), 400, 297, true).drop);  // 3 px off already (the padding is 3 px)
+    CHECK_FALSE(plan_blur(logon_screen(), 400, 301, true).drop);  // rounding of a scaled capture
+    CHECK(plan_blur(logon_screen(), 100, 75, true).drop);   // scale 0.25: not a display scaling
 
     // a screen without sensitive fields needs no positions
     ScreenState plain;
@@ -413,6 +433,16 @@ TEST_CASE("trail changes: old and new values, passwords always masked, bank valu
     auto open = diff_fields(before, after, false);
     REQUIRE(open.size() == 2);
     CHECK(open[1].new_value == "0099999999");
+    // sensitive on either screen is enough: the label "IBAN" only appears after the change
+    ScreenState b2 = logon_screen(), a2 = logon_screen();
+    b2.fields.push_back(field("wnd[0]/usr/txtZZ_F", "GuiTextField", {}, "", "old"));
+    a2.fields.push_back(field("wnd[0]/usr/txtZZ_F", "GuiTextField", {}, "", "new"));
+    a2.fields.back().label = "IBAN";
+    auto either = diff_fields(b2, a2, true);
+    REQUIRE(either.size() == 1);
+    CHECK(either[0].old_value == ffy::proto::kMasked);
+    std::swap(b2.fields.back().label, a2.fields.back().label);
+    CHECK(diff_fields(b2, a2, true)[0].new_value == ffy::proto::kMasked);
 
     // the recorder: a fill of the quantity, of the bank account, of a password field
     auto src = std::make_shared<FakeSource>();
@@ -455,6 +485,22 @@ TEST_CASE("trail changes: old and new values, passwords always masked, bank valu
     CHECK(pr.changes[0].old_value == ffy::proto::kMasked);
     CHECK(pr.changes[0].new_value == ffy::proto::kMasked);
     CHECK(ffy::proto::password_field(pr.changes[0].field, pr.changes[0].label));
+
+    // a fill target that is not on the screen is not read at all (its label is unknown): no change reported
+    auto ghost = step("gui_element_fill", false, false, {{"element", "wnd[0]/usr/txtZZ_UNKNOWN"}, {"value", "1234"}});
+    src->values["wnd[0]/usr/txtZZ_UNKNOWN"] = "4321";
+    rec->before(ghost);
+    src->values["wnd[0]/usr/txtZZ_UNKNOWN"] = "1234";
+    CHECK(rec->after(ghost, {{"isError", false}}).changes.empty());
+    // a full scripting id finds the field like the relative one
+    auto full = step("gui_element_fill", false, true, {{"element", "/app/con[0]/ses[0]/wnd[0]/usr/txtEKPO-MENGE"}, {"value", "160"}});
+    rec->before(full);
+    src->values["wnd[0]/usr/txtEKPO-MENGE"] = "160";
+    auto fr = rec->after(full, {{"isError", false}});
+    REQUIRE(fr.changes.size() == 1);
+    CHECK(fr.changes[0].field == "wnd[0]/usr/txtEKPO-MENGE");
+    CHECK(fr.changes[0].new_value == "160");
+    src->values["wnd[0]/usr/txtEKPO-MENGE"] = "150";
 
     // a read changes nothing; a tool marked destructive reports what changed on the screen
     auto read = step("gui_screen_read", false, true);
@@ -532,6 +578,16 @@ TEST_CASE("trail recorder: before and after screenshots with a fake SAP GUI; non
     CHECK(fr.shots.empty());
     CHECK_FALSE(fr.description.empty());
     src->fail_capture = false;
+
+    // a popup opened between reading the elements and the capture: its image never gets the old window's rectangles
+    struct PopupSource : FakeSource {
+        std::string capture_png(const std::string& window_id) override { return FakeSource::capture_png(window_id == "wnd[0]" ? "wnd[1]" : window_id); }
+    };
+    auto popup = std::make_shared<PopupSource>();
+    auto rec3 = direct_recorder(popup);
+    auto ps = step("gui_screen_read", true, true);
+    rec3->before(ps);
+    CHECK(rec3->after(ps, json::object()).shots.empty());
 
     // a password field that cannot be located: no screenshot of that screen
     struct NoRect : FakeSource {
@@ -831,8 +887,15 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
 #else
     const char* profile_var = "XDG_CONFIG_HOME";
 #endif
-    const char* old_profile = std::getenv(profile_var);
-    const std::string saved_profile = old_profile ? old_profile : "";
+    struct EnvRestore {  // also when a REQUIRE below fails
+        const char* name;
+        std::optional<std::string> old;
+        explicit EnvRestore(const char* n) : name(n) {
+            if (const char* v = std::getenv(n)) old = v;
+        }
+        ~EnvRestore() { set_env(name, old ? old->c_str() : nullptr); }
+    };
+    EnvRestore restore_profile(profile_var), restore_guard("FAIRYFLY_LINK_FORBID_DEFAULT_STATE");
     set_env(profile_var, (tmp / "profile").string().c_str());
     REQUIRE(default_state_path().rfind((tmp / "profile").string(), 0) == 0);
     const std::string fake_default = default_state_path();
@@ -880,8 +943,11 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
     CHECK_FALSE(make_link_control(own.state_path)->view().trail_on);
     REQUIRE(link_pause(own).status == fairyfly::Result::Status::Success);
     CHECK(is_paused(own.state_path));
-    set_env("FAIRYFLY_LINK_FORBID_DEFAULT_STATE", nullptr);
-    set_env(profile_var, saved_profile.empty() ? nullptr : saved_profile.c_str());
+    // the tray's view of the default pairing cannot pause it either
+    CHECK_FALSE(make_link_control(fake_default)->set_paused(true));
+    CHECK_FALSE(fs::exists(pause_marker(fake_default)));
+    CHECK(link_state_guard(own) == std::nullopt);
+    CHECK(link_state_guard(explicit_default).has_value());
     fs::remove_all(tmp);
 }
 

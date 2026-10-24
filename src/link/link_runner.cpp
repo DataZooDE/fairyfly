@@ -13,6 +13,13 @@
 #include <optional>
 #include <set>
 #include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <shlobj.h>
+#include <objbase.h>
+#endif
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -156,18 +163,40 @@ std::string state_path(const LinkOptions& o) { return o.state_path.empty() ? def
 
 /// FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1 (tests, tests/integration/link_trail_live.ps1): refuse the pairing state the
 /// person at this desktop relies on, so a test copy can never pause, unpair or overwrite it.
-std::optional<Result> state_guard(const LinkOptions& o) {
+bool guard_on() {
     const std::string v = ffy::env_or("FAIRYFLY_LINK_FORBID_DEFAULT_STATE");
-    if (v != "1" && v != "true" && v != "yes" && v != "on") return std::nullopt;
-    const std::string dir = std::filesystem::path(default_state_path()).parent_path().string();
-    if (!in_default_state_dir(state_path(o), dir)) return std::nullopt;
+    return v == "1" || v == "true" || v == "yes" || v == "on";
+}
+
+/// The pairing directories to protect: from LOCALAPPDATA (what default_state_path uses) and, on Windows, from the
+/// Local AppData known folder (a test may have redirected LOCALAPPDATA; the real pairing stays protected).
+std::vector<std::string> protected_dirs() {
+    std::vector<std::string> dirs{std::filesystem::path(default_state_path()).parent_path().string()};
+#ifdef _WIN32
+    PWSTR known = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &known)) && known)
+        dirs.push_back((std::filesystem::path(known) / "fairyfly" / "link").string());
+    if (known) CoTaskMemFree(known);
+#endif
+    return dirs;
+}
+
+std::optional<Result> state_guard_for(const std::string& path) {
+    if (!guard_on()) return std::nullopt;
+    std::string hit;
+    for (const auto& dir : protected_dirs())
+        if (in_default_state_dir(path, dir)) hit = dir;
+    if (hit.empty()) return std::nullopt;
+    const std::string dir = hit;
     Result r;
     r.status = Result::Status::Error;
     r.error["code"] = "STATE_GUARD";
-    r.error["message"] = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE is set and the pairing state " + state_path(o) + " lies in " + dir +
+    r.error["message"] = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE is set and the pairing state " + path + " lies in " + dir +
                          "; pass --state <file> outside it";
     return r;
 }
+
+std::optional<Result> state_guard(const LinkOptions& o) { return state_guard_for(state_path(o)); }
 
 std::string host_name() {
     std::string h = ffy::env_or("COMPUTERNAME");
@@ -188,6 +217,8 @@ json tools_json(const mcp::ToolProvider& provider) {
 }  // namespace
 
 int background_threads() { return g_background.load(); }
+
+std::optional<Result> link_state_guard(const LinkOptions& options) { return state_guard(options); }
 
 std::string default_state_path() {
 #ifdef _WIN32
@@ -348,7 +379,10 @@ public:
         }
         return v;
     }
-    bool set_paused(bool paused) override { return fairyfly::link::set_paused(path_, paused); }
+    bool set_paused(bool paused) override {
+        if (state_guard_for(path_)) return false;  // a test copy never pauses the real pairing
+        return fairyfly::link::set_paused(path_, paused);
+    }
 
 private:
     std::string path_;
@@ -427,7 +461,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     ro.source = trail::make_com_screen_source(peek);
     ro.run_on_main = [weak = std::weak_ptr<MainThreadTools>(tools)](std::function<void()> fn) {
         auto t = weak.lock();
-        return t && t->invoke(std::move(fn), 20000);
+        return t && t->invoke(std::move(fn), 5000);  // never holds up the answer for long
     };
     ro.on_policy = [trail_changed, tray = o.tray](const ffy::proto::TrailPolicy& p) {
         const std::string line = trail::notice_line(p);

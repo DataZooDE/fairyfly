@@ -122,6 +122,16 @@ never reaches a file or the log.
 - a screenshot is **dropped** (only the step is sent) when a field that must be blurred cannot be located, when the
   screen's elements cannot be read, or when the image does not have the window's proportions.
 
+- control containers the screen tree does not list (custom controls, docking and splitter containers) are read
+  element by element; one that cannot be read is filled as a whole, and so is a grid whose columns cannot be read;
+- the image must have the window's proportions (within 2 px) at a display scaling between 0.5 and 4, and the
+  window must still be the active one when it is captured (a popup that opened in between is not captured).
+
+Not covered (filled only when the element id, name, label or column name says so): column titles of ALV grids and
+table controls with custom (Z) names, classic list output (`lbl[c,r]` lines), HTML viewers and column-tree cells.
+Screens that show bank data only there should be kept out of recorded sessions. Calls run one at a time, but with several calls in flight a step's
+before/after screenshots can include the effect of another call between them.
+
 **Field changes.** For `gui_element_fill` and the tools annotated `destructiveHint` (e.g. `gui_key_send`,
 `gui_element_click`): the target of a fill, read before and after, and every input field on the screen whose value
 changed, as `{field: SAP id, label: screen label, old, new}`, at most 200. Values of password fields are always
