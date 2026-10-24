@@ -391,6 +391,9 @@ struct LinkTrayServices {
     std::function<void()> stop_link;   ///< thread-safe: makes the running `link run` return
     /// Unpaired at start: how often run_link_with_tray looks whether `link pair` (from the menu) has paired the desktop.
     std::chrono::milliseconds pairing_poll{1000};
+    /// optional: true while another link (e.g. `link run` in a console) serves this pairing; the tray then waits, with
+    /// a notice, instead of failing, and starts its link once that one ends. Polled every pairing_poll.
+    std::function<bool()> link_busy;
 };
 
 class LinkTrayController : public TrayListener {

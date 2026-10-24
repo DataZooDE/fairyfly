@@ -21,6 +21,18 @@
   release asset now carries a ~9 KB `Content-Security-Policy` header, above cpp-httplib's 8 KiB limit. The limit is
   raised to 64 KiB. A dropped connection on a download host is now retried like an HTTP error.
 
+### Cloud link: pairing and one link per pairing
+
+- `link pair` without `--gateway` and `FAIRYFLY_LINK_GATEWAY` asks for the service with `https://fairyfly.io`
+  filled in: Enter accepts it, or edit it (in a console the address stands in the input line; from a pipe it is
+  shown in brackets and an empty answer takes it). `--gateway` and `FAIRYFLY_LINK_GATEWAY` still decide without a
+  question.
+- `link run` (also the link tray's link) holds a per-pairing lock while it serves; a second link for the same pairing
+  state is refused with `LINK_ALREADY_RUNNING` instead of fighting the first over the connection. The link tray
+  waits (with a notice) while a console link serves its pairing and connects once that one ends.
+- `link pair`'s `next` no longer says `fairyfly link run` when the link tray is running (it connects by itself) or a
+  link for this pairing already runs (restart it to use the new pairing).
+
 ### Start menu and trays
 
 - The Start-menu entry "fairyfly (tray)" did nothing: it ran `mcp --tray`, which refuses to start without the HTTP

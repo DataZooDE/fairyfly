@@ -460,7 +460,7 @@ public:
     bool exists() override {
         if (handle_) return false;
         HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, utf8_to_wide(name_).c_str());
-        if (!h) return false;
+        if (!h) return GetLastError() == ERROR_ACCESS_DENIED;   // held by an elevated process: it exists
         CloseHandle(h);
         return true;
     }

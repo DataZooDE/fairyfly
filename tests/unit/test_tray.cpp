@@ -979,6 +979,43 @@ TEST_CASE("run_link_with_tray: unpaired, the tray stays up, leads to pairing and
     CHECK(f.host.boxes.empty());
 }
 
+TEST_CASE("run_link_with_tray: while a console link serves the pairing the tray waits, then starts its own", "[tray][link_tray][run]") {
+    Fixture f;
+    FakeGuard guard;
+    f.link.current = paired("not running");
+    std::atomic<bool> busy{true};
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.pairing_poll = std::chrono::milliseconds(5);
+    services.link_busy = [&] { return busy.load(); };
+    std::atomic<bool> stop{false};
+    services.stop_link = [&] { stop = true; };
+    std::atomic<int> runs{0};
+    int runs_while_busy = -1;
+    auto driver = drive(f.host, [&](TrayListener& l) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        runs_while_busy = runs;   // refused anyway (LINK_ALREADY_RUNNING): not started
+        busy = false;             // the console link ended
+        for (int i = 0; i < 500 && runs == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        l.on_action(TrayAction::Quit);
+    });
+    const int code = run_link_with_tray(
+        [&] {
+            ++runs;
+            for (int i = 0; i < 500 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return 0;
+        },
+        services, guard, f.paths);
+    driver.join();
+    CHECK(code == 0);
+    CHECK(runs_while_busy == 0);
+    CHECK(runs == 1);
+    REQUIRE_FALSE(f.host.balloons.empty());
+    CHECK(f.host.balloons[0].find("already running in a console") != std::string::npos);
+    CHECK(f.host.boxes.empty());
+}
+
 TEST_CASE("run_link_with_tray: Quit while unpaired ends the tray without starting the link", "[tray][link_tray][run]") {
     Fixture f;
     FakeGuard guard;

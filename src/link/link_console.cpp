@@ -1,6 +1,10 @@
 #include "include/link/link_console.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
 #include <cstdio>
 #include <iostream>
 
@@ -27,6 +31,50 @@ std::string render_qr(const ffy::qr::Matrix& m, QrStyle style) {
         out += "\n";
     }
     return out;
+}
+
+PairGateway pair_gateway(const std::string& flag, const std::string& env) {
+    if (!flag.empty()) return {flag, false};
+    if (!env.empty()) return {env, false};
+    return {kDefaultGateway, true};
+}
+
+std::string pair_gateway_prompt(const std::string& prefill, bool in_line) {
+    if (in_line) return "Web address of the fairyfly service (Enter accepts it, or change it): ";
+    return "Web address of the fairyfly service [" + prefill + "] (Enter accepts it, or type another): ";
+}
+
+std::string pair_gateway_answer(const std::string& typed, const std::string& prefill) {
+    const auto blank = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+    auto b = std::find_if_not(typed.begin(), typed.end(), blank);
+    auto e = std::find_if_not(typed.rbegin(), typed.rend(), blank).base();
+    const std::string t = b < e ? std::string(b, e) : std::string();
+    return t.empty() ? prefill : t;
+}
+
+std::string link_run_lock_name(const std::string& state_path) {
+    std::filesystem::path p(state_path);
+    std::error_code ec;
+    const auto abs = std::filesystem::absolute(p, ec);
+    std::string key = (ec ? p : abs).lexically_normal().string();
+    std::replace(key.begin(), key.end(), '/', '\\');
+    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::uint64_t h = 1469598103934665603ULL;   // FNV-1a: mutex names may not contain more backslashes
+    for (unsigned char c : key) {
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    char hex[17];
+    std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(h));
+    return std::string("Local\\fairyfly-link-run-") + hex;
+}
+
+std::string pair_next_step(bool link_tray_running, bool link_running) {
+    if (link_running)
+        return "a link for this desktop is already running with the previous pairing: quit it (tray: Quit, console: Ctrl+C) "
+               "and start it again";
+    if (link_tray_running) return "nothing: the link tray connects by itself now";
+    return "the Start-menu entry \"fairyfly\" (fairyfly link run --tray), or fairyfly link run in a console";
 }
 
 QrStyle choose_qr_style(const std::string& requested) {

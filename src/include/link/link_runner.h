@@ -29,7 +29,7 @@ std::string default_state_path();
 struct LinkOptions {
     std::string state_path;
     // pair
-    std::string gateway;          ///< web address of the service, e.g. https://app.fairyfly.cloud
+    std::string gateway;          ///< web address of the service, e.g. https://fairyfly.io (link_console.h kDefaultGateway)
     std::string qr_png;           ///< also write the QR code as a PNG file
     std::string qr_style = "auto";  ///< auto | blocks | ascii (see link_console.h)
     int pair_timeout_s = 300;
@@ -70,6 +70,10 @@ std::optional<Result> link_state_guard(const LinkOptions& options);
 
 /// The tray's view of the link (pairing state + the running link's status file) and its pause switch.
 std::unique_ptr<tray::LinkControl> make_link_control(const std::string& state_path = {});
+
+/// Takes the per-pairing lock (link_run_lock_name) into `held`, as run_link() does before it connects:
+/// LINK_ALREADY_RUNNING when another `link run` or the link tray serves this pairing already.
+std::optional<Result> claim_link_run(const std::string& state_path, std::unique_ptr<tray::SingleInstance>& held);
 
 /// Runs until Ctrl+C (or request_stop()). Returns the process exit code. Calls are audited with source "link".
 int run_link(const LinkOptions& options, const std::function<cli::CommandHandler&()>& get_handler,

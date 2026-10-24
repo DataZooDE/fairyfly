@@ -31,6 +31,9 @@
 #include "include/link/trail_recorder.h"
 #include "include/link/trail_screen_source.h"
 #include "include/mcp/run_mcp.h"
+#ifdef _WIN32
+#include "include/tray/tray_win32.h"
+#endif
 #include "include/version.h"
 
 // libffl
@@ -214,11 +217,77 @@ json tools_json(const mcp::ToolProvider& provider) {
     return out;
 }
 
+/// Puts `text` into the console's input line, as if typed: the person can accept it with Enter or edit it. False
+/// without a console on stdin (a pipe or file): the prompt then shows the prefill in brackets.
+bool prefill_console_line(const std::string& text) {
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (h == INVALID_HANDLE_VALUE || !h || !GetConsoleMode(h, &mode) || !(mode & ENABLE_LINE_INPUT) ||
+        !(mode & ENABLE_ECHO_INPUT))
+        return false;
+    FlushConsoleInputBuffer(h);   // typeahead would end up in front of the address
+    const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (n <= 0) return false;
+    std::wstring wide(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), n);
+    std::vector<INPUT_RECORD> keys;
+    for (wchar_t c : wide)
+        for (BOOL down : {TRUE, FALSE}) {
+            INPUT_RECORD r{};
+            r.EventType = KEY_EVENT;
+            r.Event.KeyEvent.bKeyDown = down;
+            r.Event.KeyEvent.wRepeatCount = 1;
+            r.Event.KeyEvent.uChar.UnicodeChar = c;
+            const SHORT vk = VkKeyScanW(c);   // some console hosts drop key events without a key code
+            if (vk != -1) {
+                r.Event.KeyEvent.wVirtualKeyCode = LOBYTE(vk);
+                r.Event.KeyEvent.wVirtualScanCode = static_cast<WORD>(MapVirtualKeyW(LOBYTE(vk), MAPVK_VK_TO_VSC));
+            }
+            keys.push_back(r);
+        }
+    DWORD written = 0;
+    return WriteConsoleInputW(h, keys.data(), static_cast<DWORD>(keys.size()), &written) && written == static_cast<DWORD>(keys.size());
+#else
+    (void)text;
+    return false;
+#endif
+}
+
+/// pair_next_step() for this desktop: is the link tray running, does a link already serve this pairing?
+std::string pair_next_step_now(const std::string& path) {
+#ifdef _WIN32
+    // the link tray serves the default pairing (its `--state` aside): it only connects a pairing made there
+    const bool tray_running = link_run_lock_name(path) == link_run_lock_name(default_state_path()) &&
+                              tray::make_win32_single_instance(tray::kLinkTrayMutexName)->exists();
+    const bool link_running = tray::make_win32_single_instance(link_run_lock_name(path))->exists();
+    return pair_next_step(tray_running, link_running);
+#else
+    (void)path;
+    return pair_next_step(false, false);
+#endif
+}
+
 }  // namespace
 
 int background_threads() { return g_background.load(); }
 
 std::optional<Result> link_state_guard(const LinkOptions& options) { return state_guard(options); }
+
+std::optional<Result> claim_link_run(const std::string& path, std::unique_ptr<tray::SingleInstance>& held) {
+#ifdef _WIN32
+    auto lock = tray::make_win32_single_instance(link_run_lock_name(path));
+    if (!lock->acquire())
+        return error("LINK_ALREADY_RUNNING", "a link for this pairing (" + path +
+                                                 ") is already running, in the link tray or another console; quit it first "
+                                                 "(tray: Quit, console: Ctrl+C)");
+    held = std::move(lock);
+#else
+    (void)path;
+    (void)held;
+#endif
+    return std::nullopt;
+}
 
 std::string default_state_path() {
 #ifdef _WIN32
@@ -246,16 +315,19 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     if (auto refused = state_guard(options)) return *refused;
     out << "state: " << state_path(options) << std::endl;
     LinkOptions o = options;
-    if (o.gateway.empty()) o.gateway = ffy::env_or("FAIRYFLY_LINK_GATEWAY");
-    if (o.gateway.empty()) {  // started from the tray: ask in the console
+    const PairGateway gateway = pair_gateway(o.gateway, ffy::env_or("FAIRYFLY_LINK_GATEWAY"));
+    o.gateway = gateway.address;
+    if (gateway.ask) {  // e.g. from the tray's "Pair with the fairyfly cloud": https://fairyfly.io, Enter accepts it
         if (stop) return cancelled();
-        out <<"Web address of the fairyfly service (from your administrator, e.g. https://app.fairyfly.cloud): " << std::flush;
-        std::getline(in, o.gateway);
+        const bool in_line = !io.in && prefill_console_line(gateway.address);   // editable in the console's input line
+        out << pair_gateway_prompt(gateway.address, in_line) << std::flush;
+        std::string typed;
+        std::getline(in, typed);
         if (stop) return cancelled();
-        while (!o.gateway.empty() && (o.gateway.back() == ' ' || o.gateway.back() == '\r')) o.gateway.pop_back();
+        o.gateway = pair_gateway_answer(typed, gateway.address);
     }
     if (o.gateway.rfind("https://", 0) != 0 && o.gateway.rfind("http://127.0.0.1", 0) != 0 && o.gateway.rfind("http://localhost", 0) != 0)
-        return error("INVALID_ARGUMENT", "the gateway address must start with https://, e.g. https://app.fairyfly.cloud");
+        return error("INVALID_ARGUMENT", std::string("the gateway address must start with https://, e.g. ") + kDefaultGateway);
     while (o.gateway.size() > 8 && o.gateway.back() == '/') o.gateway.pop_back();
     try {
         out << "Contacting " << o.gateway << "\xE2\x80\xA6" << std::endl;
@@ -294,7 +366,7 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
         Result r;
         r.status = Result::Status::Success;
         r.data = {{"device", st->device_id}, {"account", st->email}, {"organisation", st->tenant_name.empty() ? st->tenant : st->tenant_name},
-                  {"organisation_id", st->tenant}, {"gateway", st->link_url}, {"state", state_path(o)}, {"next", "fairyfly link run"}};
+                  {"organisation_id", st->tenant}, {"gateway", st->link_url}, {"state", state_path(o)}, {"next", pair_next_step_now(state_path(o))}};
         return r;
     } catch (const std::exception& e) {
         return error("PAIRING_FAILED", e.what());
@@ -318,7 +390,7 @@ Result link_status(const LinkOptions& o) {
     } catch (const std::exception&) {
         Result r;
         r.status = Result::Status::Success;
-        r.data = {{"paired", false}, {"state", state_path(o)}, {"next", "fairyfly link pair --gateway <address>"}};
+        r.data = {{"paired", false}, {"state", state_path(o)}, {"next", "fairyfly link pair"}};
         return r;
     }
 }
@@ -404,11 +476,18 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         return 2;
     }
     if (!o.tray) write_utf8("state: " + state_path(o) + "\n");
+    // one link per pairing: a second `link run` (or the tray's) next to a running one would fight over the connection
+    std::unique_ptr<tray::SingleInstance> run_lock;
+    if (auto refused = claim_link_run(state_path(o), run_lock)) {
+        spdlog::error("LINK_ALREADY_RUNNING: {}", refused->error.value("message", std::string()));   // the tray's link.log
+        std::cerr << refused->to_json().dump() << std::endl;
+        return 2;
+    }
     ffy::link::State st;
     try {
         st = ffy::link::load_state(state_path(o));
     } catch (const std::exception& e) {
-        Result r = error("LINK_NOT_PAIRED", std::string("this desktop is not paired (") + e.what() + "); run: fairyfly link pair --gateway <address>");
+        Result r = error("LINK_NOT_PAIRED", std::string("this desktop is not paired (") + e.what() + "); run: fairyfly link pair");
         std::cerr << r.to_json().dump() << std::endl;
         return 2;
     }

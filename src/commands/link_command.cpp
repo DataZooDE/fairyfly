@@ -14,9 +14,11 @@ CLI::App* LinkCommand::setup_cli(CLI::App& app) {
     pair_cmd_->footer(R"HELP(Usage notes:
 Shows a QR code and a number. Scan it with your phone, sign in, type the number; then confirm here
 that the account and organisation shown are yours. Nothing is saved before that confirmation.
-Example: fairyfly link pair --gateway https://app.fairyfly.cloud
+Without --gateway or FAIRYFLY_LINK_GATEWAY it asks for the service, https://fairyfly.io prefilled (Enter).
+Example: fairyfly link pair
+Example: fairyfly link pair --gateway https://fairyfly.io
 )HELP");
-    pair_cmd_->add_option("--gateway", options_.gateway, "Web address of the fairyfly service (default: FAIRYFLY_LINK_GATEWAY, else asked)");
+    pair_cmd_->add_option("--gateway", options_.gateway, "Web address of the fairyfly service (default: FAIRYFLY_LINK_GATEWAY, else asked with https://fairyfly.io prefilled)");
     pair_cmd_->add_option("--qr-png", options_.qr_png, "Also write the QR code as a PNG file");
     pair_cmd_->add_option("--qr-style", options_.qr_style, "QR code in the console: auto (block characters where the console can show them, else ASCII) | blocks | ascii")
         ->check(CLI::IsMember({"auto", "blocks", "ascii"}));

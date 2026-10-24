@@ -4,6 +4,7 @@
 
 #include "include/audit_log.h"
 #include "include/config/mcp_config.h"
+#include "include/link/link_console.h"
 #include "include/link/link_runner.h"
 #include "include/tray/tray.h"
 #include "include/tray/tray_win32.h"
@@ -68,6 +69,9 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     auto mcp_tray = tray::make_win32_single_instance(tray::kTrayMutexName);   // probed only: "Start local MCP server"
     tray_services.mcp_tray = mcp_tray.get();
     tray_services.stop_link = [] { request_stop(); };
+    tray_services.link_busy = [lock = link_run_lock_name(o.state_path.empty() ? default_state_path() : o.state_path)] {
+        return tray::make_win32_single_instance(lock)->exists();
+    };
 
     tray::TrayPaths paths;
     paths.log_file = log_file;

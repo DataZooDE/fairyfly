@@ -224,7 +224,15 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
         }
         spdlog::info("link tray: paired; starting the link");
     }
-    if (controller.quit_requested()) {   // Quit right after the pairing appeared
+    // One link per pairing: a console `link run` already serving it would refuse ours (LINK_ALREADY_RUNNING).
+    if (services.link_busy && services.link_busy()) {
+        spdlog::info("link tray: a link for this pairing already runs elsewhere; waiting until it ends");
+        spdlog::default_logger()->flush();
+        services.host->balloon("fairyfly link", "A link for this desktop is already running in a console. The tray "
+                                                "connects as soon as it ends (Ctrl+C there).");
+        while (!controller.quit_requested() && services.link_busy()) std::this_thread::sleep_for(services.pairing_poll);
+    }
+    if (controller.quit_requested()) {   // Quit right after the pairing appeared (or while another link ran)
         services.host->post_quit();
         ui.join();
         return 0;
