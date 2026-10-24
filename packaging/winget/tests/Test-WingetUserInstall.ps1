@@ -239,33 +239,41 @@ try {
     $linkLog = Join-Path $trayHome 'fairyfly\logs\link.log'
     Assert (Test-Path $linkLog) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
     # The icon itself can only be checked where an unelevated process can reach the taskbar. On the hosted runners
-    # Explorer runs ELEVATED (the runner account's full administrator token), so UIPI refuses the medium-integrity
+    # Explorer runs at HIGH integrity (the runner account's full administrator token), so UIPI refuses the medium-integrity
     # tray's Shell_NotifyIcon (error 5); on a user's desktop Explorer is unelevated. The tray then keeps running and
     # retrying (logged).
-    if (-not ('Ffy.Elevation' -as [type])) {
+    if (-not ('Ffy.Integrity' -as [type])) {
         Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
-namespace Ffy { public static class Elevation {
+namespace Ffy { public static class Integrity {
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr t);
-    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int info, int len, out int ret);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, IntPtr info, int len, out int ret);
+    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid, uint n);
+    [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
     [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
-    /// 1 elevated, 0 not, -1 unknown
+    /// Mandatory integrity level RID of a process (0x2000 medium, 0x3000 high), -1 unknown.
     public static int Of(int pid) {
         IntPtr p = OpenProcess(0x1000, false, pid); if (p == IntPtr.Zero) return -1;   // PROCESS_QUERY_LIMITED_INFORMATION
-        try { IntPtr t; if (!OpenProcessToken(p, 8, out t)) return -1;                  // TOKEN_QUERY
-              try { int e, r; return GetTokenInformation(t, 20, out e, 4, out r) ? (e != 0 ? 1 : 0) : -1; } finally { CloseHandle(t); } }
-        finally { CloseHandle(p); }
+        IntPtr t = IntPtr.Zero, buf = Marshal.AllocHGlobal(256);
+        try {
+            if (!OpenProcessToken(p, 8, out t)) return -1;   // TOKEN_QUERY
+            int ret; if (!GetTokenInformation(t, 25, buf, 256, out ret)) return -1;   // TokenIntegrityLevel
+            IntPtr sid = Marshal.ReadIntPtr(buf);
+            int n = Marshal.ReadByte(GetSidSubAuthorityCount(sid));
+            return Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(n - 1)));
+        } finally { if (t != IntPtr.Zero) CloseHandle(t); CloseHandle(p); Marshal.FreeHGlobal(buf); }
     } } }
 '@
     }
     $traySessions = @($alive | ForEach-Object { $_.SessionId })
     $explorerHere = @(Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId })
-    $explorerElevated = @($explorerHere | ForEach-Object { [Ffy.Elevation]::Of($_.Id) })
-    $trayElevated = @($alive | ForEach-Object { [Ffy.Elevation]::Of([int]$_.ProcessId) })
-    Write-Host "  Explorer in the tray's session: $($explorerHere.Count), elevated: $($explorerElevated -join ','); tray elevated: $($trayElevated -join ',')"
-    Assert (-not ($trayElevated -contains 1)) 'the shortcut started the tray unelevated'
-    if ($explorerHere.Count -gt 0 -and $explorerElevated -notcontains 1) {
+    $explorerLevels = @($explorerHere | ForEach-Object { [Ffy.Integrity]::Of($_.Id) })
+    $trayLevels = @($alive | ForEach-Object { [Ffy.Integrity]::Of([int]$_.ProcessId) })
+    Write-Host ("  Explorer in the tray's session: {0}, integrity: {1}; tray integrity: {2}" -f $explorerHere.Count,
+        (($explorerLevels | ForEach-Object { '0x{0:X}' -f $_ }) -join ','), (($trayLevels | ForEach-Object { '0x{0:X}' -f $_ }) -join ','))
+    Assert (@($trayLevels | Where-Object { $_ -ne 0x2000 }).Count -eq 0) 'the shortcut started the tray at medium integrity (unelevated)'
+    if ($explorerHere.Count -gt 0 -and @($explorerLevels | Where-Object { $_ -gt 0x2000 }).Count -eq 0) {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: notification icon added') 'the tray icon is in the taskbar (link.log)'
     } else {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: the notification icon could not be added yet') 'no reachable taskbar here: the tray says so in link.log and keeps running'
