@@ -464,7 +464,9 @@ namespace Ffy { public static class Msi {
             $text = Get-Content $log -Raw
             $text -split "`r?`n" | Select-String 'WIX_DOWNGRADE_DETECTED|WIX_UPGRADE_DETECTED|A newer version|Property\(S\): ProductVersion =|Installation success or error status' |
                 Select-Object -First 8 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
-            Assert ($code -ne 0) "$label over $($current.Version) is refused (msiexec exit $code)"
+            # `start /wait` does not pass msiexec's exit code on: the log's final status is the installer's result
+            $status = ([regex]::Matches($text, 'Installation success or error status: (\d+)') | Select-Object -Last 1).Groups[1].Value
+            Assert ($status -and $status -ne '0') "$label over $($current.Version) is refused (installer status $status)"
             Assert ($text -match 'Adding WIX_DOWNGRADE_DETECTED property') 'FindRelatedProducts detected the downgrade (WIX_DOWNGRADE_DETECTED)'
             $related = @(Get-RelatedProducts)
             Assert ($related.Count -eq 1 -and $related[0] -eq $current.ProductCode) "still exactly the product $($current.ProductCode): $($related -join ', ')"
