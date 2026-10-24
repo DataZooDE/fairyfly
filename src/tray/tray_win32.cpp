@@ -118,7 +118,9 @@ public:
         // later tick or on TaskbarCreated instead of ending the tray.
         icon_added_ = add_icon();
         if (icon_added_) note_icon_added();
-        else spdlog::warn("tray: the notification icon could not be added yet (no taskbar?); retrying");
+        else
+            spdlog::warn("tray: the notification icon could not be added yet (error {}, taskbar window {}); retrying",
+                         GetLastError(), FindWindowW(L"Shell_TrayWnd", nullptr) ? "present" : "missing");
         spdlog::default_logger()->flush();
         SetTimer(hwnd, kTimerId, kTickMs, nullptr);
         ready(true);

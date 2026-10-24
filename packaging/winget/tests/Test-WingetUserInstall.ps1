@@ -238,11 +238,18 @@ try {
     Assert (@($alive | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowTitle }).Count -eq 0) 'no visible window (no error message box): it sits in the tray'
     $linkLog = Join-Path $trayHome 'fairyfly\logs\link.log'
     Assert (Test-Path $linkLog) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
+    # The icon itself can only be checked where an unelevated process can reach the taskbar: with UAC off
+    # (EnableLUA=0, the hosted runners) Explorer runs with the full administrator token and UIPI drops the
+    # medium-integrity tray's Shell_NotifyIcon messages. The tray then keeps running and retrying (logged).
+    $lua = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue).EnableLUA
     $traySessions = @($alive | ForEach-Object { $_.SessionId })
-    if (Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId }) {
+    $explorerHere = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId }
+    Write-Host "  UAC EnableLUA=$lua, Explorer in the tray's session: $([bool]$explorerHere)"
+    if ($explorerHere -and "$lua" -ne '0') {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: notification icon added') 'the tray icon is in the taskbar (link.log)'
     } else {
-        Write-Host "  (no Explorer in session $($traySessions -join ',') - the icon check is skipped; the tray keeps retrying)"
+        Assert ((Get-Content $linkLog -Raw) -match 'tray: the notification icon could not be added yet') 'no reachable taskbar here: the tray says so in link.log and keeps running'
+        Write-Host '  (icon check skipped: no taskbar an unelevated process can reach)'
     }
     Assert (-not (Test-Path (Join-Path $trayHome 'fairyfly\link\state.json'))) 'nothing was paired'
     $alive | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

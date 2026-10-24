@@ -123,10 +123,10 @@ jobs:
         if ($v -ne $expected) { Write-Error "installed version '$v', expected '$expected'"; exit 1 }
         $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
         if ($userPath -notlike "*Programs\fairyfly*") { Write-Error "user PATH not extended: $userPath"; exit 1 }
-        $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\fairyfly (tray).lnk'
+        $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\fairyfly.lnk'
         if (-not (Test-Path $lnk)) { Write-Error "Start-menu shortcut missing: $lnk"; exit 1 }
         $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
-        if ($target.Arguments -ne 'mcp --tray') { Write-Error "shortcut arguments '$($target.Arguments)'"; exit 1 }
+        if ($target.Arguments -ne 'link run --tray') { Write-Error "shortcut arguments '$($target.Arguments)'"; exit 1 }
         if (Test-Path 'HKLM:\Software\DataZoo\fairyfly') { Write-Error "per-user MSI wrote HKLM"; exit 1 }
         & $exe update check
         Write-Host "installed OK: $exe $v"
