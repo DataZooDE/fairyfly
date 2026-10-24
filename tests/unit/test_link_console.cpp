@@ -368,7 +368,19 @@ TEST_CASE("link pair: https://fairyfly.io is prefilled; --gateway and FAIRYFLY_L
 }
 
 TEST_CASE("link pair: asks for the address with https://fairyfly.io prefilled; a typed address replaces it", "[link][pair]") {
-    REQUIRE(std::getenv("FAIRYFLY_LINK_GATEWAY") == nullptr);
+    // the live checks have developers set FAIRYFLY_LINK_GATEWAY: clear it for this test, restore it afterwards
+    struct EnvCleared {
+        std::string saved;
+        bool had = false;
+        EnvCleared() {
+            char* v = nullptr;
+            size_t n = 0;
+            if (_dupenv_s(&v, &n, "FAIRYFLY_LINK_GATEWAY") == 0 && v) { saved = v; had = true; }
+            free(v);
+            _putenv_s("FAIRYFLY_LINK_GATEWAY", "");
+        }
+        ~EnvCleared() { _putenv_s("FAIRYFLY_LINK_GATEWAY", had ? saved.c_str() : ""); }
+    } env_cleared;
     FakePairing gw;
     SharedOut buf;
     std::ostream out(&buf);

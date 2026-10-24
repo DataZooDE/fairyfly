@@ -16,7 +16,7 @@
 
   Prerequisites:
     - Windows PowerShell 5.1, SAP GUI with scripting enabled, a logged-in session (SAP Easy Access, no popup);
-    - this desktop paired once by a person: `fairyfly link pair --gateway <address>` (QR + number on the phone);
+    - this desktop paired once by a person: `fairyfly link pair` (asks, https://fairyfly.io prefilled) (QR + number on the phone);
     - no other `fairyfly link run` on this desktop (it uses the real pairing and its pause marker; exit 2 otherwise);
     - an access token for the gateway's MCP endpoint of the same user, e.g. from the web app's connector wizard
       ("Run test" shows how) or from your AI platform's OAuth flow. Pass it in the environment variable

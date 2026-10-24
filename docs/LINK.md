@@ -23,7 +23,8 @@ it is shown as `[https://fairyfly.io]`): Enter accepts it.
 
 One link per pairing: `link run`, in a console or in the link tray, holds a lock for its pairing state file while it
 serves. A second one for the same file is refused with `LINK_ALREADY_RUNNING` (quit the first: tray Quit, console
-Ctrl+C). `link pair` reports the next step accordingly: nothing when the link tray is running (it connects by
+Ctrl+C). The link tray does not fail in that case: it says so in a notice and connects once the console's link
+ends. `link pair` reports the next step accordingly: nothing when the link tray is running (it connects by
 itself), and a restart when a link for this pairing is already running with the previous pairing.
 
 What the console shows:

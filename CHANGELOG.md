@@ -9,7 +9,8 @@
   shown in brackets and an empty answer takes it). `--gateway` and `FAIRYFLY_LINK_GATEWAY` still decide without a
   question.
 - `link run` (also the link tray's link) holds a per-pairing lock while it serves; a second link for the same pairing
-  state is refused with `LINK_ALREADY_RUNNING` instead of fighting the first over the connection.
+  state is refused with `LINK_ALREADY_RUNNING` instead of fighting the first over the connection. The link tray
+  waits (with a notice) while a console link serves its pairing and connects once that one ends.
 - `link pair`'s `next` no longer says `fairyfly link run` when the link tray is running (it connects by itself) or a
   link for this pairing already runs (restart it to use the new pairing).
 

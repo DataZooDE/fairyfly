@@ -223,7 +223,10 @@ bool prefill_console_line(const std::string& text) {
 #ifdef _WIN32
     HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
     DWORD mode = 0;
-    if (h == INVALID_HANDLE_VALUE || !h || !GetConsoleMode(h, &mode) || !(mode & ENABLE_LINE_INPUT)) return false;
+    if (h == INVALID_HANDLE_VALUE || !h || !GetConsoleMode(h, &mode) || !(mode & ENABLE_LINE_INPUT) ||
+        !(mode & ENABLE_ECHO_INPUT))
+        return false;
+    FlushConsoleInputBuffer(h);   // typeahead would end up in front of the address
     const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
     if (n <= 0) return false;
     std::wstring wide(static_cast<size_t>(n), L'\0');
@@ -236,6 +239,11 @@ bool prefill_console_line(const std::string& text) {
             r.Event.KeyEvent.bKeyDown = down;
             r.Event.KeyEvent.wRepeatCount = 1;
             r.Event.KeyEvent.uChar.UnicodeChar = c;
+            const SHORT vk = VkKeyScanW(c);   // some console hosts drop key events without a key code
+            if (vk != -1) {
+                r.Event.KeyEvent.wVirtualKeyCode = LOBYTE(vk);
+                r.Event.KeyEvent.wVirtualScanCode = static_cast<WORD>(MapVirtualKeyW(LOBYTE(vk), MAPVK_VK_TO_VSC));
+            }
             keys.push_back(r);
         }
     DWORD written = 0;
@@ -249,7 +257,9 @@ bool prefill_console_line(const std::string& text) {
 /// pair_next_step() for this desktop: is the link tray running, does a link already serve this pairing?
 std::string pair_next_step_now(const std::string& path) {
 #ifdef _WIN32
-    const bool tray_running = tray::make_win32_single_instance(tray::kLinkTrayMutexName)->exists();
+    // the link tray serves the default pairing (its `--state` aside): it only connects a pairing made there
+    const bool tray_running = link_run_lock_name(path) == link_run_lock_name(default_state_path()) &&
+                              tray::make_win32_single_instance(tray::kLinkTrayMutexName)->exists();
     const bool link_running = tray::make_win32_single_instance(link_run_lock_name(path))->exists();
     return pair_next_step(tray_running, link_running);
 #else
