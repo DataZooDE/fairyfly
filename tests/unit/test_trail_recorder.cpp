@@ -795,8 +795,8 @@ std::string reassemble(const std::vector<ffy::proto::Frame>& frames, const std::
 
 TEST_CASE("trail agent: with fairyfly's recorder a recorded call yields a step frame and blurred shot frames", "[trail][link]") {
     AgentRig rig;
-    // the desktop announces the trail and blurring
-    CHECK(rig.agent->caps() == std::vector<std::string>{"trail/1", "trail-blur/1"});
+    // the desktop announces the trail, blurring and (libffl since gateway #121) that it reports approval decisions
+    CHECK(rig.agent->caps() == std::vector<std::string>{"trail/1", "trail-blur/1", "approval/1"});
     const json per_call = {{"v", 1}, {"shots", true}, {"blur", true}};
 
     // without the policy: no recording, whatever the request says

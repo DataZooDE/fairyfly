@@ -16,8 +16,28 @@ struct ApprovalPrompt {
     std::string summary;             // approval::summarize: every step, its target and field names, never a value
     std::vector<std::string> steps;  // approval::steps: the same, one text per step (a single call is one step)
     int window_s = 300;              // a yes allows further changes for this long without asking again
+    // How long the question waits for an answer; then it is "expired". 45 s: the answer (or APPROVAL_EXPIRED) must reach
+    // the assistant before its MCP client gives up (about 60 s); strictly below the gateway's 50 s (approval_timeout_ms).
+    int answer_s = 45;
     std::string text;                // the whole question as one text: what the built-in dialog shows
 };
+
+// The answer and why. The link agent reports `reason` to the gateway (res.approval, the audit record's "approval") and
+// refuses with APPROVAL_DENIED / APPROVAL_EXPIRED / APPROVAL_LOCKED. Only `approved` decides; reasons it does not know
+// are read as "approved" (approved true) or "denied" (approved false), "expired_in_queue" as "expired".
+namespace approval_reason {
+inline constexpr const char* kApproved = "approved";      // the person said yes
+inline constexpr const char* kRemembered = "remembered";  // an earlier yes covers it ("don't ask again", the agent's window)
+inline constexpr const char* kDenied = "denied";          // the person said no (or closed the question)
+inline constexpr const char* kExpired = "expired";        // nobody answered within answer_s (also: waited too long in the queue)
+inline constexpr const char* kLocked = "locked";          // the screen is locked, or nobody is signed in to answer
+inline constexpr const char* kNone = "none";              // nothing to approve (reads, approvals off), or refused before asking
+}  // namespace approval_reason
+struct ApprovalResult {
+    bool approved = false;
+    std::string reason;
+};
+ApprovalResult normalize(ApprovalResult r);
 
 class Approver {
 public:
@@ -26,10 +46,16 @@ public:
     // The structured question; true only for an explicit yes. The default asks approve(prompt.text), so an Approver
     // that only implements the text question keeps working. A tray UI overrides this to show the steps as a list.
     virtual bool approve_change(const ApprovalPrompt& prompt) { return approve(prompt.text); }
+    // The structured question with the reason (what the link agent calls). The default asks approve_change(prompt):
+    // an Approver that answers only yes/no is reported as approved / denied.
+    virtual ApprovalResult decide(const ApprovalPrompt& prompt) {
+        bool yes = approve_change(prompt);
+        return {yes, yes ? approval_reason::kApproved : approval_reason::kDenied};
+    }
 };
 
 std::shared_ptr<Approver> fixed_approver(bool answer);  // tests, or an explicitly unattended machine (--approve yes)
-// Windows: topmost Yes/No dialog on the interactive desktop (no answer in 60 s = deny).
+// Windows: topmost Yes/No dialog on the interactive desktop (no answer within prompt.answer_s = expired).
 // Other platforms: denies (there is no desktop dialog); use fixed_approver(true) for unattended test rigs.
 std::shared_ptr<Approver> desktop_approver();
 

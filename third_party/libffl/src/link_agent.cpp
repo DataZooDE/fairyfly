@@ -109,10 +109,14 @@ bool Agent::refresh_local() {
 
 // ---- enforcement -------------------------------------------------------------------------------------------------------
 
-bool Agent::approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args) {
+// a yes covers that assistant acting for that account, like fairyfly's "don't ask again" (#32)
+static std::string remember_key(const assertion::Claims& c) { return c.client + "\n" + c.sub; }
+
+ApprovalResult Agent::approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args) {
     {
         std::lock_guard<std::mutex> l(mu_);
-        if (now_unix() < approved_until_) return true;
+        auto i = approved_until_.find(remember_key(c));
+        if (i != approved_until_.end() && now_unix() < i->second) return {true, approval_reason::kRemembered};
     }
     ApprovalPrompt p;
     p.client = c.client.empty() ? "unknown client" : c.client.substr(0, 24);
@@ -121,13 +125,25 @@ bool Agent::approved(const assertion::Claims& c, const std::string& tool, const 
     p.summary = approval::summarize(tool, args).value_or(tool);  // serve() refused what does not fit
     p.steps = approval::steps(tool, args);
     p.window_s = cfg_.approve_window_s;
-    p.text = "An AI assistant (" + p.client + ") acting for " + c.sub + " wants to change data in your SAP session:\n\n" + p.summary +
-             "\n\nAllow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?";
-    if (!cfg_.approver->approve_change(p)) return false;
-    std::lock_guard<std::mutex> l(mu_);
-    approved_until_ = now_unix() + cfg_.approve_window_s;
-    return true;
+    p.answer_s = cfg_.approval_answer_s;
+    p.text = "An AI assistant (" + p.client + ") acting for " + c.sub + " wants to change data in your SAP session:\n\n" + p.summary + "\n\n" +
+             (cfg_.approve_window_s >= 60 ? "Allow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?" : std::string("Allow this change?")) +
+             "\n\n(No answer within " + std::to_string(p.answer_s) + " s: the change is not made.)";
+    return normalize(cfg_.approver->decide(p));  // the window opens in serve(), once the call will run
 }
+
+namespace {
+// The refusal for a decision that is not a yes, in words the assistant can pass on (ApprovalResult::reason).
+std::pair<std::string, std::string> refusal(const std::string& reason, int answer_s) {
+    if (reason == approval_reason::kExpired)
+        return {"APPROVAL_EXPIRED", "Nobody approved the change at the desktop within " + std::to_string(answer_s) +
+                                        " s; nothing was changed in SAP. Ask the person at the desktop to watch for the fairyfly approval, then try again."};
+    if (reason == approval_reason::kLocked)
+        return {"APPROVAL_LOCKED", "The desktop is locked or nobody is signed in, so nobody could approve the change; nothing was changed in SAP. "
+                                   "Ask the person to unlock the desktop, then try again."};
+    return {"APPROVAL_DENIED", "The person at the desktop denied the change; nothing was changed in SAP. Do not retry it without asking them."};
+}
+}  // namespace
 
 static proto::Frame fail(const std::string& id, const std::string& code, const std::string& msg) {
     proto::Frame f;
@@ -135,8 +151,13 @@ static proto::Frame fail(const std::string& id, const std::string& code, const s
     return f;
 }
 
-Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel) {
-    auto fail = [](const std::string& id, const std::string& code, const std::string& msg) { return Outcome{link::fail(id, code, msg), {}}; };
+Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel, const std::function<void(const proto::Frame&)>& send) {
+    std::string verdict = approval_reason::kNone;  // what the person decided, in every reply (kCapApproval)
+    auto fail = [&verdict](const std::string& id, const std::string& code, const std::string& msg) {
+        Outcome o{link::fail(id, code, msg), {}};
+        o.res.approval = verdict;
+        return o;
+    };
     assertion::Claims c;
     try {
         c = ver_.verify(req.assertion, st_.device_id, req.id);
@@ -185,12 +206,48 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     // a transaction list binds the screen only where fairyfly applies it per call (the gateway checks the same caps)
     if (!cfg_.local_enforces_tcodes && policy::needs_desktop_tcodes(g, tool, checked))
         return deny("TCODE_UNSUPPORTED", "your transactions are restricted, and the fairyfly on this desktop cannot enforce that; update fairyfly");
-    if (g.allow_write && (checked.writes || lt.destructive) && g.approval != "none") {
+    // A change: a batch when any step's tool is a change in the local catalog (an unknown one counts as a change), a
+    // step fills, or fairyfly's read-only guard would refuse a step; never because of gui_batch's own annotation. The
+    // guard's id and label rules may only make read-only grants stricter: with a write grant fairyfly does not run it.
+    bool step_changes = false;
+    if (tool == "gui_batch") {
+        std::lock_guard<std::mutex> l(mu_);
+        for (auto& t : checked.tools)
+            if (auto i = local_.find(t); i == local_.end() || i->second.destructive) step_changes = true;
+    }
+    // A single call: its annotation, a fill, or what the guard would refuse (gui_popup_close is annotated as no change,
+    // but Enter on a popup confirms it) - the same rule as for a batch step.
+    const bool change = checked.writes || checked.read_only_refused || (tool == "gui_batch" ? step_changes : lt.destructive);
+    ApprovalResult r;
+    bool asked = false;
+    auto late = [&] { return cancel && cancel->load(); };  // the gateway stopped waiting (its approval deadline)
+    auto late_yes = [&] {  // a late yes runs nothing
+        verdict = approval_reason::kExpired;
+        return deny("APPROVAL_EXPIRED", "The change was approved at the desktop only after the gateway stopped waiting; nothing was changed in SAP. Try again.");
+    };
+    if (g.allow_write && change && g.approval != "none") {
         // the person at this desktop decides; every mode but "none" asks here (also "phone" / "phone_or_desktop" of a
         // gateway from before 2026-10-24: there is no phone approval any more, an "approval" claim is ignored)
         if (!approval::summarize(tool, args))
             return deny("BATCH_TOO_LONG_TO_APPROVE", "this call is too long to show at the desktop for approval; split it into several smaller calls");
-        if (!approved(c, tool, args)) return deny("APPROVAL_DENIED", "the person at the desktop did not approve the change");
+        r = approved(c, tool, args);
+        verdict = r.reason;
+        if (!r.approved) {
+            auto [code, msg] = refusal(r.reason, cfg_.approval_answer_s);
+            return deny(code, msg);
+        }
+        asked = true;
+        if (late()) return late_yes();
+    }
+    if (send && req.approval == "await") {  // the gateway holds this call to its approval deadline until it hears this
+        proto::Frame ev;
+        ev.t = proto::TEvt; ev.id = req.id; ev.kind = "approval"; ev.approval = verdict;
+        send(ev);
+        if (asked && late()) return late_yes();  // its cancel crossed the evt: the gateway may already have answered
+    }
+    if (asked && r.reason == approval_reason::kApproved && cfg_.approve_window_s > 0) {  // only a yes for a call that runs
+        std::lock_guard<std::mutex> l(mu_);
+        approved_until_[remember_key(c)] = now_unix() + cfg_.approve_window_s;
     }
 
     int64_t budget = req.deadline_ms > 0 ? std::min<int64_t>(req.deadline_ms + 1000, 130000) : 125000;
@@ -238,7 +295,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
             out["result"]["_meta"].erase("fairyfly/changes");
             if (out["result"]["_meta"].empty()) out["result"].erase("_meta");
         }
-        o.res.t = proto::TRes; o.res.id = req.id; o.res.rpc = std::move(out);
+        o.res.t = proto::TRes; o.res.id = req.id; o.res.rpc = std::move(out); o.res.approval = verdict;
         return o;
     } catch (const std::exception& e) {
         spdlog::warn("local call failed: tool={} err={}", tool, e.what());
@@ -328,6 +385,7 @@ std::vector<std::string> Agent::caps() const {
     }
     if (cfg_.local_enforces_tcodes) c.push_back(proto::kCapTcodes);
     if (cfg_.local_honours_cancel) c.push_back(proto::kCapCancel);
+    c.push_back(proto::kCapApproval);
     return c;
 }
 
@@ -475,7 +533,7 @@ bool Agent::session(const std::atomic<bool>& stop) {
             { std::lock_guard<std::mutex> l(mu_); inflight_[f->id] = cancelled; }
             active_++;
             std::thread([this, f = *f, cancelled, w = ws.get()] {
-                Outcome o = serve(f, cancelled);
+                Outcome o = serve(f, cancelled, [w](const proto::Frame& ev) { w->send_text(ev.dump()); });
                 // also after a cancel: a gateway that waits for it learns which steps ran; others ignore the late reply
                 w->send_text(o.res.dump());
                 for (auto& t : o.trail) w->send_text(t.dump());  // the record follows the answer

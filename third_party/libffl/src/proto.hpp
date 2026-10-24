@@ -40,6 +40,11 @@ inline constexpr const char* kCapTcodes = "tcodes/1";
 // A cancel frame stops the call on the desktop (a batch runs no further step) and the desktop still sends the res,
 // with the steps that ran; the gateway waits a moment for it after a timeout.
 inline constexpr const char* kCapCancel = "cancel/1";
+// The desktop reports its approval decision (link::ApprovalResult): res.approval on every reply, and, when the req says
+// approval "await", an evt (kind "approval") as soon as the approval is passed, before the call runs (and a cancel that
+// crossed it still stops the call). Without that evt by its approval deadline the gateway cancels and, after a short
+// grace, answers APPROVAL_EXPIRED (before the assistant's MCP client gives up). res.approval is desktop-reported.
+inline constexpr const char* kCapApproval = "approval/1";
 inline constexpr size_t kShotMaxBytes = 4u << 20;             // one screenshot, encoded (PNG or WebP)
 inline constexpr size_t kShotChunkBytes = 512u << 10;         // raw bytes per shot frame (base64 in the frame)
 inline constexpr size_t kStepMaxBytes = 128u << 10;           // one step frame
@@ -83,6 +88,8 @@ struct Frame {
     std::vector<std::string> caps;
     nlohmann::json trail, step;
     std::string data;
+    // approval (kCapApproval): req "await"; res and evt (kind "approval"): approved|remembered|denied|expired|locked|none
+    std::string approval;
     int seq = 0;
     bool last = false;
 
