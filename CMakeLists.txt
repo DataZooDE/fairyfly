@@ -79,7 +79,10 @@ target_include_directories(ffl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/src
 target_include_directories(ffl SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/cpp-httplib
                                               ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/qrcodegen)
 target_compile_definitions(ffl PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_TCP_NODELAY=true
-                                      CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH=8454144)
+                                      CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH=8454144
+                                      # GitHub's download redirect carries a 9 KB Content-Security-Policy line (2026-10-24);
+                                      # the 8 KB default made every update download fail with "Failed to read connection"
+                                      CPPHTTPLIB_HEADER_MAX_LENGTH=65536)
 target_link_libraries(ffl PUBLIC OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp spdlog::spdlog)
 if(WIN32)
     target_link_libraries(ffl PUBLIC ws2_32 mswsock crypt32 user32 shell32)
