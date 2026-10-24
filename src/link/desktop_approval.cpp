@@ -5,6 +5,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <cctype>
 #include <random>
 
 namespace fairyfly::link::approval {
@@ -34,6 +35,53 @@ std::string random_nonce() {
 
 }  // namespace
 
+std::string client_name(const std::string& client_id) {
+    std::string id = client_id;
+    while (!id.empty() && (id.back() == ' ' || id.back() == '/')) id.pop_back();
+    if (id.empty() || id == "unknown client") return "an AI assistant";
+    std::string lower;
+    for (char c : id) lower += char(std::tolower(static_cast<unsigned char>(c)));
+    // known assistants, by the host or the name they report
+    struct Known {
+        const char* part;
+        const char* name;
+    };
+    static const Known known[] = {{"claude-code", "Claude Code"}, {"claude code", "Claude Code"}, {"claude desktop", "Claude Desktop"},
+                                  {"claude.ai", "Claude"},        {"anthropic.com", "Claude"},    {"chatgpt.com", "ChatGPT"},
+                                  {"openai.com", "ChatGPT"},      {"copilot", "Microsoft Copilot"}, {"gemini.google", "Gemini"}};
+    for (const auto& k : known)
+        if (lower.find(k.part) != std::string::npos) return k.name;
+    const auto scheme = lower.find("://");
+    if (scheme == std::string::npos) return id;  // a plain name
+    std::string host = id.substr(scheme + 3);
+    host = host.substr(0, host.find_first_of("/:?#"));
+    if (host.rfind("www.", 0) == 0) host = host.substr(4);
+    return host.empty() ? id : host;
+}
+
+std::string readable_step(const std::string& step) {
+    // SAP GUI's standard toolbar (tbar[0]) is the same on every screen
+    static const std::pair<const char*, const char*> buttons[] = {{"tbar[0]/btn[0]", "Enter"}, {"tbar[0]/btn[3]", "Back"},
+                                                                  {"tbar[0]/btn[11]", "Save"}, {"tbar[0]/btn[12]", "Cancel"},
+                                                                  {"tbar[0]/btn[15]", "Exit"}};
+    std::string out = step;
+    for (const auto& [id, name] : buttons) {
+        const std::string suffix = std::string(id);
+        for (size_t at = out.find(suffix); at != std::string::npos; at = out.find(suffix, at + 1)) {
+            const size_t end = at + suffix.size();
+            if (end < out.size() && out[end] != ' ' && out[end] != ',' && out[end] != ';') continue;  // btn[11] only, not btn[110]
+            // the whole element id: back to the start of the word
+            size_t begin = out.rfind(' ', at);
+            begin = begin == std::string::npos ? 0 : begin + 1;
+            const std::string element = out.substr(begin, end - begin);
+            const std::string named = std::string(name) + " (" + element + ")";
+            out.replace(begin, end - begin, named);
+            at = begin + named.size() - 1;
+        }
+    }
+    return out;
+}
+
 std::string answer_text(Answer a, const Request& r) { return std::string(verb(a)) + ":" + std::to_string(r.id) + ":" + r.nonce; }
 
 std::optional<ParsedAnswer> parse_answer(const std::string& text) {
@@ -59,13 +107,14 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     Request r;
     r.id = id;
     r.nonce = random_nonce();
-    r.client = p.client;
+    r.client = client_name(p.client);
+    r.client_id = p.client;
     r.user = p.user;
     r.tool = p.tool;
-    r.summary = p.summary.empty() ? p.text : p.summary;
-    r.steps = p.steps;
+    r.summary = readable_step(p.summary.empty() ? p.text : p.summary);
+    for (const auto& s : p.steps) r.steps.push_back(readable_step(s));
     if (r.steps.empty()) r.steps.push_back(r.summary);
-    r.window_s = p.window_s;
+    r.remember_s = int(std::chrono::duration_cast<std::chrono::seconds>(options_.remember_for).count());
     if (desk_.sap) {
         try {
             r.sap = desk_.sap();
@@ -109,6 +158,18 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
         spdlog::info("approval {}: denied, the screen is locked or there is no interactive session ({} {})", id, prompt.client, prompt.tool);
         return {false, "locked"};
     }
+    {
+        std::lock_guard<std::mutex> l(mu_);
+        auto i = remembered_.find(remember_key(prompt));
+        if (i != remembered_.end()) {
+            if (clock::now() < i->second) {
+                spdlog::info("approval {}: remembered (\"don't ask again\" for {} by {}: {})", id, client_name(prompt.client), prompt.user,
+                             prompt.summary.empty() ? prompt.tool : prompt.summary);
+                return {true, "remembered"};
+            }
+            remembered_.erase(i);
+        }
+    }
     Request r = build(prompt, id);
     r.deadline = deadline;
     r.expires_at = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(deadline - clock::now());
@@ -123,12 +184,21 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     Decision d{false, "expired"};
     while (true) {
         if (window) {
-            const Answer a = ui_->ask(r, [&] {
-                std::lock_guard<std::mutex> l(mu_);
-                return clock::now() >= deadline || noticed_ == Answer::Approve || noticed_ == Answer::Deny || !can_ask();
-            });
+            bool remember = false;
+            const Answer a = ui_->ask(
+                r,
+                [&] {
+                    std::lock_guard<std::mutex> l(mu_);
+                    return clock::now() >= deadline || noticed_ == Answer::Approve || noticed_ == Answer::Deny || !can_ask();
+                },
+                remember);
             if (a == Answer::Approve || a == Answer::Deny) {
                 d = {a == Answer::Approve, a == Answer::Approve ? "approved" : "denied"};
+                if (a == Answer::Approve && remember) {
+                    std::lock_guard<std::mutex> l(mu_);
+                    remembered_[remember_key(prompt)] = clock::now() + options_.remember_for;
+                    spdlog::info("approval {}: further changes by {} for {} approved without asking until the time is up", id, r.client, r.user);
+                }
                 break;
             }
             window = false;  // stopped: the notification answered, it expired or the screen locked

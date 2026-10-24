@@ -270,7 +270,9 @@ HRESULT CALLBACK window_events(HWND hwnd, UINT msg, WPARAM wp, LPARAM, LONG_PTR 
 }  // namespace
 
 std::wstring window_text(const Request& r) {
-    std::wstring s = L"Assistant: " + wide(r.client) + L"\nActing for: " + wide(r.user) + L"\n";
+    std::wstring s = L"Assistant: " + wide(r.client);
+    if (!r.client_id.empty() && r.client_id != r.client) s += L" (" + wide(r.client_id) + L")";
+    s += L"\nActing for: " + wide(r.user) + L"\n";
     const auto& sap = r.sap;
     if (sap.system.empty() && sap.transaction.empty()) {
         s += L"SAP: the session fairyfly works in\n";
@@ -391,7 +393,8 @@ public:
             history->RemoveGroupedTagWithId(HStringReference(tag.c_str()).Get(), HStringReference(kGroup).Get(), HStringReference(kAppUserModelId).Get());
     }
 
-    Answer ask(const Request& r, const std::function<bool()>& stop) override {
+    Answer ask(const Request& r, const std::function<bool()>& stop, bool& remember) override {
+        remember = false;
         auto fn = task_dialog();
         if (!fn) {
             spdlog::error("approval {}: denied, the approval window cannot be shown (common controls 6 missing)", r.id);
@@ -404,10 +407,11 @@ public:
         const std::wstring title = L"fairyfly – approve a change in SAP";
         const std::wstring head = headline(r);
         const std::wstring body = window_text(r);
-        const int minutes = std::max(1, r.window_s / 60);
-        const std::wstring approve = L"Approve\nAllow changes in SAP for the next " + std::to_wstring(minutes) +
-                                     (minutes == 1 ? L" minute" : L" minutes") + L" without asking again";
+        const int minutes = std::max(1, r.remember_s / 60);
+        const std::wstring approve = r.steps.size() == 1 ? L"Approve\nThis change only" : L"Approve\nThese " + std::to_wstring(r.steps.size()) + L" steps only";
         const std::wstring deny = L"Deny\nNothing is changed in SAP";
+        const std::wstring again = L"Don't ask again for " + std::to_wstring(minutes) + (minutes == 1 ? L" minute" : L" minutes") + L" (" +
+                                   wide(r.client) + L" for " + wide(r.user) + L")";
         const auto left = std::chrono::duration_cast<std::chrono::seconds>(r.deadline - st.opened).count();
         const std::wstring footer = countdown(std::max<long long>(0, left));
         TASKDIALOG_BUTTON buttons[] = {{kApprove, approve.c_str()}, {kDeny, deny.c_str()}};
@@ -433,12 +437,14 @@ public:
         c.cButtons = UINT(std::size(buttons));
         c.pButtons = buttons;
         c.nDefaultButton = kDeny;  // Enter and Esc deny
+        c.pszVerificationText = again.c_str();  // unticked: every change asks
         c.pszFooter = footer.c_str();
         c.pszFooterIcon = TD_INFORMATION_ICON;
         c.pfCallback = window_events;
         c.lpCallbackData = reinterpret_cast<LONG_PTR>(&st);
         int pressed = 0;
-        const HRESULT hr = fn(&c, &pressed, nullptr, nullptr);
+        BOOL ticked = FALSE;
+        const HRESULT hr = fn(&c, &pressed, nullptr, &ticked);
         if (big) DestroyIcon(big);
         if (st.icon_small) DestroyIcon(st.icon_small);
         if (FAILED(hr)) {
@@ -446,6 +452,7 @@ public:
             return Answer::Deny;
         }
         if (st.stopped) return Answer::None;
+        remember = pressed == kApprove && ticked;
         return pressed == kApprove ? Answer::Approve : Answer::Deny;
     }
 

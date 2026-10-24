@@ -544,7 +544,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     cfg.local = tools;
     cfg.version = fairyfly::FAIRYFLY_VERSION;
 #ifdef _WIN32
-    // a change is approved at this desktop: a notification, the approval window on Details (desktop_approval_win32)
+    // a change is approved at this desktop: a notification, the approval window on Details (desktop_approval_win32).
+    // Every change asks: libffl's blanket window is off; only the window's "Don't ask again" remembers a yes.
+    cfg.approve_window_s = 0;
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false)
                                      : approval::make_desktop_approver([weak = std::weak_ptr<MainThreadTools>(tools), peek] {
                                            // the SAP session the change would run in, read on the main (COM) thread
