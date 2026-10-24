@@ -36,7 +36,8 @@ Example: fairyfly link status
     run_cmd_->footer(R"HELP(Usage notes:
 Connects to the gateway (outbound WebSocket) and serves the AI assistant's tool calls through
 fairyfly's own MCP dispatcher. Read-only unless --allow-write; even then every change needs the
-gateway's grant and an approval (this desktop's dialog or the phone). Calls are audited with
+gateway's grant and an approval at this desktop (a notification: Approve, Deny or Details; no
+answer in 90 s, a locked screen or no interactive session deny it). Calls are audited with
 audit_source "link". Stop with Ctrl+C.
 --tray runs the link alone in the system tray (Pause/Resume, Allow changes in SAP, Health check,
 Quit); it needs no
@@ -46,7 +47,7 @@ Example: fairyfly link run --tray --install-autostart
 )HELP");
     run_cmd_->add_flag("--allow-write", options_.allow_write, "Allow changes in SAP (each still needs a grant and an approval)");
     run_cmd_->add_option("--tools", tools_filter_, "Only these tool families, e.g. session,screen");
-    run_cmd_->add_option("--approve", options_.approve, "Desktop approval of changes: desktop (dialog) | no")
+    run_cmd_->add_option("--approve", options_.approve, "Approval of changes: desktop (notification and approval window) | no (every change is denied)")
         ->check(CLI::IsMember({"desktop", "no"}));
     run_cmd_->add_flag("--tray", options_.tray, "Run in the system tray (detached from the console); no MCP server");
     run_cmd_->add_flag("--install-autostart", options_.install_autostart, "With --tray: start the link tray at logon (HKCU Run key)");

@@ -129,6 +129,13 @@ jobs:
         if ($target.Arguments -ne 'link run --tray') { Write-Error "shortcut arguments '$($target.Arguments)'"; exit 1 }
         $starter = Join-Path $env:LOCALAPPDATA 'Programs\fairyfly\fairyfly-tray.exe'
         if ($target.TargetPath -ne $starter) { Write-Error "shortcut target '$($target.TargetPath)', expected $starter (no console)"; exit 1 }
+        # the approval notifications: fairyfly's AppUserModelID and the toast activator on the shortcut
+        $item = (New-Object -ComObject Shell.Application).Namespace((Split-Path $lnk)).ParseName((Split-Path $lnk -Leaf))
+        $aumid = $item.ExtendedProperty('System.AppUserModel.ID')
+        $activator = "$($item.ExtendedProperty('System.AppUserModel.ToastActivatorCLSID'))"
+        Write-Host "shortcut AppUserModelID '$aumid', ToastActivatorCLSID '$activator'"
+        if ($aumid -ne 'DataZoo.fairyfly') { Write-Error "shortcut AppUserModelID '$aumid', expected DataZoo.fairyfly"; exit 1 }
+        if ($activator -notmatch 'DAAF1065-EF17-4CFF-B3D2-EFAF70594959') { Write-Error "shortcut ToastActivatorCLSID '$activator'"; exit 1 }
 
         # the Start-menu entry: no console, the tray stays up, "Start with Windows" is on, uninstall closes it
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'

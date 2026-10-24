@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Cloud link: changes are approved at this desktop
+
+- There is no phone approval any more (fairyfly-gateway #115): a change an AI assistant makes through the cloud link
+  is approved by the person at the desktop where SAP GUI runs. The link shows a Windows notification
+  "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and **Details**; it
+  stays on screen until answered and can be answered from the notification centre too.
+- **Details** (or a click on the notification) opens the approval window: the assistant, the account it acts for, the
+  SAP system, client and transaction, every step numbered and a countdown. **Deny** is the default button and Esc.
+- No answer in 90 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
+  one after another, never together. Each decision is in the log.
+- The old Yes/No box is gone, and with it its bug: after its 60 s it stayed open although the change was already
+  denied. With notifications off for fairyfly the approval window opens at once.
+- The Start-menu entry carries fairyfly's AppUserModelID (`DataZoo.fairyfly`) and the notifications' COM activator;
+  an uninstall removes their registration.
+- The tray's and `link run`'s texts say "at this desktop" instead of "or the phone".
+
 ### Security
 
 - `link pair` checked the gateway address by string prefix, so `http://localhost.evil.example`,

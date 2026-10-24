@@ -8,8 +8,11 @@
 //   fairyfly-tray.exe <args...>           fairyfly.exe <args...> (the Run values: link run --tray ..., mcp --tray ...)
 //   fairyfly-tray.exe --close             asks the running trays to quit and waits for them (the installer, before it
 //                                         replaces or removes fairyfly.exe)
-//   fairyfly-tray.exe --uninstall         --close, then removes the Run values that start this folder's fairyfly and
-//                                         the trays' settings (the installer, on uninstall)
+//   fairyfly-tray.exe --uninstall         --close, then removes the Run values that start this folder's fairyfly,
+//                                         the trays' settings and the notification registration (the installer, on
+//                                         uninstall)
+//   fairyfly-tray.exe -Embedding          the notification centre starts the link tray to answer an approval
+//                                         (COM, the toast activator; src/link/desktop_approval_win32.cpp)
 //
 // It links nothing of fairyfly's own; the window class and message names match src/tray/tray_win32.cpp.
 #include <windows.h>
@@ -25,6 +28,9 @@ constexpr const wchar_t* kQuitMessage = L"fairyfly-tray-quit";
 constexpr const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr const wchar_t* kSettingsKey = L"Software\\DataZoo\\fairyfly\\tray";
 constexpr const wchar_t* kRunValues[] = {L"fairyfly-link", L"fairyfly-mcp"};
+// what the link registers for its approval notifications (src/include/link/desktop_approval_win32.h)
+constexpr const wchar_t* kNotificationKeys[] = {L"Software\\Classes\\AppUserModelId\\DataZoo.fairyfly",
+                                                L"Software\\Classes\\CLSID\\{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}"};
 constexpr DWORD kCloseWaitMs = 10000;
 
 std::wstring module_dir() {
@@ -152,7 +158,10 @@ void remove_run_values(const std::wstring& dir) {
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const std::wstring dir = module_dir();
-    const auto args = arguments();
+    auto args = arguments();
+    // COM starts the toast activator's server with -Embedding: the link tray registers it once it runs (a running tray
+    // answers itself; a second start only opens its menu)
+    if (args.size() == 1 && (args[0] == L"-Embedding" || args[0] == L"/Embedding")) args.clear();
     if (args.size() == 1 && args[0] == L"--close") {
         close_trays();
         return 0;
@@ -161,6 +170,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         close_trays();
         remove_run_values(dir);
         RegDeleteTreeW(HKEY_CURRENT_USER, kSettingsKey);
+        for (const wchar_t* key : kNotificationKeys) RegDeleteTreeW(HKEY_CURRENT_USER, key);
         return 0;
     }
     return start(dir, args);

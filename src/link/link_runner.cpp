@@ -33,6 +33,8 @@
 #include "include/link/trail_screen_source.h"
 #include "include/mcp/run_mcp.h"
 #ifdef _WIN32
+#include "include/com/wrapper.h"
+#include "include/link/desktop_approval_win32.h"
 #include "include/tray/tray_win32.h"
 #endif
 #include "include/version.h"
@@ -541,7 +543,31 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     ffy::link::AgentConfig cfg;
     cfg.local = tools;
     cfg.version = fairyfly::FAIRYFLY_VERSION;
+#ifdef _WIN32
+    // a change is approved at this desktop: a notification, the approval window on Details (desktop_approval_win32)
+    cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false)
+                                     : approval::make_desktop_approver([weak = std::weak_ptr<MainThreadTools>(tools), peek] {
+                                           // the SAP session the change would run in, read on the main (COM) thread
+                                           auto out = std::make_shared<approval::SapContext>();
+                                           auto t = weak.lock();
+                                           if (!t) return *out;
+                                           auto read = std::make_shared<approval::SapContext>();
+                                           const bool ran = t->invoke(
+                                               [read, peek] {
+                                                   cli::CommandHandler* h = peek ? peek() : nullptr;
+                                                   auto s = h ? h->attached_com_session() : nullptr;
+                                                   if (!s) return;
+                                                   try { read->system = s->get_system_name(); } catch (const std::exception&) {}
+                                                   try { read->client = s->get_client(); } catch (const std::exception&) {}
+                                                   try { read->transaction = s->get_transaction_code(); } catch (const std::exception&) {}
+                                                   try { read->user = s->get_user(); } catch (const std::exception&) {}
+                                               },
+                                               2000);
+                                           return ran ? *read : *out;
+                                       });
+#else
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : ffy::link::desktop_approver();
+#endif
     // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
     // otherwise it uses its built-in catalog
     cfg.publish_catalog = true;
