@@ -52,13 +52,19 @@ bool present(const json& args, const char* key) {
     return args.is_object() && args.contains(key) && !args[key].is_null();
 }
 
-/// Selection-input rules for gui_element_fill (see authorize.h). `full` = also the screen rules (top-level calls).
-PolicyDecision check_selection_input(const mcp::Principal& principal, const json& args, bool full,
-                                     const std::optional<std::string>& current_tcode, const SelectionInputContext* input) {
-    if (principal.tcodes.empty())
-        return refuse("INPUT_NOT_ALLOWED", "typing for read-only tokens needs a T-code allowlist; token '" + principal.name +
-                                           "' has none (create it with --tcode ... --allow-selection-input)");
+/// The fill targets of a gui_element_fill call: the call itself, or each entry of a multi-field `fields` array.
+std::vector<const json*> fill_targets(const json& args) {
+    std::vector<const json*> out;
+    if (args.is_object() && args.contains("fields") && args["fields"].is_array()) {
+        for (const auto& f : args["fields"]) out.push_back(&f);
+    } else {
+        out.push_back(&args);
+    }
+    return out;
+}
 
+/// Selection-input target rules for ONE fill target (the call or a `fields` entry).
+PolicyDecision check_selection_target(const json& args) {
     // Target: a plain input field only. Cells, checkboxes, the command field and credential fields are never allowed.
     for (const char* key : {"row", "column", "checkbox", "commit"})
         if (present(args, key))
@@ -82,6 +88,21 @@ PolicyDecision check_selection_input(const mcp::Principal& principal, const json
             return refuse("INPUT_TARGET_DENIED", "typing into password or credential fields is never allowed");
     }
     if (!any_element) return refuse("INPUT_TARGET_DENIED", "the element id is required");
+    return PolicyDecision{};
+}
+
+/// Selection-input rules for gui_element_fill (see authorize.h). `full` = also the screen rules (top-level calls).
+PolicyDecision check_selection_input(const mcp::Principal& principal, const json& args, bool full,
+                                     const std::optional<std::string>& current_tcode, const SelectionInputContext* input) {
+    if (principal.tcodes.empty())
+        return refuse("INPUT_NOT_ALLOWED", "typing for read-only tokens needs a T-code allowlist; token '" + principal.name +
+                                           "' has none (create it with --tcode ... --allow-selection-input)");
+    if (args.is_object() && args.contains("fields") && !args["fields"].is_array())
+        return refuse("INPUT_TARGET_DENIED", "'fields' must be an array");
+    for (const json* target : fill_targets(args)) {
+        auto decision = check_selection_target(*target);
+        if (!decision.allowed) return decision;
+    }
     if (!full) return PolicyDecision{};
 
     // The open transaction must be allowlisted (same message family as the general rule).
@@ -202,9 +223,11 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
         } else if (tool == "gui_element_fill") {
             // `element` and its aliases `id` / `element_id`: all of them are checked, whichever the builder will use.
             bool okcd = false;
-            for (const char* key : {"element", "element_id", "id"})
-                if (args.is_object() && args.contains(key) && args[key].is_string() && is_okcd_element(args[key].get<std::string>()))
-                    okcd = true;
+            for (const json* target : fill_targets(args))
+                for (const char* key : {"element", "element_id", "id"})
+                    if (target->is_object() && target->contains(key) && (*target)[key].is_string() &&
+                        is_okcd_element((*target)[key].get<std::string>()))
+                        okcd = true;
             if (okcd)
                 return refuse("TCODE_DENIED", "typing into the command field is blocked for tokens with a T-code allowlist; "
                                               "use gui_transaction_start");

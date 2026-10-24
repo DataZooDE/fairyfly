@@ -34,6 +34,7 @@ add_executable(unit_tests
     unit/test_credential_store.cpp
     unit/test_credential_resolver.cpp
     unit/test_audit_log.cpp
+    unit/test_fill_fields.cpp
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
     unit/test_mcp_json_rpc.cpp

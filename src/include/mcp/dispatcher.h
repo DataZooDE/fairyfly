@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
@@ -141,6 +142,10 @@ public:
     }
 
 private:
+    /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a
+    /// hint to use `fields`.
+    std::atomic<long long> last_single_fill_ms_{0};
+
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
                           std::string* code_out = nullptr);
     ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,

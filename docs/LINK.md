@@ -90,6 +90,10 @@ of the MCP tray's `fairyfly-mcp` value.
   `gui_session_attach` then have to be granted there; the desktop's read-only mode only hides `gui_element_fill`.
 - The link offers this desktop's tool list on every connect. The gateway keeps it only from an account in its
   `catalog_publishers` list; otherwise it describes the tools from its own built-in catalog.
+- Data entry goes screen by screen: the assistant reads the screen with `only=editable` and fills all its fields in
+  one `gui_element_fill` call with `fields`, optionally pressing Enter or F8 afterwards. That is one call and one
+  approval per screen. It needs write access on both sides: the gateway must allow writes for you, and
+  **Allow changes in SAP** must be on in the link tray.
 
 - `link run` serves calls through **fairyfly's own MCP dispatcher, in-process**. No local HTTP endpoint and no local
   bearer token are involved.
