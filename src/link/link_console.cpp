@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <iostream>
+#include <vector>
 
 #include <spdlog/sinks/base_sink.h>
 
@@ -77,18 +78,85 @@ std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUr
     return need + ": " + url;
 }
 
+#ifdef _WIN32
+namespace {
+/// GetFinalPathNameByHandleW of an existing file or directory: junctions, symbolic links, subst drives and 8.3 names
+/// resolved, the volume as \\?\Volume{GUID} (one name for every drive letter or mount point; a network share keeps
+/// its UNC name). Empty when it cannot be opened.
+std::wstring final_path(const std::wstring& path) {
+    HANDLE h = CreateFileW(path.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return {};
+    std::wstring out;
+    for (DWORD flags : {DWORD(FILE_NAME_NORMALIZED | VOLUME_NAME_GUID), DWORD(FILE_NAME_NORMALIZED | VOLUME_NAME_DOS)}) {
+        const DWORD need = GetFinalPathNameByHandleW(h, nullptr, 0, flags);
+        if (need == 0) continue;
+        std::wstring buf(need, L'\0');
+        const DWORD got = GetFinalPathNameByHandleW(h, buf.data(), need, flags);
+        if (got == 0 || got >= need) continue;
+        buf.resize(got);
+        out = std::move(buf);
+        break;
+    }
+    CloseHandle(h);
+    return out;
+}
+
+/// Unicode upper case (NTFS compares names case-insensitively, also beyond ASCII: \u00E4 = \u00C4).
+std::wstring upper(const std::wstring& s) {
+    if (s.empty()) return s;
+    const int n = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, s.c_str(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr, 0);
+    if (n <= 0) return s;
+    std::wstring out(static_cast<size_t>(n), L'\0');
+    LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE, s.c_str(), static_cast<int>(s.size()), out.data(), n, nullptr, nullptr, 0);
+    return out;
+}
+}  // namespace
+#endif
+
 std::string link_run_lock_name(const std::string& state_path) {
     std::filesystem::path p(state_path);
     std::error_code ec;
     const auto abs = std::filesystem::absolute(p, ec);
-    std::string key = (ec ? p : abs).lexically_normal().string();
+    p = (ec ? p : abs).lexically_normal();
+    std::uint64_t h = 1469598103934665603ULL;   // FNV-1a: mutex names may not contain more backslashes
+#ifdef _WIN32
+    // The file's identity, not its spelling: the final path of the file, or, while it does not exist yet (the link
+    // tray asks before pairing), of its nearest existing parent directory plus the rest of the path. Both give the
+    // same text once the file exists, so the name does not change when pairing creates it.
+    std::wstring key;
+    std::vector<std::wstring> rest;
+    for (std::filesystem::path probe = p;;) {
+        const std::wstring resolved = final_path(probe.wstring());
+        if (!resolved.empty()) {
+            key = resolved;
+            for (auto it = rest.rbegin(); it != rest.rend(); ++it) key += L"\\" + *it;
+            break;
+        }
+        const auto parent = probe.parent_path();
+        if (parent == probe || probe.filename().empty()) break;
+        rest.push_back(probe.filename().wstring());
+        probe = parent;
+    }
+    if (key.empty()) {   // nothing of it can be opened: its spelling
+        key = p.wstring();
+        std::replace(key.begin(), key.end(), L'/', L'\\');
+    }
+    for (wchar_t c : upper(key)) {
+        for (int b = 0; b < 2; b++) {
+            h ^= static_cast<unsigned char>((static_cast<unsigned>(c) >> (8 * b)) & 0xff);
+            h *= 1099511628211ULL;
+        }
+    }
+#else
+    std::string key = p.string();
     std::replace(key.begin(), key.end(), '/', '\\');
     std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    std::uint64_t h = 1469598103934665603ULL;   // FNV-1a: mutex names may not contain more backslashes
     for (unsigned char c : key) {
         h ^= c;
         h *= 1099511628211ULL;
     }
+#endif
     char hex[17];
     std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(h));
     return std::string("Local\\fairyfly-link-run-") + hex;

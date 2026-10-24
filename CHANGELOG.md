@@ -11,12 +11,17 @@
   port, no userinfo). This holds for `--gateway`, `FAIRYFLY_LINK_GATEWAY` and the typed address; the link address the
   gateway hands out at pairing must be `wss://` (`ws://` only to those hosts), and `link run` / `link status` refuse a
   stored pairing with another one (`LINK_STATE_INSECURE`).
+- One link per pairing now holds for every spelling of the pairing file: the lock name comes from the file's final
+  path (junctions, symbolic links, subst drives and 8.3 short names resolved, Unicode case folded), not from the path
+  text, so a second `link run` through a junction, a short name or a non-ASCII case difference is refused too.
 
 ### Releases
 
 - The release workflow's tag check is case-sensitive (`packaging/check_release_tag.ps1`, covered by
   `packaging/tests/Test-VersionScripts.ps1`): a tag such as `V2026.10.24.1`, which the updater never takes, is
   refused, as it is by `msi_version.ps1` and `New-WingetManifest.ps1`.
+- Configuring checks that the version is a real date (`cmake/calendar_version.cmake`, with the updater's leap-year
+  rules): a hand-edited `2026.2.30` or `2026.02.30` fails with a clear message. Covered by `Test-VersionScripts.ps1`.
 
 ## 2026.10.24.1 (2026-10-24)
 

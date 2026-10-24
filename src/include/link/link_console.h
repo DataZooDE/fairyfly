@@ -55,7 +55,8 @@ enum class GatewayUrlKind { Web, WebSocket };
 std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUrlKind kind = GatewayUrlKind::Web);
 
 /// Name of the per-pairing lock (a named mutex in the session) that a serving `link run`, in a console or in the link
-/// tray, holds: one link per pairing. The same file under another spelling (case, separators, "..") gives the same name.
+/// tray, holds: one link per pairing. Derived from the file's final path (on Windows junctions,
+/// symbolic links, subst drives and 8.3 names resolved, Unicode case folded), so any spelling of the file gives one name.
 std::string link_run_lock_name(const std::string& state_path);
 
 /// The "next" step `link pair` reports. `link_tray_running`: the link tray runs (it starts the link itself once
