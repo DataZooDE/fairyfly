@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Releases
+
+- The MSI version is now `(YYYY-2000).MM.(DD*100+N)`: `2026.10.25` is `26.10.2500`, `2026.10.25.1` is `26.10.2501`.
+  Windows Installer ignored the 4th field of the old `26.10.24.1`, so a `26.10.24` MSI silently replaced an installed
+  `26.10.24.1`; a same-day downgrade is now refused ("A newer version of fairyfly is already installed."). The
+  released `26.10.23`, `26.10.24` and `26.10.24.1` MSIs upgrade to the new versions as before, and a rebuilt MSI of
+  the installed version still replaces it. Add/Remove Programs and the winget `DisplayVersion` show the new number.
+  A same-day release number is now 1 to 99 (`set_version.ps1`, `msi_version.ps1`, `New-WingetManifest.ps1`).
+
+### Cloud link
+
+- The link tray no longer stops with "The cloud link stopped (exit code 2)" when a console `link run` for the same
+  pairing starts just before the tray's own link: it shows its notice, waits and connects once the console link
+  ends. `link run` refused with `LINK_ALREADY_RUNNING` now exits with code 3 (other refusals stay 2).
+
 ## 2026.10.24.1 (2026-10-24)
 
 ### Releases

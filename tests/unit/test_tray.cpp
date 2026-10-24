@@ -1016,6 +1016,44 @@ TEST_CASE("run_link_with_tray: while a console link serves the pairing the tray 
     CHECK(f.host.boxes.empty());
 }
 
+TEST_CASE("run_link_with_tray: a console link that claims the pairing after the busy check makes the tray wait, not fail",
+          "[tray][link_tray][run]") {
+    Fixture f;
+    FakeGuard guard;
+    f.link.current = paired("not running");
+    std::atomic<bool> busy{false};   // free when the tray looks ...
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.pairing_poll = std::chrono::milliseconds(5);
+    services.link_busy = [&] { return busy.load(); };
+    std::atomic<int> runs{0};
+    int runs_while_busy = -1;
+    // the console link ends a little later; the tray itself is never touched (no Quit needed)
+    std::thread console([&] {
+        for (int i = 0; i < 500 && runs == 0; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        runs_while_busy = runs;
+        busy = false;
+    });
+    const int code = run_link_with_tray(
+        [&] {
+            if (++runs == 1) {   // ... but a console `link run` claims it first: claim_link_run refuses ours
+                busy = true;
+                return kLinkAlreadyRunningExitCode;
+            }
+            return 0;   // the tray's own link, after the console's ended
+        },
+        services, guard, f.paths);
+    console.join();
+    CHECK(code == 0);
+    CHECK(runs_while_busy == 1);   // not retried while the console link ran
+    CHECK(runs == 2);
+    CHECK(f.host.boxes.empty());   // no "cloud link stopped (exit code ...)"
+    REQUIRE_FALSE(f.host.balloons.empty());
+    CHECK(f.host.balloons[0].find("already running in a console") != std::string::npos);
+}
+
 TEST_CASE("run_link_with_tray: Quit while unpaired ends the tray without starting the link", "[tray][link_tray][run]") {
     Fixture f;
     FakeGuard guard;
