@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Releases
+
+- A second release on the same day is possible: version `YYYY.MM.DD.N` (N = 1, 2, ...), tag `vYYYY.MM.DD.N`, e.g.
+  `2026.10.24.1`. `fairyfly update check|apply` orders `2026.10.24 < 2026.10.24.1 < 2026.10.25` (three-part tags keep
+  working; malformed ones such as `v2026.10.24.0` or `v2026.10.24.01` are refused). The exe's version information
+  carries N as its 4th field, the MSI version is `26.10.24.1` and replaces an installed `26.10.24` (and is replaced by
+  the next day's MSI), the winget package version is `2026.10.24.1`. `packaging/set_version.ps1` sets the version in
+  `version.h`, `CMakeLists.txt` and `vcpkg.json`; configuring fails when they differ.
+
 ## 2026.10.24 (2026-10-24)
 
 ### Fill a whole screen in one call

@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <sstream>
+#include <vector>
 
 namespace fairyfly::update {
 
@@ -21,18 +23,35 @@ bool starts_with(const std::string& s, const std::string& p) { return s.rfind(p,
 
 std::optional<CalVer> parse_version(const std::string& text) {
     std::string t = !text.empty() && (text[0] == 'v' || text[0] == 'V') ? text.substr(1) : text;
-    CalVer v;
-    int* parts[3] = {&v.year, &v.month, &v.day};
+    // two or three dots: YYYY.MM.DD or YYYY.MM.DD.N
+    std::vector<std::string> parts;
     size_t pos = 0;
-    for (int i = 0; i < 3; i++) {
-        size_t end = i < 2 ? t.find('.', pos) : t.size();
-        if (end == std::string::npos || end == pos || end - pos > 4) return std::nullopt;
-        for (size_t k = pos; k < end; k++)
-            if (!std::isdigit(static_cast<unsigned char>(t[k]))) return std::nullopt;
-        *parts[i] = std::stoi(t.substr(pos, end - pos));
-        pos = end + 1;
+    for (;;) {
+        const size_t dot = t.find('.', pos);
+        parts.push_back(t.substr(pos, dot == std::string::npos ? std::string::npos : dot - pos));
+        if (dot == std::string::npos) break;
+        pos = dot + 1;
     }
-    if (v.year < 2000 || v.month < 1 || v.month > 12 || v.day < 1 || v.day > 31) return std::nullopt;
+    if (parts.size() != 3 && parts.size() != 4) return std::nullopt;
+    for (size_t i = 0; i < parts.size(); i++) {
+        const auto& p = parts[i];
+        if (p.empty() || p.size() > (i < 3 ? 4u : 5u)) return std::nullopt;
+        for (char c : p)
+            if (!std::isdigit(static_cast<unsigned char>(c))) return std::nullopt;
+    }
+    CalVer v;
+    v.year = std::stoi(parts[0]);
+    v.month = std::stoi(parts[1]);
+    v.day = std::stoi(parts[2]);
+    if (v.year < 2000 || v.month < 1 || v.month > 12 || v.day < 1) return std::nullopt;
+    static constexpr int kDays[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const bool leap = (v.year % 4 == 0 && v.year % 100 != 0) || v.year % 400 == 0;
+    if (v.day > kDays[v.month - 1] || (v.month == 2 && v.day == 29 && !leap)) return std::nullopt;  // a real date
+    if (parts.size() == 4) {
+        if (parts[3][0] == '0') return std::nullopt;  // N >= 1, one spelling per version
+        v.serial = std::stoi(parts[3]);
+        if (v.serial > 65535) return std::nullopt;  // a Windows version field (VERSIONINFO, MSI) holds 16 bits
+    }
     return v;
 }
 
@@ -40,7 +59,17 @@ int compare(const CalVer& a, const CalVer& b) {
     if (a.year != b.year) return a.year < b.year ? -1 : 1;
     if (a.month != b.month) return a.month < b.month ? -1 : 1;
     if (a.day != b.day) return a.day < b.day ? -1 : 1;
+    if (a.serial != b.serial) return a.serial < b.serial ? -1 : 1;
     return 0;
+}
+
+std::string format_version(const CalVer& v) {
+    char buf[32];
+    if (v.serial > 0)
+        std::snprintf(buf, sizeof buf, "%04d.%02d.%02d.%d", v.year, v.month, v.day, v.serial);
+    else
+        std::snprintf(buf, sizeof buf, "%04d.%02d.%02d", v.year, v.month, v.day);
+    return buf;
 }
 
 std::optional<Release> parse_release(const json& j, std::string& why) {
@@ -49,10 +78,8 @@ std::optional<Release> parse_release(const json& j, std::string& why) {
     Release r;
     r.tag = j.value("tag_name", "");
     auto v = parse_version(r.tag);
-    if (!v || r.tag[0] != 'v') { why = "tag '" + r.tag + "' is not vYYYY.MM.DD"; return std::nullopt; }
-    char buf[16];
-    std::snprintf(buf, sizeof buf, "%04d.%02d.%02d", v->year, v->month, v->day);
-    r.version = buf;
+    if (!v || r.tag[0] != 'v') { why = "tag '" + r.tag + "' is not vYYYY.MM.DD or vYYYY.MM.DD.N"; return std::nullopt; }
+    r.version = format_version(*v);
     r.page_url = j.value("html_url", "");
     const std::string base = std::string("https://github.com/") + kRepository + "/releases/download/" + r.tag + "/";
     if (j.contains("assets") && j["assets"].is_array())

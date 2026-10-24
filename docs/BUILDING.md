@@ -72,10 +72,15 @@ python assets/generate_icons.py --preview icons-preview.png
 
 ## Versions and releases
 
-fairyfly uses calendar versions (`YYYY.MM.DD`). The version is set in `src/include/version.h`, `CMakeLists.txt` and
-`vcpkg.json` and embedded in the executable's version information. Releases are built by
-[`release.yml`](../.github/workflows/release.yml) from a `vYYYY.MM.DD` tag; the full procedure, including code signing,
-is in [SIGNING.md](SIGNING.md). User-visible changes go into [CHANGELOG.md](../CHANGELOG.md).
+fairyfly uses calendar versions (`YYYY.MM.DD`). A further release on the same day gets a number: `YYYY.MM.DD.N` with
+N = 1, 2, ... (the second release on 2026-10-24 is `2026.10.24.1`); versions order by date, then N:
+`2026.10.24 < 2026.10.24.1 < 2026.10.24.2 < 2026.10.25`. The version is set in `src/include/version.h` (zero padded,
+what `--version` prints), `CMakeLists.txt` and `vcpkg.json` (plain numbers, `2026.10.5`; vcpkg refuses leading
+zeros) by `packaging/set_version.ps1 -Version <version>`; configuring fails when the three differ. It is embedded in the
+executable's version information (`ProductVersion` = `--version`; the 4th binary field is N, else 0) and becomes the
+MSI ProductVersion `(YYYY-2000).MM.DD[.N]` (`packaging/msi_version.ps1`). Releases are built by
+[`release.yml`](../.github/workflows/release.yml) from a `vYYYY.MM.DD` or `vYYYY.MM.DD.N` tag; the full procedure,
+including code signing, is in [SIGNING.md](SIGNING.md). User-visible changes go into [CHANGELOG.md](../CHANGELOG.md).
 
 ## Code layout
 
