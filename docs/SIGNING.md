@@ -33,16 +33,17 @@ That licence is **not OSI-approved**, so the free **SignPath Foundation** progra
 
 1. Bump the calendar version with `./packaging/set_version.ps1 -Version YYYY.MM.DD` (it sets `src/include/version.h`,
    `CMakeLists.txt` and `vcpkg.json`); for a further release on a day that already has one, use the next
-   `YYYY.MM.DD.N` (`2026.10.24.1`, then `2026.10.24.2`, ...). Update `CHANGELOG.md`, merge through a reviewed pull request (`.github/CODEOWNERS` lists the reviewer
+   `YYYY.MM.DD.N` (`2026.10.24.1`, then `2026.10.24.2`, ... up to `.99`). Update `CHANGELOG.md`, merge through a reviewed pull request (`.github/CODEOWNERS` lists the reviewer
    of CI, build and signing files).
 2. `git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD` (or `vYYYY.MM.DD.N`). [`release.yml`](../.github/workflows/release.yml) builds from the
    tag on a GitHub-hosted runner, runs the unit tests, checks that the tag equals `fairyfly --version` and the
    executable's `ProductVersion` (and that `ProductName` is `fairyfly`), signs with Azure Artifact Signing when
    `AZURE_SIGNING_CLIENT_SECRET` exists, verifies the signature with `signtool verify /pa`, and creates the GitHub release
    with `fairyfly.exe` and `SHA256SUMS`. Without the secret the release is published unsigned. A same-day release
-   `YYYY.MM.DD.N` is a normal update: `fairyfly update` takes it over `YYYY.MM.DD`, and its MSI (`26.10.24.1`)
-   replaces the installed `26.10.24` (Windows Installer ignores the 4th field, `AllowSameVersionUpgrades` covers it;
-   proven in CI by `winget.yml`), as the next day's MSI replaces it.
+   `YYYY.MM.DD.N` is a normal update: `fairyfly update` takes it over `YYYY.MM.DD`, and its MSI (`26.10.2401` for
+   `2026.10.24.1`, `(YYYY-2000).MM.(DD*100+N)`) replaces the installed `26.10.2400`, as the next day's MSI
+   (`26.10.2500`) replaces it; the older MSI is refused over a newer one (downgrade). Proven in CI by `winget.yml`,
+   starting from the released `v2026.10.24.1` MSI (`26.10.24.1`, the old scheme).
 3. Verify a download: `signtool verify /pa /v fairyfly.exe` and `Get-FileHash fairyfly.exe` against `SHA256SUMS`.
 
 The signing step was written from the documentation of the Azure signing action and could not be run before the Azure
