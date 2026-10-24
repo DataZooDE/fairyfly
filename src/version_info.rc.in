@@ -1,10 +1,11 @@
 // Version information of fairyfly.exe (configured by CMake: configure_file, @VAR@ placeholders).
 // Product name = project name and a product version that is consistent across builds (needed by most signing services).
+// The 4th binary field is the same-day release N of YYYY.MM.DD.N (0 for the day's first release).
 #include <winver.h>
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION     @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,0
- PRODUCTVERSION  @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,0
+ FILEVERSION     @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,@FAIRYFLY_VER_TWEAK@
+ PRODUCTVERSION  @FAIRYFLY_VER_MAJOR@,@FAIRYFLY_VER_MINOR@,@FAIRYFLY_VER_PATCH@,@FAIRYFLY_VER_TWEAK@
  FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
  FILEFLAGS       0x0L
  FILEOS          VOS_NT_WINDOWS32

@@ -3,7 +3,8 @@ name: Release fairyfly
 # Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with Azure Artifact
 # Signing (see docs/SIGNING.md) and publishes it with the per-user MSI, the winget manifests of DataZoo.fairyfly
 # (packaging/winget/) and SHA256SUMS.
-# Tag format: vYYYY.MM.DD (calendar version = ProductVersion of fairyfly.exe). Without the Azure signing secrets
+# Tag format: vYYYY.MM.DD, or vYYYY.MM.DD.N (N >= 1) for a further release on the same day, e.g. v2026.10.24.1
+# (calendar version = ProductVersion of fairyfly.exe = `fairyfly --version`). Without the Azure signing secrets
 # the release is published unsigned.
 
 on:
@@ -12,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to release (vYYYY.MM.DD)'
+        description: 'Existing tag to release (vYYYY.MM.DD or vYYYY.MM.DD.N)'
         required: true
 
 env:
@@ -68,7 +69,10 @@ jobs:
         $reported = (& "build/Release/fairyfly.exe" --version | Out-String).Trim()
         if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)'"; exit 1 }
         if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
-        if ("${{ env.RELEASE_TAG }}" -ne "v$reported") { Write-Error "Tag '${{ env.RELEASE_TAG }}' does not match the product version 'v$reported': bump src/include/version.h, CMakeLists.txt and vcpkg.json before tagging"; exit 1 }
+        if ("${{ env.RELEASE_TAG }}" -notmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') { Write-Error "Tag '${{ env.RELEASE_TAG }}' is not vYYYY.MM.DD or vYYYY.MM.DD.N (N 1..65535)"; exit 1 }
+        $n = if ($reported -match '^\d{4}\.\d{2}\.\d{2}\.(\d+)$') { [int]$Matches[1] } else { 0 }
+        if ($info.ProductPrivatePart -ne $n) { Write-Error "the version resource's 4th field is $($info.ProductPrivatePart), expected $n for $reported"; exit 1 }
+        if ("${{ env.RELEASE_TAG }}" -ne "v$reported") { Write-Error "Tag '${{ env.RELEASE_TAG }}' does not match the product version 'v$reported': bump src/include/version.h, CMakeLists.txt and vcpkg.json (packaging/set_version.ps1) before tagging"; exit 1 }
         Write-Host "Release $reported OK"
       shell: pwsh
 

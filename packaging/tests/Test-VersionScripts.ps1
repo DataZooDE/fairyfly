@@ -63,10 +63,13 @@ function Read-Versions {
     "$hv|$cv|$($j.version)"
 }
 try {
-    foreach ($v in '2026.10.24.1', 'v2026.10.24.2', '2026.10.25', '2026.10.24') {
+    # version.h zero padded (what --version prints), CMakeLists.txt and vcpkg.json plain (vcpkg refuses leading zeros)
+    foreach ($case in @('2026.10.24.1', '2026.10.24.1'), @('v2026.10.24.2', '2026.10.24.2'), @('2026.10.05', '2026.10.5'),
+                      @('2026.09.05.3', '2026.9.5.3'), @('2026.10.24', '2026.10.24')) {
+        $v = $case[0]; $plain = $case[1]
         $r = Try-Run { & $setVersion -Version $v -Root $tmp }
         $want = $v.TrimStart('v')
-        Check ($r.Error -eq '' -and (Read-Versions) -eq "$want|$want|$want") "set_version $v -> version.h|CMakeLists.txt|vcpkg.json = $(Read-Versions)$(if ($r.Error) { " error: $($r.Error)" })"
+        Check ($r.Error -eq '' -and (Read-Versions) -eq "$want|$plain|$plain") "set_version $v -> version.h|CMakeLists.txt|vcpkg.json = $(Read-Versions)$(if ($r.Error) { " error: $($r.Error)" })"
     }
     $before = Read-Versions
     foreach ($bad in '2026.10.24.0', '2026.10.24.65536', '2026.02.30', '2026.10.24-1', '26.10.24') {

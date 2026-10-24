@@ -2,7 +2,7 @@
 // `fairyfly update check|apply` (D10 install and update): the decisions, without network or OS calls.
 // The update channel is the project's GitHub releases (the same place release.yml publishes to). A release is
 // installed only when:
-//   - it is newer (calendar version YYYY.MM.DD);
+//   - it is newer (calendar version YYYY.MM.DD, or YYYY.MM.DD.N for the N-th further release of a day);
 //   - fairyfly.exe matches its line in SHA256SUMS;
 //   - its Authenticode signature is valid and, on a signed installation, made by the same signer.
 // An unsigned (self-built) installation takes an unsigned release only with --allow-unsigned.
@@ -15,10 +15,15 @@ namespace fairyfly::update {
 
 struct CalVer {
     int year = 0, month = 0, day = 0;
+    int serial = 0;  ///< N of a further release on the same day (YYYY.MM.DD.N, 1..65535); 0 = the day's first release
 };
-/// "2026.10.16" or "v2026.10.16"; nullopt for anything else.
+/// "2026.10.16", "v2026.10.16" or, for a further release that day, "2026.10.16.1" (N 1..65535, no leading zero);
+/// nullopt for anything else.
 std::optional<CalVer> parse_version(const std::string& text);
-int compare(const CalVer& a, const CalVer& b);  ///< <0, 0, >0
+/// By date, then N: 2026.10.24 < 2026.10.24.1 < 2026.10.24.2 < 2026.10.25.  <0, 0, >0
+int compare(const CalVer& a, const CalVer& b);
+/// Canonical text: "2026.10.05", "2026.10.24.1".
+std::string format_version(const CalVer& v);
 
 inline constexpr const char* kRepository = "DataZooDE/fairyfly";
 inline constexpr const char* kLatestReleaseUrl = "https://api.github.com/repos/DataZooDE/fairyfly/releases/latest";

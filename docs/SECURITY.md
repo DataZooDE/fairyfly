@@ -188,7 +188,7 @@ the VM; (e) an operator with an over-privileged token.
 ## Release integrity
 
 Releases are built from this repository's source by the GitHub Actions workflow
-[`release.yml`](../.github/workflows/release.yml) on a GitHub-hosted runner from a version tag (`vYYYY.MM.DD`), and
+[`release.yml`](../.github/workflows/release.yml) on a GitHub-hosted runner from a version tag (`vYYYY.MM.DD`, or `vYYYY.MM.DD.N` for a further release on the same day), and
 published with a `SHA256SUMS` file. (At the time of writing no release has been published yet.) Verify a download with `Get-FileHash fairyfly.exe`. Releases are
 Authenticode-signed when a signing certificate is configured for the repository; then
 `signtool verify /pa /v fairyfly.exe` (or the file's **Properties > Digital Signatures**) shows the publisher. The
