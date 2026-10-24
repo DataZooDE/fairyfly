@@ -10,7 +10,8 @@
 
 namespace fairyfly::tray {
 
-std::unique_ptr<TrayHost> make_win32_tray_host();
+std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind = TrayKind::Mcp);
+std::unique_ptr<TraySettings> make_win32_tray_settings();
 std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
@@ -29,7 +30,12 @@ unsigned console_process_count();
 bool startup_error_needs_dialog_here();
 /// True when FAIRYFLY_TRAY_CHILD=1 (this is the detached tray process).
 bool is_tray_child_process();
-/// Removes FAIRYFLY_TRAY_CHILD from this process's environment, so the processes it starts do not inherit it.
+/// True when fairyfly-tray.exe started this tray (FAIRYFLY_TRAY_LAUNCHED=1 with FAIRYFLY_TRAY_CHILD=1).
+bool is_tray_launched_process();
+/// True when `path` is an existing file.
+bool path_exists(const std::filesystem::path& path);
+/// Removes FAIRYFLY_TRAY_CHILD and FAIRYFLY_TRAY_LAUNCHED from this process's environment, so the processes it starts
+/// do not inherit them.
 void clear_tray_child_marker();
 /// Detaches from the console (tray child; no-op without one).
 void detach_console();

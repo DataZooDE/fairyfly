@@ -29,7 +29,8 @@ std::string who(const LinkView& link) { return link.organisation + " (" + link.a
 
 std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
 
-TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp) {
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp,
+                              const AutostartView& autostart) {
     TrayMenuModel model;
     if (link.state == "connected") model.icon = IconState::Running;
     else if (link.state == "paused") model.icon = IconState::Warning;
@@ -64,6 +65,13 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         start.checked = mcp.running;
         model.items.push_back(std::move(start));
     }
+    if (autostart.available) {
+        model.items.push_back(separator());
+        MenuItem start = item("Start with Windows", TrayAction::ToggleAutostart);
+        start.checkable = true;
+        start.checked = autostart.on;
+        model.items.push_back(std::move(start));
+    }
     model.items.push_back(separator());
     model.items.push_back(item("Open log", TrayAction::OpenLog));
     model.items.push_back(item("Open audit trail folder", TrayAction::OpenAuditFolder));
@@ -71,7 +79,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(separator());
     model.items.push_back(item("Quit", TrayAction::Quit));
 
-    std::string tooltip = "fairyfly link: " + (link.paired ? link.state : std::string("not paired - right-click to pair"));
+    std::string tooltip = "fairyfly link: " + (link.paired ? link.state : std::string("not paired - click to pair"));
     if (writes.available) tooltip += writes.allowed && !writes.locked ? " (changes allowed)" : " (read-only)";
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
@@ -99,7 +107,15 @@ McpTrayView LinkTrayController::mcp_view() {
     return v;
 }
 
-TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view(), mcp_view()); }
+AutostartView LinkTrayController::autostart_view() {
+    AutostartView v;
+    if (!services_.run_key || services_.autostart.name.empty()) return v;
+    v.available = true;
+    v.on = services_.run_key->get(services_.autostart.name).has_value();
+    return v;
+}
+
+TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view(), mcp_view(), autostart_view()); }
 
 TrayView LinkTrayController::view() {
     const auto model = build_link_menu(link_, writes_view());
@@ -179,6 +195,14 @@ void LinkTrayController::on_action(TrayAction action) {
         notify(ok ? "Starting the local MCP server; it gets its own tray icon" : "Could not start the local MCP server");
         break;
     }
+    case TrayAction::ToggleAutostart: {
+        if (!services_.run_key || services_.autostart.name.empty()) break;
+        const bool on = !services_.run_key->get(services_.autostart.name).has_value();
+        const bool ok = on ? services_.run_key->set(services_.autostart.name, services_.autostart.line)
+                           : services_.run_key->remove(services_.autostart.name);
+        if (!ok) notify("Could not change \"Start with Windows\"");
+        break;
+    }
     case TrayAction::OpenLog: open(paths_.log_file, "the log"); break;
     case TrayAction::OpenAuditFolder: open(paths_.audit_dir, "the audit trail folder"); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
@@ -196,7 +220,9 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
                        TrayPaths paths) {
     if (!services.host) return 1;
     if (!guard.acquire()) {
-        services.host->message_box("fairyfly link", "The fairyfly link tray is already running.");
+        // started again (Start menu): the running tray opens its menu, as other tray apps come to the front
+        if (!services.host->show_running_instance())
+            services.host->message_box("fairyfly link", "The fairyfly link tray is already running.");
         return 0;
     }
     const std::string log_file = paths.log_file.string();
@@ -213,7 +239,7 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     if (services.link && !services.link->view().paired) {
         spdlog::info("link tray: this desktop is not paired yet; waiting for `fairyfly link pair`");
         spdlog::default_logger()->flush();
-        services.host->balloon("fairyfly link", "This desktop is not paired yet. Right-click the fairyfly icon and choose "
+        services.host->balloon("fairyfly link", "This desktop is not paired yet. Click the fairyfly icon and choose "
                                                 "\"Pair with the fairyfly cloud...\".");
         while (!controller.quit_requested() && !services.link->view().paired)
             std::this_thread::sleep_for(services.pairing_poll);

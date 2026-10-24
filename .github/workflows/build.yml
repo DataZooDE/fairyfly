@@ -111,7 +111,7 @@ jobs:
         dotnet tool install --global wix --version 5.0.2
         $msiVersion = (& ./packaging/msi_version.ps1).Trim()
         Write-Host "MSI version $msiVersion"
-        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=$msiVersion -o build/fairyfly.msi
+        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d TrayExePath=build/Release/fairyfly-tray.exe -d MsiVersion=$msiVersion -o build/fairyfly.msi
         if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
 
         $p = Start-Process msiexec.exe -ArgumentList @('/i', "$PWD\build\fairyfly.msi", '/qn', '/l*v', "$PWD\build\msi-install.log") -Wait -PassThru
@@ -127,6 +127,22 @@ jobs:
         if (-not (Test-Path $lnk)) { Write-Error "Start-menu shortcut missing: $lnk"; exit 1 }
         $target = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
         if ($target.Arguments -ne 'link run --tray') { Write-Error "shortcut arguments '$($target.Arguments)'"; exit 1 }
+        $starter = Join-Path $env:LOCALAPPDATA 'Programs\fairyfly\fairyfly-tray.exe'
+        if ($target.TargetPath -ne $starter) { Write-Error "shortcut target '$($target.TargetPath)', expected $starter (no console)"; exit 1 }
+
+        # the Start-menu entry: no console, the tray stays up, "Start with Windows" is on, uninstall closes it
+        $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        Remove-ItemProperty $runKey -Name fairyfly-link -ErrorAction SilentlyContinue
+        Remove-Item 'HKCU:\Software\DataZoo\fairyfly\tray' -Recurse -ErrorAction SilentlyContinue
+        Start-Process $starter -ArgumentList $target.Arguments
+        Start-Sleep -Seconds 8
+        $trays = @(Get-CimInstance Win32_Process -Filter "Name='fairyfly.exe'" | Where-Object { $_.CommandLine -like '*link run --tray*' })
+        if ($trays.Count -ne 1) { Write-Error "expected one link tray, found $($trays.Count)"; exit 1 }
+        $conhosts = @(Get-CimInstance Win32_Process -Filter "Name='conhost.exe'" | Where-Object { $_.ParentProcessId -eq $trays[0].ProcessId })
+        if ((Get-Process -Id $trays[0].ProcessId).MainWindowHandle -ne 0) { Write-Error "the tray has a visible window"; exit 1 }
+        Write-Host "link tray pid $($trays[0].ProcessId), console hosts: $($conhosts.Count)"
+        $run = (Get-ItemProperty $runKey -Name fairyfly-link -ErrorAction SilentlyContinue).'fairyfly-link'
+        if ($run -notlike "*fairyfly-tray.exe*link run --tray*") { Write-Error "Start with Windows not set to the starter: '$run'"; exit 1 }
         if (Test-Path 'HKLM:\Software\DataZoo\fairyfly') { Write-Error "per-user MSI wrote HKLM"; exit 1 }
         & $exe update check
         Write-Host "installed OK: $exe $v"
@@ -135,6 +151,8 @@ jobs:
         if ($p.ExitCode -ne 0) { Write-Error "uninstall failed: $($p.ExitCode)"; exit 1 }
         if (Test-Path $exe) { Write-Error "still present after uninstall"; exit 1 }
         if (Test-Path $lnk) { Write-Error "shortcut still present after uninstall"; exit 1 }
+        if (Get-Process -Id $trays[0].ProcessId -ErrorAction SilentlyContinue) { Write-Error "the uninstall did not close the tray"; exit 1 }
+        if (Get-ItemProperty $runKey -Name fairyfly-link -ErrorAction SilentlyContinue) { Write-Error "Run value fairyfly-link left behind"; exit 1 }
         if ([Environment]::GetEnvironmentVariable('PATH', 'User') -like "*Programs\fairyfly*") { Write-Error "PATH entry not removed"; exit 1 }
         Write-Host "uninstalled OK"
       shell: pwsh

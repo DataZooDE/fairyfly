@@ -1,11 +1,14 @@
 <!--
   Per-user installer of fairyfly (D10 install and update), built with WiX v5:
-    wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=26.10.5 -o fairyfly.msi
+    wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d TrayExePath=build/Release/fairyfly-tray.exe -d MsiVersion=26.10.5 -o fairyfly.msi
   - Installs fairyfly.exe to %LOCALAPPDATA%\Programs\fairyfly without administrator rights (the tray, the link and
     SAP GUI all run as the user on the interactive desktop).
   - Appends that folder to the user's PATH and adds the Start-menu entry "fairyfly": the cloud link tray
     (fairyfly link run with the tray option; unpaired it leads to pairing, its menu can start the local MCP server
-    tray). Up to 2026.10.23 the entry was "fairyfly (tray)" (the MCP tray without the HTTP option, which exits at
+    tray). The entry starts fairyfly-tray.exe, a Windows-subsystem starter, so no console window flashes.
+  - Before it replaces or removes the files it asks running trays to quit (fairyfly-tray.exe close option); an
+    uninstall also removes the trays' Run values and settings. After an interactive install (not with /qn or
+    /quiet) it starts the tray; LAUNCHAPP=0 turns that off. Up to 2026.10.23 the entry was "fairyfly (tray)" (the MCP tray without the HTTP option, which exits at
     once); it lives in
     the same component, so an upgrade (MajorUpgrade removes the old product first) replaces it.
   - MsiVersion: MSI versions are major.minor.build with major < 256, so the calendar version YYYY.MM.DD becomes
@@ -26,6 +29,22 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of fairyfly is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- 1: start the tray after an interactive install or upgrade (silent installs never start it) -->
+    <Property Id="LAUNCHAPP" Value="1" Secure="yes" />
+    <!-- the trays hold fairyfly.exe open: they quit first (as from their menu), so no reboot is needed. The installed
+         starter does it; on a first install there is none yet and the action is ignored. -->
+    <CustomAction Id="CloseTrays" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot; --close"
+                  Execute="immediate" Return="ignore" />
+    <CustomAction Id="UninstallCleanup" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot; --uninstall" Execute="immediate" Return="ignore" />
+    <CustomAction Id="LaunchTray" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot;"
+                  Execute="immediate" Return="asyncNoWait" />
+    <InstallExecuteSequence>
+      <Custom Action="CloseTrays" Before="InstallValidate" Condition="NOT (REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE)" />
+      <Custom Action="UninstallCleanup" Before="InstallValidate" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="LaunchTray" After="InstallFinalize" Condition="NOT REMOVE AND LAUNCHAPP=&quot;1&quot; AND UILevel &gt;= 3" />
+    </InstallExecuteSequence>
+
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="fairyfly" />
@@ -37,6 +56,7 @@
       <!-- files in the user profile: the key path is an HKCU value (ICE38), folders are removed on uninstall (ICE64) -->
       <Component Id="FairyflyExe" Directory="INSTALLFOLDER" Guid="{3F7B6A15-2C4E-4D7B-9E1A-8B5C6D7E8F90}">
         <File Id="FairyflyExeFile" Source="$(var.ExePath)" Name="fairyfly.exe" KeyPath="no" />
+        <File Id="FairyflyTrayExeFile" Source="$(var.TrayExePath)" Name="fairyfly-tray.exe" KeyPath="no" />
         <RegistryValue Root="HKCU" Key="Software\DataZoo\fairyfly" Name="installed" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         <Environment Id="UserPath" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="no" Permanent="no" />
         <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
@@ -44,7 +64,7 @@
       </Component>
       <Component Id="TrayShortcut" Directory="ProgramMenuFolder" Guid="{8D2E4F61-7A3B-4C9D-B1E2-F3A4B5C6D7E8}">
         <Shortcut Id="TrayShortcutLnk" Name="fairyfly" Description="fairyfly cloud link in the system tray (pairing, local MCP server from its menu)"
-                  Target="[INSTALLFOLDER]fairyfly.exe" Arguments="link run --tray" WorkingDirectory="INSTALLFOLDER" />
+                  Target="[INSTALLFOLDER]fairyfly-tray.exe" Arguments="link run --tray" WorkingDirectory="INSTALLFOLDER" />
         <!-- the entry up to 2026.10.23; a MajorUpgrade removes it anyway, this also covers a repair or reinstall -->
         <RemoveFile Id="RemoveOldTrayLnk" Name="fairyfly (tray).lnk" On="install" />
         <RegistryValue Root="HKCU" Key="Software\DataZoo\fairyfly" Name="shortcut" Type="integer" Value="1" KeyPath="yes" />

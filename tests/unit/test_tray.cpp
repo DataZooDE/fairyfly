@@ -758,7 +758,7 @@ TEST_CASE("link tray menu: an unpaired desktop is led to pairing", "[tray][link_
     CHECK(pair->enabled);
     CHECK(pair->label == "Pair with the fairyfly cloud... (console)");
     CHECK(top_labels(m)[2] == pair->label);   // the first action under the status line
-    CHECK(m.tooltip == "fairyfly link: not paired - right-click to pair");
+    CHECK(m.tooltip == "fairyfly link: not paired - click to pair");
     CHECK(m.icon == IconState::Stopped);
 }
 
@@ -1215,4 +1215,158 @@ TEST_CASE("mcp tray: a balloon when the cloud link's audit trail turns on or off
     controller.on_tick();
     REQUIRE(f.host.balloons.size() == 2);
     CHECK(f.host.balloons[1].find("Audit trail off") != std::string::npos);
+}
+
+// ================= starting the trays like a Windows app =================
+namespace {
+struct FakeSettings : TraySettings {
+    std::map<std::string, std::string> values;
+    std::optional<std::string> get(const std::string& n) override { auto it = values.find(n); if (it == values.end()) return std::nullopt; return it->second; }
+    bool set(const std::string& n, const std::string& v) override { values[n] = v; return true; }
+};
+
+struct ShowingHost : FakeHost {
+    bool other_tray = true;
+    int shown = 0;
+    bool show_running_instance() override { ++shown; return other_tray; }
+};
+
+AutostartPlan link_plan() {
+    AutostartPlan plan;
+    plan.name = kLinkAutostartValueName;
+    plan.exe = "C:\\Users\\pat\\AppData\\Local\\Programs\\fairyfly\\fairyfly.exe";
+    plan.program = "C:\\Users\\pat\\AppData\\Local\\Programs\\fairyfly\\fairyfly-tray.exe";
+    plan.line = link_autostart_command(plan.program, {"link", "run", "--tray"});
+    return plan;
+}
+} // namespace
+
+TEST_CASE("tray start program: fairyfly-tray.exe next to fairyfly.exe when it is installed", "[tray][starter]") {
+    const std::string exe = "C:\\Programs\\fairyfly\\fairyfly.exe";
+    std::vector<std::filesystem::path> asked;
+    CHECK(tray_start_program(exe, [&](const std::filesystem::path& p) { asked.push_back(p); return true; }) ==
+          "C:\\Programs\\fairyfly\\fairyfly-tray.exe");
+    CHECK(asked == std::vector<std::filesystem::path>{"C:\\Programs\\fairyfly\\fairyfly-tray.exe"});
+    CHECK(tray_start_program(exe, [](const std::filesystem::path&) { return false; }) == exe);   // portable exe alone
+    CHECK(tray_start_program(exe, nullptr) == exe);
+    CHECK(link_autostart_command(tray_start_program(exe, [](const std::filesystem::path&) { return true; }), {"link", "run", "--tray"}) ==
+          "C:\\Programs\\fairyfly\\fairyfly-tray.exe link run --tray");
+}
+
+TEST_CASE("Start with Windows: on after the first start through the starter, then the person decides", "[tray][autostart][starter]") {
+    const AutostartPlan plan = link_plan();
+    FakeRegistry run;
+    FakeSettings settings;
+
+    // started from a console (not the starter): nothing changes
+    CHECK_FALSE(settle_autostart(plan, false, run, settings));
+    CHECK(run.values.empty());
+    CHECK(settings.values.empty());
+
+    // the first start from the Start menu: on, and noted
+    CHECK(settle_autostart(plan, true, run, settings));
+    CHECK(run.values.at("fairyfly-link") == plan.line);
+    CHECK(settings.values.at(kAutostartDefaultedSetting) == "1");
+    CHECK_FALSE(settle_autostart(plan, true, run, settings));   // already right
+
+    // turned off in the menu: stays off at the next start
+    run.values.clear();
+    CHECK_FALSE(settle_autostart(plan, true, run, settings));
+    CHECK(run.values.empty());
+}
+
+TEST_CASE("Start with Windows: an older Run value that starts fairyfly.exe moves to the starter, options kept", "[tray][autostart][starter]") {
+    const AutostartPlan plan = link_plan();
+    FakeRegistry run;
+    FakeSettings settings;
+    run.values["fairyfly-link"] = quote_arg(plan.exe) + " link run --tray --state D:\\pairing.json";
+    CHECK(settle_autostart(plan, true, run, settings));
+    CHECK(run.values.at("fairyfly-link") == quote_arg(plan.program) + " link run --tray --state D:\\pairing.json");
+    CHECK(settings.values.empty());   // the person had already chosen it
+
+    // another copy's value (a different folder) is left alone, and so is everything without the starter installed
+    run.values["fairyfly-link"] = "D:\\tools\\fairyfly.exe link run --tray";
+    CHECK_FALSE(settle_autostart(plan, true, run, settings));
+    CHECK(run.values.at("fairyfly-link") == "D:\\tools\\fairyfly.exe link run --tray");
+    AutostartPlan portable = plan;
+    portable.program = portable.exe;
+    run.values["fairyfly-link"] = quote_arg(plan.exe) + " link run --tray";
+    CHECK_FALSE(settle_autostart(portable, true, run, settings));
+}
+
+TEST_CASE("link tray menu: Start with Windows, checkable, switches the Run value", "[tray][link_tray][autostart]") {
+    CHECK(find_item(build_link_menu(paired("connected")), TrayAction::ToggleAutostart) == nullptr);   // no Run key access
+    AutostartView on;
+    on.available = true;
+    on.on = true;
+    const auto m = build_link_menu(paired("connected"), {}, {}, on);
+    const MenuItem* item = find_item(m, TrayAction::ToggleAutostart);
+    REQUIRE(item != nullptr);
+    CHECK(item->label == "Start with Windows");
+    CHECK(item->checkable);
+    CHECK(item->checked);
+
+    Fixture f;
+    FakeRegistry run;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.run_key = &run;
+    services.autostart = link_plan();
+    LinkTrayController controller(services, f.paths);
+    const MenuItem* before = nullptr;
+    auto menu = controller.menu();
+    before = find_item(menu, TrayAction::ToggleAutostart);
+    REQUIRE(before != nullptr);
+    CHECK_FALSE(before->checked);
+    controller.on_action(TrayAction::ToggleAutostart);
+    CHECK(run.values.at("fairyfly-link") == services.autostart.line);
+    menu = controller.menu();
+    CHECK(find_item(menu, TrayAction::ToggleAutostart)->checked);
+    controller.on_action(TrayAction::ToggleAutostart);
+    CHECK(run.values.empty());
+
+    run.ok = false;
+    controller.on_action(TrayAction::ToggleAutostart);
+    REQUIRE_FALSE(f.host.balloons.empty());
+    CHECK(f.host.balloons.back().find("Start with Windows") != std::string::npos);
+}
+
+TEST_CASE("a second start opens the running tray's menu instead of a message box", "[tray][run][starter]") {
+    {
+        ShowingHost host;
+        FakeGuard guard;
+        guard.other_running = true;
+        LinkTrayServices services;
+        services.host = &host;
+        TrayPaths paths;
+        bool ran = false;
+        CHECK(run_link_with_tray([&] { ran = true; return 0; }, services, guard, paths) == 0);
+        CHECK_FALSE(ran);
+        CHECK(host.shown == 1);
+        CHECK(host.boxes.empty());
+    }
+    {
+        Fixture f;
+        ShowingHost host;
+        FakeGuard guard;
+        guard.other_running = true;
+        TrayServices services;
+        services.host = &host;
+        CHECK(run_with_tray(f.runner, services, guard, f.paths) == 0);
+        CHECK_FALSE(f.runner.ran);
+        CHECK(host.shown == 1);
+        CHECK(host.boxes.empty());
+    }
+    {   // its window is not there (it is just starting or ending): the message box as before
+        ShowingHost host;
+        host.other_tray = false;
+        FakeGuard guard;
+        guard.other_running = true;
+        LinkTrayServices services;
+        services.host = &host;
+        CHECK(run_link_with_tray([] { return 0; }, services, guard, TrayPaths{}) == 0);
+        REQUIRE(host.boxes.size() == 1);
+        CHECK(host.boxes[0].find("already running") != std::string::npos);
+    }
 }

@@ -28,6 +28,12 @@ constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTickMs = 2000;
 constexpr int kIconGiveUpTicks = 30;   // 60 s without a taskbar: tell the person once
 constexpr int kFirstCommandId = 1000;
+constexpr const wchar_t* kWindowClass = L"fairyfly_tray_window";
+// Another process (a second start, fairyfly-tray.exe --close from the installer) talks to a running tray through these.
+constexpr const wchar_t* kShowMenuMessage = L"fairyfly-tray-show-menu";
+constexpr const wchar_t* kQuitMessage = L"fairyfly-tray-quit";
+
+const wchar_t* window_title(TrayKind kind) { return kind == TrayKind::Link ? L"fairyfly link tray" : L"fairyfly MCP tray"; }
 
 void copy_wide(wchar_t* dest, size_t capacity, const std::wstring& src) {
     wcsncpy_s(dest, capacity, src.c_str(), _TRUNCATE);
@@ -78,13 +84,15 @@ bool taskbar_is_light() {
     return rc == ERROR_SUCCESS && value != 0;
 }
 
-HICON load_state_icon(IconState state, bool light) {
-    int id = light ? IDI_TRAY_STOPPED_LIGHT : IDI_TRAY_STOPPED;
+HICON load_state_icon(TrayKind kind, IconState state, bool light) {
+    // resource ids: MCP 10x (dark) / 11x (light), link 12x / 13x; x = running 1, warning 2, stopped 3, error 4
+    const int base = (kind == TrayKind::Link ? IDI_LINK_RUNNING : IDI_TRAY_RUNNING) + (light ? 10 : 0);
+    int id = base + 2;
     COLORREF color = RGB(140, 140, 140);
     switch (state) {
-    case IconState::Running: id = light ? IDI_TRAY_RUNNING_LIGHT : IDI_TRAY_RUNNING; color = RGB(37, 180, 147); break;
-    case IconState::Warning: id = light ? IDI_TRAY_WARNING_LIGHT : IDI_TRAY_WARNING; color = RGB(224, 168, 0); break;
-    case IconState::Error: id = light ? IDI_TRAY_ERROR_LIGHT : IDI_TRAY_ERROR; color = RGB(214, 48, 49); break;
+    case IconState::Running: id = base; color = kind == TrayKind::Link ? RGB(37, 180, 147) : RGB(124, 92, 230); break;
+    case IconState::Warning: id = base + 1; color = RGB(224, 168, 0); break;
+    case IconState::Error: id = base + 3; color = RGB(214, 48, 49); break;
     case IconState::Stopped: break;
     }
     HICON icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(id), IMAGE_ICON,
@@ -97,22 +105,30 @@ HICON load_state_icon(IconState state, bool light) {
 // ---- Tray host ----------------------------------------------------------------------------------
 class Win32TrayHost : public TrayHost {
 public:
+    explicit Win32TrayHost(TrayKind kind) : kind_(kind) {}
+
     bool run(TrayListener& listener, const std::function<void(bool)>& ready) override {
         listener_ = &listener;
         taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
+        show_menu_message_ = RegisterWindowMessageW(kShowMenuMessage);
+        quit_message_ = RegisterWindowMessageW(kQuitMessage);
 
         WNDCLASSW wc{};
         wc.lpfnWndProc = &Win32TrayHost::wnd_proc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"fairyfly_tray_window";
+        wc.lpszClassName = kWindowClass;
         RegisterClassW(&wc);
-        // A real (hidden) top-level window: message-only windows do not receive the TaskbarCreated broadcast.
-        HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"fairyfly MCP tray", WS_POPUP, 0, 0, 0, 0,
+        // A real (hidden) top-level window: message-only windows do not receive the TaskbarCreated broadcast. Its
+        // title tells a second start which tray it is.
+        HWND hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, window_title(kind_), WS_POPUP, 0, 0, 0, 0,
                                     nullptr, nullptr, wc.hInstance, this);
         if (!hwnd) {
             ready(false);
             return false;
         }
+        // a second start and the installer run unelevated like the tray; this only matters for an elevated tray
+        ChangeWindowMessageFilterEx(hwnd, show_menu_message_, MSGFLT_ALLOW, nullptr);
+        ChangeWindowMessageFilterEx(hwnd, quit_message_, MSGFLT_ALLOW, nullptr);
         hwnd_ = hwnd;
         // No taskbar yet (an autostart right after logon, Explorer restarting): keep running and add the icon on a
         // later tick or on TaskbarCreated instead of ending the tray.
@@ -159,6 +175,30 @@ public:
         MessageBoxW(hwnd_, utf8_to_wide(text).c_str(), utf8_to_wide(title).c_str(),
                     MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST);
     }
+    bool show_running_instance() override {
+        // every window of this tray kind: up to 2026.10.24 all trays were titled "fairyfly MCP tray" and ignore the
+        // message, so the first one found may be an old link tray
+        struct Search {
+            const wchar_t* title;
+            UINT message;
+            int asked = 0;
+        } search{window_title(kind_), RegisterWindowMessageW(kShowMenuMessage)};
+        EnumWindows(
+            [](HWND hwnd, LPARAM param) -> BOOL {
+                auto* s = reinterpret_cast<Search*>(param);
+                wchar_t cls[64] = {}, title[64] = {};
+                if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, kWindowClass) != 0) return TRUE;
+                if (!GetWindowTextW(hwnd, title, 64) || wcscmp(title, s->title) != 0) return TRUE;
+                DWORD pid = 0;
+                GetWindowThreadProcessId(hwnd, &pid);
+                // started by the person (Start menu): hand the foreground on, so the menu gets the focus
+                if (pid) AllowSetForegroundWindow(pid);
+                if (PostMessageW(hwnd, s->message, 0, 0)) ++s->asked;
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&search));
+        return search.asked > 0;
+    }
 
 private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
@@ -173,6 +213,17 @@ private:
     }
 
     LRESULT handle(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
+        if (msg == show_menu_message_ && show_menu_message_ != 0) {
+            if (icon_added_) show_menu(hwnd, true);
+            return 0;
+        }
+        if (msg == quit_message_ && quit_message_ != 0) {
+            // the installer closes the tray before it replaces or removes the files
+            spdlog::info("tray: asked to quit by another process (installer)");
+            EndMenu();
+            listener_->on_action(TrayAction::Quit);
+            return 0;
+        }
         if (msg == taskbar_created_ && taskbar_created_ != 0) {
             // Explorer (re)started: the icon is gone, add it again. Also broadcast in other cases (the icon still
             // exists, NIM_ADD then fails): a successful NIM_MODIFY means it is there.
@@ -183,11 +234,9 @@ private:
         }
         switch (msg) {
         case kTrayCallback:
-            if (LOWORD(lparam) == WM_LBUTTONUP) {
-                show_balloon("fairyfly MCP", listener_->left_click_text());
-            } else if (LOWORD(lparam) == WM_RBUTTONUP || LOWORD(lparam) == WM_CONTEXTMENU) {
-                show_menu(hwnd);
-            }
+            // either button opens the menu; its first line is the status
+            if (LOWORD(lparam) == WM_LBUTTONUP || LOWORD(lparam) == WM_RBUTTONUP || LOWORD(lparam) == WM_CONTEXTMENU)
+                show_menu(hwnd, false);
             return 0;
         case WM_TIMER:
             if (wparam == kTimerId) {
@@ -261,7 +310,7 @@ private:
 
     HICON icon_for_state(IconState state) {
         HICON& slot = icons_[light_taskbar_ ? 1 : 0][static_cast<size_t>(state)];
-        if (!slot) slot = load_state_icon(state, light_taskbar_);
+        if (!slot) slot = load_state_icon(kind_, state, light_taskbar_);
         return slot;
     }
 
@@ -326,12 +375,22 @@ private:
         return menu;
     }
 
-    void show_menu(HWND hwnd) {
+    void show_menu(HWND hwnd, bool at_icon) {
         const TrayMenuModel model = listener_->menu();
         std::vector<TrayAction> ids;
         HMENU menu = build_native(model.items, ids);
+        if (!model.items.empty() && !model.items.front().separator) SetMenuDefaultItem(menu, 0, TRUE);   // status in bold
         POINT pt;
         GetCursorPos(&pt);
+        NOTIFYICONIDENTIFIER icon{};
+        icon.cbSize = sizeof(icon);
+        icon.hWnd = hwnd;
+        icon.uID = 1;
+        RECT rect{};
+        if (at_icon && SUCCEEDED(Shell_NotifyIconGetRect(&icon, &rect))) {   // opened by a second start, not a click
+            pt.x = (rect.left + rect.right) / 2;
+            pt.y = (rect.top + rect.bottom) / 2;
+        }
         SetForegroundWindow(hwnd);   // required so the menu closes when clicking elsewhere
         const UINT cmd = static_cast<UINT>(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
                                                           pt.x, pt.y, 0, hwnd, nullptr));
@@ -341,8 +400,11 @@ private:
             listener_->on_action(ids[cmd - kFirstCommandId]);
     }
 
+    TrayKind kind_;
     TrayListener* listener_ = nullptr;
     std::atomic<HWND> hwnd_{nullptr};
+    UINT show_menu_message_ = 0;
+    UINT quit_message_ = 0;
     std::atomic<bool> quit_requested_{false};
     UINT taskbar_created_ = 0;
     bool icon_added_ = false;   // the notification icon is in the taskbar (retried on every tick until it is)
@@ -440,6 +502,25 @@ private:
     static constexpr const wchar_t* kSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 };
 
+class Win32TraySettings : public TraySettings {
+public:
+    std::optional<std::string> get(const std::string& name) override {
+        wchar_t buffer[512];
+        DWORD size = sizeof(buffer);
+        if (RegGetValueW(HKEY_CURRENT_USER, kSubKey, utf8_to_wide(name).c_str(), RRF_RT_REG_SZ, nullptr, buffer, &size) != ERROR_SUCCESS)
+            return std::nullopt;
+        return com::wide_to_utf8(buffer);
+    }
+    bool set(const std::string& name, const std::string& value) override {
+        const std::wstring v = utf8_to_wide(value);
+        return RegSetKeyValueW(HKEY_CURRENT_USER, kSubKey, utf8_to_wide(name).c_str(), REG_SZ, v.c_str(),
+                               static_cast<DWORD>((v.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    }
+
+private:
+    static constexpr const wchar_t* kSubKey = L"Software\\DataZoo\\fairyfly\\tray";
+};
+
 class Win32SingleInstance : public SingleInstance {
 public:
     explicit Win32SingleInstance(std::string name) : name_(std::move(name)) {}
@@ -494,7 +575,8 @@ public:
 
 } // namespace
 
-std::unique_ptr<TrayHost> make_win32_tray_host() { return std::make_unique<Win32TrayHost>(); }
+std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind) { return std::make_unique<Win32TrayHost>(kind); }
+std::unique_ptr<TraySettings> make_win32_tray_settings() { return std::make_unique<Win32TraySettings>(); }
 std::unique_ptr<FileOpener> make_win32_file_opener() { return std::make_unique<Win32FileOpener>(); }
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher() { return std::make_unique<Win32ProcessLauncher>(); }
 std::unique_ptr<RegistryRunKey> make_win32_run_key() { return std::make_unique<Win32RunKey>(); }
@@ -532,9 +614,19 @@ bool startup_error_needs_dialog_here() {
 
 bool is_tray_child_process() { return config::process_env()(kTrayChildEnv) == "1"; }
 
+bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(kTrayLaunchedEnv) == "1"; }
+
+bool path_exists(const std::filesystem::path& path) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(path, ec);
+}
+
 void detach_console() { FreeConsole(); }
 
-void clear_tray_child_marker() { SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", nullptr); }
+void clear_tray_child_marker() {
+    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", nullptr);
+    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", nullptr);
+}
 
 std::string route_logging_to_file(const std::string& file_name) {
     const auto dir = log_directory(config::process_env());

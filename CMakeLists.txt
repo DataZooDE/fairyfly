@@ -359,8 +359,23 @@ if(WIN32)
     if(NOT "${PROJECT_VERSION_TWEAK}" STREQUAL "")
         math(EXPR FAIRYFLY_VER_TWEAK "${PROJECT_VERSION_TWEAK}")
     endif()
+    set(FAIRYFLY_RC_NAME fairyfly)
+    set(FAIRYFLY_RC_DESCRIPTION "fairyfly - SAP GUI automation CLI and MCP server")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version_info.rc.in ${CMAKE_CURRENT_BINARY_DIR}/version_info.rc @ONLY)
     add_executable(fairyfly src/main.cpp src/tray/fairyfly.rc ${CMAKE_CURRENT_BINARY_DIR}/version_info.rc)
+
+    # fairyfly-tray.exe: a Windows-subsystem starter for the trays, so the Start menu and the autostart open no console
+    # window (fairyfly.exe is a console program). Nothing of fairyfly_core; shipped next to fairyfly.exe by the MSI.
+    set(FAIRYFLY_RC_NAME fairyfly-tray)
+    set(FAIRYFLY_RC_DESCRIPTION "fairyfly - starts the fairyfly tray")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version_info.rc.in ${CMAKE_CURRENT_BINARY_DIR}/version_info_tray.rc @ONLY)
+    add_executable(fairyfly_tray WIN32 src/tray_launcher/fairyfly_tray.cpp src/tray_launcher/fairyfly_tray.rc
+                   ${CMAKE_CURRENT_BINARY_DIR}/version_info_tray.rc)
+    set_target_properties(fairyfly_tray PROPERTIES OUTPUT_NAME fairyfly-tray)
+    target_compile_definitions(fairyfly_tray PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(fairyfly_tray PRIVATE /W4 /utf-8)
+    target_link_libraries(fairyfly_tray PRIVATE shell32 user32 advapi32)
+    add_dependencies(fairyfly fairyfly_tray)   # building fairyfly also builds its tray starter (CI, Makefile)
 else()
     add_executable(fairyfly src/main.cpp)
 endif()

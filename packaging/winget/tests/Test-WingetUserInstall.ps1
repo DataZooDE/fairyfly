@@ -52,6 +52,7 @@ function Run-Unelevated([string]$cmd, [string]$name) {
 
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\fairyfly'
 $installedExe = Join-Path $installDir 'fairyfly.exe'
+$installedStarter = Join-Path $installDir 'fairyfly-tray.exe'   # the shortcut's target: a Windows-subsystem starter, no console
 $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
 $lnk = Join-Path $startMenu 'fairyfly.lnk'
 $oldLnk = Join-Path $startMenu 'fairyfly (tray).lnk'   # up to v2026.10.23: `mcp --tray`, which exits at once without --http
@@ -61,7 +62,7 @@ function Get-FairyflyShortcuts {
     Get-ChildItem $startMenu -Filter *.lnk -ErrorAction SilentlyContinue | ForEach-Object {
         $s = $shell.CreateShortcut($_.FullName)
         [pscustomobject]@{ Path = $_.FullName; Name = $_.Name; TargetPath = $s.TargetPath; Arguments = $s.Arguments; WorkingDirectory = $s.WorkingDirectory }
-    } | Where-Object { $_.TargetPath -ieq $installedExe }
+    } | Where-Object { $_.TargetPath -ieq $installedStarter }
 }
 function Get-FairyflyProcesses {
     @(Get-CimInstance Win32_Process -Filter "Name = 'fairyfly.exe'" | Where-Object { $_.ExecutablePath -ieq $installedExe })
@@ -216,7 +217,7 @@ try {
     Step 'Start-menu shortcut: started as Explorer starts it, the tray stays up'
     $shortcuts = @(Get-FairyflyShortcuts)
     foreach ($sc in $shortcuts) { Write-Host "  $($sc.Name): TargetPath=$($sc.TargetPath) Arguments='$($sc.Arguments)' WorkingDirectory=$($sc.WorkingDirectory)" }
-    Assert ($shortcuts.Count -eq 1) 'exactly one Start-menu shortcut starts fairyfly.exe'
+    Assert ($shortcuts.Count -eq 1) 'exactly one Start-menu shortcut starts fairyfly-tray.exe'
     $sc = $shortcuts[0]
     Assert (@(Get-FairyflyProcesses).Count -eq 0) 'no fairyfly process before the shortcut is started'
     # an isolated profile folder: no pairing, logs or audit trail of the runner's user are read or written

@@ -41,7 +41,12 @@
 namespace fairyfly::tray {
 
 // ---- Pure model ---------------------------------------------------------------------------------
-enum class IconState { Running, Warning, Stopped, Error };   ///< green, yellow, grey, red
+/// The mark in the tray's own colour (link: teal, MCP: violet); a yellow or red badge for warning/paused and error, faded
+/// when stopped.
+enum class IconState { Running, Warning, Stopped, Error };
+
+/// Which tray a process shows: its icon colour, window title (a second start finds the running one by it) and texts.
+enum class TrayKind { Mcp, Link };
 
 enum class TrayAction {
     None,
@@ -53,6 +58,7 @@ enum class TrayAction {
     LinkToggleWrites,                                          ///< link tray: "Allow changes in SAP"
     UpdateCheck,                                               ///< `fairyfly update check` in a console
     StartMcpServer,                                            ///< link tray: the local MCP server in its own tray
+    ToggleAutostart,                                           ///< link tray: "Start with Windows"
     Quit,
 };
 
@@ -123,6 +129,11 @@ RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string
                            bool is_child, bool has_console);
 
 inline constexpr const char* kTrayChildEnv = "FAIRYFLY_TRAY_CHILD";
+/// Set by fairyfly-tray.exe (with kTrayChildEnv) for the fairyfly.exe it starts: the Start menu, the autostart or the
+/// installer started this tray, not a developer's console.
+inline constexpr const char* kTrayLaunchedEnv = "FAIRYFLY_TRAY_LAUNCHED";
+/// The windowless starter next to fairyfly.exe (Windows subsystem, so Explorer opens no console for it).
+inline constexpr const char* kTrayLauncherName = "fairyfly-tray.exe";
 inline constexpr const char* kTrayMutexName = "Local\\fairyfly-tray";
 inline constexpr const char* kAutostartValueName = "fairyfly-mcp";
 inline constexpr const char* kLinkTrayMutexName = "Local\\fairyfly-link-tray";
@@ -133,6 +144,8 @@ std::string autostart_command(const std::string& exe, const std::string& config_
 /// Value of HKCU\...\Run\fairyfly-link: "<exe>" and the `link run --tray` arguments (argv without the program
 /// name) without --install-autostart/--remove-autostart; --tray is added when missing.
 std::string link_autostart_command(const std::string& exe, const std::vector<std::string>& args);
+/// The program the Run values start: fairyfly-tray.exe next to `exe` when it is there (no console at logon), else `exe`.
+std::string tray_start_program(const std::string& exe, const std::function<bool(const std::filesystem::path&)>& exists);
 /// `cmd.exe /k` command line that runs `fairyfly <args>` in a console that stays open.
 std::string console_command_line(const std::string& exe, const std::vector<std::string>& args);
 
@@ -176,6 +189,28 @@ public:
     virtual bool remove(const std::string& name) = 0;
     virtual std::optional<std::string> get(const std::string& name) = 0;
 };
+
+/// Small per-user settings of the trays (HKCU\Software\DataZoo\fairyfly\tray).
+class TraySettings {
+public:
+    virtual ~TraySettings() = default;
+    virtual std::optional<std::string> get(const std::string& name) = 0;
+    virtual bool set(const std::string& name, const std::string& value) = 0;
+};
+
+/// "Start with Windows" of the link tray: its Run value, on by default.
+struct AutostartPlan {
+    std::string name;                 ///< the Run value (kLinkAutostartValueName)
+    std::string line;                 ///< what "Start with Windows" writes (link_autostart_command of the start program)
+    std::string exe;                  ///< fairyfly.exe; a Run value that starts it directly is moved to `program`
+    std::string program;              ///< tray_start_program(exe)
+};
+inline constexpr const char* kAutostartDefaultedSetting = "link-autostart-defaulted";
+/// At the start of a tray that fairyfly-tray.exe started (`launched`): the very first time it turns "Start with Windows"
+/// on (and notes that, so turning it off in the menu stays off); a Run value of an older version that starts fairyfly.exe
+/// (a console at every logon) starts `program` instead, its options kept. Started any other way it changes nothing.
+/// Returns true when the Run value was written.
+bool settle_autostart(const AutostartPlan& plan, bool launched, RegistryRunKey& run, TraySettings& settings);
 
 /// Named-mutex based single-instance guard.
 class SingleInstance {
@@ -244,6 +279,9 @@ public:
     virtual bool confirm(const std::string& title, const std::string& text) = 0;
     /// Modal information box ("already running"); may be called without a running message loop.
     virtual void message_box(const std::string& title, const std::string& text) = 0;
+    /// A second start of the same tray: asks the running one to open its menu at its icon. False when there is none to
+    /// ask (the caller then says "already running" in a message box).
+    virtual bool show_running_instance() { return false; }
 };
 
 /// Prints "error <code>: <message>" through `print` and, with `dialog` and a host, shows it in a message box titled
@@ -377,9 +415,16 @@ struct LinkWritesView {
     bool locked = false;
 };
 
+/// "Start with Windows" as the menu shows it.
+struct AutostartView {
+    bool available = false;   ///< false: no item (no Run key access)
+    bool on = false;
+};
+
 /// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again (unpaired: Pair with the fairyfly cloud),
-/// Start local MCP server, Open log/audit trail folder, Check for updates, Quit.
-TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {}, const McpTrayView& mcp = {});
+/// Start local MCP server, Start with Windows, Open log/audit trail folder, Check for updates, Quit.
+TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {}, const McpTrayView& mcp = {},
+                              const AutostartView& autostart = {});
 
 struct LinkTrayServices {
     TrayHost* host = nullptr;
@@ -388,6 +433,8 @@ struct LinkTrayServices {
     LinkControl* link = nullptr;
     LinkWriteMode* writes = nullptr;   ///< optional: "Allow changes in SAP"
     SingleInstance* mcp_tray = nullptr;   ///< optional probe of the MCP tray's guard (kTrayMutexName); never acquired
+    RegistryRunKey* run_key = nullptr;    ///< optional: "Start with Windows"
+    AutostartPlan autostart;              ///< the Run value that item switches
     std::function<void()> stop_link;   ///< thread-safe: makes the running `link run` return
     /// Unpaired at start: how often run_link_with_tray looks whether `link pair` (from the menu) has paired the desktop.
     std::chrono::milliseconds pairing_poll{1000};
@@ -413,6 +460,7 @@ private:
     void notify(const std::string& text);
     LinkWritesView writes_view();
     McpTrayView mcp_view();
+    AutostartView autostart_view();
 
     LinkTrayServices services_;
     TrayPaths paths_;

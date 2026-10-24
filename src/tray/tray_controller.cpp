@@ -70,6 +70,23 @@ std::string link_autostart_command(const std::string& exe, const std::vector<std
     return join_command_line(exe, kept);
 }
 
+std::string tray_start_program(const std::string& exe, const std::function<bool(const std::filesystem::path&)>& exists) {
+    const auto launcher = std::filesystem::path(exe).parent_path() / kTrayLauncherName;
+    return exists && exists(launcher) ? launcher.string() : exe;
+}
+
+bool settle_autostart(const AutostartPlan& plan, bool launched, RegistryRunKey& run, TraySettings& settings) {
+    if (!launched || plan.name.empty() || plan.line.empty()) return false;
+    if (const auto current = run.get(plan.name)) {
+        const std::string old_program = quote_arg(plan.exe);
+        if (plan.program == plan.exe || current->rfind(old_program, 0) != 0) return false;
+        return run.set(plan.name, quote_arg(plan.program) + current->substr(old_program.size()));
+    }
+    if (settings.get(kAutostartDefaultedSetting)) return false;                   // turned off in the menu: stays off
+    settings.set(kAutostartDefaultedSetting, "1");
+    return run.set(plan.name, plan.line);
+}
+
 std::string console_command_line(const std::string& exe, const std::vector<std::string>& args) {
     return "cmd.exe /k \"" + join_command_line(exe, args) + "\"";
 }
@@ -244,7 +261,8 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
                   TrayState state) {
     if (!services.host) return 1;
     if (!guard.acquire()) {
-        services.host->message_box("fairyfly MCP", "The fairyfly MCP tray is already running.");
+        if (!services.host->show_running_instance())
+            services.host->message_box("fairyfly MCP", "The fairyfly MCP tray is already running.");
         return 0;
     }
 

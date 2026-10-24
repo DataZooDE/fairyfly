@@ -22,16 +22,21 @@ menu item **Start local MCP server** runs `fairyfly mcp --tray --http` ([LINK.md
 shell console would show them (started from the Start menu, the autostart or the link tray). Started from a
 console, the process relaunches itself detached (no window, `FAIRYFLY_TRAY_CHILD=1` marks the child),
 prints the child pid and exits with 0. The child frees its console, logs to
-`%LOCALAPPDATA%\fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start prints or
-pops up "already running" (named mutex `Local\fairyfly-tray`) and exits 0.
+`%LOCALAPPDATA%\fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start (named mutex
+`Local\fairyfly-tray`) opens the running tray's menu at its icon and exits 0; only when that tray's window cannot be
+found it says "already running" (console or message box).
 
-The icon is the fairyfly butterfly, recoloured by state: teal = running, amber = running with warnings,
-grey = stopped, red = error. It follows the taskbar theme (white spine on a dark taskbar, navy on a light one) and
-switches live when the theme changes. Sources: `assets/logo/`, regenerated with `python assets/generate_icons.py`
-(Pillow). The icon is re-added when Explorer restarts (`TaskbarCreated`); when there is no taskbar yet (an autostart right after logon) the tray keeps running and adds the icon as soon as it can (`tray: notification icon added` in the log). Left-click shows a status balloon (endpoint, mode,
-session routing when enabled, counters, warnings). Warnings are also shown in a balloon once when the server is up.
+`fairyfly-tray.exe`, installed next to `fairyfly.exe` by the MSI, starts a tray without any console window (it is a
+Windows program, `fairyfly.exe` a console program): `fairyfly-tray.exe mcp --tray --http`. The autostart value uses it
+when it is there.
 
-Right-click menu:
+The icon is the fairyfly butterfly in **violet** (the cloud link tray's is teal, so both can sit side by side): an
+amber badge = running with warnings, faded = stopped, a red badge = error. It follows the taskbar theme (white spine on
+a dark taskbar, navy on a light one) and switches live when the theme changes. Sources: `assets/logo/`, regenerated
+with `python assets/generate_icons.py` (Pillow). The icon is re-added when Explorer restarts (`TaskbarCreated`); when there is no taskbar yet (an autostart right after logon) the tray keeps running and adds the icon as soon as it can (`tray: notification icon added` in the log). The tooltip shows
+the state; warnings are shown in a balloon once when the server is up.
+
+Menu (left or right click; the first line, in bold, is the status):
 
 | Item | Effect |
 |---|---|
@@ -150,7 +155,7 @@ provides its probe. Exit code 1 when any check fails.
    the test binary does not link the icon resources; `fairyfly mcp --tray` shows the butterfly).
 2. Restart Explorer (`taskkill /f /im explorer.exe`, then start it): the icon comes back.
 3. `fairyfly mcp --tray --http` from a console: pid printed, console returns, icon appears; running it again
-   says "already running".
+   opens the running tray's menu at its icon.
 4. Menu: Stop then Start, Restart, Open log / audit folder / config, Tokens (console stays open).
 5. Toggle read-only off: confirm dialog appears; No leaves the mode unchanged.
 6. `--install-autostart`, log off and on: tray starts; `--remove-autostart`, check the Run key is gone.

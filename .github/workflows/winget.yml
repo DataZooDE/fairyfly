@@ -21,6 +21,7 @@ on:
       - 'vcpkg.json'
       - 'src/tray/**'
       - 'src/include/tray/**'
+      - 'src/tray_launcher/**'
       - 'src/link/link_tray_entry.cpp'
       - 'src/link/link_runner.cpp'
       - 'src/commands/mcp_config_command.cpp'
@@ -53,6 +54,7 @@ jobs:
       with:
         path: |
           build/Release/fairyfly.exe
+          build/Release/fairyfly-tray.exe
           build/variants
         key: ffy-exe-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('src/**', 'third_party/**', 'assets/**', 'CMakeLists.txt', 'vcpkg.json', 'cmake/**') }}
 
@@ -126,6 +128,7 @@ jobs:
       with:
         path: |
           build/Release/fairyfly.exe
+          build/Release/fairyfly-tray.exe
           build/variants
         key: ${{ steps.exe-cache.outputs.cache-primary-key }}
 
@@ -161,7 +164,8 @@ jobs:
                        @{ exe = 'build/variants/next-day/fairyfly.exe'; msi = 'build/variants/next-day/fairyfly.msi' }) {
           $version = (& $b.exe --version | Out-String).Trim()
           $msiVersion = (& ./packaging/msi_version.ps1 -Version $version).Trim()
-          wix build packaging/fairyfly.wxs -arch x64 -d ExePath=$($b.exe) -d MsiVersion=$msiVersion -o $b.msi
+          # one tray starter for all three: it carries no logic that depends on the version
+          wix build packaging/fairyfly.wxs -arch x64 -d ExePath=$($b.exe) -d TrayExePath=build/Release/fairyfly-tray.exe -d MsiVersion=$msiVersion -o $b.msi
           if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
           Write-Host "fairyfly $version -> MSI $msiVersion ($($b.msi))"
         }
