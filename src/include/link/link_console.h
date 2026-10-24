@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <streambuf>
 #include <string>
@@ -44,8 +45,18 @@ std::string pair_gateway_prompt(const std::string& prefill, bool in_line);
 /// The typed line without surrounding spaces and the CR; empty (Enter) = `prefill`.
 std::string pair_gateway_answer(const std::string& typed, const std::string& prefill);
 
+/// Which address gateway_url_problem() checks: the service's web address (`link pair`) or the link's WebSocket
+/// address the service hands out at pairing (state.json link_url, used by `link run`).
+enum class GatewayUrlKind { Web, WebSocket };
+/// Why `url` must not be used as a gateway address, or nullopt when it may. Parsed with libffl's strict parse_url (the
+/// parser the HTTP and WebSocket clients use): no userinfo, no whitespace/control characters/backslashes, no
+/// percent-encoding in the authority, IPv6 only in brackets, no fragment (and for Web no query). https:// (wss://) is
+/// required; plain http:// (ws://) only for exactly localhost, 127.0.0.1 or [::1] with an optional port.
+std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUrlKind kind = GatewayUrlKind::Web);
+
 /// Name of the per-pairing lock (a named mutex in the session) that a serving `link run`, in a console or in the link
-/// tray, holds: one link per pairing. The same file under another spelling (case, separators, "..") gives the same name.
+/// tray, holds: one link per pairing. Derived from the file's final path (on Windows junctions,
+/// symbolic links, subst drives and 8.3 names resolved, Unicode case folded), so any spelling of the file gives one name.
 std::string link_run_lock_name(const std::string& state_path);
 
 /// The "next" step `link pair` reports. `link_tray_running`: the link tray runs (it starts the link itself once

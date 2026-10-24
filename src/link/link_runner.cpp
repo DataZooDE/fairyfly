@@ -326,8 +326,7 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
         if (stop) return cancelled();
         o.gateway = pair_gateway_answer(typed, gateway.address);
     }
-    if (o.gateway.rfind("https://", 0) != 0 && o.gateway.rfind("http://127.0.0.1", 0) != 0 && o.gateway.rfind("http://localhost", 0) != 0)
-        return error("INVALID_ARGUMENT", std::string("the gateway address must start with https://, e.g. ") + kDefaultGateway);
+    if (auto problem = gateway_url_problem(o.gateway)) return error("INVALID_ARGUMENT", *problem + ", e.g. " + kDefaultGateway);
     while (o.gateway.size() > 8 && o.gateway.back() == '/') o.gateway.pop_back();
     try {
         out << "Contacting " << o.gateway << "\xE2\x80\xA6" << std::endl;
@@ -358,6 +357,9 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
             if (!sleep_unless_stopped(std::chrono::milliseconds(2000), stop)) return cancelled();
         }
         if (!st) return error(pc->status() == "expired" ? "PAIRING_EXPIRED" : "PAIRING_FAILED", "pairing " + pc->status() + " - start again with: fairyfly link pair --gateway " + o.gateway);
+        // the gateway decides where `link run` connects: never in plain text to another computer
+        if (auto problem = gateway_url_problem(st->link_url, GatewayUrlKind::WebSocket))
+            return error("PAIRING_FAILED", "the gateway handed out an insecure link address - nothing was saved (" + *problem + ")");
         if (stop) return cancelled();  // Ctrl+C right after the phone approved: do not start reading the answer
         const bool confirmed = ffy::link::confirm_pairing(*st, in, out);
         if (stop) return cancelled();  // Ctrl+C at the prompt ends the input as well
@@ -377,6 +379,9 @@ Result link_status(const LinkOptions& o) {
     if (auto refused = state_guard(o)) return *refused;
     try {
         auto st = ffy::link::load_state(state_path(o));
+        if (auto problem = gateway_url_problem(st.link_url, GatewayUrlKind::WebSocket))
+            return error("LINK_STATE_INSECURE", "the pairing state " + state_path(o) + " holds an insecure link address (" + *problem +
+                                                    "); pair again: fairyfly link pair");
         Result r;
         r.status = Result::Status::Success;
         r.data = {{"paired", true}, {"device", st.device_id}, {"account", st.email}, {"organisation_id", st.tenant},
@@ -488,6 +493,13 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         st = ffy::link::load_state(state_path(o));
     } catch (const std::exception& e) {
         Result r = error("LINK_NOT_PAIRED", std::string("this desktop is not paired (") + e.what() + "); run: fairyfly link pair");
+        std::cerr << r.to_json().dump() << std::endl;
+        return 2;
+    }
+    if (auto problem = gateway_url_problem(st.link_url, GatewayUrlKind::WebSocket)) {
+        Result r = error("LINK_STATE_INSECURE", "the pairing state " + state_path(o) + " holds an insecure link address (" + *problem +
+                                                    "); pair again: fairyfly link pair");
+        spdlog::error("LINK_STATE_INSECURE: {}", *problem);   // the tray's link.log
         std::cerr << r.to_json().dump() << std::endl;
         return 2;
     }
