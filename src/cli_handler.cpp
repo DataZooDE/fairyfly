@@ -1379,6 +1379,112 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
     return result;
 }
 
+Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fields, const std::string& then_key,
+                                          bool stop_on_error, std::optional<int> connection_id, bool allow_fill)
+{
+    Result result;
+    std::optional<int> then_vkey;
+    if (!then_key.empty()) {
+        then_vkey = sap::fill_then_vkey(then_key);
+        if (!then_vkey) {
+            result.status = Result::Status::Error;
+            result.error["code"] = "INVALID_ARGUMENT";
+            result.error["message"] = "then_key must be enter or f8; save, back and cancel are separate calls";
+            return result;
+        }
+    }
+    if (fields.empty()) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "INVALID_ARGUMENT";
+        result.error["message"] = "at least one field is required";
+        return result;
+    }
+
+    // Every field takes exactly the single-field path (read-only guard, selection-input rules, grid cells, read-back).
+    json entries = json::array();
+    std::size_t filled = 0;
+    std::optional<std::size_t> failed_at;
+    json first_error;
+    json last_ok;
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const auto& f = fields[i];
+        if (failed_at && stop_on_error) {
+            entries.push_back({{"element", f.element}, {"ok", false}, {"skipped", true}});
+            continue;
+        }
+        Result one = handle_fill(f.element, f.clear ? std::string() : f.value, connection_id, f.row, f.column, f.checkbox,
+                                 f.commit, allow_fill);
+        json entry = {{"element", f.element}, {"ok", one.status == Result::Status::Success}};
+        if (one.status == Result::Status::Success) {
+            ++filled;
+            for (const char* key : {"value", "value_redacted", "selected", "key", "display_value"})
+                if (one.data.contains(key)) entry[key] = one.data[key];
+            last_ok = one.data;
+        } else {
+            entry["error_code"] = one.error.value("code", std::string("ERROR"));
+            entry["message"] = one.error.value("message", std::string());
+            if (!failed_at) {
+                failed_at = i;
+                first_error = one.error;
+            }
+        }
+        entries.push_back(std::move(entry));
+    }
+
+    result.data["action"] = "fill_fields";
+    result.data["fields"] = entries;
+    result.data["filled"] = filled;
+    result.data["total"] = fields.size();
+    if (last_ok.contains("connection_id")) result.data["connection_id"] = last_ok["connection_id"];
+    if (last_ok.contains("window")) result.data["window"] = last_ok["window"];
+
+    if (failed_at) {
+        result.status = Result::Status::Error;
+        result.error = first_error;
+        result.error["message"] = fmt::format("field {} of {} ({}) failed: {}{}", *failed_at + 1, fields.size(),
+                                              fields[*failed_at].element, first_error.value("message", std::string()),
+                                              then_vkey ? "; the key was not pressed" : "");
+        result.error["failed_at"] = *failed_at;
+        result.error["filled"] = filled;
+        result.error["fields"] = entries;
+        return result;
+    }
+    if (!then_vkey) {
+        result.status = Result::Status::Success;
+        if (last_ok.contains("statusbar")) result.data["statusbar"] = last_ok["statusbar"];
+        return result;
+    }
+
+    // The key goes to the main window only: on a popup, Enter could confirm a save or delete dialog.
+    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    const std::string active = com_engine ? com_engine->get_active_window_id().id : std::string();
+    if (!com_engine || WindowId(active).get_index() != 0) {
+        result.status = Result::Status::Error;
+        result.error["code"] = "THEN_KEY_NOT_ON_MAIN_WINDOW";
+        result.error["message"] = fmt::format("all {} fields were filled, but a popup ({}) is open, so {} was not pressed",
+                                              fields.size(), active.empty() ? "unknown window" : active, then_key);
+        result.error["hint"] = "read the popup, then answer it with gui_popup_close or gui_key_send";
+        result.error["filled"] = filled;
+        result.error["fields"] = entries;
+        return result;
+    }
+    Result key = handle_send_key(then_key, "wnd[0]", connection_id);
+    if (key.status != Result::Status::Success) {
+        result.status = Result::Status::Error;
+        result.error = key.error;
+        result.error["message"] = fmt::format("all {} fields were filled, but {} failed: {}", fields.size(), then_key,
+                                              key.error.value("message", std::string()));
+        result.error["filled"] = filled;
+        result.error["fields"] = entries;
+        return result;
+    }
+    result.status = Result::Status::Success;
+    result.data["then_key"] = then_key;
+    for (auto it = key.data.begin(); it != key.data.end(); ++it)
+        if (it.key() != "key" && it.key() != "connection_id" && !result.data.contains(it.key())) result.data[it.key()] = it.value();
+    return result;
+}
+
 Result CommandHandler::handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes,
                                          bool activate_tab)
 {

@@ -61,7 +61,7 @@ bool option_name_is_sensitive(const std::string& raw_name) {
 
 /// Options of `element fill` that consume the next token.
 bool fill_option_takes_value(const std::string& name) {
-    return name == "--connection" || name == "--row" || name == "--column";
+    return name == "--connection" || name == "--row" || name == "--column" || name == "--then-key";
 }
 
 std::tm utc_tm(std::chrono::system_clock::time_point tp) {
@@ -224,6 +224,19 @@ std::vector<std::string> redact_argv(const std::vector<std::string>& argv) {
                 } else {
                     out.push_back(tok);
                     if (i + 1 < argv.size() && !looks_like_option(argv[i + 1])) {
+                        out.push_back(kRedacted);
+                        ++i;
+                    }
+                }
+                continue;
+            }
+            if (in_fill && name == "--fields") {
+                // A multi-field fill: the JSON carries the values, so none of it is recorded.
+                if (eq != std::string::npos) {
+                    out.push_back(name + "=" + kRedacted);
+                } else {
+                    out.push_back(tok);
+                    if (i + 1 < argv.size()) {
                         out.push_back(kRedacted);
                         ++i;
                     }

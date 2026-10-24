@@ -53,7 +53,7 @@ const std::vector<Sample>& samples() {
           "--type", "GuiButton", "--first", "--max-rows", "5", "--skip-trees", "--probe-all", "--connection", "1",
           "--output", "json"}},
         {"gui_screen_read", {{"no_tabs", true}, {"only", "editable"}},
-         {"screen", "read", "--no-tabs", "--only-editable", "--max-rows", "20", "--compact", "--output", "markdown"}},
+         {"screen", "read", "--no-tabs", "--only-editable", "--max-rows", "20", "--output", "markdown"}},  // editable keeps ids and empty fields
         {"gui_screen_read", {{"only", "fields"}, {"text_contains", "-danger"}},
          {"screen", "read", "--only-fields", "--text-contains=-danger", "--max-rows", "20", "--compact", "--output", "markdown"}},
         {"gui_screen_read", {{"only", "f4_fields"}},

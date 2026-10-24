@@ -104,6 +104,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
     src/field_fill_info.cpp
+    src/fill_fields.cpp
     src/tab_guard.cpp
     src/server_clock.cpp
     src/read_only_guard.cpp
