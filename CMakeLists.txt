@@ -29,7 +29,7 @@ endif()
 # numbers (2026.10.5), in version.h the zero-padded form (2026.10.05) that --version prints and the tag uses.
 project(fairyfly VERSION 2026.10.24.1 LANGUAGES CXX)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/calendar_version.cmake)
-fairyfly_check_calendar_version("${PROJECT_VERSION}")   # a real date (2026.2.30 is refused), N <= 65535
+fairyfly_check_calendar_version("${PROJECT_VERSION}")   # a real date (2026.2.30 is refused), N 1..99
 math(EXPR _ff_minor "${PROJECT_VERSION_MINOR}")
 math(EXPR _ff_patch "${PROJECT_VERSION_PATCH}")
 if(_ff_minor LESS 10)

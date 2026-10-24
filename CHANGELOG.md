@@ -25,7 +25,8 @@
   A same-day release number is now 1 to 99 (`set_version.ps1`, `msi_version.ps1`, `New-WingetManifest.ps1`).
 - The release workflow's tag check is case-sensitive (`packaging/check_release_tag.ps1`, covered by
   `packaging/tests/Test-VersionScripts.ps1`): a tag such as `V2026.10.24.1`, which the updater never takes, is
-  refused, as it is by `msi_version.ps1` and `New-WingetManifest.ps1`.
+  refused, as it is by `msi_version.ps1` and `New-WingetManifest.ps1`. It and the configure check also limit the same-day
+  release number to 1..99 like the MSI version (the updater still reads tags up to `.65535`).
 - Configuring checks that the version is a real date (`cmake/calendar_version.cmake`, with the updater's leap-year
   rules): a hand-edited `2026.2.30` or `2026.02.30` fails with a clear message. Covered by `Test-VersionScripts.ps1`.
 

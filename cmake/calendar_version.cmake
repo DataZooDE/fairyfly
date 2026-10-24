@@ -1,6 +1,6 @@
 # fairyfly_check_calendar_version(<version>): stops configuring unless <version> is a calendar version YYYY.MM.DD, or
-# YYYY.MM.DD.N (N = 1..65535) for a further release on the same day, as the updater (src/update/update_model.cpp,
-# parse_calver) accepts it.
+# YYYY.MM.DD.N (N = 1..99) for a further release on the same day: a real date with the updater's rules
+# (src/update/update_model.cpp), N as the MSI version (YYYY-2000).MM.(DD*100+N) and set_version.ps1 allow it.
 # Script mode, for the check in packaging/tests/Test-VersionScripts.ps1:
 #   cmake -DVERSION=2026.10.24.1 -P cmake/calendar_version.cmake
 function(fairyfly_check_calendar_version version)
@@ -41,8 +41,8 @@ function(fairyfly_check_calendar_version version)
         message(FATAL_ERROR "project VERSION ${version} is not a date: ${y}-${m} has no day ${d} (1..${days})")
     endif()
     string(LENGTH "${n}" n_len)
-    if(n_len GREATER 5 OR (NOT n STREQUAL "" AND n GREATER 65535))
-        message(FATAL_ERROR "same-day release number ${n} does not fit a Windows version field (max 65535)")
+    if(n_len GREATER 2)
+        message(FATAL_ERROR "project VERSION ${version}: the same-day release number ${n} is not 1..99 (MSI version DD*100+N)")
     endif()
 endfunction()
 
