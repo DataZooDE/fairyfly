@@ -5,13 +5,20 @@ name: winget per-user install
 # process (ElevationRequirement: elevationProhibited), `winget install --manifest` from an unelevated process of the
 # same user (MSI served from a local HTTP server), start the Start-menu shortcut as Explorer would and check the tray
 # stays up, check the per-user footprint, `winget uninstall`, check it is gone, then upgrade the previous release's MSI.
-# packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks.
+# Then the same-day release chain: the exe is also built as <version>.N+1 (a second release on the same day, e.g.
+# 2026.10.24.1) and as the next day's version; their MSIs must upgrade base -> same-day -> next-day with exactly one
+# product registered each time. packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks,
+# packaging/tests/Test-VersionScripts.ps1 those of the version scripts.
 
 on:
   pull_request:
     branches: [ main ]
     paths:
       - 'packaging/**'
+      - 'src/include/version.h'
+      - 'src/version_info.rc.in'
+      - 'CMakeLists.txt'
+      - 'vcpkg.json'
       - 'src/tray/**'
       - 'src/include/tray/**'
       - 'src/link/link_tray_entry.cpp'
@@ -44,7 +51,9 @@ jobs:
       id: exe-cache
       uses: actions/cache/restore@v4
       with:
-        path: build/Release/fairyfly.exe
+        path: |
+          build/Release/fairyfly.exe
+          build/variants
         key: ffy-exe-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('src/**', 'third_party/**', 'assets/**', 'CMakeLists.txt', 'vcpkg.json', 'cmake/**') }}
 
     - name: Setup vcpkg
@@ -85,26 +94,86 @@ jobs:
         cmake --build build --config Release --target fairyfly --parallel
       shell: pwsh
 
+    - name: Build the same-day (.N) and next-day variants of fairyfly.exe (version files patched, incremental)
+      if: steps.exe-cache.outputs.cache-hit != 'true'
+      run: |
+        $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        $base = (& build/Release/fairyfly.exe --version | Out-String).Trim()
+        if ($base -notmatch '^(\d{4}\.\d{2}\.\d{2})(?:\.(\d+))?$') { Write-Error "unexpected version '$base'"; exit 1 }
+        $sameDay = "$($Matches[1]).$([int]$Matches[2] + 1)"
+        $nextDay = [datetime]::ParseExact($Matches[1], 'yyyy.MM.dd', [cultureinfo]::InvariantCulture).AddDays(1).ToString('yyyy.MM.dd', [cultureinfo]::InvariantCulture)
+        New-Item -ItemType Directory -Force build/variants | Out-Null
+        Copy-Item build/Release/fairyfly.exe build/variants/base.exe
+        try {
+          foreach ($v in @{ name = 'same-day'; version = $sameDay }, @{ name = 'next-day'; version = $nextDay }) {
+            ./packaging/set_version.ps1 -Version $v.version
+            cmake --build build --config Release --target fairyfly --parallel
+            if ($LASTEXITCODE -ne 0) { Write-Error "build of $($v.version) failed"; exit 1 }
+            New-Item -ItemType Directory -Force "build/variants/$($v.name)" | Out-Null
+            Copy-Item build/Release/fairyfly.exe "build/variants/$($v.name)/fairyfly.exe"
+            Write-Host "built $($v.name) variant: $(& "build/variants/$($v.name)/fairyfly.exe" --version)"
+          }
+        } finally {
+          git checkout -- src/include/version.h CMakeLists.txt vcpkg.json
+          Move-Item -Force build/variants/base.exe build/Release/fairyfly.exe   # the cached exe stays the sources' version
+        }
+        if ((& build/Release/fairyfly.exe --version | Out-String).Trim() -ne $base) { Write-Error "build/Release/fairyfly.exe is not $base again"; exit 1 }
+      shell: pwsh
+
     - name: Save fairyfly.exe for later runs (also when the winget checks fail)
       if: steps.exe-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: build/Release/fairyfly.exe
+        path: |
+          build/Release/fairyfly.exe
+          build/variants
         key: ${{ steps.exe-cache.outputs.cache-primary-key }}
 
-    - name: Build the per-user MSI (WiX 5)
+    - name: Version metadata of the exe and its variants (ProductVersion = --version, 4th field = .N)
+      run: |
+        foreach ($exe in 'build/Release/fairyfly.exe', 'build/variants/same-day/fairyfly.exe', 'build/variants/next-day/fairyfly.exe') {
+          $info = (Get-Item $exe).VersionInfo
+          $reported = (& $exe --version | Out-String).Trim()
+          $n = if ($reported -match '^\d{4}\.\d{2}\.\d{2}\.(\d+)$') { [int]$Matches[1] } else { 0 }
+          Write-Host "${exe}: --version $reported, ProductVersion '$($info.ProductVersion)', FileVersion '$($info.FileVersion)', ProductVersionRaw $($info.ProductMajorPart).$($info.ProductMinorPart).$($info.ProductBuildPart).$($info.ProductPrivatePart), FileVersionRaw $($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart).$($info.FilePrivatePart)"
+          if ($info.ProductName -ne 'fairyfly') { Write-Error "ProductName is '$($info.ProductName)'"; exit 1 }
+          if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
+          if ($info.FileVersion -ne $reported) { Write-Error "FileVersion '$($info.FileVersion)' differs from --version '$reported'"; exit 1 }
+          if ($info.ProductPrivatePart -ne $n -or $info.FilePrivatePart -ne $n) { Write-Error "4th version field is $($info.ProductPrivatePart)/$($info.FilePrivatePart), expected $n"; exit 1 }
+          # what release.yml checks: the tag v<--version>
+          if ("v$reported" -notmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') { Write-Error "tag v$reported is not vYYYY.MM.DD[.N]"; exit 1 }
+        }
+        $same = (& build/variants/same-day/fairyfly.exe --version | Out-String).Trim()
+        if ($same -notmatch '^\d{4}\.\d{2}\.\d{2}\.[1-9]\d*$') { Write-Error "same-day variant '$same' has no .N"; exit 1 }
+        Write-Host "version metadata OK"
+      shell: pwsh
+
+    - name: Version scripts (msi_version.ps1, set_version.ps1, New-WingetManifest.ps1 version check)
+      if: ${{ !cancelled() }}
+      run: ./packaging/tests/Test-VersionScripts.ps1
+      shell: pwsh
+
+    - name: Build the per-user MSIs (WiX 5)
       run: |
         dotnet tool install --global wix --version 5.0.2
-        $msiVersion = (& ./packaging/msi_version.ps1).Trim()
-        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=build/Release/fairyfly.exe -d MsiVersion=$msiVersion -o build/fairyfly.msi
-        if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
-        Write-Host "fairyfly $(& build/Release/fairyfly.exe --version) -> MSI $msiVersion"
+        foreach ($b in @{ exe = 'build/Release/fairyfly.exe'; msi = 'build/fairyfly.msi' },
+                       @{ exe = 'build/variants/same-day/fairyfly.exe'; msi = 'build/variants/same-day/fairyfly.msi' },
+                       @{ exe = 'build/variants/next-day/fairyfly.exe'; msi = 'build/variants/next-day/fairyfly.msi' }) {
+          $version = (& $b.exe --version | Out-String).Trim()
+          $msiVersion = (& ./packaging/msi_version.ps1 -Version $version).Trim()
+          wix build packaging/fairyfly.wxs -arch x64 -d ExePath=$($b.exe) -d MsiVersion=$msiVersion -o $b.msi
+          if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
+          Write-Host "fairyfly $version -> MSI $msiVersion ($($b.msi))"
+        }
       shell: pwsh
 
     - name: winget validate + install/uninstall as an unelevated user
       run: |
         $version = (& build/Release/fairyfly.exe --version | Out-String).Trim()
-        ./packaging/winget/tests/Test-WingetUserInstall.ps1 -MsiPath build/fairyfly.msi -Version $version -WorkDir "$env:TEMP\ffy-winget-test"
+        $chain = foreach ($name in 'same-day', 'next-day') {
+          "$((& build/variants/$name/fairyfly.exe --version | Out-String).Trim())=build/variants/$name/fairyfly.msi"
+        }
+        ./packaging/winget/tests/Test-WingetUserInstall.ps1 -MsiPath build/fairyfly.msi -Version $version -WorkDir "$env:TEMP\ffy-winget-test" -UpgradeChain $chain
       shell: pwsh
 
     - name: Collect manifests and logs
@@ -126,5 +195,6 @@ jobs:
         path: |
           build/winget-test/
           build/fairyfly.msi
+          build/variants/*/fairyfly.msi
         if-no-files-found: warn
         retention-days: 14

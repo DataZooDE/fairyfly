@@ -9,14 +9,20 @@
   everything is gone. Finally it upgrades the previous release's MSI (-PreviousMsiUrl) with this one through
   msiexec (the old Start-menu entry "fairyfly (tray)" must go) and uninstalls again. After the winget install it starts the Start-menu
   shortcut exactly as Explorer would (unelevated, new console, its working directory, an isolated LOCALAPPDATA so no
-  real pairing is touched) and checks that the tray is still running 10 s later. On Windows Server it first shows that the default policy refuses per-user MSI installs by
+  real pairing is touched) and checks that the tray is still running 10 s later. With -UpgradeChain it then installs
+  -MsiPath again and upgrades it with each MSI of the chain in turn (a same-day release YYYY.MM.DD.N, then the next
+  day's YYYY.MM.DD): after every step exactly one fairyfly product is registered (the previous one is gone), the exe
+  reports the step's version and Add/Remove Programs shows the MSI's ProductVersion as DisplayVersion, which must be
+  the DisplayVersion of the step's winget manifest (AppsAndFeaturesEntries). On Windows Server it first shows that the default policy refuses per-user MSI installs by
   non-admins (1625) and then sets DisableMSI=0, the Windows 10/11 default.
   It changes the machine (winget setting LocalManifestFiles, MSI logging policy, installs and removes fairyfly):
   run it on a throw-away CI runner, not on a workstation.
 .PARAMETER MsiPath
   The built fairyfly.msi.
 .PARAMETER Version
-  Calendar version or tag (vYYYY.MM.DD) the MSI was built for.
+  Calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N) the MSI was built for.
+.PARAMETER UpgradeChain
+  "version=path-to-msi" entries, in upgrade order after -MsiPath (e.g. 2026.10.24.1=..., 2026.10.25=...).
 #>
 param(
     [Parameter(Mandatory)][string]$MsiPath,
@@ -25,7 +31,8 @@ param(
     [int]$Port = 8765,
     [string]$WingetRelease = 'v1.29.380',
     # the last release whose Start-menu entry was "fairyfly (tray)" (mcp --tray); '' skips the upgrade check
-    [string]$PreviousMsiUrl = 'https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.23/fairyfly.msi'
+    [string]$PreviousMsiUrl = 'https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.23/fairyfly.msi',
+    [string[]]$UpgradeChain = @()
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -380,6 +387,67 @@ namespace Ffy { public static class Integrity {
         $code = Run-Unelevated "start `"`" /wait msiexec.exe /x `"$MsiPath`" /qn /l*v `"$(Join-Path $WorkDir 'msi-upgrade-uninstall.log')`"" 'msi-upgrade-uninstall'
         Assert ($code -eq 0) 'uninstalled again (unelevated msiexec /x)'
         Assert (-not (Test-Path $installDir) -and -not (Test-Path $lnk) -and -not (Test-Path $oldLnk)) 'nothing left after the upgrade check'
+    }
+    if ($UpgradeChain) {
+        $chain = @([pscustomobject]@{ Version = $Version; Msi = $MsiPath })
+        foreach ($entry in $UpgradeChain) {
+            $v, $p = $entry -split '=', 2
+            $chain += [pscustomobject]@{ Version = $v.TrimStart('v'); Msi = (Resolve-Path $p).Path }
+        }
+        Step "Upgrade chain (unelevated msiexec): $(($chain | ForEach-Object Version) -join ' -> ')"
+        $upgradeCode = '{AEC9807E-BC74-4802-8816-25F3AB39BA29}'
+        $wi = New-Object -ComObject WindowsInstaller.Installer
+        function Get-WiProperty($obj, [string]$name, [object[]]$argList) { $obj.GetType().InvokeMember($name, 'GetProperty', $null, $obj, $argList) }
+        function Get-RelatedProducts {
+            $list = Get-WiProperty $wi 'RelatedProducts' @($upgradeCode)
+            $n = [int](Get-WiProperty $list 'Count' $null)
+            @(for ($i = 0; $i -lt $n; $i++) { [string](Get-WiProperty $list 'Item' @($i)) })
+        }
+        function Get-PathEntries { @(([Environment]::ExpandEnvironmentVariables((Get-UserPathRaw)) -split ';') | Where-Object { $_.TrimEnd('\') -ieq $installDir }) }
+        Assert (@(Get-RelatedProducts).Count -eq 0) 'no fairyfly product registered before the chain'
+        $previous = $null
+        for ($i = 0; $i -lt $chain.Count; $i++) {
+            $c = $chain[$i]
+            $dir = Join-Path $WorkDir "chain-$i"
+            $ci = & $generator -Version $c.Version -MsiPath $c.Msi -OutDir $dir -InstallerUrl "http://127.0.0.1:$Port/chain-$i.msi"
+            & $wingetExe validate --manifest $dir --disable-interactivity | Out-Null
+            Assert ($LASTEXITCODE -eq 0) "winget validate of the $($c.Version) manifests"
+            $manifestYaml = Get-Content (Join-Path $dir 'DataZoo.fairyfly.installer.yaml') -Raw
+            $versionYaml = Get-Content (Join-Path $dir 'DataZoo.fairyfly.yaml') -Raw
+            Assert ($versionYaml -match "(?m)^PackageVersion: $([regex]::Escape($c.Version))\s*$") "manifest PackageVersion $($c.Version)"
+            $null = $manifestYaml -match '(?m)^\s*DisplayVersion: (\S+)\s*$'; $manifestDisplay = $Matches[1]
+            $log = Join-Path $WorkDir "msi-chain-$i.log"
+            $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$($c.Msi)`" /qn /l*v `"$log`"" "msi-chain-$i"
+            Assert ($code -eq 0) "$($c.Version) (MSI $($ci.MsiVersion), $($ci.ProductCode)) installed, unelevated msiexec exit 0"
+            $logText = Get-Content $log -Raw
+            $logText -split "`r?`n" | Select-String 'FindRelatedProducts|RemoveExistingProducts|ProductVersion =|Installation success or error status' |
+                Select-Object -First 12 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
+            if ($previous) {
+                Assert ($logText -match "FindRelatedProducts: Found application: $([regex]::Escape($previous.ProductCode))") "FindRelatedProducts found $($previous.Version)'s product $($previous.ProductCode) (an upgrade, not an install beside it)"
+                Assert ([int](Get-WiProperty $wi 'ProductState' @($previous.ProductCode)) -eq -1) "the previous product $($previous.ProductCode) ($($previous.Version)) is no longer registered (ProductState -1)"
+            }
+            $related = @(Get-RelatedProducts)
+            Assert ($related.Count -eq 1 -and $related[0] -eq $ci.ProductCode) "exactly one product with fairyfly's UpgradeCode: $($related -join ', ')"
+            $arp = @(Find-UninstallEntries 'HKLM' $ci.ProductCode)
+            foreach ($e in $arp) { Write-Host ("  uninstall entry {0}: DisplayName={1} DisplayVersion={2} Version=0x{3:X8}" -f $e.PSChildName, $e.GetValue('DisplayName'), $e.GetValue('DisplayVersion'), $e.GetValue('Version')) }
+            Assert ($arp.Count -eq 1 -and $arp[0].PSChildName -eq $ci.ProductCode) 'exactly one Add/Remove Programs entry, the new product'
+            $shown = [string]$arp[0].GetValue('DisplayVersion')
+            Write-Host "  Windows shows DisplayVersion '$shown' for MSI ProductVersion '$($ci.MsiVersion)' (fairyfly $($c.Version))"
+            Assert ($shown -eq $ci.MsiVersion) "Add/Remove Programs DisplayVersion = MSI ProductVersion $($ci.MsiVersion)"
+            Assert ($manifestDisplay -eq $shown) "winget AppsAndFeaturesEntries DisplayVersion $manifestDisplay = what Windows shows"
+            Assert ([string](Get-WiProperty $wi 'ProductInfo' @($ci.ProductCode, 'VersionString')) -eq $ci.MsiVersion) "Installer API VersionString $($ci.MsiVersion)"
+            $exeVersion = (& $installedExe --version | Out-String).Trim()
+            Assert ($exeVersion -eq $c.Version) "installed fairyfly --version = $exeVersion"
+            Assert (@(Get-FairyflyShortcuts).Count -eq 1 -and (Test-Path $lnk)) 'one Start-menu shortcut'
+            Assert ((Get-PathEntries).Count -eq 1) 'the install folder is on the user PATH exactly once'
+            Assert ((@(Get-ChildItem $installDir -File).Name -join ',') -eq 'fairyfly.exe') "only fairyfly.exe in $installDir"
+            $previous = [pscustomobject]@{ Version = $c.Version; ProductCode = $ci.ProductCode; Msi = $c.Msi }
+        }
+        $code = Run-Unelevated "start `"`" /wait msiexec.exe /x `"$($previous.Msi)`" /qn /l*v `"$(Join-Path $WorkDir 'msi-chain-uninstall.log')`"" 'msi-chain-uninstall'
+        Assert ($code -eq 0) "uninstalled $($previous.Version) (unelevated msiexec /x)"
+        Assert (@(Get-RelatedProducts).Count -eq 0) 'no fairyfly product registered after the chain'
+        Assert (@(Find-UninstallEntries 'HKLM' $previous.ProductCode).Count -eq 0) 'no Add/Remove Programs entry left'
+        Assert (-not (Test-Path $installDir) -and -not (Test-Path $lnk) -and (Get-PathEntries).Count -eq 0 -and -not (Test-Path 'HKCU:\Software\DataZoo\fairyfly')) 'nothing left after the chain (folder, shortcut, PATH, HKCU)'
     }
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }

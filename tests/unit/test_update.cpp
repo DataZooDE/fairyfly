@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <thread>
 
 #include <httplib.h>
@@ -261,6 +262,45 @@ TEST_CASE("update: the download request keeps the signed query byte for byte, on
     INFO("headers without a value: " << empty_headers.size());
     CHECK(empty_headers.empty());
     CHECK(accept_encoding == "identity");
+}
+
+TEST_CASE("update check: a same-day release vYYYY.MM.DD.N from the channel is newer than that day's first release", "[update]") {
+    // `fairyfly update check` end to end against a local release API (hop 0 has no host check)
+    httplib::Server srv;
+    std::string tag;
+    std::mutex m;
+    srv.Get("/latest", [&](const httplib::Request&, httplib::Response& res) {
+        std::lock_guard<std::mutex> lock(m);
+        res.set_content(release(tag).dump(), "application/json");
+    });
+    const int port = srv.bind_to_any_port("127.0.0.1");
+    std::thread t([&] { srv.listen_after_bind(); });
+    const std::string api = "http://127.0.0.1:" + std::to_string(port) + "/latest";
+    struct Row {
+        std::string current, tag;
+        bool available;
+    };
+    const std::vector<Row> rows = {{"2026.10.24", "v2026.10.24.1", true},  {"2026.10.24.1", "v2026.10.24.1", false},
+                                   {"2026.10.25", "v2026.10.24.1", false}, {"2026.10.24.1", "v2026.10.25", true},
+                                   {"2026.10.24.1", "v2026.10.24", false}, {"2026.10.23", "v2026.10.24", true}};
+    try {
+        for (const auto& row : rows) {
+            {
+                std::lock_guard<std::mutex> lock(m);
+                tag = row.tag;
+            }
+            INFO(row.current << " vs " << row.tag);
+            auto c = check(row.current, api);
+            CHECK(c.latest == row.tag.substr(1));
+            CHECK(c.available == row.available);
+        }
+    } catch (...) {
+        srv.stop();
+        t.join();
+        throw;
+    }
+    srv.stop();
+    t.join();
 }
 
 // ---- the real update channel (hidden: needs internet; run with  unit_tests "[update-live]") ----
