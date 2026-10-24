@@ -10,6 +10,14 @@
 
 namespace ffy::link {
 
+ApprovalResult normalize(ApprovalResult r) {
+    namespace k = approval_reason;
+    if (r.approved) r.reason = r.reason == k::kRemembered ? k::kRemembered : k::kApproved;
+    else if (r.reason == k::kExpired || r.reason == "expired_in_queue") r.reason = k::kExpired;
+    else if (r.reason != k::kLocked) r.reason = k::kDenied;
+    return r;
+}
+
 namespace {
 struct Fixed : Approver {
     explicit Fixed(bool a) : a_(a) {}
@@ -18,7 +26,9 @@ struct Fixed : Approver {
 };
 #ifdef _WIN32
 struct Desktop : Approver {
-    bool approve(const std::string& text) override {
+    bool approve(const std::string& text) override { return ask(text, 45).approved; }
+    ApprovalResult decide(const ApprovalPrompt& prompt) override { return ask(prompt.text, prompt.answer_s); }
+    static ApprovalResult ask(const std::string& text, int answer_s) {
         auto p = std::make_shared<std::promise<bool>>();
         auto f = p->get_future();
         std::thread([p, text] {
@@ -28,7 +38,8 @@ struct Desktop : Approver {
             int r = MessageBoxW(nullptr, w.c_str(), L"fairyfly AI access - confirm SAP change", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND);
             p->set_value(r == IDYES);
         }).detach();
-        return f.wait_for(std::chrono::seconds(60)) == std::future_status::ready && f.get();
+        if (f.wait_for(std::chrono::seconds(answer_s > 0 ? answer_s : 1)) != std::future_status::ready) return {false, approval_reason::kExpired};
+        return f.get() ? ApprovalResult{true, approval_reason::kApproved} : ApprovalResult{false, approval_reason::kDenied};
     }
 };
 #endif

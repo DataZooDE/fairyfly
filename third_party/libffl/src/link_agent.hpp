@@ -97,6 +97,9 @@ struct AgentConfig {
     std::shared_ptr<Approver> approver = fixed_approver(false);
     std::string version = "0.2.0";
     int approve_window_s = 300;
+    // how long the person has to answer (ApprovalPrompt::answer_s): the refusal must reach the assistant before its MCP
+    // client gives up (about 60 s); strictly below the gateway's own approval deadline (50 s, then a 3 s grace)
+    int approval_answer_s = 45;
     // calls to local fairyfly at the same time; the rest wait in order. SAP GUI scripting is serial anyway, so a burst
     // from the cloud must not open one local connection (and thread) per call.
     int max_local_concurrency = 4;
@@ -119,8 +122,10 @@ public:
         proto::Frame res;
         std::vector<proto::Frame> trail;
     };
-    // cancel: set when the gateway cancels this request (the connection loop owns it); null: never cancelled
-    Outcome serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr);
+    // cancel: set when the gateway cancels this request (the connection loop owns it); null: never cancelled.
+    // send: frames to the gateway while the call runs (the approval evt when req.approval is "await"); null: none.
+    Outcome serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr,
+                  const std::function<void(const proto::Frame&)>& send = nullptr);
     proto::Frame process(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr) { return serve(req, std::move(cancel)).res; }
     // ready.trail and trail frames: the policy this desktop runs under (tells the recorder to show the notice)
     void set_trail_policy(const proto::TrailPolicy& p);
@@ -130,7 +135,7 @@ public:
 private:
     struct LocalTool { bool destructive = false; };
     bool session(const std::atomic<bool>& stop);
-    bool approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args);
+    ApprovalResult approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args);
     nlohmann::json call_local(const std::string& method, const nlohmann::json& params, int timeout_ms, const CallInfo& info = {});
 
     State st_;
@@ -143,7 +148,7 @@ private:
     std::map<std::string, LocalTool> local_;
     nlohmann::json local_tools_ = nlohmann::json::array();
     std::shared_ptr<LocalTools> tools_;
-    int64_t approved_until_ = 0;
+    std::map<std::string, int64_t> approved_until_;  // a yes covers further changes of that assistant + account until then
     std::map<std::string, std::shared_ptr<std::atomic<bool>>> inflight_;
     std::atomic<int> active_{0};
     proto::TrailPolicy trail_;  // guarded by mu_

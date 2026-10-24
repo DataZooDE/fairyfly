@@ -26,6 +26,7 @@ std::string Frame::dump() const {
     if (!trail.is_null()) j["trail"] = trail;
     if (!step.is_null()) j["step"] = step;
     put("data", data);
+    put("approval", approval);
     if (t == TShot) {
         j["seq"] = seq;
         j["last"] = last;
@@ -57,6 +58,7 @@ std::optional<Frame> Frame::parse(const std::string& text) {
     if (j.contains("trail")) f.trail = j["trail"];
     if (j.contains("step")) f.step = j["step"];
     f.data = s("data");
+    f.approval = s("approval");
     if (j.contains("seq") && j["seq"].is_number_integer()) f.seq = j["seq"];
     if (j.contains("last") && j["last"].is_boolean()) f.last = j["last"];
     return f;
