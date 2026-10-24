@@ -138,6 +138,9 @@ inline constexpr const char* kTrayMutexName = "Local\\fairyfly-tray";
 inline constexpr const char* kAutostartValueName = "fairyfly-mcp";
 inline constexpr const char* kLinkTrayMutexName = "Local\\fairyfly-link-tray";
 inline constexpr const char* kLinkAutostartValueName = "fairyfly-link";
+/// Exit code of `link run` when another link already serves the pairing (LINK_ALREADY_RUNNING from claim_link_run):
+/// the link tray then waits for that link instead of reporting a failure.
+inline constexpr int kLinkAlreadyRunningExitCode = 3;
 
 /// Value of HKCU\...\Run\fairyfly-mcp: "<exe>" mcp --tray [-c "<config>"].
 std::string autostart_command(const std::string& exe, const std::string& config_path);

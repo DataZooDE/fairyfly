@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Releases
+
+- The MSI version is now `(YYYY-2000).MM.(DD*100+N)`: `2026.10.25` is `26.10.2500`, `2026.10.25.1` is `26.10.2501`.
+  Windows Installer ignored the 4th field of the old `26.10.24.1`, so a `26.10.24` MSI silently replaced an installed
+  `26.10.24.1`; a same-day downgrade is now refused ("A newer version of fairyfly is already installed."). The
+  released `26.10.23`, `26.10.24` and `26.10.24.1` MSIs upgrade to the new versions as before, and a rebuilt MSI of
+  the installed version still replaces it. Add/Remove Programs and the winget `DisplayVersion` show the new number.
+  A same-day release number is now 1 to 99 (`set_version.ps1`, `msi_version.ps1`, `New-WingetManifest.ps1`).
+
+### Cloud link
+
+- The link tray no longer stops with "The cloud link stopped (exit code 2)" when a console `link run` for the same
+  pairing starts just before the tray's own link: it shows its notice, waits and connects once the console link
+  ends. `link run` refused with `LINK_ALREADY_RUNNING` now exits with code 3 (other refusals stay 2).
+
+### Trays: starting like a Windows app
+
+- The Start-menu entry **fairyfly** no longer flashes a console window: it starts `fairyfly-tray.exe`, a small
+  Windows program installed next to `fairyfly.exe`, which starts the tray without a console (`fairyfly.exe` is a
+  console program; Explorer opened a console for it before the tray hid itself). The Run values for "Start with
+  Windows" use it too.
+- The link tray's menu has **Start with Windows** (a check mark). It is turned on once, at the first start from the
+  Start menu or the installer; after that only the menu changes it. A Run value of an older version that started
+  `fairyfly.exe` directly is moved to `fairyfly-tray.exe`, its options kept.
+- Starting a tray that already runs (Start menu again) opens its menu at the icon instead of the "already running"
+  message box.
+- Either mouse button opens a tray's menu; its first line, in bold, is the status (left-click showed a balloon).
+- Icons: the cloud link tray is teal, the local MCP server's tray violet, so both can be told apart side by side.
+  States are a badge (amber: warnings or paused, red: error) or a faded mark (stopped), no longer a recoloured mark.
+- `fairyfly.msi`: asks running trays to quit before it replaces or removes the files (no reboot because of a running
+  tray), starts the tray after an interactive install (`LAUNCHAPP=0` turns that off; never with `/qn`), and an
+  uninstall removes the trays' Run values of its folder and their settings.
+
 ## 2026.10.24.1 (2026-10-24)
 
 ### Releases
@@ -22,26 +57,6 @@
   waits (with a notice) while a console link serves its pairing and connects once that one ends.
 - `link pair`'s `next` no longer says `fairyfly link run` when the link tray is running (it connects by itself) or a
   link for this pairing already runs (restart it to use the new pairing).
-
-## Unreleased
-
-### Trays: starting like a Windows app
-
-- The Start-menu entry **fairyfly** no longer flashes a console window: it starts `fairyfly-tray.exe`, a small
-  Windows program installed next to `fairyfly.exe`, which starts the tray without a console (`fairyfly.exe` is a
-  console program; Explorer opened a console for it before the tray hid itself). The Run values for "Start with
-  Windows" use it too.
-- The link tray's menu has **Start with Windows** (a check mark). It is turned on once, at the first start from the
-  Start menu or the installer; after that only the menu changes it. A Run value of an older version that started
-  `fairyfly.exe` directly is moved to `fairyfly-tray.exe`, its options kept.
-- Starting a tray that already runs (Start menu again) opens its menu at the icon instead of the "already running"
-  message box.
-- Either mouse button opens a tray's menu; its first line, in bold, is the status (left-click showed a balloon).
-- Icons: the cloud link tray is teal, the local MCP server's tray violet, so both can be told apart side by side.
-  States are a badge (amber: warnings or paused, red: error) or a faded mark (stopped), no longer a recoloured mark.
-- `fairyfly.msi`: asks running trays to quit before it replaces or removes the files (no reboot because of a running
-  tray), starts the tray after an interactive install (`LAUNCHAPP=0` turns that off; never with `/qn`), and an
-  uninstall removes the trays' Run values of its folder and their settings.
 
 ## 2026.10.24 (2026-10-24)
 

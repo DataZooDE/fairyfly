@@ -11,10 +11,11 @@
     /quiet) it starts the tray; LAUNCHAPP=0 turns that off. Up to 2026.10.23 the entry was "fairyfly (tray)" (the MCP tray without the HTTP option, which exits at
     once); it lives in
     the same component, so an upgrade (MajorUpgrade removes the old product first) replaces it.
-  - MsiVersion: MSI versions are major.minor.build with major < 256, so the calendar version YYYY.MM.DD becomes
-    (YYYY-2000).MM.DD, e.g. 2026.10.05 -> 26.10.5 (packaging/msi_version.ps1). A further release on the same day,
-    YYYY.MM.DD.N, keeps N as the 4th field (2026.10.24.1 -> 26.10.24.1); Windows Installer ignores that field when it
-    compares versions, so AllowSameVersionUpgrades below is what makes it replace 26.10.24 (CI: winget.yml chain).
+  - MsiVersion: Windows Installer compares major.minor.build only (major < 256, build < 65536), so the calendar version
+    YYYY.MM.DD[.N] becomes (YYYY-2000).MM.(DD*100+N): 2026.10.05 -> 26.10.500, a further release on the same day
+    2026.10.24.1 -> 26.10.2401 (packaging/msi_version.ps1). It replaces 26.10.2400, and 26.10.2400 is refused over it
+    (downgrade). Up to 2026.10.24.1 the MSIs were 26.10.DD[.N] (N ignored): all are below the new scheme
+    (CI: winget.yml chain, from the released v2026.10.24.1 MSI).
   - Upgrades replace older versions (MajorUpgrade, same UpgradeCode); `fairyfly update apply` may also update the exe
     in place between MSI releases.
   - Software distribution: deploy the MSI per user (e.g. Intune "user" context); it never writes HKLM.
@@ -23,9 +24,9 @@
   <Package Name="fairyfly" Manufacturer="DataZoo GmbH" Version="$(var.MsiVersion)"
            UpgradeCode="{AEC9807E-BC74-4802-8816-25F3AB39BA29}" Scope="perUser" Compressed="yes" InstallerVersion="500">
     <SummaryInformation Description="fairyfly - SAP GUI automation CLI, MCP server and cloud link" />
-    <!-- AllowSameVersionUpgrades: a rebuilt MSI of the same calendar version, and a same-day release 26.10.24.N (the
-         4th field is ignored in the comparison), replaces the installed one instead of being installed beside it
-         (ICE61 warns about it; that is intended). Side effect: 26.10.24 also replaces 26.10.24.1 (no downgrade error). -->
+    <!-- AllowSameVersionUpgrades: a rebuilt MSI of the same version (a new ProductCode per build) replaces the
+         installed one instead of being installed beside it (ICE61 warns about it; that is intended). Same-day releases
+         differ in the third field (DD*100+N), so an older one is refused as a downgrade. -->
     <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of fairyfly is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
