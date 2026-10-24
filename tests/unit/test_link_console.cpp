@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -26,6 +27,7 @@
 
 #include "include/link/link_console.h"
 #include "include/link/link_runner.h"
+#include "include/tray/tray_win32.h"
 #include "crypto.hpp"
 #include "link_agent.hpp"
 #include "qr.hpp"
@@ -337,6 +339,88 @@ TEST_CASE("link pair: the account check reaches the given stream and 'no' saves 
     CHECK_THAT(buf.text(), ContainsSubstring("jr@data-zoo.de"));
     CHECK_THAT(buf.text(), ContainsSubstring("data z\xC3\xB6o"));
     CHECK_FALSE(std::filesystem::exists(o.state_path));
+}
+
+// ---- link pair: the service's address and the next step ---------------------------------------------------------
+
+TEST_CASE("link pair: https://fairyfly.io is prefilled; --gateway and FAIRYFLY_LINK_GATEWAY override it", "[link][pair]") {
+    auto g = pair_gateway("", "");
+    CHECK(g.ask);
+    CHECK(g.address == "https://fairyfly.io");
+    CHECK(std::string(kDefaultGateway) == "https://fairyfly.io");
+    g = pair_gateway("", "https://gw.acme.example");
+    CHECK_FALSE(g.ask);
+    CHECK(g.address == "https://gw.acme.example");
+    g = pair_gateway("https://flag.example", "https://gw.acme.example");   // the flag wins over the environment
+    CHECK_FALSE(g.ask);
+    CHECK(g.address == "https://flag.example");
+
+    CHECK(pair_gateway_answer("", "https://fairyfly.io") == "https://fairyfly.io");          // Enter accepts the prefill
+    CHECK(pair_gateway_answer("  \r", "https://fairyfly.io") == "https://fairyfly.io");
+    CHECK(pair_gateway_answer(" https://gw.acme.example \r", "https://fairyfly.io") == "https://gw.acme.example");   // edited
+
+    const std::string shown = pair_gateway_prompt("https://fairyfly.io", false);
+    CHECK_THAT(shown, ContainsSubstring("[https://fairyfly.io]"));
+    CHECK_THAT(shown, ContainsSubstring("Enter"));
+    const std::string in_line = pair_gateway_prompt("https://fairyfly.io", true);   // already typed in the input line
+    CHECK_THAT(in_line, !ContainsSubstring("[https://fairyfly.io]"));
+    CHECK_THAT(in_line, ContainsSubstring("Enter"));
+}
+
+TEST_CASE("link pair: asks for the address with https://fairyfly.io prefilled; a typed address replaces it", "[link][pair]") {
+    REQUIRE(std::getenv("FAIRYFLY_LINK_GATEWAY") == nullptr);
+    FakePairing gw;
+    SharedOut buf;
+    std::ostream out(&buf);
+    std::istringstream in(gw.url() + "\n");
+    std::atomic<bool> stop{false};
+    LinkOptions o;   // no --gateway
+    const TempDir dir("pair-ask");
+    o.state_path = (dir / "state.json").string();
+    fairyfly::Result result;
+    std::atomic<bool> done{false};
+    std::thread t([&] { result = link_pair(o, PairIo{&out, &in, &stop}); done = true; });
+    REQUIRE(buf.wait_for("Contacting " + gw.url(), std::chrono::seconds(5)));
+    CHECK_THAT(buf.text(), ContainsSubstring("[https://fairyfly.io]"));
+    stop = true;
+    gw.release();
+    t.join();
+    CHECK(result.error["code"] == "PAIRING_CANCELLED");
+}
+
+TEST_CASE("link run lock: one name per pairing state file", "[link][run]") {
+    const std::string a = link_run_lock_name("C:\\Users\\pat\\AppData\\Local\\fairyfly\\link\\state.json");
+    CHECK_THAT(a, StartsWith("Local\\fairyfly-link-run-"));
+    CHECK(a.find('\\', 6) == std::string::npos);   // only the namespace separator
+    CHECK(a == link_run_lock_name("c:/users/PAT/AppData/Local/fairyfly/link/state.json"));
+    CHECK(a == link_run_lock_name("C:\\Users\\pat\\AppData\\Local\\fairyfly\\link\\..\\link\\state.json"));
+    CHECK(a != link_run_lock_name("C:\\Tools\\fairyfly-test\\state.json"));
+}
+
+TEST_CASE("link run: a second link for the same pairing is refused", "[link][run]") {
+    const TempDir dir("run-lock");
+    const std::string state = (dir / "state.json").string();
+    std::unique_ptr<fairyfly::tray::SingleInstance> first, second, other;
+    CHECK_FALSE(claim_link_run(state, first).has_value());   // the first link takes it
+    REQUIRE(first);
+    auto refused = claim_link_run(state, second);
+    REQUIRE(refused.has_value());
+    CHECK(refused->error["code"] == "LINK_ALREADY_RUNNING");
+    CHECK_THAT(refused->error["message"].get<std::string>(), ContainsSubstring("already running"));
+    CHECK_FALSE(claim_link_run((dir / "other.json").string(), other).has_value());   // another pairing is independent
+    first.reset();   // the first link ended
+    CHECK_FALSE(claim_link_run(state, second).has_value());
+}
+
+TEST_CASE("link pair: the next step never asks for a second link", "[link][pair]") {
+    CHECK_THAT(pair_next_step(false, false), ContainsSubstring("fairyfly link run"));
+    const std::string tray = pair_next_step(true, false);
+    CHECK_THAT(tray, ContainsSubstring("tray"));
+    CHECK_THAT(tray, !ContainsSubstring("fairyfly link run"));
+    const std::string running = pair_next_step(false, true);
+    CHECK_THAT(running, ContainsSubstring("already running"));
+    CHECK_THAT(running, !StartsWith("fairyfly link run"));
+    CHECK_THAT(pair_next_step(true, true), ContainsSubstring("already running"));
 }
 
 // ---- link run: status lines --------------------------------------------------------------------------------------

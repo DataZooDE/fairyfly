@@ -71,6 +71,10 @@ std::optional<Result> link_state_guard(const LinkOptions& options);
 /// The tray's view of the link (pairing state + the running link's status file) and its pause switch.
 std::unique_ptr<tray::LinkControl> make_link_control(const std::string& state_path = {});
 
+/// Takes the per-pairing lock (link_run_lock_name) into `held`, as run_link() does before it connects:
+/// LINK_ALREADY_RUNNING when another `link run` or the link tray serves this pairing already.
+std::optional<Result> claim_link_run(const std::string& state_path, std::unique_ptr<tray::SingleInstance>& held);
+
 /// Runs until Ctrl+C (or request_stop()). Returns the process exit code. Calls are audited with source "link".
 int run_link(const LinkOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
              const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);

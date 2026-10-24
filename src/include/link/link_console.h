@@ -27,6 +27,31 @@ enum class QrStyle {
 /// Both styles draw the light modules (scans on dark terminals, where the text is light) with a 2-module quiet zone.
 std::string render_qr(const ffy::qr::Matrix& matrix, QrStyle style);
 
+// ---- `link pair`: which service, and what next -------------------------------------------------------------------
+/// The fairyfly cloud, prefilled when `link pair` asks for the service's address.
+inline constexpr const char* kDefaultGateway = "https://fairyfly.io";
+
+struct PairGateway {
+    std::string address;   ///< the address to use, or the one to prefill when `ask`
+    bool ask = false;      ///< ask the person (Enter accepts `address`)
+};
+/// --gateway, else FAIRYFLY_LINK_GATEWAY: used as given, without a question. Neither: asked, https://fairyfly.io
+/// prefilled.
+PairGateway pair_gateway(const std::string& flag, const std::string& env);
+/// The question. `in_line`: the prefill already stands, editable, in the console's input line; otherwise it is shown as
+/// "[<prefill>]" and an empty answer takes it.
+std::string pair_gateway_prompt(const std::string& prefill, bool in_line);
+/// The typed line without surrounding spaces and the CR; empty (Enter) = `prefill`.
+std::string pair_gateway_answer(const std::string& typed, const std::string& prefill);
+
+/// Name of the per-pairing lock (a named mutex in the session) that a serving `link run`, in a console or in the link
+/// tray, holds: one link per pairing. The same file under another spelling (case, separators, "..") gives the same name.
+std::string link_run_lock_name(const std::string& state_path);
+
+/// The "next" step `link pair` reports. `link_tray_running`: the link tray runs (it starts the link itself once
+/// paired). `link_running`: a link for this pairing already serves, still with the previous pairing.
+std::string pair_next_step(bool link_tray_running, bool link_running);
+
 /// `--qr-style`: "blocks", "ascii", or "auto" (blocks when stderr is a console whose font can show them).
 QrStyle choose_qr_style(const std::string& requested);
 
