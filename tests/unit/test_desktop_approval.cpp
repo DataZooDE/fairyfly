@@ -32,6 +32,7 @@ struct FakeUi : Ui {
     bool can_notify = true;
     // the window's answer; None: waits until stopped
     Answer window_answer = Answer::None;
+    bool window_remember = false;  // "Don't ask again for 5 minutes" ticked
     std::chrono::milliseconds window_delay{0};
 
     std::mutex mu;
@@ -51,7 +52,8 @@ struct FakeUi : Ui {
         withdrawn.push_back(r);
         --open_notices;
     }
-    Answer ask(const Request& r, const std::function<bool()>& stop) override {
+    Answer ask(const Request& r, const std::function<bool()>& stop, bool& remember) override {
+        remember = window_remember;
         {
             std::lock_guard<std::mutex> l(mu);
             windows.push_back(r);
@@ -118,7 +120,7 @@ TEST_CASE("desktop approval: the notification's Approve approves, and the notifi
     CHECK(r.sap.system == "BIG");
     CHECK(r.sap.transaction == "VA02");
     CHECK(r.steps == std::vector<std::string>{"fill fields ctxtA, ctxtB, then press f8"});
-    CHECK(r.window_s == 300);
+    CHECK(r.remember_s == 300);  // what the window's "Don't ask again" offers
     CHECK(!r.nonce.empty());
     b.answer(r.id, r.nonce, Answer::Approve);
     const Decision d = f.get();
@@ -250,7 +252,7 @@ TEST_CASE("desktop approval: several questions are asked one after another, each
     std::this_thread::sleep_for(50ms);
     CHECK(ui->notified_count() == 1);  // the second waits; never shown beside the first
     const Request r1 = ui->last_notified();
-    CHECK(r1.summary == "click wnd[0]/tbar[0]/btn[11]");
+    CHECK(r1.summary == "click Save (wnd[0]/tbar[0]/btn[11])");
     b.answer(r1.id, r1.nonce, Answer::Approve);
     CHECK(first.get().approved);
     REQUIRE(eventually([&] { return ui->notified_count() == 2; }));
@@ -293,6 +295,116 @@ TEST_CASE("desktop approval: libffl's Approver asks the broker", "[link][approva
     ui->window_answer = Answer::Approve;
     CHECK(approver->approve("An AI assistant wants to change data"));
     CHECK(ui->windows.back().steps == std::vector<std::string>{"An AI assistant wants to change data"});
+}
+
+TEST_CASE("desktop approval: every change asks; a yes approves only that change", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    Broker b(ui, desk(), fast());
+    CHECK(b.decide(prompt()).approved);
+    CHECK(b.decide(prompt()).approved);
+    CHECK(ui->windows.size() == 2);  // asked twice
+}
+
+TEST_CASE("desktop approval: \"Don't ask again for 5 minutes\" approves the same assistant and account without asking", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    Options o = fast();
+    o.remember_for = 300ms;
+    Broker b(ui, desk(), o);
+    CHECK(b.decide(prompt()).approved);
+    const Decision again = b.decide(prompt());
+    CHECK(again.approved);
+    CHECK(again.reason == "remembered");
+    CHECK(ui->windows.size() == 1);
+    // another account, or another assistant: asked
+    auto other = prompt();
+    other.user = "someone@example.com";
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    CHECK_FALSE(b.decide(other).approved);
+    auto other_client = prompt();
+    other_client.client = "https://chatgpt.com/";
+    CHECK_FALSE(b.decide(other_client).approved);
+    CHECK(ui->windows.size() == 3);
+    // after the time: asked again
+    std::this_thread::sleep_for(350ms);
+    CHECK_FALSE(b.decide(prompt()).approved);
+    CHECK(ui->windows.size() == 4);
+}
+
+TEST_CASE("desktop approval: \"Don't ask again\" with Deny remembers nothing", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Deny;
+    ui->window_remember = true;
+    Broker b(ui, desk(), fast());
+    CHECK_FALSE(b.decide(prompt()).approved);
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = false;
+    CHECK(b.decide(prompt()).approved);
+    CHECK(ui->windows.size() == 2);
+}
+
+TEST_CASE("desktop approval: the notification's Approve never remembers", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    Broker b(ui, desk(), fast());
+    for (int i = 0; i < 2; i++) {
+        auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
+        REQUIRE(eventually([&] { return ui->notified_count() == size_t(i + 1); }));
+        const Request r = ui->last_notified();
+        b.answer(r.id, r.nonce, Answer::Approve);
+        CHECK(f.get().reason == "approved");
+    }
+}
+
+TEST_CASE("desktop approval: a locked screen denies even within \"Don't ask again\"", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    auto unlocked = std::make_shared<std::atomic<bool>>(true);
+    Broker b(ui, desk(unlocked), fast());
+    CHECK(b.decide(prompt()).approved);
+    *unlocked = false;
+    const Decision d = b.decide(prompt());
+    CHECK_FALSE(d.approved);
+    CHECK(d.reason == "locked");
+}
+
+TEST_CASE("desktop approval: the assistant's name, not its URL", "[link][approval]") {
+    CHECK(client_name("https://claude.ai/oauth/") == "Claude");
+    CHECK(client_name("https://claude.ai") == "Claude");
+    CHECK(client_name("claude-code") == "Claude Code");
+    CHECK(client_name("Claude Desktop") == "Claude Desktop");
+    CHECK(client_name("https://chatgpt.com/connector") == "ChatGPT");
+    CHECK(client_name("https://www.example.org/mcp") == "example.org");
+    CHECK(client_name("") == "an AI assistant");
+    CHECK(client_name("unknown client") == "an AI assistant");
+    // the request: the name for the headline, the full identifier for the window
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Deny;
+    Broker b(ui, desk(), fast());
+    auto p = prompt();
+    p.client = "https://claude.ai/oauth/";
+    b.decide(p);
+    REQUIRE(ui->windows.size() == 1);
+    CHECK(ui->windows[0].client == "Claude");
+    CHECK(ui->windows[0].client_id == "https://claude.ai/oauth/");
+}
+
+TEST_CASE("desktop approval: the standard toolbar's buttons are named in the steps", "[link][approval]") {
+    CHECK(readable_step("click wnd[0]/tbar[0]/btn[11]") == "click Save (wnd[0]/tbar[0]/btn[11])");
+    CHECK(readable_step("click wnd[0]/tbar[0]/btn[3]") == "click Back (wnd[0]/tbar[0]/btn[3])");
+    CHECK(readable_step("run 2 steps: 1. press enter; 2. click wnd[0]/tbar[0]/btn[11]; 3. click wnd[1]/tbar[0]/btn[0]") ==
+          "run 2 steps: 1. press enter; 2. click Save (wnd[0]/tbar[0]/btn[11]); 3. click Enter (wnd[1]/tbar[0]/btn[0])");
+    CHECK(readable_step("click wnd[0]/tbar[0]/btn[110]") == "click wnd[0]/tbar[0]/btn[110]");
+    CHECK(readable_step("click wnd[0]/tbar[1]/btn[8]") == "click wnd[0]/tbar[1]/btn[8]");  // application toolbar: varies
+    CHECK(readable_step("fill fields ctxtA, ctxtB, then press f8") == "fill fields ctxtA, ctxtB, then press f8");
 }
 
 TEST_CASE("desktop approval: notification answers round-trip", "[link][approval]") {

@@ -216,14 +216,18 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   approval since 2026-10-24, the desktop where SAP GUI runs is the second factor):
   - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and
     **Details**; it stays on screen until answered and can be answered from the notification centre too;
-  - **Details** (or a click on the notification) opens the approval window: the assistant, the account it acts for,
-    the SAP system, client and transaction, every step numbered, a countdown; **Deny** is the default button and Esc;
+  - **Details** (or a click on the notification) opens the approval window: the assistant by name ("Claude", the
+    client's URL in brackets), the account it acts for, the SAP system, client and transaction, every step numbered
+    (standard toolbar buttons named: "click Save (wnd[0]/tbar[0]/btn[11])"), a countdown; **Deny** is the default
+    button and Esc;
+  - every change asks: a yes approves that change (all steps of that batch) only. The window's **Don't ask again for
+    5 minutes**, unticked by default, approves further changes of the same assistant for the same account without
+    asking for 5 minutes (never while the screen is locked);
   - no answer in 90 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
-    one after another, never together. A yes allows further changes for the window the gateway sets (5 minutes)
-    without asking again;
+    one after another, never together;
   - with notifications turned off for fairyfly (or without the Start-menu entry's registration) the window opens at
-    once. `--approve no` denies every change. Each decision is in the log (`approval <n>: approved|denied|expired|
-    locked`). Source: `src/link/desktop_approval.cpp` (decisions), `src/link/desktop_approval_win32.cpp` (UI).
+    once. `--approve no` denies every change. Each decision is in the log (`approval <n>: approved|remembered|denied|
+    expired|locked`). Source: `src/link/desktop_approval.cpp` (decisions), `src/link/desktop_approval_win32.cpp` (UI).
 - Every call is written to fairyfly's audit trail with `audit_source: "link"`, the principal `link:<organisation
   id>/<user>`, the AI client and the gateway's request id, so it can be matched with the cloud audit.
 - Calls arrive on the link's network threads and are handed to the main (COM) thread one at a time
