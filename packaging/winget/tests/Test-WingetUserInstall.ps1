@@ -238,14 +238,34 @@ try {
     Assert (@($alive | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowTitle }).Count -eq 0) 'no visible window (no error message box): it sits in the tray'
     $linkLog = Join-Path $trayHome 'fairyfly\logs\link.log'
     Assert (Test-Path $linkLog) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
-    # The icon itself can only be checked where an unelevated process can reach the taskbar: with UAC off
-    # (EnableLUA=0, the hosted runners) Explorer runs with the full administrator token and UIPI drops the
-    # medium-integrity tray's Shell_NotifyIcon messages. The tray then keeps running and retrying (logged).
-    $lua = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue).EnableLUA
+    # The icon itself can only be checked where an unelevated process can reach the taskbar. On the hosted runners
+    # Explorer runs ELEVATED (the runner account's full administrator token), so UIPI refuses the medium-integrity
+    # tray's Shell_NotifyIcon (error 5); on a user's desktop Explorer is unelevated. The tray then keeps running and
+    # retrying (logged).
+    if (-not ('Ffy.Elevation' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+namespace Ffy { public static class Elevation {
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr t);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr t, int cls, out int info, int len, out int ret);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    /// 1 elevated, 0 not, -1 unknown
+    public static int Of(int pid) {
+        IntPtr p = OpenProcess(0x1000, false, pid); if (p == IntPtr.Zero) return -1;   // PROCESS_QUERY_LIMITED_INFORMATION
+        try { IntPtr t; if (!OpenProcessToken(p, 8, out t)) return -1;                  // TOKEN_QUERY
+              try { int e, r; return GetTokenInformation(t, 20, out e, 4, out r) ? (e != 0 ? 1 : 0) : -1; } finally { CloseHandle(t); } }
+        finally { CloseHandle(p); }
+    } } }
+'@
+    }
     $traySessions = @($alive | ForEach-Object { $_.SessionId })
-    $explorerHere = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId }
-    Write-Host "  UAC EnableLUA=$lua, Explorer in the tray's session: $([bool]$explorerHere)"
-    if ($explorerHere -and "$lua" -ne '0') {
+    $explorerHere = @(Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId })
+    $explorerElevated = @($explorerHere | ForEach-Object { [Ffy.Elevation]::Of($_.Id) })
+    $trayElevated = @($alive | ForEach-Object { [Ffy.Elevation]::Of([int]$_.ProcessId) })
+    Write-Host "  Explorer in the tray's session: $($explorerHere.Count), elevated: $($explorerElevated -join ','); tray elevated: $($trayElevated -join ',')"
+    Assert (-not ($trayElevated -contains 1)) 'the shortcut started the tray unelevated'
+    if ($explorerHere.Count -gt 0 -and $explorerElevated -notcontains 1) {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: notification icon added') 'the tray icon is in the taskbar (link.log)'
     } else {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: the notification icon could not be added yet') 'no reachable taskbar here: the tray says so in link.log and keeps running'
