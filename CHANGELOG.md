@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- `link pair` checked the gateway address by string prefix, so `http://localhost.evil.example`,
+  `http://127.0.0.1@evil.example`, `http://localhost:80@evil.example` or `http://127.0.0.1.nip.io` sent pairing
+  traffic to another host without TLS. The address is now parsed (with the same strict parser the HTTP and WebSocket
+  clients use): `https://` is required, plain `http://` only for exactly `localhost`, `127.0.0.1` or `[::1]` (optional
+  port, no userinfo). This holds for `--gateway`, `FAIRYFLY_LINK_GATEWAY` and the typed address; the link address the
+  gateway hands out at pairing must be `wss://` (`ws://` only to those hosts), and `link run` / `link status` refuse a
+  stored pairing with another one (`LINK_STATE_INSECURE`).
+
+### Releases
+
+- The release workflow's tag check is case-sensitive (`packaging/check_release_tag.ps1`, covered by
+  `packaging/tests/Test-VersionScripts.ps1`): a tag such as `V2026.10.24.1`, which the updater never takes, is
+  refused, as it is by `msi_version.ps1` and `New-WingetManifest.ps1`.
+
 ## 2026.10.24.1 (2026-10-24)
 
 ### Releases

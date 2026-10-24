@@ -10,6 +10,8 @@
 
 #include <spdlog/sinks/base_sink.h>
 
+#include "util.hpp"  // libffl: ffy::parse_url
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -53,9 +55,26 @@ std::string pair_gateway_answer(const std::string& typed, const std::string& pre
 }
 
 std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUrlKind kind) {
-    (void)url;
-    (void)kind;
-    return std::nullopt;  // TODO
+    const bool ws = kind == GatewayUrlKind::WebSocket;
+    const std::string secure = ws ? "wss" : "https", plain = ws ? "ws" : "http";
+    const std::string need = ws ? "the link address must be wss://, or ws:// to localhost, 127.0.0.1 or [::1]"
+                                : "the gateway address must start with https:// (plain http:// only to localhost, 127.0.0.1 or [::1])";
+    // libffl's parser is the one the HTTP and WebSocket clients use: what it accepts here is exactly what they connect to.
+    // It refuses userinfo, whitespace and control characters, backslashes, percent-encoding in the authority, an
+    // unbracketed IPv6 address, an empty host and a bad port.
+    ffy::Url u;
+    try {
+        u = ffy::parse_url(url);
+    } catch (const std::exception&) {
+        return need + ": " + url;
+    }
+    if (url.find('#') != std::string::npos) return need + " (no #fragment): " + url;
+    if (!ws && url.find('?') != std::string::npos) return need + " (no ?query): " + url;
+    std::string host = u.host;
+    std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (u.scheme == secure) return std::nullopt;
+    if (u.scheme == plain && (host == "localhost" || host == "127.0.0.1" || host == "[::1]")) return std::nullopt;
+    return need + ": " + url;
 }
 
 std::string link_run_lock_name(const std::string& state_path) {

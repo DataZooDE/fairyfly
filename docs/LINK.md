@@ -20,6 +20,11 @@ organisation has connected there can use your SAP GUI:
 Without `--gateway`, `link pair` uses `FAIRYFLY_LINK_GATEWAY`. With neither it asks for the service's web address
 with `https://fairyfly.io` already filled in (in a console it stands in the input line and can be edited; from a pipe
 it is shown as `[https://fairyfly.io]`): Enter accepts it.
+The address must be `https://`; plain `http://` is accepted only for exactly `localhost`, `127.0.0.1` or `[::1]`
+(optional port, no `user@`) for a gateway on this computer. Anything else is refused with `INVALID_ARGUMENT` before
+it is contacted. The link address the gateway hands out at pairing must be `wss://` (`ws://` only to those three
+hosts), otherwise nothing is saved; a stored pairing with another address is refused by `link run` and `link status`
+with `LINK_STATE_INSECURE` (pair again).
 
 One link per pairing: `link run`, in a console or in the link tray, holds a lock for its pairing state file while it
 serves. A second one for the same file is refused with `LINK_ALREADY_RUNNING` (quit the first: tray Quit, console

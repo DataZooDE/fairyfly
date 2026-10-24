@@ -15,9 +15,9 @@ param(
     [Parameter(Mandatory)][string]$Version
 )
 $ErrorActionPreference = 'Stop'
-if ($Tag -notmatch '^v\d{4}\.\d{2}\.\d{2}(?:\.([1-9]\d{0,4}))?$' -or ($Matches[1] -and [int]$Matches[1] -gt 65535)) {
+if ($Tag -cnotmatch '^v\d{4}\.\d{2}\.\d{2}(?:\.([1-9]\d{0,4}))?$' -or ($Matches[1] -and [int]$Matches[1] -gt 65535)) {
     throw "Tag '$Tag' is not vYYYY.MM.DD or vYYYY.MM.DD.N (N 1..65535, lowercase v)"
 }
-if ($Tag -ne "v$Version") {
+if ($Tag -cne "v$Version") {
     throw "Tag '$Tag' does not match the product version 'v$Version': bump src/include/version.h, CMakeLists.txt and vcpkg.json (packaging/set_version.ps1) before tagging"
 }

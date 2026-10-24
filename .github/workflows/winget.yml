@@ -141,7 +141,7 @@ jobs:
           if ($info.FileVersion -ne $reported) { Write-Error "FileVersion '$($info.FileVersion)' differs from --version '$reported'"; exit 1 }
           if ($info.ProductPrivatePart -ne $n -or $info.FilePrivatePart -ne $n) { Write-Error "4th version field is $($info.ProductPrivatePart)/$($info.FilePrivatePart), expected $n"; exit 1 }
           # what release.yml checks: the tag v<--version>
-          if ("v$reported" -notmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') { Write-Error "tag v$reported is not vYYYY.MM.DD[.N]"; exit 1 }
+          if ("v$reported" -cnotmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') { Write-Error "tag v$reported is not vYYYY.MM.DD[.N]"; exit 1 }
         }
         $same = (& build/variants/same-day/fairyfly.exe --version | Out-String).Trim()
         if ($same -notmatch '^\d{4}\.\d{2}\.\d{2}\.[1-9]\d*$') { Write-Error "same-day variant '$same' has no .N"; exit 1 }
