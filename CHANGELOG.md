@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Security
+
+- `link pair` checked the gateway address by string prefix, so `http://localhost.evil.example`,
+  `http://127.0.0.1@evil.example`, `http://localhost:80@evil.example` or `http://127.0.0.1.nip.io` sent pairing
+  traffic to another host without TLS. The address is now parsed (with the same strict parser the HTTP and WebSocket
+  clients use): `https://` is required, plain `http://` only for exactly `localhost`, `127.0.0.1` or `[::1]` (optional
+  port, no userinfo). This holds for `--gateway`, `FAIRYFLY_LINK_GATEWAY` and the typed address; the link address the
+  gateway hands out at pairing must be `wss://` (`ws://` only to those hosts), and `link run` / `link status` refuse a
+  stored pairing with another one (`LINK_STATE_INSECURE`).
+- One link per pairing now holds for every spelling of the pairing file: the lock name comes from the file's final
+  path (junctions, symbolic links, subst drives and 8.3 short names resolved, Unicode case folded), not from the path
+  text, so a second `link run` through a junction, a short name or a non-ASCII case difference is refused too.
+
 ### Releases
 
 - The MSI version is now `(YYYY-2000).MM.(DD*100+N)`: `2026.10.25` is `26.10.2500`, `2026.10.25.1` is `26.10.2501`.
@@ -10,6 +23,12 @@
   released `26.10.23`, `26.10.24` and `26.10.24.1` MSIs upgrade to the new versions as before, and a rebuilt MSI of
   the installed version still replaces it. Add/Remove Programs and the winget `DisplayVersion` show the new number.
   A same-day release number is now 1 to 99 (`set_version.ps1`, `msi_version.ps1`, `New-WingetManifest.ps1`).
+- The release workflow's tag check is case-sensitive (`packaging/check_release_tag.ps1`, covered by
+  `packaging/tests/Test-VersionScripts.ps1`): a tag such as `V2026.10.24.1`, which the updater never takes, is
+  refused, as it is by `msi_version.ps1` and `New-WingetManifest.ps1`. It and the configure check also limit the same-day
+  release number to 1..99 like the MSI version (the updater still reads tags up to `.65535`).
+- Configuring checks that the version is a real date (`cmake/calendar_version.cmake`, with the updater's leap-year
+  rules): a hand-edited `2026.2.30` or `2026.02.30` fails with a clear message. Covered by `Test-VersionScripts.ps1`.
 
 ### Cloud link
 

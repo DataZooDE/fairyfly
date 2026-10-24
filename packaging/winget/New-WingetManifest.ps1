@@ -34,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 $UpgradeCode = '{AEC9807E-BC74-4802-8816-25F3AB39BA29}'   # packaging/fairyfly.wxs, never changes
 $Manufacturer = 'DataZoo GmbH'
 
-if ($Version -notmatch '^v?(\d{4})\.(\d{2})\.(\d{2})(\.[1-9]\d?)?$') { throw "not a calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N, N 1..99): $Version" }
+if ($Version -cnotmatch '^v?(\d{4})\.(\d{2})\.(\d{2})(\.[1-9]\d?)?$') { throw "not a calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N, N 1..99): $Version" }
 $packageVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3])$($Matches[4])"
 $releaseDate = "$($Matches[1])-$($Matches[2])-$($Matches[3])"
 $tag = "v$packageVersion"
