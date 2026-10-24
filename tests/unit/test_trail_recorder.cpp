@@ -396,11 +396,11 @@ TEST_CASE("trail shots: PNG in memory, filled before scaling, at most 1920 px wi
     auto full = make_shot(encode_png(block_image(1600, 1200)), mid, true, &why);
     REQUIRE(full);
     const size_t limit = full->png.size() - 1;
-    auto small = make_shot(encode_png(block_image(1600, 1200)), mid, true, &why, limit);
-    REQUIRE(small);
-    CHECK(small->png.size() <= limit);
-    CHECK(decode_png(small->png)->width < 1600);
-    CHECK(small->blurred == 1);
+    auto shrunk = make_shot(encode_png(block_image(1600, 1200)), mid, true, &why, limit);
+    REQUIRE(shrunk);
+    CHECK(shrunk->png.size() <= limit);
+    CHECK(decode_png(shrunk->png)->width < 1600);
+    CHECK(shrunk->blurred == 1);
     // not a PNG at all: nothing
     CHECK_FALSE(make_shot("garbage", logon_screen(), true, &why));
 }
@@ -971,7 +971,7 @@ TEST_CASE("trail live: the active SAP GUI window, blurred as the audit trail wou
     const bool blur = !blur_env || std::string(blur_env) != "0";
     ScreenState state = source->state([blur](const Field& f) { return must_blur(f, blur); });
     REQUIRE(state.complete);
-    std::string raw = source->capture_png();
+    std::string raw = source->capture_png(state.window_id);
     REQUIRE_FALSE(raw.empty());
     auto native = decode_png(raw);
     REQUIRE(native);
