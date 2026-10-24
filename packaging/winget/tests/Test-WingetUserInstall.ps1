@@ -11,7 +11,10 @@
   shortcut exactly as Explorer would (unelevated, new console, its working directory, an isolated LOCALAPPDATA so no
   real pairing is touched) and checks that the tray is still running 10 s later. With -UpgradeChain it then installs
   -MsiPath again and upgrades it with each MSI of the chain in turn (a same-day release YYYY.MM.DD.N, then the next
-  day's YYYY.MM.DD): after every step exactly one fairyfly product is registered (the previous one is gone), the exe
+  day's YYYY.MM.DD): the chain starts from the released MSI of -OldSchemeMsiUrl (MSI versions 26.10.DD[.N], up to
+  v2026.10.24.1), which -MsiPath must upgrade. After every step the MSI it replaced, and -SameDayOlder after the first
+  step, must be refused as a downgrade (unless it has the same version: a rebuilt MSI of the installed version still
+  replaces it). After every step exactly one fairyfly product is registered (the previous one is gone), the exe
   reports the step's version and Add/Remove Programs shows the MSI's ProductVersion as DisplayVersion, which must be
   the DisplayVersion of the step's winget manifest (AppsAndFeaturesEntries). On Windows Server it first shows that the default policy refuses per-user MSI installs by
   non-admins (1625) and then sets DisableMSI=0, the Windows 10/11 default.
@@ -23,6 +26,11 @@
   Calendar version or tag (vYYYY.MM.DD or vYYYY.MM.DD.N) the MSI was built for.
 .PARAMETER UpgradeChain
   "version=path-to-msi" entries, in upgrade order after -MsiPath (e.g. 2026.10.24.1=..., 2026.10.25=...).
+.PARAMETER SameDayOlder
+  "version=path-to-msi" of an earlier release of -Version's day (2026.10.24 for 2026.10.24.1): with -MsiPath installed
+  it must be refused. Its payload is never installed, only its ProductVersion matters.
+.PARAMETER OldSchemeMsiUrl
+  A released MSI of the old version scheme that the chain starts from ('' starts from nothing).
 #>
 param(
     [Parameter(Mandatory)][string]$MsiPath,
@@ -32,7 +40,10 @@ param(
     [string]$WingetRelease = 'v1.29.380',
     # the last release whose Start-menu entry was "fairyfly (tray)" (mcp --tray); '' skips the upgrade check
     [string]$PreviousMsiUrl = 'https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.23/fairyfly.msi',
-    [string[]]$UpgradeChain = @()
+    [string[]]$UpgradeChain = @(),
+    [string]$SameDayOlder = '',
+    # the last release with the MSI version 26.10.DD[.N] (Windows Installer ignored N): the chain upgrades it
+    [string]$OldSchemeMsiUrl = 'https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.24.1/fairyfly.msi'
 )
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
@@ -430,6 +441,36 @@ namespace Ffy { public static class Msi {
         function Get-PathEntries { @(([Environment]::ExpandEnvironmentVariables((Get-UserPathRaw)) -split ';') | Where-Object { $_.TrimEnd('\') -ieq $installDir }) }
         Assert (@(Get-RelatedProducts).Count -eq 0) 'no fairyfly product registered before the chain'
         $previous = $null
+        if ($OldSchemeMsiUrl) {
+            $oldMsi = Join-Path $WorkDir 'old-scheme.msi'
+            $ProgressPreference = 'SilentlyContinue'
+            for ($try = 1; ; $try++) {
+                try { Invoke-WebRequest $OldSchemeMsiUrl -OutFile $oldMsi -UseBasicParsing; break }
+                catch { if ($try -ge 4) { throw }; Write-Host "  download failed ($($_.Exception.Message)), retry $try"; Start-Sleep -Seconds (5 * $try) }
+            }
+            $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$oldMsi`" /qn /l*v `"$(Join-Path $WorkDir 'msi-chain-old-scheme.log')`"" 'msi-chain-old-scheme'
+            Assert ($code -eq 0) "released old-scheme MSI installed ($OldSchemeMsiUrl)"
+            $related = @(Get-RelatedProducts)
+            Assert ($related.Count -eq 1) "one fairyfly product: $($related -join ', ')"
+            $oldVersion = (& $installedExe --version | Out-String).Trim()
+            $previous = [pscustomobject]@{ Version = $oldVersion; ProductCode = $related[0]; Msi = $oldMsi }
+            Write-Host "  released $oldVersion is MSI $([Ffy.Msi]::Info($related[0], 'VersionString')) ($($related[0])); the chain upgrades it"
+        }
+        $refusals = 0
+        function Assert-Refused([string]$msi, [string]$label, $current) {
+            $script:refusals++
+            $log = Join-Path $WorkDir "msi-downgrade-$script:refusals.log"
+            $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$msi`" /qn /l*v `"$log`"" "msi-downgrade-$script:refusals"
+            $text = Get-Content $log -Raw
+            $text -split "`r?`n" | Select-String 'WIX_DOWNGRADE_DETECTED|WIX_UPGRADE_DETECTED|A newer version|Property\(S\): ProductVersion =|Installation success or error status' |
+                Select-Object -First 8 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
+            Assert ($code -ne 0) "$label over $($current.Version) is refused (msiexec exit $code)"
+            Assert ($text -match 'Adding WIX_DOWNGRADE_DETECTED property') 'FindRelatedProducts detected the downgrade (WIX_DOWNGRADE_DETECTED)'
+            $related = @(Get-RelatedProducts)
+            Assert ($related.Count -eq 1 -and $related[0] -eq $current.ProductCode) "still exactly the product $($current.ProductCode): $($related -join ', ')"
+            $exeVersion = (& $installedExe --version | Out-String).Trim()
+            Assert ($exeVersion -eq $current.Version) "installed fairyfly --version still $exeVersion"
+        }
         for ($i = 0; $i -lt $chain.Count; $i++) {
             $c = $chain[$i]
             $dir = Join-Path $WorkDir "chain-$i"
@@ -467,7 +508,14 @@ namespace Ffy { public static class Msi {
             Assert (@(Get-FairyflyShortcuts).Count -eq 1 -and (Test-Path $lnk)) 'one Start-menu shortcut'
             Assert ((Get-PathEntries).Count -eq 1) 'the install folder is on the user PATH exactly once'
             Assert ((@(Get-ChildItem $installDir -File).Name -join ',') -eq 'fairyfly.exe') "only fairyfly.exe in $installDir"
-            $previous = [pscustomobject]@{ Version = $c.Version; ProductCode = $ci.ProductCode; Msi = $c.Msi }
+            $current = [pscustomobject]@{ Version = $c.Version; ProductCode = $ci.ProductCode; Msi = $c.Msi }
+            # downgrades are refused: the MSI this step replaced (a rebuilt MSI of the same version is not a downgrade)
+            if ($previous -and $previous.Version -ne $c.Version) { Assert-Refused $previous.Msi "the MSI of $($previous.Version) (a downgrade)" $current }
+            if ($i -eq 0 -and $SameDayOlder) {
+                $ov, $op = $SameDayOlder -split '=', 2
+                Assert-Refused (Resolve-Path $op).Path "the MSI of $ov (MSI $((& (Join-Path $here '..\..\msi_version.ps1') -Version $ov).Trim()), same day, a downgrade)" $current
+            }
+            $previous = $current
         }
         $code = Run-Unelevated "start `"`" /wait msiexec.exe /x `"$($previous.Msi)`" /qn /l*v `"$(Join-Path $WorkDir 'msi-chain-uninstall.log')`"" 'msi-chain-uninstall'
         Assert ($code -eq 0) "uninstalled $($previous.Version) (unelevated msiexec /x)"
