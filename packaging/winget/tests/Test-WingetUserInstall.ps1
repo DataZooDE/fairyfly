@@ -510,7 +510,8 @@ namespace Ffy { public static class Msi {
             Assert ($exeVersion -eq $c.Version) "installed fairyfly --version = $exeVersion"
             Assert (@(Get-FairyflyShortcuts).Count -eq 1 -and (Test-Path $lnk)) 'one Start-menu shortcut'
             Assert ((Get-PathEntries).Count -eq 1) 'the install folder is on the user PATH exactly once'
-            Assert ((@(Get-ChildItem $installDir -File).Name -join ',') -eq 'fairyfly.exe') "only fairyfly.exe in $installDir"
+            $files = @(Get-ChildItem $installDir -File).Name
+            Assert ($files.Count -eq 2 -and $files -contains 'fairyfly.exe' -and $files -contains 'fairyfly-tray.exe') "only fairyfly.exe and its tray starter fairyfly-tray.exe in $installDir ($($files -join ', '))"
             $current = [pscustomobject]@{ Version = $c.Version; ProductCode = $ci.ProductCode; Msi = $c.Msi }
             # downgrades are refused: the MSI this step replaced (a rebuilt MSI of the same version is not a downgrade)
             if ($previous -and $previous.Version -ne $c.Version) { Assert-Refused $previous.Msi "the MSI of $($previous.Version) (a downgrade)" $current }
