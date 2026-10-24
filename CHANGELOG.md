@@ -8,8 +8,13 @@
   is approved by the person at the desktop where SAP GUI runs. The link shows a Windows notification
   "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and **Details**; it
   stays on screen until answered and can be answered from the notification centre too.
-- **Details** (or a click on the notification) opens the approval window: the assistant, the account it acts for, the
-  SAP system, client and transaction, every step numbered and a countdown. **Deny** is the default button and Esc.
+- **Details** (or a click on the notification) opens the approval window: the assistant by name ("Claude", not
+  "https://claude.ai/oauth/", which follows in brackets), the account it acts for, the SAP system, client and
+  transaction, every step numbered (the standard toolbar's buttons named, "click Save (...btn[11])") and a countdown.
+  **Deny** is the default button and Esc.
+- Every change asks; a yes approves that change only. There is no blanket "allow SAP changes for the next 5 minutes"
+  any more: only the window's **Don't ask again for 5 minutes**, unticked by default, approves further changes of the
+  same assistant for the same account without asking (never while the screen is locked).
 - No answer in 90 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
   one after another, never together. Each decision is in the log.
 - The old Yes/No box is gone, and with it its bug: after its 60 s it stayed open although the change was already

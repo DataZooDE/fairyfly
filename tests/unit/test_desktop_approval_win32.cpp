@@ -22,11 +22,12 @@ Request sample() {
     r.id = 7;
     r.nonce = "n0nce";
     r.client = "Claude <Code> & co";
+    r.client_id = "https://claude.ai/oauth/";
     r.user = "jr@example.com";
     r.tool = "gui_batch";
     r.summary = "run 2 steps: 1. fill fields ctxtVBAK-AUART, then press enter; 2. click wnd[0]/tbar[0]/btn[11]";
     r.steps = {"fill fields ctxtVBAK-AUART, then press enter", "click wnd[0]/tbar[0]/btn[11]"};
-    r.window_s = 300;
+    r.remember_s = 300;
     r.sap = {"BIG", "100", "VA02", "JR"};
     r.deadline = std::chrono::steady_clock::now() + 90s;
     r.expires_at = std::chrono::system_clock::now() + 90s;
@@ -52,7 +53,7 @@ TEST_CASE("desktop approval toast: headline, transaction, three answers with the
 
 TEST_CASE("desktop approval window: who, where, and every step numbered", "[link][approval]") {
     const std::wstring t = window_text(sample());
-    CHECK(contains(t, L"Assistant: Claude <Code> & co"));
+    CHECK(contains(t, L"Assistant: Claude <Code> & co (https://claude.ai/oauth/)"));
     CHECK(contains(t, L"Acting for: jr@example.com"));
     CHECK(contains(t, L"SAP: system BIG, client 100, transaction VA02, user JR"));
     CHECK(contains(t, L"1. fill fields ctxtVBAK-AUART, then press enter\n2. click wnd[0]/tbar[0]/btn[11]"));
@@ -66,7 +67,9 @@ TEST_CASE("desktop approval window: closes by itself when stopped (expired), not
     Request r = sample();
     r.deadline = std::chrono::steady_clock::now() + 400ms;
     const auto start = std::chrono::steady_clock::now();
-    const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; });
+    bool remember = true;
+    const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; }, remember);
+    CHECK_FALSE(remember);
     CHECK(a == Answer::None);
     CHECK(std::chrono::steady_clock::now() - start < 5s);
     CHECK(FindWindowW(nullptr, L"fairyfly – approve a change in SAP") == nullptr);
@@ -102,4 +105,14 @@ TEST_CASE("manual: two questions at once are asked one after another", "[.][appr
     });
     std::cout << "first: " << approver->approve_change(p) << std::endl;
     second.join();
+}
+
+TEST_CASE("manual: the approval window for 20 s (screenshots)", "[.][approval_manual][window]") {
+    auto ui = make_win32_ui([](const std::string&) {});
+    Request r = sample();
+    r.client = "Claude";
+    r.deadline = std::chrono::steady_clock::now() + 20s;
+    bool remember = false;
+    const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; }, remember);
+    std::cout << "answer " << int(a) << " remember " << remember << std::endl;
 }
