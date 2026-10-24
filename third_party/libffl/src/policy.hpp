@@ -75,4 +75,10 @@ struct CallCheck {
 constexpr std::size_t kMaxBatchItems = 20;
 CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::json& args);
 
+// fairyfly's --tcode key rule: keys that stay in the open transaction (Enter, F4, F8, the page keys, as names or VKeys)
+bool tcode_safe_key(const std::string& key);
+// The call (or one of its batch steps, checked.tools) acts on the SAP screen (screen, element, key, popup, menu) while
+// a transaction list applies: only a desktop that enforces the list itself (proto::kCapTcodes) may run it.
+bool needs_desktop_tcodes(const Grants& g, const std::string& tool, const CallCheck& checked);
+
 }  // namespace ffy::policy

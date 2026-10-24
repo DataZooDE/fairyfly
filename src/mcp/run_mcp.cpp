@@ -139,6 +139,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     if (link)
         policy.allow_write_hint = "the person at the desktop can allow changes with 'Allow changes in SAP' in the fairyfly "
                                   "link tray, or by restarting with `fairyfly link run --allow-write`";
+    if (link)  // the gateway granted this call read-only: the organisation's switch, which no desktop setting overrides
+        policy.grant_write_hint = "changes in SAP are not allowed for your organisation in the fairyfly web app (Settings, "
+                                  "'Allow changes in SAP'); an administrator can turn it on there - the desktop's own "
+                                  "setting cannot override it";
 #ifdef _WIN32
     // Owner-mode workers attach to SAP GUI through the running object table: never host SAP GUI windows in-process.
     sap::ComGuiApplication::set_embedded_fallback_allowed(embedded_sap_gui_allowed(http, options.owner_sap_identities));

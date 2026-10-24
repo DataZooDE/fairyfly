@@ -193,6 +193,16 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   4. the policy limits.
 - Each call additionally carries the gateway's grant. A call the gateway granted read-only runs with fairyfly's
   read-only guard switched on, even when this desktop allows writes.
+  Its refusals say which side blocks: the organisation (the fairyfly web app, Settings, "Allow changes in SAP"; only
+  an administrator can change it) or this desktop (the tray), or both.
+- A grant limited to transactions (`grants.tcodes`) applies the same rules as `mcp token create --tcode` to every link
+  call and batch step: the open transaction must be listed, `gui_menu_select` is refused, `gui_key_send` takes only
+  Enter, F4, F8 and the page keys, and a call that ends outside the list blocks screen tools until an allowed
+  `gui_transaction_start` (src/include/link/link_call.h). The link announces `tcodes/1`; the gateway sends calls under
+  a transaction list to screen tools only to desktops that do, older ones get `DESKTOP_OUTDATED`.
+- When the gateway's time limit cancels a call (`cancel/1`), a running batch stops before its next step and still
+  answers; its result lists the steps that ran (structuredContent `cancelled`, `items`), and the gateway names them in
+  its `CALL_TIMEOUT`.
 - A change needs the person's approval:
   - on this desktop (a dialog, `--approve desktop`, the default), or
   - with a passkey on the phone (the gateway puts the approval into the signed call).
