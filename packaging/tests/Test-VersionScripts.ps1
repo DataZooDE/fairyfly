@@ -122,14 +122,16 @@ foreach ($bad in '2026.10.24.0', '2026.10.24.01', '2026.10.24.100', 'v2026.10.24
 }
 
 Write-Host "`n=== check_release_tag.ps1 (release.yml's tag check) ==="
-# the updater (src/update/update_model.cpp parse_release) only takes a lowercase v: the check must be case-sensitive
+# the updater (src/update/update_model.cpp parse_release) only takes a lowercase v: the check must be case-sensitive;
+# N is 1..99 as for set_version/msi_version (MSI (YYYY-2000).MM.(DD*100+N)), though the updater still reads up to 65535
 $tagCheck = Join-Path $packaging 'check_release_tag.ps1'
-foreach ($case in @('v2026.10.24', '2026.10.24'), @('v2026.10.24.1', '2026.10.24.1'), @('v2026.10.24.65535', '2026.10.24.65535')) {
+foreach ($case in @('v2026.10.24', '2026.10.24'), @('v2026.10.24.1', '2026.10.24.1'), @('v2026.10.24.99', '2026.10.24.99')) {
     $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
     Check ($r.Error -eq '') "check_release_tag accepts $($case[0]) for $($case[1])$(if ($r.Error) { " error: $($r.Error)" })"
 }
 foreach ($case in @('V2026.10.24.1', '2026.10.24.1'), @('V2026.10.24', '2026.10.24'), @('v2026.10.24', '2026.10.24.1'),
                   @('v2026.10.24.1', '2026.10.24'), @('2026.10.24', '2026.10.24'), @('v2026.10.24.0', '2026.10.24.0'),
+                  @('v2026.10.24.100', '2026.10.24.100'), @('v2026.10.24.65535', '2026.10.24.65535'),
                   @('v2026.10.24.65536', '2026.10.24.65536'), @('vv2026.10.24', 'v2026.10.24'), @('v2026.10.24 ', '2026.10.24'),
                   @('', '2026.10.24')) {
     $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
@@ -149,15 +151,15 @@ function Invoke-CMakeCheck([string]$v) {
     $out = & cmake "-DVERSION=$v" -P $cmakeCheck 2>&1 | Out-String
     [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Out = $out.Trim() }
 }
-foreach ($v in '2026.10.24', '2026.10.5', '2026.10.05', '2026.10.24.1', '2026.10.24.65535', '2024.2.29', '2000.2.29', '2026.12.31', '2026.1.31', '2026.4.30') {
+foreach ($v in '2026.10.24', '2026.10.5', '2026.10.05', '2026.10.24.1', '2026.10.24.99', '2024.2.29', '2000.2.29', '2026.12.31', '2026.1.31', '2026.4.30') {
     $r = Invoke-CMakeCheck $v
     Check $r.Ok "configure accepts the version $v$(if (-not $r.Ok) { ": $($r.Out)" })"
 }
 foreach ($v in '2026.2.30', '2026.02.30', '2026.2.29', '1900.2.29', '2100.2.29', '2026.4.31', '2026.6.31', '2026.9.31', '2026.11.31',
-               '2026.1.32', '2026.13.1', '2026.0.1', '2026.1.0', '2026.00.10', '1999.12.31', '2026.10.24.0', '2026.10.24.65536',
+               '2026.1.32', '2026.13.1', '2026.0.1', '2026.1.0', '2026.00.10', '1999.12.31', '2026.10.24.0', '2026.10.24.100', '2026.10.24.65535', '2026.10.24.65536',
                '2026.10.24.01', '2026.10', '26.10.24', '2026.10.24-1', 'v2026.10.24') {
     $r = Invoke-CMakeCheck $v
-    Check (-not $r.Ok -and $r.Out -match 'calendar version|not a date|65535') "configure refuses the version $v ($(($r.Out -split "`n")[-1]))"
+    Check (-not $r.Ok -and $r.Out -match 'calendar version|not a date|1\.\.99') "configure refuses the version $v ($(($r.Out -split "`n")[-1]))"
 }
 
 if ($failures) { Write-Host "`n$failures check(s) FAILED"; exit 1 }
