@@ -5,6 +5,7 @@
 #include "connection_manager.h"
 #include "credential_store.h"
 #include "audit_log.h"
+#include "fill_fields.h"
 #include <string>
 #include <functional>
 #include <memory>
@@ -212,6 +213,10 @@ public:
                        std::optional<int> connection_id, std::optional<int> row = std::nullopt,
                        const std::string& column = "", bool checkbox = false, bool commit = false,
                        bool allow_fill = false);
+    /// Several fields of one screen in one call (each exactly like handle_fill), then optionally one key (Enter or F8,
+    /// only on the main window and only when every field succeeded). `stop_on_error` skips the rest after a failure.
+    Result handle_fill_fields(const std::vector<sap::FillField>& fields, const std::string& then_key,
+                              bool stop_on_error, std::optional<int> connection_id, bool allow_fill = false);
     Result handle_read_field(const std::string& element_id, std::optional<int> connection_id, bool list_nodes = false,
                              bool activate_tab = false);
     Result handle_press_f4(const std::string& element_id, std::optional<int> connection_id);

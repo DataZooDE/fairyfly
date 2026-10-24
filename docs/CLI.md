@@ -133,6 +133,10 @@ buttons report `selected`; buttons, tabs, check boxes and radio buttons report t
   control shows it (max. 200 characters, redacted for password fields) and a `field` object with `type`,
   `max_length`, `input_kind` (date, time, numeric), `format_hint` such as `DD.MM.YYYY` and, when SAP reformatted a
   date, a `format_warning`.
+  `element fill --fields '<json>'` (or `--fields @file`) fills several fields of one screen in one call: a JSON array
+  of `{"element","value"}`, `{"element","clear":true}` or grid cells `{"element","row","column","value"}` (at most
+  50). It stops at the first failure unless `--keep-going`; `--then-key enter|f8` presses that key on the main window
+  once every field succeeded. The audit trail records `--fields <redacted>`.
 - `element get <id>` reads one element. An element on a tab that is not selected returns `ELEMENT_ON_INACTIVE_TAB`
   (with `tab_id` and `tab_text`); `--activate-tab` selects the tab for the read and restores the previous one.
 - `element f4 <id>` opens the value help of a field.

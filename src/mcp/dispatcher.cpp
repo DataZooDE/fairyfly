@@ -1460,6 +1460,15 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 6. shape
     if (result.status != Result::Status::Success) add_assistant_hint(result, policy_);
+    if (name == "gui_element_fill" && result.status == Result::Status::Success && !args.contains("fields") &&
+        result.data.is_object()) {
+        const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now().time_since_epoch()).count();
+        const long long previous = last_single_fill_ms_.exchange(now);
+        if (previous > 0 && now - previous < 120000)
+            result.data["hint"] = "to enter several fields, pass them all in ONE gui_element_fill call: "
+                                  "fields=[{element, value}, ...], optionally then_key enter or f8";
+    }
     ToolSpec shaped_spec = *spec;
     if (spec->output == ToolOutput::Markdown) {
         std::string format = policy_.default_format;
