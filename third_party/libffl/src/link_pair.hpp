@@ -35,4 +35,7 @@ private:
 // A code read over someone's shoulder can be approved into a stranger's organisation: this is the last check.
 bool confirm_pairing(const State& st, std::istream& in, std::ostream& out);
 
+// the pairing number as the desktop shows it: six digits grouped "048 213"; anything else unchanged
+std::string format_pairing_number(const std::string& match);
+
 }  // namespace ffy::link

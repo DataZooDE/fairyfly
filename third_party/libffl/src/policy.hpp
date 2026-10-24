@@ -47,9 +47,13 @@ public:
     bool can_publish_catalog(const std::string& email) const;
     bool can_enrol(const std::string& email) const;
     int max_devices() const { return max_devices_; }
+    // No policy text at all: the built-in default. It allows writes only where a tenant switch caps them (SaaS tenants,
+    // read-only unless the tenant allows writes); a gateway without tenants keeps it read-only.
+    bool builtin_default() const { return builtin_; }
 
 private:
     Allow def_;
+    bool builtin_ = false;
     std::vector<Rule> rules_;
     std::vector<std::string> admins_, publishers_, enrol_domains_, enrol_emails_;
     int max_devices_ = 5;
@@ -58,5 +62,17 @@ private:
 // "*", exact "gui_screen_read", family "screen", verb "screen.read".
 bool tool_allowed(const std::vector<std::string>& patterns, const std::string& tool);
 bool tcode_allowed(const std::vector<std::string>& allowed, const std::string& code);  // empty list = unrestricted
+
+// What one tools/call does beyond its name, checked the same way by the gateway and the desktop: the steps of a
+// gui_batch (each granted, none dangerous or nested, transactions allowed), typing into the command field while
+// transactions are restricted (also in a multi-field fill), screenshots. `tools` lists the step tools of a batch.
+struct CallCheck {
+    std::string code, message;
+    std::vector<std::string> tools;
+    bool writes = false;  // a gui_element_fill, on its own or as a step
+    bool ok() const { return code.empty(); }
+};
+constexpr std::size_t kMaxBatchItems = 20;
+CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::json& args);
 
 }  // namespace ffy::policy
