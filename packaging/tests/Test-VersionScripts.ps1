@@ -76,6 +76,13 @@ try {
         $r = Try-Run { & $setVersion -Version $bad -Root $tmp }
         Check ($r.Error -ne '' -and (Read-Versions) -eq $before) "set_version refuses '$bad' and changes nothing ($($r.Error))"
     }
+    # a file without its version line: nothing is written, not even the files checked before it
+    $cm = Join-Path $tmp 'CMakeLists.txt'
+    $saved = [IO.File]::ReadAllText($cm)
+    [IO.File]::WriteAllText($cm, ($saved -replace 'project\(fairyfly VERSION', 'project(fairyfly  VERSION'))
+    $r = Try-Run { & $setVersion -Version '2026.10.24.7' -Root $tmp }
+    [IO.File]::WriteAllText($cm, $saved)
+    Check ($r.Error -match 'nothing was changed' -and (Read-Versions) -eq $before) "set_version changes no file when one version line is missing ($($r.Error))"
     $other = Get-Content (Join-Path $tmp 'vcpkg.json') -Raw
     Check ($other -match '"builtin-baseline"') 'vcpkg.json keeps its other keys'
 } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }

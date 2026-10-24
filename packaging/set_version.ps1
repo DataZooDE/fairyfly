@@ -21,7 +21,7 @@ param(
     [string]$Root = (Join-Path $PSScriptRoot '..')
 )
 $ErrorActionPreference = 'Stop'
-$Version = $Version -replace '^v', ''
+$Version = $Version -replace '^[vV]', ''
 if ($Version -notmatch '^(\d{4})\.(\d{2})\.(\d{2})(?:\.([1-9]\d{0,4}))?$' -or ($Matches[4] -and [int]$Matches[4] -gt 65535)) {
     throw "not a calendar version YYYY.MM.DD or YYYY.MM.DD.N (N 1..65535): $Version"
 }
@@ -31,15 +31,18 @@ if (-not [datetime]::TryParseExact("$($Matches[1])-$($Matches[2])-$($Matches[3])
 
 $plain = (($Version -split '\.') | ForEach-Object { [string][int]$_ }) -join '.'
 
-function Set-Line([string]$relative, [string]$pattern, [string]$replacement) {
-    $path = Join-Path $Root $relative
+# all three checked first, then written: a file whose version line is not found leaves every file unchanged
+$edits = foreach ($e in @(
+        @{ File = 'src/include/version.h'; Pattern = '(FAIRYFLY_VERSION\s*=\s*")[0-9.]+(")'; Value = $Version },
+        @{ File = 'CMakeLists.txt'; Pattern = '^(project\(fairyfly VERSION )[0-9.]+( )'; Value = $plain },
+        @{ File = 'vcpkg.json'; Pattern = '^(\s*"version"\s*:\s*")[0-9.]+(")'; Value = $plain })) {
+    $path = Join-Path $Root $e.File
     $text = [IO.File]::ReadAllText($path)
-    $hits = [regex]::Matches($text, $pattern, 'Multiline').Count
-    if ($hits -ne 1) { throw "${relative}: expected one match of /$pattern/, found $hits" }
-    $new = [regex]::Replace($text, $pattern, $replacement, 'Multiline')
-    [IO.File]::WriteAllText($path, $new, [Text.UTF8Encoding]::new($false))
-    Write-Host "${relative} updated"
+    $hits = [regex]::Matches($text, $e.Pattern, 'Multiline').Count
+    if ($hits -ne 1) { throw "$($e.File): expected one match of /$($e.Pattern)/, found $hits; nothing was changed" }
+    [pscustomobject]@{ Path = $path; File = $e.File; Text = [regex]::Replace($text, $e.Pattern, "`${1}$($e.Value)`${2}", 'Multiline'); Value = $e.Value }
 }
-Set-Line 'src/include/version.h' '(FAIRYFLY_VERSION\s*=\s*")[0-9.]+(")' "`${1}$Version`${2}"
-Set-Line 'CMakeLists.txt' '^(project\(fairyfly VERSION )[0-9.]+( )' "`${1}$plain`${2}"
-Set-Line 'vcpkg.json' '^(\s*"version"\s*:\s*")[0-9.]+(")' "`${1}$plain`${2}"
+foreach ($e in $edits) {
+    [IO.File]::WriteAllText($e.Path, $e.Text, [Text.UTF8Encoding]::new($false))
+    Write-Host "$($e.File): $($e.Value)"
+}

@@ -43,7 +43,10 @@ std::optional<CalVer> parse_version(const std::string& text) {
     v.year = std::stoi(parts[0]);
     v.month = std::stoi(parts[1]);
     v.day = std::stoi(parts[2]);
-    if (v.year < 2000 || v.month < 1 || v.month > 12 || v.day < 1 || v.day > 31) return std::nullopt;
+    if (v.year < 2000 || v.month < 1 || v.month > 12 || v.day < 1) return std::nullopt;
+    static constexpr int kDays[12] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const bool leap = (v.year % 4 == 0 && v.year % 100 != 0) || v.year % 400 == 0;
+    if (v.day > kDays[v.month - 1] || (v.month == 2 && v.day == 29 && !leap)) return std::nullopt;  // a real date
     if (parts.size() == 4) {
         if (parts[3][0] == '0') return std::nullopt;  // N >= 1, one spelling per version
         v.serial = std::stoi(parts[3]);

@@ -389,20 +389,44 @@ namespace Ffy { public static class Integrity {
         Assert (-not (Test-Path $installDir) -and -not (Test-Path $lnk) -and -not (Test-Path $oldLnk)) 'nothing left after the upgrade check'
     }
     if ($UpgradeChain) {
-        $chain = @([pscustomobject]@{ Version = $Version; Msi = $MsiPath })
+        $chain = @([pscustomobject]@{ Version = $Version.TrimStart('v'); Msi = $MsiPath })
         foreach ($entry in $UpgradeChain) {
             $v, $p = $entry -split '=', 2
             $chain += [pscustomobject]@{ Version = $v.TrimStart('v'); Msi = (Resolve-Path $p).Path }
         }
         Step "Upgrade chain (unelevated msiexec): $(($chain | ForEach-Object Version) -join ' -> ')"
         $upgradeCode = '{AEC9807E-BC74-4802-8816-25F3AB39BA29}'
-        $wi = New-Object -ComObject WindowsInstaller.Installer
-        function Get-WiProperty($obj, [string]$name, [object[]]$argList) { $obj.GetType().InvokeMember($name, 'GetProperty', $null, $obj, $argList) }
-        function Get-RelatedProducts {
-            $list = Get-WiProperty $wi 'RelatedProducts' @($upgradeCode)
-            $n = [int](Get-WiProperty $list 'Count' $null)
-            @(for ($i = 0; $i -lt $n; $i++) { [string](Get-WiProperty $list 'Item' @($i)) })
+        # the Windows Installer API itself (msi.dll), not its COM wrapper: RelatedProducts through IDispatch came back null
+        if (-not ('Ffy.Msi' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+namespace Ffy { public static class Msi {
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)] static extern uint MsiEnumRelatedProducts(string upgradeCode, uint reserved, uint index, StringBuilder product);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)] static extern int MsiQueryProductState(string product);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode)] static extern uint MsiGetProductInfo(string product, string property, StringBuilder value, ref uint len);
+    /// ProductCodes of all installed products with this UpgradeCode (any context visible to this user).
+    public static string[] Related(string upgradeCode) {
+        var list = new List<string>();
+        for (uint i = 0; ; i++) {
+            var sb = new StringBuilder(39);
+            uint r = MsiEnumRelatedProducts(upgradeCode, 0, i, sb);
+            if (r == 259) break;   // ERROR_NO_MORE_ITEMS
+            if (r != 0) throw new Exception("MsiEnumRelatedProducts: " + r);
+            list.Add(sb.ToString());
         }
+        return list.ToArray();
+    }
+    /// INSTALLSTATE: 5 = installed, -1 = unknown (not registered)
+    public static int State(string product) { return MsiQueryProductState(product); }
+    public static string Info(string product, string property) {
+        uint len = 256; var sb = new StringBuilder((int)len);
+        uint r = MsiGetProductInfo(product, property, sb, ref len);
+        return r == 0 ? sb.ToString() : "<error " + r + ">";
+    }
+} }
+'@
+        }
+        function Get-RelatedProducts { @([Ffy.Msi]::Related($upgradeCode)) }
         function Get-PathEntries { @(([Environment]::ExpandEnvironmentVariables((Get-UserPathRaw)) -split ';') | Where-Object { $_.TrimEnd('\') -ieq $installDir }) }
         Assert (@(Get-RelatedProducts).Count -eq 0) 'no fairyfly product registered before the chain'
         $previous = $null
@@ -424,7 +448,7 @@ namespace Ffy { public static class Integrity {
                 Select-Object -First 12 | ForEach-Object { Write-Host "  log: $($_.Line.Trim())" }
             if ($previous) {
                 Assert ($logText -match "FindRelatedProducts: Found application: $([regex]::Escape($previous.ProductCode))") "FindRelatedProducts found $($previous.Version)'s product $($previous.ProductCode) (an upgrade, not an install beside it)"
-                Assert ([int](Get-WiProperty $wi 'ProductState' @($previous.ProductCode)) -eq -1) "the previous product $($previous.ProductCode) ($($previous.Version)) is no longer registered (ProductState -1)"
+                Assert ([Ffy.Msi]::State($previous.ProductCode) -eq -1) "the previous product $($previous.ProductCode) ($($previous.Version)) is no longer registered (ProductState -1)"
             }
             $related = @(Get-RelatedProducts)
             Assert ($related.Count -eq 1 -and $related[0] -eq $ci.ProductCode) "exactly one product with fairyfly's UpgradeCode: $($related -join ', ')"
@@ -435,7 +459,8 @@ namespace Ffy { public static class Integrity {
             Write-Host "  Windows shows DisplayVersion '$shown' for MSI ProductVersion '$($ci.MsiVersion)' (fairyfly $($c.Version))"
             Assert ($shown -eq $ci.MsiVersion) "Add/Remove Programs DisplayVersion = MSI ProductVersion $($ci.MsiVersion)"
             Assert ($manifestDisplay -eq $shown) "winget AppsAndFeaturesEntries DisplayVersion $manifestDisplay = what Windows shows"
-            Assert ([string](Get-WiProperty $wi 'ProductInfo' @($ci.ProductCode, 'VersionString')) -eq $ci.MsiVersion) "Installer API VersionString $($ci.MsiVersion)"
+            $apiVersion = [Ffy.Msi]::Info($ci.ProductCode, 'VersionString')
+            Assert ($apiVersion -eq $ci.MsiVersion) "Installer API VersionString $apiVersion = MSI ProductVersion"
             $exeVersion = (& $installedExe --version | Out-String).Trim()
             Assert ($exeVersion -eq $c.Version) "installed fairyfly --version = $exeVersion"
             Assert (@(Get-FairyflyShortcuts).Count -eq 1 -and (Test-Path $lnk)) 'one Start-menu shortcut'

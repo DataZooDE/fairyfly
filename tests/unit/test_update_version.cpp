@@ -40,6 +40,8 @@ TEST_CASE("update version: a same-day release number .N parses", "[update][versi
     REQUIRE(parse_version("2026.10.24"));
     REQUIRE(parse_version("v2026.09.30"));
     CHECK(cmp("2026.9.30", "2026.09.30") == 0);
+    REQUIRE(parse_version("2028.02.29.1"));  // leap day
+    REQUIRE(parse_version("2026.12.31"));
 }
 
 TEST_CASE("update version: ordering 2026.10.24 < 2026.10.24.1 < 2026.10.24.2 < 2026.10.24.10 < 2026.10.25", "[update][version]") {
@@ -78,6 +80,9 @@ TEST_CASE("update version: malformed versions and tags are refused", "[update][v
                             "2026.10",             //
                             "2026.13.01.1",        // month out of range, suffix or not
                             "2026.10.32.1",        //
+                            "2026.02.31",          // not a date
+                            "2026.02.29.1",        // 2026 is no leap year
+                            "2026.04.31",          //
                             "0.2.0"}) {
         INFO("'" << bad << "'");
         CHECK_FALSE(parse_version(bad));
