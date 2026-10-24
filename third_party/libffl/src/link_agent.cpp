@@ -167,13 +167,14 @@ Agent::Outcome Agent::serve(const proto::Frame& req) {
         lookup();
         if (!known) return deny("UNKNOWN_TOOL", "tool not offered by local fairyfly");
     }
-    if (tool == "gui_screen_capture" && !g.screenshots) return deny("POLICY_DENIED", "screenshots are not enabled for this user");
-    if (tool == "gui_transaction_start" && !policy::tcode_allowed(g.tcodes, args.value("code", std::string()))) return deny("TCODE_DENIED", "transaction not granted");
+    // the steps of a batch, transactions, the command field, screenshots: the same check as on the gateway
+    const auto checked = policy::check_call(g, tool, args);
+    if (!checked.ok()) return deny(checked.code, checked.message);
     // The read-only promise: a read-only grant must not run against a write-mode fairyfly.
     if (have_fill && !g.allow_write && !cfg_.allow_local_write_mode && !tools_->per_call_read_only())
         return deny("LOCAL_WRITE_MODE", "local fairyfly runs in write mode but the policy grants read-only; restart fairyfly without --allow-write");
-    if (tool == "gui_element_fill" && !g.allow_write) return deny("WRITE_DENIED", "write tools are not granted");
-    if (g.allow_write && (tool == "gui_element_fill" || lt.destructive) && g.approval != "none") {
+    if (checked.writes && !g.allow_write) return deny("WRITE_DENIED", "write tools are not granted");
+    if (g.allow_write && (checked.writes || lt.destructive) && g.approval != "none") {
         // phone: the user approved this call with a passkey; the gateway put the approval id into the signed
         // assertion. phone_or_desktop: without it the desktop dialog decides. device/desktop: the dialog decides.
         bool phone_ok = !c.approval.empty() && (g.approval == "phone" || g.approval == "phone_or_desktop");
