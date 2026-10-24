@@ -142,3 +142,4 @@ foreach ($v in '2026.2.30', '2026.02.30', '2026.2.29', '1900.2.29', '2100.2.29',
 
 if ($failures) { Write-Host "`n$failures check(s) FAILED"; exit 1 }
 Write-Host "`nALL VERSION SCRIPT CHECKS PASSED"
+exit 0   # not the exit code of the last cmake -P run above (an expected refusal)
