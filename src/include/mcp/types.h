@@ -137,6 +137,9 @@ struct Policy {
     bool auto_attach = false;
     /// How the person at the desktop allows changes, in read-only refusals (empty: restart with `mcp --allow-write`).
     std::string allow_write_hint;
+    /// link: how changes are allowed when the call itself was granted read-only (the organisation's switch in the
+    /// fairyfly web app, not this desktop); empty: no such hint.
+    std::string grant_write_hint;
 };
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).

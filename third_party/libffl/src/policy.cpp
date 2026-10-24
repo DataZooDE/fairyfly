@@ -3,6 +3,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
@@ -188,6 +189,22 @@ CallCheck check_step(const Grants& g, const std::string& tool, const nlohmann::j
     } else if (tool == "gui_screen_capture" && !g.screenshots) {
         r.code = "POLICY_DENIED";
         r.message = "screenshots are not enabled for this user";
+    } else if (!g.tcodes.empty() && (tool == "gui_menu_select" || tool == "gui_key_send" || tool == "gui_popup_close")) {
+        // fairyfly's --tcode rules for menus and keys (src/auth/authorize.cpp): they could leave the listed transactions
+        std::string why;
+        if (tool == "gui_menu_select") why = "menu paths can start other transactions; use gui_transaction_start";
+        else if (tool == "gui_key_send") {
+            const auto key = args.is_object() && args.contains("key") && args["key"].is_string() ? args["key"].get<std::string>() : std::string();
+            if (!tcode_safe_key(key)) why = "key '" + key + "' can leave the transaction (allowed: enter, f4, f8 and the page keys)";
+        } else if (args.is_object() && args.contains("vkey")) {
+            const auto& v = args["vkey"];  // the popup's own default (F12, sent to the popup only) or a safe VKey number
+            if (!v.is_number_integer() || (v.get<long long>() != 12 && !tcode_safe_key(std::to_string(v.get<long long>()))))
+                why = "vkey " + v.dump() + " can leave the transaction (allowed: 12, the default, and 0, 4, 8, 80-83)";
+        }
+        if (!why.empty()) {
+            r.code = "TCODE_DENIED";
+            r.message = tool + " is not allowed while your transactions are restricted: " + why;
+        }
     } else if (tool == "gui_element_fill") {
         r.writes = true;
         if (!g.tcodes.empty()) {
@@ -247,6 +264,39 @@ CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::j
         if (std::find(r.tools.begin(), r.tools.end(), t) == r.tools.end()) r.tools.push_back(t);
     }
     return r;
+}
+
+bool tcode_safe_key(const std::string& key) {
+    // fairyfly's parse_vkey + tcode_safe_key (src/include/vkey.h, src/auth/authorize.cpp): blanks and case never matter,
+    // '_' and '-' only in names; a number is a raw VKey (at most two digits)
+    std::string k;
+    for (unsigned char c : key)
+        if (!std::isspace(c)) k.push_back(char(std::tolower(c)));
+    if (k.empty()) return false;
+    if (std::all_of(k.begin(), k.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        if (k.size() > 2) return false;
+        const int v = std::stoi(k);
+        return v == 0 || v == 4 || v == 8 || (v >= 80 && v <= 83);
+    }
+    std::string n;
+    for (char c : k)
+        if (c != '_' && c != '-') n.push_back(c);
+    static const char* safe[] = {"enter", "return", "f4", "f8", "pageup", "pgup", "pagedown", "pgdn", "pgdown", "pagetop", "pgtop", "firstpage",
+                                 "ctrl+pageup", "ctrl+pgup", "pagebottom", "pgbottom", "lastpage", "ctrl+pagedown", "ctrl+pgdn"};
+    for (auto s : safe)
+        if (n == s) return true;
+    return false;
+}
+
+bool needs_desktop_tcodes(const Grants& g, const std::string& tool, const CallCheck& checked) {
+    if (g.tcodes.empty()) return false;
+    auto on_screen = [](const std::string& t) {  // fairyfly's acts_on_screen: the families screen, element, key, popup, menu
+        for (const char* f : {"gui_screen_", "gui_element_", "gui_key_", "gui_popup_", "gui_menu_"})
+            if (t.rfind(f, 0) == 0) return true;
+        return false;
+    };
+    if (on_screen(tool)) return true;
+    return std::any_of(checked.tools.begin(), checked.tools.end(), on_screen);
 }
 
 }  // namespace ffy::policy

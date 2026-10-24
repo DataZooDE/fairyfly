@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -15,6 +17,7 @@
 #include "include/mcp/result_shaper.h"
 #include "include/mcp/tool_catalog.h"
 #include "include/command_table.h"
+#include "include/link/link_call.h"
 
 using namespace fairyfly::mcp;
 using fairyfly::Result;
@@ -882,4 +885,125 @@ TEST_CASE("Dispatcher: read-only refusals name how this server allows changes; s
     CHECK_FALSE(d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id()).is_error);
     d.set_read_only(true);
     CHECK(d.call_tool("gui_element_fill", json{{"element", "x"}, {"value", "y"}}, ctx_with_id()).is_error);
+}
+
+// ---- calls over the cloud link (fairyfly link run, D10): the context comes from libffl's CallInfo ----------------------
+
+namespace {
+ffy::link::CallInfo link_info(bool write, std::vector<std::string> tcodes = {}, std::shared_ptr<std::atomic<bool>> cancel = nullptr) {
+    ffy::link::CallInfo info{"acme", "alice@acme.example", "claude", "req-1", write};
+    info.tcodes = std::move(tcodes);
+    info.cancel = std::move(cancel);
+    return info;
+}
+}  // namespace
+
+TEST_CASE("Link: the gateway's cancel stops a batch before its next step; the result lists the steps that ran", "[mcp][dispatcher][batch][link]") {
+    Fixture f;
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    // the gateway's cancel (CALL_TIMEOUT) arrives while step 1 runs
+    f.handler = [&](const Argv&) {
+        *cancel = true;
+        return ok({{"title", "T"}, {"scanned_count", 0}, {"elements", json::array()}});
+    };
+    auto d = f.make();
+    const std::atomic<bool> stop{false};
+    const json read = {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "x"}}}};
+    auto r = d.call_tool("gui_batch", json{{"items", json::array({read, read, read})}}, fairyfly::link::link_call_context(link_info(false, {}, cancel), stop));
+    CHECK(f.calls.size() == 1);  // steps 2 and 3 never ran
+    CHECK(r.is_error);
+    REQUIRE(r.structured);
+    CHECK((*r.structured)["cancelled"] == true);
+    const json items = (*r.structured)["items"];
+    REQUIRE(items.size() == 3);
+    CHECK(items[0]["ok"] == true);
+    CHECK_FALSE(items[0].contains("skipped"));
+    CHECK(items[1]["skipped"] == true);
+    CHECK(items[2]["skipped"] == true);
+
+    // the link's own stop still cancels; a call nobody cancelled runs every step and claims no cancel
+    f.calls.clear();
+    f.handler = [](const Argv&) { return ok({{"title", "T"}, {"scanned_count", 0}, {"elements", json::array()}}); };
+    auto whole = d.call_tool("gui_batch", json{{"items", json::array({read, read})}}, fairyfly::link::link_call_context(link_info(false), stop));
+    CHECK_FALSE(whole.is_error);
+    CHECK(f.calls.size() == 2);
+    CHECK_FALSE((whole.structured && whole.structured->contains("cancelled")));
+    const std::atomic<bool> stopping{true};
+    CHECK(fairyfly::link::link_call_context(link_info(false), stopping).cancelled());
+}
+
+TEST_CASE("Link: the grant's transaction list applies fairyfly's --tcode rules to link calls", "[mcp][dispatcher][link]") {
+    Fixture f;
+    auto d = f.make();
+    const std::atomic<bool> stop{false};
+    auto ctx = fairyfly::link::link_call_context(link_info(false, {"SM37", "VA03"}), stop);
+    CHECK(ctx.principal.tcodes == std::vector<std::string>{"SM37", "VA03"});
+    CHECK(ctx.principal.read_only);
+    CHECK(ctx.principal.name == "link:acme/alice@acme.example");
+    auto code_of = [](const ToolResult& r) { return r.is_error ? text_of(r) : std::string(); };
+    // menus and keys that can leave the transaction never reach SAP
+    CHECK(code_of(d.call_tool("gui_menu_select", json{{"path", "System/Services/Table Maintenance"}}, ctx)).find("TCODE_DENIED") != std::string::npos);
+    CHECK(code_of(d.call_tool("gui_key_send", json{{"key", "f3"}}, ctx)).find("TCODE_DENIED") != std::string::npos);
+    CHECK(code_of(d.call_tool("gui_transaction_start", json{{"code", "SE16"}}, ctx)).find("TCODE_DENIED") != std::string::npos);
+    CHECK(code_of(d.call_tool("gui_batch", json{{"items", json::array({{{"tool", "gui_key_send"}, {"arguments", {{"key", "shift+f3"}}}}})}}, ctx))
+              .find("TCODE_DENIED") != std::string::npos);
+    CHECK(f.calls.empty());
+    // an allowed transaction starts
+    f.handler = [](const Argv&) { return ok({{"transaction", "SM37"}}); };
+    CHECK_FALSE(d.call_tool("gui_transaction_start", json{{"code", "SM37"}}, ctx).is_error);
+    CHECK(f.calls.size() == 1);
+    // without a list the same calls are not restricted by transaction
+    auto open = fairyfly::link::link_call_context(link_info(false), stop);
+    CHECK(open.principal.tcodes.empty());
+    CHECK(code_of(d.call_tool("gui_menu_select", json{{"path", "System/Status"}}, open)).find("TCODE_DENIED") == std::string::npos);
+}
+
+TEST_CASE("Link: a read-only refusal names its cause - the organisation's grant, this desktop's mode, or both", "[mcp][dispatcher][link]") {
+    const std::string tray = "use 'Allow changes in SAP' in the link tray";
+    const std::string org = "an administrator can turn on 'Allow changes in SAP' in the fairyfly web app";
+    auto make_policy = [&](bool desktop_read_only) {
+        Policy p;
+        p.read_only = desktop_read_only;
+        p.allow_write = !desktop_read_only;
+        p.allow_write_hint = tray;
+        p.grant_write_hint = org;
+        return p;
+    };
+    const std::atomic<bool> stop{false};
+    const json fill = {{"element", "wnd[0]/usr/txtA"}, {"value", "1"}};
+    {
+        // the tray allows changes, the organisation does not: the tray is not the way out
+        Fixture f;
+        f.handler = [](const Argv&) { return err("READ_ONLY_REFUSED", "the read-only guard refused this key"); };
+        auto d = f.make(make_policy(false));
+        auto ctx = fairyfly::link::link_call_context(link_info(false), stop);
+        const std::string refused = text_of(d.call_tool("gui_element_fill", fill, ctx));
+        INFO(refused);
+        CHECK(refused.find(org) != std::string::npos);
+        CHECK(refused.find(tray) == std::string::npos);
+        const std::string key = text_of(d.call_tool("gui_key_send", json{{"key", "f11"}}, ctx));
+        INFO(key);
+        CHECK(key.find("READ_ONLY_REFUSED") != std::string::npos);
+        CHECK(key.find(org) != std::string::npos);
+        CHECK(key.find(tray) == std::string::npos);
+    }
+    {
+        // the organisation allows this write, the desktop runs read-only: the tray is the way out
+        Fixture f;
+        auto d = f.make(make_policy(true));
+        const std::string refused = text_of(d.call_tool("gui_element_fill", fill, fairyfly::link::link_call_context(link_info(true), stop)));
+        INFO(refused);
+        CHECK(refused.find(tray) != std::string::npos);
+        CHECK(refused.find(org) == std::string::npos);
+    }
+    {
+        // both: both are named
+        Fixture f;
+        f.handler = [](const Argv&) { return err("READ_ONLY_REFUSED", "the read-only guard refused this key"); };
+        auto d = f.make(make_policy(true));
+        const std::string key = text_of(d.call_tool("gui_key_send", json{{"key", "f11"}}, fairyfly::link::link_call_context(link_info(false), stop)));
+        INFO(key);
+        CHECK(key.find(tray) != std::string::npos);
+        CHECK(key.find(org) != std::string::npos);
+    }
 }

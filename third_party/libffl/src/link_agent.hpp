@@ -21,6 +21,11 @@ namespace ffy::link {
 struct CallInfo {
     std::string tenant, user, client, request_id;
     bool write_granted = false;
+    // the grant's transaction list (empty: unrestricted); fairyfly applies its --tcode rules with it (kCapTcodes)
+    std::vector<std::string> tcodes;
+    // set once the gateway cancelled the call (timeout, client gone); null: never. A batch stops before its next step.
+    std::shared_ptr<const std::atomic<bool>> cancel;
+    bool cancelled() const { return cancel && cancel->load(); }
 };
 
 // The tools on this desktop: fairyfly's MCP endpoint over loopback HTTP (ffy-link), or fairyfly's own dispatcher
@@ -96,6 +101,10 @@ struct AgentConfig {
     // from the cloud must not open one local connection (and thread) per call.
     int max_local_concurrency = 4;
     std::shared_ptr<Recorder> recorder;  // set: this desktop offers the audit trail (hello.caps)
+    // What the local tools do with CallInfo (announced in hello.caps). Only fairyfly's in-process dispatcher (the
+    // `fairyfly link` noun) does either; unmodified fairyfly over loopback HTTP never sees CallInfo.
+    bool local_enforces_tcodes = false;  // applies CallInfo::tcodes with fairyfly's --tcode rules (kCapTcodes)
+    bool local_honours_cancel = false;   // stops at CallInfo::cancelled() (kCapCancel)
 };
 
 class Agent {
@@ -110,8 +119,9 @@ public:
         proto::Frame res;
         std::vector<proto::Frame> trail;
     };
-    Outcome serve(const proto::Frame& req);
-    proto::Frame process(const proto::Frame& req) { return serve(req).res; }
+    // cancel: set when the gateway cancels this request (the connection loop owns it); null: never cancelled
+    Outcome serve(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr);
+    proto::Frame process(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr) { return serve(req, std::move(cancel)).res; }
     // ready.trail and trail frames: the policy this desktop runs under (tells the recorder to show the notice)
     void set_trail_policy(const proto::TrailPolicy& p);
     std::vector<std::string> caps() const;  // what hello announces
