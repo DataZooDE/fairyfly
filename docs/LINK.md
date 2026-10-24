@@ -59,14 +59,19 @@ Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 
 `fairyfly link run --tray` runs the link in the system tray. It has its own icon and does not start the MCP server
 or an HTTP endpoint.
-- The Start-menu entry **fairyfly** (installed by `fairyfly.msi` / winget) runs exactly this command.
-- It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session.
+- The Start-menu entry **fairyfly** (installed by `fairyfly.msi` / winget) runs exactly this command through
+  `fairyfly-tray.exe`, a small Windows program next to `fairyfly.exe` that starts it without a console window. The
+  installer starts the tray after an interactive install (not with `/qn`; `LAUNCHAPP=0` turns it off).
+- It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session: starting it again
+  (Start menu) opens the running tray's menu at its icon.
+- The icon is teal (the local MCP server's tray is violet). Left or right click opens the menu; its first line, in
+  bold, is the status.
 - A desktop that is not paired still gets the tray (grey icon): a notice says so, and the menu offers
   **Pair with the fairyfly cloud...** (`link pair` in a console, which asks for the service's web address with
   `https://fairyfly.io` filled in, unless `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
 - An error while starting (for example a failed relaunch) is shown in a message box, not only in the
   console, which closes at once when the tray was started from the Start menu or the autostart.
-- The icon is green while connected, yellow while paused and grey otherwise.
+- The icon is teal while connected, has an amber badge while paused and is faded otherwise.
 - A notice appears when the link starts, pauses, resumes or stops.
 - The menu has:
   - the pairing (organisation, account) and the link's state;
@@ -83,6 +88,9 @@ or an HTTP endpoint.
     `127.0.0.1:8383` unless the config file says otherwise; see [MCP_TRAY.md](MCP_TRAY.md)). While it runs the item is
     checked and disabled (it follows the MCP tray's single-instance guard `Local\fairyfly-tray`); quit it from its own
     icon;
+  - **Start with Windows** (a check mark): the Run value `fairyfly-link` (below). It is turned on once, at the first
+    start from the Start menu or the installer (`fairyfly-tray.exe`); after that only this item changes it. A Run value
+    of an older version that starts `fairyfly.exe` directly is moved to `fairyfly-tray.exe`, its options kept;
   - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
   - **Quit**, which disconnects the link and ends the process.
 - The other `link run` options apply as usual: `fairyfly link run --tray --allow-write --tools session,screen`.
@@ -94,8 +102,9 @@ Autostart at logon:
     fairyfly link run --tray --remove-autostart
 
 This writes or removes the value `fairyfly-link` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The
-value holds the `link run --tray` command with the options given, without the autostart flag. It is independent
-of the MCP tray's `fairyfly-mcp` value.
+value holds the `link run --tray` command with the options given, without the autostart flag, and starts
+`fairyfly-tray.exe` when it is installed (no console at logon). It is independent of the MCP tray's `fairyfly-mcp`
+value.
 
 `fairyfly mcp --tray` also has a **Cloud link** submenu:
 - the pairing (organisation, account) and the link's state;
@@ -223,8 +232,13 @@ pairing), pairing, the DPAPI state and the link agent:
 
 - `fairyfly.msi` (per user, no administrator rights): installs to `%LOCALAPPDATA%\Programs\fairyfly`, extends the
   user's `PATH` and adds the Start-menu entry "fairyfly" (the link tray, `link run --tray`; up to 2026.10.23 it was
-  "fairyfly (tray)", which an MSI or winget upgrade removes; `update apply` only swaps the exe). Source: `packaging/fairyfly.wxs`. The CI builds it,
-  installs it on the runner, checks the result and uninstalls it again.
+  "fairyfly (tray)", which an MSI or winget upgrade removes; `update apply` only swaps the exe). The entry starts
+  `fairyfly-tray.exe` (no console window). Before replacing or removing the files the installer asks running trays to
+  quit (`fairyfly-tray.exe --close`), so no reboot is needed; an uninstall also removes the Run values `fairyfly-link`
+  and `fairyfly-mcp` of this folder and the trays' settings (`fairyfly-tray.exe --uninstall`). After an interactive
+  install it starts the tray (`LAUNCHAPP=0` turns that off; never with `/qn`). Source: `packaging/fairyfly.wxs`. The
+  CI builds it, installs it on the runner, starts the tray through the shortcut's target, checks the result and
+  uninstalls it again (the tray must be closed and the Run value gone).
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
   when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the
   installed one. An unsigned self-built installation accepts an unsigned release only with `--allow-unsigned`.

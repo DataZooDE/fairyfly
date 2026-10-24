@@ -3,7 +3,9 @@
     python assets/generate_icons.py [--preview out.png]
 
 Needs Pillow (pip install pillow). Writes assets/icons/fairyfly.ico (executable icon: mark on the light tile) and
-assets/icons/tray_<state>_<theme>.ico (tray icons: whole mark recoloured per server state, dark/light taskbar).
+assets/icons/tray_<kind>_<state>_<theme>.ico (tray icons, dark/light taskbar): the mark in the tray's own colour (link:
+brand teal, mcp: violet, so the two trays side by side are told apart), a badge for warning/paused (amber) and error
+(red), faded when stopped.
 The polygons are the ones of assets/logo/fairyfly_mark.svg; keep both in sync when the logo changes.
 """
 
@@ -35,13 +37,21 @@ LIGHT = {"lm": "#20A884", "ll": "#17745B", "lb": "#1E2E3D", "rm": "#26BA93", "rl
 # On the tray the dark taskbar needs lighter base folds than the logo tile, or they disappear.
 TRAY_BASE = {"dark": {"lb": "#3A5670", "rb": "#4A6984"}, "light": {"lb": "#1E2E3D", "rb": "#293E52"}}
 
-# Server state -> (hue in degrees or None for grey, saturation factor, lightness shift).
-STATES = {
-    "running": None,                # brand teal as designed
-    "warning": (40, 1.15, 0.06),    # amber
-    "stopped": (None, 0.0, 0.04),   # grey
-    "error": (356, 1.05, 0.04),     # red
+# Tray kind -> (hue in degrees or None for the brand teal, saturation factor, lightness shift) of the wing planes.
+KINDS = {
+    "link": None,                   # the cloud link, the Start-menu app: brand teal as designed
+    "mcp": (258, 1.0, 0.06),        # the local MCP server: violet
 }
+
+# State -> (badge colour or None, faded mark). Paused is a warning.
+STATES = {
+    "running": (None, False),
+    "warning": ("#F5A524", False),  # amber
+    "stopped": (None, True),
+    "error": ("#E5484D", False),    # red
+}
+FADED_SATURATION = 0.35
+FADED_ALPHA = 0.55
 
 TRAY_SIZES = [16, 20, 24, 32, 40, 48, 64]
 APP_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
@@ -53,25 +63,26 @@ def hex_rgb(value):
     return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def recolour(hex_value, state):
-    spec = STATES[state]
-    if spec is None:
-        return hex_value
-    hue, sat_factor, light_shift = spec
+def recolour(hex_value, spec, faded=False):
     r, g, b = (c / 255 for c in hex_rgb(hex_value))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
-    if hue is not None:
-        h = hue / 360
-    s = min(1.0, s * sat_factor)
-    l = min(0.92, l + light_shift)
+    if spec is not None:
+        hue, sat_factor, light_shift = spec
+        if hue is not None:
+            h = hue / 360
+        s = min(1.0, s * sat_factor)
+        l = min(0.92, l + light_shift)
+    if faded:
+        s *= FADED_SATURATION
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     return "#%02X%02X%02X" % (round(r * 255), round(g * 255), round(b * 255))
 
 
-def palette_for(theme, state):
+def palette_for(kind, theme, state):
     base = dict(DARK if theme == "dark" else LIGHT)
     base.update(TRAY_BASE[theme])
-    return {k: (v if k in ("spine", "lb", "rb") else recolour(v, state)) for k, v in base.items()}
+    faded = STATES[state][1]
+    return {k: (v if k in ("spine", "lb", "rb") else recolour(v, KINDS[kind], faded)) for k, v in base.items()}
 
 
 def draw_mark(draw, palette, cx, cy, scale, spine_boost=1.0):
@@ -90,7 +101,7 @@ def draw_mark(draw, palette, cx, cy, scale, spine_boost=1.0):
                  fill=hex_rgb(palette["spine"]))
 
 
-def render(size, palette, *, fill=0.96, tile=None, spine_boost=1.0):
+def render(size, palette, *, fill=0.96, tile=None, spine_boost=1.0, badge=None, alpha=1.0):
     n = size * SUPERSAMPLE
     img = Image.new("RGBA", (n, n), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -105,6 +116,19 @@ def render(size, palette, *, fill=0.96, tile=None, spine_boost=1.0):
     cx = n / 2 - (x0 + x1) / 2 * scale
     cy = n / 2 - (y0 + y1) / 2 * scale
     draw_mark(draw, palette, cx, cy, scale, spine_boost)
+    if alpha < 1.0:
+        img.putalpha(img.getchannel("A").point(lambda a: round(a * alpha)))
+    if badge:
+        # a dot in the lower right corner, cut free from the mark by a transparent ring
+        d = n * (0.50 if size <= 20 else 0.44)
+        gap = n * 0.08
+        x1, y1 = n, n
+        x0, y0 = x1 - d, y1 - d
+        hole = Image.new("L", (n, n), 0)
+        ImageDraw.Draw(hole).ellipse([x0 - gap, y0 - gap, x1 + gap, y1 + gap], fill=255)
+        cleared = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+        img = Image.composite(cleared, img, hole)
+        ImageDraw.Draw(img).ellipse([x0, y0, x1 - 1, y1 - 1], fill=hex_rgb(badge) + (255,))
     return img.resize((size, size), Image.LANCZOS)
 
 
@@ -117,9 +141,11 @@ def save_ico(path, images):
     images[0].save(path, format="ICO", sizes=[im.size for im in images], append_images=images[1:])
 
 
-def tray_images(theme, state):
-    pal = palette_for(theme, state)
-    return [render(s, pal, fill=1.0, spine_boost=spine_boost_for(s)) for s in TRAY_SIZES]
+def tray_images(kind, theme, state):
+    pal = palette_for(kind, theme, state)
+    badge, faded = STATES[state]
+    return [render(s, pal, fill=1.0, spine_boost=spine_boost_for(s), badge=badge, alpha=FADED_ALPHA if faded else 1.0)
+            for s in TRAY_SIZES]
 
 
 def app_images():
@@ -132,8 +158,9 @@ def preview(out):
     """Contact sheet: tray icons at 1x and 4x on Windows dark/light taskbar colours, plus the app icon."""
     rows = []
     for theme, bg in (("dark", (32, 32, 32)), ("light", (238, 238, 238))):
-        for state in STATES:
-            rows.append((bg, tray_images(theme, state)))
+        for kind in KINDS:
+            for state in STATES:
+                rows.append((bg, tray_images(kind, theme, state)))
     rows.append(((255, 255, 255), app_images()[::-1]))
     rows.append(((32, 32, 32), app_images()[::-1]))
     width = 1600
@@ -164,9 +191,10 @@ def main():
     parser.add_argument("--preview", type=Path, help="also write a PNG contact sheet of all icons")
     args = parser.parse_args()
     ICONS.mkdir(exist_ok=True)
-    for theme in ("dark", "light"):
-        for state in STATES:
-            save_ico(ICONS / f"tray_{state}_{theme}.ico", tray_images(theme, state))
+    for kind in KINDS:
+        for theme in ("dark", "light"):
+            for state in STATES:
+                save_ico(ICONS / f"tray_{kind}_{state}_{theme}.ico", tray_images(kind, theme, state))
     save_ico(ICONS / "fairyfly.ico", app_images())
     if args.preview:
         preview(args.preview)

@@ -162,6 +162,9 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     entry.exe = exe;
     entry.config_path = x.config_path.empty() && loaded.path.source == Source::Default ? std::string() : loaded.path.path.string();
     entry.args = tray::current_args();   // the detached child gets exactly the same arguments
+    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
+    const std::string program = tray::tray_start_program(exe, tray::path_exists);
+    if (program != exe) entry.autostart_line = tray::autostart_command(program, entry.config_path);
 
     auto registry = tray::make_win32_run_key();
     auto launcher = tray::make_win32_process_launcher();
@@ -182,8 +185,11 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
     if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
         tray::make_win32_tray_host()->message_box("fairyfly MCP", decided.message);   // nobody reads this console
-    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning && tray::startup_error_needs_dialog_here())
-        tray::make_win32_tray_host()->message_box("fairyfly MCP", "The fairyfly MCP tray is already running: its icon is in the notification area.");
+    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning) {
+        auto other = tray::make_win32_tray_host(tray::TrayKind::Mcp);
+        if (!other->show_running_instance() && tray::startup_error_needs_dialog_here())
+            other->message_box("fairyfly MCP", "The fairyfly MCP tray is already running: its icon is in the notification area.");
+    }
     if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
 
     // From here on this process is the tray: no console, logs to file, server on the main thread.
