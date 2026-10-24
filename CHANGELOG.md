@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link: audit trail with screenshots
+
+- `fairyfly link run` supports the gateway's per-desktop audit trail (docs/LINK.md, "Audit trail"; announces
+  `trail/1` and `trail-blur/1`). While an admin has it on, every step an AI assistant takes on this desktop is
+  recorded with a short description, screenshots of the SAP window before and after it, and the field changes
+  (old → new) of steps that change SAP.
+- Password fields are always, bank fields (IBAN, account number, bank key, SWIFT/BIC, card numbers, account holder)
+  by default filled solid on the screenshots before they leave the desktop, and their values masked (`••••`) in the
+  field changes. A screenshot whose sensitive field cannot be located is not sent.
+- The person at the desktop sees it: a console line in `link run`, an entry and a balloon in the link tray and the
+  `mcp --tray` Cloud link submenu, and `audit_trail` in `fairyfly link status`.
+- `link pair` and `link run` print the state file they use first; `FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1` makes every
+  `link` verb refuse the default state in `%LOCALAPPDATA%\fairyfly\link\` (tests and test installations).
+- `tests/integration/link_trail_live.ps1`: live check on a separate test pairing (blurring of the current SAP
+  screen, notice, status, recorded steps through a gateway).
+
 ## 2026.10.23 (2026-10-23)
 
 ### Cloud link (`fairyfly link`)

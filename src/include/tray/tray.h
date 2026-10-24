@@ -62,7 +62,17 @@ struct LinkView {
     std::string organisation, account;
     std::string state = "not running";   ///< connected | paused | not running
     bool paused = false;
+    /// The audit trail (the running link's status file): while on, the person at this desktop must see it.
+    bool trail_on = false;
+    std::string trail_mode = "every";    ///< every | changes
+    int trail_retention_days = 90;
+    bool trail_blur = true;
 };
+
+/// The persistent menu entry while the audit trail is on; empty while it is off.
+std::string trail_menu_text(const LinkView& link);
+/// The balloon when the audit trail turns on or off.
+std::string trail_balloon_text(const LinkView& link);
 
 /// State that belongs to the tray itself (not to the server).
 struct TrayState {
@@ -284,6 +294,7 @@ private:
     TrayPaths paths_;
     TrayState state_;
     bool announced_ = false;
+    bool last_trail_ = false;   ///< the cloud link's audit trail as seen on the previous tick
     std::mutex update_mu_;
     std::string announced_update_;
 };
@@ -378,6 +389,7 @@ private:
     TrayPaths paths_;
     LinkView link_;
     std::string last_state_;   ///< the state seen on the previous tick, for the change notices
+    bool last_trail_ = false;  ///< the audit trail as seen on the previous tick
     std::atomic<bool> quit_requested_{false};
 };
 

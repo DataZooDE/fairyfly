@@ -11,6 +11,7 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
 
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -20,6 +21,8 @@
 #include "include/link/link_control.h"
 #include "include/config/mcp_config.h"
 #include "include/link/main_thread_tools.h"
+#include "include/link/trail_recorder.h"
+#include "include/link/trail_screen_source.h"
 #include "include/mcp/run_mcp.h"
 #include "include/version.h"
 
@@ -151,6 +154,21 @@ Result error(const std::string& code, const std::string& message) {
 
 std::string state_path(const LinkOptions& o) { return o.state_path.empty() ? default_state_path() : o.state_path; }
 
+/// FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1 (tests, tests/integration/link_trail_live.ps1): refuse the pairing state the
+/// person at this desktop relies on, so a test copy can never pause, unpair or overwrite it.
+std::optional<Result> state_guard(const LinkOptions& o) {
+    const std::string v = ffy::env_or("FAIRYFLY_LINK_FORBID_DEFAULT_STATE");
+    if (v != "1" && v != "true" && v != "yes" && v != "on") return std::nullopt;
+    const std::string dir = std::filesystem::path(default_state_path()).parent_path().string();
+    if (!in_default_state_dir(state_path(o), dir)) return std::nullopt;
+    Result r;
+    r.status = Result::Status::Error;
+    r.error["code"] = "STATE_GUARD";
+    r.error["message"] = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE is set and the pairing state " + state_path(o) + " lies in " + dir +
+                         "; pass --state <file> outside it";
+    return r;
+}
+
 std::string host_name() {
     std::string h = ffy::env_or("COMPUTERNAME");
     return h.empty() ? ffy::env_or("HOSTNAME", "unknown") : h;
@@ -194,6 +212,8 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     const std::atomic<bool>& stop = io.stop ? *io.stop : g_pair_stop;
     const auto cancelled = [] { return error("PAIRING_CANCELLED", "pairing cancelled - nothing was saved"); };
 
+    if (auto refused = state_guard(options)) return *refused;
+    out << "state: " << state_path(options) << std::endl;
     LinkOptions o = options;
     if (o.gateway.empty()) o.gateway = ffy::env_or("FAIRYFLY_LINK_GATEWAY");
     if (o.gateway.empty()) {  // started from the tray: ask in the console
@@ -251,6 +271,7 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
 }
 
 Result link_status(const LinkOptions& o) {
+    if (auto refused = state_guard(o)) return *refused;
     try {
         auto st = ffy::link::load_state(state_path(o));
         Result r;
@@ -258,6 +279,10 @@ Result link_status(const LinkOptions& o) {
         r.data = {{"paired", true}, {"device", st.device_id}, {"account", st.email}, {"organisation_id", st.tenant},
                   {"organisation", st.tenant_name}, {"gateway", st.link_url}, {"pinned_gateway_keys", st.gateway_keys.size()}, {"state", state_path(o)},
                   {"paused", is_paused(state_path(o))}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
+        // the audit trail this desktop runs under, as the running link last wrote it
+        const json status = read_status(state_path(o));
+        const bool running = r.data["link"] != "not running";
+        r.data["audit_trail"] = running && status.contains("trail") ? trail::status_text(status["trail"]) : std::string("off");
         return r;
     } catch (const std::exception&) {
         Result r;
@@ -268,6 +293,7 @@ Result link_status(const LinkOptions& o) {
 }
 
 Result link_unpair(const LinkOptions& o) {
+    if (auto refused = state_guard(o)) return *refused;
     std::error_code ec;
     bool removed = std::filesystem::remove(state_path(o), ec);
     if (ec) return error("UNPAIR_FAILED", ec.message());
@@ -278,6 +304,7 @@ Result link_unpair(const LinkOptions& o) {
 }
 
 Result link_pause(const LinkOptions& o) {
+    if (auto refused = state_guard(o)) return *refused;
     if (!set_paused(state_path(o), true)) return error("PAUSE_FAILED", "could not write " + pause_marker(state_path(o)).string());
     Result r;
     r.status = Result::Status::Success;
@@ -287,6 +314,7 @@ Result link_pause(const LinkOptions& o) {
 }
 
 Result link_resume(const LinkOptions& o) {
+    if (auto refused = state_guard(o)) return *refused;
     if (!set_paused(state_path(o), false)) return error("RESUME_FAILED", "could not remove " + pause_marker(state_path(o)).string());
     Result r;
     r.status = Result::Status::Success;
@@ -309,7 +337,15 @@ public:
         } catch (const std::exception&) {
             return v;  // not paired (or the state is unreadable for this Windows user)
         }
-        v.state = describe(read_status(path_), ffy::now_unix());
+        const json status = read_status(path_);
+        v.state = describe(status, ffy::now_unix());
+        if (v.state != "not running" && status.contains("trail")) {
+            const auto p = ffy::proto::TrailPolicy::from_json(status["trail"]);
+            v.trail_on = p.on;
+            v.trail_mode = p.mode;
+            v.trail_retention_days = p.retention_days;
+            v.trail_blur = p.blur;
+        }
         return v;
     }
     bool set_paused(bool paused) override { return fairyfly::link::set_paused(path_, paused); }
@@ -329,6 +365,11 @@ std::unique_ptr<tray::LinkWriteMode> make_write_mode_control() { return std::mak
 
 int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
              audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
+    if (auto refused = state_guard(o)) {
+        std::cerr << refused->to_json().dump() << std::endl;
+        return 2;
+    }
+    if (!o.tray) write_utf8("state: " + state_path(o) + "\n");
     ffy::link::State st;
     try {
         st = ffy::link::load_state(state_path(o));
@@ -378,6 +419,24 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
     // otherwise it uses its built-in catalog
     cfg.publish_catalog = true;
+    // The audit trail (docs/LINK.md "Audit trail"): libffl announces it and asks for steps only while the gateway's
+    // policy is on; the recorder reads SAP on the main thread through `tools`, shows the notice and puts the policy
+    // into the status file for the tray.
+    auto trail_changed = std::make_shared<std::atomic<bool>>(false);
+    trail::RecorderOptions ro;
+    ro.source = trail::make_com_screen_source(peek);
+    ro.run_on_main = [weak = std::weak_ptr<MainThreadTools>(tools)](std::function<void()> fn) {
+        auto t = weak.lock();
+        return t && t->invoke(std::move(fn), 20000);
+    };
+    ro.on_policy = [trail_changed, tray = o.tray](const ffy::proto::TrailPolicy& p) {
+        const std::string line = trail::notice_line(p);
+        if (!tray) write_utf8(line + "\n");
+        spdlog::info("{}", line);
+        *trail_changed = true;
+    };
+    auto recorder = std::make_shared<trail::TrailRecorder>(ro);
+    cfg.recorder = recorder;
     auto net = std::make_shared<Net>(st, cfg);
     net->state_path = sp;
     g_stop = false;
@@ -388,6 +447,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     SupervisorOptions supervision;
     g_write_mode.reconnect = false;
     supervision.reconnect = &g_write_mode.reconnect;
+    supervision.status_changed = trail_changed.get();
+    supervision.status_extra = [recorder] { return json{{"trail", recorder->current_policy().to_json()}}; };
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {
             if (state == "paused") printer->paused();
@@ -396,7 +457,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         last = state;
     };
     g_background++;
-    std::thread net_thread([net, supervision] {
+    std::thread net_thread([net, supervision, trail_changed] {
         supervise(net->state_path, [net](const std::atomic<bool>& net_stop) { net->agent.run(net_stop); }, g_stop, supervision);
         net->done = true;
         g_background--;
@@ -416,6 +477,14 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
             g_write_mode.set_read_only = set_read_only;
             g_write_mode.allowed = o.allow_write && !o.read_only && !env_read_only();
             g_write_mode.locked = o.read_only || env_read_only();
+        }
+        {
+            // the tools that change SAP (destructiveHint): their steps carry field changes
+            std::set<std::string> change_tools;
+            for (const auto& t : tools_json(provider))
+                if (t.contains("annotations") && t["annotations"].is_object() && t["annotations"].value("destructiveHint", false))
+                    change_tools.insert(t.value("name", std::string()));
+            recorder->set_change_tools(std::move(change_tools));
         }
         tools->set_handlers([&provider] { return tools_json(provider); },
                             [&provider](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {

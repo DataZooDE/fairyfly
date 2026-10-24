@@ -12,6 +12,7 @@ namespace cli {
 }
 namespace sap {
     struct ScreenFindOptions;
+    class ComGuiSession;
 }
 
 class AutomationEngine {
@@ -86,6 +87,9 @@ public:
     /// validate return false and the caller must refuse the fill (fail closed).
     virtual bool set_selection_input_policy(const sap::SelectionInputPolicy& /*policy*/) { return false; }
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
+    /// The SAP GUI session calls currently run against, without attaching one (the audit trail reads its screen).
+    /// nullptr when nothing is attached or this engine has no COM session.
+    virtual std::shared_ptr<sap::ComGuiSession> attached_com_session() const { return nullptr; }
 
     // Enumeration and diagnostics
     virtual nlohmann::json get_application_info() const = 0;

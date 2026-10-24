@@ -33,6 +33,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
 
     if (link.paired) {
         model.items.push_back(item(who(link) + ": " + link.state, TrayAction::None, false));
+        if (link.trail_on) model.items.push_back(item(trail_menu_text(link), TrayAction::None, false));
         model.items.push_back(separator());
         if (link.paused) model.items.push_back(item("Resume", TrayAction::LinkResume));
         else model.items.push_back(item("Pause", TrayAction::LinkPause));
@@ -60,6 +61,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
 
     std::string tooltip = "fairyfly link: " + link.state;
     if (writes.available) tooltip += writes.allowed && !writes.locked ? " (changes allowed)" : " (read-only)";
+    if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
     if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
     model.tooltip = tooltip;
@@ -94,6 +96,10 @@ void LinkTrayController::notify(const std::string& text) {
 void LinkTrayController::on_tick() {
     if (!services_.link) return;
     link_ = services_.link->view();
+    if (link_.trail_on != last_trail_) {
+        notify(trail_balloon_text(link_));
+        last_trail_ = link_.trail_on;
+    }
     const std::string state = link_.state;
     if (state == last_state_) return;
     // "not running" before the first status is written (start) or after Quit says nothing new

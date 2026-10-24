@@ -1,7 +1,9 @@
 #include "include/link/link_control.h"
 
+#include <cctype>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <system_error>
 #include <thread>
 
@@ -44,14 +46,20 @@ bool set_paused(const std::string& state_path, bool paused) {
     return fs::exists(marker, ec);
 }
 
-void write_status(const std::string& state_path, const std::string& state) {
+void write_status(const std::string& state_path, const std::string& state, const json& extra) {
+    static std::mutex mu;  // the supervisor and a final write after Ctrl+C share the temporary file
+    std::lock_guard<std::mutex> l(mu);
+    json status{{"state", state}, {"pid", static_cast<std::int64_t>(FFY_GETPID())}, {"updated", now_s()}};
+    if (extra.is_object())
+        for (auto it = extra.begin(); it != extra.end(); ++it)
+            if (!status.contains(it.key())) status[it.key()] = it.value();
     std::error_code ec;
     const auto f = status_file(state_path);
     fs::create_directories(f.parent_path(), ec);
     const auto tmp = fs::path(f.string() + ".tmp");
     {
         std::ofstream out(tmp, std::ios::trunc);
-        out << json{{"state", state}, {"pid", static_cast<std::int64_t>(FFY_GETPID())}, {"updated", now_s()}}.dump();
+        out << status.dump();
     }
     fs::rename(tmp, f, ec);  // readers never see a half-written file
     if (ec) fs::remove(tmp, ec);
@@ -91,8 +99,9 @@ void supervise(const std::string& state_path, const std::function<void(const std
     auto last_write = std::chrono::steady_clock::now();
     auto set = [&](const std::string& s) {
         auto now = std::chrono::steady_clock::now();
-        if (s != last || now - last_write >= o.heartbeat) {
-            write_status(state_path, s);
+        const bool changed = o.status_changed && o.status_changed->exchange(false);
+        if (s != last || changed || now - last_write >= o.heartbeat) {
+            write_status(state_path, s, o.status_extra ? o.status_extra() : json());
             if (s != last && o.on_change) o.on_change(s);
             last = s;
             last_write = now;
@@ -126,6 +135,22 @@ void supervise(const std::string& state_path, const std::function<void(const std
     }
     halt();
     write_status(state_path, "stopped");
+}
+
+bool in_default_state_dir(const std::string& state_path, const std::string& default_dir) {
+    if (state_path.empty()) return true;  // resolves to the default
+    std::error_code ec;
+    auto norm = [&](const std::string& p) {
+        auto a = fs::weakly_canonical(fs::absolute(fs::path(p), ec), ec);
+        std::string s = a.lexically_normal().generic_string();
+#ifdef _WIN32
+        for (auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+#endif
+        while (s.size() > 1 && s.back() == '/') s.pop_back();
+        return s;
+    };
+    const std::string p = norm(state_path), d = norm(default_dir);
+    return p == d || (p.size() > d.size() && p.compare(0, d.size(), d) == 0 && p[d.size()] == '/');
 }
 
 }  // namespace fairyfly::link
