@@ -11,6 +11,7 @@
 #include <functional>
 #include <iosfwd>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,10 @@ Result link_status(const LinkOptions& options);
 Result link_unpair(const LinkOptions& options);
 Result link_pause(const LinkOptions& options);
 Result link_resume(const LinkOptions& options);
+
+/// FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1: STATE_GUARD when the options' state lies in the default pairing directory
+/// (from LOCALAPPDATA and, on Windows, the real Local AppData known folder). nullopt when allowed.
+std::optional<Result> link_state_guard(const LinkOptions& options);
 
 /// The tray's view of the link (pairing state + the running link's status file) and its pause switch.
 std::unique_ptr<tray::LinkControl> make_link_control(const std::string& state_path = {});
