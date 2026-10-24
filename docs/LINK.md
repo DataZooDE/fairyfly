@@ -9,7 +9,7 @@ organisation has connected there can use your SAP GUI:
 
 | Command | What it does |
 |---|---|
-| `fairyfly link pair [--gateway https://app.example]` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
+| `fairyfly link pair [--gateway https://fairyfly.io]` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
 | `fairyfly link status` | Paired or not, with device, account, organisation and gateway |
 | `fairyfly link run [--allow-write] [--tools session,screen] [--approve desktop\|no]` | Connects and serves tool calls until Ctrl+C |
 | `fairyfly link run --tray [--install-autostart\|--remove-autostart]` | The same link in the system tray, without the MCP server (see [Tray](#tray)) |
@@ -17,7 +17,14 @@ organisation has connected there can use your SAP GUI:
 | `fairyfly link resume` | Lets a paused link connect again |
 | `fairyfly link unpair` | Forgets the pairing here (remove the desktop in the web app too) |
 
-Without `--gateway`, `link pair` uses `FAIRYFLY_LINK_GATEWAY`, and otherwise asks for the address.
+Without `--gateway`, `link pair` uses `FAIRYFLY_LINK_GATEWAY`. With neither it asks for the service's web address
+with `https://fairyfly.io` already filled in (in a console it stands in the input line and can be edited; from a pipe
+it is shown as `[https://fairyfly.io]`): Enter accepts it.
+
+One link per pairing: `link run`, in a console or in the link tray, holds a lock for its pairing state file while it
+serves. A second one for the same file is refused with `LINK_ALREADY_RUNNING` (quit the first: tray Quit, console
+Ctrl+C). `link pair` reports the next step accordingly: nothing when the link tray is running (it connects by
+itself), and a restart when a link for this pairing is already running with the previous pairing.
 
 What the console shows:
 - `link pair` prints `Contacting <gateway>…` at once, then the QR code, the typed code and the number.
@@ -49,8 +56,8 @@ or an HTTP endpoint.
 - The Start-menu entry **fairyfly** (installed by `fairyfly.msi` / winget) runs exactly this command.
 - It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session.
 - A desktop that is not paired still gets the tray (grey icon): a notice says so, and the menu offers
-  **Pair with the fairyfly cloud...** (`link pair` in a console, which asks for the service's web address unless
-  `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
+  **Pair with the fairyfly cloud...** (`link pair` in a console, which asks for the service's web address with
+  `https://fairyfly.io` filled in, unless `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
 - An error while starting (for example a failed relaunch) is shown in a message box, not only in the
   console, which closes at once when the tray was started from the Start menu or the autostart.
 - The icon is green while connected, yellow while paused and grey otherwise.

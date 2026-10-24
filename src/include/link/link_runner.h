@@ -29,7 +29,7 @@ std::string default_state_path();
 struct LinkOptions {
     std::string state_path;
     // pair
-    std::string gateway;          ///< web address of the service, e.g. https://app.fairyfly.cloud
+    std::string gateway;          ///< web address of the service, e.g. https://fairyfly.io (link_console.h kDefaultGateway)
     std::string qr_png;           ///< also write the QR code as a PNG file
     std::string qr_style = "auto";  ///< auto | blocks | ascii (see link_console.h)
     int pair_timeout_s = 300;
