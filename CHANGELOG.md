@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.24.2 (2026-10-24)
 
 ### Cloud link: changes are approved at this desktop
 
