@@ -30,6 +30,7 @@
 #include "include/tray/tray_win32.h"
 #include "crypto.hpp"
 #include "link_agent.hpp"
+#include "link_state.hpp"
 #include "qr.hpp"
 
 using namespace fairyfly::link;
@@ -398,6 +399,148 @@ TEST_CASE("link pair: asks for the address with https://fairyfly.io prefilled; a
     gw.release();
     t.join();
     CHECK(result.error["code"] == "PAIRING_CANCELLED");
+}
+
+// ---- the gateway address: https only, plain http only to this computer ------------------------------------------
+
+TEST_CASE("gateway url: https anywhere, http only to exactly localhost, 127.0.0.1 or [::1]", "[link][pair][gateway-url]") {
+    const auto ok = [](const std::string& url) { return !gateway_url_problem(url).has_value(); };
+    // allowed
+    for (const char* url : {"https://fairyfly.io", "https://fairyfly.io/", "https://gw.acme.example:8443/base", "https://[2001:db8::1]:443",
+                            "HTTPS://fairyfly.io", "http://localhost", "http://localhost:8080", "http://localhost:8080/", "http://127.0.0.1",
+                            "http://127.0.0.1:18080/gw", "http://[::1]", "http://[::1]:9000", "http://LOCALHOST:80", "HTTP://LocalHost"}) {
+        INFO(url);
+        CHECK(ok(url));
+    }
+    // refused: the prefix tricks the old check let through, and other ways to reach a remote host without TLS
+    for (const char* url : {"http://localhost.evil.example", "http://127.0.0.1@evil.example", "http://localhost:80@evil.example",
+                            "http://127.0.0.1.nip.io", "http://127.0.0.1.nip.io:8080/", "http://localhost.", "http://localhost.:8080",
+                            "http://127.0.0.1.", "http://LOCALHOST.EVIL.EXAMPLE", "HTTP://evil.example", "http://evil.example",
+                            "http://user:pass@localhost", "http://localhost@localhost", "https://user@fairyfly.io",
+                            "https://fairyfly.io:443@evil.example", "http://[::1].evil.example", "http://[::2]", "http://[::1",
+                            "http://::1", "http://[0:0:0:0:0:0:0:1]", "http://0.0.0.0", "http://127.0.0.2", "http://127.1",
+                            "http://2130706433", "http://0x7f.0.0.1", "http://%6cocalhost", "http://localhost%2eevil.example",
+                            "http://127.0.0.1%40evil.example", " http://localhost", "http://localhost ", "http://local host",
+                            "http://localhost\t", "\nhttp://localhost", "http:\\\\localhost", "http://localhost\\@evil.example",
+                            "https://fairyfly.io\\@evil.example", "http://evil.example#@localhost", "http://evil.example?@localhost",
+                            "http://localhost#frag", "https://fairyfly.io/#x", "https://fairyfly.io/?x=1", "http://localhost:0",
+                            "http://localhost:99999", "http://localhost:", "http://localhost:80a", "ftp://fairyfly.io",
+                            "wss://fairyfly.io", "ws://localhost", "fairyfly.io", "localhost:8080", "//localhost", "", "https://",
+                            "https://:443", "https:///fairyfly.io", "https://fairyfly.\xC4\xB1o", "file:///C:/x"}) {
+        INFO(url);
+        CHECK_FALSE(ok(url));
+    }
+    CHECK_THAT(*gateway_url_problem("http://localhost.evil.example"), ContainsSubstring("https://"));
+}
+
+TEST_CASE("gateway url: the link's WebSocket address needs wss://, ws:// only to this computer", "[link][run][gateway-url]") {
+    const auto ok = [](const std::string& url) { return !gateway_url_problem(url, GatewayUrlKind::WebSocket).has_value(); };
+    for (const char* url : {"wss://fairyfly.io/link", "wss://gw.acme.example:8443/link?v=1", "ws://127.0.0.1:9000/link", "ws://localhost/link",
+                            "ws://[::1]:9000/link"}) {
+        INFO(url);
+        CHECK(ok(url));
+    }
+    for (const char* url : {"ws://evil.example/link", "ws://localhost.evil.example/link", "ws://127.0.0.1@evil.example/link",
+                            "ws://127.0.0.1.nip.io/link", "ws://localhost./link", "https://fairyfly.io/link", "http://127.0.0.1/link",
+                            "wss://fairyfly.io/link#x", "wss://user@fairyfly.io/link", " wss://fairyfly.io/link", ""}) {
+        INFO(url);
+        CHECK_FALSE(ok(url));
+    }
+}
+
+namespace {
+/// Sets (or, with "", clears) an environment variable for one test and restores it afterwards.
+struct EnvSet {
+    std::string name, saved;
+    bool had = false;
+    EnvSet(const std::string& n, const std::string& value) : name(n) {
+        char* v = nullptr;
+        size_t len = 0;
+        if (_dupenv_s(&v, &len, n.c_str()) == 0 && v) { saved = v; had = true; }
+        free(v);
+        _putenv_s(n.c_str(), value.c_str());
+    }
+    ~EnvSet() { _putenv_s(name.c_str(), had ? saved.c_str() : ""); }
+};
+}  // namespace
+
+TEST_CASE("link pair: a plain-http gateway that is not this computer is refused before anything is sent", "[link][pair][gateway-url]") {
+    // Each address resolves to (or is tried at) a port nothing listens on: the old prefix check let them through to
+    // "Contacting ..." and a network error. Refused, nothing is contacted and nothing saved.
+    const auto pair_with = [](LinkOptions o, const std::string& typed, const std::string& dir_name) {
+        std::ostringstream out;
+        std::istringstream in(typed);
+        std::atomic<bool> stop{false};
+        const TempDir dir(dir_name);
+        o.state_path = (dir / "state.json").string();
+        o.pair_timeout_s = 1;
+        auto r = link_pair(o, PairIo{&out, &in, &stop});
+        CHECK_FALSE(std::filesystem::exists(o.state_path));
+        CHECK(out.str().find("Contacting") == std::string::npos);
+        return r;
+    };
+    for (const char* bad : {"http://127.0.0.1@127.0.0.1:1", "http://localhost:1@127.0.0.1:1", "http://127.0.0.1.nip.io:1", "http://localhost.:1"}) {
+        INFO(bad);
+        {   // --gateway
+            EnvSet env("FAIRYFLY_LINK_GATEWAY", "");
+            LinkOptions o;
+            o.gateway = bad;
+            auto r = pair_with(o, "", "pair-bad-flag");
+            CHECK(r.error["code"] == "INVALID_ARGUMENT");
+        }
+        {   // FAIRYFLY_LINK_GATEWAY
+            EnvSet env("FAIRYFLY_LINK_GATEWAY", bad);
+            auto r = pair_with(LinkOptions{}, "", "pair-bad-env");
+            CHECK(r.error["code"] == "INVALID_ARGUMENT");
+        }
+        {   // typed at the prompt
+            EnvSet env("FAIRYFLY_LINK_GATEWAY", "");
+            auto r = pair_with(LinkOptions{}, std::string(bad) + "\n", "pair-bad-typed");
+            CHECK(r.error["code"] == "INVALID_ARGUMENT");
+        }
+    }
+}
+
+TEST_CASE("link pair: a gateway that hands out a plain ws:// link to another host is not saved", "[link][pair][gateway-url]") {
+    FakePairing gw;
+    gw.release();
+    auto gk = ffy::ec_generate();
+    gw.collect_result = {{"device_id", "dev-1"}, {"tenant", "t-1"}, {"tenant_name", "data zoo"}, {"email", "jr@data-zoo.de"},
+                         {"email_verified", true}, {"provider", "google"}, {"issuer", "https://fairyfly.io"},
+                         {"link_url", "ws://127.0.0.1.nip.io/link"}, {"gateway_keys", json::array({ffy::jwk_from_ec(gk).to_json()})}};
+    std::ostringstream out;
+    std::istringstream in("yes\n");
+    std::atomic<bool> stop{false};
+    LinkOptions o;
+    o.gateway = gw.url();
+    const TempDir dir("pair-insecure-link");
+    o.state_path = (dir / "state.json").string();
+    auto result = link_pair(o, PairIo{&out, &in, &stop});
+    CHECK(result.status == fairyfly::Result::Status::Error);
+    CHECK(result.error["code"] == "PAIRING_FAILED");
+    CHECK_FALSE(std::filesystem::exists(o.state_path));
+}
+
+TEST_CASE("link status: a stored pairing with a plain ws:// link to another host is refused", "[link][run][gateway-url]") {
+    const TempDir dir("state-insecure");
+    ffy::link::State st;
+    st.link_url = "ws://localhost.evil.example/link";
+    st.device_id = "dev-1";
+    st.tenant = "t-1";
+    st.email = "jr@data-zoo.de";
+    st.issuer = "https://fairyfly.io";
+    st.key = ffy::ec_generate();
+    st.gateway_keys.push_back(ffy::jwk_from_ec(ffy::ec_generate()));
+    LinkOptions o;
+    o.state_path = (dir / "state.json").string();
+    ffy::link::save_state(st, o.state_path);
+    auto r = link_status(o);
+    CHECK(r.status == fairyfly::Result::Status::Error);
+    CHECK(r.error["code"] == "LINK_STATE_INSECURE");
+
+    st.link_url = "wss://fairyfly.io/link";   // the same pairing with a wss:// link is fine
+    ffy::link::save_state(st, o.state_path);
+    CHECK(link_status(o).status == fairyfly::Result::Status::Success);
 }
 
 TEST_CASE("link run lock: one name per pairing state file", "[link][run]") {

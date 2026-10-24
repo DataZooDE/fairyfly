@@ -70,11 +70,11 @@ jobs:
         if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)'"; exit 1 }
         if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
         $tag = $env:RELEASE_TAG
-        if ($tag -notmatch '^v\d{4}\.\d{2}\.\d{2}(?:\.([1-9]\d{0,4}))?$' -or ($Matches[1] -and [int]$Matches[1] -gt 65535)) { Write-Error "Tag '$tag' is not vYYYY.MM.DD or vYYYY.MM.DD.N (N 1..65535)"; exit 1 }
         if ($info.FileVersion -ne $reported) { Write-Error "FileVersion '$($info.FileVersion)' differs from --version '$reported'"; exit 1 }
         $n = if ($reported -match '^\d{4}\.\d{2}\.\d{2}\.(\d+)$') { [int]$Matches[1] } else { 0 }
         if ($info.ProductPrivatePart -ne $n -or $info.FilePrivatePart -ne $n) { Write-Error "the version resource's 4th field is $($info.ProductPrivatePart)/$($info.FilePrivatePart), expected $n for $reported"; exit 1 }
-        if ($tag -ne "v$reported") { Write-Error "Tag '$tag' does not match the product version 'v$reported': bump src/include/version.h, CMakeLists.txt and vcpkg.json (packaging/set_version.ps1) before tagging"; exit 1 }
+        # vYYYY.MM.DD[.N] with a lowercase v (what the updater's parse_release takes) and equal to v<--version>
+        try { & ./packaging/check_release_tag.ps1 -Tag $tag -Version $reported } catch { Write-Error $_.Exception.Message; exit 1 }
         Write-Host "Release $reported OK"
       shell: pwsh
 

@@ -52,6 +52,12 @@ std::string pair_gateway_answer(const std::string& typed, const std::string& pre
     return t.empty() ? prefill : t;
 }
 
+std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUrlKind kind) {
+    (void)url;
+    (void)kind;
+    return std::nullopt;  // TODO
+}
+
 std::string link_run_lock_name(const std::string& state_path) {
     std::filesystem::path p(state_path);
     std::error_code ec;

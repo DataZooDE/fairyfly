@@ -101,5 +101,27 @@ foreach ($bad in '2026.10.24.0', '2026.10.24.01', 'v2026.10.24.1.1', '2026.10.5'
     Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
 }
 
+Write-Host "`n=== check_release_tag.ps1 (release.yml's tag check) ==="
+# the updater (src/update/update_model.cpp parse_release) only takes a lowercase v: the check must be case-sensitive
+$tagCheck = Join-Path $packaging 'check_release_tag.ps1'
+foreach ($case in @('v2026.10.24', '2026.10.24'), @('v2026.10.24.1', '2026.10.24.1'), @('v2026.10.24.65535', '2026.10.24.65535')) {
+    $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
+    Check ($r.Error -eq '') "check_release_tag accepts $($case[0]) for $($case[1])$(if ($r.Error) { " error: $($r.Error)" })"
+}
+foreach ($case in @('V2026.10.24.1', '2026.10.24.1'), @('V2026.10.24', '2026.10.24'), @('v2026.10.24', '2026.10.24.1'),
+                  @('v2026.10.24.1', '2026.10.24'), @('2026.10.24', '2026.10.24'), @('v2026.10.24.0', '2026.10.24.0'),
+                  @('v2026.10.24.65536', '2026.10.24.65536'), @('vv2026.10.24', 'v2026.10.24'), @('v2026.10.24 ', '2026.10.24'),
+                  @('', '2026.10.24')) {
+    $r = Try-Run { & $tagCheck -Tag $case[0] -Version $case[1] }
+    Check ($r.Error -ne '') "check_release_tag refuses '$($case[0])' for $($case[1]) ($($r.Error))"
+}
+# a tag with an uppercase V is no tag the updater takes: msi_version.ps1 and New-WingetManifest.ps1 refuse it too
+foreach ($bad in 'V2026.10.24', 'V2026.10.24.1') {
+    $r = Try-Run { & $msiVersion -Version $bad }
+    Check ($r.Error -ne '' -and $r.Out -eq '') "msi_version refuses '$bad' ($($r.Error))"
+    $r = Try-Run { & $generator -Version $bad -MsiPath $noMsi -OutDir $outDir }
+    Check ($r.Error -match 'not a calendar version') "New-WingetManifest refuses the version $bad ($($r.Error))"
+}
+
 if ($failures) { Write-Host "`n$failures check(s) FAILED"; exit 1 }
 Write-Host "`nALL VERSION SCRIPT CHECKS PASSED"
