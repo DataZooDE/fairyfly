@@ -14,5 +14,6 @@ set(LIBFFL_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/src/link_state.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/link_enrol.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/approver.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/approval_summary.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/link_agent.cpp
 )

@@ -130,7 +130,7 @@ public:
 private:
     struct LocalTool { bool destructive = false; };
     bool session(const std::atomic<bool>& stop);
-    bool approved(const assertion::Claims& c, const std::string& tool);
+    bool approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args);
     nlohmann::json call_local(const std::string& method, const nlohmann::json& params, int timeout_ms, const CallInfo& info = {});
 
     State st_;

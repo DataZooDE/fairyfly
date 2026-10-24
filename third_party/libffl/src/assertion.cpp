@@ -8,7 +8,6 @@ std::string sign(Signer& s, const Claims& c) {
     nlohmann::json hdr = {{"alg", "ES256"}, {"typ", "ffl+jwt"}, {"kid", s.kid()}};
     nlohmann::json cl = {{"iss", c.iss}, {"aud", c.aud}, {"sub", c.sub}, {"jti", c.jti}, {"iat", c.iat}, {"exp", c.exp},
                          {"req", c.req}, {"client", c.client}, {"tenant", c.tenant}, {"grants", c.grants.to_json()}};
-    if (!c.approval.empty()) cl["approval"] = c.approval;
     return jws::encode(hdr, cl, [&](const std::string& in) { return s.sign(in); });
 }
 
@@ -37,7 +36,7 @@ Claims Verifier::verify(const std::string& token, const std::string& device_id, 
     Claims c;
     auto s = [&](const char* n) { return j.contains(n) && j[n].is_string() ? j[n].get<std::string>() : std::string(); };
     auto i = [&](const char* n) { return j.contains(n) && j[n].is_number_integer() ? j[n].get<int64_t>() : int64_t(0); };
-    c.iss = s("iss"); c.aud = s("aud"); c.sub = s("sub"); c.jti = s("jti"); c.req = s("req"); c.client = s("client"); c.tenant = s("tenant"); c.approval = s("approval");
+    c.iss = s("iss"); c.aud = s("aud"); c.sub = s("sub"); c.jti = s("jti"); c.req = s("req"); c.client = s("client"); c.tenant = s("tenant");
     c.iat = i("iat"); c.exp = i("exp");
     if (j.contains("grants")) c.grants = policy::Grants::from_json(j["grants"]);
     int64_t now = now_fn();
