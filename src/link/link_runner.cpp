@@ -380,7 +380,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     cfg.publish_catalog = true;
     auto net = std::make_shared<Net>(st, cfg);
     net->state_path = sp;
-    g_stop = false;
+    // the tray's Quit may come before this point (request_stop): only a console run starts from a clean flag
+    if (!o.tray) g_stop = false;
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
     printer->starting(is_paused(sp));

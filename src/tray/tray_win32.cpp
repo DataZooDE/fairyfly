@@ -26,6 +26,7 @@ constexpr UINT kMsgBalloon = WM_APP + 3;
 constexpr UINT kMsgQuit = WM_APP + 4;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTickMs = 2000;
+constexpr int kIconGiveUpTicks = 30;   // 60 s without a taskbar: tell the person once
 constexpr int kFirstCommandId = 1000;
 
 void copy_wide(wchar_t* dest, size_t capacity, const std::wstring& src) {
@@ -113,12 +114,12 @@ public:
             return false;
         }
         hwnd_ = hwnd;
-        if (!add_icon()) {
-            DestroyWindow(hwnd);
-            hwnd_ = nullptr;
-            ready(false);
-            return false;
-        }
+        // No taskbar yet (an autostart right after logon, Explorer restarting): keep running and add the icon on a
+        // later tick or on TaskbarCreated instead of ending the tray.
+        icon_added_ = add_icon();
+        if (icon_added_) note_icon_added();
+        else spdlog::warn("tray: the notification icon could not be added yet (no taskbar?); retrying");
+        spdlog::default_logger()->flush();
         SetTimer(hwnd, kTimerId, kTickMs, nullptr);
         ready(true);
         if (quit_requested_) PostMessageW(hwnd, kMsgQuit, 0, 0);
@@ -171,7 +172,11 @@ private:
 
     LRESULT handle(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
         if (msg == taskbar_created_ && taskbar_created_ != 0) {
-            add_icon();   // Explorer restarted: the icon is gone, add it again
+            // Explorer (re)started: the icon is gone, add it again. Also broadcast in other cases (the icon still
+            // exists, NIM_ADD then fails): a successful NIM_MODIFY means it is there.
+            const bool was_added = icon_added_;
+            icon_added_ = add_icon() || (was_added && modify_icon());
+            if (icon_added_ && !was_added) note_icon_added();
             return 0;
         }
         switch (msg) {
@@ -184,6 +189,19 @@ private:
             return 0;
         case WM_TIMER:
             if (wparam == kTimerId) {
+                if (!icon_added_) {
+                    icon_added_ = add_icon();
+                    if (icon_added_) note_icon_added();
+                    else if (++ticks_without_icon_ == kIconGiveUpTicks) {
+                        // still no taskbar: say so once instead of running on invisibly (Quit from the box is not
+                        // possible; the log and Task Manager are)
+                        spdlog::warn("tray: still no notification icon after {} s", kIconGiveUpTicks * kTickMs / 1000);
+                        spdlog::default_logger()->flush();
+                        MessageBoxW(hwnd, L"fairyfly is running but could not add its icon to the notification area "
+                                          L"(no taskbar). It keeps trying; to end it, use Task Manager.",
+                                    L"fairyfly", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST);
+                    }
+                }
                 listener_->on_tick();
                 update_icon();
             }
@@ -198,6 +216,7 @@ private:
             }
             return 0;
         case kMsgBalloon: {
+            if (!icon_added_) return 0;   // kept until the icon exists (note_icon_added posts this again)
             std::deque<std::pair<std::string, std::string>> pending;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -215,6 +234,19 @@ private:
         default: break;
         }
         return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
+    void note_icon_added() {
+        spdlog::info("tray: notification icon added");
+        spdlog::default_logger()->flush();
+        if (HWND hwnd = hwnd_) PostMessageW(hwnd, kMsgBalloon, 0, 0);   // notices queued while there was no icon
+    }
+
+    bool modify_icon() {
+        NOTIFYICONDATAW nid = base_data();
+        nid.uFlags = NIF_TIP;
+        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), utf8_to_wide(current_tip_));
+        return Shell_NotifyIconW(NIM_MODIFY, &nid) == TRUE;
     }
 
     NOTIFYICONDATAW base_data() const {
@@ -311,6 +343,8 @@ private:
     std::atomic<HWND> hwnd_{nullptr};
     std::atomic<bool> quit_requested_{false};
     UINT taskbar_created_ = 0;
+    bool icon_added_ = false;   // the notification icon is in the taskbar (retried on every tick until it is)
+    int ticks_without_icon_ = 0;
     HICON icons_[2][4] = {};   // [dark, light taskbar][IconState]
     bool light_taskbar_ = false;
     IconState current_icon_ = IconState::Stopped;
@@ -485,9 +519,20 @@ std::vector<std::string> current_args() {
 
 bool process_has_console() { return GetConsoleWindow() != nullptr; }
 
+unsigned console_process_count() {
+    DWORD ids[8];
+    return static_cast<unsigned>(GetConsoleProcessList(ids, ARRAYSIZE(ids)));   // 0 without a console
+}
+
+bool startup_error_needs_dialog_here() {
+    return startup_error_needs_dialog(is_tray_child_process(), process_has_console(), console_process_count());
+}
+
 bool is_tray_child_process() { return config::process_env()(kTrayChildEnv) == "1"; }
 
 void detach_console() { FreeConsole(); }
+
+void clear_tray_child_marker() { SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", nullptr); }
 
 std::string route_logging_to_file(const std::string& file_name) {
     const auto dir = log_directory(config::process_env());

@@ -398,6 +398,7 @@ public:
 private:
     void notify(const std::string& text);
     LinkWritesView writes_view();
+    McpTrayView mcp_view();
 
     LinkTrayServices services_;
     TrayPaths paths_;

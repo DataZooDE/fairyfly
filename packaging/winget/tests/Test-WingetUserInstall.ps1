@@ -236,7 +236,14 @@ try {
     Assert ($sc.WorkingDirectory.TrimEnd('\') -ieq $installDir) "shortcut WorkingDirectory = $installDir"
     Assert (@($alive | Where-Object { $_.CommandLine -like "*$shortcutArguments*" }).Count -ge 1) "the running process is the link tray ($shortcutArguments)"
     Assert (@($alive | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowTitle }).Count -eq 0) 'no visible window (no error message box): it sits in the tray'
-    Assert (Test-Path (Join-Path $trayHome 'fairyfly\logs\link.log')) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
+    $linkLog = Join-Path $trayHome 'fairyfly\logs\link.log'
+    Assert (Test-Path $linkLog) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
+    $traySessions = @($alive | ForEach-Object { $_.SessionId })
+    if (Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $traySessions -contains $_.SessionId }) {
+        Assert ((Get-Content $linkLog -Raw) -match 'tray: notification icon added') 'the tray icon is in the taskbar (link.log)'
+    } else {
+        Write-Host "  (no Explorer in session $($traySessions -join ',') - the icon check is skipped; the tray keeps retrying)"
+    }
     Assert (-not (Test-Path (Join-Path $trayHome 'fairyfly\link\state.json'))) 'nothing was paired'
     $alive | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $deadline = (Get-Date).AddSeconds(15)
@@ -322,7 +329,10 @@ try {
         Step "Upgrade from the previous release ($PreviousMsiUrl) with msiexec, unelevated"
         $prevMsi = Join-Path $WorkDir 'previous.msi'
         $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest $PreviousMsiUrl -OutFile $prevMsi -UseBasicParsing
+        for ($try = 1; ; $try++) {
+            try { Invoke-WebRequest $PreviousMsiUrl -OutFile $prevMsi -UseBasicParsing; break }
+            catch { if ($try -ge 4) { throw }; Write-Host "  download failed ($($_.Exception.Message)), retry $try"; Start-Sleep -Seconds (5 * $try) }
+        }
         $code = Run-Unelevated "start `"`" /wait msiexec.exe /i `"$prevMsi`" /qn /l*v `"$(Join-Path $WorkDir 'msi-install-previous.log')`"" 'msi-install-previous'
         Assert ($code -eq 0) 'previous release installed (unelevated msiexec)'
         Assert (Test-Path $oldLnk) 'the previous release has the Start-menu entry "fairyfly (tray)"'

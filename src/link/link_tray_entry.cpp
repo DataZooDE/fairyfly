@@ -25,12 +25,9 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     entry.autostart_line = tray::link_autostart_command(exe, entry.args);
     entry.name = "fairyfly link tray";
 
+    // An unpaired desktop still gets the tray: it leads to "Pair with the fairyfly cloud" (run_link_with_tray). The
+    // Start-menu entry runs this command, so refusing here would end in a console that closes at once.
     auto link_control = make_link_control(o.state_path);
-    // checked here, in the console, so the person hears it (the detached tray has no console)
-    if (!o.install_autostart && !o.remove_autostart && !link_control->view().paired) {
-        std::cerr << "error LINK_NOT_PAIRED: this desktop is not paired; run: fairyfly link pair --gateway <address>" << std::endl;
-        return 2;
-    }
 
     auto registry = tray::make_win32_run_key();
     auto launcher = tray::make_win32_process_launcher();
@@ -41,10 +38,15 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     services.guard = guard.get();
     services.print = [](const std::string& line) { std::cout << line << std::endl; };
     const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
+    if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
+        tray::make_win32_tray_host()->message_box("fairyfly link", decided.message);   // nobody reads this console
+    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning && tray::startup_error_needs_dialog_here())
+        tray::make_win32_tray_host()->message_box("fairyfly link", "The fairyfly link tray is already running: its icon is in the notification area.");
     if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
 
     // From here on this process is the link tray: no console, logs to link.log, the link on the main thread.
     if (entry.is_child) tray::detach_console();
+    tray::clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
     const std::string log_file = tray::route_logging_to_file("link.log");
 
     auto host = tray::make_win32_tray_host();
@@ -56,6 +58,8 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     tray_services.link = link_control.get();
     auto write_mode = make_write_mode_control();
     tray_services.writes = write_mode.get();
+    auto mcp_tray = tray::make_win32_single_instance(tray::kTrayMutexName);   // probed only: "Start local MCP server"
+    tray_services.mcp_tray = mcp_tray.get();
     tray_services.stop_link = [] { request_stop(); };
 
     tray::TrayPaths paths;

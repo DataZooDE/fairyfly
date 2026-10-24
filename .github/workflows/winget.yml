@@ -13,7 +13,9 @@ on:
     paths:
       - 'packaging/**'
       - 'src/tray/**'
+      - 'src/include/tray/**'
       - 'src/link/link_tray_entry.cpp'
+      - 'src/link/link_runner.cpp'
       - 'src/commands/mcp_config_command.cpp'
       - '.github/workflows/winget.yml'
       - '.github/workflows/release.yml'
