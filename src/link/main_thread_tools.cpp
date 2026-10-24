@@ -42,6 +42,20 @@ bool MainThreadTools::post(std::function<void()> fn) {
     return true;
 }
 
+bool MainThreadTools::invoke(std::function<void()> fn, int timeout_ms) {
+    auto job = std::make_shared<Job>();
+    job->fn = std::move(fn);
+    std::unique_lock<std::mutex> l(mu_);
+    if (shutdown_) return false;
+    queue_.push_back(job);
+    work_cv_.notify_one();
+    if (!done_cv_.wait_for(l, std::chrono::milliseconds(timeout_ms), [&] { return job->done || shutdown_; })) {
+        job->abandoned = true;  // not started yet: skipped
+        return false;
+    }
+    return job->done && job->error.empty();
+}
+
 json MainThreadTools::run(Job& job) {
     if (job.fn) {
         job.fn();

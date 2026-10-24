@@ -78,11 +78,11 @@ add_library(ffl STATIC ${LIBFFL_SOURCES})
 target_include_directories(ffl PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/src)
 target_include_directories(ffl SYSTEM PUBLIC ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/cpp-httplib
                                               ${CMAKE_SOURCE_DIR}/third_party/libffl/third_party/qrcodegen)
+# CPPHTTPLIB_HEADER_MAX_LENGTH: github.com's redirect to a release asset carries a ~9 KB Content-Security-Policy header
+# (2026-10-24), more than cpp-httplib's default 8 KiB line limit, and `fairyfly update` failed with "Failed to read
+# connection".
 target_compile_definitions(ffl PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_TCP_NODELAY=true
-                                      CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH=8454144
-                                      # GitHub's download redirect carries a 9 KB Content-Security-Policy line (2026-10-24);
-                                      # the 8 KB default made every update download fail with "Failed to read connection"
-                                      CPPHTTPLIB_HEADER_MAX_LENGTH=65536)
+                                      CPPHTTPLIB_WEBSOCKET_MAX_PAYLOAD_LENGTH=8454144 CPPHTTPLIB_HEADER_MAX_LENGTH=65536)
 target_link_libraries(ffl PUBLIC OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp spdlog::spdlog)
 if(WIN32)
     target_link_libraries(ffl PUBLIC ws2_32 mswsock crypt32 user32 shell32)
@@ -198,6 +198,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/link_control.cpp
     src/link/link_console.cpp
     src/link/link_tray_entry.cpp
+    src/link/trail_recorder.cpp
+    src/link/trail_screen_source.cpp
     src/update/update_model.cpp
     src/update/updater.cpp
     src/mcp/http_tray_runner.cpp

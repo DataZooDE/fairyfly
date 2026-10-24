@@ -110,7 +110,7 @@ log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
   *Turn off Windows Installer* is set to *Never* (`DisableMSI=0`); Windows 10/11 allow them by default.
 - **MSI**: download `fairyfly.msi` from the [releases page](https://github.com/DataZooDE/fairyfly/releases) and run it,
   or install silently with `msiexec /i fairyfly.msi /qn`. It installs to `%LOCALAPPDATA%\Programs\fairyfly`, adds
-  that folder to your user `PATH` (open a new terminal afterwards) and adds a Start-menu entry *fairyfly (tray)*; its
+  that folder to your user `PATH` (open a new terminal afterwards) and adds a Start-menu entry *fairyfly* (the cloud link tray: pairing, and *Start local MCP server* in its menu); its
   own settings go to `HKCU` only. Uninstall it under *Settings > Apps* (or `msiexec /x fairyfly.msi /qn`).
 - **Single file**: download `fairyfly.exe`, put it in a folder of your choice, for example `C:\Tools\fairyfly\`, and
   add that folder to your `PATH`.

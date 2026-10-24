@@ -3,7 +3,8 @@ name: winget per-user install
 # Proves the winget path end to end on a real Windows runner: build fairyfly.exe and the per-user MSI, render the
 # winget manifests (packaging/winget/New-WingetManifest.ps1), `winget validate`, refuse the install from an elevated
 # process (ElevationRequirement: elevationProhibited), `winget install --manifest` from an unelevated process of the
-# same user (MSI served from a local HTTP server), check the per-user footprint, `winget uninstall`, check it is gone.
+# same user (MSI served from a local HTTP server), start the Start-menu shortcut as Explorer would and check the tray
+# stays up, check the per-user footprint, `winget uninstall`, check it is gone, then upgrade the previous release's MSI.
 # packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks.
 
 on:
@@ -11,6 +12,11 @@ on:
     branches: [ main ]
     paths:
       - 'packaging/**'
+      - 'src/tray/**'
+      - 'src/include/tray/**'
+      - 'src/link/link_tray_entry.cpp'
+      - 'src/link/link_runner.cpp'
+      - 'src/commands/mcp_config_command.cpp'
       - '.github/workflows/winget.yml'
       - '.github/workflows/release.yml'
   workflow_dispatch:

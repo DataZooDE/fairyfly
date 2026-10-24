@@ -46,12 +46,19 @@ Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 
 `fairyfly link run --tray` runs the link in the system tray. It has its own icon and does not start the MCP server
 or an HTTP endpoint.
+- The Start-menu entry **fairyfly** (installed by `fairyfly.msi` / winget) runs exactly this command.
 - It detaches from the console, like `mcp --tray`. Only one link tray runs per Windows session.
-- A desktop that is not paired is refused in the console with `LINK_NOT_PAIRED`; pair it first.
+- A desktop that is not paired still gets the tray (grey icon): a notice says so, and the menu offers
+  **Pair with the fairyfly cloud...** (`link pair` in a console, which asks for the service's web address unless
+  `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
+- An error while starting (for example a failed relaunch) is shown in a message box, not only in the
+  console, which closes at once when the tray was started from the Start menu or the autostart.
 - The icon is green while connected, yellow while paused and grey otherwise.
 - A notice appears when the link starts, pauses, resumes or stops.
 - The menu has:
   - the pairing (organisation, account) and the link's state;
+  - while the audit trail is on: *Audit trail on — your admin records steps and screenshots on this desktop* (see
+    "Audit trail" below; a balloon also tells when it turns on or off);
   - **Pause** / **Resume**;
   - **Allow changes in SAP** (a check mark): switches the running link between read-only and write mode without a
     restart. Turning it on asks first. The link then reconnects and offers its new tool list again. The switch is
@@ -59,6 +66,10 @@ or an HTTP endpoint.
     `--read-only` / `FAIRYFLY_READ_ONLY=1`. Every change still needs the gateway's grant and an approval;
   - **Health check**: `link status` in a console;
   - **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
+  - **Start local MCP server**: starts the MCP server in its own tray (`fairyfly mcp --tray --http`, plain HTTP on
+    `127.0.0.1:8383` unless the config file says otherwise; see [MCP_TRAY.md](MCP_TRAY.md)). While it runs the item is
+    checked and disabled (it follows the MCP tray's single-instance guard `Local\fairyfly-tray`); quit it from its own
+    icon;
   - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
   - **Quit**, which disconnects the link and ends the process.
 - The other `link run` options apply as usual: `fairyfly link run --tray --allow-write --tools session,screen`.
@@ -79,6 +90,71 @@ of the MCP tray's `fairyfly-mcp` value.
 - **Start link**: starts the link tray (`fairyfly link run --tray`);
 - **Pause** / **Resume**;
 - **Health check**: `link status` in a console.
+
+## Audit trail
+
+Your organisation's admins can turn on, per desktop, an audit trail of what AI assistants do on it: each step with a
+short description, the SAP fields it changed (old → new) and screenshots of the SAP window before and after it. It is
+**off** until an admin turns it on in the web app (Admin › Desktops). The contract with the gateway is
+`docs/AUDIT_TRAIL.md` in fairyfly-gateway; the protocol work (announcing `trail/1` and `trail-blur/1`, the policy,
+the `step` and `shot` frames, the limits) is libffl's. fairyfly implements the recorder
+(`src/link/trail_recorder.cpp`, SAP GUI access in `src/link/trail_screen_source.cpp`).
+
+**When it records.** Only while the gateway's policy for this desktop is on **and** the call asks for a record. A
+gateway without the audit trail, or an admin who turns it off, means nothing is recorded and no notice is shown.
+
+**The notice.** While the trail is on, the person at this desktop sees it:
+- `link run` prints a line when it turns on or off, e.g. `Audit trail ON: your administrator records the steps
+  assistants take on this desktop, with screenshots (kept 90 days)`;
+- the link tray and the `mcp --tray` Cloud link submenu show the entry *Audit trail on — your admin records steps and
+  screenshots on this desktop*, and a balloon when it turns on or off (the running link writes the policy into
+  `state.json.status.json` as `"trail"`);
+- `fairyfly link status` shows `"audit_trail": "on since 2026-10-24 (screenshots: every step; kept 90 days; blurring
+  on)"`, or `"off"` (also while the link is not running).
+
+**Screenshots.** The active window of the SAP GUI session the calls use (a popup, if one is open), captured with
+`HardCopyToMemory` before and after the step, on the main (COM) thread like the calls themselves. They are PNG, at
+most 1920 px wide and 4 MiB (scaled down further if needed). Everything happens in memory: an unblurred screenshot
+never reaches a file or the log.
+
+**Blurring** (on by default; the admin can turn it off for bank fields):
+- filled with a solid grey before scaling and encoding (not reversible): every password field (`GuiPasswordField`,
+  `pwd…` ids, and fields whose name or label is on the password list) always, and while blurring is on every bank
+  field: IBAN, account number, bank key, SWIFT/BIC, card numbers, account holder (SAP names such as `BANKN`, `BANKL`,
+  `BANKS`, `IBAN`, `SWIFT`, `BKREF`, `KOINH`, `CCNUM`, or labels such as *Kontonr.*, *Kontoinhaber*, *Sort code*);
+- the list is libffl's `proto::password_field` / `proto::bank_field`, the same one the gateway uses to mask field
+  changes; it is matched on the element id, the SAP field name, the screen label and the tooltip;
+- an ALV grid (GuiShell GridView) with such a column is filled as a whole; table-control cells are matched by their
+  own ids;
+- rectangles come from the elements' `ScreenLeft`/`ScreenTop`/`Width`/`Height`, relative to the window and scaled to
+  the captured image, with 3 px around each;
+- a screenshot is **dropped** (only the step is sent) when a field that must be blurred cannot be located, when the
+  screen's elements cannot be read, or when the image does not have the window's proportions.
+
+- control containers the screen tree does not list (custom controls, docking and splitter containers) are read
+  element by element; one that cannot be read is filled as a whole, and so is a grid whose columns cannot be read;
+- the image must have the window's proportions (within 2 px) at a display scaling between 0.5 and 4, and the
+  window must still be the active one when it is captured (a popup that opened in between is not captured).
+
+Not covered (filled only when the element id, name, label or column name says so): column titles of ALV grids and
+table controls with custom (Z) names, classic list output (`lbl[c,r]` lines), HTML viewers and column-tree cells.
+Screens that show bank data only there should be kept out of recorded sessions. Calls run one at a time, but with several calls in flight a step's
+before/after screenshots can include the effect of another call between them.
+
+**Field changes.** For `gui_element_fill` and the tools annotated `destructiveHint` (e.g. `gui_key_send`,
+`gui_element_click`): the target of a fill, read before and after, and every input field on the screen whose value
+changed, as `{field: SAP id, label: screen label, old, new}`, at most 200. Values of password fields are always
+`••••`, values of bank fields while blurring is on (fairyfly masks them, and libffl and the gateway mask again). A
+password field's text is never read.
+
+**Errors** never fail the call: the step is recorded with what could be captured, and the log says why (never with
+screen content).
+
+**Testing without the live pairing.** Use your own state file for every manual test (`--state`), and set
+`FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1`: then every `link` verb refuses (`STATE_GUARD`) a state in
+`%LOCALAPPDATA%\fairyfly\link\`, so a test copy cannot pause, unpair or overwrite the pairing the person at this
+desktop relies on. `link pair` and `link run` print the state they use first (`state: <path>`).
+`tests/integration/link_trail_live.ps1` is the live check.
 
 ## What runs where
 
@@ -119,7 +195,8 @@ pairing), pairing, the DPAPI state and the link agent:
 ## Install and update
 
 - `fairyfly.msi` (per user, no administrator rights): installs to `%LOCALAPPDATA%\Programs\fairyfly`, extends the
-  user's `PATH` and adds the Start-menu entry "fairyfly (tray)". Source: `packaging/fairyfly.wxs`. The CI builds it,
+  user's `PATH` and adds the Start-menu entry "fairyfly" (the link tray, `link run --tray`; up to 2026.10.23 it was
+  "fairyfly (tray)", which an MSI or winget upgrade removes; `update apply` only swaps the exe). Source: `packaging/fairyfly.wxs`. The CI builds it,
   installs it on the runner, checks the result and uninstalls it again.
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
   when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the
@@ -127,6 +204,10 @@ pairing), pairing, the DPAPI state and the link agent:
 - The tray announces a newer release once (`FAIRYFLY_UPDATE_CHECK=0` turns that off).
 
 ## Live test
+
+`tests/integration/link_trail_live.ps1` checks the audit trail live with its own state file and test pairing (never
+the desktop's real one): the blurring of the current SAP screen (offline), the notice, the status and, through a
+gateway with the trail on for that test desktop, the recorded steps. See the script's help.
 
 `tests/integration/link_live.ps1` runs `link run` against a real gateway and a logged-in SAP GUI. It calls the
 gateway's MCP endpoint with an access token and checks:

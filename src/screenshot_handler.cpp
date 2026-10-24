@@ -159,6 +159,48 @@ void ScreenshotHandler::emit_base64_output(Result& result, const std::string& ba
     result.data["filepath"] = output_file;
 }
 
+std::vector<uint8_t> ScreenshotHandler::hard_copy_png(const ComGuiWindowPtr& window) {
+    if (!window) return {};
+    IDispatch* window_dispatch = window->get_dispatch();
+    if (!window_dispatch) return {};
+
+    VARIANT image_type;
+    VariantInit(&image_type);
+    image_type.vt = VT_I4;
+    image_type.lVal = constants::IMAGE_TYPE_PNG;
+
+    VARIANT png_bytes_var;
+    VariantInit(&png_bytes_var);
+
+    DISPID dispid;
+    LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopyToMemory");
+    HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("HardCopyToMemory method unavailable: 0x{:08X}", hr));
+
+    VARIANT args[1];
+    args[0] = image_type;
+    DISPPARAMS params;
+    params.rgvarg = args;
+    params.cArgs = 1;
+    params.rgdispidNamedArgs = nullptr;
+    params.cNamedArgs = 0;
+    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, &png_bytes_var, nullptr, nullptr);
+    VariantClear(&image_type);
+    if (FAILED(hr)) {
+        VariantClear(&png_bytes_var);
+        throw std::runtime_error(fmt::format("HardCopyToMemory failed: 0x{:08X}", hr));
+    }
+    std::vector<uint8_t> png_bytes;
+    try {
+        png_bytes = extract_safearray_bytes(png_bytes_var);
+    } catch (...) {
+        VariantClear(&png_bytes_var);
+        throw;
+    }
+    VariantClear(&png_bytes_var);
+    return png_bytes;
+}
+
 Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
     TraceGuard trace("ScreenshotHandler::capture");
     auto start = std::chrono::high_resolution_clock::now();
@@ -319,51 +361,13 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         } else {
             // Processing path: Use HardCopyToMemory + CImg
             json capture_geometry = json::object();
-            VARIANT image_type;
-            VariantInit(&image_type);
-            image_type.vt = VT_I4;
-            image_type.lVal = constants::IMAGE_TYPE_PNG;
-
-            VARIANT png_bytes_var;
-            VariantInit(&png_bytes_var);
-
-            IDispatch* window_dispatch = window->get_dispatch();
-            if (!window_dispatch) {
+            std::vector<uint8_t> png_bytes = hard_copy_png(window);
+            if (png_bytes.empty()) {
                 result.status = Result::Status::Error;
                 result.error["code"] = "INVALID_WINDOW";
                 result.error["message"] = "Window COM object is invalid or has been closed";
-                VariantClear(&image_type);
                 return result;
             }
-
-            DISPID dispid;
-            LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopyToMemory");
-            HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-            if (SUCCEEDED(hr)) {
-                VARIANT args[1];
-                args[0] = image_type;
-
-                DISPPARAMS params;
-                params.rgvarg = args;
-                params.cArgs = 1;
-                params.rgdispidNamedArgs = nullptr;
-                params.cNamedArgs = 0;
-
-                hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_METHOD, &params, &png_bytes_var, nullptr, nullptr);
-
-                if (FAILED(hr)) {
-                    VariantClear(&image_type);
-                    throw std::runtime_error(fmt::format("HardCopyToMemory failed: 0x{:08X}", hr));
-                }
-            }
-
-            VariantClear(&image_type);
-
-            // Extract PNG bytes
-            std::vector<uint8_t> png_bytes = extract_safearray_bytes(png_bytes_var);
-            VariantClear(&png_bytes_var);
 
             spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
 
