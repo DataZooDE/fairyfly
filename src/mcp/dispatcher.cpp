@@ -380,6 +380,92 @@ bool CommandDispatcher::owner_target_visible(const Principal& principal, const a
            (principal.sap_systems.empty() || auth::system_allowed(principal.sap_systems, target.system));
 }
 
+namespace {
+/// Appends `note` as a new line to the first content item when that is text; false when there is none.
+bool append_note(ToolResult& shaped, const std::string& note) {
+    if (shaped.content.empty() || !shaped.content[0].is_object() || shaped.content[0].value("type", "") != "text") return false;
+    shaped.content[0]["text"] = shaped.content[0]["text"].get<std::string>() + "\n" + note;
+    return true;
+}
+}  // namespace
+
+bool CommandDispatcher::recheck_transaction(const Principal& principal, const ToolSpec& spec, const std::string& name,
+                                            const Result& result, McpCallRecord& record,
+                                            const std::string& policy_state_key) {
+    if (principal.tcodes.empty() || !facts_provider_ ||
+        !(auth::acts_on_screen(spec.def.name) || name == "gui_transaction_start"))
+        return false;
+    bool tcode_left = false;
+    std::string after;
+    std::string after_program, after_screen, after_identity;
+    std::optional<int> after_connection;
+    // The connection the call ACTUALLY used (its result carries it), not the one resolved before the call: an automatic
+    // single-connection resolution leaves record.connection empty.
+    std::optional<int> used_connection = record.connection;
+    if (result.status == Result::Status::Success && result.data.is_object() && result.data.contains("connection_id"))
+        if (auto id = int_from_json(result.data["connection_id"])) used_connection = id;
+    const auto facts_started = std::chrono::steady_clock::now();
+    try {
+        if (auto facts = facts_provider_(used_connection)) {
+            after = auth::normalize_tcode(facts->transaction);
+            after_program = facts->program;
+            after_screen = facts->screen_number;
+            after_identity = facts->session_identity;
+            after_connection = facts->connection_id;
+        }
+    } catch (...) {}
+    // A racing or misrouted facts lookup must not update another session's policy state.
+    // Treat the facts as unknown while retaining the call's connection for conservative
+    // initial-screen invalidation on that session.
+    if (used_connection && after_connection && *used_connection != *after_connection) {
+        after.clear();
+        after_program.clear();
+        after_screen.clear();
+        after_identity.clear();
+        after_connection.reset();
+    } else if (!used_connection) used_connection = after_connection;
+    const std::string post_state_key = !after_identity.empty() || used_connection
+        ? session_policy_key(principal, after_identity, used_connection) : policy_state_key;
+    note_step("facts_post", name, principal.name, facts_started, record.facts_post_ms);
+    if (!after.empty()) {
+        const bool allowed = std::any_of(principal.tcodes.begin(), principal.tcodes.end(),
+                                         [&](const std::string& pat) { return auth::glob_match(pat, after); });
+        if (!allowed) {
+            tcode_left = true;
+            set_tcode_blocked(post_state_key, true);
+            if (used_connection) set_tcode_blocked(session_policy_key(principal, "", used_connection), true);
+            record.tcode_left_allowlist = true;
+            if (principal.allow_selection_input) set_initial_screen(post_state_key, std::nullopt);
+        } else if (name == "gui_transaction_start" && result.status == Result::Status::Success) {
+            set_tcode_blocked(post_state_key, false);
+            if (used_connection) set_tcode_blocked(session_policy_key(principal, "", used_connection), false);
+            // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
+            // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
+            if (principal.allow_selection_input) {
+                auth::InitialScreen screen{after, after_program, after_screen, used_connection, after_identity};
+                set_initial_screen(post_state_key, screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
+            }
+        }
+    }
+    // Typing is only possible right after gui_transaction_start until the first navigation: any later call whose
+    // post-call facts are uncertain (empty) or show another transaction/program/screen clears the record, so returning
+    // to the initial screen later does NOT re-enable typing until gui_transaction_start runs again.
+    if (principal.allow_selection_input && name != "gui_transaction_start") {
+        const auto invalid = [&](const auth::InitialScreen& rec) {
+            return after.empty() || after_program.empty() || after_screen.empty() ||
+                after != rec.transaction || after_program != rec.program || after_screen != rec.screen_number;
+        };
+        if (auto rec = initial_screen(post_state_key); rec && invalid(*rec))
+            set_initial_screen(post_state_key, std::nullopt);
+        // A timed-out or misrouted post-call lookup can fall back to a connection key.
+        // Invalidate the identity-keyed record checked before the call as well.
+        if (post_state_key != policy_state_key)
+            if (auto rec = initial_screen(policy_state_key); rec && invalid(*rec))
+                set_initial_screen(policy_state_key, std::nullopt);
+    }
+    return tcode_left;
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1377,76 +1463,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // with a T-code allowlist and only for calls that act on the screen or start a transaction. Unknown facts do not
     // flag (the next call fails closed on them anyway); a known transaction outside the allowlist does.
     // Serialised with the blocked-state check above (single executor thread), see docs/MCP_REMOTE.md.
-    bool tcode_left = false;
-    if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->def.name) || name == "gui_transaction_start")) {
-        std::string after;
-        std::string after_program, after_screen, after_identity;
-        std::optional<int> after_connection;
-        // The connection the call ACTUALLY used (its result carries it), not the one resolved before the call: an automatic
-        // single-connection resolution leaves record.connection empty.
-        std::optional<int> used_connection = record.connection;
-        if (result.status == Result::Status::Success && result.data.is_object() && result.data.contains("connection_id"))
-            if (auto id = int_from_json(result.data["connection_id"])) used_connection = id;
-        const auto facts_started = std::chrono::steady_clock::now();
-        try {
-            if (auto facts = facts_provider_(used_connection)) {
-                after = auth::normalize_tcode(facts->transaction);
-                after_program = facts->program;
-                after_screen = facts->screen_number;
-                after_identity = facts->session_identity;
-                after_connection = facts->connection_id;
-            }
-        } catch (...) {}
-        // A racing or misrouted facts lookup must not update another session's policy state.
-        // Treat the facts as unknown while retaining the call's connection for conservative
-        // initial-screen invalidation on that session.
-        if (used_connection && after_connection && *used_connection != *after_connection) {
-            after.clear();
-            after_program.clear();
-            after_screen.clear();
-            after_identity.clear();
-            after_connection.reset();
-        } else if (!used_connection) used_connection = after_connection;
-        const std::string post_state_key = !after_identity.empty() || used_connection
-            ? session_policy_key(principal, after_identity, used_connection) : policy_state_key;
-        note_step("facts_post", name, principal.name, facts_started, record.facts_post_ms);
-        if (!after.empty()) {
-            const bool allowed = std::any_of(principal.tcodes.begin(), principal.tcodes.end(),
-                                             [&](const std::string& pat) { return auth::glob_match(pat, after); });
-            if (!allowed) {
-                tcode_left = true;
-                set_tcode_blocked(post_state_key, true);
-                if (used_connection) set_tcode_blocked(session_policy_key(principal, "", used_connection), true);
-                record.tcode_left_allowlist = true;
-                if (principal.allow_selection_input) set_initial_screen(post_state_key, std::nullopt);
-            } else if (name == "gui_transaction_start" && result.status == Result::Status::Success) {
-                set_tcode_blocked(post_state_key, false);
-                if (used_connection) set_tcode_blocked(session_policy_key(principal, "", used_connection), false);
-                // The screen the start ended on is the only one typing is allowed on (selection-input rule). Unknown
-                // program/screen records nothing, so typing stays denied until a start with known facts succeeds.
-                if (principal.allow_selection_input) {
-                    auth::InitialScreen screen{after, after_program, after_screen, used_connection, after_identity};
-                    set_initial_screen(post_state_key, screen.known() ? std::optional<auth::InitialScreen>(screen) : std::nullopt);
-                }
-            }
-        }
-        // Typing is only possible right after gui_transaction_start until the first navigation: any later call whose
-        // post-call facts are uncertain (empty) or show another transaction/program/screen clears the record, so returning
-        // to the initial screen later does NOT re-enable typing until gui_transaction_start runs again.
-        if (principal.allow_selection_input && name != "gui_transaction_start") {
-            const auto invalid = [&](const auth::InitialScreen& rec) {
-                return after.empty() || after_program.empty() || after_screen.empty() ||
-                    after != rec.transaction || after_program != rec.program || after_screen != rec.screen_number;
-            };
-            if (auto rec = initial_screen(post_state_key); rec && invalid(*rec))
-                set_initial_screen(post_state_key, std::nullopt);
-            // A timed-out or misrouted post-call lookup can fall back to a connection key.
-            // Invalidate the identity-keyed record checked before the call as well.
-            if (post_state_key != policy_state_key)
-                if (auto rec = initial_screen(policy_state_key); rec && invalid(*rec))
-                    set_initial_screen(policy_state_key, std::nullopt);
-        }
-    }
+    const bool tcode_left = recheck_transaction(principal, *spec, name, result, record, policy_state_key);
 
     // gui_screen_capture: enforce the image cap with one retry at half scale.
     if (spec->output == ToolOutput::Image && result.status == Result::Status::Success &&
@@ -1527,10 +1544,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (tcode_left) {
         const std::string warning = "WARNING tcode_left_allowlist: this call ended outside the token's allowed transactions; "
                                     "further screen calls are denied until gui_transaction_start opens an allowed transaction.";
-        if (!shaped.content.empty() && shaped.content[0].is_object() && shaped.content[0].value("type", "") == "text")
-            shaped.content[0]["text"] = shaped.content[0]["text"].get<std::string>() + "\n" + warning;
-        else
-            shaped.content.push_back(json{{"type", "text"}, {"text", warning}});
+        if (!append_note(shaped, warning)) shaped.content.push_back(json{{"type", "text"}, {"text", warning}});
         if (!shaped.structured || !shaped.structured->is_object()) shaped.structured = json::object();
         (*shaped.structured)["tcode_left_allowlist"] = true;
     }
@@ -1553,8 +1567,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (stored) {
                 const std::string note = "connection " + std::to_string(*id) +
                                          " is now the default for later calls that omit `connection`.";
-                if (!shaped.content.empty() && shaped.content[0].is_object() && shaped.content[0].value("type", "") == "text")
-                    shaped.content[0]["text"] = shaped.content[0]["text"].get<std::string>() + "\n" + note;
+                append_note(shaped, note);
             }
         }
     }

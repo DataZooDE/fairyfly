@@ -144,6 +144,11 @@ public:
 private:
     /// Owner mode: an HTTP call on an endpoint that is limited to exact SAP identities (--owner-identity).
     bool owner_mode(const CallContext& ctx) const { return ctx.http && !policy_.owner_sap_identities.empty(); }
+    /// After a call of a token with a T-code allowlist: the transaction the session ended in. Outside the allowlist the
+    /// token's screen tools are blocked until gui_transaction_start opens an allowed one; true then. Also keeps or
+    /// clears the selection-input initial screen.
+    bool recheck_transaction(const Principal& principal, const ToolSpec& spec, const std::string& name, const Result& result,
+                             McpCallRecord& record, const std::string& policy_state_key);
     /// A row of an owner-mode listing is shown: its identity is the endpoint's and the token's, its system allowed.
     bool owner_target_visible(const Principal& principal, const auth::SessionTarget& target) const;
     /// A refusal before anything runs: the code, the message and a hint for the assistant.
