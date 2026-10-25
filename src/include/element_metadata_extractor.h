@@ -27,6 +27,13 @@ public:
     std::size_t cached_entries() const { return tree_grid_cache_.size(); }
 
 private:
+    // the parts of extract (element_metadata_extractor.cpp)
+    void extract_table_or_tree(const ComGuiElementPtr& elem, const std::string& elem_id, const std::string& type,
+                               const std::string& text, bool probe_grid, json& metadata);
+    static void read_abap_editor(const ComGuiElementPtr& elem, json& metadata);
+    static void list_child_ids(const ComGuiElementPtr& elem, const std::string& type, const std::string& container_type,
+                               int depth, json& metadata);
+
     Options options_;
     std::map<std::string, json> tree_grid_cache_;  ///< element id -> extracted table/tree data
 };
