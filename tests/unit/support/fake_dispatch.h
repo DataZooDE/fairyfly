@@ -131,6 +131,7 @@ public:
     std::vector<std::pair<std::wstring, std::wstring>> calls;
     std::map<std::wstring, std::wstring> method_answers;   ///< "Name(arg,arg)" -> the BSTR a generic method answers
     std::set<std::wstring> failing_calls;                  ///< "Name(arg,arg)" answers DISP_E_EXCEPTION (still recorded)
+    std::map<std::wstring, _variant_t> method_values;      ///< a generic method's answer by name (any VARIANT, copied)
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -250,6 +251,9 @@ public:
                 result->vt = VT_DISPATCH;
                 result->pdispVal = returned->second;
                 returned->second->AddRef();
+            } else if (auto value = method_values.find(name); result && value != method_values.end()) {
+                VariantInit(result);
+                return VariantCopy(result, &value->second);
             } else if (auto answer = method_answers.find(name + L"(" + text + L")"); result && answer != method_answers.end()) {
                 VariantInit(result);
                 result->vt = VT_BSTR;
