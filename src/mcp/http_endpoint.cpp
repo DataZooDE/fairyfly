@@ -423,6 +423,20 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
     return std::nullopt;
 }
 
+AuthOutcome HttpEndpoint::reauthenticate(const AuthRequest& auth) {
+    AuthOutcome outcome;  // no authenticator: not ok (the caller refuses)
+    try {
+        if (authenticator_) {
+            authenticator_->invalidate_cache();  // a revoked or changed token must not pass from the cache
+            outcome = authenticator_->authenticate(auth);
+        }
+    } catch (...) {
+        outcome.ok = false;
+        outcome.error_code = "AUTH_UNAVAILABLE";
+    }
+    return outcome;
+}
+
 HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) {
     PreAuth out;
     if (auto rejected = precheck(request)) {
@@ -630,16 +644,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     Principal admission_principal = principal;
     if (is_call && session_pool_ && session_router_ && params.is_object() &&
         params.contains("name") && params["name"].is_string()) {
-        AuthOutcome refreshed;
-        try {
-            if (authenticator_) {
-                authenticator_->invalidate_cache();
-                refreshed = authenticator_->authenticate(execution_auth);
-            }
-        } catch (...) {
-            refreshed.ok = false;
-            refreshed.error_code = "AUTH_UNAVAILABLE";
-        }
+        AuthOutcome refreshed = reauthenticate(execution_auth);
         if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
             const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
             return reply(make_error(message.id, kInvalidParams, "authorization changed before route admission",
@@ -691,16 +696,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     job.run = [this, pending, principal = admission_principal, execution_auth, era, stateless, server_info, client_info, progress_token, want_progress,
                route_provider, route_identity, route_lane_key, routed,
                waiter](CallState& state) -> json {
-        AuthOutcome refreshed;
-        try {
-            if (authenticator_) {
-                authenticator_->invalidate_cache();
-                refreshed = authenticator_->authenticate(execution_auth);
-            }
-        } catch (...) {
-            refreshed.ok = false;
-            refreshed.error_code = "AUTH_UNAVAILABLE";
-        }
+        AuthOutcome refreshed = reauthenticate(execution_auth);
         if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
             const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
             json denied = make_error(pending.id, kInvalidParams, "authorization changed before execution",
@@ -743,14 +739,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
             ctx.http = true;
             ctx.cancelled = [&state] { return state.cancelled.load(); };
             ctx.reauthorize = [this, execution_auth, bound = current_principal]() {
-                if (!authenticator_) return false;
-                try {
-                    authenticator_->invalidate_cache();
-                    const AuthOutcome latest = authenticator_->authenticate(execution_auth);
-                    return latest.ok && same_security_principal(latest.principal, bound);
-                } catch (...) {
-                    return false;
-                }
+                const AuthOutcome latest = reauthenticate(execution_auth);
+                return latest.ok && same_security_principal(latest.principal, bound);
             };
             auto last = std::make_shared<double>(0.0);
             if (want_progress) {

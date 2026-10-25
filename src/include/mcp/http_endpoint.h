@@ -137,6 +137,9 @@ public:
     static const std::vector<std::string>& supported_versions();
 
 private:
+    /// Authenticates `auth` again past the cache (a token can be revoked or changed while a call waits); exceptions
+    /// become AUTH_UNAVAILABLE. Not ok without an authenticator.
+    AuthOutcome reauthenticate(const AuthRequest& auth);
     HttpResponse dispatch(const HttpRequest& request, const Principal& principal);
     HttpResponse finish(const HttpRequest& request, HttpResponse response) const;
     bool host_allowed(const std::string& host_header) const;
