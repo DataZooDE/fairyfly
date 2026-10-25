@@ -1970,11 +1970,6 @@ std::string tab_strip_id(const std::string& tab_id) {
     return slash == std::string::npos ? std::string() : tab_id.substr(0, slash);
 }
 
-struct LocatedTabStrip {
-    std::string id;
-    std::vector<json> tabs;  // {id, type, text, strip_id}
-};
-
 void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStrip>& out) {
     LocatedTabStrip info;
     info.id = strip->get_id();
@@ -1998,6 +1993,57 @@ const char* tab_read_failure_reason(TabReadStatus status) {
         case TabReadStatus::BusyTimeout: return "busy_timeout";
         case TabReadStatus::TreeUnavailable: return "object_tree_unavailable";
         default: return "error";
+    }
+}
+
+namespace {
+/// The tabs of all located strips, in order.
+std::vector<json> tabs_of(const std::vector<LocatedTabStrip>& strips) {
+    std::vector<json> tabs;
+    for (const auto& strip : strips) tabs.insert(tabs.end(), strip.tabs.begin(), strip.tabs.end());
+    return tabs;
+}
+}  // namespace
+
+/// The tab strips of a window, found cheaply: the children of usr, one more level into subscreen containers.
+std::vector<LocatedTabStrip> ScreenReader::locate_tab_strips(const std::string& window_id) {
+    std::vector<LocatedTabStrip> strips;
+    // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
+    try {
+        auto usr = session_->find_element_by_id(window_id + "/usr");
+        const int kMaxScanned = 200;
+        auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
+            auto children = container->children();
+            for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
+                const std::string type = child->get_type();
+                if (type == "GuiTabStrip") {
+                    collect_tab_strip(child, strips);
+                } else if (descend && (type == "GuiSimpleContainer" ||
+                                       type == "GuiScrollContainer" || type == "GuiSubScreen")) {
+                    self(self, child, false);
+                }
+            }
+        };
+        if (usr) scan(scan, usr, true);
+    } catch (const std::exception& e) {
+        spdlog::debug("read_tab: cheap tab strip lookup failed: {}", e.what());
+    }
+    return strips;
+}
+
+/// Nested or unusual layouts: the tab strips the discovery path finds (filtered by type) join `strips`.
+void ScreenReader::add_tab_strips_by_search(const ComGuiWindowPtr& window, bool skip_trees, std::vector<LocatedTabStrip>& strips) {
+    ScreenFindOptions query;
+    query.type = "GuiTabStrip";
+    query.limit = 100;
+    ScreenSearchContext search{query};
+    ScreenElementCollector probe_collector;
+    discover_elements(window, probe_collector, skip_trees, &search);
+    for (const auto& match : search.matches) {
+        try {
+            auto strip = session_->find_element_by_id(match.value("id", ""));
+            if (strip) collect_tab_strip(strip, strips);
+        } catch (const std::exception&) {}
     }
 }
 
@@ -2035,55 +2081,17 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         metadata_ = ElementMetadataExtractor({skip_trees});
         if (skip_trees) spdlog::info("Tree extraction disabled (--skip-trees)");
 
-        // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
-        std::vector<LocatedTabStrip> strips;
-        try {
-            auto usr = session_->find_element_by_id(window_id + "/usr");
-            const int kMaxScanned = 200;
-            auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
-                auto children = container->children();
-                for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
-                    const std::string type = child->get_type();
-                    if (type == "GuiTabStrip") {
-                        collect_tab_strip(child, strips);
-                    } else if (descend && (type == "GuiSimpleContainer" ||
-                                           type == "GuiScrollContainer" || type == "GuiSubScreen")) {
-                        self(self, child, false);
-                    }
-                }
-            };
-            if (usr) scan(scan, usr, true);
-        } catch (const std::exception& e) {
-            spdlog::debug("read_tab: cheap tab strip lookup failed: {}", e.what());
-        }
+        std::vector<LocatedTabStrip> strips = locate_tab_strips(window_id);
+        std::vector<json> matched = select_tabs(tabs_of(strips), only_tab);
 
-        auto all_tabs = [&]() {
-            std::vector<json> tabs;
-            for (const auto& strip : strips) tabs.insert(tabs.end(), strip.tabs.begin(), strip.tabs.end());
-            return tabs;
-        };
-        std::vector<json> matched = select_tabs(all_tabs(), only_tab);
-
-        if (matched.empty()) {
-            // Fallback: nested or unusual layouts. Reuse the discovery path with a type filter.
-            ScreenFindOptions query;
-            query.type = "GuiTabStrip";
-            query.limit = 100;
-            ScreenSearchContext search{query};
-            ScreenElementCollector probe_collector;
-            discover_elements(window, probe_collector, skip_trees, &search);
-            for (const auto& match : search.matches) {
-                try {
-                    auto strip = session_->find_element_by_id(match.value("id", ""));
-                    if (strip) collect_tab_strip(strip, strips);
-                } catch (const std::exception&) {}
-            }
-            matched = select_tabs(all_tabs(), only_tab);
+        if (matched.empty()) {   // nested or unusual layouts: the discovery path, filtered by type
+            add_tab_strips_by_search(window, skip_trees, strips);
+            matched = select_tabs(tabs_of(strips), only_tab);
         }
 
         if (matched.empty()) {
             json available = json::array();
-            for (const auto& tab : all_tabs()) available.push_back(tab.value("id", ""));
+            for (const auto& tab : tabs_of(strips)) available.push_back(tab.value("id", ""));
             result.data = json::object();
             result.set_error("TAB_NOT_FOUND", "No tab matches '" + only_tab + "'");
             result.error["tab_id"] = only_tab;

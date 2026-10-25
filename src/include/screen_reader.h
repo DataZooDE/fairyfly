@@ -115,6 +115,12 @@ void set_tab_wait_timeout_ms_for_testing(int ms);
 
 struct ScreenSearchContext;
 
+/// A tab strip found on the screen and its tabs ({id, type, text, strip_id}), for read_tab.
+struct LocatedTabStrip {
+    std::string id;
+    std::vector<json> tabs;
+};
+
 /// Handles screen reading and element discovery
 /// Extracted from ComAutomationEngine to improve separation of concerns
 class ScreenReader {
@@ -229,6 +235,10 @@ private:
     /// Populates the provided collector with elements and extracted tree data
     void discover_elements(ComGuiWindowPtr window, ScreenElementCollector& collector,
                            bool skip_trees = false, ScreenSearchContext* search = nullptr);
+
+    // the parts of read_tab (screen_reader.cpp)
+    std::vector<LocatedTabStrip> locate_tab_strips(const std::string& window_id);
+    void add_tab_strips_by_search(const ComGuiWindowPtr& window, bool skip_trees, std::vector<LocatedTabStrip>& strips);
 
     // the stages of traverse_element_tree (screen_reader.cpp)
     bool collect_shell_or_grid(const ComGuiElementPtr& element, const std::string& type, const std::string& elem_id,
