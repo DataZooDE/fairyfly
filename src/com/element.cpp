@@ -25,6 +25,15 @@ std::string text_result(HRESULT hr, const _variant_t& result) {
 }
 }  // namespace
 
+void ComGuiElement::call(const wchar_t* method, std::initializer_list<_variant_t> args, const char* unavailable,
+                         const char* failed) {
+    DISPID dispid;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method, &dispid);
+    if (FAILED(hr)) throw ComException(unavailable, hr);
+    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, args);
+    if (FAILED(hr)) throw ComException(failed, hr);
+}
+
 
 // ============================================================================
 // ComGuiElement Implementation
@@ -390,13 +399,7 @@ ComGuiElement::Rect ComGuiElement::get_rect() const {
 
 void ComGuiElement::set_focus() {
     if (!dispatch_) throw ComException("Null element");
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetFocus", &dispid);
-    if (FAILED(hr)) throw ComException("SetFocus method not found on element", hr);
-    DISPPARAMS params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                           &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to focus element", hr);
+    call(L"SetFocus", {}, "SetFocus method not found on element", "Failed to focus element");
 }
 
 void ComGuiElement::press() {
@@ -1146,11 +1149,7 @@ void ComGuiElement::modify_grid_cell(int row, const std::string& column_name,
     if (row < 0 || column_name.empty()) throw ComException("Invalid GridView cell coordinates");
 
     const wchar_t* method_name = checkbox ? L"ModifyCheckBox" : L"ModifyCell";
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-    if (FAILED(hr)) throw ComException("GridView cell modification is unavailable", hr);
-
-    _variant_t arguments[3];
+    _variant_t cell_value;
     if (checkbox) {
         bool checked;
         if (value == "X" || value == "x" || value == "1" || value == "true" || value == "True") {
@@ -1160,45 +1159,22 @@ void ComGuiElement::modify_grid_cell(int row, const std::string& column_name,
         } else {
             throw ComException("Checkbox value must be X, 1, true, 0, or false");
         }
-        arguments[0] = _variant_t(checked);
+        cell_value = _variant_t(checked);
     } else {
-        const auto wide_value = com::utf8_to_wide(value);
-        arguments[0] = _variant_t(wide_value.c_str());
+        cell_value = _variant_t(com::utf8_to_wide(value).c_str());
     }
-    const auto wide_column = com::utf8_to_wide(column_name);
-    arguments[1] = _variant_t(wide_column.c_str());
-    arguments[2] = _variant_t(row);
-    DISPPARAMS params = {arguments, nullptr, 3, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to modify GridView cell", hr);
-
-    if (commit) {
-        hr = get_dispid_via_typeinfo(dispatch_, L"TriggerModified", &dispid);
-        if (FAILED(hr)) throw ComException("GridView TriggerModified method not found", hr);
-        DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &no_arguments, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Failed to commit GridView changes", hr);
-    }
+    call(method_name, {_variant_t(row), _variant_t(com::utf8_to_wide(column_name).c_str()), cell_value},
+         "GridView cell modification is unavailable", "Failed to modify GridView cell");
+    if (commit) call(L"TriggerModified", {}, "GridView TriggerModified method not found", "Failed to commit GridView changes");
 }
 
 void ComGuiElement::select_grid_row(int row, const std::string& column_name) {
     if (!dispatch_) throw ComException("Null GridView element");
     if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");
 
-    auto invoke_cell = [&](const wchar_t* method_name) {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-        if (FAILED(hr)) throw ComException("GridView cell action is unavailable", hr);
-        _variant_t arguments[2];
-        const auto wide_column = com::utf8_to_wide(column_name);
-        arguments[0] = _variant_t(wide_column.c_str());
-        arguments[1] = _variant_t(row);
-        DISPPARAMS params = {arguments, nullptr, 2, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Failed to activate GridView cell", hr);
+    const auto invoke_cell = [&](const wchar_t* method_name) {
+        call(method_name, {_variant_t(row), _variant_t(com::utf8_to_wide(column_name).c_str())},
+             "GridView cell action is unavailable", "Failed to activate GridView cell");
     };
 
     // Click refreshes some detail panes, but read-only grids can reject it.
@@ -1219,24 +1195,10 @@ void ComGuiElement::doubleclick_grid_cell(int row, const std::string& column_nam
     if (!dispatch_) throw ComException("Null GridView element");
     if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");
 
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetCurrentCell", &dispid);
-    if (FAILED(hr)) throw ComException("GridView SetCurrentCell method not found", hr);
-    _variant_t arguments[2];
-    const auto wide_column = com::utf8_to_wide(column_name);
-    arguments[0] = _variant_t(wide_column.c_str());
-    arguments[1] = _variant_t(row);
-    DISPPARAMS params = {arguments, nullptr, 2, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to set GridView current cell", hr);
-
-    hr = get_dispid_via_typeinfo(dispatch_, L"DoubleClickCurrentCell", &dispid);
-    if (FAILED(hr)) throw ComException("GridView DoubleClickCurrentCell method not found", hr);
-    DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &no_arguments, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to double-click GridView cell", hr);
+    call(L"SetCurrentCell", {_variant_t(row), _variant_t(com::utf8_to_wide(column_name).c_str())},
+         "GridView SetCurrentCell method not found", "Failed to set GridView current cell");
+    call(L"DoubleClickCurrentCell", {}, "GridView DoubleClickCurrentCell method not found",
+         "Failed to double-click GridView cell");
 }
 
 int ComGuiElement::get_grid_toolbar_button_count() const {

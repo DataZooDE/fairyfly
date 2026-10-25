@@ -245,6 +245,9 @@ public:
     /// Get button ID at specified position (0-based)
     /// Returns empty string if position invalid or method fails
     std::string get_button_id(int position) const;
+    /// Calls `method` with `args` in reading order; ComException(unavailable) when it is missing, ComException(failed)
+    /// when the call fails.
+    void call(const wchar_t* method, std::initializer_list<_variant_t> args, const char* unavailable, const char* failed);
     /// One of the toolbar's by-position string getters (GetButtonId, GetButtonText, ...); "" on failure.
     std::string button_string(const wchar_t* method, int position) const;
 
