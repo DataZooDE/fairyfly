@@ -1,6 +1,8 @@
 // The one reader of fairyfly's environment variables (config/environment.h): every switch such as
 // FAIRYFLY_READ_ONLY is parsed in one place, so no two parts of fairyfly can disagree about it.
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
+#include <sstream>
 
 #include "include/config/environment.h"
 #include "include/mcp/policy.h"
@@ -98,6 +100,21 @@ TEST_CASE("environment: fairyfly's data directory is LOCALAPPDATA\fairyfly (temp
     CHECK(config::Environment(env_of({})).data_dir() == std::filesystem::temp_directory_path() / "fairyfly");
 }
 
+namespace {
+/// The matches of `re` (group `group`) on the lines of `text` that contain one of `markers` (std::regex over whole
+/// source files took 20 s; the markers keep it to the few lines that can match).
+std::vector<std::string> matching_lines(const std::string& text, std::initializer_list<const char*> markers, const std::regex& re,
+                                        int group) {
+    std::vector<std::string> found;
+    std::istringstream lines(text);
+    for (std::string line; std::getline(lines, line);) {
+        if (std::none_of(markers.begin(), markers.end(), [&](const char* m) { return line.find(m) != std::string::npos; })) continue;
+        for (std::sregex_iterator m(line.begin(), line.end(), re), end; m != end; ++m) found.push_back((*m)[group].str());
+    }
+    return found;
+}
+}  // namespace
+
 TEST_CASE("environment: no file under src/ reads the environment except config/environment.cpp", "[config][env]") {
     // keeps the one reader the only one: a new getenv/_dupenv_s elsewhere would bring back diverging parsers
     namespace fs = std::filesystem;
@@ -113,8 +130,8 @@ TEST_CASE("environment: no file under src/ reads the environment except config/e
         REQUIRE(in.good());
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         static const std::regex call(R"(\b(std::)?(getenv|_dupenv_s|_wgetenv|_wdupenv_s|GetEnvironmentVariable[AW]?|ffy::env_or)\s*\()");
-        for (std::sregex_iterator m(text.begin(), text.end(), call), end; m != end; ++m)
-            offenders.push_back(rel.string() + ": " + (*m)[2].str());
+        for (const auto& hit : matching_lines(text, {"getenv", "dupenv", "GetEnvironmentVariable", "env_or"}, call, 2))
+            offenders.push_back(rel.string() + ": " + hit);
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());
@@ -142,12 +159,11 @@ TEST_CASE("environment: names and writers of the environment live in config only
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         static const std::regex name(R"re(L?"FAIRYFLY_[A-Z_]+")re");
         static const std::regex writer(R"(\b(SetEnvironmentVariable[AW]?|_w?putenv(_s)?|(un)?setenv)\s*\()");
-        for (std::sregex_iterator m(text.begin(), text.end(), name), end; m != end; ++m)
-            offenders.push_back(rel.string() + ": " + m->str());
+        for (const auto& hit : matching_lines(text, {"FAIRYFLY_"}, name, 0)) offenders.push_back(rel.string() + ": " + hit);
         // the windowless starter is its own small exe without fairyfly_core: it writes with the Win32 call itself
         if (rel == fs::path("tray_launcher") / "fairyfly_tray.cpp") continue;
-        for (std::sregex_iterator m(text.begin(), text.end(), writer), end; m != end; ++m)
-            offenders.push_back(rel.string() + ": " + (*m)[1].str());
+        for (const auto& hit : matching_lines(text, {"putenv", "setenv", "SetEnvironmentVariable"}, writer, 1))
+            offenders.push_back(rel.string() + ": " + hit);
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());

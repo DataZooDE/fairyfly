@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+
+#include "support/eventually.h"
 #include "include/mcp/session_worker_process.h"
 
 #ifdef _WIN32
@@ -44,8 +47,9 @@ TEST_CASE("Private worker process returns a connection probe before binding", "[
 
 TEST_CASE("Private worker rechecks admission after waiting for its pipe", "[mcp][worker-process]") {
     SessionWorkerProcess worker(fixture_path(), L"--sleep-first-call");
-    auto first = std::async(std::launch::async, [&] { return worker.invoke(call(1)); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::atomic<bool> first_sent{false};
+    auto first = std::async(std::launch::async, [&] { return worker.invoke(call(1), [&] { first_sent = true; }); });
+    REQUIRE(fairyfly::test::eventually([&] { return first_sent.load(); }));   // the first call holds the pipe
     bool gate_ran = false;
     try {
         (void)worker.invoke(call(2), [&] {
@@ -93,12 +97,13 @@ TEST_CASE("A worker write side effect is not replayed after its response is lost
 
 TEST_CASE("Hung worker can be terminated out of band", "[mcp][worker-process]") {
     SessionWorkerProcess worker(fixture_path(), L"--hang-on-call");
+    std::atomic<bool> sent{false};
     auto result = std::async(std::launch::async, [&] {
-        try { (void)worker.invoke(call(4)); }
+        try { (void)worker.invoke(call(4), [&] { sent = true; }); }
         catch (const WorkerTransportError& error) { return error.code(); }
         return std::string("NO_ERROR");
     });
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    REQUIRE(fairyfly::test::eventually([&] { return sent.load(); }));   // submitted: its outcome is unknown now
     worker.terminate();
     CHECK(result.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
     CHECK(result.get() == "OUTCOME_UNKNOWN");

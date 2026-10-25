@@ -7,6 +7,7 @@
 #include "include/fill_fields.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/tool_catalog.h"
+#include "support/tool_specs.h"
 
 // Multi-field fill: `element fill --fields` / gui_element_fill `fields` (+ then_key). Pure parsing, argv, audit and
 // authorization; no SAP.
@@ -17,12 +18,7 @@ using Argv = std::vector<std::string>;
 
 namespace {
 
-const ToolSpec& fill_spec() {
-    static const auto specs = all_tool_specs();
-    for (const auto& s : specs)
-        if (s.def.name == "gui_element_fill") return s;
-    throw std::logic_error("gui_element_fill missing");
-}
+const ToolSpec& fill_spec() { return fairyfly::test::spec_of("gui_element_fill"); }
 
 Argv fill_argv(const json& args) { return fill_spec().build_argv(args, Policy{}); }
 
