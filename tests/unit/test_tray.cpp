@@ -1460,3 +1460,24 @@ TEST_CASE("tray menu entries: one builder for both trays", "[tray][menu]") {
     CHECK(quit.enabled);
     CHECK(quit.action == TrayAction::Quit);
 }
+
+TEST_CASE("tray tooltip: at most 127 UTF-16 units, cut between characters, with an ellipsis", "[tray][menu]") {
+    CHECK(fit_tooltip("fairyfly link: connected") == "fairyfly link: connected");
+    const std::string ascii(200, 'a');
+    CHECK(fit_tooltip(ascii) == std::string(124, 'a') + "...");
+    CHECK(fit_tooltip(std::string(127, 'a')) == std::string(127, 'a'));
+    // 100 "ä" (2 bytes, 1 UTF-16 unit each) fit; a byte cut at 127 would split one
+    std::string umlauts;
+    for (int i = 0; i < 100; ++i) umlauts += "\xC3\xA4";
+    CHECK(fit_tooltip(umlauts) == umlauts);
+    std::string long_umlauts;
+    for (int i = 0; i < 130; ++i) long_umlauts += "\xC3\xA4";
+    const std::string cut = fit_tooltip(long_umlauts);
+    CHECK(cut.size() == 124 * 2 + 3);
+    CHECK(cut.substr(cut.size() - 3) == "...");
+    // a character outside the BMP counts two units and is never split
+    std::string emoji;
+    for (int i = 0; i < 70; ++i) emoji += "\xF0\x9F\x98\x80";
+    const std::string cut_emoji = fit_tooltip(emoji);
+    CHECK(cut_emoji == emoji.substr(0, 62 * 4) + "...");
+}

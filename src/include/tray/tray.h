@@ -104,11 +104,13 @@ MenuItem item(std::string label, TrayAction action, bool enabled = true);
 MenuItem separator();
 /// "fairyfly <version>", greyed out above "Check for updates": which fairyfly answers.
 MenuItem version_item();
+/// A tooltip as the notification area shows it: at most 127 UTF-16 units, cut between characters, with "...".
+std::string fit_tooltip(const std::string& text);
 
 struct TrayMenuModel {
     std::vector<MenuItem> items;
     IconState icon = IconState::Stopped;
-    std::string tooltip;   ///< at most 127 characters (NOTIFYICONDATA limit)
+    std::string tooltip;   ///< fit_tooltip(): at most 127 UTF-16 units (NOTIFYICONDATA limit)
 };
 
 /// Builds the menu exactly as specified: status line, warnings submenu, separator, Start/Stop/Restart,

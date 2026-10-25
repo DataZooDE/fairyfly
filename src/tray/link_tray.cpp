@@ -73,10 +73,9 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         tooltip += writes.locked                                ? " (read-only)"
                    : writes.allowed && !writes.enforced ? " (changes allowed)"
                                                         : " (changes need your approval)";
-    if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
+    if (link.trail_on) tooltip += " - audit trail on";   // before the names: a long tooltip is cut
     if (link.paired) tooltip += " - " + who(link);
-    if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
-    model.tooltip = tooltip;
+    model.tooltip = fit_tooltip(tooltip);
     return model;
 }
 
