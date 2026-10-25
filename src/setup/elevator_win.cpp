@@ -1,5 +1,6 @@
 // Elevation state (token), user SIDs and the one-shot UAC self-elevation: `<exe> mcp setup --apply-plan F --result-file R`.
 #include <winsock2.h>
+#include "include/config/environment.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <objbase.h>
@@ -54,17 +55,7 @@ std::string exe_path() {
     }
 }
 
-std::string local_app_data_dir() {
-    char* value = nullptr;
-    size_t size = 0;
-    std::string out;
-    if (_dupenv_s(&value, &size, "LOCALAPPDATA") == 0 && value) {
-        out = value;
-        free(value);
-    }
-    if (out.empty()) out = std::filesystem::temp_directory_path().string();
-    return out;
-}
+std::string local_app_data_dir() { return config::Environment::process().local_app_data().string(); }
 
 class RealElevator : public Elevator {
 public:

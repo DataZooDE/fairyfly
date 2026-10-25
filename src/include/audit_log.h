@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include/config/environment.h"
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -67,7 +68,7 @@ struct AuditConfig {
     std::filesystem::path file;
 };
 
-using GetEnvFn = std::function<std::string(const char*)>;
+using GetEnvFn = config::EnvLookup;
 
 /// "YYYY-MM.jsonl" for the UTC month of `now`.
 std::string monthly_file_name(std::chrono::system_clock::time_point now);

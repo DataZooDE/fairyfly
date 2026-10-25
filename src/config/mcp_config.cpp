@@ -37,7 +37,7 @@ std::string trim(const std::string& s) {
 }
 
 std::string env_name_for(const std::string& key) {
-    std::string out = "FAIRYFLY_MCP_";
+    std::string out = env::kMcpPrefix;
     for (char c : key) out += (c == '.') ? '_' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return out;
 }
@@ -530,35 +530,18 @@ void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     // line, never from a file or the environment.
 }
 
-EnvLookup process_env() {
-    return [](const char* name) -> std::string {
-#ifdef _WIN32
-        char* buffer = nullptr;
-        size_t size = 0;
-        std::string value;
-        if (_dupenv_s(&buffer, &size, name) == 0 && buffer) { value = buffer; free(buffer); }
-        return value;
-#else
-        const char* v = std::getenv(name);
-        return v ? v : "";
-#endif
-    };
-}
-
 ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& env) {
     ConfigPath out;
     if (!trim(flag_path).empty()) {
         out.path = flag_path; out.source = Source::Flag; out.explicit_request = true;
         return out;
     }
-    const std::string from_env = env ? trim(env("FAIRYFLY_MCP_CONFIG")) : std::string();
+    const std::string from_env = env ? trim(env(env::kMcpConfig)) : std::string();
     if (!from_env.empty()) {
         out.path = from_env; out.source = Source::Env; out.explicit_request = true;
         return out;
     }
-    const std::string base = env ? env("LOCALAPPDATA") : std::string();
-    std::filesystem::path root = base.empty() ? std::filesystem::temp_directory_path() : std::filesystem::path(base);
-    out.path = root / "fairyfly" / "mcp.yaml";
+    out.path = Environment(env).data_dir() / "mcp.yaml";
     out.source = Source::Default;
     return out;
 }

@@ -1,4 +1,5 @@
 #include "include/update/updater.h"
+#include "include/config/environment.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -44,7 +45,7 @@ std::string fetch_once(const std::string& start, size_t max_body, int max_redire
         rq.headers = {{"Accept", api ? "application/vnd.github+json" : "application/octet-stream"}, {"Accept-Encoding", "identity"}};
         // optional, for rate limits on shared machines (CI); sent to the API only, never to a download host
         if (api)
-            if (const char* t = std::getenv("FAIRYFLY_GITHUB_TOKEN"); t && *t) rq.headers.push_back({"Authorization", std::string("Bearer ") + t});
+            if (const std::string t = config::Environment::process().get(config::env::kGithubToken); !t.empty()) rq.headers.push_back({"Authorization", "Bearer " + t});
         rq.timeout_ms = 30000;
         rq.max_body = max_body;
         ffy::HttpResponse r;

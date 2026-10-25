@@ -37,6 +37,7 @@ add_executable(unit_tests
     unit/test_fill_fields.cpp
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
+    unit/test_environment.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
@@ -105,7 +106,8 @@ add_executable(sap_sta_parallel_probe EXCLUDE_FROM_ALL integration/sap_sta_paral
 target_link_libraries(sap_sta_parallel_probe PRIVATE fairyfly_core)
 
 # Recorded SAP screens (object trees and legacy reads) used by the bulk reader parity tests
-target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures")
+target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures"
+                                              FAIRYFLY_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src")
 
 # Link against fairyfly_core library (all dependencies inherited)
 target_link_libraries(unit_tests PRIVATE

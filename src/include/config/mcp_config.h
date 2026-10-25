@@ -10,6 +10,8 @@
 // refused (CONFIG_CONTAINS_SECRET). Everything here is pure (no file/registry/process access) except
 // the two small file helpers at the bottom.
 
+#include "include/config/environment.h"
+
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -84,8 +86,6 @@ struct ParseResult {
 ParseResult parse_yaml(const std::string& yaml_text);
 
 // ---- Precedence ---------------------------------------------------------------------------------
-using EnvLookup = std::function<std::string(const char*)>;
-
 struct EffectiveValue {
     Value value;
     Source source = Source::Default;
@@ -127,9 +127,6 @@ nlohmann::json effective_to_json(const Effective& effective);
 
 /// "path:line: message" style rendering of one issue.
 std::string format_issue(const ConfigIssue& issue, const std::string& file_label = {});
-
-/// Environment lookup of the real process ("" when unset).
-EnvLookup process_env();
 
 // ---- File helpers (the only I/O here) -----------------------------------------------------------
 std::optional<std::string> read_text_file(const std::filesystem::path& path);

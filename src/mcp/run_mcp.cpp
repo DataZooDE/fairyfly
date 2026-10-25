@@ -1,4 +1,5 @@
 #include "include/mcp/run_mcp.h"
+#include "include/config/environment.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -48,22 +49,6 @@ constexpr const char* kInstructions =
     "saves, posts, releases, deletes, changes passwords or ends sessions. In read-only mode "
     "state-changing actions are refused.";
 
-bool env_flag_read_only() {
-    std::string value;
-#ifdef _WIN32
-    char* buffer = nullptr;
-    size_t size = 0;
-    if (_dupenv_s(&buffer, &size, "FAIRYFLY_READ_ONLY") == 0 && buffer != nullptr) {
-        value = buffer;
-        free(buffer);
-    }
-#else
-    if (const char* v = std::getenv("FAIRYFLY_READ_ONLY")) value = v;
-#endif
-    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
-    return value == "1" || value == "true" || value == "yes" || value == "on";
-}
-
 int refuse(const char* code, const std::string& message, int exit_code = 2) {
     Result failure;
     failure.status = Result::Status::Error;
@@ -109,7 +94,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     bool read_only = !options.allow_write;
     bool allow_write = options.allow_write;
     if (options.read_only) read_only = true;
-    if (env_flag_read_only()) {
+    if (config::read_only_cap()) {
         if (allow_write) spdlog::warn("FAIRYFLY_READ_ONLY is set: ignoring --allow-write");
         else spdlog::info("FAIRYFLY_READ_ONLY is set: serving read-only");
         read_only = true;
@@ -202,7 +187,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         http_args.options = options;
         http_args.server_options = server_options;
         http_args.read_only = read_only;
-        http_args.read_only_cap = env_flag_read_only();
+        http_args.read_only_cap = config::read_only_cap();
         const auto families = options.families;
         // Token mutations run in a separate CLI process. On a competing lease
         // acquire, read the current Credential Manager record before retaining
@@ -361,7 +346,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
         if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
             return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
-        const bool hard_read_only = options.read_only || env_flag_read_only();
+        const bool hard_read_only = options.read_only || config::read_only_cap();
         const auto set_read_only = [&](bool ro) {
             if (!ro && hard_read_only) return false;
             link_dispatcher.set_read_only(ro);

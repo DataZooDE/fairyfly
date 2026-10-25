@@ -165,14 +165,13 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     auto get = [&](const char* name) { return getenv_fn ? getenv_fn(name) : std::string(); };
     AuditConfig config;
 
-    std::string mode_env = get("FAIRYFLY_AUDIT");
-    for (auto& c : mode_env) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    if (mode_env == "0" || mode_env == "off") config.mode = Mode::Disabled;
-    else if (mode_env == "required") config.mode = Mode::Required;
+    const std::string mode_env = get(config::env::kAudit);
+    if (config::parse_off(mode_env)) config.mode = Mode::Disabled;
+    else if (config::normalized(mode_env) == "required") config.mode = Mode::Required;
     if (cli_no_audit) config.mode = Mode::Disabled;
     if (cli_required) config.mode = Mode::Required;  // fail safe: required beats any disable
 
-    const std::string file_env = get("FAIRYFLY_AUDIT_FILE");
+    const std::string file_env = get(config::env::kAuditFile);
     if (!file_env.empty()) {
         config.file = std::filesystem::path(file_env);
         return config;
@@ -180,10 +179,10 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
 
     std::filesystem::path dir;
 #ifdef _WIN32
-    const std::string local = get("LOCALAPPDATA");
+    const std::string local = get(config::env::kLocalAppData);
     if (!local.empty()) dir = std::filesystem::path(local) / "fairyfly" / "audit";
 #else
-    const std::string home = get("HOME");
+    const std::string home = get(config::env::kHome);
     if (!home.empty()) dir = std::filesystem::path(home) / ".local" / "share" / "fairyfly" / "audit";
 #endif
     if (dir.empty()) {

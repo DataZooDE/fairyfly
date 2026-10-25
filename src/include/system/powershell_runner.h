@@ -3,6 +3,8 @@
 // travel as JSON in the environment variable FAIRYFLY_PS_PARAMS, never spliced into script text. The child
 // is killed on a hard timeout. Tests use a fake PowerShellRunner; nothing here runs at start-up.
 
+#include "include/config/environment.h"
+
 #include <memory>
 #include <string>
 
@@ -10,7 +12,7 @@
 
 namespace fairyfly::sys {
 
-inline constexpr const char* kParamsEnvVar = "FAIRYFLY_PS_PARAMS";
+inline constexpr const char* kParamsEnvVar = config::env::kPsParams;
 inline constexpr int kScriptTimeoutMs = 60000;
 
 /// Script prologue: fail-fast trap (message to stderr, exit 1), quiet progress, `$p` = parsed

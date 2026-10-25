@@ -1,3 +1,4 @@
+#include "include/config/environment.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -92,14 +93,7 @@ std::string console_command_line(const std::string& exe, const std::vector<std::
 }
 
 std::filesystem::path log_directory(const std::function<std::string(const char*)>& env) {
-    const std::string base = env ? env("LOCALAPPDATA") : std::string();
-    std::filesystem::path root;
-    if (!base.empty()) root = base;
-    else {
-        std::error_code ec;
-        root = std::filesystem::temp_directory_path(ec);
-    }
-    return root / "fairyfly" / "logs";
+    return config::Environment(env).data_dir() / "logs";
 }
 
 // ---- Controller ----------------------------------------------------------------------------------

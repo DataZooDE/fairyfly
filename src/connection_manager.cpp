@@ -1,4 +1,5 @@
 #include "include/connection_manager.h"
+#include "include/config/environment.h"
 #include "include/exceptions.h"
 #include "include/trace.h"
 #include <spdlog/spdlog.h>
@@ -297,26 +298,14 @@ void migrate_legacy_id_collisions(const std::string& cache_dir) {
     }
 }
 
-std::string get_env(const char* name) {
-#ifdef _WIN32
-    char buf[32767];
-    DWORD len = GetEnvironmentVariableA(name, buf, sizeof(buf));
-    if (len > 0 && len < sizeof(buf)) {
-        return std::string(buf, len);
-    }
-    return "";
-#else
-    const char* val = std::getenv(name);
-    return val ? std::string(val) : "";
-#endif
-}
+std::string get_env(const char* name) { return config::Environment::process().get(name); }
 }
 
 std::string ConnectionManager::get_default_cache_directory() {
     std::error_code ec;
 
     // 1. FAIRYFLY_CACHE_DIR environment variable override
-    std::string env_dir = get_env("FAIRYFLY_CACHE_DIR");
+    std::string env_dir = get_env(config::env::kCacheDir);
     if (!env_dir.empty()) {
         fs::path p(env_dir);
         fs::create_directories(p, ec);
@@ -327,7 +316,7 @@ std::string ConnectionManager::get_default_cache_directory() {
 
     // 2. User local app data on Windows, ~/.cache on POSIX
 #ifdef _WIN32
-    std::string local_app_data = get_env("LOCALAPPDATA");
+    std::string local_app_data = get_env(config::env::kLocalAppData);
     if (!local_app_data.empty()) {
         fs::path p = fs::path(local_app_data) / "fairyfly" / "sessions";
         fs::create_directories(p, ec);
@@ -336,7 +325,7 @@ std::string ConnectionManager::get_default_cache_directory() {
         }
     }
 #else
-    std::string home = get_env("HOME");
+    std::string home = get_env(config::env::kHome);
     if (!home.empty()) {
         fs::path p = fs::path(home) / ".cache" / "fairyfly" / "sessions";
         fs::create_directories(p, ec);

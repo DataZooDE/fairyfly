@@ -248,6 +248,10 @@ Get-Content $env:LOCALAPPDATA\fairyfly\audit\2026-10.jsonl | ConvertFrom-Json |
 
 ## Environment variables
 
+Switches (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_PROBE_ALL`, `FAIRYFLY_DIAG`) are on for `1`, `true`, `yes` or `on` in any
+case; `FAIRYFLY_AUDIT` is switched off by `0`, `false`, `no` or `off`. Every part of fairyfly (CLI, MCP server, session
+workers, setup, cloud link) reads them the same way.
+
 | Variable | Effect |
 |---|---|
 | `FAIRYFLY_READ_ONLY=1` | Read-only guard for every command; hard cap for the MCP server |

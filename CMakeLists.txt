@@ -278,6 +278,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/http_sys_mapping.cpp
     src/mcp/http_sys_server.cpp
     src/mcp/http_auth.cpp
+    src/config/environment.cpp
     src/config/mcp_config.cpp
     src/config/client_config.cpp
     src/config/mcp_doctor.cpp

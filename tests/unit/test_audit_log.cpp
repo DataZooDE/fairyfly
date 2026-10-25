@@ -223,6 +223,10 @@ TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "OFF"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), false, false, now).mode == Mode::Required);
+    // the off spellings of every fairyfly flag (config::parse_off) switch it off too
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "false"}}), false, false, now).mode == Mode::Disabled);
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", " No "}}), false, false, now).mode == Mode::Disabled);
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now).mode == Mode::Enabled);
     REQUIRE(resolve_config(env_of({}), true, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({}), false, true, now).mode == Mode::Required);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, true, now).mode == Mode::Required);

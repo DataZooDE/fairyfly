@@ -1,5 +1,6 @@
 // Real SystemProbe: TCP probe (ws2_32), thumbprint-pinned TLS probe (WinHTTP), files, clock, names.
 #include <winsock2.h>
+#include "include/config/environment.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <winhttp.h>
@@ -133,17 +134,7 @@ public:
         return "localhost";
     }
 
-    std::string local_app_data() override {
-        char* value = nullptr;
-        size_t size = 0;
-        std::string out;
-        if (_dupenv_s(&value, &size, "LOCALAPPDATA") == 0 && value) {
-            out = value;
-            free(value);
-        }
-        if (out.empty()) out = fs::temp_directory_path().string();
-        return out;
-    }
+    std::string local_app_data() override { return config::Environment::process().local_app_data().string(); }
 };
 
 } // namespace

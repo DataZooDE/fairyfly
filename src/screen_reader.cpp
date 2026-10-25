@@ -1,4 +1,5 @@
 #include "include/object_tree.h"
+#include "include/config/environment.h"
 #include "include/screen_reader.h"
 #include "include/session_info.h"
 #include "include/action_status.h"
@@ -752,16 +753,7 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
     return ids;
 }
 
-bool probe_all_from_environment() {
-    char* buffer = nullptr;
-    size_t size = 0;
-    bool enabled = false;
-    if (_dupenv_s(&buffer, &size, "FAIRYFLY_PROBE_ALL") == 0 && buffer != nullptr) {
-        enabled = std::string(buffer) == "1";
-        free(buffer);
-    }
-    return enabled;
-}
+bool probe_all_from_environment() { return config::Environment::process().flag(config::env::kProbeAll); }
 
 std::optional<TreeReaderMode> parse_tree_reader_mode(const std::string& text) {
     const std::string value = lower_ascii(text);
@@ -780,26 +772,12 @@ const char* tree_reader_mode_name(TreeReaderMode mode) {
 }
 
 TreeReaderMode tree_reader_mode_from_environment() {
-    char* buffer = nullptr;
-    size_t size = 0;
     // Bulk where available is the default; `legacy` is the explicit escape hatch.
-    TreeReaderMode mode = TreeReaderMode::Auto;
-    if (_dupenv_s(&buffer, &size, "FAIRYFLY_SCREEN_READER") == 0 && buffer != nullptr) {
-        mode = parse_tree_reader_mode(buffer).value_or(TreeReaderMode::Auto);
-        free(buffer);
-    }
-    return mode;
+    return parse_tree_reader_mode(config::Environment::process().get(config::env::kScreenReader)).value_or(TreeReaderMode::Auto);
 }
 
 bool tree_reader_mode_set_in_environment() {
-    char* buffer = nullptr;
-    size_t size = 0;
-    bool explicit_mode = false;
-    if (_dupenv_s(&buffer, &size, "FAIRYFLY_SCREEN_READER") == 0 && buffer != nullptr) {
-        explicit_mode = parse_tree_reader_mode(buffer).has_value();
-        free(buffer);
-    }
-    return explicit_mode;
+    return parse_tree_reader_mode(config::Environment::process().get(config::env::kScreenReader)).has_value();
 }
 
 namespace {
@@ -848,9 +826,9 @@ ObjectTreeSource ScreenReader::object_tree_source() const {
         return answer;
     };
     // Live robustness checks: FAIRYFLY_DIAG=1 + FAIRYFLY_BULK_FAULT=<mode> simulate a failing GetObjectTree.
-    const char* diag = std::getenv("FAIRYFLY_DIAG");
-    const char* fault = std::getenv("FAIRYFLY_BULK_FAULT");
-    const std::string mode = injected_fault_mode(diag, fault);
+    const auto& env = config::Environment::process();
+    const std::string diag = env.get(config::env::kDiag), fault = env.get(config::env::kBulkFault);
+    const std::string mode = injected_fault_mode(diag.empty() ? nullptr : diag.c_str(), fault.empty() ? nullptr : fault.c_str());
     return mode.empty() ? real : wrap_with_injected_fault(std::move(real), mode);
 }
 

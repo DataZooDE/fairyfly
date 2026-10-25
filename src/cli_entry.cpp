@@ -1,4 +1,5 @@
 #include <CLI/CLI.hpp>
+#include "include/config/environment.h"
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -67,19 +68,8 @@ namespace {
 
         // Check environment variable first
         std::string effective_level = log_level;
-#ifdef _WIN32
-        char* env_buffer = nullptr;
-        size_t env_size = 0;
-        if (_dupenv_s(&env_buffer, &env_size, "FFLYLOG_LEVEL") == 0 && env_buffer != nullptr) {
-            effective_level = env_buffer;
-            free(env_buffer);
-        }
-#else
-        const char* env_level = std::getenv("FFLYLOG_LEVEL");
-        if (env_level != nullptr && std::strlen(env_level) > 0) {
+        if (const std::string env_level = config::Environment::process().get(config::env::kLogLevel); !env_level.empty())
             effective_level = env_level;
-        }
-#endif
 
         spdlog::level::level_enum level = parse_log_level(effective_level);
         spdlog::set_level(level);
@@ -139,23 +129,6 @@ namespace {
         }
     }
 
-    /// True when FAIRYFLY_READ_ONLY is set to 1/true/yes/on.
-    bool env_read_only() {
-        std::string value;
-#ifdef _WIN32
-        char* env_buffer = nullptr;
-        size_t env_size = 0;
-        if (_dupenv_s(&env_buffer, &env_size, "FAIRYFLY_READ_ONLY") == 0 && env_buffer != nullptr) {
-            value = env_buffer;
-            free(env_buffer);
-        }
-#else
-        if (const char* env_value = std::getenv("FAIRYFLY_READ_ONLY")) value = env_value;
-#endif
-        std::transform(value.begin(), value.end(), value.begin(), ::tolower);
-        return value == "1" || value == "true" || value == "yes" || value == "on";
-    }
-
     /// Print one JSON result on a single line (batch protocol).
     void print_compact_json(const json& j) {
         std::cout << j.dump() << std::endl;
@@ -204,7 +177,7 @@ namespace {
         return code == 0 ? 0 : 1;
     }
 
-    if (env_read_only()) global_opts.read_only = true;
+    if (config::read_only_cap()) global_opts.read_only = true;
     audit_out.read_only = global_opts.read_only;
     note_command(audit_out, app);
     note_connection_from_argv(audit_out, argv);
@@ -491,14 +464,7 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
         if (arg == "--no-audit") cli_no_audit = true;
         else if (arg == "--audit-required") cli_required = true;
     }
-    auto env_lookup = [](const char* name) -> std::string {
-        char* buffer = nullptr;
-        size_t size = 0;
-        std::string value;
-        if (_dupenv_s(&buffer, &size, name) == 0 && buffer != nullptr) { value = buffer; free(buffer); }
-        return value;
-    };
-    audit::AuditSink sink(audit::resolve_config(env_lookup, cli_no_audit, cli_required,
+    audit::AuditSink sink(audit::resolve_config(config::process_env(), cli_no_audit, cli_required,
                                                 std::chrono::system_clock::now()));
     struct ContextGuard {
         ~ContextGuard() { g_audit = AuditContext{}; }

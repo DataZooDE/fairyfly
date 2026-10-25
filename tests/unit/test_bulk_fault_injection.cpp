@@ -50,5 +50,6 @@ TEST_CASE("fault injection wraps the tree source only for the diagnostic modes",
         REQUIRE(injected_fault_mode("0", "fault") == "");
         REQUIRE(injected_fault_mode("1", nullptr) == "");
         REQUIRE(injected_fault_mode("1", "fault") == "fault");
+        REQUIRE(injected_fault_mode("on", "fault") == "fault");  // FAIRYFLY_DIAG is a flag like the others
     }
 }

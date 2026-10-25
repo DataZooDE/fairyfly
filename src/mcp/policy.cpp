@@ -13,25 +13,6 @@ std::string lower(std::string s) {
     return s;
 }
 
-bool env_read_only(const EnvFn& getenv_fn) {
-    std::string value;
-    if (getenv_fn) {
-        value = getenv_fn("FAIRYFLY_READ_ONLY");
-    } else {
-#ifdef _WIN32
-        char* buffer = nullptr;
-        std::size_t size = 0;
-        if (_dupenv_s(&buffer, &size, "FAIRYFLY_READ_ONLY") == 0 && buffer != nullptr) {
-            value = buffer;
-            std::free(buffer);
-        }
-#else
-        if (const char* v = std::getenv("FAIRYFLY_READ_ONLY")) value = v;
-#endif
-    }
-    value = lower(value);
-    return value == "1" || value == "true" || value == "yes" || value == "on";
-}
 
 bool is_true(const json& v) {
     if (v.is_boolean()) return v.get<bool>();
@@ -52,6 +33,10 @@ PolicyDecision refuse(const char* code, const std::string& message) {
 }
 
 } // namespace
+
+bool env_read_only(const EnvFn& getenv_fn) {
+    return getenv_fn ? config::Environment(getenv_fn).read_only_cap() : config::read_only_cap();
+}
 
 PolicyDecision check_call(const ToolSpec& spec, const json& args, const Policy& policy, const EnvFn& getenv_fn) {
     const bool read_only = policy.read_only || env_read_only(getenv_fn);

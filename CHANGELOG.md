@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### One reader for environment variables
+
+- `FAIRYFLY_READ_ONLY` and the other switches are read by one shared reader (`config::Environment`). They are on
+  for `1`, `true`, `yes` or `on` in any case, everywhere. Before, `mcp config` and `mcp setup` accepted only some
+  spellings: with `FAIRYFLY_READ_ONLY=Yes` the MCP server refused changes while `mcp setup` would change the
+  machine and `mcp config` reported no hard cap.
+- `FAIRYFLY_DIAG` and `FAIRYFLY_PROBE_ALL` follow the same rule (they took only `1`), and `FAIRYFLY_AUDIT=false` or
+  `no` switches the audit trail off like `0` and `off`.
+
 ### Cloud link: approval follow-ups (fairyfly #36)
 
 - "Don't ask again for 5 minutes" covers exactly the assistant it was given for. It was keyed by the assistant's

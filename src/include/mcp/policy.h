@@ -5,12 +5,16 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include "include/config/environment.h"
 #include "include/mcp/types.h"
 
 namespace fairyfly::mcp {
 
 /// Environment lookup used by check_call for the FAIRYFLY_READ_ONLY hard cap (empty = process env).
-using EnvFn = std::function<std::string(const char*)>;
+using EnvFn = config::EnvLookup;
+
+/// FAIRYFLY_READ_ONLY through `getenv_fn` (empty: the process environment), parsed by config::parse_flag.
+bool env_read_only(const EnvFn& getenv_fn = {});
 
 /// Decides whether a call may run (read-only refusals). Pure and cheap; it checks policy only, not
 /// argument shapes (the dispatcher / argv builders do that). FAIRYFLY_READ_ONLY=1 is treated as

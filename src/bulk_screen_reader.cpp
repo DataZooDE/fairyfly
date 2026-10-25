@@ -1,5 +1,6 @@
 #include "include/bulk_screen_reader.h"
 #include "include/constants.h"
+#include "include/object_tree_diag.h"
 #include "include/display_text_policy.h"
 #include "include/sensitive_data.h"
 #include <algorithm>
@@ -193,7 +194,7 @@ ObjectTreeSource wrap_with_injected_fault(ObjectTreeSource real, const std::stri
 }
 
 std::string injected_fault_mode(const char* diag_env, const char* fault_env) {
-    if (!diag_env || std::string(diag_env) != "1" || !fault_env) return "";
+    if (!fairyfly::diag::diag_enabled(diag_env) || !fault_env) return "";
     return fault_env;
 }
 

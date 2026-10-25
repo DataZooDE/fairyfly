@@ -1,4 +1,5 @@
 #include "include/mcp/session_worker_main.h"
+#include "include/config/environment.h"
 
 #include <iostream>
 #include <memory>
@@ -26,23 +27,6 @@ Result worker_error(const char* code, const char* message) {
     result.status = Result::Status::Error;
     result.error = {{"code", code}, {"message", message}};
     return result;
-}
-
-bool hard_read_only() {
-    std::string value;
-#ifdef _WIN32
-    char* buffer = nullptr;
-    size_t size = 0;
-    if (_dupenv_s(&buffer, &size, "FAIRYFLY_READ_ONLY") == 0 && buffer) {
-        value = buffer;
-        std::free(buffer);
-    }
-#else
-    if (const char* env = std::getenv("FAIRYFLY_READ_ONLY")) value = env;
-#endif
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value == "1" || value == "true" || value == "yes" || value == "on";
 }
 
 } // namespace
@@ -120,7 +104,7 @@ int run_session_worker_stdio() {
                 bound->owner != call.owner_identity)
                 return worker_error("WORKER_SESSION_MISMATCH", "worker is bound to another SAP session");
         }
-        if (hard_read_only() && call.selection_input)
+        if (config::read_only_cap() && call.selection_input)
             return worker_error("READ_ONLY", "selection input is disabled by FAIRYFLY_READ_ONLY");
         if (!handler) {
             handler = std::make_unique<cli::CommandHandler>();
@@ -135,7 +119,7 @@ int run_session_worker_stdio() {
         if (!call.expected_screen_guard.empty() && screen_guard_for(live) != call.expected_screen_guard)
             return worker_error("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
         if (!bound) bound = BoundSession{call.connection, call.session_identity, call.owner_identity};
-        handler->set_read_only(hard_read_only() || (call.read_only && !call.selection_input));
+        handler->set_read_only(config::read_only_cap() || (call.read_only && !call.selection_input));
         handler->set_selection_input_only(call.selection_input, call.selection_program, call.selection_screen);
         handler->set_expected_mcp_session(call.session_identity, call.owner_identity);
         struct ClearGuard {

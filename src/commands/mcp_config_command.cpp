@@ -1,4 +1,5 @@
 #include <chrono>
+#include "include/config/environment.h"
 #include <iostream>
 
 #include <nlohmann/json.hpp>
@@ -137,11 +138,6 @@ int cmd_show(McpExtras& x) {
     return 0;
 }
 
-std::string env_or_empty(const char* name) { return process_env()(name); }
-
-bool truthy(const std::string& v) {
-    return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
-}
 
 // A startup error of the tray started from the Start menu, the autostart or the link tray would only reach a console
 // that closes at once (or none): it is shown in a message box as well.
@@ -216,7 +212,7 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     auto link_control = link::make_link_control();
     tray_services.link = link_control.get();
     // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0 turns it off
-    const std::string update_check = env_or_empty("FAIRYFLY_UPDATE_CHECK");
+    const std::string update_check = config::Environment::process().get(config::env::kUpdateCheck);
     if (update_check != "0" && update_check != "off" && update_check != "false")
         tray_services.latest_update = []() -> std::optional<std::string> {
             auto c = update::check(FAIRYFLY_VERSION);
@@ -229,7 +225,7 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     paths.config_file = loaded.path.path;
     paths.exe = exe;
     tray::TrayState state;
-    state.hard_read_only = truthy(env_or_empty("FAIRYFLY_READ_ONLY"));
+    state.hard_read_only = config::read_only_cap();
     if (auto v = layers.get_bool("tray.start_minimized_notice")) state.start_notice = *v;
     return tray::run_with_tray(*runner, tray_services, *guard, std::move(paths), std::move(state));
 }
