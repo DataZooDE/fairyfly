@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Dispatcher and HTTP endpoint in named steps (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` has its admission checks (`admission_refusal`) and its post-call transaction
+  re-check (`recheck_transaction`) as named steps; the owner-mode predicate, the listing deadline check and the
+  row visibility test are written once. The HTTP endpoint re-authenticates through one function instead of three
+  copies.
+
 ### Screen Markdown in sections (2026-10-25 code review)
 
 - `ScreenMarkdownFormatter::format` (728 lines) is one function per section (header, grid layout, menu bar,
