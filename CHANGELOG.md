@@ -27,6 +27,9 @@
   id (libffl `ApprovalPrompt::client_id`), and the approval window shows all of it.
 - A click on Approve in the window that arrives after the 45 s are up, or after the screen locked, is no longer
   taken as a yes (and remembers nothing): the window notices the deadline only every 200 ms.
+- The same for the notification: when Deny (or Approve) in the notification comes before a click in the open approval
+  window, the notification's answer counts. A Deny there is no longer overruled by Approve with "Don't ask again" in
+  the window, and the window's tick remembers nothing.
 - Closing a popup with F12 (Cancel, the default) or Shift+F3 no longer asks for approval. `gui_popup_close` stays
   annotated as no change; over the cloud link only a key that confirms the popup (vkey 0, Enter) asks.
 

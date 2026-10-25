@@ -270,6 +270,17 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
                     return clock::now() >= deadline || noticed_ == Answer::Approve || noticed_ == Answer::Deny || !can_ask();
                 },
                 remember);
+            Answer first;
+            {
+                std::lock_guard<std::mutex> l(mu_);
+                first = noticed_;
+            }
+            if ((a == Answer::Approve || a == Answer::Deny) && (first == Answer::Approve || first == Answer::Deny)) {
+                // the notification was answered before the window's next check: its answer counts, and it remembers nothing
+                d = {first == Answer::Approve, first == Answer::Approve ? "approved" : "denied"};
+                spdlog::info("approval {}: the notification was answered before the window; the window's answer is ignored", id);
+                break;
+            }
             if (a == Answer::Approve && !(clock::now() < deadline && can_ask())) {
                 // a click between the deadline (or the lock) and the window's next check: not a yes, nothing turned on
                 d = {false, can_ask() ? "expired" : "locked"};
