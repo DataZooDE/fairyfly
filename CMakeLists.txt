@@ -156,6 +156,10 @@ set(FAIRYFLY_LIB_SOURCES
     src/com_automation_engine.cpp
     src/trace.cpp
     src/cli_handler.cpp
+    src/cli_handler_doctor.cpp
+    src/doctor_checks.cpp
+    src/screen_filter.cpp
+    src/output_format.cpp
     src/connection_manager.cpp
     src/sap_gui_base.cpp
     src/element_type_registry.cpp

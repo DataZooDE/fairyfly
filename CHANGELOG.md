@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### CommandHandler split; doctor checks testable; explicit result rendering (2026-10-25 code review)
+
+- `cli_handler.cpp` (2,815 lines) is split: screen filters (`screen_filter.cpp`), the doctor
+  (`cli_handler_doctor.cpp` on top of `doctor_checks.cpp`: Win32 probes plus pure, unit-tested judges) and output
+  formatting (`output_format.cpp`).
+- How a result renders as Markdown is part of its command's row in the command table (`screen read`,
+  `screen find`, `doctor`); `format_output` no longer guesses it from the keys of the result.
+
 ### Element metadata state per screen read (2026-10-25 code review)
 
 - The table/tree cache and the `--skip-trees` option of the element metadata extractor belong to one screen read

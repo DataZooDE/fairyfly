@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "include/command_table.h"
 #include "include/screen_reader.h"
 #include "include/table_data_extractor.h"
 #include "include/com/wrapper.h"
@@ -130,7 +131,7 @@ TEST_CASE("Targeted screen search Markdown shows every returned match", "[screen
              {"name", "titl"}, {"text", "Dictionary: Display Table"}}
         })}}}
     };
-    const auto markdown = cli::format_output(result, cli::OutputFormat::Markdown);
+    const auto markdown = cli::format_output(result, cli::OutputFormat::Markdown, false, command_table::Render::ScreenFind);
     REQUIRE(markdown.find("wnd\\[0\\]/titl") != std::string::npos);
     REQUIRE(markdown.find("Dictionary: Display Table") != std::string::npos);
 }

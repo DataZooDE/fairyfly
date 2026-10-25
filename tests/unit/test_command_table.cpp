@@ -386,3 +386,25 @@ TEST_CASE("command table: tool classification has one source", "[command_table][
     CHECK(ct::path_has({"screen", "read"}, ct::Trait::WorkerBound));
     CHECK_FALSE(ct::path_has({"credentials", "set"}, ct::Trait::WorkerBound));
 }
+
+TEST_CASE("command table: how a command's result is rendered is part of its row", "[command_table][render]") {
+    // review 2026-10-25: format_output guessed the renderer from the keys of the result
+    CHECK(ct::find_by_path({"screen", "read"})->render == ct::Render::ScreenRead);
+    CHECK(ct::find_by_path({"screen", "find"})->render == ct::Render::ScreenFind);
+    CHECK(ct::find_by_path({"doctor"})->render == ct::Render::Doctor);
+    CHECK(ct::find_by_path({"element", "click"})->render == ct::Render::Generic);
+    CHECK(ct::render_of_tool("gui_screen_read") == ct::Render::ScreenRead);
+    CHECK(ct::render_of_tool("gui_no_such_tool") == ct::Render::Generic);
+}
+
+TEST_CASE("format_output: the renderer comes from the command, not from the keys of the result", "[command_table][render]") {
+    Result doctor_like = Result::ok(nlohmann::json{{"overall_health", "ok"}, {"checks", nlohmann::json::array()}});
+    const std::string generic = cli::format_output(doctor_like, cli::OutputFormat::Markdown);
+    CHECK(generic.find("Environment Diagnostics") == std::string::npos);  // a result of another command
+    CHECK(generic.find("# ") != std::string::npos);
+    const std::string doctor = cli::format_output(doctor_like, cli::OutputFormat::Markdown, false, ct::Render::Doctor);
+    CHECK(doctor.find("Environment Diagnostics: Healthy") != std::string::npos);
+    // an error of `screen read` is rendered as an error
+    const std::string failed = cli::format_output(Result::fail("NO_SESSION", "x"), cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(failed.find("NO_SESSION") != std::string::npos);
+}

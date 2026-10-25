@@ -204,7 +204,8 @@ namespace {
         return OutputFormat::Json;
     };
     auto print_result = [&]() {
-        std::string text = format_output(command_result, requested_output_format(), global_opts.verbose_errors);
+        std::string text = format_output(command_result, requested_output_format(), global_opts.verbose_errors,
+                                         command_table::render_of_path(invoked_command_words(app)));
         if (batch_mode) {
             // Keep the batch protocol strictly one JSON object per line.
             try { text = json::parse(text).dump(); } catch (const std::exception&) {}

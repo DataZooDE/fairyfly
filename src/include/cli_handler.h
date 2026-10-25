@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core.h"
+#include "command_table.h"
 #include "automation_engine.h"
 #include "connection_manager.h"
 #include "credential_store.h"
@@ -268,7 +269,10 @@ public:
 /// @param result The result to format
 /// @param format The output format
 /// @param verbose_errors If true, include detailed error suggestions; if false, show compact errors (default)
-std::string format_output(const Result& result, OutputFormat format, bool verbose_errors = false);
+/// `render`: how the command that produced `result` renders as Markdown (command_table::Render; the command table
+/// knows it per command), so a result is never guessed from its keys.
+std::string format_output(const Result& result, OutputFormat format, bool verbose_errors = false,
+                          command_table::Render render = command_table::Render::Generic);
 
 }  // namespace cli
 }  // namespace fairyfly

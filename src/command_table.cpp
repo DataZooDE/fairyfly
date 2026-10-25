@@ -16,6 +16,7 @@ struct Row {
     const char* family_override;  // nullptr = the noun
     bool mcp_only = false;
     unsigned traits = 0;
+    Render render = Render::Generic;
 };
 
 // the session-bound tools: one worker, one established session's screen
@@ -42,8 +43,8 @@ const std::vector<Row>& rows() {
         {{"session", "disconnect"}, "Remove a saved connection; optionally close its SAP GUI session", "SESSION", true, nullptr, false, Trait::WorkerBound | Trait::LeaseCapable},
         {{"session", "lease"}, "Acquire, renew or release an MCP session lease", "SESSION", true, nullptr, true, kSessionSetup},
         {{"connection", "list"}, "List and manage saved fairyfly connections", "CONNECTION", true, nullptr, false, kListing},
-        {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr, false, kOnScreenLeased | Trait::ScreenData},
-        {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr, false, kOnScreen | Trait::ScreenData},
+        {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr, false, kOnScreenLeased | Trait::ScreenData, Render::ScreenRead},
+        {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr, false, kOnScreen | Trait::ScreenData, Render::ScreenFind},
         {{"screen", "capture"}, "Capture screenshot", "SCREEN", true, nullptr, false, kOnScreen},
         {{"menu", "list"}, "List the menu bar tree", "MENU", true, nullptr, false, kOnScreen | Trait::ScreenData},
         {{"menu", "select"}, "Select a menu item by its text path", "MENU", true, nullptr, false, kOnScreenLeased},
@@ -68,7 +69,7 @@ const std::vector<Row>& rows() {
         {{"update", "apply"}, "Download, verify and install the latest fairyfly release", "UPDATE", false, nullptr},
         {{"mcp"}, "Start the MCP server (stdio)", "MCP SERVER", false, nullptr},
         {{"mcp", "tools"}, "Print the MCP tool table", "MCP SERVER", false, nullptr},
-        {{"doctor"}, "Run comprehensive preflight environment and scripting diagnostics", "SYSTEM", true, "system", false, Trait::GlobalControl | Trait::Targetless},
+        {{"doctor"}, "Run comprehensive preflight environment and scripting diagnostics", "SYSTEM", true, "system", false, Trait::GlobalControl | Trait::Targetless, Render::Doctor},
         {{"batch"}, "Run many commands from stdin (or --file), one per line, in one process", "SYSTEM", true, "batch", false, static_cast<unsigned>(Trait::Targetless)},
     };
     return table;
@@ -83,6 +84,7 @@ std::vector<CommandSpec> build_commands() {
         spec.help_group = row.help_group;
         spec.mcp_only = row.mcp_only;
         spec.traits = row.traits;
+        spec.render = row.render;
         if (row.tool) {
             spec.tool_name = derived_tool_name(row.path);
             spec.family = row.family_override ? row.family_override : row.path.front();
@@ -104,6 +106,16 @@ bool tool_has(const std::string& tool_name, Trait trait) {
 bool path_has(const std::vector<std::string>& path, Trait trait) {
     const CommandSpec* spec = find_by_path(path);
     return spec && spec->has(trait);
+}
+
+Render render_of_tool(const std::string& tool_name) {
+    const CommandSpec* spec = find_by_tool(tool_name);
+    return spec ? spec->render : Render::Generic;
+}
+
+Render render_of_path(const std::vector<std::string>& path) {
+    const CommandSpec* spec = find_by_path(path);
+    return spec ? spec->render : Render::Generic;
 }
 
 std::string derived_tool_name(const std::vector<std::string>& path) {
