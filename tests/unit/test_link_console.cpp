@@ -34,10 +34,13 @@
 #include "qr.hpp"
 #include "support/env_guard.h"
 
+#include "support/temp_dir.h"
 using namespace fairyfly::link;
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::StartsWith;
 using nlohmann::json;
+
+using fairyfly::test::TempDir;
 
 namespace {
 
@@ -119,20 +122,6 @@ std::string decode_screen(const std::string& screen) {
 }
 
 /// A fresh directory under %TEMP%, removed again at the end of the test.
-struct TempDir {
-    std::filesystem::path path;
-    explicit TempDir(const std::string& name)
-        : path(std::filesystem::temp_directory_path() /
-               ("ffy-link-console-" + name + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
-        std::filesystem::create_directories(path);
-    }
-    ~TempDir() {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-    std::filesystem::path operator/(const std::string& file) const { return path / file; }
-};
-
 }  // namespace
 
 TEST_CASE("link qr: the decoder of these tests reads libffl's own block rendering", "[link][qr]") {
@@ -536,7 +525,7 @@ TEST_CASE("link run lock: the same file through a junction, an 8.3 name or anoth
     // second lock for the same pairing file, so two links could serve one pairing.
     namespace fs = std::filesystem;
     const TempDir root("lock-identity");
-    const fs::path real = root.path / "real";
+    const fs::path real = root.path() / "real";
     const fs::path dir = real / L"Pairing Ärger-Ölweg long directory";
     fs::create_directories(dir);
     const fs::path state = dir / "state.json";
@@ -548,13 +537,13 @@ TEST_CASE("link run lock: the same file through a junction, an 8.3 name or anoth
     std::ofstream(state) << "{}";
     const std::string a = name(state);
     CHECK(a == before);
-    CHECK(a == name(root.path / "real" / L"pAIRING äRGER-öLWEG LONG DIRECTORY" / "STATE.JSON"));   // case, also non-ASCII
-    CHECK(a == name(fs::path(root.path.wstring() + L"\\real\\.\\x\\..\\" + dir.filename().wstring() + L"\\state.json")));
+    CHECK(a == name(root.path() / "real" / L"pAIRING äRGER-öLWEG LONG DIRECTORY" / "STATE.JSON"));   // case, also non-ASCII
+    CHECK(a == name(fs::path(root.path().wstring() + L"\\real\\.\\x\\..\\" + dir.filename().wstring() + L"\\state.json")));
     CHECK(a != name(missing));
     CHECK(a != name(real / "state.json"));
 
     // a junction to the directory holding it
-    const fs::path junction = root.path / "jn";
+    const fs::path junction = root.path() / "jn";
     const std::wstring cmd = L"cmd /c mklink /J \"" + junction.wstring() + L"\" \"" + real.wstring() + L"\" >NUL";
     REQUIRE(_wsystem(cmd.c_str()) == 0);
     REQUIRE(fs::exists(junction / dir.filename() / "state.json"));

@@ -9,31 +9,23 @@
 
 #include "include/link/link_control.h"
 
+#include "support/temp_dir.h"
+#include "support/eventually.h"
 namespace fs = std::filesystem;
 using namespace fairyfly::link;
 
+using fairyfly::test::eventually;
+
 namespace {
-fs::path temp_state() {
-    auto d = fs::temp_directory_path() / ("ffy-link-ctl-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(d);
-    return d / "state.json";
-}
 std::string state_of(const fs::path& st) {
     auto s = read_status(st.string());
     return s.is_object() ? s.value("state", "") : "";
 }
-template <class F>
-bool eventually(F f, int ms = 3000) {
-    for (int i = 0; i < ms / 10; i++) {
-        if (f()) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    return f();
-}
 }  // namespace
 
 TEST_CASE("link control: pause marker next to the pairing state", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     CHECK_FALSE(is_paused(st.string()));
     REQUIRE(set_paused(st.string(), true));
     CHECK(is_paused(st.string()));
@@ -47,7 +39,8 @@ TEST_CASE("link control: pause marker next to the pairing state", "[link]") {
 }
 
 TEST_CASE("link control: the supervisor disconnects while paused and reconnects on resume", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0}, running{0};
     std::atomic<bool> stop{false};
     // stands in for libffl's Agent::run(net_stop): connected until net_stop
@@ -79,7 +72,8 @@ TEST_CASE("link control: the supervisor disconnects while paused and reconnects 
 }
 
 TEST_CASE("link control: a link started while paused does not connect", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     REQUIRE(set_paused(st.string(), true));
     std::atomic<int> starts{0};
     std::atomic<bool> stop{false};
@@ -95,7 +89,8 @@ TEST_CASE("link control: a link started while paused does not connect", "[link]"
 }
 
 TEST_CASE("link control: an agent that returns by itself is restarted with a back-off", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0};
     std::atomic<bool> stop{false};
     SupervisorOptions so;
@@ -109,7 +104,8 @@ TEST_CASE("link control: an agent that returns by itself is restarted with a bac
 }
 
 TEST_CASE("link control: status of a link that is not running", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     CHECK(read_status(st.string()).is_null());
     write_status(st.string(), "connected");
     auto s = read_status(st.string());
@@ -124,7 +120,8 @@ TEST_CASE("link control: status of a link that is not running", "[link]") {
 }
 
 TEST_CASE("link control: a reconnect request closes the link and opens it again at once", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0}, running{0};
     std::atomic<bool> stop{false}, reconnect{false};
     auto agent = [&](const std::atomic<bool>& net_stop) {

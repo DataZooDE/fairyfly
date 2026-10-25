@@ -26,6 +26,7 @@
 
 #ifdef _WIN32
 #include "include/com/wrapper.h"
+#include "support/temp_dir.h"
 #endif
 
 namespace fs = std::filesystem;
@@ -191,12 +192,6 @@ void set_env(const char* name, const char* value) {
     if (value) setenv(name, value, 1);
     else unsetenv(name);
 #endif
-}
-
-fs::path temp_dir(const char* what) {
-    auto d = fs::temp_directory_path() / (std::string("ffy-trail-") + what + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(d);
-    return d;
 }
 
 }  // namespace
@@ -668,7 +663,7 @@ TEST_CASE("trail notice: policy on and off reach the console line and the status
     CHECK(status_text(json("on")) == "off");
 
     // the running link writes the policy into <state>.status.json; the tray and `link status` read it from there
-    const auto dir = temp_dir("status");
+    const fairyfly::test::TempDir dir("trail-status");
     const std::string st = (dir / "state.json").string();
     write_status(st, "connected", json{{"trail", on_policy().to_json()}});
     auto status = read_status(st);
@@ -881,7 +876,7 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
 
     // The default location is redirected into a temporary profile first (LOCALAPPDATA / XDG_CONFIG_HOME): even a
     // broken guard could only touch that, never the pairing of the person at this desktop.
-    const auto tmp = temp_dir("guard");
+    const fairyfly::test::TempDir tmp("trail-guard");
 #ifdef _WIN32
     const char* profile_var = "LOCALAPPDATA";
 #else

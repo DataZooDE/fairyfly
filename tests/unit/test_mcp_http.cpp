@@ -25,6 +25,7 @@
 #include "include/mcp/tool_catalog.h"
 #include "support/raw_http_client.h"
 
+#include "support/eventually.h"
 using namespace fairyfly::mcp;
 using namespace std::chrono_literals;
 
@@ -1588,11 +1589,11 @@ TEST_CASE("Executor: soft timeout, SERVER_BUSY and queue cap", "[mcp][http][exec
         auto first = std::async(std::launch::async, [&] {
             return f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_slow"}, {"arguments", json{{"ms", 400}}}})));
         });
-        std::this_thread::sleep_for(100ms);  // first is running, queue is empty
+        REQUIRE(fairyfly::test::eventually([&] { return f.provider.calls == 1 && f.exec.queued() == 0; }));  // first runs
         auto second = std::async(std::launch::async, [&] {
             return f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}, 2)));
         });
-        std::this_thread::sleep_for(100ms);  // second sits in the queue (cap 1)
+        REQUIRE(fairyfly::test::eventually([&] { return f.exec.queued() == 1; }));  // second sits in the queue (cap 1)
         auto third = f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}, 3)));
         CHECK(third.status == 503);
         CHECK(body_of(third)["error"]["code"] == kServerBusy);
@@ -1744,7 +1745,7 @@ TEST_CASE("JSON client disconnect removes a queued tool call", "[mcp][http][canc
     auto queued = f.post(Fixture::rpc("tools/call", json{{"name", "gui_screen_read"}}, 41));
     queued.connected = [&] { return connected.load(); };
     auto second = std::async(std::launch::async, [&] { return f.endpoint.handle(queued); });
-    std::this_thread::sleep_for(40ms);
+    REQUIRE(fairyfly::test::eventually([&] { return f.exec.queued() == 1; }));  // waiting behind the first call
     connected = false;
     CHECK(second.wait_for(300ms) == std::future_status::ready);
     if (second.wait_for(0ms) == std::future_status::ready) CHECK(second.get().status == 499);

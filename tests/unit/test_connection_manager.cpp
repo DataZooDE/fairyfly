@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "include/connection_manager.h"
 #include "include/exceptions.h"
+#include "support/temp_dir.h"
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -18,10 +19,8 @@ namespace fs = std::filesystem;
 using namespace fairyfly::cli;
 
 TEST_CASE("Uncertain SAP observation preserves the saved connection during cleanup", "[connection_manager]") {
-    const fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_uncertain_cleanup_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-uncertain-cleanup");
+    const fs::path temp_dir = temp_dir_guard.path();
     ConnectionManager manager(temp_dir.string());
     const auto saved = manager.create_or_update_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "key:0");
@@ -43,9 +42,8 @@ TEST_CASE("ConnectionManager isolated cache directory", "[connection_manager]") 
     }
 
     SECTION("ConnectionManager in explicit directory saves and loads connections") {
-        fs::path temp_dir = fs::temp_directory_path() /
-            ("fairyfly_test_conns_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        REQUIRE(fs::create_directory(temp_dir));
+        const fairyfly::test::TempDir temp_dir_guard("cm-conns");
+        const fs::path temp_dir = temp_dir_guard.path();
 
         ConnectionManager mgr(temp_dir.string());
         REQUIRE(mgr.get_working_directory() == temp_dir.string());
@@ -101,10 +99,8 @@ TEST_CASE("ConnectionManager isolated cache directory", "[connection_manager]") 
     }
 
     SECTION("failed replacement preserves the previous target and removes temporary files") {
-        fs::path temp_dir = fs::temp_directory_path() /
-            ("fairyfly_test_replace_failure_" +
-             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-        REQUIRE(fs::create_directory(temp_dir));
+        const fairyfly::test::TempDir temp_dir_guard("cm-replace-failure");
+        const fs::path temp_dir = temp_dir_guard.path();
         fs::path blocked_target = temp_dir / "fairyfly.0.con";
         REQUIRE(fs::create_directory(blocked_target));
 
@@ -122,10 +118,8 @@ TEST_CASE("ConnectionManager isolated cache directory", "[connection_manager]") 
 }
 
 TEST_CASE("ConnectionManager rejects exhausted connection ID space", "[connection_manager]") {
-    const fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_exhausted_ids_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-exhausted-ids");
+    const fs::path temp_dir = temp_dir_guard.path();
     const fs::path max_id_file = temp_dir /
         ("fairyfly." + std::to_string(std::numeric_limits<int>::max()) + ".con");
     {
@@ -144,10 +138,8 @@ TEST_CASE("ConnectionManager rejects exhausted connection ID space", "[connectio
 }
 
 TEST_CASE("ConnectionManager distinguishes reused SAP session paths", "[connection_manager]") {
-    fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_session_key_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-session-key");
+    const fs::path temp_dir = temp_dir_guard.path();
     ConnectionManager mgr(temp_dir.string());
     const std::string path = "/app/con[0]/ses[0]";
     auto legacy = mgr.create_or_update_connection(path, "/app/con[0]", "System",
@@ -184,10 +176,8 @@ TEST_CASE("ConnectionManager distinguishes reused SAP session paths", "[connecti
 }
 
 TEST_CASE("ConnectionManager owner launch creates only a fresh session receipt", "[connection_manager]") {
-    const auto temp_dir = std::filesystem::temp_directory_path() /
-        ("fairyfly-owner-launch-create-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(std::filesystem::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-fairyfly-owner-launch-create-");
+    const fs::path temp_dir = temp_dir_guard.path();
     ConnectionManager manager(temp_dir.string());
     const auto first = manager.create_new_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "A4H Logon", "", "", "key-one");
@@ -212,10 +202,8 @@ TEST_CASE("ConnectionManager owner launch creates only a fresh session receipt",
 
 TEST_CASE("Legacy connection files remain mutable and do not collide with new IDs", "[connection_manager]") {
     const fs::path original_directory = fs::current_path();
-    const fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_legacy_cache_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-legacy-cache");
+    const fs::path temp_dir = temp_dir_guard.path();
     const fs::path cache_dir = temp_dir / "cache";
     REQUIRE(fs::create_directory(cache_dir));
     struct RestoreDirectory {
@@ -276,10 +264,8 @@ TEST_CASE("Legacy connection files remain mutable and do not collide with new ID
 
 TEST_CASE("Pre-existing primary and legacy cache ID collision preserves both sessions", "[connection_manager]") {
     const fs::path original_directory = fs::current_path();
-    const fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_duplicate_cache_id_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-duplicate-cache-id");
+    const fs::path temp_dir = temp_dir_guard.path();
     const fs::path cache_dir = temp_dir / "cache";
     REQUIRE(fs::create_directory(cache_dir));
     struct RestoreDirectory {
@@ -328,10 +314,8 @@ TEST_CASE("Pre-existing primary and legacy cache ID collision preserves both ses
 }
 
 TEST_CASE("Stale cleanup does not delete a replacement connection file", "[connection_manager]") {
-    fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_stale_cleanup_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-stale-cleanup");
+    const fs::path temp_dir = temp_dir_guard.path();
     ConnectionManager manager(temp_dir.string());
     auto first = manager.create_or_update_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "session:0");
@@ -357,10 +341,8 @@ TEST_CASE("Stale cleanup does not delete a replacement connection file", "[conne
 }
 
 TEST_CASE("Concurrent connection creators receive distinct cache IDs", "[connection_manager]") {
-    fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_concurrent_cache_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-concurrent-cache");
+    const fs::path temp_dir = temp_dir_guard.path();
 
     constexpr int count = 12;
     std::atomic<bool> start{false};
@@ -408,10 +390,8 @@ TEST_CASE("Concurrent processes receive distinct cache IDs", "[connection_manage
     const fs::path worker = fs::path(executable_path).parent_path() / "connection_cache_worker.exe";
     REQUIRE(fs::exists(worker));
 
-    fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_process_cache_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-process-cache");
+    const fs::path temp_dir = temp_dir_guard.path();
     constexpr int count = 12;
     std::vector<PROCESS_INFORMATION> processes;
     for (int i = 0; i < count; ++i) {
@@ -476,10 +456,8 @@ TEST_CASE("Concurrent processes receive distinct cache IDs", "[connection_manage
 #endif
 
 TEST_CASE("Stale connection with distinct session key is not reused for same path", "[connection_manager]") {
-    fs::path temp_dir = fs::temp_directory_path() /
-        ("fairyfly_test_stale_key_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(temp_dir));
+    const fairyfly::test::TempDir temp_dir_guard("cm-stale-key");
+    const fs::path temp_dir = temp_dir_guard.path();
 
     ConnectionManager manager(temp_dir.string());
     // Create initial connection with old session key

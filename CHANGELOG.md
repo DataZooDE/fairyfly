@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Tests: shared support, no fixed sleeps, faster (2026-10-25 code review)
+
+- `tests/unit/support/`: `TempDir` (removed also when a test fails; replaces five helpers and 12 inline
+  directories that were left behind on a failure), `eventually`, `spec_of`, `EnvGuard`; tests use `Result::ok`.
+- Waiting on a condition instead of fixed sleeps in the HTTP queue, disconnect and executor-pool tests; the worker
+  fixture's slow call takes 600 ms instead of 2 s. A unit run takes about 40 s (84 s before this review).
+- Tests that asserted nothing are gone; the redaction tests moved to `test_sensitive_data.cpp`, the read-only
+  guard tests to `test_read_only_guard.cpp`.
+
 ### One definition for shared constants and command-line quoting (2026-10-25 code review)
 
 - The default ports (8383, 8443), the protocol versions (one table that says which are spoken over stdio and over

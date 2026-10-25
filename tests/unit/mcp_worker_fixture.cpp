@@ -33,7 +33,8 @@ int main(int argc, char** argv) {
     }
     const bool sleep_first = argc > 1 && std::string(argv[1]) == "--sleep-first-call";
     return fairyfly::mcp::run_worker_loop(std::cin, std::cout, [sleep_first](const fairyfly::mcp::WorkerCall& call) {
-        if (sleep_first && call.id == 1) std::this_thread::sleep_for(std::chrono::seconds(2));
+        // long enough for the callers' windows (100 ms soft timeout, 250 ms FIFO check, 1 s "fast" call), not longer
+        if (sleep_first && call.id == 1) std::this_thread::sleep_for(std::chrono::milliseconds(600));
         fairyfly::Result result;
         result.status = fairyfly::Result::Status::Success;
         result.data = {{"id", call.id}};

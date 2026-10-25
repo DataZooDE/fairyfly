@@ -1761,20 +1761,6 @@ TEST_CASE("ComGuiElement classify_type tests", "[com][element][classify]") {
     }
 }
 
-TEST_CASE("ComGuiApplication initialization", "[com][gui_application]") {
-    SECTION("ComGuiApplication::create() returns valid pointer or throws") {
-        try {
-            auto app = ComGuiApplication::create();
-            REQUIRE(app != nullptr);
-            spdlog::info("SAP GUI found - initialization successful");
-            SUCCEED();
-        } catch (const ComException& e) {
-            spdlog::warn("SAP GUI not available: {}", e.what());
-            SUCCEED("ComException thrown as expected when SAP not available");
-        }
-    }
-}
-
 // [live]: these attach to whatever SAP GUI session is open and may change it (select tabs). They are hidden
 // from the unit run; run them deliberately with `unit_tests "[live]"` on a test system.
 TEST_CASE("ComGuiApplication with SAP GUI present", "[com][gui_application][.][live]") {
