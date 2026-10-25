@@ -114,7 +114,7 @@ std::optional<T> unless_stopped(std::function<T()> fn, const std::atomic<bool>& 
         std::exception_ptr error;
     };
     auto shared = std::make_shared<Shared>();
-    std::thread([shared, fn = std::move(fn), alive = LinkRuntime::process().background_thread()] {
+    LinkRuntime::process().start_thread([shared, fn = std::move(fn)] {
         std::optional<T> value;
         std::exception_ptr error;
         try {
@@ -626,7 +626,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         }
         last = state;
     };
-    std::thread net_thread([net, supervision, trail_changed, &runtime, alive = runtime.background_thread()] {
+    std::thread net_thread = runtime.start_thread([net, supervision, trail_changed, &runtime] {
         supervise(net->state_path, [net](const std::atomic<bool>& net_stop) { net->agent.run(net_stop); }, runtime.stop, supervision);
         net->done = true;
     });

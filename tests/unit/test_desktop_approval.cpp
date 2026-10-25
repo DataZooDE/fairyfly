@@ -848,3 +848,28 @@ TEST_CASE("link runtime: stop requests and background threads belong to one runt
     // the process runtime is the one Ctrl+C, the tray's Quit and main()'s exit check use
     CHECK(&fairyfly::link::LinkRuntime::process() == &fairyfly::link::LinkRuntime::process());
 }
+
+namespace {
+// records the runtime's background count when the work's captures are destroyed
+struct CountOnDestroy {
+    fairyfly::link::LinkRuntime* runtime;
+    std::atomic<int>* seen;
+    CountOnDestroy(fairyfly::link::LinkRuntime* r, std::atomic<int>* s) : runtime(r), seen(s) {}
+    CountOnDestroy(CountOnDestroy&& other) noexcept : runtime(other.runtime), seen(other.seen) { other.runtime = nullptr; }
+    CountOnDestroy(const CountOnDestroy&) = delete;
+    ~CountOnDestroy() { if (runtime) *seen = runtime->background_threads(); }
+};
+}  // namespace
+
+TEST_CASE("link runtime: a background thread counts until its work and captures are destroyed", "[link][runtime]") {
+    // codex 2026-10-25: main() ends with _Exit once the count is zero; a capture destroyed after the decrement
+    // (OpenSSL state, a socket) could still race static destruction
+    fairyfly::link::LinkRuntime runtime(std::make_shared<fairyfly::link::approval::Standing>());
+    std::atomic<int> seen{-1};
+    std::atomic<bool> ran{false};
+    std::thread t = runtime.start_thread([probe = CountOnDestroy(&runtime, &seen), &ran] { ran = true; });
+    t.join();
+    CHECK(ran);
+    CHECK(seen == 1);   // still counted while the captures went away
+    CHECK(runtime.background_threads() == 0);
+}

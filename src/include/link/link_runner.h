@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "include/audit_log.h"
@@ -87,6 +88,18 @@ public:
         std::atomic<int>* count_;
     };
     BackgroundThread background_thread() { return BackgroundThread(background_); }
+    /// A thread running `work` that counts as a background thread until `work` and everything it captured are
+    /// destroyed (main() may _Exit as soon as the count is zero). The caller joins or detaches it.
+    template <class Work>
+    std::thread start_thread(Work work) {
+        return std::thread([alive = background_thread(), work = std::move(work)]() mutable {
+            const BackgroundThread counted = std::move(alive);   // declared first: released last
+            {
+                Work owned = std::move(work);   // the captures end with this scope, before the count drops
+                owned();
+            }
+        });
+    }
     /// Threads that `link pair` or `link run` gave up waiting for after Ctrl+C and that are still running.
     int background_threads() const { return background_.load(); }
 
