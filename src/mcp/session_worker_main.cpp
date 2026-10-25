@@ -21,9 +21,38 @@
 #include "include/mcp/screen_guard.h"
 
 namespace fairyfly::mcp {
-namespace {
 
-} // namespace
+std::optional<Result> worker_binding_refusal(const WorkerCall& call, const std::optional<WorkerBinding>& bound,
+                                             bool read_only_cap) {
+    if (bound && (bound->connection != call.connection || bound->identity != call.session_identity ||
+                  bound->owner != call.owner_identity))
+        return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to another SAP session");
+    if (read_only_cap && call.selection_input)
+        return Result::fail("READ_ONLY", "selection input is disabled by FAIRYFLY_READ_ONLY");
+    return std::nullopt;
+}
+
+std::optional<Result> worker_live_refusal(const WorkerCall& call, const audit::SapFacts& live) {
+    const std::string live_owner = sap_identity(live);
+    if (live.connection_id != call.connection || live.session_identity != call.session_identity ||
+        live_owner != call.owner_identity || live.system.empty() || live.client.empty() || live.user.empty())
+        return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+    if (!call.expected_screen_guard.empty() && screen_guard_for(live) != call.expected_screen_guard)
+        return Result::fail("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
+    return std::nullopt;
+}
+
+WorkerCallFlags::WorkerCallFlags(cli::CommandHandler& handler, const WorkerCall& call, bool read_only_cap) : handler_(handler) {
+    handler_.set_read_only(read_only_cap || (call.read_only && !call.selection_input));
+    handler_.set_selection_input_only(call.selection_input, call.selection_program, call.selection_screen);
+    handler_.set_expected_mcp_session(call.session_identity, call.owner_identity);
+}
+
+WorkerCallFlags::~WorkerCallFlags() {
+    handler_.set_selection_input_only(false);
+    handler_.set_expected_mcp_session("", "");
+    handler_.set_read_only(true);
+}
 
 int run_session_worker_stdio() {
     // stdout is exclusively the versioned IPC stream. No CLI diagnostics or
@@ -35,12 +64,7 @@ int run_session_worker_stdio() {
     sap::ComGuiApplication::set_embedded_fallback_allowed(false);
 #endif
     std::unique_ptr<cli::CommandHandler> handler;
-    struct BoundSession {
-        int connection;
-        std::string identity;
-        std::string owner;
-    };
-    std::optional<BoundSession> bound;
+    std::optional<WorkerBinding> bound;
     return run_worker_loop(std::cin, std::cout, [&](const WorkerCall& call) -> Result {
         if (call.enumerate) {
             if (bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
@@ -93,37 +117,17 @@ int run_session_worker_stdio() {
                            {"screen_number", facts.screen_number}, {"connection_name", target.connection_name}};
             return result;
         }
-        if (bound) {
-            if (bound->connection != call.connection || bound->identity != call.session_identity ||
-                bound->owner != call.owner_identity)
-                return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to another SAP session");
-        }
-        if (config::read_only_cap() && call.selection_input)
-            return Result::fail("READ_ONLY", "selection input is disabled by FAIRYFLY_READ_ONLY");
+        // a mismatch and the read-only cap are refused before the handler (SAP) is touched
+        if (auto refused = worker_binding_refusal(call, bound, config::read_only_cap())) return *refused;
         if (!handler) {
             handler = std::make_unique<cli::CommandHandler>();
             handler->set_batch_mode(true);
             handler->set_owner_window_guard(true);
         }
         const audit::SapFacts live = handler->audit_facts_for_connection(call.connection);
-        const std::string live_owner = sap_identity(live);
-        if (live.connection_id != call.connection || live.session_identity != call.session_identity ||
-            live_owner != call.owner_identity || live.system.empty() || live.client.empty() || live.user.empty())
-            return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
-        if (!call.expected_screen_guard.empty() && screen_guard_for(live) != call.expected_screen_guard)
-            return Result::fail("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
-        if (!bound) bound = BoundSession{call.connection, call.session_identity, call.owner_identity};
-        handler->set_read_only(config::read_only_cap() || (call.read_only && !call.selection_input));
-        handler->set_selection_input_only(call.selection_input, call.selection_program, call.selection_screen);
-        handler->set_expected_mcp_session(call.session_identity, call.owner_identity);
-        struct ClearGuard {
-            cli::CommandHandler& handler;
-            ~ClearGuard() {
-                handler.set_selection_input_only(false);
-                handler.set_expected_mcp_session("", "");
-                handler.set_read_only(true);
-            }
-        } clear{*handler};
+        if (auto refused = worker_live_refusal(call, live)) return *refused;
+        if (!bound) bound = WorkerBinding{call.connection, call.session_identity, call.owner_identity};
+        const WorkerCallFlags flags(*handler, call, config::read_only_cap());
         Result result = make_registry_invoker([&]() -> cli::CommandHandler& { return *handler; })(call.argv);
         return result;
     });
