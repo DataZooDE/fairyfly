@@ -123,26 +123,11 @@ int startup_error(bool tray_mode, const std::string& code, const std::string& me
 
 int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& options, const LoadedConfig& loaded) {
     (void)layers;
-    const std::string exe = tray::current_exe_path();
-    tray::TrayEntry entry;
-    entry.tray_requested = true;
-    entry.is_child = tray::is_tray_child_process();
-    entry.has_console = tray::process_has_console();
-    entry.exe = exe;
+    tray::TrayStart start = tray::prepare_tray_start(tray::kTrayMutexName);
+    tray::TrayEntry& entry = start.entry;
+    const std::string& exe = entry.exe;
     entry.config_path = x.config_path.empty() && loaded.path.source == Source::Default ? std::string() : loaded.path.path.string();
-    entry.args = tray::current_args();   // the detached child gets exactly the same arguments
-    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
-    const std::string program = tray::tray_start_program(exe, tray::path_exists);
-    if (program != exe) entry.autostart_line = tray::autostart_command(program, entry.config_path);
-
-    auto registry = tray::make_win32_run_key();
-    auto launcher = tray::make_win32_process_launcher();
-    auto guard = tray::make_win32_single_instance();
-    tray::TrayEntryServices services;
-    services.registry = registry.get();
-    services.launcher = launcher.get();
-    services.guard = guard.get();
-    services.print = [](const std::string& line) { std::cout << line << std::endl; };
+    if (start.program != exe) entry.autostart_line = tray::autostart_command(start.program, entry.config_path);
 
     // Autostart install/remove and the relaunch decision. The HTTP requirement is checked first so the
     // user hears about it in the console, not in an invisible child.
@@ -151,19 +136,10 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
                              "The tray needs the HTTP transport (--http, or server.transport: http in the config file)", 2);
     entry.install_autostart = x.install_autostart;
     entry.remove_autostart = x.remove_autostart;
-    const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
-    if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
-        tray::make_win32_tray_host()->message_box("fairyfly MCP", decided.message);   // nobody reads this console
-    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning) {
-        auto other = tray::make_win32_tray_host(tray::TrayKind::Mcp);
-        if (!other->show_running_instance() && tray::startup_error_needs_dialog_here())
-            other->message_box("fairyfly MCP", "The fairyfly MCP tray is already running: its icon is in the notification area.");
-    }
-    if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
-
-    // From here on this process is the tray: no console, logs to file, server on the main thread.
-    if (entry.is_child) tray::detach_console();
-    tray::clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
+    if (auto exit_code = tray::settle_tray_start(start, tray::TrayKind::Mcp, "fairyfly MCP")) return *exit_code;
+    // From here on this process is the tray: logs to file, server on the main thread.
+    auto& launcher = start.launcher;
+    auto& guard = start.guard;
     const std::string log_file = tray::route_logging_to_file();
 
     auto& factory = tray::runner_factory();
