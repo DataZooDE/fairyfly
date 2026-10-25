@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Link runtime and tray structure (2026-10-25 code review)
+
+- The link's process-wide stop flags, abandoned-thread count and standing approval are one `LinkRuntime`; the
+  link tray's "Allow changes in SAP" switch is tested with an in-memory approval.
+- Both trays share the start sequence, the open/console/detached-start actions and the UI thread's lifetime
+  (`UiThread`). The MCP server's tray moved to `tray/mcp_tray.h`, so `tray/tray.h` no longer depends on `mcp/`.
+- `docs/ARCHITECTURE.md` has a Threads section.
+
 ### One environment writer, one tray contract (2026-10-25 code review)
 
 - Environment variables are written through `config::set_process_env`/`unset_process_env` and read through the
