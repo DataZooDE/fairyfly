@@ -308,6 +308,48 @@ json ScreenReader::group_elements_by_container(const json& elements) {
     return grouped;
 }
 
+/// One node of a tree read: key, text (recovered from a column when empty), path and, for a column tree, its column
+/// values; a text or path that cannot be read is "[extraction_failed]".
+json ScreenReader::tree_node_json(ComGuiElement& tree, const std::string& elem_id, const std::string& key,
+                                  const std::vector<std::string>& columns, TreeNodeTexts& node_texts) {
+    json node;
+    node["key"] = key;
+
+    // Extract node text with individual error handling
+    try {
+        spdlog::debug("  -> Getting node text for key '{}'", key);
+        node["text"] = node_texts.text(key);
+        spdlog::debug("  -> Got node text for key '{}'", key);
+    } catch (const std::exception& e) {
+        node["text"] = "[extraction_failed]";
+        spdlog::warn("Failed to extract text for node key '{}' in tree {}: {}", key, elem_id, e.what());
+    }
+
+    // Extract node path with individual error handling
+    try {
+        spdlog::debug("  -> Getting node path for key '{}'", key);
+        node["path"] = as_tree(tree).get_node_path_by_key(key);
+        spdlog::debug("  -> Got node path: '{}'", node["path"].get<std::string>());
+    } catch (const std::exception& e) {
+        node["path"] = "[extraction_failed]";
+        spdlog::warn("Failed to extract path for node key '{}' in tree {}: {}", key, elem_id, e.what());
+    }
+
+    // Extract column values using GetItemText
+    if (!columns.empty()) {
+        spdlog::debug("  -> Extracting {} columns for key '{}'", columns.size(), key);
+        node["available_columns"] = columns;
+
+        const Stopwatch col_timer;
+        node["column_values"] = as_tree(tree).item_texts(key, columns, /*skip_hierarchy=*/true);
+        const auto col_ms = col_timer.elapsed().count();
+        if (col_ms > 500) {
+            spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);
+        }
+    }
+    return node;
+}
+
 json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const std::string& elem_id) {
     json tree_element;
     tree_element["id"] = elem_id;
@@ -365,43 +407,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                 spdlog::debug("Extracting node {}/{}: key='{}'", i+1, node_keys.size(), key);
                 const Stopwatch node_timer;
 
-                json node;
-                node["key"] = key;
-
-                // Extract node text with individual error handling
-                try {
-                    spdlog::debug("  -> Getting node text for key '{}'", key);
-                    node["text"] = node_texts.text(key);
-                    spdlog::debug("  -> Got node text for key '{}'", key);
-                } catch (const std::exception& e) {
-                    node["text"] = "[extraction_failed]";
-                    spdlog::warn("Failed to extract text for node key '{}' in tree {}: {}", key, elem_id, e.what());
-                }
-
-                // Extract node path with individual error handling
-                try {
-                    spdlog::debug("  -> Getting node path for key '{}'", key);
-                    node["path"] = as_tree(*element).get_node_path_by_key(key);
-                    spdlog::debug("  -> Got node path: '{}'", node["path"].get<std::string>());
-                } catch (const std::exception& e) {
-                    node["path"] = "[extraction_failed]";
-                    spdlog::warn("Failed to extract path for node key '{}' in tree {}: {}", key, elem_id, e.what());
-                }
-
-                // Extract column values using GetItemText
-                if (!columns.empty()) {
-                    spdlog::debug("  -> Extracting {} columns for key '{}'", columns.size(), key);
-                    node["available_columns"] = columns;
-
-                    const Stopwatch col_timer;
-                    node["column_values"] = as_tree(*element).item_texts(key, columns, /*skip_hierarchy=*/true);
-                    const auto col_ms = col_timer.elapsed().count();
-                    if (col_ms > 500) {
-                        spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);
-                    }
-                }
-
-                nodes_array.push_back(node);
+                nodes_array.push_back(tree_node_json(*element, elem_id, key, columns, node_texts));
 
                 // Log if this node took unusually long
                 const auto node_ms = node_timer.elapsed().count();
