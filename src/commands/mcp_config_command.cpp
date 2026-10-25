@@ -27,33 +27,6 @@ CLI::Option* output_option(CLI::App* cmd, std::string& target) {
         ->check(CLI::IsMember({"text", "json", "markdown"}));
 }
 
-/// CLI option names that feed each config key (first match with a count wins).
-struct FlagMap { const char* key; std::vector<const char*> options; };
-const std::vector<FlagMap>& flag_map() {
-    static const std::vector<FlagMap> map = {
-        {"server.host", {"--mcp-host"}},
-        {"server.port", {"--mcp-port", "--port"}},
-        {"server.transport", {"--transport"}},
-        {"server.tls", {"--tls"}},
-        {"server.allow_ip", {"--allow-ip"}},
-        {"server.allow_ip_include_loopback", {"--allow-ip-include-loopback"}},
-        {"server.sse", {"--sse"}},
-        {"server.allowed_hosts", {"--allowed-hosts"}},
-        {"server.cors_origins", {"--cors-origin"}},
-        {"mode.read_only", {"--read-only"}},
-        {"mode.allow_write", {"--allow-write"}},
-        {"limits.max_result_chars", {"--max-result-chars"}},
-        {"limits.max_image_bytes", {"--max-image-bytes"}},
-        {"limits.max_calls_per_minute", {"--max-calls-per-minute"}},
-        {"limits.call_timeout_ms", {"--call-timeout-ms"}},
-        {"tools.families", {"--tools"}},
-        {"default_connection", {"--default-connection"}},
-        {"format", {"--format"}},
-        {"tray.enabled", {"--tray"}},
-    };
-    return map;
-}
-
 std::string join_results(const CLI::Option& option) {
     std::string out;
     for (const auto& r : option.results()) out += (out.empty() ? "" : ",") + r;
@@ -255,13 +228,11 @@ LoadedConfig load_config(const std::string& flag_path, const EnvLookup& env) {
 
 McpConfig flags_layer(const CLI::App& mcp_app) {
     McpConfig layer;
-    for (const auto& entry : flag_map()) {
-        const KeySpec* spec = find_key(entry.key);
-        if (!spec) continue;
-        for (const char* name : entry.options) {
+    for (const auto& spec : key_specs()) {  // the key table names the options of each key (first given wins)
+        for (const auto& name : spec.cli) {
             const CLI::Option* option = mcp_app.get_option_no_throw(name);
             if (!option || option->count() == 0) continue;
-            if (auto value = parse_value(*spec, join_results(*option))) layer.set(entry.key, std::move(*value));
+            if (auto value = parse_value(spec, join_results(*option))) layer.set(spec.key, std::move(*value));
             break;
         }
     }

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### One table for the mcp.yaml keys (2026-10-25 code review)
+
+- Each key of `mcp.yaml` names its `fairyfly mcp` options and the server option it sets in the key table; the flag
+  map and `apply_config` are derived from it instead of being two more hand-kept tables. The precedence
+  (flag > environment > `mcp.yaml` > default) is implemented once (`resolve_layers`); `merged_layers` and the audit
+  settings use it.
+
 ### Tool classification in the command table (2026-10-25 code review)
 
 - What a tool is (global control, targetless, listing, session system, lease-capable, worker-bound, screen-bound,

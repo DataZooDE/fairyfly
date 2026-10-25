@@ -4,6 +4,10 @@
 
 #include "include/config/mcp_config.h"
 
+#include "include/commands/cli_app.h"
+#include "include/commands/global_options.h"
+
+#include <CLI/CLI.hpp>
 using namespace fairyfly;
 using namespace fairyfly::config;
 
@@ -428,4 +432,92 @@ TEST_CASE("config: audit.required from any layer cannot be switched off by a hig
     CHECK(o.audit_file.enabled == false);  // the rest keeps flag > env > yaml
     McpConfig none;
     CHECK_FALSE(audit_settings(none, none, none).required.value_or(false));
+}
+
+TEST_CASE("config: every key with a setting moves exactly its ServeOptions field", "[config][keys]") {
+    // characterization of apply_config: one entry per key that configures the running server
+    struct Expect {
+        const char* key;
+        Value value;
+        std::function<bool(const mcp::ServeOptions&)> applied;
+    };
+    using V = std::vector<std::string>;
+    const std::vector<Expect> cases = {
+        {"mode.read_only", true, [](const auto& o) { return o.read_only; }},
+        {"mode.allow_write", true, [](const auto& o) { return o.allow_write; }},
+        {"default_connection", 3LL, [](const auto& o) { return o.default_connection == 3; }},
+        {"format", std::string("json"), [](const auto& o) { return o.format == "json"; }},
+        {"limits.max_result_chars", 1234LL, [](const auto& o) { return o.max_result_chars == 1234; }},
+        {"limits.max_image_bytes", 4321LL, [](const auto& o) { return o.max_image_bytes == 4321; }},
+        {"limits.max_calls_per_minute", 7LL, [](const auto& o) { return o.max_calls_per_minute == 7; }},
+        {"limits.call_timeout_ms", 6000LL, [](const auto& o) { return o.call_timeout_ms == 6000; }},
+        {"tools.families", V{"screen"}, [](const auto& o) { return o.families == V{"screen"}; }},
+        {"server.transport", std::string("http"), [](const auto& o) { return o.transport == "http"; }},
+        {"server.port", 9001LL, [](const auto& o) { return o.port == 9001; }},
+        {"server.host", std::string("0.0.0.0"), [](const auto& o) { return o.host == "0.0.0.0"; }},
+        {"server.sse", false, [](const auto& o) { return !o.sse; }},
+        {"server.tls", true, [](const auto& o) { return o.tls; }},
+        {"server.allow_ip", V{"10.0.0.0/8"}, [](const auto& o) { return o.allow_ip == V{"10.0.0.0/8"}; }},
+        {"server.allow_ip_include_loopback", true, [](const auto& o) { return o.allow_ip_include_loopback; }},
+        {"server.allowed_hosts", V{"vm"}, [](const auto& o) { return o.allowed_hosts == V{"vm"}; }},
+        {"server.cors_origins", V{"https://a"}, [](const auto& o) { return o.cors_origins == V{"https://a"}; }},
+        {"owner.sap_identities", V{"BIG/001/JR"}, [](const auto& o) { return o.owner_sap_identities == V{"BIG/001/JR"}; }},
+        {"audit.required", true, [](const auto& o) { return o.audit_file.required == true; }},
+        {"audit.enabled", false, [](const auto& o) { return o.audit_file.enabled == false; }},
+        {"audit.file", std::string("D:/a.jsonl"), [](const auto& o) { return o.audit_file.file == std::string("D:/a.jsonl"); }},
+    };
+    for (const auto& c : cases) {
+        CAPTURE(c.key);
+        REQUIRE(config::find_key(c.key) != nullptr);
+        McpConfig layer;
+        layer.set(c.key, c.value);
+        mcp::ServeOptions o;
+        apply_config(layer, o);
+        CHECK(c.applied(o));
+    }
+    // nothing set: the options stay at their defaults
+    mcp::ServeOptions untouched;
+    apply_config(McpConfig{}, untouched);
+    CHECK(untouched.port == mcp::ServeOptions{}.port);
+    CHECK(untouched.format == mcp::ServeOptions{}.format);
+}
+
+TEST_CASE("config: merged layers are what resolve says, without the defaults", "[config][precedence]") {
+    McpConfig yaml;
+    yaml.set("server.port", 1111LL);
+    yaml.set("format", std::string("json"));
+    McpConfig flags;
+    flags.set("server.port", 3333LL);
+    const auto env = fake_env({{"FAIRYFLY_MCP_LIMITS_CALL_TIMEOUT_MS", "7000"}, {"FAIRYFLY_MCP_FORMAT", "markdown"}});
+    const McpConfig merged = merged_layers(yaml, flags, env);
+    const Effective effective = resolve(yaml, flags, env);
+    for (const auto& [key, ev] : effective) {
+        CAPTURE(key);
+        if (ev.set && ev.source != Source::Default) {
+            REQUIRE(merged.has(key));
+            CHECK(merged.values.at(key) == ev.value);
+        } else {
+            CHECK_FALSE(merged.has(key));
+        }
+    }
+    CHECK(merged.get_int("server.port") == 3333);
+    CHECK(merged.get_string("format") == "markdown");  // env over yaml
+}
+
+TEST_CASE("config: every CLI option a key names exists on `fairyfly mcp`", "[config][keys]") {
+    CLI::App app{"fairyfly"};
+    commands::GlobalOptions global;
+    commands::add_global_options(app, global);
+    commands::build_command_tree(app);
+    const CLI::App* mcp_app = app.get_subcommand_no_throw("mcp");
+    REQUIRE(mcp_app != nullptr);
+    std::size_t bound = 0;
+    for (const auto& spec : key_specs()) {
+        for (const auto& option : spec.cli) {
+            CAPTURE(spec.key, option);
+            CHECK(mcp_app->get_option_no_throw(option) != nullptr);
+            ++bound;
+        }
+    }
+    CHECK(bound >= 20);  // --mcp-host, --mcp-port/--port, --transport, --tls, ... (the server's flags)
 }
