@@ -47,6 +47,7 @@ add_executable(unit_tests
     unit/test_sap_identity.cpp
     unit/test_command_handler.cpp
     unit/test_doctor_checks.cpp
+    unit/test_screen_markdown_golden.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp

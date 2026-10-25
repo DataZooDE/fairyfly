@@ -1,0 +1,70 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 4,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 0,
+    "id": "wnd[0]/usr/lbl[0,0]",
+    "text": "Queue:",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 30,
+    "grid_row": 0,
+    "id": "wnd[0]/usr/lbl[30,0]",
+    "text": "Workers:",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[0,1]",
+    "text": "Ready",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 30,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[30,1]",
+    "text": "4",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "form_fields": [
+    {
+     "grid_col": 0,
+     "grid_row": 0,
+     "id": "wnd[0]/usr/lbl[0,0]",
+     "text": "Queue:",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 30,
+     "grid_row": 0,
+     "id": "wnd[0]/usr/lbl[30,0]",
+     "text": "Workers:",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 1,
+     "id": "wnd[0]/usr/lbl[0,1]",
+     "text": "Ready",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 30,
+     "grid_row": 1,
+     "id": "wnd[0]/usr/lbl[30,1]",
+     "text": "4",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "Status screen"
+ },
+ "output": "# Status screen\n\n**Screen ID:** ``\n\n## Status Information\n\n| Property | Value |\n|:---------|:------|\n| **Queue**    | Ready |\n| **Workers**  | 4     |\n\n## Report Output\n\n```\nQueue: Workers:\nReady 4\n```\n\n---\n**Screen Elements:** 4 top-level\n"
+}

@@ -1,0 +1,42 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 2,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[0,2]",
+    "text": "Delete drafts:",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 3,
+    "id": "wnd[0]/usr/lbl[0,3]",
+    "text": "Deleted 0 drafts",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "form_fields": [
+    {
+     "grid_col": 0,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[0,2]",
+     "text": "Delete drafts:",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 3,
+     "id": "wnd[0]/usr/lbl[0,3]",
+     "text": "Deleted 0 drafts",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "Report log"
+ },
+ "output": "# Report log\n\n**Screen ID:** ``\n\n## Report Output\n\n```\nDelete drafts:\nDeleted 0 drafts\n```\n\n---\n**Screen Elements:** 2 top-level\n"
+}
