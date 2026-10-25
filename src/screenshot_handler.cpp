@@ -28,10 +28,10 @@ _variant_t call_window(IDispatch* window, const wchar_t* method, const char* lab
     DISPID dispid;
     LPOLESTR method_name = const_cast<LPOLESTR>(method);
     HRESULT hr = window->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} method unavailable: 0x{:08X}", label, hr));
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} method unavailable: 0x{:08X}", label, static_cast<unsigned long>(hr)));
     _variant_t answer;
     hr = invoke(window, dispid, DISPATCH_METHOD, args, &answer);
-    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} failed: 0x{:08X}", label, hr));
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} failed: 0x{:08X}", label, static_cast<unsigned long>(hr)));
     return answer;
 }
 
@@ -245,16 +245,15 @@ Result save_hard_copy(const ComGuiWindowPtr& window, const std::string& output_f
 }
 
 /// The processing path: HardCopyToMemory, then crop (native pixels), scale, preview and the output as base64, to
-/// stdout or to a file.
-Result capture_processed(const ComGuiWindowPtr& window, const std::string& window_title,
-                         const cli::ScreenshotOptions& options) {
-    Result result;
+/// stdout or to a file. Fills `result`, which keeps what was set (e.g. displayed) when a later step throws.
+void capture_processed(const ComGuiWindowPtr& window, const std::string& window_title,
+                       const cli::ScreenshotOptions& options, Result& result) {
     // Processing path: Use HardCopyToMemory + CImg
     json capture_geometry = json::object();
     std::vector<uint8_t> png_bytes = ScreenshotHandler::hard_copy_png(window);
     if (png_bytes.empty()) {
         result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
-        return result;
+        return;
     }
 
     spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
@@ -317,7 +316,6 @@ Result capture_processed(const ComGuiWindowPtr& window, const std::string& windo
 
     result.status = Result::Status::Success;
     for (const auto& [key, value] : capture_geometry.items()) result.data[key] = value;
-    return result;
 }
 
 }  // namespace
@@ -351,9 +349,8 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         // size there (SAP's own HardCopy subsection cannot report it and can silently produce a blank image).
         const bool needs_processing = options.show || !options.scale.empty() || options.format == "base64" ||
                                       options.output_file == "-" || options.crop_x.has_value();
-        result = !needs_processing && !options.output_file.empty()
-            ? save_hard_copy(window, options.output_file)
-            : capture_processed(window, window_title, options);
+        if (!needs_processing && !options.output_file.empty()) result = save_hard_copy(window, options.output_file);
+        else capture_processed(window, window_title, options, result);
         if (result.status == Result::Status::Success) result.duration = timer.elapsed();
 
     } catch (const std::invalid_argument& e) {
