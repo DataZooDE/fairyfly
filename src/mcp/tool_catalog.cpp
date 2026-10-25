@@ -291,7 +291,7 @@ std::vector<ToolSpec> read_tool_specs() {
         "calls that omit `connection`. The result reports server_time (null: the scripting API has no server clock, "
         "server_time_source=\"unavailable\"), server_time_summary and client_time (PC clock, not the server's).",
         make_schema({{"session_id", str_min("Exact SAP GUI session id from gui_session_list (e.g. /app/con[0]/ses[0]).")}}),
-        annotations("Attach to a SAP GUI session", false, false, true), ToolOutput::Json,
+        annotations("Attach to a SAP GUI session", true, false, true), ToolOutput::Json,
         [](const json& a, const Policy&) {
             if (!a.contains("session_id"))
                 throw std::invalid_argument(
@@ -301,7 +301,7 @@ std::vector<ToolSpec> read_tool_specs() {
             Argv argv{"session", "attach"};
             push_option(argv, "--session-id", id);
             return argv;
-        }, false));
+        }, true));
 
     // gui_session_launch -------------------------------------------------------------------------------
     specs.push_back(make_spec(
@@ -356,14 +356,14 @@ std::vector<ToolSpec> read_tool_specs() {
         "Navigates the session to a transaction code (e.g. SE38, VA03, /nSM37). Opens the transaction's start "
         "screen; follow with gui_screen_read (small: `only`, `max_rows`) to see it.",
         make_schema({{"code", str_min("Transaction code, e.g. SE38 or /nSM37.")}, {"connection", conn}}, {"code"}),
-        annotations("Run a transaction code", false, false, false), ToolOutput::Json,
+        annotations("Run a transaction code", true, false, false), ToolOutput::Json,
         [](const json& a, const Policy& p) {
             const std::string code = get_str(a, "code");
             require_positional("code", code);
             Argv argv{"transaction", "start", code};
             push_connection(argv, a, p);
             return argv;
-        }, false));
+        }, true));
 
     // gui_screen_read --------------------------------------------------------------------------
     specs.push_back(make_spec(
@@ -625,14 +625,14 @@ std::vector<ToolSpec> read_tool_specs() {
         "as a new window; read it with gui_screen_read, pick an entry with gui_element_click (doubleclick on its row) "
         "{?gui_element_fill:or type the value with gui_element_fill, }and close it with gui_popup_close.",
         make_schema(with_element_aliases({{"element", str_min("Element ID of the field, e.g. wnd[0]/usr/ctxtFIELD.")}, {"connection", conn}})),
-        annotations("Open the F4 value help", false, false, false), ToolOutput::Json,
+        annotations("Open the F4 value help", true, false, false), ToolOutput::Json,
         [](const json& a, const Policy& p) {
             const std::string element = get_str(a, "element");
             require_positional("element", element);
             Argv argv{"element", "f4", element};
             push_connection(argv, a, p);
             return argv;
-        }, false));
+        }, true));
 
     // gui_menu_select --------------------------------------------------------------------------
     specs.push_back(make_spec(
