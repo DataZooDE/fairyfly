@@ -419,39 +419,10 @@ std::string elevation_text(ElevationType type) {
 
 } // namespace
 
-Plan MakePlan(const Diagnosis& d, const Options& o) {
-    Plan p;
-    p.operation = "setup";
-    p.tls = d.tls;
-    p.hostname = d.hostname;
-    p.port = d.port;
-    p.prefix = d.prefix;
-    p.ipports = d.ipports;
-    p.sid = d.sid;
-    p.user = d.user;
-    p.elevation = d.elevation;
-    p.url = endpoint_url(d.tls, d.hostname, d.port);
-    p.cert_mode = o.cert_mode;
-    p.force_binding = o.force_binding;
-    p.open_firewall = o.open_firewall;
-    p.cer_path = d.cer_path;
-    p.manifest_path = d.manifest_path;
-    p.config_path = d.config_path;
-    p.firewall_display = firewall_rule_name(d.port);
-    p.firewall_rule = d.firewall_name;
+namespace {
 
-    if (!d.identity_error.empty()) {
-        p.error = ErrorInfo{"USER_NOT_FOUND", d.identity_error, 2};
-        return p;
-    }
-
-    // ---- diagnosis items ----
-    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
-    if (d.manifest_unreadable) p.diagnosis.push_back({"setup_manifest", "warn", "unreadable: " + d.manifest_path});
-    else if (d.manifest) p.diagnosis.push_back({"setup_manifest", "ok", "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port)});
-    else p.diagnosis.push_back({"setup_manifest", "missing", "no setup recorded (" + d.manifest_path + ")"});
-
-    // ---- certificate ----
+/// MakePlan: certificate.
+void plan_certificate(Plan& p, const Diagnosis& d, const Options& o) {
     const bool tls = d.tls;
     std::string cert_thumb;   // thumbprint to bind when known
     StepItem cert_step;
@@ -496,9 +467,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     }
     p.thumbprint = cert_thumb;
     p.steps.push_back(cert_step);
-    const bool cert_will_be_new = p.create_cert;
+}
 
-    // ---- urlacl ----
+/// MakePlan: urlacl.
+void plan_urlacl(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
     {
         StepItem s = make_step("urlacl", "URL reservation " + d.prefix + " for " + d.user, "", "", true);
         if (!tls) {
@@ -532,8 +505,13 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         }
         p.steps.push_back(s);
     }
+}
 
-    // ---- sslcert ----
+/// MakePlan: sslcert.
+void plan_sslcert(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
     if (!tls) {
         p.steps.push_back(make_step("sslcert", "TLS binding", "skipped", "--no-tls: nothing to bind"));
         p.diagnosis.push_back({"sslcert", "skip", "--no-tls"});
@@ -585,8 +563,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         p.steps.push_back(s);
         p.diagnosis.push_back({"sslcert", diag_status, diag});
     }
+}
 
-    // ---- firewall ----
+/// MakePlan: firewall.
+void plan_firewall(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     if (!tls) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--no-tls: loopback only"));
     } else if (!o.open_firewall) {
@@ -605,15 +586,21 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "would_create", "inbound TCP " + std::to_string(d.port) + " (rule name " + p.firewall_rule + ")", true));
         p.diagnosis.push_back({"firewall", "missing", "rule '" + p.firewall_display + "' does not exist"});
     }
+}
 
-    // ---- certificate_export ----
+/// MakePlan: certificate_export.
+void plan_certificate_export(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
+    const std::string cert_status = p.step("certificate")->status;   // set by plan_certificate
     if (!tls) {
         p.steps.push_back(make_step("certificate_export", "Export the public certificate", "skipped", "--no-tls"));
     } else if (cert_will_be_new || (cert_thumb.empty())) {
         // the certificate does not exist yet (or is blocked)
         p.steps.push_back(make_step("certificate_export", "Export the public certificate to " + d.cer_path,
-                                    cert_step.status == "blocked" ? "skipped" : (d.cer == CerState::Missing ? "would_create" : "would_update"),
-                                    cert_step.status == "blocked" ? "no usable certificate" : "after the certificate exists"));
+                                    cert_status == "blocked" ? "skipped" : (d.cer == CerState::Missing ? "would_create" : "would_update"),
+                                    cert_status == "blocked" ? "no usable certificate" : "after the certificate exists"));
     } else if (d.cer == CerState::Matches) {
         p.steps.push_back(make_step("certificate_export", "Export the public certificate to " + d.cer_path, "unchanged", "file matches the certificate"));
     } else {
@@ -621,8 +608,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
                                     d.cer == CerState::Missing ? "would_create" : "would_update",
                                     d.cer == CerState::Missing ? "not exported yet" : "file holds a different certificate"));
     }
+}
 
-    // ---- config ----
+/// MakePlan: config.
+void plan_config(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     {
         const auto want = desired_config(tls, d.hostname, d.port, o.allow_ip);
         std::vector<std::string> differing;
@@ -644,8 +634,13 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             p.human.push_back({"config_keys", "Edit " + d.config_path + " and set:" + keys});
         }
     }
+}
 
-    // ---- manifest ----
+/// MakePlan: manifest.
+void plan_manifest(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
     {
         Manifest m;
         m.mode = tls ? "tls" : "no-tls";
@@ -719,12 +714,16 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             p.human.push_back({"previous_setup", "A previous setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) +
                                                      " is recorded; it is replaced in the manifest but its reservations stay. Run 'fairyfly mcp teardown' first to remove it cleanly."});
     }
+}
 
-    // ---- port ----
+/// MakePlan: port.
+void plan_port(Plan& p, const Diagnosis& d, const Options&) {
     p.diagnosis.push_back({"port", d.port_listening ? "info" : "ok",
                            d.port_listening ? "port " + std::to_string(d.port) + " is already served (tray or server running)" : "port " + std::to_string(d.port) + " is free"});
+}
 
-    // ---- summary flags ----
+/// MakePlan: summary flags.
+void plan_summary_flags(Plan& p, const Diagnosis&, const Options&) {
     bool nothing = true;
     for (const auto& s : p.steps) {
         if (s.status == "blocked") p.blocked = true;
@@ -734,8 +733,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         }
     }
     p.nothing = nothing && !p.blocked;
+}
 
-    // ---- Left for a human ----
+/// MakePlan: Left for a human.
+void plan_left_for_a_human(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     if (tls) {
         if (o.cert_mode == CertMode::SelfSigned)
             p.human.push_back({"trust_certificate", "Trust the exported certificate " + d.cer_path + " on every client:\n" + [&] {
@@ -753,11 +755,61 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     }
     if (d.tls_probe.status == "ok" && !d.tls_probe.protocol.empty() && (d.tls_probe.protocol == "TLS 1.0" || d.tls_probe.protocol == "TLS 1.1" || d.tls_probe.protocol.rfind("SSL", 0) == 0))
         p.human.push_back({"schannel", "The server negotiated " + d.tls_probe.protocol + ": raise the machine's Schannel policy to TLS 1.2 or newer (registry SCHANNEL\\Protocols)."});
+}
 
-    // ---- next steps ----
+/// MakePlan: next steps.
+void plan_next_steps(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
     p.next_steps.push_back("fairyfly mcp token create NAME   (bearer token for a client; shown once)");
     p.next_steps.push_back(tls ? "fairyfly mcp --http   (or --tray --http) serves " + p.url : "fairyfly mcp --http   serves " + p.url);
     p.next_steps.push_back("fairyfly mcp doctor");
+}
+
+}  // namespace
+
+Plan MakePlan(const Diagnosis& d, const Options& o) {
+    Plan p;
+    p.operation = "setup";
+    p.tls = d.tls;
+    p.hostname = d.hostname;
+    p.port = d.port;
+    p.prefix = d.prefix;
+    p.ipports = d.ipports;
+    p.sid = d.sid;
+    p.user = d.user;
+    p.elevation = d.elevation;
+    p.url = endpoint_url(d.tls, d.hostname, d.port);
+    p.cert_mode = o.cert_mode;
+    p.force_binding = o.force_binding;
+    p.open_firewall = o.open_firewall;
+    p.cer_path = d.cer_path;
+    p.manifest_path = d.manifest_path;
+    p.config_path = d.config_path;
+    p.firewall_display = firewall_rule_name(d.port);
+    p.firewall_rule = d.firewall_name;
+
+    if (!d.identity_error.empty()) {
+        p.error = ErrorInfo{"USER_NOT_FOUND", d.identity_error, 2};
+        return p;
+    }
+
+    // ---- diagnosis items ----
+    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
+    if (d.manifest_unreadable) p.diagnosis.push_back({"setup_manifest", "warn", "unreadable: " + d.manifest_path});
+    else if (d.manifest) p.diagnosis.push_back({"setup_manifest", "ok", "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port)});
+    else p.diagnosis.push_back({"setup_manifest", "missing", "no setup recorded (" + d.manifest_path + ")"});
+
+    plan_certificate(p, d, o);
+    plan_urlacl(p, d, o);
+    plan_sslcert(p, d, o);
+    plan_firewall(p, d, o);
+    plan_certificate_export(p, d, o);
+    plan_config(p, d, o);
+    plan_manifest(p, d, o);
+    plan_port(p, d, o);
+    plan_summary_flags(p, d, o);
+    plan_left_for_a_human(p, d, o);
+    plan_next_steps(p, d, o);
     return p;
 }
 
