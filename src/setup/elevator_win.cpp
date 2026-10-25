@@ -16,6 +16,7 @@
 #include "include/auth/crypto.h"
 #include "include/setup/setup_hosts.h"
 #include "win_util.h"
+#include "include/system/unique_handle.h"
 
 namespace fairyfly::setup {
 
@@ -23,15 +24,12 @@ namespace {
 
 using namespace win;
 
-struct TokenHandle {
-    HANDLE h = nullptr;
-    TokenHandle() {
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &h)) h = nullptr;
-    }
-    ~TokenHandle() {
-        if (h) CloseHandle(h);
-    }
-};
+/// This process's token (empty when it cannot be opened).
+system::UniqueHandle process_token() {
+    system::UniqueHandle token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, token.out())) token.reset();
+    return token;
+}
 
 std::string sid_to_string(PSID sid) {
     LPWSTR text = nullptr;
@@ -61,41 +59,41 @@ std::string local_app_data_dir() { return text::path_utf8(config::Environment::p
 class RealElevator : public Elevator {
 public:
     bool is_elevated() override {
-        TokenHandle token;
-        if (!token.h) return false;
+        const auto token = process_token();
+        if (!token) return false;
         TOKEN_ELEVATION e{};
         DWORD size = 0;
-        return GetTokenInformation(token.h, TokenElevation, &e, sizeof(e), &size) && e.TokenIsElevated != 0;
+        return GetTokenInformation(token.get(), TokenElevation, &e, sizeof(e), &size) && e.TokenIsElevated != 0;
     }
 
     ElevationType elevation_type() override {
-        TokenHandle token;
-        if (!token.h) return ElevationType::Unknown;
+        const auto token = process_token();
+        if (!token) return ElevationType::Unknown;
         TOKEN_ELEVATION_TYPE type{};
         DWORD size = 0;
-        if (!GetTokenInformation(token.h, TokenElevationType, &type, sizeof(type), &size)) return ElevationType::Unknown;
+        if (!GetTokenInformation(token.get(), TokenElevationType, &type, sizeof(type), &size)) return ElevationType::Unknown;
         if (type == TokenElevationTypeFull) return ElevationType::Elevated;
         if (type == TokenElevationTypeLimited) return ElevationType::AdminFiltered;
         return is_elevated() ? ElevationType::Elevated : ElevationType::StandardUser;   // Default: UAC off or plain user
     }
 
     std::string current_user_sid() override {
-        TokenHandle token;
-        if (!token.h) return {};
+        const auto token = process_token();
+        if (!token) return {};
         DWORD size = 0;
-        GetTokenInformation(token.h, TokenUser, nullptr, 0, &size);
+        GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
         std::vector<BYTE> buffer(size);
-        if (!GetTokenInformation(token.h, TokenUser, buffer.data(), size, &size)) return {};
+        if (!GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size)) return {};
         return sid_to_string(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid);
     }
 
     std::string current_user_name() override {
-        TokenHandle token;
-        if (!token.h) return {};
+        const auto token = process_token();
+        if (!token) return {};
         DWORD size = 0;
-        GetTokenInformation(token.h, TokenUser, nullptr, 0, &size);
+        GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
         std::vector<BYTE> buffer(size);
-        if (!GetTokenInformation(token.h, TokenUser, buffer.data(), size, &size)) return {};
+        if (!GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size)) return {};
         return account_of(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid);
     }
 
