@@ -159,6 +159,13 @@ private:
     };
     /// Admission of a call, before any SAP lookup: policy, token scope, owner binding, rate limits, owner-mode
     /// discovery and launch rules. Charges the rate limiters. nullopt: admitted.
+    /// Owner-mode listings, verified row by row (dispatcher.cpp); a refusal when they cannot be verified in time.
+    std::optional<CallRefusal> filter_owner_session_listing(Result& result, const Principal& principal,
+                                                            const std::function<bool()>& listing_interrupted);
+    std::optional<CallRefusal> filter_owner_connection_listing(Result& result, const std::string& name, const Principal& principal,
+                                                               const std::function<bool()>& listing_interrupted);
+    void auto_attach_and_retry(Result& result, const std::string& name, const Principal& principal, McpCallRecord& record,
+                               const std::function<Result()>& retry);
     std::optional<CallRefusal> admission_refusal(const ToolSpec* spec, const std::string& name, const json& args,
                                                  const CallContext& ctx, bool selection_input);
     /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a

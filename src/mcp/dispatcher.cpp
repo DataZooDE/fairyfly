@@ -466,6 +466,164 @@ bool CommandDispatcher::recheck_transaction(const Principal& principal, const To
     return tcode_left;
 }
 
+/// Owner mode: a session listing keeps only the sessions whose live identity (resolved again, or from the worker's
+/// verified target) is the endpoint's and the token's; anything unverifiable is a refusal, never unfiltered data.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::filter_owner_session_listing(
+    Result& result, const Principal& principal, const std::function<bool()>& listing_interrupted) {
+    if (listing_interrupted())
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
+    if (result.status != Result::Status::Success || !result.data.is_object() ||
+        !result.data.contains("connections") || !result.data["connections"].is_array() ||
+        (!owner_session_listing_provider_ && !target_resolver_))
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified against the endpoint owner's SAP identity"};
+    json kept = json::array();
+    long long total_sessions = 0;
+    for (const auto& connection : result.data["connections"]) {
+        if (listing_interrupted())
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
+        if (!connection.is_object() || !connection.contains("sessions") || !connection["sessions"].is_array())
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified against the endpoint owner's SAP identity"};
+        std::map<std::string, json> groups;
+        for (const auto& session : connection["sessions"]) {
+            if (listing_interrupted())
+                return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
+            if (!session.is_object() || !session.contains("id") || !session["id"].is_string()) continue;
+            TargetQuery query;
+            query.session_id = session["id"].get<std::string>();
+            auth::SessionTarget target;
+            if (owner_session_listing_provider_) {
+                if (!session.contains("verified_target") || !session["verified_target"].is_object()) continue;
+                const auto& verified = session["verified_target"];
+                if (!verified.contains("system") || !verified["system"].is_string() ||
+                    !verified.contains("user") || !verified["user"].is_string() ||
+                    !verified.contains("connection_name") || !verified["connection_name"].is_string()) continue;
+                target.system = verified["system"].get<std::string>();
+                target.user = verified["user"].get<std::string>();
+                target.connection_name = verified["connection_name"].get<std::string>();
+            } else {
+                try { target = target_resolver_(query); } catch (...) { target.ambiguous = true; }
+            }
+            if (listing_interrupted())
+                return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
+            if (target.ambiguous || target.system.empty() || target.user.empty()) continue;
+            if (!owner_target_visible(principal, target)) continue;
+            // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
+            // Only return the ID that was resolved and metadata from that live resolution.
+            if (!groups.count(target.connection_name)) groups[target.connection_name] = json::array();
+            groups[target.connection_name].push_back({{"id", query.session_id}});
+            ++total_sessions;
+        }
+        for (auto& [connection_name, sessions] : groups) {
+            json visible = {{"sessions", std::move(sessions)}};
+            visible["session_count"] = visible["sessions"].size();
+            if (!connection_name.empty()) visible["description"] = connection_name;
+            kept.push_back(std::move(visible));
+        }
+    }
+    if (listing_interrupted())
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
+    const auto total_connections = kept.size();
+    result.data = {{"connections", std::move(kept)}, {"total_connections", total_connections},
+                   {"total_sessions", total_sessions}};
+    result.diagnostics = json();
+    return std::nullopt;
+}
+
+/// Owner mode: a connection listing (and the owner doctor) keeps only the saved connections whose live facts and
+/// identity match the endpoint's and the token's, within the listing budget.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::filter_owner_connection_listing(
+    Result& result, const std::string& name, const Principal& principal, const std::function<bool()>& listing_interrupted) {
+    if (listing_interrupted())
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time"};
+    if (result.status != Result::Status::Success || !result.data.is_object() ||
+        !result.data.contains("connections") || !result.data["connections"].is_array() ||
+        !facts_provider_ || !target_resolver_)
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified against the endpoint owner's SAP identity"};
+    // A busy SAP window can hold a facts probe for five seconds. The snapshot
+    // itself performs no COM validation; this budget covers the full listing.
+    json kept = json::array();
+    for (const auto& row : result.data["connections"]) {
+        if (listing_interrupted())
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time"};
+        if (!row.is_object())
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified against the endpoint owner's SAP identity"};
+        const auto id = row.contains("id") ? int_from_json(row["id"]) : std::nullopt;
+        if (!id || *id < 0 ||
+            !row.contains("session_id") || !row["session_id"].is_string() ||
+            !row.contains("server_session_key") || !row["server_session_key"].is_string() ||
+            !row.contains("cache_generation") || !row["cache_generation"].is_string()) continue;
+        const std::string session_id = row["session_id"].get<std::string>();
+        const std::string key = row["server_session_key"].get<std::string>();
+        const std::string generation = row["cache_generation"].get<std::string>();
+        if (session_id.empty() || key.empty() || generation.empty()) continue;
+        std::optional<audit::SapFacts> facts;
+        auth::SessionTarget target;
+        target.ambiguous = true;
+        try {
+            facts = facts_provider_(*id);
+            if (!listing_interrupted())
+                target = target_resolver_(TargetQuery{"", "", *id});
+        } catch (...) { continue; }
+        if (listing_interrupted())
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time"};
+        if (!facts || facts->connection_id != id ||
+            facts->session_identity != session_id + "|" + key + "|" + generation ||
+            facts->system.empty() || facts->client.empty() || facts->user.empty() ||
+            target.ambiguous || target.system != facts->system + "/" + facts->client ||
+            target.user != facts->user || target.connection_name.empty()) continue;
+        if (!owner_target_visible(principal, target)) continue;
+        kept.push_back({{"id", *id}, {"session_id", session_id},
+                        {"description", target.connection_name}, {"valid", true}});
+    }
+    const auto count = kept.size();
+    result.data = {{"connections", std::move(kept)}, {"count", count}};
+    result.diagnostics = json();
+    if (name == "gui_doctor") {
+        if (!auth::filter_listing_for_connections(principal, "gui_connection_list", result))
+            return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the owner diagnostic could not be filtered"};
+        const auto visible_count = result.data["count"].get<size_t>();
+        const bool ready = visible_count > 0;
+        result.data = {{"overall_health", ready ? "ok" : "warning"},
+                       {"checks", json::array({{{"name", "owner_connections"},
+                                                {"status", ready ? "pass" : "warn"},
+                                                {"message", ready ? "An allowed SAP connection is ready" :
+                                                                    "No allowed SAP connection is ready"},
+                                                {"count", visible_count}}})}};
+    }
+    return std::nullopt;
+}
+
+/// stdio and link: a call that finds no saved connection attaches to the only open SAP GUI session and runs again
+/// (`retry`), so the first gui_screen_read works without a gui_session_attach. Several or no sessions: an error.
+void CommandDispatcher::auto_attach_and_retry(Result& result, const std::string& name, const Principal& principal,
+                                              McpCallRecord& record, const std::function<Result()>& retry) {
+    const Result listed = invoke({"session", "list"});
+    const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
+    if (listed.status != Result::Status::Success) {
+        // keep NO_CONNECTIONS: SAP GUI could not be asked
+    } else if (sessions.empty()) {
+        result = Result::fail("NO_SESSIONS", "no SAP GUI session is open on this desktop");
+    } else if (sessions.size() > 1) {
+        result = Result::fail("MULTIPLE_SESSIONS", std::to_string(sessions.size()) +
+                                                     " SAP GUI sessions are open and none is attached. Sessions: " +
+                                                     dump_compact(sessions));
+    } else {
+        const std::string session_id = sessions[0].value("session_id", "");
+        Result attached = invoke({"session", "attach", "--session-id", session_id});
+        if (attached.status != Result::Status::Success) {
+            result = attached;
+        } else {
+            if (attached.data.is_object() && attached.data.contains("connection_file_id"))
+                if (auto id = int_from_json(attached.data["connection_file_id"])) {
+                    set_sticky_connection(principal_key(principal), *id, "");
+                    record.connection = id;
+                }
+            spdlog::info("{}: attached to the only open SAP GUI session {}", name, session_id);
+            result = retry();
+        }
+    }
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1120,36 +1278,10 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         catch (...) { return fail("OWNER_IDENTITY_UNKNOWN", "the session list cannot be verified"); }
     } else {
         result = invoke_selected(argv);
-        // 5b. auto-attach (stdio, link): a call that finds no saved connection attaches to the only open SAP GUI
-        // session and runs again, so the first gui_screen_read works without a gui_session_attach.
+        // 5b. auto-attach (stdio, link)
         if (policy_.auto_attach && !ctx.http && !worker_bound && accepts_connection && !record.connection &&
-            result.status != Result::Status::Success && result_error_code(result) == "NO_CONNECTIONS") {
-            const Result listed = invoke({"session", "list"});
-            const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
-            if (listed.status != Result::Status::Success) {
-                // keep NO_CONNECTIONS: SAP GUI could not be asked
-            } else if (sessions.empty()) {
-                result = Result::fail("NO_SESSIONS", "no SAP GUI session is open on this desktop");
-            } else if (sessions.size() > 1) {
-                result = Result::fail("MULTIPLE_SESSIONS", std::to_string(sessions.size()) +
-                                                             " SAP GUI sessions are open and none is attached. Sessions: " +
-                                                             dump_compact(sessions));
-            } else {
-                const std::string session_id = sessions[0].value("session_id", "");
-                Result attached = invoke({"session", "attach", "--session-id", session_id});
-                if (attached.status != Result::Status::Success) {
-                    result = attached;
-                } else {
-                    if (attached.data.is_object() && attached.data.contains("connection_file_id"))
-                        if (auto id = int_from_json(attached.data["connection_file_id"])) {
-                            set_sticky_connection(principal_key(principal), *id, "");
-                            record.connection = id;
-                        }
-                    spdlog::info("{}: attached to the only open SAP GUI session {}", name, session_id);
-                    result = invoke_selected(argv);
-                }
-            }
-        }
+            result.status != Result::Status::Success && result_error_code(result) == "NO_CONNECTIONS")
+            auto_attach_and_retry(result, name, principal, record, [&] { return invoke_selected(argv); });
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts) {
@@ -1193,124 +1325,12 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     const auto listing_interrupted = [&] {
         return std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled());
     };
-    if (owner_mode(ctx) && name == "gui_session_list") {
-        if (listing_interrupted())
-            return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
-        if (result.status != Result::Status::Success || !result.data.is_object() ||
-            !result.data.contains("connections") || !result.data["connections"].is_array() ||
-            (!owner_session_listing_provider_ && !target_resolver_))
-            return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified against the endpoint owner's SAP identity");
-        json kept = json::array();
-        long long total_sessions = 0;
-        for (const auto& connection : result.data["connections"]) {
-            if (listing_interrupted())
-                return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
-            if (!connection.is_object() || !connection.contains("sessions") || !connection["sessions"].is_array())
-                return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified against the endpoint owner's SAP identity");
-            std::map<std::string, json> groups;
-            for (const auto& session : connection["sessions"]) {
-                if (listing_interrupted())
-                    return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
-                if (!session.is_object() || !session.contains("id") || !session["id"].is_string()) continue;
-                TargetQuery query;
-                query.session_id = session["id"].get<std::string>();
-                auth::SessionTarget target;
-                if (owner_session_listing_provider_) {
-                    if (!session.contains("verified_target") || !session["verified_target"].is_object()) continue;
-                    const auto& verified = session["verified_target"];
-                    if (!verified.contains("system") || !verified["system"].is_string() ||
-                        !verified.contains("user") || !verified["user"].is_string() ||
-                        !verified.contains("connection_name") || !verified["connection_name"].is_string()) continue;
-                    target.system = verified["system"].get<std::string>();
-                    target.user = verified["user"].get<std::string>();
-                    target.connection_name = verified["connection_name"].get<std::string>();
-                } else {
-                    try { target = target_resolver_(query); } catch (...) { target.ambiguous = true; }
-                }
-                if (listing_interrupted())
-                    return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
-                if (target.ambiguous || target.system.empty() || target.user.empty()) continue;
-                if (!owner_target_visible(principal, target)) continue;
-                // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
-                // Only return the ID that was resolved and metadata from that live resolution.
-                if (!groups.count(target.connection_name)) groups[target.connection_name] = json::array();
-                groups[target.connection_name].push_back({{"id", query.session_id}});
-                ++total_sessions;
-            }
-            for (auto& [connection_name, sessions] : groups) {
-                json visible = {{"sessions", std::move(sessions)}};
-                visible["session_count"] = visible["sessions"].size();
-                if (!connection_name.empty()) visible["description"] = connection_name;
-                kept.push_back(std::move(visible));
-            }
-        }
-        if (listing_interrupted())
-            return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
-        const auto total_connections = kept.size();
-        result.data = {{"connections", std::move(kept)}, {"total_connections", total_connections},
-                       {"total_sessions", total_sessions}};
-        result.diagnostics = json();
-    }
-
-    if (owner_connection_list) {
-        if (listing_interrupted())
-            return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
-        if (result.status != Result::Status::Success || !result.data.is_object() ||
-            !result.data.contains("connections") || !result.data["connections"].is_array() ||
-            !facts_provider_ || !target_resolver_)
-            return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified against the endpoint owner's SAP identity");
-        // A busy SAP window can hold a facts probe for five seconds. The snapshot
-        // itself performs no COM validation; this budget covers the full listing.
-        json kept = json::array();
-        for (const auto& row : result.data["connections"]) {
-            if (listing_interrupted())
-                return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
-            if (!row.is_object())
-                return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified against the endpoint owner's SAP identity");
-            const auto id = row.contains("id") ? int_from_json(row["id"]) : std::nullopt;
-            if (!id || *id < 0 ||
-                !row.contains("session_id") || !row["session_id"].is_string() ||
-                !row.contains("server_session_key") || !row["server_session_key"].is_string() ||
-                !row.contains("cache_generation") || !row["cache_generation"].is_string()) continue;
-            const std::string session_id = row["session_id"].get<std::string>();
-            const std::string key = row["server_session_key"].get<std::string>();
-            const std::string generation = row["cache_generation"].get<std::string>();
-            if (session_id.empty() || key.empty() || generation.empty()) continue;
-            std::optional<audit::SapFacts> facts;
-            auth::SessionTarget target;
-            target.ambiguous = true;
-            try {
-                facts = facts_provider_(*id);
-                if (!listing_interrupted())
-                    target = target_resolver_(TargetQuery{"", "", *id});
-            } catch (...) { continue; }
-            if (listing_interrupted())
-                return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
-            if (!facts || facts->connection_id != id ||
-                facts->session_identity != session_id + "|" + key + "|" + generation ||
-                facts->system.empty() || facts->client.empty() || facts->user.empty() ||
-                target.ambiguous || target.system != facts->system + "/" + facts->client ||
-                target.user != facts->user || target.connection_name.empty()) continue;
-            if (!owner_target_visible(principal, target)) continue;
-            kept.push_back({{"id", *id}, {"session_id", session_id},
-                            {"description", target.connection_name}, {"valid", true}});
-        }
-        const auto count = kept.size();
-        result.data = {{"connections", std::move(kept)}, {"count", count}};
-        result.diagnostics = json();
-        if (name == "gui_doctor") {
-            if (!auth::filter_listing_for_connections(principal, "gui_connection_list", result))
-                return fail("OWNER_IDENTITY_UNKNOWN", "the owner diagnostic could not be filtered");
-            const auto visible_count = result.data["count"].get<size_t>();
-            const bool ready = visible_count > 0;
-            result.data = {{"overall_health", ready ? "ok" : "warning"},
-                           {"checks", json::array({{{"name", "owner_connections"},
-                                                    {"status", ready ? "pass" : "warn"},
-                                                    {"message", ready ? "An allowed SAP connection is ready" :
-                                                                        "No allowed SAP connection is ready"},
-                                                    {"count", visible_count}}})}};
-        }
-    }
+    if (owner_mode(ctx) && name == "gui_session_list")
+        if (auto refused = filter_owner_session_listing(result, principal, listing_interrupted))
+            return fail(refused->code, refused->message, refused->hint);
+    if (owner_connection_list)
+        if (auto refused = filter_owner_connection_listing(result, name, principal, listing_interrupted))
+            return fail(refused->code, refused->message, refused->hint);
 
     // Attaching changes the selected connection. Re-read the saved connection created by the attach and withhold
     // the result if its live session or SAP user differs from the pre-call target. Do this before shaping or sticky state.
