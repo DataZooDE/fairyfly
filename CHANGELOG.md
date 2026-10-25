@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### One environment writer, one tray contract (2026-10-25 code review)
+
+- Environment variables are written through `config::set_process_env`/`unset_process_env` and read through the
+  wide API: a value outside the ANSI code page (for example a user profile path with an umlaut in `LOCALAPPDATA`)
+  now arrives intact. `FAIRYFLY_*` names are spelled only in `config/environment.h` (guard test).
+- The names the tray starter shares with the trays and the link (window class, messages, Run values, registry
+  keys, the notification AUMID and CLSID) live in `tray/tray_contract.h` (guard test).
+- Tray tooltips are cut at 127 UTF-16 units between characters, with an ellipsis, in both trays (a byte cut could
+  split an umlaut of an organisation or account name). The link states are named once; `link run` restores the
+  previous Ctrl+C handler when it returns; the unused tray clipboard is gone.
+
 ### Fewer copies in the handler, engine, screen filter and trays (2026-10-25 code review)
 
 - `@active` paths resolve through one helper; click, fill and F4 build their ELEMENT_NOT_FOUND answer through one
