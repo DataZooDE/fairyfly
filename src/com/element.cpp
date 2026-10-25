@@ -20,6 +20,15 @@ namespace fairyfly {
 namespace sap {
 
 namespace {
+/// A BSTR argument from UTF-8 with its exact length (embedded NULs stay).
+_variant_t bstr_arg(const std::string& utf8) {
+    const std::wstring wide = com::utf8_to_wide(utf8);
+    _variant_t value;
+    value.vt = VT_BSTR;
+    value.bstrVal = SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+    return value;
+}
+
 /// A toolbar's by-position answer that is a string ("" when the call fails or answers something else).
 std::string text_result(HRESULT hr, const _variant_t& result) {
     return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : std::string();
@@ -466,10 +475,8 @@ void ComGuiElement::select(bool selected) {
             }
 
             // Call Select() method with no parameters
-            DISPPARAMS params = {nullptr, nullptr, 0, 0};
             _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                &params, &result, nullptr, nullptr);
+            hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
             if (FAILED(hr)) {
                 trace.mark_error(fmt::format("Failed to call Select(): 0x{:08X}", hr));
                 throw ComException("Failed to select tab or menu element", hr);
@@ -490,10 +497,8 @@ void ComGuiElement::select(bool selected) {
             _bstr_t sel_method("Select");
             DISPID sel_dispid;
             if (SUCCEEDED(get_dispid_via_typeinfo(dispatch_, sel_method.GetBSTR(), &sel_dispid))) {
-                DISPPARAMS params = {nullptr, nullptr, 0, 0};
                 _variant_t result;
-                if (SUCCEEDED(dispatch_->Invoke(sel_dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                              &params, &result, nullptr, nullptr))) {
+                if (SUCCEEDED(invoke(dispatch_, sel_dispid, DISPATCH_METHOD, {}, &result))) {
                     trace.mark_success();
                     spdlog::debug("RadioButton selected via Select(): {}", get_id());
                     return;
@@ -509,14 +514,7 @@ void ComGuiElement::select(bool selected) {
             throw ComException("Selected property not found", hr);
         }
 
-        _variant_t var;
-        var.vt = VT_BOOL;
-        var.boolVal = selected ? VARIANT_TRUE : VARIANT_FALSE;
-
-        DISPID propput_id = DISPID_PROPERTYPUT;
-        DISPPARAMS params = {(VARIANT*)&var, &propput_id, 1, 1};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT,
-                            &params, nullptr, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYPUT, {_variant_t(selected)});   // VT_BOOL
         if (FAILED(hr)) {
             trace.mark_error(fmt::format("Failed to set Selected: 0x{:08X}", hr));
             throw ComException("Failed to set selected state", hr);
@@ -750,30 +748,10 @@ std::vector<std::string> ComGuiElement::get_all_node_keys() const {
 
                 // Enumerate items (0-based indexing)
                 for (int i = 0; i < count; ++i) {
-                    VARIANT index_var;
-                    com::VariantGuard index_guard(&index_var);
-                    index_var.vt = VT_I4;
-                    index_var.lVal = i;
-
-                    DISPPARAMS item_params;
-                    item_params.cArgs = 1;
-                    item_params.rgvarg = &index_var;
-                    item_params.cNamedArgs = 0;
-                    item_params.rgdispidNamedArgs = nullptr;
-
                     VARIANT item_result_var;
                     com::VariantGuard item_result_guard(&item_result_var);
 
-                    hr = coll->Invoke(
-                        item_dispid,
-                        IID_NULL,
-                        LOCALE_USER_DEFAULT,
-                        DISPATCH_METHOD,
-                        &item_params,
-                        item_result_guard.get(),
-                        nullptr,
-                        nullptr
-                    );
+                    hr = invoke(coll, item_dispid, DISPATCH_METHOD, {_variant_t(static_cast<long>(i))}, item_result_guard.get());   // VT_I4, as SAP expects
 
                     if (SUCCEEDED(hr)) {
                         // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
@@ -813,32 +791,10 @@ std::string ComGuiElement::get_node_text_by_key(const std::string& key) const {
             return "";
         }
 
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        const auto wide_key = com::utf8_to_wide(key);
-        arg_var.bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
 
-        hr = dispatch_->Invoke(
-            dispid,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_METHOD,
-            &params,
-            result_guard.get(),
-            nullptr,
-            nullptr
-        );
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(key)}, result_guard.get());
 
         // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
         std::string text;
@@ -868,24 +824,10 @@ std::string ComGuiElement::get_node_path_by_key(const std::string& key) const {
             return "";
         }
 
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        const auto wide_key = com::utf8_to_wide(key);
-        arg_var.bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
 
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, result_guard.get(), nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(key)}, result_guard.get());
 
         // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
         std::string path;
@@ -938,22 +880,10 @@ std::vector<std::string> ComGuiElement::get_column_order() const {
                     hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
                     if (SUCCEEDED(hr)) {
                         for (int i = 0; i < count; ++i) {
-                            VARIANT index_var;
-                            com::VariantGuard index_guard(&index_var);
-                            index_var.vt = VT_I4;
-                            index_var.lVal = i;
-
-                            DISPPARAMS item_params;
-                            item_params.cArgs = 1;
-                            item_params.rgvarg = &index_var;
-                            item_params.cNamedArgs = 0;
-                            item_params.rgdispidNamedArgs = nullptr;
-
                             VARIANT item_result_var;
                             com::VariantGuard item_result_guard(&item_result_var);
 
-                            hr = coll->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                            DISPATCH_METHOD, &item_params, item_result_guard.get(), nullptr, nullptr);
+                            hr = invoke(coll, item_dispid, DISPATCH_METHOD, {_variant_t(static_cast<long>(i))}, item_result_guard.get());   // VT_I4, as SAP expects
 
                             // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
                             if (SUCCEEDED(hr)) {
