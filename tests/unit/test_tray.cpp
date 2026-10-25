@@ -7,10 +7,16 @@
 #include <map>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <thread>
 
 #include "include/tray/tray.h"
+#include "include/tray/tray_contract.h"
+
+#include <windows.h>
+#include <objbase.h>
 #include "include/version.h"
 
 using namespace fairyfly;
@@ -1480,4 +1486,34 @@ TEST_CASE("tray tooltip: at most 127 UTF-16 units, cut between characters, with 
     for (int i = 0; i < 70; ++i) emoji += "\xF0\x9F\x98\x80";
     const std::string cut_emoji = fit_tooltip(emoji);
     CHECK(cut_emoji == emoji.substr(0, 62 * 4) + "...");
+}
+
+TEST_CASE("tray contract: the names other processes rely on are spelled once", "[tray][contract]") {
+    // review 2026-10-25: the launcher (installer --close, autostart cleanup) hard-coded the tray's window class,
+    // messages, registry keys and the notification CLSID; a rename on one side broke the other silently
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    const std::vector<std::string> names = {"fairyfly_tray_window", "fairyfly-tray-quit", "fairyfly-tray-show-menu",
+                                            "DAAF1065", "DataZoo.fairyfly", "DataZoo\\fairyfly\\tray",
+                                            "CurrentVersion\\Run\"", "L\"fairyfly-link\"", "L\"fairyfly-mcp\"",
+                                            "ValueName = \""};  // the Run values (not the link's client label)
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h")) continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel == fs::path("include") / "tray" / "tray_contract.h") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (const auto& name : names)
+            if (text.find(name) != std::string::npos) offenders.push_back(rel.string() + ": " + name);
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}
+
+TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][contract]") {
+    GUID clsid{};
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
+    CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
 }

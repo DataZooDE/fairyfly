@@ -1,5 +1,6 @@
 #include "include/text/utf8.h"
 #include "include/tray/tray_win32.h"
+#include "include/tray/tray_contract.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -32,10 +33,10 @@ constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTickMs = 2000;
 constexpr int kIconGiveUpTicks = 30;   // 60 s without a taskbar: tell the person once
 constexpr int kFirstCommandId = 1000;
-constexpr const wchar_t* kWindowClass = L"fairyfly_tray_window";
 // Another process (a second start, fairyfly-tray.exe --close from the installer) talks to a running tray through these.
-constexpr const wchar_t* kShowMenuMessage = L"fairyfly-tray-show-menu";
-constexpr const wchar_t* kQuitMessage = L"fairyfly-tray-quit";
+using contract::kQuitMessage;
+using contract::kShowMenuMessage;
+using contract::kWindowClass;
 
 const wchar_t* window_title(TrayKind kind) { return kind == TrayKind::Link ? L"fairyfly link tray" : L"fairyfly MCP tray"; }
 
@@ -503,7 +504,7 @@ public:
     }
 
 private:
-    static constexpr const wchar_t* kSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    static constexpr const wchar_t* kSubKey = contract::kRunKey;
 };
 
 class Win32TraySettings : public TraySettings {
@@ -522,7 +523,7 @@ public:
     }
 
 private:
-    static constexpr const wchar_t* kSubKey = L"Software\\DataZoo\\fairyfly\\tray";
+    static constexpr const wchar_t* kSubKey = contract::kSettingsKey;
 };
 
 class Win32SingleInstance : public SingleInstance {

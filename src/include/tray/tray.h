@@ -23,6 +23,7 @@
 // small interface below; unit tests use fakes, the Win32 implementations live in src/tray/tray_win32.cpp
 // and are exercised by hidden manual tests only.
 
+#include "include/tray/tray_contract.h"
 #include "include/link/link_state_names.h"
 #include <atomic>
 #include <chrono>
@@ -140,9 +141,9 @@ RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string
 /// The windowless starter next to fairyfly.exe (Windows subsystem, so Explorer opens no console for it).
 inline constexpr const char* kTrayLauncherName = "fairyfly-tray.exe";
 inline constexpr const char* kTrayMutexName = "Local\\fairyfly-tray";
-inline constexpr const char* kAutostartValueName = "fairyfly-mcp";
+inline constexpr const char* kAutostartValueName = contract::kMcpRunValue;
 inline constexpr const char* kLinkTrayMutexName = "Local\\fairyfly-link-tray";
-inline constexpr const char* kLinkAutostartValueName = "fairyfly-link";
+inline constexpr const char* kLinkAutostartValueName = contract::kLinkRunValue;
 /// Exit code of `link run` when another link already serves the pairing (LINK_ALREADY_RUNNING from claim_link_run):
 /// the link tray then waits for that link instead of reporting a failure.
 inline constexpr int kLinkAlreadyRunningExitCode = 3;
@@ -198,7 +199,7 @@ public:
     virtual std::optional<std::string> get(const std::string& name) = 0;
 };
 
-/// Small per-user settings of the trays (HKCU\Software\DataZoo\fairyfly\tray).
+/// Small per-user settings of the trays (HKCU, contract::kSettingsKey).
 class TraySettings {
 public:
     virtual ~TraySettings() = default;
