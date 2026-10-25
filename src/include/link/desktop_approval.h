@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "approver.hpp"  // libffl
 
 namespace fairyfly::link::approval {
@@ -62,7 +64,8 @@ public:
 
 /// "Allow changes in SAP" in the link tray: the standing approval at this desktop. On: changes run without asking.
 /// Off (the default): every change asks. Saved for the user through load/save (the tray settings in HKCU), so it
-/// survives restarts and updates; without them it lives in memory. While the organisation enforces asking it counts
+/// survives restarts and updates, and read again for every decision (a console link and the tray share it); without
+/// them it lives in memory. While the organisation enforces asking it counts
 /// as off and cannot be turned on; the saved choice is kept for when the organisation lets the person decide again.
 /// Thread-safe.
 class Standing {
@@ -80,9 +83,12 @@ public:
     void set_enforced(bool enforced);
 
 private:
+    bool read() const;  ///< the saved choice (load_ every time), under mu_
+
+    Load load_;
     Save save_;
     mutable std::mutex mu_;
-    bool saved_ = false;
+    bool saved_ = false;  ///< without load_: the choice in memory
     bool enforced_ = false;
 };
 
@@ -159,6 +165,14 @@ private:
     std::string asking_nonce_;
     Answer noticed_ = Answer::None;
 };
+
+/// The desktop's own proof that a cloud change was approved here. libffl skips the approver for a grant with approval
+/// "none"; the desktop is the second factor and does not trust that (Codex review). A yes (also "standing") leaves a
+/// permit for exactly that call - tool and libffl's summary - on the thread that asked (libffl's serve(), which then
+/// calls fairyfly on the same thread); the call takes it, once, within 30 s. A call with the write grant and no permit
+/// runs read-only (MainThreadTools::set_write_permit).
+void grant_permit(const ffy::link::ApprovalPrompt& prompt);
+bool take_permit(const std::string& tool, const nlohmann::json& args);
 
 /// libffl's Approver over a Broker: decide asks the broker and returns its Decision with the reason the gateway
 /// audits (approved | standing | denied | expired | locked; expired_in_queue is reported as expired);

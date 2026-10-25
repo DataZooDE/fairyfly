@@ -60,8 +60,9 @@ void on_pair_signal(int) { g_pair_stop = true; }
 std::atomic<int> g_background{0};  // see background_threads()
 
 bool env_read_only() {
-    const std::string v = config::process_env()("FAIRYFLY_READ_ONLY");
-    return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
+    std::string v = config::process_env()("FAIRYFLY_READ_ONLY");
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return char(std::tolower(c)); });  // as run_mcp reads it
+    return v == "1" || v == "true" || v == "yes" || v == "on";
 }
 
 /// "Allow changes in SAP" (approval model v2): the standing approval at this desktop, saved for the user in the tray
@@ -571,6 +572,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
                                            return ran ? *read : *out;
                                        };
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : approval::make_desktop_approver(std::move(desk));
+    // the desktop's own check: write rights only for the call approved here, whatever the grant says about approval
+    tools->set_write_permit(approval::take_permit);
 #else
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : ffy::link::desktop_approver();
 #endif

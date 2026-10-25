@@ -8,6 +8,7 @@
 #include <cctype>
 #include <random>
 
+#include "approval_summary.hpp"  // libffl
 #include "include/vkey.h"
 
 namespace fairyfly::link::approval {
@@ -117,24 +118,27 @@ std::string readable_step(const std::string& step) {
     return out;
 }
 
-Standing::Standing(Load load, Save save) : save_(std::move(save)) {
-    if (load) {
-        try {
-            saved_ = load().value_or("0") == "1";
-        } catch (const std::exception& e) {
-            spdlog::warn("approval: \"Allow changes in SAP\" could not be read: {}", e.what());
-        }
+Standing::Standing(Load load, Save save) : load_(std::move(load)), save_(std::move(save)) {}
+
+bool Standing::read() const {
+    if (!load_) return saved_;
+    // read every time: a console link and the tray are separate processes on the same switch
+    try {
+        return load_().value_or("0") == "1";
+    } catch (const std::exception& e) {
+        spdlog::warn("approval: \"Allow changes in SAP\" could not be read: {}", e.what());
+        return false;
     }
 }
 
 bool Standing::on() const {
     std::lock_guard<std::mutex> l(mu_);
-    return saved_ && !enforced_;
+    return !enforced_ && read();
 }
 
 bool Standing::saved() const {
     std::lock_guard<std::mutex> l(mu_);
-    return saved_;
+    return read();
 }
 
 bool Standing::enforced() const {
@@ -325,6 +329,28 @@ void Broker::answer_text(const std::string& text) {
 }
 
 namespace {
+struct Permit {
+    std::string tool, summary;
+    std::chrono::steady_clock::time_point at;
+};
+thread_local std::optional<Permit> t_permit;
+}  // namespace
+
+void grant_permit(const ffy::link::ApprovalPrompt& prompt) {
+    t_permit = Permit{prompt.tool, prompt.summary, std::chrono::steady_clock::now()};
+}
+
+bool take_permit(const std::string& tool, const nlohmann::json& args) {
+    if (!t_permit) return false;
+    const Permit p = *t_permit;
+    // the summary libffl built the question from (link_agent.cpp Agent::approved)
+    const std::string summary = ffy::approval::summarize(tool, args).value_or(tool);
+    if (p.tool != tool || p.summary != summary) return false;  // another call: the permit stays for its own
+    t_permit.reset();
+    return std::chrono::steady_clock::now() - p.at < std::chrono::seconds(30);
+}
+
+namespace {
 struct BrokerApprover : ffy::link::Approver {
     explicit BrokerApprover(std::shared_ptr<Broker> b) : broker(std::move(b)) {}
     bool approve(const std::string& text) override {
@@ -335,9 +361,10 @@ struct BrokerApprover : ffy::link::Approver {
         p.steps = {text};
         return broker->decide(p).approved;
     }
-    bool approve_change(const ffy::link::ApprovalPrompt& prompt) override { return broker->decide(prompt).approved; }
+    bool approve_change(const ffy::link::ApprovalPrompt& prompt) override { return decide(prompt).approved; }
     ffy::link::ApprovalResult decide(const ffy::link::ApprovalPrompt& prompt) override {
         const Decision d = broker->decide(prompt);
+        if (d.approved) grant_permit(prompt);
         return {d.approved, d.reason == "expired_in_queue" ? ffy::link::approval_reason::kExpired : d.reason};
     }
     std::shared_ptr<Broker> broker;

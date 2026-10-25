@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "include/link/desktop_approval.h"
+#include "include/link/link_runner.h"
 
 using namespace fairyfly::link::approval;
 using namespace std::chrono_literals;
@@ -567,6 +568,60 @@ TEST_CASE("standing approval: saved for the user, off by default, refused while 
     Standing memory_only;  // no store (tests, a console run): in memory
     CHECK(memory_only.set(true));
     CHECK(memory_only.on());
+}
+
+TEST_CASE("standing approval: the tray's switch is off with FAIRYFLY_READ_ONLY in any spelling run_mcp accepts", "[link][approval]") {
+    // Codex review: the link read only "1", "true", "TRUE", "yes", "on", while the dispatcher lower-cases the value
+    for (const char* v : {"ON", "Yes", "True", "1"}) {
+        _putenv_s("FAIRYFLY_READ_ONLY", v);
+        INFO(v);
+        CHECK(fairyfly::link::make_write_mode_control(false)->locked());
+    }
+    _putenv_s("FAIRYFLY_READ_ONLY", "");
+    CHECK_FALSE(fairyfly::link::make_write_mode_control(false)->locked());
+    CHECK(fairyfly::link::make_write_mode_control(true)->locked());  // link run --read-only
+}
+
+TEST_CASE("standing approval: every process sees the saved switch at once (a console link and the tray)", "[link][approval]") {
+    // Codex review: the switch was read once per process, so a console link kept running changes without asking
+    // after the tray turned it off
+    Saved saved;
+    auto console_link = saved.standing();
+    auto tray = saved.standing();
+    CHECK(tray->set(true));
+    CHECK(console_link->on());
+    CHECK(tray->set(false));
+    CHECK_FALSE(console_link->on());
+    CHECK_FALSE(console_link->saved());
+}
+
+TEST_CASE("desktop approval: a cloud change gets write rights only for the call this desktop approved", "[link][approval]") {
+    // Codex review: libffl skips the approver for a grant with approval "none"; the desktop must not trust that.
+    // A yes leaves a permit for exactly that call (tool and summary), on the thread that asked, used once.
+    auto key = [](const std::string& k) { return nlohmann::json{{"key", k}}; };
+    CHECK_FALSE(take_permit("gui_key_send", key("11")));  // nobody approved anything
+    ffy::link::ApprovalPrompt p = prompt("press 11");
+    p.tool = "gui_key_send";
+    grant_permit(p);
+    CHECK_FALSE(take_permit("gui_key_send", key("12")));  // another call
+    CHECK_FALSE(std::async(std::launch::async, [&] { return take_permit("gui_key_send", key("11")); }).get());  // another thread
+    CHECK(take_permit("gui_key_send", key("11")));
+    CHECK_FALSE(take_permit("gui_key_send", key("11")));  // once
+
+    // the broker's yes (also the standing approval) leaves the permit; a no leaves none
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    auto standing = std::make_shared<Standing>();
+    auto approver = make_approver(std::make_shared<Broker>(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast()));
+    CHECK(approver->decide(p).approved);
+    CHECK(take_permit("gui_key_send", key("11")));
+    ui->window_answer = Answer::Deny;
+    CHECK_FALSE(approver->decide(p).approved);
+    CHECK_FALSE(take_permit("gui_key_send", key("11")));
+    standing->set(true);
+    CHECK(approver->decide(p).reason == "standing");
+    CHECK(take_permit("gui_key_send", key("11")));
 }
 
 TEST_CASE("desktop approval: with \"Allow changes in SAP\" on, a change runs without asking, also on a locked screen", "[link][approval]") {

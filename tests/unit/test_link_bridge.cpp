@@ -59,6 +59,35 @@ TEST_CASE("link bridge: worker-thread calls run on the pumping thread, one at a 
     CHECK(tools.per_call_read_only());
 }
 
+TEST_CASE("link bridge: a call with the write grant keeps it only with the desktop's permit", "[link]") {
+    // the desktop's own check that this exact call was approved here (approval::take_permit in the link)
+    MainThreadTools tools;
+    std::vector<bool> seen;
+    tools.set_handlers([] { return json::array(); },
+                       [&](const std::string&, const json&, const ffy::link::CallInfo& info) {
+                           seen.push_back(info.write_granted);
+                           return json{{"content", json::array()}, {"isError", false}};
+                       });
+    std::vector<std::string> asked;
+    tools.set_write_permit([&](const std::string& tool, const json& args) {
+        asked.push_back(tool);
+        return args.value("ok", false);
+    });
+    std::atomic<bool> stop{false};
+    std::thread worker([&] {
+        ffy::link::CallInfo granted{"acme", "alice", "claude", "r1", true};
+        ffy::link::CallInfo read_only{"acme", "alice", "claude", "r2", false};
+        tools.rpc("tools/call", {{"name", "gui_key_send"}, {"arguments", {{"ok", true}}}}, 5000, granted);
+        tools.rpc("tools/call", {{"name", "gui_key_send"}, {"arguments", {{"ok", false}}}}, 5000, granted);
+        tools.rpc("tools/call", {{"name", "gui_screen_read"}, {"arguments", json::object()}}, 5000, read_only);
+        stop = true;
+    });
+    tools.pump(stop);
+    worker.join();
+    CHECK(seen == std::vector<bool>{true, false, false});
+    CHECK(asked == std::vector<std::string>{"gui_key_send", "gui_key_send"});  // a read-only grant needs no permit
+}
+
 TEST_CASE("link bridge: tools/list, timeouts when nobody pumps, shutdown", "[link]") {
     MainThreadTools tools;
     tools.set_handlers([] { return json::array({{{"name", "gui_screen_read"}}}); }, nullptr);
