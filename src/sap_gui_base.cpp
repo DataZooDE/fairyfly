@@ -1,4 +1,5 @@
 #include "include/text/utf8.h"
+#include "include/com/invoke.h"
 #include "include/sap_gui_base.h"
 #include "include/com/utf8.h"
 #include "include/trace.h"
@@ -395,12 +396,9 @@ _variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* na
         throw SapGuiException(property ? "Failed to get property DISPID" : "Failed to get method DISPID", hr, "SapGuiObject",
                               operation);
     }
-    // a property put names its single argument DISPID_PROPERTYPUT; a method takes it positionally
-    DISPID put_name = DISPID_PROPERTYPUT;
-    DISPPARAMS params = {argument, property ? &put_name : nullptr, argument ? 1u : 0u, property ? 1u : 0u};
     _variant_t result;
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, flags, &params, property ? nullptr : &result, nullptr,
-                           nullptr);
+    hr = argument ? invoke(dispatch_, dispid, flags, {_variant_t(*argument)}, property ? nullptr : &result)
+                  : invoke(dispatch_, dispid, flags, {}, &result);
     if (FAILED(hr)) {
         spdlog::error("{}|Invoke failed|{}={}{}|hr={:#010x}", operation, kind, member, log_value, (unsigned int)hr);
         throw SapGuiException(property ? "Failed to set property" : "Failed to invoke method", hr, "SapGuiObject", operation);

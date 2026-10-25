@@ -6,6 +6,8 @@
 #include <spdlog/spdlog.h>
 #include <comdef.h>
 
+#include "include/com/invoke.h"
+
 namespace fairyfly {
 namespace sap {
 

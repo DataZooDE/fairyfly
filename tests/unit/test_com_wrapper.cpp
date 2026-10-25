@@ -2824,14 +2824,14 @@ public:
         }
         if ((flags & DISPATCH_METHOD) && methods.count(name)) {
             if (put_fails.count(name)) return DISP_E_EXCEPTION;
-            std::wstring text;
-            if (params && params->cArgs == 1) {
-                const VARIANT& arg = params->rgvarg[0];
-                if (arg.vt == VT_BSTR) text = arg.bstrVal;
-                else if (arg.vt == VT_I4 || arg.vt == VT_INT) text = std::to_wstring(arg.vt == VT_INT ? arg.intVal : arg.lVal);
+            std::wstring text;   // the arguments in reading order (COM passes them last first), joined by ","
+            for (UINT i = params ? params->cArgs : 0; i-- > 0;) {
+                const VARIANT& arg = params->rgvarg[i];
+                if (!text.empty()) text += L",";
+                if (arg.vt == VT_BSTR) text += arg.bstrVal;
+                else if (arg.vt == VT_I4 || arg.vt == VT_INT) text += std::to_wstring(arg.vt == VT_INT ? arg.intVal : arg.lVal);
+                else if (arg.vt == VT_BOOL) text += arg.boolVal != VARIANT_FALSE ? L"true" : L"false";
                 else return DISP_E_TYPEMISMATCH;
-            } else if (params && params->cArgs > 1) {
-                return DISP_E_BADPARAMCOUNT;
             }
             calls.emplace_back(name, text);
             auto returned = dispatches.find(name);
@@ -3959,4 +3959,32 @@ TEST_CASE("SapGuiObject: a failed lookup, put or call throws SapGuiException wit
     SapGuiObject empty(nullptr);
     expect([&] { empty.set_bool_property(L"Selected", true); }, "Cannot set property on null object", "set_bool_property");
     expect([&] { empty.invoke_method_with_int(L"SendVKey", 0); }, "Cannot invoke method on null object", "invoke_method_with_int");
+}
+
+TEST_CASE("com::invoke passes the arguments in reading order and returns the answer", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiShell";
+    node->methods = {L"GetCellValue", L"PressToolbarButton"};
+    auto* child = new FakeNode();
+    node->dispatches[L"GetCellValue"] = child;
+    IDispatchPtr dispatch(node, false);
+    DISPID cell = 0, press = 0;
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"GetCellValue", &cell)));
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"PressToolbarButton", &press)));
+    _variant_t answer;
+    CHECK(SUCCEEDED(invoke(dispatch, cell, DISPATCH_METHOD, {_variant_t(3), _variant_t(L"MATNR"), _variant_t(true)}, &answer)));
+    CHECK(answer.vt == VT_DISPATCH);
+    CHECK(SUCCEEDED(invoke(dispatch, press, DISPATCH_METHOD, {_variant_t(L"&FIND")})));
+    REQUIRE(node->calls.size() == 2);
+    CHECK(node->calls[0].second == L"3,MATNR,true");
+    CHECK(node->calls[1].second == L"&FIND");
+    // a put names its value DISPID_PROPERTYPUT (the fake refuses it otherwise)
+    DISPID text = 0;
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"Text", &text)));
+    CHECK(SUCCEEDED(invoke(dispatch, text, DISPATCH_PROPERTYPUT, {_variant_t(L"x")})));
+    CHECK(node->strings[L"Text"] == L"x");
+    CHECK(invoke(nullptr, text, DISPATCH_METHOD) == E_POINTER);
+    answer.Clear();
+    child->Release();
 }
