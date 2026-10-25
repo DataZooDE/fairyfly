@@ -112,7 +112,7 @@ TEST_CASE("environment: no file under src/ reads the environment except config/e
         std::ifstream in(e.path(), std::ios::binary);
         REQUIRE(in.good());
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        static const std::regex call(R"(\b(std::)?(getenv|_dupenv_s|_wgetenv|_wdupenv_s|GetEnvironmentVariable[AW]?)\s*\()");
+        static const std::regex call(R"(\b(std::)?(getenv|_dupenv_s|_wgetenv|_wdupenv_s|GetEnvironmentVariable[AW]?|ffy::env_or)\s*\()");
         for (std::sregex_iterator m(text.begin(), text.end(), call), end; m != end; ++m)
             offenders.push_back(rel.string() + ": " + (*m)[2].str());
     }
