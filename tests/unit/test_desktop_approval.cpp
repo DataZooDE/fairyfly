@@ -34,6 +34,8 @@ struct FakeUi : Ui {
     Answer window_answer = Answer::None;
     bool window_remember = false;  // "Don't ask again for 5 minutes" ticked
     std::chrono::milliseconds window_delay{0};
+    // the window answers before it notices that it should close (the Win32 window checks only every 200 ms)
+    bool ignore_stop = false;
 
     std::mutex mu;
     std::vector<Request> notified, withdrawn, windows;
@@ -63,7 +65,7 @@ struct FakeUi : Ui {
         const auto until = std::chrono::steady_clock::now() + window_delay;
         Answer a = Answer::None;
         while (true) {
-            if (stop()) break;
+            if (!ignore_stop && stop()) break;
             if (window_answer != Answer::None && std::chrono::steady_clock::now() >= until) {
                 a = window_answer;
                 break;
@@ -378,6 +380,132 @@ TEST_CASE("desktop approval: \"Don't ask again for 5 minutes\" approves the same
     std::this_thread::sleep_for(350ms);
     CHECK_FALSE(b.decide(prompt()).approved);
     CHECK(ui->windows.size() == 4);
+}
+
+TEST_CASE("desktop approval: \"Don't ask again\" is keyed by the whole client id, not its 24-character display form", "[link][approval]") {
+    // review of #34: libffl cuts prompt.client to 24 characters, so a yes remembered for Claude Code covered every
+    // client whose id starts with "https://claude.ai/oauth/"
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    Broker b(ui, desk(), fast());
+    auto code = prompt();
+    code.client_id = "https://claude.ai/oauth/claude-code-client-metadata";
+    code.client = code.client_id.substr(0, 24);
+    auto other = prompt();
+    other.client_id = "https://claude.ai/oauth/someone-else";
+    other.client = other.client_id.substr(0, 24);
+    REQUIRE(code.client == other.client);
+    CHECK(b.decide(code).reason == "approved");
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    const Decision d = b.decide(other);  // asked, not remembered
+    CHECK_FALSE(d.approved);
+    CHECK(d.reason == "denied");
+    REQUIRE(ui->windows.size() == 2);
+    CHECK(ui->windows[1].client_id == other.client_id);  // the window names the whole id
+    CHECK(b.decide(code).reason == "remembered");
+    CHECK(ui->windows.size() == 2);
+    // a prompt without client_id (an agent from before it) is keyed by its client
+    auto old = prompt();
+    old.client = "https://chatgpt.com/";
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    CHECK(b.decide(old).reason == "approved");
+    CHECK(b.decide(old).reason == "remembered");
+    CHECK(ui->windows.size() == 3);
+}
+
+TEST_CASE("desktop approval: a yes in the window after the time is up is not a yes, and remembers nothing", "[link][approval]") {
+    // review of #34: the window notices the deadline only at its next timer tick; an Approve in between came through
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    ui->window_delay = 250ms;  // answered after the 100 ms deadline, before the window noticed
+    ui->ignore_stop = true;
+    Broker b(ui, desk(), fast(100ms));
+    const Decision d = b.decide(prompt());
+    CHECK_FALSE(d.approved);
+    CHECK(d.reason == "expired");
+    // nothing was remembered: the next change is asked
+    ui->window_delay = 0ms;
+    ui->ignore_stop = false;
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    CHECK(b.decide(prompt()).reason == "denied");
+    CHECK(ui->windows.size() == 2);
+}
+
+TEST_CASE("desktop approval: a yes in the window after the screen locked is not a yes", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    ui->window_delay = 150ms;
+    ui->ignore_stop = true;
+    auto unlocked = std::make_shared<std::atomic<bool>>(true);
+    Broker b(ui, desk(unlocked), fast());
+    auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
+    REQUIRE(eventually([&] { return ui->open_windows.load() == 1; }));
+    *unlocked = false;  // locked before the click arrives
+    const Decision d = f.get();
+    CHECK_FALSE(d.approved);
+    CHECK(d.reason == "locked");
+    *unlocked = true;
+    ui->window_delay = 0ms;
+    ui->ignore_stop = false;
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    CHECK(b.decide(prompt()).reason == "denied");  // asked again: nothing remembered
+    CHECK(ui->windows.size() == 2);
+}
+
+TEST_CASE("desktop approval: libffl's decide through the notification", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();  // can_notify: the toast path
+    auto broker = std::make_shared<Broker>(ui, desk(), fast(300ms));
+    auto approver = make_approver(broker);
+    // the toast's buttons: answered through the button text, as the toast activator delivers it
+    auto via_toast = [&](Answer a) {
+        const size_t before = ui->notified_count();
+        auto f = std::async(std::launch::async, [&] { return approver->decide(prompt()); });
+        REQUIRE(eventually([&] { return ui->notified_count() == before + 1; }));
+        if (a != Answer::None) broker->answer_text(answer_text(a, ui->last_notified()));
+        return f.get();
+    };
+    auto r = via_toast(Answer::Approve);
+    CHECK(r.approved);
+    CHECK(r.reason == "approved");
+    r = via_toast(Answer::Approve);  // the notification's Approve never remembers: asked again
+    CHECK(r.reason == "approved");
+    CHECK(ui->notified_count() == 2);
+    r = via_toast(Answer::Deny);
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "denied");
+    r = via_toast(Answer::None);  // nobody answers
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "expired");
+    CHECK(ui->windows.empty());
+    CHECK(ui->withdrawn.size() == 4);
+}
+
+TEST_CASE("desktop approval: libffl's decide reports a question that expired in the queue as expired", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;  // the first question's window waits until it expires
+    auto broker = std::make_shared<Broker>(ui, desk(), fast(3s));
+    auto approver = make_approver(broker);
+    auto first = std::async(std::launch::async, [&] { return broker->decide(prompt("first")); });
+    REQUIRE(eventually([&] { return ui->open_windows.load() == 1; }));
+    auto p = prompt("second");
+    p.answer_s = 1;  // expires behind the first, never shown
+    const Decision queued = broker->decide(p);
+    CHECK(queued.reason == "expired_in_queue");  // what the broker says ...
+    const auto r = approver->decide(p);
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "expired");  // ... and what libffl hears (the gateway's vocabulary)
+    CHECK(first.get().reason == "expired");
+    CHECK(ui->windows.size() == 1);
 }
 
 TEST_CASE("desktop approval: \"Don't ask again\" with Deny remembers nothing", "[link][approval]") {
