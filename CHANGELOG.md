@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.25.1 (2026-10-25)
 
 ### Cloud link: "Allow changes in SAP" is the approval (approval model v2)
 
