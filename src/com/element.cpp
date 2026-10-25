@@ -1008,6 +1008,9 @@ void ComGuiElement::modify_grid_cell(int row, const std::string& column_name,
     if (row < 0 || column_name.empty()) throw ComException("Invalid GridView cell coordinates");
 
     const wchar_t* method_name = checkbox ? L"ModifyCheckBox" : L"ModifyCell";
+    DISPID available;   // the method first, then the value (as before): a grid without it says so
+    if (const HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &available); FAILED(hr))
+        throw ComException("GridView cell modification is unavailable", hr);
     _variant_t cell_value;
     if (checkbox) {
         bool checked;
@@ -1324,7 +1327,8 @@ void ComGuiElement::press_button(const std::string& button_id) {
         // uses PressToolbarButton. Both are exposed as synthetic CLI buttons.
         for (const wchar_t* method_name : {L"PressButton", L"PressToolbarButton"}) {
             _variant_t result;
-            const HRESULT hr = call_method(method_name, {_variant_t(wide_id.c_str())}, result);
+            // plain: an access violation in PressButton must not be followed by PressToolbarButton
+            const HRESULT hr = call_method(method_name, {_variant_t(wide_id.c_str())}, result, Lookup::TypeInfo, Protection::Plain);
             if (SUCCEEDED(hr)) {
                 spdlog::debug("Pressed toolbar button: {}", button_id);
                 return;
@@ -1342,9 +1346,9 @@ void ComGuiElement::press_f4() {
     try {
         // F4 is sent as a virtual key event to the element (focus first; a failure is ignored)
         _variant_t ignored;
-        (void)call_method(L"SetFocus", {}, ignored);
+        (void)call_method(L"SetFocus", {}, ignored, Lookup::TypeInfo, Protection::Plain);
         _variant_t result;
-        if (SUCCEEDED(call_method(L"SendVKey", {_variant_t(4)}, result)))   // SAP's index 4 is F4
+        if (SUCCEEDED(call_method(L"SendVKey", {_variant_t(4)}, result, Lookup::TypeInfo, Protection::Plain)))   // index 4 is F4
             spdlog::debug("Sent F4 key directly to element");
         else
             spdlog::debug("Element does not take SendVKey directly; focus set for window send_vkey");

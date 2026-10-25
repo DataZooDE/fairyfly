@@ -4009,3 +4009,26 @@ TEST_CASE("com: IDispatch::Invoke is called in one place (com::invoke, safe_invo
     CAPTURE(offenders);
     CHECK(offenders.empty());
 }
+
+TEST_CASE("SapGuiObject: the argument is converted only after the object and the member are checked", "[com][invoke]") {
+    // codex 2026-10-25: invalid UTF-8 turned a null object or a missing member into std::invalid_argument
+    ScopedDispatchCacheReset cache_reset;
+    const std::string invalid = "\xC3";   // a lead byte without its continuation
+    SapGuiObject empty(nullptr);
+    try {
+        empty.set_string_property(L"Text", invalid);
+        FAIL("no exception");
+    } catch (const SapGuiException& e) {
+        CHECK(std::string(e.what()) == "Cannot set property on null object");
+    }
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiTextField";
+    node->unknown_names = {L"Missing"};
+    SapGuiObject object(IDispatchPtr(node, false));
+    try {
+        object.invoke_method_with_string(L"Missing", invalid);
+        FAIL("no exception");
+    } catch (const SapGuiException& e) {
+        CHECK(std::string(e.what()) == "Failed to get method DISPID");
+    }
+}
