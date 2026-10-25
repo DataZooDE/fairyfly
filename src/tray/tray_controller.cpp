@@ -121,17 +121,31 @@ void TrayController::on_tick() {
     }
 }
 
+void TrayActions::open(const std::filesystem::path& path, const std::string& what) const {
+    if ((!opener || !opener->open(path)) && notify) notify("Could not open " + what + ": " + path.string());
+}
+
+void TrayActions::console(const std::vector<std::string>& args) const {
+    if (!launcher) return;
+    LaunchRequest request;
+    request.command_line = console_command_line(exe, args);
+    request.new_console = true;
+    if (!launcher->launch(request) && notify) notify("Could not open a console");
+}
+
+bool TrayActions::start_detached(const std::vector<std::string>& args) const {
+    if (!launcher) return false;
+    LaunchRequest request;
+    request.command_line = join_command_line(exe, args);
+    request.detached = true;
+    return launcher->launch(request).has_value();
+}
+
 void TrayController::on_action(TrayAction action) {
-    auto open = [&](const std::filesystem::path& path, const char* what) {
-        if (!services_.opener || !services_.opener->open(path)) notify(std::string("Could not open ") + what + ": " + path.string());
-    };
-    auto console = [&](const std::vector<std::string>& args) {
-        if (!services_.launcher) return;
-        LaunchRequest request;
-        request.command_line = console_command_line(paths_.exe, args);
-        request.new_console = true;
-        if (!services_.launcher->launch(request)) notify("Could not open a console");
-    };
+    const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
+                              [this](const std::string& text) { notify(text); }};
+    const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };
+    const auto console = [&](const std::vector<std::string>& args) { actions.console(args); };
 
     switch (action) {
     case TrayAction::Start: control_.request_start(); break;
@@ -158,17 +172,9 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::LinkPair: console({"link", "pair"}); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
     case TrayAction::LinkStatus: console({"link", "status"}); break;
-    case TrayAction::LinkStart: {
-        bool ok = false;
-        if (services_.launcher) {
-            LaunchRequest request;   // the link tray: its own icon and Quit; it reads the pairing state
-            request.command_line = join_command_line(paths_.exe, {"link", "run", "--tray"});
-            request.detached = true;
-            ok = services_.launcher->launch(request).has_value();
-        }
-        if (!ok) notify("Could not start the cloud link");
+    case TrayAction::LinkStart:   // the link tray: its own icon and Quit; it reads the pairing state
+        if (!actions.start_detached({"link", "run", "--tray"})) notify("Could not start the cloud link");
         break;
-    }
     case TrayAction::LinkPause:
     case TrayAction::LinkResume: {
         const bool pause = action == TrayAction::LinkPause;

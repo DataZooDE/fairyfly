@@ -327,6 +327,20 @@ struct TrayServices {
     std::chrono::milliseconds update_check_delay{30000};
 };
 
+/// The effects both trays' menus share: open a file or folder, run a command in a console that stays open, start
+/// fairyfly detached (another tray). A failure becomes a notice; without an opener or launcher nothing happens.
+struct TrayActions {
+    FileOpener* opener = nullptr;
+    ProcessLauncher* launcher = nullptr;
+    std::string exe;                                     ///< fairyfly.exe
+    std::function<void(const std::string&)> notify;
+
+    void open(const std::filesystem::path& path, const std::string& what) const;
+    void console(const std::vector<std::string>& args) const;
+    /// `fairyfly <args>` without a window (its own tray); false when it could not be started.
+    bool start_detached(const std::vector<std::string>& args) const;
+};
+
 /// Turns menu actions into effects. Runs on the UI thread; status() calls are thread-safe.
 class TrayController : public TrayListener {
 public:

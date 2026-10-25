@@ -1517,3 +1517,39 @@ TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][c
     REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
     CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
 }
+
+TEST_CASE("tray actions: open, console and detached start, shared by both trays", "[tray][actions]") {
+    FakeOpener opener;
+    FakeLauncher launcher;
+    std::vector<std::string> notices;
+    const TrayActions actions{&opener, &launcher, "C:/fairyfly/fairyfly.exe",
+                              [&](const std::string& text) { notices.push_back(text); }};
+    actions.open("C:/logs/link.log", "the log");
+    CHECK(opener.opened.size() == 1);
+    CHECK(notices.empty());
+    opener.ok = false;
+    actions.open("C:/logs/link.log", "the log");
+    REQUIRE(notices.size() == 1);
+    CHECK(notices[0] == "Could not open the log: C:/logs/link.log");
+
+    actions.console({"link", "status"});
+    REQUIRE(launcher.requests.size() == 1);
+    CHECK(launcher.requests[0].new_console);
+    CHECK(launcher.requests[0].command_line == console_command_line("C:/fairyfly/fairyfly.exe", {"link", "status"}));
+
+    CHECK(actions.start_detached({"link", "run", "--tray"}));
+    REQUIRE(launcher.requests.size() == 2);
+    CHECK(launcher.requests[1].detached);
+    CHECK(launcher.requests[1].command_line == join_command_line("C:/fairyfly/fairyfly.exe", {"link", "run", "--tray"}));
+    launcher.pid.reset();
+    CHECK_FALSE(actions.start_detached({"link", "run", "--tray"}));
+    actions.console({"update", "check"});
+    CHECK(notices.back() == "Could not open a console");
+    // without a launcher nothing starts, and a console says nothing (as before)
+    const TrayActions none{nullptr, nullptr, "x.exe", [&](const std::string& text) { notices.push_back(text); }};
+    const auto before = notices.size();
+    none.console({"link", "pair"});
+    CHECK_FALSE(none.start_detached({"mcp"}));
+    none.open("y", "the log");
+    CHECK(notices.size() == before + 1);   // only the failed open
+}

@@ -138,16 +138,10 @@ void LinkTrayController::on_tick() {
 }
 
 void LinkTrayController::on_action(TrayAction action) {
-    auto open = [&](const std::filesystem::path& path, const char* what) {
-        if (!services_.opener || !services_.opener->open(path)) notify(std::string("Could not open ") + what + ": " + path.string());
-    };
-    auto console = [&](const std::vector<std::string>& args) {
-        if (!services_.launcher) return;
-        LaunchRequest request;
-        request.command_line = console_command_line(paths_.exe, args);
-        request.new_console = true;
-        if (!services_.launcher->launch(request)) notify("Could not open a console");
-    };
+    const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
+                              [this](const std::string& text) { notify(text); }};
+    const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };
+    const auto console = [&](const std::vector<std::string>& args) { actions.console(args); };
 
     switch (action) {
     case TrayAction::LinkPause:
@@ -179,13 +173,7 @@ void LinkTrayController::on_action(TrayAction action) {
             notify("The local MCP server is already running (its own tray icon)");
             break;
         }
-        bool ok = false;
-        if (services_.launcher) {
-            LaunchRequest request;   // detached: the MCP tray has its own icon, Quit and log (mcp.log)
-            request.command_line = join_command_line(paths_.exe, mcp_tray_args());
-            request.detached = true;
-            ok = services_.launcher->launch(request).has_value();
-        }
+        const bool ok = actions.start_detached(mcp_tray_args());   // the MCP tray has its own icon, Quit and log
         notify(ok ? "Starting the local MCP server; it gets its own tray icon" : "Could not start the local MCP server");
         break;
     }
