@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Screen Markdown in sections (2026-10-25 code review)
+
+- `ScreenMarkdownFormatter::format` (728 lines) is one function per section (header, grid layout, menu bar,
+  buttons, status, form, tabs, tables, ABAP source, other content, summary), checked byte for byte against 34
+  recorded screens. The grid layout and the menu bar share one menu renderer.
+
 ### CommandHandler split; doctor checks testable; explicit result rendering (2026-10-25 code review)
 
 - `cli_handler.cpp` (2,815 lines) is split: screen filters (`screen_filter.cpp`), the doctor
