@@ -6,6 +6,7 @@
 #include <chrono>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "include/link/desktop_approval.h"
@@ -32,7 +33,7 @@ struct FakeUi : Ui {
     bool can_notify = true;
     // the window's answer; None: waits until stopped
     Answer window_answer = Answer::None;
-    bool window_remember = false;  // "Don't ask again for 5 minutes" ticked
+    bool window_remember = false;  // "Don't ask again" ticked
     std::chrono::milliseconds window_delay{0};
     // the window answers before it notices that it should close (the Win32 window checks only every 200 ms)
     bool ignore_stop = false;
@@ -92,12 +93,28 @@ Options fast(std::chrono::milliseconds within = 2s) {
     return o;
 }
 
-Desk desk(std::shared_ptr<std::atomic<bool>> unlocked = std::make_shared<std::atomic<bool>>(true)) {
+Desk desk(std::shared_ptr<std::atomic<bool>> unlocked = std::make_shared<std::atomic<bool>>(true),
+          std::shared_ptr<Standing> standing = std::make_shared<Standing>()) {
     Desk d;
     d.can_ask = [unlocked] { return unlocked->load(); };
     d.sap = [] { return SapContext{"BIG", "100", "VA02", "JR"}; };
+    d.standing = std::move(standing);
     return d;
 }
+
+// The saved "Allow changes in SAP", in memory: what Standing loads and saves.
+struct Saved {
+    std::optional<std::string> value;
+    int saves = 0;
+    std::shared_ptr<Standing> standing() {
+        return std::make_shared<Standing>([this] { return value; },
+                                          [this](const std::string& v) {
+                                              value = v;
+                                              saves++;
+                                              return true;
+                                          });
+    }
+};
 
 template <class F>
 bool eventually(F f, std::chrono::milliseconds within = 2s) {
@@ -305,13 +322,15 @@ TEST_CASE("desktop approval: libffl's decide gets the broker's reason", "[link][
     ui->window_answer = Answer::Approve;
     ui->window_remember = true;
     auto unlocked = std::make_shared<std::atomic<bool>>(true);
-    auto approver = make_approver(std::make_shared<Broker>(ui, desk(unlocked), fast(200ms)));
+    auto standing = std::make_shared<Standing>();
+    auto approver = make_approver(std::make_shared<Broker>(ui, desk(unlocked, standing), fast(200ms)));
     auto r = approver->decide(prompt());
     CHECK(r.approved);
     CHECK(r.reason == "approved");
-    r = approver->decide(prompt());
+    r = approver->decide(prompt());  // "Don't ask again" turned on "Allow changes in SAP"
     CHECK(r.approved);
-    CHECK(r.reason == "remembered");
+    CHECK(r.reason == "standing");
+    standing->set(false);
     auto other = prompt();
     other.user = "someone@example.com";
     ui->window_remember = false;
@@ -353,70 +372,6 @@ TEST_CASE("desktop approval: every change asks; a yes approves only that change"
     CHECK(ui->windows.size() == 2);  // asked twice
 }
 
-TEST_CASE("desktop approval: \"Don't ask again for 5 minutes\" approves the same assistant and account without asking", "[link][approval]") {
-    auto ui = std::make_shared<FakeUi>();
-    ui->can_notify = false;
-    ui->window_answer = Answer::Approve;
-    ui->window_remember = true;
-    Options o = fast();
-    o.remember_for = 300ms;
-    Broker b(ui, desk(), o);
-    CHECK(b.decide(prompt()).approved);
-    const Decision again = b.decide(prompt());
-    CHECK(again.approved);
-    CHECK(again.reason == "remembered");
-    CHECK(ui->windows.size() == 1);
-    // another account, or another assistant: asked
-    auto other = prompt();
-    other.user = "someone@example.com";
-    ui->window_remember = false;
-    ui->window_answer = Answer::Deny;
-    CHECK_FALSE(b.decide(other).approved);
-    auto other_client = prompt();
-    other_client.client = "https://chatgpt.com/";
-    CHECK_FALSE(b.decide(other_client).approved);
-    CHECK(ui->windows.size() == 3);
-    // after the time: asked again
-    std::this_thread::sleep_for(350ms);
-    CHECK_FALSE(b.decide(prompt()).approved);
-    CHECK(ui->windows.size() == 4);
-}
-
-TEST_CASE("desktop approval: \"Don't ask again\" is keyed by the whole client id, not its 24-character display form", "[link][approval]") {
-    // review of #34: libffl cuts prompt.client to 24 characters, so a yes remembered for Claude Code covered every
-    // client whose id starts with "https://claude.ai/oauth/"
-    auto ui = std::make_shared<FakeUi>();
-    ui->can_notify = false;
-    ui->window_answer = Answer::Approve;
-    ui->window_remember = true;
-    Broker b(ui, desk(), fast());
-    auto code = prompt();
-    code.client_id = "https://claude.ai/oauth/claude-code-client-metadata";
-    code.client = code.client_id.substr(0, 24);
-    auto other = prompt();
-    other.client_id = "https://claude.ai/oauth/someone-else";
-    other.client = other.client_id.substr(0, 24);
-    REQUIRE(code.client == other.client);
-    CHECK(b.decide(code).reason == "approved");
-    ui->window_remember = false;
-    ui->window_answer = Answer::Deny;
-    const Decision d = b.decide(other);  // asked, not remembered
-    CHECK_FALSE(d.approved);
-    CHECK(d.reason == "denied");
-    REQUIRE(ui->windows.size() == 2);
-    CHECK(ui->windows[1].client_id == other.client_id);  // the window names the whole id
-    CHECK(b.decide(code).reason == "remembered");
-    CHECK(ui->windows.size() == 2);
-    // a prompt without client_id (an agent from before it) is keyed by its client
-    auto old = prompt();
-    old.client = "https://chatgpt.com/";
-    ui->window_answer = Answer::Approve;
-    ui->window_remember = true;
-    CHECK(b.decide(old).reason == "approved");
-    CHECK(b.decide(old).reason == "remembered");
-    CHECK(ui->windows.size() == 3);
-}
-
 TEST_CASE("desktop approval: a yes in the window after the time is up is not a yes, and remembers nothing", "[link][approval]") {
     // review of #34: the window notices the deadline only at its next timer tick; an Approve in between came through
     auto ui = std::make_shared<FakeUi>();
@@ -425,10 +380,12 @@ TEST_CASE("desktop approval: a yes in the window after the time is up is not a y
     ui->window_remember = true;
     ui->window_delay = 250ms;  // answered after the 100 ms deadline, before the window noticed
     ui->ignore_stop = true;
-    Broker b(ui, desk(), fast(100ms));
+    auto standing = std::make_shared<Standing>();
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast(100ms));
     const Decision d = b.decide(prompt());
     CHECK_FALSE(d.approved);
     CHECK(d.reason == "expired");
+    CHECK_FALSE(standing->on());
     // nothing was remembered: the next change is asked
     ui->window_delay = 0ms;
     ui->ignore_stop = false;
@@ -446,13 +403,15 @@ TEST_CASE("desktop approval: a yes in the window after the screen locked is not 
     ui->window_delay = 150ms;
     ui->ignore_stop = true;
     auto unlocked = std::make_shared<std::atomic<bool>>(true);
-    Broker b(ui, desk(unlocked), fast());
+    auto standing = std::make_shared<Standing>();
+    Broker b(ui, desk(unlocked, standing), fast());
     auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
     REQUIRE(eventually([&] { return ui->open_windows.load() == 1; }));
     *unlocked = false;  // locked before the click arrives
     const Decision d = f.get();
     CHECK_FALSE(d.approved);
     CHECK(d.reason == "locked");
+    CHECK_FALSE(standing->on());
     *unlocked = true;
     ui->window_delay = 0ms;
     ui->ignore_stop = false;
@@ -508,20 +467,22 @@ TEST_CASE("desktop approval: libffl's decide reports a question that expired in 
     CHECK(ui->windows.size() == 1);
 }
 
-TEST_CASE("desktop approval: \"Don't ask again\" with Deny remembers nothing", "[link][approval]") {
+TEST_CASE("desktop approval: \"Don't ask again\" with Deny turns nothing on", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     ui->can_notify = false;
     ui->window_answer = Answer::Deny;
     ui->window_remember = true;
-    Broker b(ui, desk(), fast());
+    auto standing = std::make_shared<Standing>();
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast());
     CHECK_FALSE(b.decide(prompt()).approved);
+    CHECK_FALSE(standing->on());
     ui->window_answer = Answer::Approve;
     ui->window_remember = false;
     CHECK(b.decide(prompt()).approved);
     CHECK(ui->windows.size() == 2);
 }
 
-TEST_CASE("desktop approval: the notification's Approve never remembers", "[link][approval]") {
+TEST_CASE("desktop approval: the notification's Approve never turns on \"Allow changes in SAP\"", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     Broker b(ui, desk(), fast());
     for (int i = 0; i < 2; i++) {
@@ -531,20 +492,6 @@ TEST_CASE("desktop approval: the notification's Approve never remembers", "[link
         b.answer(r.id, r.nonce, Answer::Approve);
         CHECK(f.get().reason == "approved");
     }
-}
-
-TEST_CASE("desktop approval: a locked screen denies even within \"Don't ask again\"", "[link][approval]") {
-    auto ui = std::make_shared<FakeUi>();
-    ui->can_notify = false;
-    ui->window_answer = Answer::Approve;
-    ui->window_remember = true;
-    auto unlocked = std::make_shared<std::atomic<bool>>(true);
-    Broker b(ui, desk(unlocked), fast());
-    CHECK(b.decide(prompt()).approved);
-    *unlocked = false;
-    const Decision d = b.decide(prompt());
-    CHECK_FALSE(d.approved);
-    CHECK(d.reason == "locked");
 }
 
 TEST_CASE("desktop approval: the assistant's name, not its URL", "[link][approval]") {
@@ -576,7 +523,116 @@ TEST_CASE("desktop approval: the standard toolbar's buttons are named in the ste
           "run 2 steps: 1. press enter; 2. click Save (wnd[0]/tbar[0]/btn[11]); 3. click Enter (wnd[1]/tbar[0]/btn[0])");
     CHECK(readable_step("click wnd[0]/tbar[0]/btn[110]") == "click wnd[0]/tbar[0]/btn[110]");
     CHECK(readable_step("click wnd[0]/tbar[1]/btn[8]") == "click wnd[0]/tbar[1]/btn[8]");  // application toolbar: varies
-    CHECK(readable_step("fill fields ctxtA, ctxtB, then press f8") == "fill fields ctxtA, ctxtB, then press f8");
+}
+
+TEST_CASE("desktop approval: keys are named as people know them", "[link][approval]") {
+    CHECK(readable_step("press 11") == "press Save (Ctrl+S)");
+    CHECK(readable_step("press enter") == "press Enter");
+    CHECK(readable_step("press 0") == "press Enter");
+    CHECK(readable_step("press f3") == "press Back (F3)");
+    CHECK(readable_step("press F8") == "press Execute (F8)");
+    CHECK(readable_step("press 12") == "press Cancel (F12)");
+    CHECK(readable_step("press 15") == "press Exit (Shift+F3)");
+    CHECK(readable_step("press shift+f4") == "press Shift+F4");
+    CHECK(readable_step("press 26") == "press Ctrl+F2");
+    CHECK(readable_step("press pagedown") == "press Page Down");
+    CHECK(readable_step("fill fields ctxtA, ctxtB, then press f8") == "fill fields ctxtA, ctxtB, then press Execute (F8)");
+    CHECK(readable_step("run 2 steps: 1. press 11; 2. click wnd[0]/tbar[0]/btn[3]") ==
+          "run 2 steps: 1. press Save (Ctrl+S); 2. click Back (wnd[0]/tbar[0]/btn[3])");
+    CHECK(readable_step("press nonsense") == "press nonsense");  // not a key: as it is
+}
+
+// ---- approval model v2: "Allow changes in SAP" is the standing approval at this desktop ----
+
+TEST_CASE("standing approval: saved for the user, off by default, refused while the organisation enforces asking", "[link][approval]") {
+    Saved saved;
+    auto s = saved.standing();
+    CHECK_FALSE(s->on());  // nothing saved: off
+    CHECK(s->set(true));
+    CHECK(s->on());
+    CHECK(saved.value == "1");
+    CHECK(saved.standing()->on());  // the next start (and the next version) reads it back
+    CHECK(s->set(false));
+    CHECK(saved.value == "0");
+    CHECK_FALSE(saved.standing()->on());
+
+    s->set(true);
+    s->set_enforced(true);  // "Always ask at the desktop"
+    CHECK(s->enforced());
+    CHECK_FALSE(s->on());   // counts as off ...
+    CHECK(s->saved());      // ... the person's choice is kept for when the organisation lets them decide again
+    CHECK_FALSE(s->set(true));
+    s->set_enforced(false);
+    CHECK(s->on());
+    Standing memory_only;  // no store (tests, a console run): in memory
+    CHECK(memory_only.set(true));
+    CHECK(memory_only.on());
+}
+
+TEST_CASE("desktop approval: with \"Allow changes in SAP\" on, a change runs without asking, also on a locked screen", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    auto unlocked = std::make_shared<std::atomic<bool>>(true);
+    auto standing = std::make_shared<Standing>();
+    standing->set(true);
+    auto approver = make_approver(std::make_shared<Broker>(ui, desk(unlocked, standing), fast()));
+    auto r = approver->decide(prompt());
+    CHECK(r.approved);
+    CHECK(r.reason == "standing");
+    *unlocked = false;  // the person turned it on: it stands while they are away
+    r = approver->decide(prompt());
+    CHECK(r.approved);
+    CHECK(r.reason == "standing");
+    CHECK(ui->notified.empty());
+    CHECK(ui->windows.empty());
+}
+
+TEST_CASE("desktop approval: \"Don't ask again\" approves this change and turns on \"Allow changes in SAP\"", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    Saved saved;
+    auto standing = saved.standing();
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast());
+    const Decision d = b.decide(prompt());
+    CHECK(d.approved);
+    CHECK(d.reason == "approved");
+    REQUIRE(ui->windows.size() == 1);
+    CHECK(ui->windows[0].offer_standing);
+    CHECK(standing->on());
+    CHECK(saved.value == "1");  // saved: it stays on after a restart
+    auto other = prompt();       // for every assistant and account at this desktop
+    other.user = "someone@example.com";
+    other.client = "https://chatgpt.com/";
+    CHECK(b.decide(other).reason == "standing");
+    CHECK(ui->windows.size() == 1);
+}
+
+TEST_CASE("desktop approval: when the organisation enforces asking, every change asks and nothing turns it off", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;  // a stale tick cannot turn anything on
+    auto standing = std::make_shared<Standing>();
+    standing->set(true);
+    standing->set_enforced(true);
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast());
+    CHECK(b.decide(prompt()).reason == "approved");
+    CHECK(b.decide(prompt()).reason == "approved");
+    REQUIRE(ui->windows.size() == 2);
+    CHECK_FALSE(ui->windows[0].offer_standing);  // no "Don't ask again", the window says why
+    CHECK_FALSE(standing->on());
+}
+
+TEST_CASE("desktop approval: a change that cannot run here (fairyfly read-only) is never asked", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    Desk d = desk();
+    d.can_change = [] { return false; };  // --read-only / FAIRYFLY_READ_ONLY: fairyfly refuses it with its own message
+    Broker b(ui, d, fast());
+    const Decision r = b.decide(prompt());
+    CHECK(r.reason == "not_asked");
+    CHECK(ui->notified.empty());
+    CHECK(ui->windows.empty());
 }
 
 TEST_CASE("desktop approval: notification answers round-trip", "[link][approval]") {
