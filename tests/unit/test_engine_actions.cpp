@@ -239,12 +239,12 @@ TEST_CASE("tree item texts: one value per column; a failed read is empty and the
     ComGuiElement element(IDispatchPtr(control, false));
     using Calls = std::vector<std::pair<std::wstring, std::wstring>>;
 
-    SECTION("the screen reader skips the hierarchy and unnamed columns") {
+    SECTION("skip_hierarchy (the screen reader's flag) skips the hierarchy and unnamed columns") {
         CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL1", "", "COL3", "COL2"}, true) ==
               std::vector<std::string>{"", "a", "", "", "b"});
         CHECK(control->calls == Calls{{L"GetItemText", L"N1,COL1"}, {L"GetItemText", L"N1,COL3"}, {L"GetItemText", L"N1,COL2"}});
     }
-    SECTION("the table extractor asks every data column, as before") {
+    SECTION("without skip_hierarchy (the table extractor's flag) every column is asked, as before") {
         CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL3", "COL2"}, false) ==
               std::vector<std::string>{"h", "", "b"});
         CHECK(control->calls == Calls{{L"GetItemText", L"N1,HierarchyHeader"}, {L"GetItemText", L"N1,COL3"},
