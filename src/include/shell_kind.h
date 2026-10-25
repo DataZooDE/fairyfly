@@ -21,9 +21,10 @@ inline ShellExtractionKind classify_shell_extraction(const std::string& subtype)
 /// An ALV grid (SubType GridView).
 inline bool is_grid_shell(const std::string& subtype) { return classify_shell_extraction(subtype) == ShellExtractionKind::Grid; }
 
-/// Shells with a dedicated reader; any other SubType gets the generic probe (grid-like, HTML/text, accessibility).
+/// Shells with a dedicated reader: grids and trees (the classifier's), plus the metadata shells read on their own;
+/// any other SubType gets the generic probe (grid-like, HTML/text, accessibility).
 inline bool has_dedicated_shell_reader(const std::string& subtype) {
-    return subtype == "GridView" || subtype == "Tree" || subtype == "TableTreeControl" || subtype == "Toolbar" ||
+    return classify_shell_extraction(subtype) != ShellExtractionKind::Metadata || subtype == "Toolbar" ||
            subtype == "HTMLViewer" || subtype == "AbapEditor" || subtype == "TextEdit";
 }
 
