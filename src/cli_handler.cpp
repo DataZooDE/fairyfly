@@ -1,3 +1,4 @@
+#include "include/com/tree_view.h"
 #include "include/cli_handler.h"
 #include "include/sap_identity.h"
 #include "include/string_utils.h"
@@ -1003,7 +1004,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                     const std::string full_path = expand_active(elem.path);
                     if (auto target = session->find_element_by_id(full_path))
                         target_text = node_key.empty() ? target->get_cell_value(*row, column)
-                                                       : target->get_node_text_by_key(node_key);
+                                                       : as_tree(*target).get_node_text_by_key(node_key);
                 }
             }
         } catch (const std::exception& e) {
@@ -1084,15 +1085,15 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
 
             // Execute the tree action
             if (tree_action == "select") {
-                tree_elem->select_node(node_key);
+                as_tree(*tree_elem).select_node(node_key);
             } else if (tree_action == "expand") {
-                tree_elem->expand_node(node_key);
+                as_tree(*tree_elem).expand_node(node_key);
             } else if (tree_action == "collapse") {
-                tree_elem->collapse_node(node_key);
+                as_tree(*tree_elem).collapse_node(node_key);
             } else if (tree_action == "contextmenu") {
-                tree_elem->select_node_context_item(node_key, menu_item);
+                as_tree(*tree_elem).select_node_context_item(node_key, menu_item);
             } else { // doubleclick (default)
-                tree_elem->doubleclick_node(node_key);
+                as_tree(*tree_elem).doubleclick_node(node_key);
             }
             session->wait_for_completion(500);
             const auto after_status = sap::read_action_status(session);
@@ -1472,7 +1473,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
             // Get all node keys
             auto start = std::chrono::high_resolution_clock::now();
-            auto node_keys = tree_elem->get_all_node_keys();
+            auto node_keys = as_tree(*tree_elem).get_all_node_keys();
 
             // Build nodes array with keys and text
             json nodes = json::array();
@@ -1481,15 +1482,15 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
             for (const auto& key : node_keys) {
                 json node;
                 node["key"] = key;
-                std::string node_text = tree_elem->get_node_text_by_key(key);
+                std::string node_text = as_tree(*tree_elem).get_node_text_by_key(key);
                 if (node_text.empty() && !tree_column_names_loaded) {
-                    tree_column_names = tree_elem->get_tree_column_names();
+                    tree_column_names = as_tree(*tree_elem).get_tree_column_names();
                     tree_column_names_loaded = true;
                 }
                 node["text"] = sap::recover_tree_node_text(
                     node_text, tree_column_names,
                     [&](const std::string& name) {
-                        return tree_elem->get_item_text(key, name);
+                        return as_tree(*tree_elem).get_item_text(key, name);
                     });
                 nodes.push_back(node);
             }

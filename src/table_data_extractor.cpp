@@ -1,3 +1,4 @@
+#include "include/com/tree_view.h"
 #include "include/table_data_extractor.h"
 #include "include/com/invoke.h"
 #include <spdlog/spdlog.h>
@@ -440,7 +441,7 @@ void TableDataExtractor::traverse_tree_nodes(
             spdlog::debug("Detected GuiShell tree control, using GetAllNodeKeys()");
 
             // Get all node keys from the tree
-            auto node_keys = tree_element->get_all_node_keys();
+            auto node_keys = as_tree(*tree_element).get_all_node_keys();
             spdlog::info("Retrieved {} nodes from GuiShell tree", node_keys.size());
 
             // Get column names (skip first column which is the hierarchy/text column)
@@ -461,7 +462,7 @@ void TableDataExtractor::traverse_tree_nodes(
             for (const auto& key : node_keys) {
                 try {
                     spdlog::trace("TREE_EXTRACT: Getting path for node key {} ({}/{})", key, ++path_count, node_keys.size());
-                    key_to_path[key] = tree_element->get_node_path_by_key(key);
+                    key_to_path[key] = as_tree(*tree_element).get_node_path_by_key(key);
                 } catch (const std::exception& e) {
                     spdlog::warn("Failed to get path for node key {}: {}", key, e.what());
                     key_to_path[key] = "";
@@ -481,15 +482,15 @@ void TableDataExtractor::traverse_tree_nodes(
 
                     // Get node text with error handling
                     try {
-                        node.text = tree_element->get_node_text_by_key(key);
+                        node.text = as_tree(*tree_element).get_node_text_by_key(key);
                         if (node.text.empty() && !tree_column_names_loaded) {
-                            tree_column_names = tree_element->get_tree_column_names();
+                            tree_column_names = as_tree(*tree_element).get_tree_column_names();
                             tree_column_names_loaded = true;
                         }
                         node.text = recover_tree_node_text(
                             node.text, tree_column_names,
                             [&](const std::string& name) {
-                                return tree_element->get_item_text(key, name);
+                                return as_tree(*tree_element).get_item_text(key, name);
                             });
                         spdlog::trace("TREE_EXTRACT: Got text for node {}", key);
                     } catch (const std::exception& e) {
@@ -515,7 +516,7 @@ void TableDataExtractor::traverse_tree_nodes(
                     spdlog::trace("TREE_EXTRACT: Getting {} column values for node {}...", data_columns.size(), key);
                     for (const auto& col_name : data_columns) {
                         try {
-                            std::string col_value = tree_element->get_item_text(key, col_name);
+                            std::string col_value = as_tree(*tree_element).get_item_text(key, col_name);
                             node.column_values.push_back(col_value);
                         } catch (const std::exception& e) {
                             spdlog::debug("Failed to get column {} for node {}: {}", col_name, key, e.what());
@@ -540,7 +541,7 @@ void TableDataExtractor::traverse_tree_nodes(
                     nodes.push_back(std::move(node));
                 } else {
                     // Find parent and add as child
-                    std::string path = tree_element->get_node_path_by_key(key);
+                    std::string path = as_tree(*tree_element).get_node_path_by_key(key);
                     size_t last_backslash = path.find_last_of('\\');
                     if (last_backslash != std::string::npos) {
                         std::string parent_path = path.substr(0, last_backslash);

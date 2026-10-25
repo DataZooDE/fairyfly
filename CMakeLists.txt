@@ -149,6 +149,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/com/wrapper.cpp
     src/com/wrapper_helpers.cpp
     src/com/element.cpp
+    src/com/tree_view.cpp
     src/com/window.cpp
     src/com/session.cpp
     src/com/connection.cpp

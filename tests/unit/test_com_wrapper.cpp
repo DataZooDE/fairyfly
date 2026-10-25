@@ -3,6 +3,7 @@
 #include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
+#include "include/com/tree_view.h"
 #include "include/com/wrapper.h"
 #include "include/constants.h"
 #include "include/com/wrapper_helpers.h"
@@ -1511,7 +1512,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     auto* dispatch = new TextFieldDispatch(L"GuiShell", 151, L"wnd[0]/usr/tree");
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
-    tree->doubleclick_node("NODE");
+    as_tree(*tree).doubleclick_node("NODE");
     REQUIRE(dispatch->tree_item_doubleclicks == 1);
     REQUIRE(dispatch->tree_node_doubleclicks == 0);
 
@@ -1519,7 +1520,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     simple_dispatch->tree_node_has_text = true;
     auto simple_tree = ComGuiElement::create(simple_dispatch);
     simple_dispatch->Release();
-    simple_tree->doubleclick_node("SIMPLE");
+    as_tree(*simple_tree).doubleclick_node("SIMPLE");
     REQUIRE(simple_dispatch->tree_node_doubleclicks == 1);
     REQUIRE(simple_dispatch->tree_item_doubleclicks == 0);
 }
@@ -1530,7 +1531,7 @@ TEST_CASE("Selecting a tree node clears an earlier selection", "[com][tree][acti
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
 
-    tree->select_node("target-node");
+    as_tree(*tree).select_node("target-node");
 
     REQUIRE(dispatch->tree_selection_calls == std::vector<std::string>{"UnselectAll", "SelectNode"});
     REQUIRE(dispatch->selected_tree_nodes == std::vector<std::wstring>{L"target-node"});

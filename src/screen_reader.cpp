@@ -1,3 +1,4 @@
+#include "include/com/tree_view.h"
 #include "include/shell_kind.h"
 #include "include/object_tree.h"
 #include "include/string_utils.h"
@@ -326,7 +327,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         spdlog::debug("Extracting tree data from {} using tree API...", elem_id);
 
         // Get all node keys (safe API, no Children traversal)
-        auto node_keys = element->get_all_node_keys();
+        auto node_keys = as_tree(*element).get_all_node_keys();
         if (node_keys.empty()) {
             spdlog::warn("Tree {} extraction returned 0 nodes - tree may be empty or API call failed", elem_id);
             tree_element["extraction_warning"] = "No nodes returned by GetAllNodeKeys() - tree may be empty";
@@ -369,14 +370,14 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                 // Extract node text with individual error handling
                 try {
                     spdlog::debug("  -> Getting node text for key '{}'", key);
-                    std::string node_text = element->get_node_text_by_key(key);
+                    std::string node_text = as_tree(*element).get_node_text_by_key(key);
                     if (node_text.empty() && !tree_column_names_loaded) {
-                        tree_column_names = element->get_tree_column_names();
+                        tree_column_names = as_tree(*element).get_tree_column_names();
                         tree_column_names_loaded = true;
                     }
                     node["text"] = recover_tree_node_text(
                         node_text, tree_column_names,
-                        [&](const std::string& name) { return element->get_item_text(key, name); });
+                        [&](const std::string& name) { return as_tree(*element).get_item_text(key, name); });
                     spdlog::debug("  -> Got node text for key '{}'", key);
                 } catch (const std::exception& e) {
                     node["text"] = "[extraction_failed]";
@@ -386,7 +387,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                 // Extract node path with individual error handling
                 try {
                     spdlog::debug("  -> Getting node path for key '{}'", key);
-                    node["path"] = element->get_node_path_by_key(key);
+                    node["path"] = as_tree(*element).get_node_path_by_key(key);
                     spdlog::debug("  -> Got node path: '{}'", node["path"].get<std::string>());
                 } catch (const std::exception& e) {
                     node["path"] = "[extraction_failed]";
@@ -410,7 +411,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                                 continue;
                             }
 
-                            std::string col_value = element->get_item_text(key, col_name_str);
+                            std::string col_value = as_tree(*element).get_item_text(key, col_name_str);
                             column_values.push_back(col_value);
 
                         } catch (const std::exception& e) {

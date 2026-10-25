@@ -1,3 +1,4 @@
+#include "include/com/tree_view.h"
 #include "include/shell_kind.h"
 #include "include/link/trail_screen_source.h"
 
@@ -72,7 +73,7 @@ void read_columns(Field& f, const ComGuiElementPtr& e, const std::string& subtyp
         if (f.columns.empty()) f.opaque = true;
     } else if (subtype == "Tree") {
         try {
-            f.columns = e->get_tree_column_names();
+            f.columns = as_tree(*e).get_tree_column_names();
         } catch (const std::exception&) {
         }
     }
