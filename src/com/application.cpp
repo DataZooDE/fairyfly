@@ -47,6 +47,128 @@ ComGuiApplication::~ComGuiApplication() {
     }
 }
 
+namespace {
+
+/// The SAPGUI entry of the running object table through SAP's official SapROTWr.SapROTWrapper (AddRef'd), or null.
+IDispatch* sapgui_rot_entry() {
+    IDispatch* sap_gui = nullptr;
+    CLSID clsid_rot;
+    HRESULT rot_hr = CLSIDFromProgID(L"SapROTWr.SapROTWrapper", &clsid_rot);
+    spdlog::debug("SapROTWr CLSID lookup hr={}", hresult_hex(rot_hr));
+    if (SUCCEEDED(rot_hr)) {
+        IDispatch* rot_wrapper = nullptr;
+        rot_hr = CoCreateInstance(clsid_rot, nullptr, CLSCTX_INPROC_SERVER, IID_IDispatch, (void**)&rot_wrapper);
+        spdlog::debug("SapROTWr creation hr={}", hresult_hex(rot_hr));
+        if (SUCCEEDED(rot_hr)) {
+            OLECHAR* rot_entry_name = (OLECHAR*)L"GetROTEntry";
+            DISPID dispid_rot;
+            rot_hr = rot_wrapper->GetIDsOfNames(IID_NULL, &rot_entry_name, 1, LOCALE_USER_DEFAULT, &dispid_rot);
+            spdlog::debug("SapROTWr GetROTEntry lookup hr={}", hresult_hex(rot_hr));
+            if (SUCCEEDED(rot_hr)) {
+                VARIANT res;
+                VariantInit(&res);
+                HRESULT hr_call = invoke(rot_wrapper, dispid_rot, DISPATCH_METHOD, {_variant_t(L"SAPGUI")}, &res);
+                spdlog::debug("SapROTWr GetROTEntry invoke hr={}, result type={}",
+                              hresult_hex(hr_call), res.vt);
+                if (SUCCEEDED(hr_call) && res.vt == VT_DISPATCH && res.pdispVal) {
+                    sap_gui = res.pdispVal;
+                    spdlog::debug("SapROTWr.SapROTWrapper returned SAPGUI ROT entry successfully");
+                }
+                if (res.vt != VT_DISPATCH || !res.pdispVal) VariantClear(&res);
+            }
+            rot_wrapper->Release();
+        }
+    }
+    return sap_gui;
+}
+
+/// The GuiApplication behind SAPGUI's ROT entry (SapGuiAuto.GetScriptingEngine), or null. Some builds expose it as
+/// a PROPERTYGET, others as a METHOD: PROPERTYGET first.
+IDispatchPtr scripting_engine_of(IDispatch* sap_gui) {
+    _bstr_t ge_name(L"GetScriptingEngine");
+    DISPID ge_id{};
+    HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, ge_name, &ge_id);
+
+    if (SUCCEEDED(ge_hr)) {
+        _variant_t vr;
+
+        // Try PROPERTYGET
+        HRESULT hr_prop = invoke(sap_gui, ge_id, DISPATCH_PROPERTYGET, {}, &vr);
+        if (SUCCEEDED(hr_prop) && vr.vt == VT_DISPATCH && vr.pdispVal) {
+            spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
+            return IDispatchPtr(vr.pdispVal);
+        }
+
+        // Try METHOD
+        VariantClear(&vr);
+        HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD, {}, &vr);
+        if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
+            spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
+            return IDispatchPtr(vr.pdispVal);
+        }
+
+        spdlog::debug("GetScriptingEngine failed: prop_hr={}, meth_hr={}", hresult_hex(hr_prop), hresult_hex(hr_meth));
+    } else {
+        spdlog::debug("GetScriptingEngine name resolution failed (hr={})", hresult_hex(ge_hr));
+    }
+    return nullptr;
+}
+
+/// The embedded fallback: a new SapGui.ScriptingCtrl.1 instance in this process and its GuiApplication (or the
+/// control itself when it implements OpenConnection); null when that fails, with `hr` the last HRESULT.
+ComGuiApplicationPtr create_embedded_application(HRESULT& hr) {
+    IDispatch* sap_gui = nullptr;
+    CLSID clsid;
+    hr = CLSIDFromProgID(L"SapGui.ScriptingCtrl.1", &clsid);
+
+    if (SUCCEEDED(hr)) {
+        spdlog::debug("CLSID found for SapGui.ScriptingCtrl.1, attempting CoCreateInstance...");
+        // Try CLSCTX_ALL to allow in-process, local, and remote servers
+        hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_IDispatch,
+                             (void**)&sap_gui);
+
+        if (SUCCEEDED(hr) && sap_gui) {
+            spdlog::info("Created SAP GUI COM object via CoCreateInstance (SapGui.ScriptingCtrl.1)");
+
+            // SapGui.ScriptingCtrl.1 provides GetScriptingEngine() which returns GuiApplication
+            DISPID ge_id = -1;
+            HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, L"GetScriptingEngine", &ge_id);
+            if (FAILED(ge_hr)) {
+                _bstr_t ge_name(L"GetScriptingEngine");
+                ge_hr = sap_gui->GetIDsOfNames(IID_NULL, (LPOLESTR*)&ge_name, 1, LOCALE_USER_DEFAULT, &ge_id);
+            }
+
+            if (SUCCEEDED(ge_hr)) {
+                _variant_t vr;
+                HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, {}, &vr);
+                if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
+                    spdlog::info("Got GuiApplication via SapGui.ScriptingCtrl.1 GetScriptingEngine");
+                    sap_gui->Release();
+                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), 2);
+                }
+            }
+
+            // If GetScriptingEngine wasn't available, check if sap_gui itself implements OpenConnection
+            DISPID test_dispid = -1;
+            HRESULT test_hr = get_dispid_via_typeinfo(sap_gui, L"OpenConnection", &test_dispid);
+            if (SUCCEEDED(test_hr)) {
+                return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui), 2);
+            }
+
+            sap_gui->Release();
+            sap_gui = nullptr;
+            // SapGui.ScriptingCtrl.1 (sapfewse.ocx) incremented COM apartment count during
+            // CoCreateInstance. Balance it here since creation did not produce an application.
+            CoUninitialize();
+        }
+
+        spdlog::debug("CoCreateInstance failed (hr={})", hresult_hex(hr));
+    }
+    return nullptr;
+}
+
+}  // namespace
+
 ComGuiApplicationPtr ComGuiApplication::create() {
     // Initialize COM library for STA (Single-Threaded Apartment) mode
     // This is required for SAP GUI scripting API
@@ -58,36 +180,8 @@ ComGuiApplicationPtr ComGuiApplication::create() {
     spdlog::debug("COM library initialized");
 
     try {
-        IDispatch* sap_gui = nullptr;
-
         // Method 1: Try SapROTWr.SapROTWrapper (Official SAP GUI Scripting entrypoint)
-        CLSID clsid_rot;
-        HRESULT rot_hr = CLSIDFromProgID(L"SapROTWr.SapROTWrapper", &clsid_rot);
-        spdlog::debug("SapROTWr CLSID lookup hr={}", hresult_hex(rot_hr));
-        if (SUCCEEDED(rot_hr)) {
-            IDispatch* rot_wrapper = nullptr;
-            rot_hr = CoCreateInstance(clsid_rot, nullptr, CLSCTX_INPROC_SERVER, IID_IDispatch, (void**)&rot_wrapper);
-            spdlog::debug("SapROTWr creation hr={}", hresult_hex(rot_hr));
-            if (SUCCEEDED(rot_hr)) {
-                OLECHAR* rot_entry_name = (OLECHAR*)L"GetROTEntry";
-                DISPID dispid_rot;
-                rot_hr = rot_wrapper->GetIDsOfNames(IID_NULL, &rot_entry_name, 1, LOCALE_USER_DEFAULT, &dispid_rot);
-                spdlog::debug("SapROTWr GetROTEntry lookup hr={}", hresult_hex(rot_hr));
-                if (SUCCEEDED(rot_hr)) {
-                    VARIANT res;
-                    VariantInit(&res);
-                    HRESULT hr_call = invoke(rot_wrapper, dispid_rot, DISPATCH_METHOD, {_variant_t(L"SAPGUI")}, &res);
-                    spdlog::debug("SapROTWr GetROTEntry invoke hr={}, result type={}",
-                                  hresult_hex(hr_call), res.vt);
-                    if (SUCCEEDED(hr_call) && res.vt == VT_DISPATCH && res.pdispVal) {
-                        sap_gui = res.pdispVal;
-                        spdlog::debug("SapROTWr.SapROTWrapper returned SAPGUI ROT entry successfully");
-                    }
-                    if (res.vt != VT_DISPATCH || !res.pdispVal) VariantClear(&res);
-                }
-                rot_wrapper->Release();
-            }
-        }
+        IDispatch* sap_gui = sapgui_rot_entry();
 
         // Fallback to CoGetObject("SAPGUI")
         if (!sap_gui) {
@@ -98,40 +192,9 @@ ComGuiApplicationPtr ComGuiApplication::create() {
         const bool sap_logon_found = sap_gui != nullptr;
         if (sap_gui) {
             spdlog::debug("SAPGUI ROT entry obtained successfully - SAP GUI is running");
-
-            // CoGetObject("SAPGUI") returns SapGuiAuto (ROT entry). It exposes GetScriptingEngine.
-            // Some builds expose it as a PROPERTYGET, others as a METHOD. Try both, PROPERTYGET first.
-            _bstr_t ge_name(L"GetScriptingEngine");
-            DISPID ge_id{};
-            HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, ge_name, &ge_id);
-
-            if (SUCCEEDED(ge_hr)) {
-                _variant_t vr;
-
-                // Try PROPERTYGET
-                HRESULT hr_prop = invoke(sap_gui, ge_id, DISPATCH_PROPERTYGET, {}, &vr);
-                if (SUCCEEDED(hr_prop) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                    spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
-                    sap_gui->Release();
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), true);
-                }
-
-                // Try METHOD
-                VariantClear(&vr);
-                HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD, {}, &vr);
-                if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                    spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
-                    sap_gui->Release();
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), true);
-                }
-
-                spdlog::debug("GetScriptingEngine failed: prop_hr={}, meth_hr={}", hresult_hex(hr_prop), hresult_hex(hr_meth));
-            } else {
-                spdlog::debug("GetScriptingEngine name resolution failed (hr={})", hresult_hex(ge_hr));
-            }
-
+            IDispatchPtr engine = scripting_engine_of(sap_gui);
             sap_gui->Release();
-            sap_gui = nullptr;
+            if (engine) return std::make_shared<ComGuiApplication>(engine, true);
         }
 
         if (!embedded_fallback_allowed()) {
@@ -151,52 +214,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
         // Method 2: Try CreateObject as fallback
         // This creates a new SAP GUI instance rather than connecting to running one
         // Only use this if Method 1 fails
-        CLSID clsid;
-        hr = CLSIDFromProgID(L"SapGui.ScriptingCtrl.1", &clsid);
-
-        if (SUCCEEDED(hr)) {
-            spdlog::debug("CLSID found for SapGui.ScriptingCtrl.1, attempting CoCreateInstance...");
-            // Try CLSCTX_ALL to allow in-process, local, and remote servers
-            hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_IDispatch,
-                                 (void**)&sap_gui);
-
-            if (SUCCEEDED(hr) && sap_gui) {
-                spdlog::info("Created SAP GUI COM object via CoCreateInstance (SapGui.ScriptingCtrl.1)");
-
-                // SapGui.ScriptingCtrl.1 provides GetScriptingEngine() which returns GuiApplication
-                DISPID ge_id = -1;
-                HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, L"GetScriptingEngine", &ge_id);
-                if (FAILED(ge_hr)) {
-                    _bstr_t ge_name(L"GetScriptingEngine");
-                    ge_hr = sap_gui->GetIDsOfNames(IID_NULL, (LPOLESTR*)&ge_name, 1, LOCALE_USER_DEFAULT, &ge_id);
-                }
-
-                if (SUCCEEDED(ge_hr)) {
-                    _variant_t vr;
-                    HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, {}, &vr);
-                    if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                        spdlog::info("Got GuiApplication via SapGui.ScriptingCtrl.1 GetScriptingEngine");
-                        sap_gui->Release();
-                        return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), 2);
-                    }
-                }
-
-                // If GetScriptingEngine wasn't available, check if sap_gui itself implements OpenConnection
-                DISPID test_dispid = -1;
-                HRESULT test_hr = get_dispid_via_typeinfo(sap_gui, L"OpenConnection", &test_dispid);
-                if (SUCCEEDED(test_hr)) {
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui), 2);
-                }
-
-                sap_gui->Release();
-                sap_gui = nullptr;
-                // SapGui.ScriptingCtrl.1 (sapfewse.ocx) incremented COM apartment count during
-                // CoCreateInstance. Balance it here since creation did not produce an application.
-                CoUninitialize();
-            }
-
-            spdlog::debug("CoCreateInstance failed (hr={})", hresult_hex(hr));
-        }
+        if (auto embedded = create_embedded_application(hr)) return embedded;
 
         // All methods failed
         std::string error_msg = fmt::format(
