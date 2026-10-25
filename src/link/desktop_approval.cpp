@@ -263,6 +263,8 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     Decision d{false, "expired"};
     while (true) {
         if (window) {
+            // the administrator may have enforced asking since the notification was shown
+            if (r.offer_standing && desk_.standing->enforced()) r.offer_standing = false;
             bool remember = false;
             const Answer a = ui_->ask(
                 r,
@@ -380,7 +382,7 @@ struct BrokerApprover : ffy::link::Approver {
     bool approve_change(const ffy::link::ApprovalPrompt& prompt) override { return decide(prompt).approved; }
     ffy::link::ApprovalResult decide(const ffy::link::ApprovalPrompt& prompt) override {
         const Decision d = broker->decide(prompt);
-        if (d.approved) grant_permit(prompt);
+        if (d.approved && d.reason != "not_asked") grant_permit(prompt);  // not_asked: fairyfly refuses it anyway
         return {d.approved, d.reason == "expired_in_queue" ? ffy::link::approval_reason::kExpired : d.reason};
     }
     void approval_enforced(bool enforced) override { broker->approval_enforced(enforced); }

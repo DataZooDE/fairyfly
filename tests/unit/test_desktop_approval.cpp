@@ -767,6 +767,25 @@ TEST_CASE("desktop approval: libffl's approval_enforced greys out the switch unt
     CHECK(standing->on());
 }
 
+TEST_CASE("desktop approval: the administrator's push while a notification waits takes \"Don't ask again\" out of its window", "[link][approval]") {
+    // Codex review of #39: the question was built before the push; Details opened the window with the checkbox
+    auto ui = std::make_shared<FakeUi>();
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    auto standing = std::make_shared<Standing>();
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast());
+    auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
+    REQUIRE(eventually([&] { return ui->notified_count() == 1; }));
+    const Request r = ui->last_notified();
+    CHECK(r.offer_standing);
+    b.approval_enforced(true);
+    b.answer(r.id, r.nonce, Answer::Details);
+    CHECK(f.get().reason == "approved");
+    REQUIRE(ui->windows.size() == 1);
+    CHECK_FALSE(ui->windows[0].offer_standing);
+    CHECK_FALSE(standing->saved());
+}
+
 TEST_CASE("desktop approval: a change that cannot run here (fairyfly read-only) is never asked", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     Desk d = desk();
@@ -776,6 +795,12 @@ TEST_CASE("desktop approval: a change that cannot run here (fairyfly read-only) 
     CHECK(r.reason == "not_asked");
     CHECK(ui->notified.empty());
     CHECK(ui->windows.empty());
+    // nobody approved it: no permit for the call (Codex review of #39)
+    auto approver = make_approver(std::make_shared<Broker>(ui, d, fast()));
+    ffy::link::ApprovalPrompt p = prompt("press 11");
+    p.tool = "gui_key_send";
+    CHECK(approver->decide(p).approved);
+    CHECK_FALSE(take_permit("gui_key_send", nlohmann::json{{"key", "11"}}));
 }
 
 TEST_CASE("desktop approval: notification answers round-trip", "[link][approval]") {
