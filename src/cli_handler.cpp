@@ -953,6 +953,145 @@ Result CommandHandler::handle_transaction(const std::string& tcode, std::optiona
     return result;
 }
 
+/// element click --node-key: select, expand, collapse, double-click or a context-menu item of a tree node.
+Result CommandHandler::click_tree_node(const ElementId& elem, const std::string& element_id, const std::string& node_key,
+                                       const std::string& tree_action, const std::string& menu_item, int connection_id) {
+    Result result;
+    if (tree_action == "contextmenu" && menu_item.empty()) {
+        result.set_error("MENU_ITEM_REQUIRED", "--menu-item is required for tree context-menu actions");
+        return result;
+    }
+    spdlog::info("Tree operation requested: action='{}', node_key='{}'", tree_action, node_key);
+
+    try {
+        const Stopwatch timer;
+
+        // Get the ComAutomationEngine to access session
+        auto* com_engine = engine_->scripting();
+        if (!com_engine) {
+            result.set_error("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
+            return result;
+        }
+
+        auto session = com_engine->unchecked_session();
+        if (!session) {
+            result.set_error("NO_SESSION", "No active session");
+            return result;
+        }
+
+        const std::string full_path = expand_active(elem.path);
+
+        // Find element by ID
+        auto tree_elem = session->find_element_by_id(full_path);
+        if (!tree_elem) {
+            result.set_error("ELEMENT_NOT_FOUND", fmt::format("Element not found: {}", full_path));
+            return result;
+        }
+
+        // Check if element is a tree (optional - will fail gracefully if not)
+        std::string elem_type = tree_elem->get_type();
+        const auto before_status = sap::read_action_status(session);
+
+        // Execute the tree action
+        if (tree_action == "select") {
+            as_tree(*tree_elem).select_node(node_key);
+        } else if (tree_action == "expand") {
+            as_tree(*tree_elem).expand_node(node_key);
+        } else if (tree_action == "collapse") {
+            as_tree(*tree_elem).collapse_node(node_key);
+        } else if (tree_action == "contextmenu") {
+            as_tree(*tree_elem).select_node_context_item(node_key, menu_item);
+        } else { // doubleclick (default)
+            as_tree(*tree_elem).doubleclick_node(node_key);
+        }
+        session->wait_for_completion(500);
+        const auto after_status = sap::read_action_status(session);
+        if (auto rejection = sap::classify_action_status(before_status,
+                after_status, full_path,
+                tree_action == "contextmenu" || tree_action == "doubleclick")) {
+            sap::attach_status_bar(*rejection, before_status, after_status);
+            rejection->error["node_key"] = node_key;
+            rejection->error["tree_action"] = tree_action;
+            rejection->duration = timer.elapsed();
+            return *rejection;
+        }
+
+        const auto duration = timer.elapsed();
+
+        result.status = Result::Status::Success;
+        result.data["action"] = tree_action + "_node";
+        result.data["node_key"] = node_key;
+        if (tree_action == "contextmenu") result.data["menu_item"] = menu_item;
+        result.data["element"] = full_path;
+        result.data["element_type"] = elem_type;
+        result.data["connection_id"] = connection_id;
+        sap::attach_status_bar(result, before_status, after_status);
+        result.duration = duration;
+
+        spdlog::info("Executed tree action '{}' on node '{}' (duration: {}ms)",
+                    tree_action, node_key, duration.count());
+
+        return result;
+
+    } catch (const std::exception& e) {
+        result.set_error("TREE_ACTION_FAILED", fmt::format("Tree action '{}' failed: {}", tree_action, e.what()));
+        result.error["node_key"] = node_key;
+        result.error["tree_action"] = tree_action;
+        result.error["suggestions"] = json::array({
+            fmt::format("List nodes: fairyfly element get {} --list-nodes", element_id),
+            "Ensure element is a tree control (GuiShell or GuiTree)",
+            "Verify node key exists in tree"
+        });
+        return result;
+    }
+}
+
+/// After a click with --wait-for-window: wait until the window OR the screen content changes (SAP often updates in
+/// place, same window id), at most `timeout_ms`; what changed goes into result.data and the wait into its duration.
+void CommandHandler::wait_for_screen_change(Result& result, const WindowId& window_before,
+                                            const sap::ScreenSnapshot& snapshot_before, SapGuiScripting* snapshot_engine,
+                                            int timeout_ms) {
+    const auto start = std::chrono::steady_clock::now();
+    bool window_changed = false;
+    bool screen_changed = false;
+    WindowId new_window = window_before;
+
+    while (true) {
+        new_window = engine_->get_active_window_id();
+        window_changed = new_window.id != window_before.id;
+        if (snapshot_engine) {
+            screen_changed = sap::screen_snapshot_changed(
+                snapshot_before, snapshot_engine->capture_screen_snapshot());
+        } else {
+            screen_changed = window_changed;
+        }
+        if (window_changed || screen_changed) break;
+
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+        if (elapsed.count() >= timeout_ms) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+    result.data["waited_ms"] = waited.count();
+    result.data["window_changed"] = window_changed;
+    result.data["screen_changed"] = screen_changed;
+    result.duration += waited;
+
+    if (window_changed) {
+        result.data["window_before"] = window_before.id;
+        result.data["window_after"] = new_window.id;
+        result.data["new_window"] = new_window.id;  // For easy access
+        spdlog::info("New window detected after click: {} -> {}", window_before.id, new_window.id);
+    } else if (screen_changed) {
+        spdlog::info("Screen changed in place after click (waited {}ms)", waited.count());
+    } else {
+        spdlog::debug("No screen change detected after click (waited {}ms)", waited.count());
+    }
+}
+
 Result CommandHandler::handle_click(const std::string& element_id, std::optional<int> connection_id,
                                      bool wait_for_window, int timeout_ms,
                                      const std::string& node_key_raw, const std::string& tree_action,
@@ -1048,97 +1187,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     }
 
     // Check if node_key is provided - if so, this is a tree operation
-    if (!node_key.empty()) {
-        if (tree_action == "contextmenu" && menu_item.empty()) {
-            result.set_error("MENU_ITEM_REQUIRED", "--menu-item is required for tree context-menu actions");
-            return result;
-        }
-        spdlog::info("Tree operation requested: action='{}', node_key='{}'", tree_action, node_key);
-
-        try {
-            auto start = std::chrono::high_resolution_clock::now();
-
-            // Get the ComAutomationEngine to access session
-            auto* com_engine = engine_->scripting();
-            if (!com_engine) {
-                result.set_error("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
-                return result;
-            }
-
-            auto session = com_engine->unchecked_session();
-            if (!session) {
-                result.set_error("NO_SESSION", "No active session");
-                return result;
-            }
-
-            const std::string full_path = expand_active(elem.path);
-
-            // Find element by ID
-            auto tree_elem = session->find_element_by_id(full_path);
-            if (!tree_elem) {
-                result.set_error("ELEMENT_NOT_FOUND", fmt::format("Element not found: {}", full_path));
-                return result;
-            }
-
-            // Check if element is a tree (optional - will fail gracefully if not)
-            std::string elem_type = tree_elem->get_type();
-            const auto before_status = sap::read_action_status(session);
-
-            // Execute the tree action
-            if (tree_action == "select") {
-                as_tree(*tree_elem).select_node(node_key);
-            } else if (tree_action == "expand") {
-                as_tree(*tree_elem).expand_node(node_key);
-            } else if (tree_action == "collapse") {
-                as_tree(*tree_elem).collapse_node(node_key);
-            } else if (tree_action == "contextmenu") {
-                as_tree(*tree_elem).select_node_context_item(node_key, menu_item);
-            } else { // doubleclick (default)
-                as_tree(*tree_elem).doubleclick_node(node_key);
-            }
-            session->wait_for_completion(500);
-            const auto after_status = sap::read_action_status(session);
-            if (auto rejection = sap::classify_action_status(before_status,
-                    after_status, full_path,
-                    tree_action == "contextmenu" || tree_action == "doubleclick")) {
-                sap::attach_status_bar(*rejection, before_status, after_status);
-                rejection->error["node_key"] = node_key;
-                rejection->error["tree_action"] = tree_action;
-                rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start);
-                return *rejection;
-            }
-
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-            result.status = Result::Status::Success;
-            result.data["action"] = tree_action + "_node";
-            result.data["node_key"] = node_key;
-            if (tree_action == "contextmenu") result.data["menu_item"] = menu_item;
-            result.data["element"] = full_path;
-            result.data["element_type"] = elem_type;
-            result.data["connection_id"] = conn_result.value.id;
-            sap::attach_status_bar(result, before_status, after_status);
-            result.duration = duration;
-
-            spdlog::info("Executed tree action '{}' on node '{}' (duration: {}ms)",
-                        tree_action, node_key, duration.count());
-
-            return result;
-
-        } catch (const std::exception& e) {
-            result.set_error("TREE_ACTION_FAILED", fmt::format("Tree action '{}' failed: {}", tree_action, e.what()));
-            result.error["node_key"] = node_key;
-            result.error["tree_action"] = tree_action;
-            result.error["suggestions"] = json::array({
-                fmt::format("List nodes: fairyfly element get {} --list-nodes", element_id),
-                "Ensure element is a tree control (GuiShell or GuiTree)",
-                "Verify node key exists in tree"
-            });
-            return result;
-        }
-    }
+    if (!node_key.empty()) return click_tree_node(elem, element_id, node_key, tree_action, menu_item, conn_result.value.id);
 
     // Handle synthetic toolbar buttons differently
     if (is_synthetic_button) {
@@ -1162,47 +1211,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         // If requested, wait until the window OR the screen content changes.
         // SAP often updates in place (same window id), so a window-only check
         // would always wait for the full timeout.
-        if (wait_for_window) {
-            const auto start = std::chrono::steady_clock::now();
-            bool window_changed = false;
-            bool screen_changed = false;
-            WindowId new_window = window_before;
-
-            while (true) {
-                new_window = engine_->get_active_window_id();
-                window_changed = new_window.id != window_before.id;
-                if (snapshot_engine) {
-                    screen_changed = sap::screen_snapshot_changed(
-                        snapshot_before, snapshot_engine->capture_screen_snapshot());
-                } else {
-                    screen_changed = window_changed;
-                }
-                if (window_changed || screen_changed) break;
-
-                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - start);
-                if (elapsed.count() >= timeout_ms) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-
-            const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start);
-            result.data["waited_ms"] = waited.count();
-            result.data["window_changed"] = window_changed;
-            result.data["screen_changed"] = screen_changed;
-            result.duration += waited;
-
-            if (window_changed) {
-                result.data["window_before"] = window_before.id;
-                result.data["window_after"] = new_window.id;
-                result.data["new_window"] = new_window.id;  // For easy access
-                spdlog::info("New window detected after click: {} -> {}", window_before.id, new_window.id);
-            } else if (screen_changed) {
-                spdlog::info("Screen changed in place after click (waited {}ms)", waited.count());
-            } else {
-                spdlog::debug("No screen change detected after click (waited {}ms)", waited.count());
-            }
-        }
+        if (wait_for_window) wait_for_screen_change(result, window_before, snapshot_before, snapshot_engine, timeout_ms);
     }
 
     return result;
@@ -1473,7 +1482,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
             }
 
             // Get all node keys
-            auto start = std::chrono::high_resolution_clock::now();
+            const Stopwatch timer;
             auto node_keys = as_tree(*tree_elem).get_all_node_keys();
 
             // Build nodes array with keys and text
@@ -1486,8 +1495,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
                 nodes.push_back(node);
             }
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            const auto duration = timer.elapsed();
 
             Result result;
             result.status = Result::Status::Success;

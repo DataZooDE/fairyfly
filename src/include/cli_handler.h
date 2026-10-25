@@ -7,6 +7,7 @@
 #include "credential_store.h"
 #include "audit_log.h"
 #include "fill_fields.h"
+#include "screen_snapshot.h"
 #include <string>
 #include <functional>
 #include <memory>
@@ -100,6 +101,11 @@ private:
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
+    // the parts of handle_click (cli_handler.cpp)
+    Result click_tree_node(const ElementId& elem, const std::string& element_id, const std::string& node_key,
+                           const std::string& tree_action, const std::string& menu_item, int connection_id);
+    void wait_for_screen_change(Result& result, const WindowId& window_before, const sap::ScreenSnapshot& snapshot_before,
+                                SapGuiScripting* snapshot_engine, int timeout_ms);
     /// `@active...` with the active window's id in front; any other path unchanged.
     std::string expand_active(const std::string& path) const;
     void describe_element(const std::string& element_id, std::string& type, std::string& text, std::string& tooltip);
