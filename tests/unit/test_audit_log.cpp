@@ -221,7 +221,8 @@ TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
     REQUIRE(resolve_config(env_of({}), true, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({}), false, true, now).mode == Mode::Required);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, true, now).mode == Mode::Required);
-    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now).mode == Mode::Disabled);
+    // required is monotonic: once any source asks for it, no disable weakens it (review 2026-10-25)
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now).mode == Mode::Required);
 }
 
 TEST_CASE("AuditSink appends exactly one terminated line per record", "[audit]") {
@@ -395,13 +396,18 @@ TEST_CASE("resolve_config: mcp.yaml's audit.* sits below FAIRYFLY_AUDIT* and the
     both.required = true;  // fail safe inside the file too
     CHECK(resolve_config(none, false, false, now, both).mode == Mode::Required);
     CHECK(resolve_config(none, false, false, now, file).file == fs::path("D:/yaml/audit.jsonl"));
-    // the environment beats the file
+    // enabled/disabled and the file: the environment beats the file, the flags beat both
     CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now, disabled).mode == Mode::Enabled);
-    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "off"}}), false, false, now, required).mode == Mode::Disabled);
     CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT_FILE", "E:/env.jsonl"}}), false, false, now, file).file == fs::path("E:/env.jsonl"));
-    // and the flags beat both (--audit-required wins over every disable)
-    CHECK(resolve_config(none, true, false, now, required).mode == Mode::Disabled);
-    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "off"}}), false, true, now, disabled).mode == Mode::Required);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), true, false, now, {}).mode == Mode::Disabled);
+    // required is monotonic: every source that asks for it wins over every disable or "enabled"
+    for (const char* weaker : {"off", "0", "false", "1", "on", ""}) {
+        CAPTURE(weaker);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), false, false, now, required).mode == Mode::Required);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), true, false, now, required).mode == Mode::Required);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), true, true, now, disabled).mode == Mode::Required);
+    }
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now, disabled).mode == Mode::Required);
     // nothing set: as before
     CHECK(resolve_config(none, false, false, now, {}).mode == Mode::Enabled);
 }

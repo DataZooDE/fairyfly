@@ -71,6 +71,12 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         spdlog::set_level(spdlog::level::from_str(global.log_level));
     }
 
+    // mcp.yaml's audit.* is known only now (stdio, HTTP and the tray all start here): flag > env > yaml for on/off
+    // and the file, "required" from any of them
+    if (sink)
+        sink->reconfigure(audit::resolve_config(config::process_env(), global.no_audit, global.audit_required,
+                                                std::chrono::system_clock::now(), options.audit_file));
+
     const bool http = options.http || options.transport == "http";
     const bool link = !http && options.transport == "link";  // fairyfly link run: calls from the cloud gateway
     if (!http && !link && options.transport != "stdio") {

@@ -235,8 +235,10 @@ Every command, and every line of a `batch`, adds one JSON record to `%LOCALAPPDA
 - Never recorded: error messages, screen content, cell values, passwords and other secrets (secret-looking option
   values and `element fill` values are replaced by a placeholder), the Windows user name and the host name. Search
   terms are kept.
-- Control: `--no-audit`, `--audit-required` (fail with `AUDIT_UNAVAILABLE` when the file cannot be written; wins over
-  any disable), `FAIRYFLY_AUDIT=0|off|required`, `FAIRYFLY_AUDIT_FILE=<path>`. The record is written after the
+- Control: `--no-audit`, `--audit-required` (fail with `AUDIT_UNAVAILABLE` when the file cannot be written),
+  `FAIRYFLY_AUDIT=0|off|required`, `FAIRYFLY_AUDIT_FILE=<path>`, and for `fairyfly mcp` also `audit.*` in `mcp.yaml`.
+  On/off and the file: flag > environment > `mcp.yaml`. "Required" is monotonic: once `--audit-required`,
+  `FAIRYFLY_AUDIT=required` or `audit.required: true` asks for it, no disable switches it off. The record is written after the
   command ran: `AUDIT_UNAVAILABLE` does not mean the action did not happen, so do not retry it blindly.
 - A write failure prints one warning and never breaks a command, unless audit is required.
 - The file is append-only by convention, not tamper-proof: any process of the same Windows user can edit it.

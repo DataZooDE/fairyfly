@@ -250,10 +250,6 @@ namespace {
             }
             // Copy the options first: nothing may rebuild the registry (and destroy this command) later.
             mcp::ServeOptions serve_options = mcp_command->options();
-            // mcp.yaml's audit.* sits below FAIRYFLY_AUDIT* and --no-audit/--audit-required
-            if (g_audit.sink)
-                g_audit.sink->reconfigure(audit::resolve_config(config::process_env(), global_opts.no_audit, global_opts.audit_required,
-                                                                std::chrono::system_clock::now(), serve_options.audit_file));
             std::function<CommandHandler*()> peek = [] {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
             };
