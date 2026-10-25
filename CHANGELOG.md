@@ -124,6 +124,11 @@
 - The cloud link and its tray read them the same way too (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_LINK_GATEWAY`,
   `FAIRYFLY_LINK_FORBID_DEFAULT_STATE`).
 
+### Tray: the running version
+
+- Both trays (the link tray and the local MCP server's tray) show the running version, greyed out, above **Check for
+  updates**, e.g. "fairyfly 2026.10.25.1".
+
 ## 2026.10.25.1 (2026-10-25)
 
 ### Cloud link: "Allow changes in SAP" is the approval (approval model v2)

@@ -1,4 +1,5 @@
 #include "include/tray/tray.h"
+#include "include/version.h"
 
 namespace fairyfly::tray {
 
@@ -17,6 +18,9 @@ MenuItem separator() {
     m.separator = true;
     return m;
 }
+
+// the running version, so the person can tell which fairyfly answers (greyed out, above "Check for updates")
+MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
 
 std::string mode_text(const mcp::ServerStatus& status) { return status.read_only ? "read-only" : "write mode"; }
 
@@ -93,6 +97,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
         cloud.children.push_back(item("Pair again (console)", TrayAction::LinkPair));
     }
     model.items.push_back(std::move(cloud));
+    model.items.push_back(version_item());
     model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
 

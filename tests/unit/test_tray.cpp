@@ -2,6 +2,7 @@
 // window, registry key, mutex or process is ever created here.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <chrono>
@@ -10,6 +11,7 @@
 #include <thread>
 
 #include "include/tray/tray.h"
+#include "include/version.h"
 
 using namespace fairyfly;
 using namespace fairyfly::tray;
@@ -179,12 +181,15 @@ struct Fixture {
 } // namespace
 
 // ================= menu model =================
+// the running version, shown (disabled) above "Check for updates" in both trays
+const std::string kVersionItem = std::string("fairyfly ") + FAIRYFLY_VERSION;
+
 TEST_CASE("tray menu: running read-only server with warnings", "[tray][menu]") {
     const auto m = build_menu(make_status(true, true, {"no tokens", "insecure"}), {});
     CHECK(top_labels(m) == std::vector<std::string>{
         "Running: http://127.0.0.1:8383/mcp (read-only)", "Warnings (2)", "---",
         "Start", "Stop", "Restart", "Read-only mode", "---",
-        "Open log", "Open audit trail folder", "Open config file", "Tokens", "Cloud link", "Check for updates (console)", "---", "Quit"});
+        "Open log", "Open audit trail folder", "Open config file", "Tokens", "Cloud link", kVersionItem, "Check for updates (console)", "---", "Quit"});
     CHECK(m.icon == IconState::Warning);
     CHECK_FALSE(m.items[0].enabled);
     REQUIRE(m.items[1].children.size() == 2);
@@ -402,7 +407,7 @@ TEST_CASE("tray controller: left click text and view", "[tray][controller]") {
     auto controller = f.make();
     CHECK(controller.left_click_text().find("write mode") != std::string::npos);
     CHECK(controller.view().icon == IconState::Warning);
-    CHECK(controller.menu().items.size() == 16);
+    CHECK(controller.menu().items.size() == 17);  // with the version line
 }
 
 // ================= entry decisions =================
@@ -735,7 +740,7 @@ TEST_CASE("link tray menu: no MCP server items, state per link", "[tray][link_tr
     CHECK(m.icon == IconState::Running);
     CHECK(top_labels(m) == std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected", "---", "Pause",
                                                     "Health check (console)", "Pair again (console)", "---", "Open log",
-                                                    "Open audit trail folder", "Check for updates (console)", "---", "Quit"});
+                                                    "Open audit trail folder", kVersionItem, "Check for updates (console)", "---", "Quit"});
     CHECK(m.tooltip == "fairyfly link: connected - Acme Purchasing (pat@acme.example)");
     CHECK(find_item(m, TrayAction::Start) == nullptr);
     CHECK(find_item(m, TrayAction::ToggleReadOnly) == nullptr);
@@ -775,7 +780,7 @@ TEST_CASE("link tray menu: Start local MCP server, checked and disabled while it
     CHECK(top_labels(m) == std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected", "---", "Pause",
                                                     "Health check (console)", "Pair again (console)", "---",
                                                     "Start local MCP server", "---", "Open log", "Open audit trail folder",
-                                                    "Check for updates (console)", "---", "Quit"});
+                                                    kVersionItem, "Check for updates (console)", "---", "Quit"});
     mcp.running = true;
     const auto running_menu = build_link_menu(paired("connected"), {}, mcp);   // find_item points into it
     start = find_item(running_menu, TrayAction::StartMcpServer);
@@ -907,10 +912,16 @@ TEST_CASE("run_link_with_tray: the link runs on the calling thread, Quit stops i
     services.stop_link = [&] { stop = true; };
     const auto main_thread = std::this_thread::get_id();
     std::thread::id ran_on;
-    auto driver = drive(f.host, [&](TrayListener& l) { l.on_action(TrayAction::Quit); });
+    std::atomic<bool> started{false};
+    // Quit only once the link runs: a Quit posted before it starts ends the tray without running it (flaky 1 in 6)
+    auto driver = drive(f.host, [&](TrayListener& l) {
+        for (int i = 0; i < 500 && !started; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        l.on_action(TrayAction::Quit);
+    });
     const int code = run_link_with_tray(
         [&] {
             ran_on = std::this_thread::get_id();
+            started = true;
             for (int i = 0; i < 500 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
             return stop ? 0 : 9;
         },
@@ -1425,5 +1436,16 @@ TEST_CASE("a second start opens the running tray's menu instead of a message box
         CHECK(run_link_with_tray([] { return 0; }, services, guard, TrayPaths{}) == 0);
         REQUIRE(host.boxes.size() == 1);
         CHECK(host.boxes[0].find("already running") != std::string::npos);
+    }
+}
+
+TEST_CASE("tray menus: both trays show the running version, greyed out, above Check for updates", "[tray][menu]") {
+    for (const auto& m : {build_menu(make_status(true, false, {}), {}), build_link_menu(paired("connected"))}) {
+        const auto labels = top_labels(m);
+        auto at = std::find(labels.begin(), labels.end(), kVersionItem);
+        REQUIRE(at != labels.end());
+        REQUIRE(at + 1 != labels.end());
+        CHECK(*(at + 1) == "Check for updates (console)");
+        CHECK_FALSE(m.items[size_t(at - labels.begin())].enabled);
     }
 }

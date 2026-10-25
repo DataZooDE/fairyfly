@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 
 #include "include/tray/tray.h"
+#include "include/version.h"
 
 namespace fairyfly::tray {
 
@@ -22,6 +23,9 @@ MenuItem separator() {
     m.separator = true;
     return m;
 }
+
+// the running version, so the person can tell which fairyfly answers (greyed out, above "Check for updates")
+MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
 
 std::string who(const LinkView& link) { return link.organisation + " (" + link.account + ")"; }
 
@@ -77,6 +81,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(separator());
     model.items.push_back(item("Open log", TrayAction::OpenLog));
     model.items.push_back(item("Open audit trail folder", TrayAction::OpenAuditFolder));
+    model.items.push_back(version_item());
     model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
     model.items.push_back(item("Quit", TrayAction::Quit));
