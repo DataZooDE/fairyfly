@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Typed views and shorter functions (2026-10-25 code review)
+
+- `ComGuiElement` keeps its general methods (59 -> 34); trees, grids and toolbars are typed views
+  (`as_tree`, `as_grid`, `as_toolbar`). One `TreeNodeTexts` recovers an empty node text from its columns for the
+  screen reader, the table extractor and `element get --list-nodes`.
+- `HttpEndpoint::dispatch`, `run_link`, `read_tab`, `launch_connection`, `MakePlan`, the dispatcher's
+  `execute_call` and `traverse_element_tree` are split into named parts; `Stopwatch` measures the actions.
+- An `mcp` command no longer leaves the tray's runner factory registered after it returns (it referred to
+  `run_cli`'s locals). New tests: the config commands, `run_mcp`'s start refusals, the session worker's admission
+  and flags, the audit trail's screen source, the engine's launch, fill, click and transaction.
+
 ### Tests and seams (2026-10-25 code review)
 
 - The setup probes take their HTTP transport (tested without WinHTTP), and `ComAutomationEngine` its SAP GUI
