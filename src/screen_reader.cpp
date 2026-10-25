@@ -1,3 +1,4 @@
+#include "include/com/hresult.h"
 #include "include/com/control_views.h"
 #include "include/com/tree_view.h"
 #include "include/shell_kind.h"
@@ -1212,8 +1213,8 @@ void ScreenReader::extract_collected_trees_and_grids(ScreenElementCollector& col
                            tree_data.value("node_count", 0), tree_id);
 
             } catch (const ComException& e) {
-                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: 0x{:08X})",
-                             tree_id, e.what(), e.hresult());
+                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: {})",
+                             tree_id, e.what(), hresult_hex(e.hresult()));
                 spdlog::error("Possible causes: stale COM pointer, connection lost, or SAP GUI reorganized connections");
                 // Continue with other trees even if one fails
             } catch (const std::exception& e) {
@@ -1273,8 +1274,8 @@ void ScreenReader::extract_collected_trees_and_grids(ScreenElementCollector& col
                 spdlog::debug("Successfully extracted {} rows from grid {}", row_count, grid_id);
 
             } catch (const ComException& e) {
-                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: 0x{:08X})",
-                             grid_id, e.what(), e.hresult());
+                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: {})",
+                             grid_id, e.what(), hresult_hex(e.hresult()));
             } catch (const std::exception& e) {
                 spdlog::error("Failed to extract grid {} in Phase 2B: {}", grid_id, e.what());
             }

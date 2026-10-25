@@ -1,3 +1,4 @@
+#include "include/com/hresult.h"
 #include "include/com/wrapper.h"
 #include "include/com/invoke.h"
 #include "include/com/utf8.h"
@@ -62,22 +63,22 @@ ComGuiApplicationPtr ComGuiApplication::create() {
         // Method 1: Try SapROTWr.SapROTWrapper (Official SAP GUI Scripting entrypoint)
         CLSID clsid_rot;
         HRESULT rot_hr = CLSIDFromProgID(L"SapROTWr.SapROTWrapper", &clsid_rot);
-        spdlog::debug("SapROTWr CLSID lookup hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+        spdlog::debug("SapROTWr CLSID lookup hr={}", hresult_hex(rot_hr));
         if (SUCCEEDED(rot_hr)) {
             IDispatch* rot_wrapper = nullptr;
             rot_hr = CoCreateInstance(clsid_rot, nullptr, CLSCTX_INPROC_SERVER, IID_IDispatch, (void**)&rot_wrapper);
-            spdlog::debug("SapROTWr creation hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+            spdlog::debug("SapROTWr creation hr={}", hresult_hex(rot_hr));
             if (SUCCEEDED(rot_hr)) {
                 OLECHAR* rot_entry_name = (OLECHAR*)L"GetROTEntry";
                 DISPID dispid_rot;
                 rot_hr = rot_wrapper->GetIDsOfNames(IID_NULL, &rot_entry_name, 1, LOCALE_USER_DEFAULT, &dispid_rot);
-                spdlog::debug("SapROTWr GetROTEntry lookup hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
+                spdlog::debug("SapROTWr GetROTEntry lookup hr={}", hresult_hex(rot_hr));
                 if (SUCCEEDED(rot_hr)) {
                     VARIANT res;
                     VariantInit(&res);
                     HRESULT hr_call = invoke(rot_wrapper, dispid_rot, DISPATCH_METHOD, {_variant_t(L"SAPGUI")}, &res);
-                    spdlog::debug("SapROTWr GetROTEntry invoke hr=0x{:08X}, result type={}",
-                                  static_cast<unsigned int>(hr_call), res.vt);
+                    spdlog::debug("SapROTWr GetROTEntry invoke hr={}, result type={}",
+                                  hresult_hex(hr_call), res.vt);
                     if (SUCCEEDED(hr_call) && res.vt == VT_DISPATCH && res.pdispVal) {
                         sap_gui = res.pdispVal;
                         spdlog::debug("SapROTWr.SapROTWrapper returned SAPGUI ROT entry successfully");
@@ -124,9 +125,9 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                     return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), true);
                 }
 
-                spdlog::debug("GetScriptingEngine failed: prop_hr=0x{:08X}, meth_hr=0x{:08X}", hr_prop, hr_meth);
+                spdlog::debug("GetScriptingEngine failed: prop_hr={}, meth_hr={}", hresult_hex(hr_prop), hresult_hex(hr_meth));
             } else {
-                spdlog::debug("GetScriptingEngine name resolution failed (hr=0x{:08X})", ge_hr);
+                spdlog::debug("GetScriptingEngine name resolution failed (hr={})", hresult_hex(ge_hr));
             }
 
             sap_gui->Release();
@@ -194,16 +195,15 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 CoUninitialize();
             }
 
-            spdlog::debug("CoCreateInstance failed (hr=0x{:08X})", hr);
+            spdlog::debug("CoCreateInstance failed (hr={})", hresult_hex(hr));
         }
 
         // All methods failed
         std::string error_msg = fmt::format(
-            "SAP GUI Scripting API not available (final hr=0x{:08X}). "
+            "SAP GUI Scripting API not available (final hr={}). "
             "Possible causes: (1) SAP GUI not running, (2) SAP GUI scripting not enabled in SAP GUI options, "
             "(3) COM registration issue. Ensure SAP GUI is running and has an active transaction window open.",
-            hr
-        );
+            hresult_hex(hr));
         throw ComException(error_msg, hr);
 
     } catch (const ComException&) {
@@ -284,7 +284,7 @@ ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connec
     }
 
     if (FAILED(hr)) {
-        spdlog::error("OpenConnection method DISPID not found (hr=0x{:08X})", hr);
+        spdlog::error("OpenConnection method DISPID not found (hr={})", hresult_hex(hr));
         if (raise_error) throw ComException("OpenConnection method not found", hr);
         return nullptr;
     }
@@ -306,9 +306,9 @@ ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connec
         if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
         if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
 
-        spdlog::warn("OpenConnection('{}') failed: hr=0x{:08X} {}", connection_name, hr, err_detail);
+        spdlog::warn("OpenConnection('{}') failed: hr={} {}", connection_name, hresult_hex(hr), err_detail);
         if (raise_error) {
-            throw ComException(fmt::format("OpenConnection failed: {}", err_detail.empty() ? fmt::format("hr=0x{:08X}", hr) : err_detail), hr);
+            throw ComException(fmt::format("OpenConnection failed: {}", err_detail.empty() ? fmt::format("hr={}", hresult_hex(hr)) : err_detail), hr);
         }
         return nullptr;
     }
@@ -336,7 +336,7 @@ ComGuiConnectionPtr ComGuiApplication::open_connection_by_connection_string(cons
     }
 
     if (FAILED(hr)) {
-        spdlog::error("OpenConnectionByConnectionString method DISPID not found (hr=0x{:08X})", hr);
+        spdlog::error("OpenConnectionByConnectionString method DISPID not found (hr={})", hresult_hex(hr));
         if (raise_error) throw ComException("OpenConnectionByConnectionString method not found", hr);
         return nullptr;
     }
@@ -358,9 +358,9 @@ ComGuiConnectionPtr ComGuiApplication::open_connection_by_connection_string(cons
         if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
         if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
 
-        spdlog::warn("OpenConnectionByConnectionString('{}') failed: hr=0x{:08X} {}", connection_string, hr, err_detail);
+        spdlog::warn("OpenConnectionByConnectionString('{}') failed: hr={} {}", connection_string, hresult_hex(hr), err_detail);
         if (raise_error) {
-            throw ComException(fmt::format("OpenConnectionByConnectionString failed: {}", err_detail.empty() ? fmt::format("hr=0x{:08X}", hr) : err_detail), hr);
+            throw ComException(fmt::format("OpenConnectionByConnectionString failed: {}", err_detail.empty() ? fmt::format("hr={}", hresult_hex(hr)) : err_detail), hr);
         }
         return nullptr;
     }

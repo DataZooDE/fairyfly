@@ -9,6 +9,7 @@
 
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
+#include "include/com/hresult.h"
 #include "include/table_data_extractor.h"
 #include "include/com/control_views.h"
 #include "include/com/tree_view.h"
@@ -282,4 +283,11 @@ TEST_CASE("tree shell extraction: each node path is read once; nodes nest, data 
     const auto path_reads = std::count_if(tree->calls.begin(), tree->calls.end(),
                                           [](const auto& call) { return call.first == L"GetNodePathByKey"; });
     CHECK(path_reads == 2);   // once per node
+}
+
+TEST_CASE("hresult_hex prints an HRESULT unsigned, as Windows documents it", "[com][hresult]") {
+    // the {:08X} of a signed HRESULT printed 0x-7FFDFFF7 in ~35 error and log messages
+    CHECK(fairyfly::hresult_hex(DISP_E_EXCEPTION) == "0x80020009");
+    CHECK(fairyfly::hresult_hex(E_FAIL) == "0x80004005");
+    CHECK(fairyfly::hresult_hex(S_OK) == "0x00000000");
 }
