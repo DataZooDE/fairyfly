@@ -101,15 +101,22 @@ TEST_CASE("environment: fairyfly's data directory is LOCALAPPDATA\fairyfly (temp
 }
 
 namespace {
-/// The matches of `re` (group `group`) on the lines of `text` that contain one of `markers` (std::regex over whole
-/// source files took 20 s; the markers keep it to the few lines that can match).
+/// The matches of `re` (group `group`) in `text`, looked for where a line holds one of `markers`: on that line and
+/// the next, so a call split across two lines still matches (std::regex over every whole source file took 20 s).
 std::vector<std::string> matching_lines(const std::string& text, std::initializer_list<const char*> markers, const std::regex& re,
                                         int group) {
     std::vector<std::string> found;
-    std::istringstream lines(text);
-    for (std::string line; std::getline(lines, line);) {
+    std::vector<std::string> lines;
+    std::istringstream in(text);
+    for (std::string line; std::getline(in, line);) lines.push_back(std::move(line));
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string& line = lines[i];
         if (std::none_of(markers.begin(), markers.end(), [&](const char* m) { return line.find(m) != std::string::npos; })) continue;
-        for (std::sregex_iterator m(line.begin(), line.end(), re), end; m != end; ++m) found.push_back((*m)[group].str());
+        const std::string window = i + 1 < lines.size() ? line + "\n" + lines[i + 1] : line;
+        for (std::sregex_iterator m(window.begin(), window.end(), re), end; m != end; ++m) {
+            if (static_cast<std::size_t>(m->position(0)) >= line.size()) break;   // starts on the next line: its own turn
+            found.push_back((*m)[group].str());
+        }
     }
     return found;
 }
@@ -167,6 +174,15 @@ TEST_CASE("environment: names and writers of the environment live in config only
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());
+}
+
+TEST_CASE("environment: the guards also find a call split across two lines", "[config][env]") {
+    // codex 2026-10-25: matching line by line missed `getenv` followed by `("NAME")` on the next line
+    const std::regex call(R"(\b(std::)?(getenv|_dupenv_s)\s*\()");
+    CHECK(matching_lines("int x;\nauto v = std::getenv\n    (\"FAIRYFLY_X\");\n", {"getenv"}, call, 2) ==
+          std::vector<std::string>{"getenv"});
+    CHECK(matching_lines("getenv(\"A\");\ngetenv(\"B\");\n", {"getenv"}, call, 2).size() == 2);   // each once
+    CHECK(matching_lines("int getenv_count;\n", {"getenv"}, call, 2).empty());
 }
 
 TEST_CASE("environment: the writer guard recognises every writer spelling", "[config][env]") {
