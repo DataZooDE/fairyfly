@@ -1642,13 +1642,7 @@ Result ComAutomationEngine::capture_screenshot(const cli::ScreenshotOptions& opt
         auto session = ensure_session();
         initialize_services();
     }
-    if (!screenshot_handler_) {
-    Result result;
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-        result.error["message"] = "Unable to initialize screenshot handler - no session";
-            return result;
-        }
+    if (!screenshot_handler_) return Result::fail("NO_SESSION", "Unable to initialize screenshot handler - no session");
     return screenshot_handler_->capture(options);
 }
 
