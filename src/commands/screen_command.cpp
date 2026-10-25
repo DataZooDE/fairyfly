@@ -11,11 +11,6 @@ namespace commands {
 
 class ScreenCommand : public CommandBase {
 public:
-    std::string name() const override { return "screen"; }
-
-    std::string description() const override {
-        return "Screen operations";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         // Create parent "screen" subcommand once

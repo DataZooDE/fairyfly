@@ -7,11 +7,6 @@ namespace commands {
 
 class DisconnectCommand : public CommandBase {
 public:
-    std::string name() const override { return "session disconnect"; }
-
-    std::string description() const override {
-        return "Remove a saved connection; optionally close its SAP GUI session";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","disconnect"});
@@ -29,12 +24,7 @@ Example: fairyfly session disconnect --connection 3
         return handler.handle_disconnect(conn_id_, close_session_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::optional<int> conn_id_;
     bool close_session_ = false;
 };

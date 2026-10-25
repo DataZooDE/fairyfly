@@ -7,7 +7,6 @@ find_package(ZXing CONFIG REQUIRED)  # decodes the QR codes link pair draws (tes
 add_executable(unit_tests
     unit/test_main.cpp
     unit/test_com_wrapper.cpp
-    unit/test_config_session.cpp
     unit/test_markdown_table_formatter.cpp
     unit/test_toon_encoder.cpp
     unit/test_connection_launcher.cpp
@@ -81,8 +80,6 @@ add_executable(unit_tests
     unit/test_selection_input_guard.cpp
     unit/test_round2_usability.cpp
     unit/test_tray_win32_manual.cpp
-    ../src/config.cpp
-    ../src/session.cpp
 )
 
 # Small SAP-free child process used to verify cross-process cache locking.

@@ -138,7 +138,6 @@ int cmd_show(McpExtras& x) {
     return 0;
 }
 
-
 // A startup error of the tray started from the Start menu, the autostart or the link tray would only reach a console
 // that closes at once (or none): it is shown in a message box as well.
 int startup_error(bool tray_mode, const std::string& code, const std::string& message, int exit_code) {

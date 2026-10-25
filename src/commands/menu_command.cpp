@@ -8,9 +8,6 @@ namespace commands {
 /// `menu list` lists the menu bar tree, `menu select PATH` selects one item.
 class MenuCommand : public CommandBase {
 public:
-    std::string name() const override { return "menu"; }
-
-    std::string description() const override { return "Menu bar operations"; }
 
     CLI::App* setup_cli(CLI::App& app) override {
         menu_cmd_ = noun_app(app, "menu");

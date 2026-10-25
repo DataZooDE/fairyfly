@@ -8,11 +8,6 @@ namespace commands {
 
 class CredentialsCommand : public CommandBase {
 public:
-    std::string name() const override { return "credentials"; }
-
-    std::string description() const override {
-        return "Manage SAP logon credentials in the Windows Credential Manager";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = noun_app(app, "credentials");
@@ -72,15 +67,12 @@ Example: fairyfly credentials import-env credentials.txt --connection DEV --dele
         return result;
     }
 
-    bool was_invoked() const override { return cmd_ && *cmd_; }
-
     std::optional<std::string> get_preferred_output_format() const override {
         if (list_cmd_ && *list_cmd_) return output_override(list_output_);
         return std::nullopt;
     }
 
 private:
-    CLI::App* cmd_ = nullptr;
     CLI::App* set_cmd_ = nullptr;
     CLI::App* list_cmd_ = nullptr;
     CLI::App* delete_cmd_ = nullptr;

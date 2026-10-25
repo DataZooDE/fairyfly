@@ -1,16 +1,10 @@
 #include "include/commands/command_base.h"
 
-
 namespace fairyfly {
 namespace commands {
 
 class ListCommand : public CommandBase {
 public:
-    std::string name() const override { return "session list"; }
-
-    std::string description() const override {
-        return "List all SAP GUI connections, sessions, and windows";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","list"});
@@ -27,16 +21,11 @@ Example: fairyfly session list
         return handler.handle_list_all();
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
     std::optional<std::string> get_preferred_output_format() const override {
         return output_override(output_format_);
     }
 
 private:
-    CLI::App* cmd_ = nullptr;
     std::string output_format_;
 };
 

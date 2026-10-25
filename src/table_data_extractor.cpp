@@ -532,25 +532,6 @@ void TableDataExtractor::traverse_tree_nodes(
 
                     node.expanded = false;
 
-                    // Determine parent from path using pre-computed paths
-                    // Path format: "1" (top-level), "1\1" (child of node 1), "1\2\3" (grandchild)
-                    std::string parent_key;
-                    if (level > 0) {
-                        // Extract parent path by removing last segment
-                        size_t last_backslash = path.find_last_of('\\');
-                        if (last_backslash != std::string::npos) {
-                            std::string parent_path = path.substr(0, last_backslash);
-
-                            // Find node with this path using pre-computed map
-                            for (const auto& [k, p] : key_to_path) {
-                                if (p == parent_path) {
-                                    parent_key = k;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
                     node_map[key] = std::move(node);
                 } catch (const std::exception& e) {
                     spdlog::warn("Failed to process tree node {}: {}", key, e.what());
@@ -636,20 +617,6 @@ void TableDataExtractor::traverse_tree_nodes(
 
     } catch (const std::exception& e) {
         spdlog::error("traverse_tree_nodes failed at depth {}: {}", current_depth, e.what());
-    }
-}
-
-std::string TableDataExtractor::get_tree_node_text(
-    ComGuiElementPtr tree,
-    const std::string& /* node_key */
-) const {
-    try {
-        // Would call GetNodeTextByKey(key) method
-        // For now, return empty
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_tree_node_text failed: {}", e.what());
-        return "";
     }
 }
 

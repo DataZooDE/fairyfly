@@ -31,20 +31,14 @@ BatchLine parse_batch_line(const std::string& line);
 /// cli_entry.cpp (run_cli) because it must rebuild the command registry per line.
 class BatchCommand : public CommandBase {
 public:
-    std::string name() const override { return "batch"; }
-    std::string description() const override {
-        return "Run many commands from stdin (or --file), one per line, in one process";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override;
     Result execute(cli::CommandHandler& handler) override;
-    bool was_invoked() const override { return cmd_ && *cmd_; }
 
     const std::string& file() const { return file_; }
     bool stop_on_error() const { return stop_on_error_; }
 
 private:
-    CLI::App* cmd_ = nullptr;
     std::string file_;
     bool stop_on_error_ = false;
 };

@@ -7,11 +7,6 @@ namespace commands {
 
 class GetCommand : public CommandBase {
 public:
-    std::string name() const override { return "element get"; }
-
-    std::string description() const override {
-        return "Read field value";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","get"});
@@ -44,16 +39,11 @@ Examples:
         return handler.handle_read_field(element_, conn_id_, list_nodes_, activate_tab_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
     std::optional<std::string> get_preferred_output_format() const override {
         return output_override(output_format_);
     }
 
 private:
-    CLI::App* cmd_ = nullptr;
     std::string element_;
     std::optional<int> conn_id_;
     bool list_nodes_ = false;  // Tree node listing flag

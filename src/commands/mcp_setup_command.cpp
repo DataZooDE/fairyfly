@@ -50,7 +50,6 @@ struct RealHosts {
     Hosts hosts() { return Hosts{*http, *certs, *firewall, *elevator, *sys, *verify}; }
 };
 
-
 RunEnv make_env(const McpExtras& x, const GlobalOptions& global) {
     RunEnv env;
     env.stdin_is_tty = cred::stdin_is_console();

@@ -1,16 +1,10 @@
 #include "include/commands/command_base.h"
 
-
 namespace fairyfly {
 namespace commands {
 
 class ConnectionsCommand : public CommandBase {
 public:
-    std::string name() const override { return "connection list"; }
-
-    std::string description() const override {
-        return "List and manage SAP connections";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"connection","list"});
@@ -29,16 +23,11 @@ Example: fairyfly connection list
         return handler.handle_connections_list(cleanup_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
     std::optional<std::string> get_preferred_output_format() const override {
         return output_override(output_format_);
     }
 
 private:
-    CLI::App* cmd_ = nullptr;
     bool cleanup_ = false;
     std::string output_format_;
 };

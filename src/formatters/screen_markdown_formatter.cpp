@@ -2,7 +2,6 @@
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
 #include "include/grid_types.h"
-#include "include/formatters/tree_formatter.h"
 #include "include/formatters/table_formatter.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/element_renderer_registry.h"

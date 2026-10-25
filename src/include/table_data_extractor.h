@@ -120,8 +120,6 @@ private:
         int current_depth
     ) const;
 
-    /// Get text for a specific tree node
-    std::string get_tree_node_text(ComGuiElementPtr tree, const std::string& node_key) const;
 };
 
 } // namespace sap

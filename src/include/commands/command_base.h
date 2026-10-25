@@ -18,12 +18,6 @@ class CommandBase {
 public:
     virtual ~CommandBase() = default;
 
-    /// Get the command name (e.g., "session attach", "transaction start")
-    virtual std::string name() const = 0;
-
-    /// Get command description for help text
-    virtual std::string description() const = 0;
-
     /// Setup CLI11 subcommand with options/flags/arguments
     /// @param app Parent CLI::App to add subcommand to
     /// @return Pointer to created subcommand
@@ -35,8 +29,8 @@ public:
     virtual Result execute(cli::CommandHandler& handler) = 0;
 
     /// Check if this command was parsed from CLI
-    /// @return true if command's CLI11 subcommand was selected
-    virtual bool was_invoked() const = 0;
+    /// @return true if command's CLI11 subcommand was selected (cmd_ by default)
+    virtual bool was_invoked() const { return cmd_ && *cmd_; }
 
     /// Get preferred output format for this command (if any)
     /// @return Output format string ("json", "markdown", "toon") or nullopt to use global format
@@ -45,6 +39,9 @@ public:
     }
 
 protected:
+    /// The command's CLI11 subcommand, set by setup_cli (commands with several subcommands override was_invoked).
+    CLI::App* cmd_ = nullptr;
+
     /// Add a per-command --output option (json, markdown, toon) that overrides the
     /// global --output for this command. `fairyfly --output toon <cmd>` keeps working.
     static CLI::Option* add_output_option(CLI::App* cmd, std::string& target) {

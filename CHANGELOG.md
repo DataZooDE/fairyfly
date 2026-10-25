@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Dead code removed (2026-10-25 code review)
+
+- About 730 lines that nothing called: the old copy of the element metadata extractor in the automation engine
+  (the live one is `ElementMetadataExtractor`), `TreeFormatter`, the no-op `ConfigManager`/`SessionManager` stubs,
+  `retry.h`, unused free COM helpers, a placeholder tree-text helper, and `name()`/`description()` on every
+  command (help comes from the command table). `CommandBase` owns the subcommand pointer and the default
+  `was_invoked()` that 17 commands repeated. Tests that duplicated others are gone.
+
 ### Review fixes (2026-10-25 code review)
 
 - `mcp.yaml`'s `audit.enabled`, `audit.required` and `audit.file` (and `FAIRYFLY_MCP_AUDIT_*`) are applied. They were

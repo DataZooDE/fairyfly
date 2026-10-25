@@ -13,11 +13,6 @@ namespace commands {
 
 class FillCommand : public CommandBase {
 public:
-    std::string name() const override { return "element fill"; }
-
-    std::string description() const override {
-        return "Fill text field";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","fill"});
@@ -92,12 +87,7 @@ Examples:
         return handler.handle_fill_fields(*fields, then_key_, !keep_going_, conn_id_, allow_fill_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     CLI::Option* value_option_ = nullptr;
     CLI::Option* element_option_ = nullptr;
     CLI::Option* fields_option_ = nullptr;

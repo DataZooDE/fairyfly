@@ -161,7 +161,6 @@ set(FAIRYFLY_LIB_SOURCES
     src/element_type_registry.cpp
     src/screen_element_collector.cpp
     src/table_data_extractor.cpp
-    src/formatters/tree_formatter.cpp
     src/formatters/table_formatter.cpp
     src/formatters/markdown_table_formatter.cpp
     src/formatters/toon_encoder.cpp

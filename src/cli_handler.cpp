@@ -12,7 +12,6 @@
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
 #include "include/formatters/screen_markdown_formatter.h"
-#include "include/formatters/tree_formatter.h"
 #include "include/formatters/table_formatter.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/formatters/toon_encoder.h"
