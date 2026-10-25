@@ -2,6 +2,7 @@
 
 #include "include/credential_resolver.h"
 
+#include "support/temp_dir.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -90,21 +91,20 @@ TEST_CASE("resolver uses the store by default connection name and credential_nam
 TEST_CASE("resolver reports CREDENTIALS_NOT_FOUND with a suggestion and never reads trial.env", "[cred][resolver]") {
     namespace fs = std::filesystem;
     const fs::path original = fs::current_path();
-    const fs::path dir = fs::temp_directory_path() / "fairyfly_resolver_test";
-    fs::create_directories(dir);
+    const fairyfly::test::TempDir temp("resolver");  // declared first: removed after the working directory is restored
+    const fs::path dir = temp.path();
     {
         std::ofstream decoy(dir / "trial.env");
         decoy << "Username: DECOY\nPassword: decoy\nSystem ID: 001\n";  // dummy, not a real credential
     }
     fs::current_path(dir);
     struct Restore {
-        fs::path original, dir;
+        fs::path original;
         ~Restore() {
             std::error_code ec;
             fs::current_path(original, ec);
-            fs::remove_all(dir, ec);
         }
-    } restore{original, dir};
+    } restore{original};
 
     InMemoryCredentialStore store;
     std::istringstream in;
