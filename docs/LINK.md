@@ -223,7 +223,7 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   - every change asks: a yes approves that change (all steps of that batch) only. The window's **Don't ask again for
     5 minutes**, unticked by default, approves further changes of the same assistant for the same account without
     asking for 5 minutes (never while the screen is locked);
-  - no answer in 90 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
+  - no answer in 45 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
     one after another, never together;
   - with notifications turned off for fairyfly (or without the Start-menu entry's registration) the window opens at
     once. `--approve no` denies every change. Each decision is in the log (`approval <n>: approved|remembered|denied|

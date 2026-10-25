@@ -297,6 +297,50 @@ TEST_CASE("desktop approval: libffl's Approver asks the broker", "[link][approva
     CHECK(ui->windows.back().steps == std::vector<std::string>{"An AI assistant wants to change data"});
 }
 
+TEST_CASE("desktop approval: libffl's decide gets the broker's reason", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    auto unlocked = std::make_shared<std::atomic<bool>>(true);
+    auto approver = make_approver(std::make_shared<Broker>(ui, desk(unlocked), fast(200ms)));
+    auto r = approver->decide(prompt());
+    CHECK(r.approved);
+    CHECK(r.reason == "approved");
+    r = approver->decide(prompt());
+    CHECK(r.approved);
+    CHECK(r.reason == "remembered");
+    auto other = prompt();
+    other.user = "someone@example.com";
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    r = approver->decide(other);
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "denied");
+    ui->window_answer = Answer::None;  // nobody answers
+    r = approver->decide(other);
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "expired");
+    *unlocked = false;
+    r = approver->decide(other);
+    CHECK_FALSE(r.approved);
+    CHECK(r.reason == "locked");
+}
+
+TEST_CASE("desktop approval: the question waits the prompt's answer_s when that is shorter", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;  // the window waits until stopped
+    Broker b(ui, desk(), fast(10s));
+    auto p = prompt();
+    p.answer_s = 1;
+    const auto start = std::chrono::steady_clock::now();
+    const Decision d = b.decide(p);
+    const auto took = std::chrono::steady_clock::now() - start;
+    CHECK(d.reason == "expired");
+    CHECK(took >= 900ms);
+    CHECK(took < 5s);
+}
+
 TEST_CASE("desktop approval: every change asks; a yes approves only that change", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     ui->can_notify = false;

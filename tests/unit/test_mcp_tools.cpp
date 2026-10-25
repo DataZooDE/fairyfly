@@ -141,6 +141,7 @@ TEST_CASE("MCP catalog: batch annotations and destructive flags", "[mcp][tools]"
     CHECK(spec_of(specs, "gui_element_click").def.annotations["destructiveHint"] == true);
     CHECK(spec_of(specs, "gui_key_send").def.annotations["destructiveHint"] == true);
     CHECK(spec_of(specs, "gui_menu_select").def.annotations["destructiveHint"] == true);
+    CHECK(spec_of(specs, "gui_popup_close").def.annotations["destructiveHint"] == true);  // vkey 0 confirms the dialog
     CHECK(spec_of(specs, "gui_screen_read").def.annotations["readOnlyHint"] == true);
     // Documented as destructive.
     CHECK(spec_of(specs, "gui_session_launch").def.input_schema["properties"]["multiple_logon"]["enum"].size() == 4);

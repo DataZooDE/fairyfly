@@ -127,7 +127,9 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
 
 Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     using clock = std::chrono::steady_clock;
-    const auto deadline = clock::now() + options_.answer_within;
+    auto within = options_.answer_within;
+    if (prompt.answer_s > 0) within = std::min(within, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(prompt.answer_s)));
+    const auto deadline = clock::now() + within;
     const auto can_ask = [this] { return !desk_.can_ask || desk_.can_ask(); };
     uint64_t id = 0;
     // one question at a time, in the order they came; waiting counts against the question's own time
@@ -259,6 +261,10 @@ struct BrokerApprover : ffy::link::Approver {
         return broker->decide(p).approved;
     }
     bool approve_change(const ffy::link::ApprovalPrompt& prompt) override { return broker->decide(prompt).approved; }
+    ffy::link::ApprovalResult decide(const ffy::link::ApprovalPrompt& prompt) override {
+        const Decision d = broker->decide(prompt);
+        return {d.approved, d.reason == "expired_in_queue" ? ffy::link::approval_reason::kExpired : d.reason};
+    }
     std::shared_ptr<Broker> broker;
 };
 }  // namespace

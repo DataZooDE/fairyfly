@@ -138,7 +138,7 @@ Annotations: RO = `readOnlyHint` true; D = `destructiveHint` true. Read-only mod
 | `gui_credentials_list` | Names of stored credentials, never passwords | none | allowed | RO |
 | `gui_element_click` | Click a button, tab, checkbox, grid cell, tree node | `element`, `wait_for_window`, `row`, `column`, `doubleclick`, `node_key`, `tree_action` | state-changing controls refused (READ_ONLY_REFUSED) | D |
 | `gui_key_send` | Send Enter, F-keys, page keys or a raw VKey (11 = Ctrl+S) | `key`, `window` | only allowlisted keys | D |
-| `gui_popup_close` | Close the active popup (F12) | `vkey` | allowed | not RO |
+| `gui_popup_close` | Close the active popup (F12; vkey 0 confirms it) | `vkey` | allowed | D |
 | `gui_element_f4` | Open value help of a field | `element` | allowed | not RO |
 | `gui_menu_select` | Select a menu item by text path | `path`, `window` | Save/Delete-style items refused | D |
 | `gui_session_disconnect` | Remove a saved connection | `connection`, `close_session` | `close_session=true` refused | D |

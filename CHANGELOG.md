@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link: the gateway learns why a change was refused
+
+- The link reports each approval's outcome to the gateway (libffl from fairyfly-gateway #121, approval/1): approved,
+  remembered ("Don't ask again"), denied, expired or locked. The assistant gets APPROVAL_DENIED, APPROVAL_EXPIRED or
+  APPROVAL_LOCKED instead of one generic refusal, and the gateway's audit records the outcome.
+- An unanswered approval expires after 45 s (was 90 s), so the answer reaches the assistant before its MCP client
+  gives up.
+- `gui_popup_close` is annotated destructive: with vkey 0 (Enter) it confirms the dialog, which can change SAP data,
+  so the gateway asks for approval when it confirms.
+
 ## 2026.10.24.2 (2026-10-24)
 
 ### Cloud link: changes are approved at this desktop
