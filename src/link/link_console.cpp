@@ -1,5 +1,7 @@
+#include "include/text/utf8.h"
 #include "include/link/link_console.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -71,10 +73,8 @@ std::optional<std::string> gateway_url_problem(const std::string& url, GatewayUr
     }
     if (url.find('#') != std::string::npos) return need + " (no #fragment): " + url;
     if (!ws && url.find('?') != std::string::npos) return need + " (no ?query): " + url;
-    std::string host = u.host;
-    std::transform(host.begin(), host.end(), host.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (u.scheme == secure) return std::nullopt;
-    if (u.scheme == plain && (host == "localhost" || host == "127.0.0.1" || host == "[::1]")) return std::nullopt;
+    if (u.scheme == plain && utils::is_loopback_host(u.host)) return std::nullopt;
     return need + ": " + url;
 }
 
@@ -151,7 +151,7 @@ std::string link_run_lock_name(const std::string& state_path) {
 #else
     std::string key = p.string();
     std::replace(key.begin(), key.end(), '/', '\\');
-    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    key = utils::lower_ascii(key);
     for (unsigned char c : key) {
         h ^= c;
         h *= 1099511628211ULL;
@@ -191,10 +191,8 @@ bool write_utf8(std::string_view text, void* handle) {
     if (text.empty()) return true;
     if (!handle) std::cerr.flush();  // keep the order with anything written through std::cerr before
     if (is_console(h)) {
-        const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), nullptr, 0);
-        if (n <= 0) return false;
-        std::wstring wide(size_t(n), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, text.data(), int(text.size()), wide.data(), n);
+        const std::wstring wide = fairyfly::text::utf8_to_wide_lossy(text);
+        if (wide.empty()) return false;
         for (size_t done = 0; done < wide.size();) {  // large writes may be split by the console
             DWORD written = 0;
             const DWORD chunk = DWORD(std::min<size_t>(wide.size() - done, 8192));

@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/com/raii_helpers.h"
@@ -676,7 +677,7 @@ int ComGuiElement::get_property_int(const std::wstring& property_name) const {
     try {
         return get_int_property(property_name.c_str());
     } catch (const std::exception& e) {
-        std::string prop_name_utf8 = (const char*)_bstr_t(property_name.c_str());
+        std::string prop_name_utf8 = text::wide_to_utf8_lossy(property_name);
         spdlog::debug("get_property_int failed for {}: {}", prop_name_utf8, e.what());
         return 0;
     }
@@ -686,7 +687,7 @@ bool ComGuiElement::get_property_bool(const std::wstring& property_name) const {
     try {
         return get_bool_property(property_name.c_str());
     } catch (const std::exception& e) {
-        std::string prop_name_utf8 = (const char*)_bstr_t(property_name.c_str());
+        std::string prop_name_utf8 = text::wide_to_utf8_lossy(property_name);
         spdlog::debug("get_property_bool failed for {}: {}", prop_name_utf8, e.what());
         return false;
     }
@@ -696,7 +697,7 @@ std::string ComGuiElement::get_property_string(const std::wstring& property_name
     try {
         return get_string_property(property_name.c_str());
     } catch (const std::exception& e) {
-        std::string prop_name_utf8 = (const char*)_bstr_t(property_name.c_str());
+        std::string prop_name_utf8 = text::wide_to_utf8_lossy(property_name);
         spdlog::debug("get_property_string failed for {}: {}", prop_name_utf8, e.what());
         return "";
     }

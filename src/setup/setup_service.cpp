@@ -1,3 +1,4 @@
+#include "include/string_utils.h"
 #include "include/setup/setup_service.h"
 
 #include <algorithm>
@@ -218,7 +219,7 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
         d.cer_refusal = "the host name is not valid (" + *e + ")";
     } else {
         d.cer_path = join_path(dir, cer_file_name(d.hostname));
-        if (d.manifest && !d.manifest->cer_path.empty() && lower_ascii(d.manifest->cer_path) != lower_ascii(d.cer_path))
+        if (d.manifest && !d.manifest->cer_path.empty() && utils::lower_ascii(d.manifest->cer_path) != utils::lower_ascii(d.cer_path))
             d.cer_refusal = "the manifest records the export path " + d.manifest->cer_path + " but setup writes " + d.cer_path;
     }
     if (d.cer_refusal.empty()) {

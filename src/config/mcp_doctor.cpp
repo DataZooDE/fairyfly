@@ -1,5 +1,6 @@
 #include "include/config/mcp_doctor.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
@@ -24,11 +25,6 @@ bool owner_sap_identity_allowed(const std::string& system, const std::string& cl
 }
 
 namespace {
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
 
 DoctorCheck check(std::string id, CheckStatus status, std::string message, std::string remediation = {}) {
     return {std::move(id), status, std::move(message), std::move(remediation)};
@@ -265,7 +261,7 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
         const auto command = probes.autostart_command();
         if (!command) {
             out.push_back(check("autostart", CheckStatus::Skip, "not registered (optional: 'fairyfly mcp --tray --install-autostart')"));
-        } else if (!in.exe_path.empty() && lower(*command).find(lower(in.exe_path)) == std::string::npos) {
+        } else if (!in.exe_path.empty() && utils::lower_ascii(*command).find(utils::lower_ascii(in.exe_path)) == std::string::npos) {
             out.push_back(check("autostart", CheckStatus::Warn, "registered for a different fairyfly.exe: " + *command,
                                 "Run '--install-autostart' again from the current install."));
         } else {
@@ -291,7 +287,7 @@ std::string overall_status(const std::vector<DoctorCheck>& checks) {
 std::string format_doctor_text(const std::vector<DoctorCheck>& checks) {
     std::string out;
     for (const auto& c : checks) {
-        std::string tag = lower(check_status_name(c.status));
+        std::string tag = utils::lower_ascii(check_status_name(c.status));
         for (auto& ch : tag) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
         out += "[" + tag + "] " + c.id + ": " + c.message + "\n";
         if (!c.remediation.empty() && (c.status == CheckStatus::Warn || c.status == CheckStatus::Fail))

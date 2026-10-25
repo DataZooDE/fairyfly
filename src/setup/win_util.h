@@ -10,25 +10,10 @@
 
 #include "include/setup/setup_hosts.h"
 
+#include "include/text/utf8.h"
 namespace fairyfly::setup::win {
 
-inline std::wstring widen(const std::string& s) {
-    if (s.empty()) return {};
-    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring w(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-
-inline std::string narrow(const std::wstring& w) {
-    if (w.empty()) return {};
-    const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-    std::string s(static_cast<size_t>(n), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), n, nullptr, nullptr);
-    return s;
-}
-
-inline std::filesystem::path to_path(const std::string& utf8) { return std::filesystem::path(widen(utf8)); }
+inline std::filesystem::path to_path(const std::string& utf8) { return std::filesystem::path(text::utf8_to_wide_lossy(utf8)); }
 
 inline std::string hex_upper(const unsigned char* data, size_t n) {
     static const char* digits = "0123456789ABCDEF";
@@ -51,7 +36,7 @@ inline std::string error_text(unsigned long code) {
     wchar_t* buffer = nullptr;
     const DWORD n = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                                    nullptr, code, 0, reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
-    std::string text = n ? narrow(std::wstring(buffer, n)) : "error " + std::to_string(code);
+    std::string text = n ? fairyfly::text::wide_to_utf8_lossy(std::wstring(buffer, n)) : "error " + std::to_string(code);
     if (buffer) LocalFree(buffer);
     while (!text.empty() && (text.back() == '\r' || text.back() == '\n' || text.back() == ' ')) text.pop_back();
     return text;

@@ -1,5 +1,6 @@
 #include "include/system/powershell_runner.h"
 
+#include "include/text/utf8.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -16,14 +17,6 @@ namespace fairyfly::sys {
 
 namespace {
 
-std::wstring widen(const std::string& s) {
-    if (s.empty()) return {};
-    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring out(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-    return out;
-}
-
 std::string first_line(const std::string& s) {
     std::string line = s.substr(0, s.find_first_of("\r\n"));
     if (line.size() > 300) line.resize(300);
@@ -34,10 +27,10 @@ class WindowsPowerShellRunner final : public PowerShellRunner {
 public:
     PsResult run(const std::string& script, const std::string& params_json, int timeout_ms) override {
         PsResult result;
-        const std::wstring wide = widen(script);
+        const std::wstring wide = text::utf8_to_wide_lossy(script);
         std::vector<uint8_t> bytes(wide.size() * 2);
         std::memcpy(bytes.data(), wide.data(), bytes.size());
-        const std::wstring encoded = widen(utils::base64_encode(bytes));
+        const std::wstring encoded = text::utf8_to_wide_lossy(utils::base64_encode(bytes));
 
         wchar_t sysdir[MAX_PATH] = {};
         GetSystemDirectoryW(sysdir, MAX_PATH);
@@ -91,8 +84,8 @@ public:
         si.lpAttributeList = attributes;
         PROCESS_INFORMATION pi{};
 
-        const std::wstring env_name = widen(kParamsEnvVar);
-        SetEnvironmentVariableW(env_name.c_str(), widen(params_json).c_str());
+        const std::wstring env_name = text::utf8_to_wide_lossy(kParamsEnvVar);
+        SetEnvironmentVariableW(env_name.c_str(), text::utf8_to_wide_lossy(params_json).c_str());
         const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
                                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                                             nullptr, nullptr, &si.StartupInfo, &pi);

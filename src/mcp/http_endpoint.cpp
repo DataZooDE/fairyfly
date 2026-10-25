@@ -1,5 +1,6 @@
 #include "include/mcp/http_endpoint.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -18,18 +19,6 @@
 namespace fairyfly::mcp {
 
 namespace {
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-std::string trim(const std::string& s) {
-    size_t b = 0, e = s.size();
-    while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
-    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
-    return s.substr(b, e - b);
-}
 
 std::string dump(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
 
@@ -54,7 +43,7 @@ HttpResponse empty_response(int status) {
 
 /// Host name part of a Host header value, lowercased ("127.0.0.1:8383" -> "127.0.0.1", "[::1]:1" -> "[::1]").
 std::string host_name(const std::string& header) {
-    std::string h = lower(trim(header));
+    std::string h = utils::lower_ascii(utils::trim(header));
     if (h.empty()) return h;
     if (h.front() == '[') {
         const auto close = h.find(']');
@@ -238,7 +227,7 @@ bool CaseInsensitiveLess::operator()(const std::string& a, const std::string& b)
 
 void HttpResponse::set_header(std::string name, std::string value) {
     for (auto& h : headers)
-        if (lower(h.first) == lower(name)) {
+        if (utils::lower_ascii(h.first) == utils::lower_ascii(name)) {
             h.second = std::move(value);
             return;
         }
@@ -247,7 +236,7 @@ void HttpResponse::set_header(std::string name, std::string value) {
 
 std::string HttpResponse::header(const std::string& name) const {
     for (const auto& h : headers)
-        if (lower(h.first) == lower(name)) return h.second;
+        if (utils::lower_ascii(h.first) == utils::lower_ascii(name)) return h.second;
     return {};
 }
 
@@ -255,7 +244,7 @@ bool accept_prefers_sse(std::string_view accept_header, bool has_progress_token)
     // best q per specificity: [0] exact type, [1] type/*, [2] */*; -1 = not listed
     double sse[3] = {-1, -1, -1};
     double json_q[3] = {-1, -1, -1};
-    const std::string header = lower(std::string(accept_header));
+    const std::string header = utils::lower_ascii(std::string(accept_header));
     size_t pos = 0;
     while (pos <= header.size()) {
         size_t comma = header.find(',', pos);
@@ -276,11 +265,7 @@ bool accept_prefers_sse(std::string_view accept_header, bool has_progress_token)
                 }
             }
         }
-        const auto trim = [](std::string& t) {
-            while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front()))) t.erase(t.begin());
-            while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back()))) t.pop_back();
-        };
-        trim(media);
+        media = utils::trim(media);
         if (media.empty()) continue;
         if (media == "text/event-stream") sse[0] = std::max(sse[0], q);
         else if (media == "application/json") json_q[0] = std::max(json_q[0], q);
@@ -329,8 +314,8 @@ const std::vector<std::string>& HttpEndpoint::supported_versions() {
 HttpEndpoint::HttpEndpoint(HttpEndpointOptions options, CallExecutor& executor, ToolProvider& provider,
                            IAuthenticator* authenticator)
     : options_(std::move(options)), executor_(executor), provider_(provider), authenticator_(authenticator) {
-    for (auto& h : options_.allowed_hosts) h = lower(trim(h));
-    for (auto& o : options_.cors_origins) o = lower(strip_slash(trim(o)));
+    for (auto& h : options_.allowed_hosts) h = utils::lower_ascii(utils::trim(h));
+    for (auto& o : options_.cors_origins) o = utils::lower_ascii(strip_slash(utils::trim(o)));
 }
 
 bool same_security_principal(const Principal& a, const Principal& b) {
@@ -353,15 +338,15 @@ void HttpEndpoint::set_session_router(SessionExecutorPool* pool, SessionRouter r
 bool HttpEndpoint::host_allowed(const std::string& host_header) const {
     const std::string name = host_name(host_header);
     if (name.empty()) return false;
-    if (httpsys::is_loopback_host(name)) return true;
-    const std::string raw = lower(trim(host_header));
+    if (utils::is_loopback_host(name)) return true;
+    const std::string raw = utils::lower_ascii(utils::trim(host_header));
     for (const auto& allowed : options_.allowed_hosts)
         if (allowed == name || allowed == raw) return true;
     return false;
 }
 
 bool HttpEndpoint::origin_allowed(const std::string& origin) const {
-    const std::string o = lower(strip_slash(trim(origin)));
+    const std::string o = utils::lower_ascii(strip_slash(utils::trim(origin)));
     for (const auto& allowed : options_.cors_origins)
         if (allowed == o) return true;
     return false;
@@ -416,12 +401,12 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         r.set_header("Allow", "POST");
         return finish(request, std::move(r));
     }
-    std::string content_type = lower(trim(request.header("Content-Type")));
-    content_type = trim(content_type.substr(0, content_type.find(';')));
+    std::string content_type = utils::lower_ascii(utils::trim(request.header("Content-Type")));
+    content_type = utils::trim(content_type.substr(0, content_type.find(';')));
     if (content_type != "application/json")
         return finish(request, plain_error(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json"));
 
-    const std::string length = trim(request.header("Content-Length"));
+    const std::string length = utils::trim(request.header("Content-Length"));
     bool too_big = request.body.size() > options_.max_body_bytes;
     if (!length.empty() && length.find_first_not_of("0123456789") == std::string::npos) {
         try {
@@ -517,7 +502,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     // the MCP-Protocol-Version header says 2026-07-28. Everything else is legacy and keeps the lenient behaviour.
     const json meta_version = meta_value(params, "protocolVersion");
     const std::string pv = meta_version.is_string() ? meta_version.get<std::string>() : std::string();
-    const std::string hv = trim(request.header("MCP-Protocol-Version"));
+    const std::string hv = utils::trim(request.header("MCP-Protocol-Version"));
     const bool modern = (!pv.empty() && pv >= std::string(kStatelessVersion)) || method == "server/discover" ||
                         hv == kStatelessVersion;
     const std::string version = !pv.empty() ? pv : hv;
@@ -541,7 +526,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     // Mcp-Method / Mcp-Name against the body: REQUIRED for a modern request, and in EVERY era a header that is present
     // must agree with the body (a legacy request is executed all the same). Absent headers stay accepted on legacy requests.
     const auto check_method_name_headers = [&](bool required) -> std::optional<HttpResponse> {
-        const std::string h_method = trim(request.header("Mcp-Method"));
+        const std::string h_method = utils::trim(request.header("Mcp-Method"));
         if (h_method.empty()) {
             if (required) return header_error(message.id, "Header missing: Mcp-Method");
         } else if (h_method != method) {
@@ -557,7 +542,7 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
                 body_name = params[key].get<std::string>();
                 have_body_name = true;
             }
-            const std::string raw = trim(request.header("Mcp-Name"));
+            const std::string raw = utils::trim(request.header("Mcp-Name"));
             if (raw.empty()) {
                 if (required) return header_error(message.id, "Header missing: Mcp-Name");
                 return std::nullopt;

@@ -3,6 +3,8 @@
 #include "include/mcp/http_sys_mapping.h"  // winsock2, ws2tcpip, windows, http (in that order)
 #include "include/mcp/http_server.h"
 
+#include "include/text/utf8.h"
+#include "include/string_utils.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -474,7 +476,7 @@ bool McpHttpServer::bind(std::string* error) {
     };
 
     if (config_.port == 0) return fail("invalid_prefix", "http.sys has no ephemeral ports: configure a fixed port");
-    if (!config_.tls && !is_loopback_host(config_.host) && !config_.insecure_http)
+    if (!config_.tls && !fairyfly::utils::is_loopback_host(config_.host) && !config_.insecure_http)
         return fail("insecure_bind", "plain HTTP on non-loopback host '" + config_.host +
                                          "' is refused: use TLS (fairyfly mcp setup) or pass --insecure-http");
     std::string prefix_error;
@@ -528,7 +530,7 @@ bool McpHttpServer::bind(std::string* error) {
     rc = ::HttpSetRequestQueueProperty(s.queue, HttpServer503VerbosityProperty, &verbosity, sizeof(verbosity), 0, nullptr);
     if (rc != NO_ERROR) spdlog::warn("HttpSetRequestQueueProperty(503 verbosity) failed: {}", win_error(rc));
 
-    const std::wstring wide_prefix = utf8_to_wide(prefix);
+    const std::wstring wide_prefix = text::utf8_to_wide_lossy(prefix);
     rc = ::HttpAddUrlToUrlGroup(s.group, wide_prefix.c_str(), 0, 0);
     if (rc == ERROR_ACCESS_DENIED)
         return fail("no_url_reservation", "no URL reservation for " + prefix + " (access denied): run 'fairyfly mcp setup' "
@@ -601,7 +603,7 @@ int McpHttpServer::run() {
 
 std::vector<std::string> McpHttpServer::posture_lines() const {
     std::vector<std::string> lines;
-    const bool loopback = is_loopback_host(config_.host);
+    const bool loopback = fairyfly::utils::is_loopback_host(config_.host);
     const int shown_port = impl_->bound ? impl_->bound_port : config_.port;
     lines.push_back("fairyfly MCP server (HTTP)");
     lines.push_back("  endpoint:       " + http_endpoint_url(config_.tls, config_.host, config_.endpoint.allowed_hosts, shown_port,
@@ -632,8 +634,7 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
     const std::vector<std::string> auth_warnings = impl_->auth->posture_warnings();
     // The insecure-auth warning comes from the server and from AllowAllAuthenticator: print the topic once.
     const auto mentions_disabled_auth = [](const std::string& w) {
-        std::string lower = w;
-        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const std::string lower = utils::lower_ascii(w);
         return lower.find("authentication disabled") != std::string::npos || lower.find("authentication is disabled") != std::string::npos ||
                lower.find("--insecure-no-auth") != std::string::npos;
     };

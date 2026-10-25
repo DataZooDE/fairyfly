@@ -1,4 +1,5 @@
 #include "include/object_tree.h"
+#include "include/string_utils.h"
 #include "include/config/environment.h"
 #include "include/screen_reader.h"
 #include "include/session_info.h"
@@ -26,12 +27,6 @@ namespace sap {
 using utils::TraceGuard;
 
 namespace {
-std::string lower_ascii(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return value;
-}
 }
 
 bool screen_candidate_matches(const ScreenFindOptions& query,
@@ -40,7 +35,7 @@ bool screen_candidate_matches(const ScreenFindOptions& query,
                               const std::string& type) {
     return (query.id_contains.empty() || id.find(query.id_contains) != std::string::npos) &&
            (query.name_contains.empty() ||
-            lower_ascii(name).find(lower_ascii(query.name_contains)) != std::string::npos) &&
+            utils::lower_ascii(name).find(utils::lower_ascii(query.name_contains)) != std::string::npos) &&
            (query.type.empty() || type == query.type);
 }
 
@@ -756,7 +751,7 @@ std::vector<std::string> id_probe_candidates(const std::string& type,
 bool probe_all_from_environment() { return config::Environment::process().flag(config::env::kProbeAll); }
 
 std::optional<TreeReaderMode> parse_tree_reader_mode(const std::string& text) {
-    const std::string value = lower_ascii(text);
+    const std::string value = utils::lower_ascii(text);
     if (value == "legacy") return TreeReaderMode::Legacy;
     if (value == "bulk") return TreeReaderMode::Bulk;
     if (value == "auto") return TreeReaderMode::Auto;

@@ -602,11 +602,7 @@ HWND select_window_by_mouse_click(int timeout_seconds) {
     wchar_t class_name[256];
     GetClassNameW(g_clicked_hwnd, class_name, sizeof(class_name) / sizeof(class_name[0]));
 
-    // Convert wide string to regular string for logging
-    std::wstring wclass(class_name);
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wclass.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string aclass(size_needed - 1, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wclass.c_str(), -1, &aclass[0], size_needed, nullptr, nullptr);
+    const std::string aclass = text::wide_to_utf8_lossy(class_name);
 
     spdlog::debug("Selected window HWND=0x{:08X}, class={}",
                  reinterpret_cast<uintptr_t>(g_clicked_hwnd),
@@ -625,16 +621,8 @@ SAPGuiWindow ComGuiApplication::find_window_by_hwnd(HWND target_hwnd) const {
     GetWindowTextW(target_hwnd, window_title, sizeof(window_title) / sizeof(window_title[0]));
     GetClassNameW(target_hwnd, class_name, sizeof(class_name) / sizeof(class_name[0]));
     
-    std::wstring wtitle(window_title);
-    std::wstring wclass(class_name);
-    
-    int title_size = WideCharToMultiByte(CP_UTF8, 0, wtitle.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    int class_size = WideCharToMultiByte(CP_UTF8, 0, wclass.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    
-    std::string title(title_size - 1, 0);
-    std::string aclass(class_size - 1, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wtitle.c_str(), -1, &title[0], title_size, nullptr, nullptr);
-    WideCharToMultiByte(CP_UTF8, 0, wclass.c_str(), -1, &aclass[0], class_size, nullptr, nullptr);
+    const std::string title = text::wide_to_utf8_lossy(window_title);
+    const std::string aclass = text::wide_to_utf8_lossy(class_name);
     
     spdlog::debug("Clicked window title: '{}', class: '{}'", title, aclass);
     

@@ -1,5 +1,6 @@
 #include <CLI/CLI.hpp>
 #include "include/config/environment.h"
+#include "include/string_utils.h"
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -44,8 +45,7 @@ using namespace fairyfly::commands;
 namespace {
     /// Convert log level string to spdlog::level::level_enum
     spdlog::level::level_enum parse_log_level(const std::string& level_str) {
-        std::string lower = level_str;
-        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        const std::string lower = utils::lower_ascii(level_str);
 
         if (lower == "trace") return spdlog::level::trace;
         if (lower == "debug") return spdlog::level::debug;

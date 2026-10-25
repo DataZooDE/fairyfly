@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/tray/tray_win32.h"
 
 #include <windows.h>
@@ -18,7 +19,8 @@ namespace fairyfly::tray {
 
 namespace {
 
-using com::utf8_to_wide;
+// display text (tooltips, balloons, message boxes): never throw on a cut or invalid UTF-8 sequence
+std::wstring utf8_to_wide(std::string_view s) { return text::utf8_to_wide_lossy(s); }
 
 constexpr UINT kTrayCallback = WM_APP + 1;
 constexpr UINT kMsgRefresh = WM_APP + 2;

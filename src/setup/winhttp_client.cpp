@@ -8,6 +8,7 @@
 #include <winhttp.h>
 
 #include "winhttp_client.h"
+#include "include/text/utf8.h"
 #include "win_util.h"
 
 namespace fairyfly::setup {
@@ -55,13 +56,13 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
         WinHttpSetOption(session.h, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
     }
     const std::string connect_host = req.connect_host.empty() ? req.host : req.connect_host;
-    Handle connection(WinHttpConnect(session.h, widen(connect_host).c_str(), static_cast<INTERNET_PORT>(req.port), 0));
+    Handle connection(WinHttpConnect(session.h, text::utf8_to_wide_lossy(connect_host).c_str(), static_cast<INTERNET_PORT>(req.port), 0));
     if (!connection.h) {
         out.win_error = GetLastError();
         out.error = error_text(out.win_error);
         return out;
     }
-    Handle request(WinHttpOpenRequest(connection.h, widen(req.method).c_str(), widen(req.path).c_str(), nullptr, WINHTTP_NO_REFERER,
+    Handle request(WinHttpOpenRequest(connection.h, text::utf8_to_wide_lossy(req.method).c_str(), text::utf8_to_wide_lossy(req.path).c_str(), nullptr, WINHTTP_NO_REFERER,
                                       WINHTTP_DEFAULT_ACCEPT_TYPES, req.tls ? WINHTTP_FLAG_SECURE : 0));
     if (!request.h) {
         out.win_error = GetLastError();
@@ -76,8 +77,8 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
     DWORD no_redirect = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     WinHttpSetOption(request.h, WINHTTP_OPTION_REDIRECT_POLICY, &no_redirect, sizeof(no_redirect));
     std::wstring headers;
-    if (connect_host != req.host) headers += L"Host: " + widen(req.host + ":" + std::to_string(req.port)) + L"\r\n";
-    for (const auto& [k, v] : req.headers) headers += widen(k + ": " + v) + L"\r\n";
+    if (connect_host != req.host) headers += L"Host: " + text::utf8_to_wide_lossy(req.host + ":" + std::to_string(req.port)) + L"\r\n";
+    for (const auto& [k, v] : req.headers) headers += text::utf8_to_wide_lossy(k + ": " + v) + L"\r\n";
     const DWORD body_size = static_cast<DWORD>(req.body.size());
     const BOOL sent = WinHttpSendRequest(request.h, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
                                          headers.empty() ? 0 : static_cast<DWORD>(-1L), body_size ? const_cast<char*>(req.body.data()) : WINHTTP_NO_REQUEST_DATA,
@@ -110,7 +111,7 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
         std::wstring value(wa_size / sizeof(wchar_t) + 1, L'\0');
         if (WinHttpQueryHeaders(request.h, WINHTTP_QUERY_WWW_AUTHENTICATE, WINHTTP_HEADER_NAME_BY_INDEX, value.data(), &wa_size, WINHTTP_NO_HEADER_INDEX)) {
             value.resize(wa_size / sizeof(wchar_t));
-            out.www_authenticate = narrow(value);
+            out.www_authenticate = text::wide_to_utf8_lossy(value);
         }
     }
     for (;;) {

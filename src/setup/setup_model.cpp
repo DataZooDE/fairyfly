@@ -1,5 +1,6 @@
 #include "include/setup/setup_model.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <ctime>
@@ -12,13 +13,7 @@ namespace fairyfly::setup {
 
 using nlohmann::json;
 
-// ---- small helpers ---------------------------------------------------------------------------------
-std::string lower_ascii(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-std::string default_hostname(const std::string& dns) { return lower_ascii(dns); }
+std::string default_hostname(const std::string& dns) { return utils::lower_ascii(dns); }
 
 std::string url_prefix(bool tls, const std::string& hostname, int port) {
     (void)hostname;
@@ -36,8 +31,8 @@ std::vector<std::string> ssl_ipports(int port) {
 std::string sddl_for_sid(const std::string& sid) { return "D:(A;;GX;;;" + sid + ")"; }
 
 bool sddl_covers_sid(const std::string& sddl, const std::string& sid) {
-    const std::string s = lower_ascii(sddl);
-    if (!sid.empty() && s.find(";;;" + lower_ascii(sid) + ")") != std::string::npos) return true;
+    const std::string s = utils::lower_ascii(sddl);
+    if (!sid.empty() && s.find(";;;" + utils::lower_ascii(sid) + ")") != std::string::npos) return true;
     // Everyone (WD) and Authenticated Users (AU) cover any user.
     return s.find(";;;wd)") != std::string::npos || s.find(";;;au)") != std::string::npos;
 }
@@ -51,9 +46,9 @@ std::string merge_sddl(const std::string& existing, const std::string& sid) {
 }
 
 bool san_matches(const std::vector<std::string>& dns_names, const std::string& hostname) {
-    const std::string host = lower_ascii(hostname);
+    const std::string host = utils::lower_ascii(hostname);
     for (const auto& raw : dns_names) {
-        const std::string name = lower_ascii(raw);
+        const std::string name = utils::lower_ascii(raw);
         if (name == host) return true;
         if (name.size() > 2 && name.rfind("*.", 0) == 0) {
             const std::string suffix = name.substr(1);   // ".example.com"
@@ -145,7 +140,7 @@ const char* elevation_name(ElevationType type) {
 }
 
 std::string normalize_app_id(const std::string& app_id) {
-    std::string s = lower_ascii(app_id);
+    std::string s = utils::lower_ascii(app_id);
     if (!s.empty() && s.front() != '{') s = "{" + s + "}";
     return s;
 }
@@ -193,10 +188,10 @@ std::optional<ErrorInfo> validate_options(Options& o) {
     if (auto e = port_error(o.port)) return invalid("--port: " + *e);
     if (!o.no_tls) {
         if (o.hostname.empty()) return invalid("No host name: pass --hostname");
-        o.hostname = lower_ascii(o.hostname);
+        o.hostname = utils::lower_ascii(o.hostname);
         if (auto e = hostname_error(o.hostname)) return invalid("--hostname: " + *e);
     } else {
-        o.hostname = o.hostname.empty() ? "127.0.0.1" : lower_ascii(o.hostname);
+        o.hostname = o.hostname.empty() ? "127.0.0.1" : utils::lower_ascii(o.hostname);
         if (o.open_firewall) return invalid("--open-firewall makes no sense with --no-tls (the listener is loopback only)");
         if (!o.allow_ip.empty()) return invalid("--allow-ip makes no sense with --no-tls (the listener is loopback only)");
     }
@@ -208,7 +203,7 @@ std::optional<ErrorInfo> validate_options(Options& o) {
 
 std::optional<ErrorInfo> validate_teardown_options(TeardownOptions& o) {
     if (!o.hostname.empty()) {
-        o.hostname = lower_ascii(o.hostname);
+        o.hostname = utils::lower_ascii(o.hostname);
         if (auto e = hostname_error(o.hostname)) return invalid("--hostname: " + *e);
     }
     if (o.port != 0)

@@ -1,5 +1,6 @@
 #include "include/auth/authenticator.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
@@ -12,13 +13,6 @@ namespace {
 
 using mcp::AuthOutcome;
 using mcp::AuthRequest;
-
-std::string trim(const std::string& s) {
-    const auto first = s.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const auto last = s.find_last_not_of(" \t\r\n");
-    return s.substr(first, last - first + 1);
-}
 
 AuthOutcome deny(int status, const char* code, const std::string& message, const std::string& challenge = {}) {
     AuthOutcome out;
@@ -35,12 +29,10 @@ const char* kChallengeInvalid = "Bearer realm=\"fairyfly\", error=\"invalid_toke
 
 /// "Bearer <token>" (scheme case-insensitive). nullopt when the header has another shape.
 std::optional<std::string> bearer_token(const std::string& header) {
-    const std::string h = trim(header);
+    const std::string h = utils::trim(header);
     if (h.size() < 7) return std::nullopt;
-    std::string scheme = h.substr(0, 6);
-    std::transform(scheme.begin(), scheme.end(), scheme.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (scheme != "bearer" || !std::isspace(static_cast<unsigned char>(h[6]))) return std::nullopt;
-    const std::string token = trim(h.substr(7));
+    if (!utils::iequals(std::string_view(h).substr(0, 6), "bearer") || !std::isspace(static_cast<unsigned char>(h[6]))) return std::nullopt;
+    const std::string token = utils::trim(h.substr(7));
     if (token.empty() || token.find_first_of(" \t") != std::string::npos) return std::nullopt;
     return token;
 }
@@ -82,7 +74,7 @@ AuthOutcome TokenAuthenticator::authenticate(const AuthRequest& request) {
                     "authentication is required and no access tokens are configured on this server; "
                     "create a token: fairyfly mcp token create <name>", kChallenge);
 
-    if (trim(request.authorization).empty())
+    if (utils::trim(request.authorization).empty())
         return deny(401, "AUTH_REQUIRED", "authentication required: send an Authorization: Bearer <token> header", kChallenge);
 
     // One message for malformed, unknown-id and wrong-secret tokens: nothing to distinguish them by.

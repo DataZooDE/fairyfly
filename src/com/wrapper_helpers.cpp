@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/com/utf8.h"
 #include "include/sap_gui_base.h"
@@ -64,7 +65,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     ULONG ref_count = safe_addref_check(obj);
     if (ref_count == 0) {
         spdlog::error("get_dispid_via_typeinfo: Access violation during AddRef - stale COM pointer for '{}'",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
     obj->Release();  // Restore ref count
@@ -75,7 +76,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     HRESULT hr = safe_get_typeinfo(obj, &type_info);
     if (hr == E_FAIL) {
         spdlog::error("get_dispid_via_typeinfo: Access violation calling GetTypeInfo for '{}' - stale COM pointer detected",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
 
@@ -91,7 +92,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     hr = safe_get_ids_of_names(obj, &name_ptr, dispid);
     if (hr == E_FAIL) {
         spdlog::error("get_dispid_via_typeinfo: Access violation calling GetIDsOfNames for '{}' - stale COM pointer detected",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
 

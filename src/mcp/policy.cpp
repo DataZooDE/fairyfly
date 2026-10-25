@@ -1,5 +1,6 @@
 #include "include/mcp/policy.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -8,15 +9,9 @@ namespace fairyfly::mcp {
 
 namespace {
 
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-
 bool is_true(const json& v) {
     if (v.is_boolean()) return v.get<bool>();
-    if (v.is_string()) return lower(v.get<std::string>()) == "true";
+    if (v.is_string()) return utils::lower_ascii(v.get<std::string>()) == "true";
     return false;
 }
 
@@ -48,7 +43,7 @@ PolicyDecision check_call(const ToolSpec& spec, const json& args, const Policy& 
     const std::string& name = spec.def.name;
     if ((name == "gui_session_launch" || name == "gui_session_login") && args.is_object()) {
         auto it = args.find("multiple_logon");
-        if (it != args.end() && it->is_string() && lower(it->get<std::string>()) == "end")
+        if (it != args.end() && it->is_string() && utils::lower_ascii(it->get<std::string>()) == "end")
             return refuse("READ_ONLY_REFUSED",
                           "multiple_logon=end terminates other sessions and is refused while the fairyfly server "
                           "runs read-only; " + allow_write_hint(policy));

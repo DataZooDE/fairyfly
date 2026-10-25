@@ -1,4 +1,5 @@
 #include "include/auth/token_store.h"
+#include "include/string_utils.h"
 #include "include/auth/scopes.h"
 
 #include <algorithm>
@@ -50,11 +51,6 @@ bool is_hex(std::string_view s) {
 
 bool is_b64url(std::string_view s) {
     return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isalnum(c) || c == '-' || c == '_'; });
-}
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
 }
 
 /// Reads an optional restriction list. Absent = empty (no restriction of that kind). A PRESENT value must be an array

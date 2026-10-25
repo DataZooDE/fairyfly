@@ -1,4 +1,5 @@
 #include "include/config/environment.h"
+#include "include/string_utils.h"
 
 #include <cstdlib>
 #include <system_error>
@@ -23,18 +24,9 @@ std::string read_process_variable(const char* name) {
 #endif
 }
 
-bool ascii_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
 }  // namespace
 
-std::string normalized(std::string_view value) {
-    // ASCII only, independent of the C locale
-    while (!value.empty() && ascii_space(value.front())) value.remove_prefix(1);
-    while (!value.empty() && ascii_space(value.back())) value.remove_suffix(1);
-    std::string lower(value);
-    for (char& c : lower)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    return lower;
-}
+std::string normalized(std::string_view value) { return utils::lower_ascii(utils::trim(value)); }
 
 bool parse_flag(std::string_view value) {
     const std::string v = normalized(value);

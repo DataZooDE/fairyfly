@@ -1,5 +1,6 @@
 #include "include/auth/authorize.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -18,11 +19,6 @@ using mcp::json;
 using mcp::PolicyDecision;
 
 char lc(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
 
 PolicyDecision refuse(const char* code, std::string message) {
     PolicyDecision d;
@@ -81,7 +77,7 @@ PolicyDecision check_selection_target(const json& args) {
             return refuse("INPUT_TARGET_DENIED", "typing into the command field is not allowed; use gui_transaction_start");
         const auto slash = id.find_last_of('/');
         std::string leaf = slash == std::string::npos ? id : id.substr(slash + 1);
-        std::string leaf_lower = lower(leaf);
+        std::string leaf_lower = utils::lower_ascii(leaf);
         const bool pwd_type = leaf_lower.compare(0, 3, "pwd") == 0;  // GuiPasswordField ids start with pwd
         if (pwd_type || !sap::sensitive_input_field_reason("GuiTextField", id, "").empty() ||
             sap::contains_sensitive_data_name(id))
@@ -307,8 +303,7 @@ std::string normalize_tcode(const std::string& raw) {
     }
     const auto end = s.find_first_of(" \t\r\n;");
     if (end != std::string::npos) s = s.substr(0, end);
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    return s;
+    return utils::upper_ascii(s);
 }
 
 bool acts_on_screen(const std::string& family) {
@@ -335,7 +330,7 @@ bool tcode_safe_key(const std::string& key) {
 }
 
 bool is_okcd_element(const std::string& element_id) {
-    const std::string id = lower(element_id);
+    const std::string id = utils::lower_ascii(element_id);
     return id == "okcd" || (id.size() >= 5 && id.compare(id.size() - 5, 5, "/okcd") == 0);
 }
 

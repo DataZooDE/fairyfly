@@ -1639,19 +1639,12 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
     return result;
 }
 
-static std::string lowercase_ascii(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
 /// True when any string value inside `value` contains the (lowercased) needle.
 static bool json_strings_contain(const json& value, const std::string& needle, int depth = 0)
 {
     if (depth > 64) return false;
     if (value.is_string()) {
-        return lowercase_ascii(value.get<std::string>()).find(needle) != std::string::npos;
+        return utils::lower_ascii(value.get<std::string>()).find(needle) != std::string::npos;
     }
     if (value.is_array() || value.is_object()) {
         for (const auto& item : value) {
@@ -1775,7 +1768,7 @@ static bool element_matches_filter(const json& elem, const ScreenFilterOptions& 
 
     // Text search (case-insensitive)
     if (filters.text_contains.has_value() && matches) {
-        matches = element_text_matches(elem, lowercase_ascii(filters.text_contains.value()));
+        matches = element_text_matches(elem, utils::lower_ascii(filters.text_contains.value()));
     }
 
     // ID search
@@ -1826,7 +1819,7 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
             if (element_matches_filter(elem, filters)) {
                 filtered.push_back(elem);
                 if (filters.text_contains.has_value())
-                    narrow_table_rows(filtered.back(), lowercase_ascii(filters.text_contains.value()));
+                    narrow_table_rows(filtered.back(), utils::lower_ascii(filters.text_contains.value()));
                 found_first = true;
 
                 // If first_match_only, stop immediately
@@ -2074,7 +2067,7 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
     if (!filter_stats.value("filter_applied", false)) return;
 
     const std::string text_needle = filters.text_contains.has_value()
-        ? lowercase_ascii(filters.text_contains.value()) : std::string();
+        ? utils::lower_ascii(filters.text_contains.value()) : std::string();
     json categorized = json::object();
     std::unordered_set<std::string> wanted_ids;
     std::unordered_set<std::string> assigned_ids;

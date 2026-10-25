@@ -1,0 +1,42 @@
+// The shared string helpers (string_utils.h): one lower/upper/trim/iequals instead of a copy per file.
+#include <catch2/catch_test_macros.hpp>
+
+#include "include/string_utils.h"
+
+using namespace fairyfly::utils;
+
+TEST_CASE("string utils: ASCII case folding, independent of the locale", "[utils][string]") {
+    CHECK(lower_ascii("GuiTextField ÄÖ") == "guitextfield ÄÖ");
+    CHECK(upper_ascii("vbak-auart ß") == "VBAK-AUART ß");
+    CHECK(lower_ascii("") == "");
+    CHECK(lower_ascii(std::string("\xC4", 1)) == std::string("\xC4", 1));  // a Latin-1 byte stays as it is
+}
+
+TEST_CASE("string utils: trim removes ASCII white space at both ends only", "[utils][string]") {
+    CHECK(trim("  a b \t\r\n") == "a b");
+    CHECK(trim("\f\vx\v") == "x");
+    CHECK(trim("   ") == "");
+    CHECK(trim("") == "");
+    CHECK(trim("x") == "x");
+}
+
+TEST_CASE("string utils: iequals compares ASCII case-insensitively", "[utils][string]") {
+    CHECK(iequals("LocalHost", "localhost"));
+    CHECK_FALSE(iequals("localhost", "localhost."));
+    CHECK(iequals("", ""));
+    CHECK_FALSE(iequals("ä", "Ä"));  // not ASCII: compared as bytes
+}
+
+TEST_CASE("string utils: slugify keeps its rules", "[utils][string]") {
+    CHECK(slugify("Change Sales Order: Initial Screen") == "change_sales_order_initial_screen");
+    CHECK(slugify("  --a--b--  ") == "a_b");
+    CHECK(slugify("") == "screenshot");  // the default name
+    CHECK(slugify("§$%") == "screenshot");
+}
+
+TEST_CASE("string utils: screenshot names are slug_timestamp_random.png", "[utils][string]") {
+    const std::string name = generate_screenshot_filename("VA02 Display");
+    CHECK(name.rfind("va02_display_", 0) == 0);
+    CHECK(name.size() == std::string("va02_display_").size() + 14 + 1 + 4 + 4);
+    CHECK(name.substr(name.size() - 4) == ".png");
+}

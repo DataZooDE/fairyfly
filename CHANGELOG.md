@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Shared string and UTF-8 helpers (2026-10-25 code review)
+
+- One `lower_ascii` / `upper_ascii` / `trim` / `iequals` / `is_loopback_host` (`string_utils.h`) instead of about
+  25 private copies; ASCII only, independent of the C locale.
+- One UTF-8 <-> UTF-16 module (`text/utf8.h`) with an explicit strict policy (throws; strings sent to SAP) and a
+  lossy one (never throws, invalid input becomes U+FFFD; logs, window titles, credentials, setup, console). It
+  replaces nine hand-written converters. COM member names in log lines are UTF-8 now (they went through the
+  ANSI code page). Tray tooltips and message boxes no longer throw on a UTF-8 sequence cut at the length limit.
+
 ### Dead code removed (2026-10-25 code review)
 
 - About 730 lines that nothing called: the old copy of the element metadata extractor in the automation engine

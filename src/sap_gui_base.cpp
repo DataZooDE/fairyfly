@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/sap_gui_base.h"
 #include "include/com/utf8.h"
 #include "include/trace.h"
@@ -173,7 +174,7 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_string_property");
 
     if (!dispatch_) {
-        spdlog::error("get_string_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("get_string_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         return "";
     }
 
@@ -183,23 +184,23 @@ std::string SapGuiObject::get_string_property(const wchar_t* name) const {
     HRESULT hr = invoke_property_get(name, result, &lookup_failed);
     if (lookup_failed) {
         spdlog::debug("get_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return "";
     }
     if (FAILED(hr)) {
         spdlog::debug("get_string_property|Invoke failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return "";
     }
 
     // Convert to string
     if (result.vt == VT_BSTR && result.bstrVal) {
         std::string value = com::bstr_to_utf8(result.bstrVal);
-        spdlog::debug("get_string_property|success|prop={}", (const char*)_bstr_t(name));
+        spdlog::debug("get_string_property|success|prop={}", text::wide_to_utf8_lossy(name));
         return value;
     }
 
-    spdlog::warn("get_string_property|unexpected type|prop={}|vt={}", (const char*)_bstr_t(name), (int)result.vt);
+    spdlog::warn("get_string_property|unexpected type|prop={}|vt={}", text::wide_to_utf8_lossy(name), (int)result.vt);
     return "";
 }
 
@@ -279,7 +280,7 @@ int SapGuiObject::get_int_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_int_property");
 
     if (!dispatch_) {
-        spdlog::error("get_int_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("get_int_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         return 0;
     }
 
@@ -289,23 +290,23 @@ int SapGuiObject::get_int_property(const wchar_t* name) const {
     HRESULT hr = invoke_property_get(name, result, &lookup_failed);
     if (lookup_failed) {
         spdlog::debug("get_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return 0;
     }
     if (FAILED(hr)) {
         spdlog::debug("get_int_property|Invoke failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return 0;
     }
 
     // Convert to int
     if (result.vt == VT_I4 || result.vt == VT_I2) {
         int value = (int)result;
-        spdlog::debug("get_int_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+        spdlog::debug("get_int_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
         return value;
     }
 
-    spdlog::debug("get_int_property|unexpected type|prop={}|vt={}", (const char*)_bstr_t(name), (int)result.vt);
+    spdlog::debug("get_int_property|unexpected type|prop={}|vt={}", text::wide_to_utf8_lossy(name), (int)result.vt);
     return 0;
 }
 
@@ -313,7 +314,7 @@ bool SapGuiObject::get_bool_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_bool_property");
 
     if (!dispatch_) {
-        spdlog::error("get_bool_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("get_bool_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         return false;
     }
 
@@ -323,23 +324,23 @@ bool SapGuiObject::get_bool_property(const wchar_t* name) const {
     HRESULT hr = invoke_property_get(name, result, &lookup_failed);
     if (lookup_failed) {
         spdlog::debug("get_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return false;
     }
     if (FAILED(hr)) {
         spdlog::debug("get_bool_property|Invoke failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return false;
     }
 
     // Convert to bool
     if (result.vt == VT_BOOL) {
         bool value = (result.boolVal != VARIANT_FALSE);
-        spdlog::debug("get_bool_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+        spdlog::debug("get_bool_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
         return value;
     }
 
-    spdlog::debug("get_bool_property|unexpected type|prop={}|vt={}", (const char*)_bstr_t(name), (int)result.vt);
+    spdlog::debug("get_bool_property|unexpected type|prop={}|vt={}", text::wide_to_utf8_lossy(name), (int)result.vt);
     return false;
 }
 
@@ -347,7 +348,7 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
     TraceGuard trace("SapGuiObject::get_dispatch_property");
 
     if (!dispatch_) {
-        spdlog::error("get_dispatch_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("get_dispatch_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         return nullptr;
     }
 
@@ -357,22 +358,22 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
     HRESULT hr = invoke_property_get(name, result, &lookup_failed);
     if (lookup_failed) {
         spdlog::debug("get_dispatch_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return nullptr;
     }
     if (FAILED(hr)) {
         spdlog::debug("get_dispatch_property|Invoke failed|prop={}|hr={:#010x}",
-                      (const char*)_bstr_t(name), (unsigned int)hr);
+                      text::wide_to_utf8_lossy(name), (unsigned int)hr);
         return nullptr;
     }
 
     // Convert to IDispatch
     if (result.vt == VT_DISPATCH && result.pdispVal) {
-        spdlog::debug("get_dispatch_property|success|prop={}", (const char*)_bstr_t(name));
+        spdlog::debug("get_dispatch_property|success|prop={}", text::wide_to_utf8_lossy(name));
         return IDispatchPtr(result.pdispVal, true); // Attach without AddRef
     }
 
-    spdlog::debug("get_dispatch_property|unexpected type|prop={}|vt={}", (const char*)_bstr_t(name), (int)result.vt);
+    spdlog::debug("get_dispatch_property|unexpected type|prop={}|vt={}", text::wide_to_utf8_lossy(name), (int)result.vt);
     return nullptr;
 }
 
@@ -380,7 +381,7 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
     TraceGuard trace("SapGuiObject::set_string_property");
 
     if (!dispatch_) {
-        spdlog::error("set_string_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("set_string_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_string_property");
     }
 
@@ -389,7 +390,7 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
     HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
         throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_string_property");
     }
 
@@ -417,18 +418,18 @@ void SapGuiObject::set_string_property(const wchar_t* name, const std::string& v
 
     if (FAILED(hr)) {
         spdlog::error("set_string_property|Invoke failed|prop={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
         throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_string_property");
     }
 
-    spdlog::debug("set_string_property|success|prop={}", (const char*)_bstr_t(name));
+    spdlog::debug("set_string_property|success|prop={}", text::wide_to_utf8_lossy(name));
 }
 
 void SapGuiObject::set_int_property(const wchar_t* name, int value) {
     TraceGuard trace("SapGuiObject::set_int_property");
 
     if (!dispatch_) {
-        spdlog::error("set_int_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("set_int_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_int_property");
     }
 
@@ -437,7 +438,7 @@ void SapGuiObject::set_int_property(const wchar_t* name, int value) {
     HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
         throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_int_property");
     }
 
@@ -464,18 +465,18 @@ void SapGuiObject::set_int_property(const wchar_t* name, int value) {
 
     if (FAILED(hr)) {
         spdlog::error("set_int_property|Invoke failed|prop={}|value={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), value, (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), value, (unsigned int)hr);
         throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_int_property");
     }
 
-    spdlog::debug("set_int_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+    spdlog::debug("set_int_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
 }
 
 void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
     TraceGuard trace("SapGuiObject::set_bool_property");
 
     if (!dispatch_) {
-        spdlog::error("set_bool_property|null dispatch|prop={}", (const char*)_bstr_t(name));
+        spdlog::error("set_bool_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
         throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_bool_property");
     }
 
@@ -484,7 +485,7 @@ void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
     HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("set_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
         throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_bool_property");
     }
 
@@ -511,18 +512,18 @@ void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
 
     if (FAILED(hr)) {
         spdlog::error("set_bool_property|Invoke failed|prop={}|value={}|hr={:#010x}",
-                     (const char*)_bstr_t(name), value, (unsigned int)hr);
+                     text::wide_to_utf8_lossy(name), value, (unsigned int)hr);
         throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_bool_property");
     }
 
-    spdlog::debug("set_bool_property|success|prop={}|value={}", (const char*)_bstr_t(name), value);
+    spdlog::debug("set_bool_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
 }
 
 IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) const {
     TraceGuard trace("SapGuiObject::invoke_method_dispatch");
 
     if (!dispatch_) {
-        spdlog::error("invoke_method_dispatch|null dispatch|method={}", (const char*)_bstr_t(method_name));
+        spdlog::error("invoke_method_dispatch|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_dispatch");
     }
 
@@ -531,7 +532,7 @@ IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) co
     HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_dispatch|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_dispatch");
     }
 
@@ -551,16 +552,16 @@ IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) co
 
     if (FAILED(hr)) {
         spdlog::error("invoke_method_dispatch|Invoke failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_dispatch");
     }
 
     if (result.vt == VT_DISPATCH && result.pdispVal) {
-        spdlog::debug("invoke_method_dispatch|success|method={}", (const char*)_bstr_t(method_name));
+        spdlog::debug("invoke_method_dispatch|success|method={}", text::wide_to_utf8_lossy(method_name));
         return IDispatchPtr(result.pdispVal, true); // Attach without AddRef
     }
 
-    spdlog::warn("invoke_method_dispatch|unexpected type|method={}|vt={}", (const char*)_bstr_t(method_name), (int)result.vt);
+    spdlog::warn("invoke_method_dispatch|unexpected type|method={}|vt={}", text::wide_to_utf8_lossy(method_name), (int)result.vt);
     return nullptr;
 }
 
@@ -568,7 +569,7 @@ void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const s
     TraceGuard trace("SapGuiObject::invoke_method_with_string");
 
     if (!dispatch_) {
-        spdlog::error("invoke_method_with_string|null dispatch|method={}", (const char*)_bstr_t(method_name));
+        spdlog::error("invoke_method_with_string|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_string");
     }
 
@@ -577,7 +578,7 @@ void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const s
     HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_string|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_with_string");
     }
 
@@ -604,18 +605,18 @@ void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const s
 
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_string|Invoke failed|method={}|param={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), param, (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), param, (unsigned int)hr);
         throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_with_string");
     }
 
-    spdlog::debug("invoke_method_with_string|success|method={}|param={}", (const char*)_bstr_t(method_name), param);
+    spdlog::debug("invoke_method_with_string|success|method={}|param={}", text::wide_to_utf8_lossy(method_name), param);
 }
 
 void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param) {
     TraceGuard trace("SapGuiObject::invoke_method_with_int");
 
     if (!dispatch_) {
-        spdlog::error("invoke_method_with_int|null dispatch|method={}", (const char*)_bstr_t(method_name));
+        spdlog::error("invoke_method_with_int|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_int");
     }
 
@@ -624,7 +625,7 @@ void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param)
     HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_int|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_with_int");
     }
 
@@ -650,18 +651,18 @@ void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param)
 
     if (FAILED(hr)) {
         spdlog::error("invoke_method_with_int|Invoke failed|method={}|param={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), param, (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), param, (unsigned int)hr);
         throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_with_int");
     }
 
-    spdlog::debug("invoke_method_with_int|success|method={}|param={}", (const char*)_bstr_t(method_name), param);
+    spdlog::debug("invoke_method_with_int|success|method={}|param={}", text::wide_to_utf8_lossy(method_name), param);
 }
 
 void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
     TraceGuard trace("SapGuiObject::invoke_method_void");
 
     if (!dispatch_) {
-        spdlog::error("invoke_method_void|null dispatch|method={}", (const char*)_bstr_t(method_name));
+        spdlog::error("invoke_method_void|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
         throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_void");
     }
 
@@ -670,7 +671,7 @@ void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
     HRESULT hr = resolve_dispid(method_name, &dispid);
     if (FAILED(hr)) {
         spdlog::error("invoke_method_void|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_void");
     }
 
@@ -689,11 +690,11 @@ void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
 
     if (FAILED(hr)) {
         spdlog::error("invoke_method_void|Invoke failed|method={}|hr={:#010x}",
-                     (const char*)_bstr_t(method_name), (unsigned int)hr);
+                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
         throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_void");
     }
 
-    spdlog::debug("invoke_method_void|success|method={}", (const char*)_bstr_t(method_name));
+    spdlog::debug("invoke_method_void|success|method={}", text::wide_to_utf8_lossy(method_name));
 }
 
 std::string SapGuiObject::get_id() const {

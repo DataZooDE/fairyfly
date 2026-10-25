@@ -1,5 +1,6 @@
 #include "include/update/update_model.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -11,14 +12,9 @@ namespace fairyfly::update {
 using json = nlohmann::json;
 
 namespace {
-std::string lower(std::string s) {
-    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
-}
 bool is_hex64(const std::string& s) {
     return s.size() == 64 && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isxdigit(c) != 0; });
 }
-bool starts_with(const std::string& s, const std::string& p) { return s.rfind(p, 0) == 0; }
 }  // namespace
 
 std::optional<CalVer> parse_version(const std::string& text) {
@@ -96,10 +92,10 @@ std::optional<Release> parse_release(const json& j, std::string& why) {
 }
 
 bool download_host_allowed(const std::string& url) {
-    if (!starts_with(url, "https://")) return false;
+    if (!url.starts_with("https://")) return false;
     const size_t start = 8;
     size_t end = url.find_first_of("/?#", start);
-    std::string authority = lower(url.substr(start, end == std::string::npos ? std::string::npos : end - start));
+    std::string authority = utils::lower_ascii(url.substr(start, end == std::string::npos ? std::string::npos : end - start));
     if (authority.find('@') != std::string::npos || authority.find('\\') != std::string::npos) return false;
     if (authority.size() > 4 && authority.compare(authority.size() - 4, 4, ":443") == 0) authority.resize(authority.size() - 4);
     if (authority == "github.com") return true;
@@ -119,7 +115,7 @@ std::optional<std::string> expected_sha256(const std::string& sums, const std::s
         while (i < rest.size() && rest[i] == ' ') i++;
         if (i == 0) continue;
         if (i < rest.size() && rest[i] == '*') i++;  // binary marker
-        if (rest.substr(i) == file_name && is_hex64(hash)) return lower(hash);
+        if (rest.substr(i) == file_name && is_hex64(hash)) return utils::lower_ascii(hash);
     }
     return std::nullopt;
 }
@@ -130,7 +126,7 @@ Decision decide(const Facts& f) {
     if (!cur || !rel) return refuse("UPDATE_BAD_VERSION", "cannot compare '" + f.current_version + "' with '" + f.release_version + "'");
     if (compare(*rel, *cur) <= 0) return {Verdict::UpToDate, "", "fairyfly " + f.current_version + " is up to date"};
     if (!is_hex64(f.expected_sha256)) return refuse("UPDATE_CHECKSUM_MISSING", "SHA256SUMS has no hash for fairyfly.exe");
-    if (lower(f.actual_sha256) != lower(f.expected_sha256))
+    if (utils::lower_ascii(f.actual_sha256) != utils::lower_ascii(f.expected_sha256))
         return refuse("UPDATE_CHECKSUM_MISMATCH", "the download does not match SHA256SUMS; nothing was changed");
     if (f.current.valid) {
         if (!f.downloaded.valid) return refuse("UPDATE_SIGNATURE_INVALID", "the new fairyfly.exe has no valid signature; nothing was changed");

@@ -1,6 +1,7 @@
 // Real SystemProbe: TCP probe (ws2_32), thumbprint-pinned TLS probe (WinHTTP), files, clock, names.
 #include <winsock2.h>
 #include "include/config/environment.h"
+#include "include/text/utf8.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <winhttp.h>
@@ -128,7 +129,7 @@ public:
             std::wstring name(size, L'\0');
             if (GetComputerNameExW(format, name.data(), &size)) {
                 name.resize(size);
-                if (!name.empty()) return narrow(name);
+                if (!name.empty()) return text::wide_to_utf8_lossy(name);
             }
         }
         return "localhost";

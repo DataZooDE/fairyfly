@@ -1,5 +1,6 @@
 #include "include/command_table.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
@@ -81,11 +82,6 @@ std::vector<CommandSpec> build_commands() {
         out.push_back(std::move(spec));
     }
     return out;
-}
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
 }
 
 } // namespace
@@ -191,7 +187,7 @@ std::vector<std::string> unknown_families(const std::vector<std::string>& wanted
     const auto known = families();
     std::vector<std::string> out;
     for (const auto& family : wanted)
-        if (std::find(known.begin(), known.end(), lower(family)) == known.end()) out.push_back(family);
+        if (std::find(known.begin(), known.end(), utils::lower_ascii(family)) == known.end()) out.push_back(family);
     return out;
 }
 

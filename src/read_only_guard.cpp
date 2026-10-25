@@ -1,4 +1,5 @@
 #include "include/read_only_guard.h"
+#include "include/string_utils.h"
 #include "include/com/wrapper.h"
 #include <spdlog/spdlog.h>
 
@@ -10,15 +11,10 @@ namespace fairyfly::sap {
 
 namespace {
 
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
-    return s;
-}
-
 std::vector<std::string> words_of(const std::string& text) {
     std::vector<std::string> words;
     std::string current;
-    for (unsigned char c : lower(text)) {
+    for (unsigned char c : utils::lower_ascii(text)) {
         if (std::isalnum(c)) {
             current.push_back(static_cast<char>(c));
         } else if (!current.empty()) {
@@ -98,7 +94,7 @@ std::string expand_active_window_prefix(const std::string& element_id, const std
 
 std::string matched_read_only_rule(const std::string& element_type, const std::string& text,
                                    const std::string& tooltip, const std::string& element_id) {
-    const std::string id = lower(element_id);
+    const std::string id = utils::lower_ascii(element_id);
     for (const char* frag : {"&delete", "&save", "&release"}) {
         if (id.find(frag) != std::string::npos) return std::string("id:") + frag;
     }

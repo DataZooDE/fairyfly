@@ -1,6 +1,7 @@
 // Elevation state (token), user SIDs and the one-shot UAC self-elevation: `<exe> mcp setup --apply-plan F --result-file R`.
 #include <winsock2.h>
 #include "include/config/environment.h"
+#include "include/text/utf8.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <objbase.h>
@@ -36,7 +37,7 @@ std::string sid_to_string(PSID sid) {
     LPWSTR text = nullptr;
     std::string out;
     if (ConvertSidToStringSidW(sid, &text)) {
-        out = narrow(text);
+        out = text::wide_to_utf8_lossy(text);
         LocalFree(text);
     }
     return out;
@@ -49,7 +50,7 @@ std::string exe_path() {
         if (n == 0) return {};
         if (n < buffer.size()) {
             buffer.resize(n);
-            return narrow(buffer);
+            return text::wide_to_utf8_lossy(buffer);
         }
         buffer.resize(buffer.size() * 2);
     }
@@ -99,7 +100,7 @@ public:
     }
 
     std::optional<std::string> resolve_user_sid(const std::string& user) override {
-        const std::wstring name = widen(user);
+        const std::wstring name = text::utf8_to_wide_lossy(user);
         DWORD sid_size = 0, domain_size = 0;
         SID_NAME_USE use;
         LookupAccountNameW(nullptr, name.c_str(), nullptr, &sid_size, nullptr, &domain_size, &use);
@@ -144,11 +145,11 @@ public:
         }
         const std::string exe = exe_path();
         std::wstring params = L"mcp setup --apply-plan \"" + plan_file.wstring() + L"\" --result-file \"" + result_file.wstring() +
-                              L"\" --plan-sha256 " + widen(request.plan_sha256) + L" --plan-nonce " + widen(request.nonce) +
+                              L"\" --plan-sha256 " + text::utf8_to_wide_lossy(request.plan_sha256) + L" --plan-nonce " + text::utf8_to_wide_lossy(request.nonce) +
                               L" --plan-parent-pid " + std::to_wstring(request.parent_pid);
-        if (!request.sid.empty()) params += L" --plan-sid " + widen(request.sid);
+        if (!request.sid.empty()) params += L" --plan-sid " + text::utf8_to_wide_lossy(request.sid);
         if (request.force_binding) params += L" --plan-force-binding";
-        const std::wstring wexe = widen(exe);
+        const std::wstring wexe = text::utf8_to_wide_lossy(exe);
         const std::wstring wdir = win::to_path(exe).parent_path().wstring();
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         SHELLEXECUTEINFOW info{};
@@ -222,7 +223,7 @@ private:
         if (!LookupAccountSidW(nullptr, sid, name.data(), &name_size, domain.data(), &domain_size, &use)) return sid_to_string(sid);
         name.resize(name_size);
         domain.resize(domain_size);
-        return domain.empty() ? narrow(name) : narrow(domain) + "\\" + narrow(name);
+        return domain.empty() ? text::wide_to_utf8_lossy(name) : text::wide_to_utf8_lossy(domain) + "\\" + text::wide_to_utf8_lossy(name);
     }
 };
 

@@ -1,4 +1,5 @@
 #include "include/auth/ip.h"
+#include "include/string_utils.h"
 #include "include/config/mcp_config.h"
 
 #include <algorithm>
@@ -23,18 +24,6 @@ namespace fairyfly::config {
 namespace {
 
 using Vec = std::vector<std::string>;
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-std::string trim(const std::string& s) {
-    size_t b = 0, e = s.size();
-    while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
-    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
-    return s.substr(b, e - b);
-}
 
 std::string env_name_for(const std::string& key) {
     std::string out = env::kMcpPrefix;
@@ -157,14 +146,14 @@ bool validate_value(const KeySpec& spec, const Value& value, std::string* error)
 }
 
 bool looks_secret_key(const std::string& key) {
-    const std::string k = lower(key);
+    const std::string k = utils::lower_ascii(key);
     return k.find("password") != std::string::npos || k.find("passwd") != std::string::npos ||
            k.find("secret") != std::string::npos || k.rfind("token", 0) == 0 || k.find("_token") != std::string::npos ||
            k.find("api_key") != std::string::npos || k.find("apikey") != std::string::npos;
 }
 
 bool looks_secret_value(const std::string& value) {
-    const std::string l = lower(trim(value));
+    const std::string l = utils::lower_ascii(utils::trim(value));
     if (l.rfind("bearer ", 0) == 0 || l.rfind("-----begin", 0) == 0) return true;
     static const std::regex token(R"(ffy_[A-Za-z0-9]+_[A-Za-z0-9_\-]{8,})");
     return std::regex_search(value, token);
@@ -201,7 +190,7 @@ struct Walker {
         }
         if (looks_secret_key(dot == std::string::npos ? path : path.substr(dot + 1))) {
             const bool has_value = value.IsDefined() && !value.IsNull() &&
-                                   !(value.IsScalar() && trim(value.Scalar()).empty());
+                                   !(value.IsScalar() && utils::trim(value.Scalar()).empty());
             if (has_value)
                 issue(Severity::Error, "CONFIG_CONTAINS_SECRET",
                       "key '" + path + "' looks like a secret; secrets never belong in this file (use 'mcp token create' and the Credential Manager)",
@@ -240,7 +229,7 @@ struct Walker {
         }
         case ValueType::Int: {
             if (!node.IsScalar()) return bad("expected an integer");
-            const std::string text = trim(node.Scalar());
+            const std::string text = utils::trim(node.Scalar());
             char* end = nullptr;
             errno = 0;
             const long long n = std::strtoll(text.c_str(), &end, 10);
@@ -253,7 +242,7 @@ struct Walker {
         }
         case ValueType::Bool: {
             if (!node.IsScalar()) return bad("expected true or false");
-            const std::string text = lower(trim(node.Scalar()));
+            const std::string text = utils::lower_ascii(utils::trim(node.Scalar()));
             if (text == "true") out.config.values[spec.key] = true;
             else if (text == "false") out.config.values[spec.key] = false;
             else return bad("expected true or false");
@@ -365,9 +354,9 @@ std::optional<Value> parse_value(const KeySpec& spec, const std::string& text, s
     };
     Value value;
     switch (spec.type) {
-    case ValueType::String: value = trim(text); break;
+    case ValueType::String: value = utils::trim(text); break;
     case ValueType::Int: {
-        const std::string t = trim(text);
+        const std::string t = utils::trim(text);
         char* end = nullptr;
         errno = 0;
         const long long n = std::strtoll(t.c_str(), &end, 10);
@@ -457,7 +446,7 @@ McpConfig env_layer(const EnvLookup& env, std::vector<ConfigIssue>* issues) {
     McpConfig layer;
     for (const auto& spec : key_specs()) {
         const std::string text = env ? env(spec.env.c_str()) : std::string();
-        if (trim(text).empty()) continue;
+        if (utils::trim(text).empty()) continue;
         std::string why;
         if (auto value = parse_value(spec, text, &why)) {
             // A separator-only override must not silently erase a configured owner gate.
@@ -536,11 +525,11 @@ void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
 
 ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& env) {
     ConfigPath out;
-    if (!trim(flag_path).empty()) {
+    if (!utils::trim(flag_path).empty()) {
         out.path = flag_path; out.source = Source::Flag; out.explicit_request = true;
         return out;
     }
-    const std::string from_env = env ? trim(env(env::kMcpConfig)) : std::string();
+    const std::string from_env = env ? utils::trim(env(env::kMcpConfig)) : std::string();
     if (!from_env.empty()) {
         out.path = from_env; out.source = Source::Env; out.explicit_request = true;
         return out;

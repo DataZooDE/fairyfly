@@ -1,16 +1,12 @@
 #include "include/fill_fields.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
 namespace fairyfly::sap {
 
 namespace {
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
 
 bool checkbox_value_ok(const std::string& v) {
     return v == "X" || v == "x" || v == "1" || v == "true" || v == "True" || v == "0" || v == "false" || v == "False" ||
@@ -108,7 +104,7 @@ std::optional<std::vector<FillField>> parse_fill_fields(const nlohmann::json& fi
 }
 
 std::optional<int> fill_then_vkey(const std::string& key) {
-    const std::string k = lower(key);
+    const std::string k = utils::lower_ascii(key);
     if (k == "enter") return 0;
     if (k == "f8") return 8;
     return std::nullopt;
