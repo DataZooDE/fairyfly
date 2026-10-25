@@ -255,6 +255,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/setup/elevator_win.cpp
     src/setup/system_probe_win.cpp
     src/setup/winhttp_client.cpp
+    src/setup/http_probe.cpp
     src/setup/verify_win.cpp
     src/setup/setup_doctor.cpp
     src/auth/crypto.cpp
