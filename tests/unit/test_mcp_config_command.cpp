@@ -13,6 +13,7 @@
 
 #include "include/cli_entry.h"
 #include "include/config/environment.h"
+#include "include/config/mcp_config.h"
 #include "include/tray/mcp_tray.h"
 #include "include/text/utf8.h"
 #include "support/env_guard.h"
@@ -57,6 +58,10 @@ struct ConfigFile {
     fairyfly::test::EnvGuard config{fairyfly::config::env::kMcpConfig, fairyfly::text::path_utf8(file)};
     fairyfly::test::EnvGuard no_audit{fairyfly::config::env::kAudit, "0"};
     void write(const std::string& text) const { std::ofstream(file, std::ios::binary) << text; }
+    std::string read() const {
+        std::ifstream in(file, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
 };
 
 }  // namespace
@@ -74,15 +79,14 @@ TEST_CASE("mcp config path names the file FAIRYFLY_MCP_CONFIG points to and whet
 TEST_CASE("mcp config init writes the template once; --force overwrites", "[mcp][config][command]") {
     ConfigFile cfg;
     REQUIRE(cli({"mcp", "config", "init", "--output", "json"}).exit_code == 0);
-    REQUIRE(std::filesystem::exists(cfg.file));
+    CHECK(cfg.read() == fairyfly::config::config_template());   // exactly the template
+    cfg.write("server:\n  port: 9555\n");
     const Run again = cli({"mcp", "config", "init", "--output", "json"});
     CHECK(again.exit_code != 0);
     CHECK(parsed(again)["error"]["code"] == "CONFIG_EXISTS");
-    cfg.write("server:\n  port: 9555\n");
+    CHECK(cfg.read() == "server:\n  port: 9555\n");   // the refusal leaves the file as it was
     REQUIRE(cli({"mcp", "config", "init", "--force", "--output", "json"}).exit_code == 0);
-    std::ifstream in(cfg.file);
-    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    CHECK(text.find("9555") == std::string::npos);   // the template again
+    CHECK(cfg.read() == fairyfly::config::config_template());
 }
 
 TEST_CASE("mcp config validate: a missing file, a valid file and a file that holds a secret", "[mcp][config][command]") {
@@ -104,10 +108,16 @@ TEST_CASE("mcp config validate: a missing file, a valid file and a file that hol
 TEST_CASE("mcp config show reports the effective values: a flag over the file", "[mcp][config][command]") {
     ConfigFile cfg;
     cfg.write("server:\n  port: 9555\n");
-    const json from_file = parsed(cli({"mcp", "config", "show", "--output", "json"}));
-    CHECK(from_file["data"]["values"].dump().find("9555") != std::string::npos);
-    const json from_flag = parsed(cli({"mcp", "--port", "9666", "config", "show", "--output", "json"}));
-    CHECK(from_flag["data"]["values"].dump().find("9666") != std::string::npos);
+    const Run file_run = cli({"mcp", "config", "show", "--output", "json"});
+    REQUIRE(file_run.exit_code == 0);
+    const json port = parsed(file_run)["data"]["values"]["server.port"];
+    CHECK(port["value"] == 9555);
+    CHECK(port["source"] == "yaml");
+    const Run flag_run = cli({"mcp", "--port", "9666", "config", "show", "--output", "json"});
+    REQUIRE(flag_run.exit_code == 0);
+    const json flagged = parsed(flag_run)["data"]["values"]["server.port"];
+    CHECK(flagged["value"] == 9666);
+    CHECK(flagged["source"] == "flag");
 }
 
 TEST_CASE("an mcp command leaves no tray runner factory behind", "[mcp][config][command]") {
