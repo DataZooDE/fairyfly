@@ -408,3 +408,23 @@ TEST_CASE("format_output: the renderer comes from the command, not from the keys
     const std::string failed = cli::format_output(Result::fail("NO_SESSION", "x"), cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
     CHECK(failed.find("NO_SESSION") != std::string::npos);
 }
+
+TEST_CASE("format_output: a command's renderer applies only to the result shape it renders", "[command_table][render]") {
+    // codex 2026-10-25: `screen read --dump-object-tree` (FAIRYFLY_DIAG) and `screen read --no-children` return
+    // other data than a screen hierarchy; the generic Markdown keeps their fields instead of an empty screen report
+    const Result dump = Result::ok(nlohmann::json{{"object_tree", {{"Id", "/app/con[0]"}}}});
+    const std::string dumped = cli::format_output(dump, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(dumped.find("object_tree") != std::string::npos);
+    const Result shallow = Result::ok(nlohmann::json{{"screen_id", "SAPLSMTR_NAVIGATION/0100"}, {"child_count", 7},
+                                                     {"connection_id", 3}});
+    const std::string flat = cli::format_output(shallow, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(flat.find("child_count") != std::string::npos);
+    CHECK(flat.find("connection_id") != std::string::npos);
+    // a doctor or find result without its fields is shown as it is
+    const Result partial = Result::ok(nlohmann::json{{"note", "probe skipped"}});
+    CHECK(cli::format_output(partial, cli::OutputFormat::Markdown, false, ct::Render::Doctor).find("probe skipped") != std::string::npos);
+    CHECK(cli::format_output(partial, cli::OutputFormat::Markdown, false, ct::Render::ScreenFind).find("probe skipped") != std::string::npos);
+    // the screen report itself is still chosen for a hierarchy
+    const Result screen = Result::ok(nlohmann::json{{"screen_id", "X/1"}, {"hierarchy", nlohmann::json::object()}});
+    CHECK(cli::format_output(screen, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead).find("```json") == std::string::npos);
+}
