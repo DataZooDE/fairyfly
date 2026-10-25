@@ -58,6 +58,127 @@ int refuse(const char* code, const std::string& message, int exit_code = 2) {
     return exit_code;
 }
 
+/// The server's policy from its options and the effective write mode; HTTP keeps explicit attaches, the link
+/// explains its read-only answers.
+Policy make_policy(const ServeOptions& options, bool read_only, bool allow_write, audit::AuditSink* sink, bool http,
+                   bool link) {
+    Policy policy;
+    policy.read_only = read_only;
+    policy.allow_write = allow_write;
+    policy.default_connection = options.default_connection;
+    policy.default_format = options.format;
+    policy.max_result_chars = options.max_result_chars;
+    policy.max_image_bytes = options.max_image_bytes;
+    policy.max_calls_per_minute = options.max_calls_per_minute;
+    policy.audit_required = sink && sink->mode() == audit::Mode::Required;
+    policy.owner_sap_identities = options.owner_sap_identities;
+    policy.auto_attach = !http;  // stdio and link; an HTTP endpoint keeps explicit attaches (tokens, owner routing)
+    if (link)
+        policy.allow_write_hint = "fairyfly on this desktop was started with --read-only or FAIRYFLY_READ_ONLY; the person "
+                                  "at the desktop can restart the fairyfly link without it";
+    if (link)  // the gateway granted this call read-only: the organisation's switch, which no desktop setting overrides
+        policy.grant_write_hint = "changes in SAP are not allowed for your organisation in the fairyfly web app (Settings, "
+                                  "'Allow changes in SAP'); an administrator can turn it on there - the desktop's own "
+                                  "setting cannot override it";
+    return policy;
+}
+
+#ifdef _WIN32
+/// This executable's path (the session workers are started from it); empty when it cannot be read.
+std::wstring own_executable_path() {
+    std::wstring executable(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+    if (length == 0 || length >= executable.size()) return {};
+    executable.resize(length);
+    return executable;
+}
+#endif
+
+/// Required audit that cannot be written: the server must not start.
+bool audit_unavailable(audit::AuditSink* sink) {
+    return sink && sink->mode() == audit::Mode::Required && !sink->probe();
+}
+
+int refuse_audit(audit::AuditSink* sink) {
+    return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+}
+
+/// Runs a transport between its "started" and "stopped" audit records.
+int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<int()>& serve) {
+    append_serve_event(sink, "started", read_only);
+    const int exit_code = serve();
+    append_serve_event(sink, "stopped", read_only);
+    return exit_code;
+}
+
+/// The HTTP dispatcher's view of the shared handler: SAP facts and targets for token authorization, the per-call
+/// read-only and selection-input overrides, the connection snapshot and the owner-mode guards, all through the
+/// handler that is configured on first use.
+void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler) {
+    // Token authorization needs the target SAP system and a per-call read-only override.
+    dispatcher.set_sap_facts_provider([lazy_handler](std::optional<int> connection) -> std::optional<audit::SapFacts> {
+        // Facts of the connection THIS call will use (never the merely attached session).
+        // Global controls run on the tray COM executor. Initialize its handler
+        // here so a lease can be acquired before any global CLI command runs.
+        audit::SapFacts facts = lazy_handler().audit_facts_for_connection(connection);
+        if (!facts.any()) return std::nullopt;
+        return facts;
+    });
+    // System and connection name of a launch/login/attach/disconnect target (token allowlists; fail closed).
+    dispatcher.set_session_target_resolver([lazy_handler](const CommandDispatcher::TargetQuery& query) -> auth::SessionTarget {
+        const auto info = lazy_handler().peek_session_target(query.logon_name, query.session_id, query.connection);
+        auth::SessionTarget target;
+        target.connection_name = info.connection_name;
+        target.ambiguous = info.ambiguous;
+        if (!info.facts.system.empty())
+            target.system = info.facts.client.empty() ? info.facts.system : info.facts.system + "/" + info.facts.client;
+        target.user = info.facts.user;
+        return target;
+    });
+    dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
+    dispatcher.set_selection_input_override([lazy_handler](bool on, const std::string& program, const std::string& screen) {
+        lazy_handler().set_selection_input_only(on, program, screen);
+    });
+    dispatcher.set_connection_snapshot_provider([lazy_handler] {
+        return lazy_handler().handle_connections_list(false, false);
+    });
+    dispatcher.set_owner_session_override([lazy_handler](const std::string& session, const std::string& owner) {
+        lazy_handler().set_expected_mcp_session(session, owner);
+    });
+    dispatcher.set_attach_target_guard_override([lazy_handler](CommandDispatcher::AttachTargetGuard guard) {
+        lazy_handler().set_attach_target_guard(std::move(guard));
+    });
+    dispatcher.set_login_target_guard_override([lazy_handler](CommandDispatcher::LoginTargetGuard guard) {
+        lazy_handler().set_login_target_guard(std::move(guard));
+    });
+    dispatcher.set_launch_target_guard_override([lazy_handler](CommandDispatcher::LaunchTargetGuard guard) {
+        lazy_handler().set_launch_target_guard(std::move(guard));
+    });
+    dispatcher.set_launch_rollback_override([lazy_handler](int id) {
+        return lazy_handler().rollback_owner_launch(id);
+    });
+    dispatcher.set_attach_finalize_override([lazy_handler](bool accepted) {
+        return lazy_handler().finalize_owner_attach(accepted);
+    });
+}
+
+/// A competing lease acquire re-reads the holder's token (token mutations run in a separate CLI process): a revoked,
+/// rotated or expired token cannot occupy the window for the rest of its lease TTL; its routing and policy state go.
+std::function<bool(const std::string&)> lease_holder_check(const std::shared_ptr<auth::TokenStore>& tokens,
+                                                           const std::shared_ptr<SessionRoutingState>& routing_state,
+                                                           const std::shared_ptr<SessionPolicyState>& policy_state) {
+    return [tokens, routing_state, policy_state](const std::string& id) {
+        const auto lookup = tokens->lookup_fresh(id);
+        const bool invalid = lookup.status == auth::TokenLookupStatus::Absent ||
+            (lookup.status == auth::TokenLookupStatus::Found && token_definitively_invalid(lookup.meta, tokens->now()));
+        if (invalid) {
+            routing_state->revoke_principal(id);
+            policy_state->revoke_token(id);
+        }
+        return !invalid;
+    };
+}
+
 } // namespace
 
 int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
@@ -116,24 +237,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     }
 #endif
 
-    Policy policy;
-    policy.read_only = read_only;
-    policy.allow_write = allow_write;
-    policy.default_connection = options.default_connection;
-    policy.default_format = options.format;
-    policy.max_result_chars = options.max_result_chars;
-    policy.max_image_bytes = options.max_image_bytes;
-    policy.max_calls_per_minute = options.max_calls_per_minute;
-    policy.audit_required = sink && sink->mode() == audit::Mode::Required;
-    policy.owner_sap_identities = options.owner_sap_identities;
-    policy.auto_attach = !http;  // stdio and link; an HTTP endpoint keeps explicit attaches (tokens, owner routing)
-    if (link)
-        policy.allow_write_hint = "fairyfly on this desktop was started with --read-only or FAIRYFLY_READ_ONLY; the person "
-                                  "at the desktop can restart the fairyfly link without it";
-    if (link)  // the gateway granted this call read-only: the organisation's switch, which no desktop setting overrides
-        policy.grant_write_hint = "changes in SAP are not allowed for your organisation in the fairyfly web app (Settings, "
-                                  "'Allow changes in SAP'); an administrator can turn it on there - the desktop's own "
-                                  "setting cannot override it";
+    const Policy policy = make_policy(options, read_only, allow_write, sink, http, link);
 #ifdef _WIN32
     // Owner-mode workers attach to SAP GUI through the running object table: never host SAP GUI windows in-process.
     sap::ComGuiApplication::set_embedded_fallback_allowed(embedded_sap_gui_allowed(http, options.owner_sap_identities));
@@ -180,8 +284,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             return refuse("INVALID_ARGUMENT", "--allow-ip-include-loopback requires a nonempty --allow-ip list");
         // Remote transport: http.sys (TLS in the kernel when --tls). The provider is rebuilt when the
         // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
-        if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
-            return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        if (audit_unavailable(sink)) return refuse_audit(sink);
         for (const auto& cidr : options.allow_ip) {
             if (!auth::parse_ip_rule(cidr))
                 return refuse("INVALID_ARGUMENT", "invalid --allow-ip entry '" + cidr + "': expected an IPv4/IPv6 address or CIDR block");
@@ -205,17 +308,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         auto lease_token_store = std::make_shared<auth::TokenStore>(
             auth::make_credential_manager_backend(auth::kTokenTargetPrefix));
         auto session_leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), SessionLeases::IdFactory{},
-            [lease_token_store, routing_state, session_policy_state](const std::string& id) {
-                const auto lookup = lease_token_store->lookup_fresh(id);
-                const bool invalid = lookup.status == auth::TokenLookupStatus::Absent ||
-                    (lookup.status == auth::TokenLookupStatus::Found &&
-                     token_definitively_invalid(lookup.meta, lease_token_store->now()));
-                if (invalid) {
-                    routing_state->revoke_principal(id);
-                    session_policy_state->revoke_token(id);
-                }
-                return !invalid;
-            });
+            lease_holder_check(lease_token_store, routing_state, session_policy_state));
         std::unique_ptr<PeriodicSessionStateCleanup> state_cleanup;
         auto shared_rate_limiter = std::make_shared<KeyedRateLimiter>();
         http_args.make_provider = [policy, hook, lazy_handler, families, session_leases, routing_state,
@@ -230,52 +323,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             dispatcher->set_routing_state(routing_state);
             dispatcher->set_session_policy_state(session_policy_state);
             dispatcher->set_shared_rate_limiter(shared_rate_limiter);
-            // Token authorization needs the target SAP system and a per-call read-only override.
-            dispatcher->set_sap_facts_provider([lazy_handler](std::optional<int> connection) -> std::optional<audit::SapFacts> {
-                // Facts of the connection THIS call will use (never the merely attached session).
-                // Global controls run on the tray COM executor. Initialize its handler
-                // here so a lease can be acquired before any global CLI command runs.
-                audit::SapFacts facts = lazy_handler().audit_facts_for_connection(connection);
-                if (!facts.any()) return std::nullopt;
-                return facts;
-            });
-            // System and connection name of a launch/login/attach/disconnect target (token allowlists; fail closed).
-            dispatcher->set_session_target_resolver([lazy_handler](const CommandDispatcher::TargetQuery& query) -> auth::SessionTarget {
-                const auto info = lazy_handler().peek_session_target(query.logon_name, query.session_id, query.connection);
-                auth::SessionTarget target;
-                target.connection_name = info.connection_name;
-                target.ambiguous = info.ambiguous;
-                if (!info.facts.system.empty())
-                    target.system = info.facts.client.empty() ? info.facts.system : info.facts.system + "/" + info.facts.client;
-                target.user = info.facts.user;
-                return target;
-            });
-            dispatcher->set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
-            dispatcher->set_selection_input_override([lazy_handler](bool on, const std::string& program, const std::string& screen) {
-                lazy_handler().set_selection_input_only(on, program, screen);
-            });
-            dispatcher->set_connection_snapshot_provider([lazy_handler] {
-                return lazy_handler().handle_connections_list(false, false);
-            });
+            connect_to_handler(*dispatcher, lazy_handler);
             if (*owner_listing) dispatcher->set_owner_session_listing_provider(*owner_listing);
-            dispatcher->set_owner_session_override([lazy_handler](const std::string& session, const std::string& owner) {
-                lazy_handler().set_expected_mcp_session(session, owner);
-            });
-            dispatcher->set_attach_target_guard_override([lazy_handler](CommandDispatcher::AttachTargetGuard guard) {
-                lazy_handler().set_attach_target_guard(std::move(guard));
-            });
-            dispatcher->set_login_target_guard_override([lazy_handler](CommandDispatcher::LoginTargetGuard guard) {
-                lazy_handler().set_login_target_guard(std::move(guard));
-            });
-            dispatcher->set_launch_target_guard_override([lazy_handler](CommandDispatcher::LaunchTargetGuard guard) {
-                lazy_handler().set_launch_target_guard(std::move(guard));
-            });
-            dispatcher->set_launch_rollback_override([lazy_handler](int id) {
-                return lazy_handler().rollback_owner_launch(id);
-            });
-            dispatcher->set_attach_finalize_override([lazy_handler](bool accepted) {
-                return lazy_handler().finalize_owner_attach(accepted);
-            });
             dispatcher->set_login_lane_reserver([on_login_lane_reserve](
                 const std::string& key, const std::function<bool()>& cancelled) -> std::shared_ptr<void> {
                 return *on_login_lane_reserve ? (*on_login_lane_reserve)(key, cancelled) : nullptr;
@@ -288,11 +337,9 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             if (options.insecure_no_auth)
                 return refuse("INVALID_ARGUMENT", "owner session routing requires bearer-token authentication");
 #ifdef _WIN32
-            std::wstring executable(32768, L'\0');
-            const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
-            if (length == 0 || length >= executable.size())
+            std::wstring executable = own_executable_path();
+            if (executable.empty())
                 return refuse("WORKER_UNAVAILABLE", "cannot locate the fairyfly session worker executable");
-            executable.resize(length);
             auto broker = std::make_shared<SessionWorkerBroker>(std::move(executable), L"--mcp-session-worker",
                                                                  8, server_options.max_queue,
                                                                  server_options.call_timeout_ms);
@@ -336,11 +383,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             return refuse("WORKER_UNAVAILABLE", "parallel SAP session workers require Windows");
 #endif
         }
-        append_serve_event(sink, "started", read_only);
         if (hooks) http_args.on_control = hooks->on_control;
-        const int http_exit = run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
-        append_serve_event(sink, "stopped", read_only);
-        return http_exit;
+        return serve_audited(sink, read_only, [&] {
+            return run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
+        });
     }
 
     if (link) {
@@ -350,8 +396,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         // a call the gateway granted read-only runs with the handler's read-only guard on, even when this
         // desktop allows writes (--allow-write); the server value is restored after the call
         link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
-        if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
-            return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
+        if (audit_unavailable(sink)) return refuse_audit(sink);
         const bool hard_read_only = options.read_only || config::read_only_cap();
         const auto set_read_only = [&](bool ro) {
             if (!ro && hard_read_only) return false;
@@ -362,10 +407,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
             spdlog::info("fairyfly link: {}", ro ? "read-only" : "changes in SAP allowed");
             return true;
         };
-        append_serve_event(sink, "started", read_only);
-        const int link_exit = hooks->link_loop(link_dispatcher, set_read_only);
-        append_serve_event(sink, "stopped", read_only);
-        return link_exit;
+        return serve_audited(sink, read_only, [&] { return hooks->link_loop(link_dispatcher, set_read_only); });
     }
 
     CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,
@@ -374,12 +416,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
 
     McpServer server(transport, dispatcher, server_options);
     // Audit lifecycle records (only when auditing is enabled). Required mode: probe first.
-    if (sink && sink->mode() == audit::Mode::Required && !sink->probe())
-        return refuse("AUDIT_UNAVAILABLE", "Audit trail is required but cannot be written: " + sink->file().string());
-    append_serve_event(sink, "started", read_only);
-    const int exit_code = server.run();
-    append_serve_event(sink, "stopped", read_only);
-    return exit_code;
+    if (audit_unavailable(sink)) return refuse_audit(sink);
+    return serve_audited(sink, read_only, [&] { return server.run(); });
 }
 
 } // namespace fairyfly::mcp
