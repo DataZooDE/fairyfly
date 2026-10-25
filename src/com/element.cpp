@@ -920,32 +920,10 @@ std::string ComGuiElement::get_cell_value(int row, const std::string& column_nam
             return "";
         }
 
-        // Prepare parameters: row (int) and column_name (string)
-        // Parameters are passed in REVERSE order in DISPPARAMS
-        VARIANT params[2];
-        com::VariantGuard param_guards[2] = {
-            com::VariantGuard(&params[0]),  // column_name (second parameter, first in array)
-            com::VariantGuard(&params[1])  // row (first parameter, second in array)
-        };
-
-        params[0].vt = VT_BSTR;
-        const auto wide_column = com::utf8_to_wide(column_name);
-        params[0].bstrVal = SysAllocStringLen(wide_column.data(), static_cast<UINT>(wide_column.size()));
-
-        params[1].vt = VT_I4;
-        params[1].lVal = row;
-
-        DISPPARAMS disp_params;
-        disp_params.cArgs = 2;
-        disp_params.rgvarg = params;
-        disp_params.cNamedArgs = 0;
-        disp_params.rgdispidNamedArgs = nullptr;
-
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                              DISPATCH_METHOD, &disp_params, result_guard.get(), nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(static_cast<long>(row)), bstr_arg(column_name)},
+                    result_guard.get());
 
         // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
         std::string cell_value;
@@ -970,10 +948,9 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     DISPID count_id;
     HRESULT hr = resolve_dispid(L"GetLineCount", &count_id);
     if (FAILED(hr)) throw ComException("GetLineCount method not found", hr);
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
     VARIANT count_result;
     com::VariantGuard count_guard(&count_result);
-    hr = safe_invoke(dispatch_, count_id, DISPATCH_METHOD, &no_params, count_guard.get());
+    hr = safe_invoke(dispatch_, count_id, DISPATCH_METHOD, {}, count_guard.get());
     if (FAILED(hr) || count_result.vt != VT_I4)
         throw ComException("GetLineCount failed", hr);
 
@@ -987,14 +964,10 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     if (FAILED(hr)) throw ComException("GetLineText method not found", hr);
     constexpr size_t max_chars = 1024 * 1024;
     for (int line = 0; line < limit; ++line) {
-        VARIANT argument;
-        com::VariantGuard argument_guard(&argument);
-        argument.vt = VT_I4;
-        argument.lVal = line + 1;  // SAP ABAP editor lines are one-based.
         VARIANT line_result;
         com::VariantGuard line_guard(&line_result);
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, line_id, DISPATCH_METHOD, &params, line_guard.get());
+        // SAP ABAP editor lines are one-based
+        hr = safe_invoke(dispatch_, line_id, DISPATCH_METHOD, {_variant_t(static_cast<long>(line + 1))}, line_guard.get());
         if (FAILED(hr) || line_result.vt != VT_BSTR)
             throw ComException(fmt::format("GetLineText failed (hr=0x{:08X}, type={})",
                                          static_cast<unsigned int>(hr), line_result.vt), hr);
@@ -1014,11 +987,9 @@ std::vector<std::string> ComGuiElement::get_tree_column_names() const {
     try {
         DISPID method_id;
         if (FAILED(get_dispid_via_typeinfo(dispatch_, L"GetColumnNames", &method_id))) return names;
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
         VARIANT result;
         com::VariantGuard result_guard(&result);
-        if (FAILED(dispatch_->Invoke(method_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                     DISPATCH_METHOD, &no_params, result_guard.get(), nullptr, nullptr)) ||
+        if (FAILED(invoke(dispatch_, method_id, DISPATCH_METHOD, {}, result_guard.get())) ||
             result.vt != VT_DISPATCH || !result.pdispVal) return names;
         IDispatch* collection = result.pdispVal;
         DISPID count_id, item_id;
@@ -1026,14 +997,11 @@ std::vector<std::string> ComGuiElement::get_tree_column_names() const {
             FAILED(get_dispid_via_typeinfo(collection, L"Item", &item_id))) return names;
         VARIANT count;
         com::VariantGuard count_guard(&count);
-        if (FAILED(collection->Invoke(count_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                      DISPATCH_PROPERTYGET, &no_params, count_guard.get(), nullptr, nullptr)) ||
+        if (FAILED(invoke(collection, count_id, DISPATCH_PROPERTYGET, {}, count_guard.get())) ||
             count.vt != VT_I4) return names;
         for (int i = 0; i < count.lVal && i < 100; ++i) {
-            _variant_t index(i), item;
-            DISPPARAMS item_params = {&index, nullptr, 1, 0};
-            if (SUCCEEDED(collection->Invoke(item_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_METHOD, &item_params, &item, nullptr, nullptr)) &&
+            _variant_t item;
+            if (SUCCEEDED(invoke(collection, item_id, DISPATCH_METHOD, {_variant_t(i)}, &item)) &&
                 item.vt == VT_BSTR)
                 names.push_back(safe_bstr_to_string(item, "get_tree_column_names item"));
         }
