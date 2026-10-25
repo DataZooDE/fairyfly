@@ -11,9 +11,11 @@
 
 #include "include/link/desktop_approval.h"
 #include "include/link/link_runner.h"
+#include "support/eventually.h"
 
 using namespace fairyfly::link::approval;
 using namespace std::chrono_literals;
+using fairyfly::test::eventually;
 
 namespace {
 
@@ -116,16 +118,6 @@ struct Saved {
                                           });
     }
 };
-
-template <class F>
-bool eventually(F f, std::chrono::milliseconds within = 2s) {
-    const auto end = std::chrono::steady_clock::now() + within;
-    while (std::chrono::steady_clock::now() < end) {
-        if (f()) return true;
-        std::this_thread::sleep_for(2ms);
-    }
-    return f();
-}
 
 }  // namespace
 

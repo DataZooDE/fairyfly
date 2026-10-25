@@ -16,7 +16,6 @@ std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name = kTrayMutexName);
-std::unique_ptr<Clipboard> make_win32_clipboard();
 
 /// Full path of the running fairyfly.exe.
 std::string current_exe_path();
