@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Tests and seams (2026-10-25 code review)
+
+- The setup probes take their HTTP transport (tested without WinHTTP), and `ComAutomationEngine` its SAP GUI
+  application object: its fill, click, transaction and read actions are tested against a scripted SAP GUI.
+- One validation path for a fill field (CLI, MCP, fields list); the CLI keeps its error order.
+- `traverse_element_tree` and `ElementMetadataExtractor::extract` are split into named stages.
+- The rare unit-test failure was a wall-clock bound under load; sleep-ordered tests wait for an event instead;
+  the environment guard tests run in 0.16 s instead of 20 s.
+
 ### Setup and process handles (2026-10-25 code review)
 
 - `mcp setup` and `mcp teardown` share their gates (dry run, nothing to do, read-only, consent, elevation) and their
