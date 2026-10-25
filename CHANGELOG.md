@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### One reader for environment variables
+
+- `FAIRYFLY_READ_ONLY` and the other switches are read by one shared reader (`config::Environment`). They are on
+  for `1`, `true`, `yes` or `on` in any case, everywhere. Before, `mcp config` and `mcp setup` accepted only some
+  spellings: with `FAIRYFLY_READ_ONLY=Yes` the MCP server refused changes while `mcp setup` would change the
+  machine and `mcp config` reported no hard cap.
+- `FAIRYFLY_DIAG` and `FAIRYFLY_PROBE_ALL` follow the same rule (they took only `1`). `FAIRYFLY_AUDIT` and
+  `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no` or `off` in any case (`OFF` or `no` left the tray's
+  update check on). `mcp.yaml` booleans use the same spellings.
+- The cloud link's tray still reads `FAIRYFLY_READ_ONLY` on its own until approval model v2 moves it over.
+
 ## 2026.10.25.1 (2026-10-25)
 
 ### Cloud link: "Allow changes in SAP" is the approval (approval model v2)
@@ -21,17 +34,6 @@
 - `link run --allow-write` is still accepted and has no effect.
 - A cloud call gets write rights only for the change approved at this desktop (or by **Allow changes in SAP**),
   whatever the gateway's grant says about approval; any other call runs read-only.
-
-### One reader for environment variables
-
-- `FAIRYFLY_READ_ONLY` and the other switches are read by one shared reader (`config::Environment`). They are on
-  for `1`, `true`, `yes` or `on` in any case, everywhere. Before, `mcp config` and `mcp setup` accepted only some
-  spellings: with `FAIRYFLY_READ_ONLY=Yes` the MCP server refused changes while `mcp setup` would change the
-  machine and `mcp config` reported no hard cap.
-- `FAIRYFLY_DIAG` and `FAIRYFLY_PROBE_ALL` follow the same rule (they took only `1`). `FAIRYFLY_AUDIT` and
-  `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no` or `off` in any case (`OFF` or `no` left the tray's
-  update check on). `mcp.yaml` booleans use the same spellings.
-- The cloud link's tray still reads `FAIRYFLY_READ_ONLY` on its own until approval model v2 moves it over.
 
 ### MCP: navigation is annotated read-only
 
