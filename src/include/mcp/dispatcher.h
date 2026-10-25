@@ -142,6 +142,20 @@ public:
     }
 
 private:
+    /// Owner mode: an HTTP call on an endpoint that is limited to exact SAP identities (--owner-identity).
+    bool owner_mode(const CallContext& ctx) const { return ctx.http && !policy_.owner_sap_identities.empty(); }
+    /// A row of an owner-mode listing is shown: its identity is the endpoint's and the token's, its system allowed.
+    bool owner_target_visible(const Principal& principal, const auth::SessionTarget& target) const;
+    /// A refusal before anything runs: the code, the message and a hint for the assistant.
+    struct CallRefusal {
+        std::string code;
+        std::string message;
+        std::string hint = {};
+    };
+    /// Admission of a call, before any SAP lookup: policy, token scope, owner binding, rate limits, owner-mode
+    /// discovery and launch rules. Charges the rate limiters. nullopt: admitted.
+    std::optional<CallRefusal> admission_refusal(const ToolSpec* spec, const std::string& name, const json& args,
+                                                 const CallContext& ctx, bool selection_input);
     /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a
     /// hint to use `fields`.
     std::atomic<long long> last_single_fill_ms_{0};

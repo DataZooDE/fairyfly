@@ -323,10 +323,67 @@ ToolResult CommandDispatcher::run_single(const std::string& name, const json& ar
                    ctx, code_out);
 }
 
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::admission_refusal(
+    const ToolSpec* spec, const std::string& name, const json& args, const CallContext& ctx, bool selection_input) {
+    const Principal& principal = ctx.principal;
+    const PolicyDecision decision = selection_input ? PolicyDecision{} : check_call(*spec, args, policy_);
+    if (!decision.allowed)
+        return CallRefusal{decision.code.empty() ? "REFUSED" : decision.code,
+                    decision.message.empty() ? "call refused by policy" : decision.message};
+
+    // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
+    if (!auth::scope_allows(principal, spec->family, name))
+        return CallRefusal{"SCOPE_DENIED", "token lacks the required scope for this tool"};
+    if (owner_mode(ctx) && !owner_token_bound(policy_, principal))
+        return CallRefusal{"OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable"};
+    // Refuse exhausted tokens before doing a potentially slow SAP COM lookup.
+    const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
+    const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
+    const bool rate_ok = per_principal ? keyed_limiter_->allow(principal_key(principal), budget, std::chrono::steady_clock::now())
+                                       : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
+    if (!rate_ok)
+        return CallRefusal{"RATE_LIMITED",
+                    "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
+                        " per minute)",
+                    "wait a few seconds and retry, or combine steps with gui_batch"};
+    if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
+        if (!keyed_limiter_->allow(principal_key(principal) + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+            return CallRefusal{"RATE_LIMITED",
+                        "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
+                        "wait a few seconds and retry"};
+    }
+    // These discovery responses contain other sessions/credentials and cannot be vouched for by the currently
+    // selected session. Connection and session listings are verified row by row after execution.
+    if (owner_mode(ctx) &&
+        (name == "gui_credentials_list" ||
+         (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))))
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the SAP identity for this call cannot be verified before execution"};
+    if (owner_mode(ctx) && name == "gui_connection_list" &&
+        args.is_object() && args.value("cleanup", false))
+        return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "connection cleanup is unavailable for owner-mode HTTP"};
+    if (owner_mode(ctx) && name == "gui_session_launch") {
+        if (policy_.owner_sap_identities.size() > 1 && !routing_state_->prelogin_capacity_available(principal.id))
+            return CallRefusal{"OWNER_SESSION_UNAVAILABLE", "the endpoint has too many unfinished SAP logon windows"};
+        const std::string requested = args.is_object() && args.contains("name") && args["name"].is_string()
+            ? args["name"].get<std::string>() : std::string();
+        const bool vouched = !requested.empty() && std::any_of(principal.connections.begin(), principal.connections.end(),
+            [&](const std::string& pattern) { return auth::glob_match(pattern, requested); });
+        if (!vouched) return CallRefusal{"OWNER_SESSION_UNAVAILABLE", "the SAP Logon entry is unavailable to this token"};
+        if (args.is_object() && args.value("allow_sapshcut", false))
+            return CallRefusal{"SESSION_CONTROL_UNAVAILABLE", "shortcut launch is unavailable for owner-mode HTTP"};
+    }
+    return std::nullopt;
+}
+
+bool CommandDispatcher::owner_target_visible(const Principal& principal, const auth::SessionTarget& target) const {
+    return owner_identity_allowed(policy_, principal, target.identity()) &&
+           (principal.sap_systems.empty() || auth::system_allowed(principal.sap_systems, target.system));
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
-        if (ctx.http && !policy_.owner_sap_identities.empty() &&
+        if (owner_mode(ctx) &&
             (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
              c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
              c == "SESSION_TARGET_CHANGED")) {
@@ -356,53 +413,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // gui_element_fill of a principal with allow_selection_input is decided by auth::authorize_call (INPUT_* rules) instead of
     // the blanket read-only refusal; every other tool keeps check_call.
     const bool selection_input = auth::selection_input_path(ctx.principal, name, policy_);
-    const PolicyDecision decision = selection_input ? PolicyDecision{} : check_call(*spec, args, policy_);
-    if (!decision.allowed)
-        return fail(decision.code.empty() ? "REFUSED" : decision.code,
-                    decision.message.empty() ? "call refused by policy" : decision.message);
-
-    // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
+    if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
+        return fail(refused->code, refused->message, refused->hint);
     const Principal& principal = ctx.principal;
-    if (!auth::scope_allows(principal, spec->family, name))
-        return fail("SCOPE_DENIED", "token lacks the required scope for this tool");
-    if (ctx.http && !policy_.owner_sap_identities.empty() && !owner_token_bound(policy_, principal))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
-    // Refuse exhausted tokens before doing a potentially slow SAP COM lookup.
-    const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
-    const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
-    const bool rate_ok = per_principal ? keyed_limiter_->allow(principal_key(principal), budget, std::chrono::steady_clock::now())
-                                       : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
-    if (!rate_ok)
-        return fail("RATE_LIMITED",
-                    "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
-                        " per minute)",
-                    "wait a few seconds and retry, or combine steps with gui_batch");
-    if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
-        if (!keyed_limiter_->allow(principal_key(principal) + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
-            return fail("RATE_LIMITED",
-                        "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
-                        "wait a few seconds and retry");
-    }
-    // These discovery responses contain other sessions/credentials and cannot be vouched for by the currently
-    // selected session. Connection and session listings are verified row by row after execution.
-    if (ctx.http && !policy_.owner_sap_identities.empty() &&
-        (name == "gui_credentials_list" ||
-         (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))))
-        return fail("OWNER_IDENTITY_UNKNOWN", "the SAP identity for this call cannot be verified before execution");
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_connection_list" &&
-        args.is_object() && args.value("cleanup", false))
-        return fail("OWNER_IDENTITY_UNKNOWN", "connection cleanup is unavailable for owner-mode HTTP");
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch") {
-        if (policy_.owner_sap_identities.size() > 1 && !routing_state_->prelogin_capacity_available(principal.id))
-            return fail("OWNER_SESSION_UNAVAILABLE", "the endpoint has too many unfinished SAP logon windows");
-        const std::string requested = args.is_object() && args.contains("name") && args["name"].is_string()
-            ? args["name"].get<std::string>() : std::string();
-        const bool vouched = !requested.empty() && std::any_of(principal.connections.begin(), principal.connections.end(),
-            [&](const std::string& pattern) { return auth::glob_match(pattern, requested); });
-        if (!vouched) return fail("OWNER_SESSION_UNAVAILABLE", "the SAP Logon entry is unavailable to this token");
-        if (args.is_object() && args.value("allow_sapshcut", false))
-            return fail("SESSION_CONTROL_UNAVAILABLE", "shortcut launch is unavailable for owner-mode HTTP");
-    }
     std::unique_lock<std::shared_timed_mutex> control_probe_lock;
     const auto acquire_control_probe_gate = [&]() {
         if (!control_probe_gate_)
@@ -418,7 +431,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // Launch changes the GUI application. Login only needs the global probe gate
     // after its own window lane is free; holding it while queued would stall all
     // unrelated windows' admission probes.
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch" &&
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
         !acquire_control_probe_gate()) {
         return fail("SESSION_ROUTE_UNAVAILABLE", "SAP admission probes are busy");
     }
@@ -438,7 +451,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         std::optional<std::string> current_system, current_tcode;
         auth::SelectionInputContext input_context;
         std::optional<audit::SapFacts> live_facts;
-        const bool owner_needs_facts = ctx.http && !policy_.owner_sap_identities.empty() &&
+        const bool owner_needs_facts = owner_mode(ctx) &&
                                        name != "gui_session_list" && name != "gui_connection_list" &&
                                        name != "gui_doctor" &&
                                        name != "gui_session_attach" &&
@@ -471,7 +484,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             (!live_facts || live_facts->connection_id != sticky_target->connection ||
              live_facts->session_identity != sticky_target->session_identity))
             return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session");
-        if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_login") {
+        if (owner_mode(ctx) && name == "gui_session_login") {
             const bool known = live_facts && live_facts->connection_id && !live_facts->system.empty() &&
                 !live_facts->session_identity.empty() && live_facts->user.empty() &&
                 (!record.connection || *record.connection == *live_facts->connection_id);
@@ -535,7 +548,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
             current_system = granted_system_client;
             prelogin_close_facts = live_facts;
-        } else if (ctx.http && !policy_.owner_sap_identities.empty() && name != "gui_session_attach" &&
+        } else if (owner_mode(ctx) && name != "gui_session_attach" &&
             name != "gui_session_list" && name != "gui_connection_list" &&
             name != "gui_doctor" && name != "gui_session_launch") {
             const bool known = live_facts && !live_facts->system.empty() && !live_facts->client.empty() &&
@@ -563,7 +576,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             }
         }
         Principal scoped_doctor_principal = principal;
-        if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_doctor")
+        if (owner_mode(ctx) && name == "gui_doctor")
             scoped_doctor_principal.connections.clear(); // output is filtered by the original token below
         const PolicyDecision authz = auth::authorize_call(scoped_doctor_principal, *spec, spec->family, args, policy_, current_system,
                                                           current_tcode, [this](const std::string& n) { return find_spec(n); },
@@ -587,8 +600,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // contacting SAP; when it cannot be determined the call is refused (fail closed).
     const auto check_target = [&](const json& call_args) -> std::optional<PolicyDecision> {
         if (prelogin_close_facts) return std::nullopt; // exact live claim and name were checked above
-        const bool owner_target = ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_attach";
-        if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_login")
+        const bool owner_target = owner_mode(ctx) && name == "gui_session_attach";
+        if (owner_mode(ctx) && name == "gui_session_login")
             return std::nullopt; // the handler checks the stored credential and live connection before typing
         if (!owner_target && !auth::needs_session_target(principal, name, call_args)) return std::nullopt;
         TargetQuery query;
@@ -614,7 +627,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (!owner_identity_allowed(policy_, principal, identity))
                 return PolicyDecision{false, "OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint"};
         }
-        if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch") {
+        if (owner_mode(ctx) && name == "gui_session_launch") {
             // A SAP Logon entry can already have windows authenticated as other users.
             // Its live system/client may help constrain launch, but that user's identity
             // says nothing about the new window. The launch/login guards check the new
@@ -635,7 +648,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         try { (void)spec->build_argv(args, policy_); }
         catch (const std::exception& e) { return fail("INVALID_ARGUMENT", e.what()); }
         record.command = "session lease";
-        if (!ctx.http || policy_.owner_sap_identities.empty() || !owner_pre_facts ||
+        if (!owner_mode(ctx) || !owner_pre_facts ||
             principal.id.empty() || !session_leases_)
             return fail("LEASE_UNAVAILABLE", "session leases require authenticated owner-mode HTTP");
         const std::string action = args.at("action").get<std::string>();
@@ -759,7 +772,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (active) leases->end_write(session, token, id, SessionLeases::Clock::now());
         }
     } lease_scope;
-    if (ctx.http && !policy_.owner_sap_identities.empty() && !prelogin_close_facts &&
+    if (owner_mode(ctx) && !prelogin_close_facts &&
         lease_required_for_call(name, args)) {
         if (!owner_pre_facts || principal.id.empty() || !session_leases_)
             return fail("LEASE_UNAVAILABLE", "the session lease cannot be verified");
@@ -784,7 +797,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     std::string expected_screen_guard;
     if (args.is_object() && args.contains("expected_screen_guard")) {
-        if (!ctx.http || policy_.owner_sap_identities.empty() || !owner_pre_facts)
+        if (!owner_mode(ctx) || !owner_pre_facts)
             return fail("INVALID_ARGUMENT", "a screen guard requires an owner-routed SAP session");
         expected_screen_guard = args["expected_screen_guard"].get<std::string>();
         if (expected_screen_guard.size() != 64)
@@ -852,7 +865,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 if (!current)
                     throw WorkerTransportError("TOKEN_CHANGED", "authorization changed before the worker action");
             }
-            if (ctx.http && !policy_.owner_sap_identities.empty() && lease_required_for_call(name, args)) {
+            if (owner_mode(ctx) && lease_required_for_call(name, args)) {
                 const std::string id = args.value("lease_id", std::string());
                 if (!session_leases_ || !session_leases_->permits_write(owner_pre_facts->session_identity,
                         principal.id, id, SessionLeases::Clock::now()))
@@ -867,7 +880,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         catch (const WorkerTransportError& e) { return Result::fail(e.code(), e.what()); }
         catch (...) { return Result::fail("OUTCOME_UNKNOWN", "session worker command outcome is unknown"); }
     };
-    if (ctx.http && !policy_.owner_sap_identities.empty() &&
+    if (owner_mode(ctx) &&
         (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
         if (ctx.cancelled && ctx.cancelled())
             return fail("CANCELLED", "session control was cancelled before selecting the SAP session");
@@ -888,7 +901,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         }
         ~AttachGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
     } attach_guard_scope(attach_target_guard_override_,
-        ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_attach"
+        owner_mode(ctx) && name == "gui_session_attach"
             ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
                 if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
                 auth::SessionTarget target;
@@ -897,7 +910,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 target.connection_name = connection_name;
                 return auth::authorize_session_target(principal, "gui_session_attach", args, target).allowed;
             }) : AttachTargetGuard{});
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_attach" &&
+    if (owner_mode(ctx) && name == "gui_session_attach" &&
         (!attach_target_guard_override_ || !attach_finalize_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the attach target cannot be checked before changing the saved connection");
     std::optional<audit::SapFacts> checked_launch_facts;
@@ -950,9 +963,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         }
         ~LaunchGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
     } launch_guard_scope(launch_target_guard_override_,
-        ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch"
+        owner_mode(ctx) && name == "gui_session_launch"
             ? owner_launch_guard : LaunchTargetGuard{});
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch" &&
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
         (!launch_target_guard_override_ || !launch_rollback_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
     std::optional<audit::SapFacts> anticipated_login;
@@ -965,7 +978,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         }
         ~LoginGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
     } login_guard_scope(login_target_guard_override_,
-        ctx.http && !policy_.owner_sap_identities.empty() &&
+        owner_mode(ctx) &&
             (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
             ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
                                 &checked_launch_facts, &anticipated_login]
@@ -997,17 +1010,17 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 anticipated_login = facts;
                 return true;
             }) : LoginTargetGuard{});
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_login" &&
+    if (owner_mode(ctx) && name == "gui_session_login" &&
         (!login_pre_facts || !login_target_guard_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch" &&
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
         args.is_object() && args.value("login", false) && !login_target_guard_override_)
         return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP login cannot be verified");
     if (policy_.audit_required && mcp_audit_failed())
         return fail("AUDIT_UNAVAILABLE", "the required audit trail failed before the action");
-    const bool owner_connection_list = ctx.http && !policy_.owner_sap_identities.empty() &&
+    const bool owner_connection_list = owner_mode(ctx) &&
                                        (name == "gui_connection_list" || name == "gui_doctor");
-    const bool owner_session_list = ctx.http && !policy_.owner_sap_identities.empty() &&
+    const bool owner_session_list = owner_mode(ctx) &&
                                     name == "gui_session_list";
     const auto listing_deadline = std::chrono::steady_clock::now() + owner_listing_budget_;
     if (owner_connection_list && !connection_snapshot_provider_)
@@ -1090,10 +1103,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (!owner_unchanged())
         return fail("OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld");
 
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_list") {
-        const auto listing_interrupted = [&] {
-            return std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled());
-        };
+    // the owner listings verify row by row within one budget; a cancelled call stops too
+    const auto listing_interrupted = [&] {
+        return std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled());
+    };
+    if (owner_mode(ctx) && name == "gui_session_list") {
         if (listing_interrupted())
             return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
         if (result.status != Result::Status::Success || !result.data.is_object() ||
@@ -1130,9 +1144,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 if (listing_interrupted())
                     return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
                 if (target.ambiguous || target.system.empty() || target.user.empty()) continue;
-                const std::string identity = target.identity();
-                if (!owner_identity_allowed(policy_, principal, identity)) continue;
-                if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, target.system)) continue;
+                if (!owner_target_visible(principal, target)) continue;
                 // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
                 // Only return the ID that was resolved and metadata from that live resolution.
                 if (!groups.count(target.connection_name)) groups[target.connection_name] = json::array();
@@ -1155,7 +1167,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
 
     if (owner_connection_list) {
-        if (std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled()))
+        if (listing_interrupted())
             return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
         if (result.status != Result::Status::Success || !result.data.is_object() ||
             !result.data.contains("connections") || !result.data["connections"].is_array() ||
@@ -1165,7 +1177,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         // itself performs no COM validation; this budget covers the full listing.
         json kept = json::array();
         for (const auto& row : result.data["connections"]) {
-            if (std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled()))
+            if (listing_interrupted())
                 return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
             if (!row.is_object())
                 return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified against the endpoint owner's SAP identity");
@@ -1183,19 +1195,17 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             target.ambiguous = true;
             try {
                 facts = facts_provider_(*id);
-                if (std::chrono::steady_clock::now() < listing_deadline && !(ctx.cancelled && ctx.cancelled()))
+                if (!listing_interrupted())
                     target = target_resolver_(TargetQuery{"", "", *id});
             } catch (...) { continue; }
-            if (std::chrono::steady_clock::now() >= listing_deadline || (ctx.cancelled && ctx.cancelled()))
+            if (listing_interrupted())
                 return fail("OWNER_IDENTITY_UNKNOWN", "the connection list could not be verified in time");
             if (!facts || facts->connection_id != id ||
                 facts->session_identity != session_id + "|" + key + "|" + generation ||
                 facts->system.empty() || facts->client.empty() || facts->user.empty() ||
                 target.ambiguous || target.system != facts->system + "/" + facts->client ||
                 target.user != facts->user || target.connection_name.empty()) continue;
-            const std::string identity = target.identity();
-            if (!owner_identity_allowed(policy_, principal, identity)) continue;
-            if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, target.system)) continue;
+            if (!owner_target_visible(principal, target)) continue;
             kept.push_back({{"id", *id}, {"session_id", session_id},
                             {"description", target.connection_name}, {"valid", true}});
         }
@@ -1218,7 +1228,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // Attaching changes the selected connection. Re-read the saved connection created by the attach and withhold
     // the result if its live session or SAP user differs from the pre-call target. Do this before shaping or sticky state.
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_login" &&
+    if (owner_mode(ctx) && name == "gui_session_login" &&
         result.status == Result::Status::Success) {
         std::optional<audit::SapFacts> authenticated;
         try { authenticated = facts_provider_(record.connection); } catch (...) {}
@@ -1241,7 +1251,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                             login_pre_facts->session_identity);
     }
 
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_launch") {
+    if (owner_mode(ctx) && name == "gui_session_launch") {
         const json& launch_data = result.status == Result::Status::Success ? result.data
             : result.error.is_object() && result.error.contains("launch") ? result.error["launch"] : result.data;
         const auto id = launch_data.is_object() && launch_data.contains("connection_file_id")
@@ -1314,11 +1324,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         }
     }
 
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_attach" &&
+    if (owner_mode(ctx) && name == "gui_session_attach" &&
         result.status != Result::Status::Success) {
         try { (void)attach_finalize_override_(false); } catch (...) {}
     }
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_attach" &&
+    if (owner_mode(ctx) && name == "gui_session_attach" &&
         result.status == Result::Status::Success) {
         const auto attach_fail = [&](const char* code, const char* message) {
             bool rolled_back = false;
@@ -1487,7 +1497,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
     const std::set<std::string> visible_now = visible_tool_names(&principal);
     ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
-    if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_screen_read" &&
+    if (owner_mode(ctx) && name == "gui_screen_read" &&
         result.status == Result::Status::Success && owner_pre_facts && facts_provider_) {
         std::optional<audit::SapFacts> current;
         try { current = facts_provider_(record.connection); } catch (...) {}
@@ -1536,7 +1546,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                     if (facts && facts->connection_id == *id) identity = facts->session_identity;
                 } catch (...) {}
             }
-            const bool stored = !ctx.http || policy_.owner_sap_identities.empty() || !identity.empty();
+            const bool stored = !owner_mode(ctx) || !identity.empty();
             if (stored)
                 set_sticky_connection(principal_key(ctx.principal), *id, std::move(identity));
             record.connection = id;
@@ -1608,7 +1618,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         }
     } pin;
     CallContext item_ctx = ctx;
-    if (ctx.http && !policy_.owner_sap_identities.empty()) {
+    if (owner_mode(ctx)) {
         if (!args.contains("connection"))
             return batch_fail("BATCH_SESSION_REQUIRED", "owner-mode batches need an explicit saved connection");
         const int connection = args["connection"].get<int>();
