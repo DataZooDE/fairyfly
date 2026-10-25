@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### One way to call SAP GUI's COM objects (2026-10-25 code review)
+
+- `SapGuiObject`'s six setter/invoker bodies are one `invoke_checked()`, and about 60 hand-built `DISPPARAMS` went
+  into `com::invoke`/`safe_invoke` (arguments in reading order, the named put argument); a guard test keeps it so.
+- Tree node keys, the tree context-menu text, toolbar button ids, `StartTransaction`'s T-code and `FindById`'s id are
+  passed to SAP GUI as UTF-8; they went through the ANSI code page before (a non-ASCII value could arrive garbled).
+
 ### Link runtime and tray structure (2026-10-25 code review)
 
 - The link's process-wide stop flags, abandoned-thread count and standing approval are one `LinkRuntime`; the
