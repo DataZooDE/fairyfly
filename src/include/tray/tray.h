@@ -126,7 +126,7 @@ std::string join_command_line(const std::string& exe, const std::vector<std::str
 struct RelaunchPlan {
     bool relaunch = false;               ///< parent must spawn the detached child and exit
     std::string command_line;            ///< quoted exe + the same args
-    std::vector<std::pair<std::string, std::string>> extra_env;   ///< {"FAIRYFLY_TRAY_CHILD","1"}
+    std::vector<std::pair<std::string, std::string>> extra_env;   ///< {config::env::kTrayChild, "1"}
     bool no_window = true;               ///< CREATE_NO_WINDOW | DETACHED_PROCESS
 };
 /// `args` = argv without the program name. Relaunch only when --tray was given, this is not already
@@ -134,10 +134,6 @@ struct RelaunchPlan {
 RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string>& args, bool tray_requested,
                            bool is_child, bool has_console);
 
-inline constexpr const char* kTrayChildEnv = "FAIRYFLY_TRAY_CHILD";
-/// Set by fairyfly-tray.exe (with kTrayChildEnv) for the fairyfly.exe it starts: the Start menu, the autostart or the
-/// installer started this tray, not a developer's console.
-inline constexpr const char* kTrayLaunchedEnv = "FAIRYFLY_TRAY_LAUNCHED";
 /// The windowless starter next to fairyfly.exe (Windows subsystem, so Explorer opens no console for it).
 inline constexpr const char* kTrayLauncherName = "fairyfly-tray.exe";
 inline constexpr const char* kTrayMutexName = "Local\\fairyfly-tray";
@@ -246,12 +242,6 @@ public:
     virtual bool locked() = 0;    ///< --read-only / FAIRYFLY_READ_ONLY: no change can run here, the switch is off
     virtual bool enforced() { return false; }   ///< the organisation requires approval: the switch is off
     virtual bool set_allowed(bool allowed) = 0;   ///< false: it could not be switched (or saved)
-};
-
-class Clipboard {
-public:
-    virtual ~Clipboard() = default;
-    virtual bool set_text(const std::string& text) = 0;
 };
 
 // ---- UI host ------------------------------------------------------------------------------------

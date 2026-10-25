@@ -16,9 +16,11 @@
 //
 // It links nothing of fairyfly's own; the window class and message names match src/tray/tray_win32.cpp.
 #include <windows.h>
+#include "include/config/environment.h"
 #include "include/text/command_line.h"
 #include <shellapi.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -63,8 +65,9 @@ int start(const std::wstring& dir, std::vector<std::wstring> args) {
     }
     std::wstring command = fairyfly::text::join_command_line<wchar_t>(exe, args);
     // the tray child (no relaunch, a dialog for startup errors) that this program started (Start with Windows default)
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", L"1");
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", L"1");
+    // this small starter has no fairyfly_core (config::set_process_env); the names are config's
+    for (const char* name : {fairyfly::config::env::kTrayChild, fairyfly::config::env::kTrayLaunched})
+        SetEnvironmentVariableW(std::wstring(name, name + std::strlen(name)).c_str(), L"1");  // ASCII names
     // the person started this from the Start menu: a tray that is already running may open its menu in front
     AllowSetForegroundWindow(ASFW_ANY);
     STARTUPINFOW si{};

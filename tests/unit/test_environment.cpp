@@ -119,3 +119,36 @@ TEST_CASE("environment: no file under src/ reads the environment except config/e
     CAPTURE(offenders);
     CHECK(offenders.empty());
 }
+
+TEST_CASE("environment: a process variable is set and removed through config", "[config][env]") {
+    // review 2026-10-25: the tray and the PowerShell runner wrote the environment with their own spellings
+    const char* name = "FAIRYFLY_TEST_SET_PROCESS_ENV";
+    config::set_process_env(name, "tr\xC3\xA4y");  // UTF-8 survives the wide API
+    CHECK(config::Environment::process().get(name) == "tr\xC3\xA4y");
+    config::unset_process_env(name);
+    CHECK(config::Environment::process().get(name).empty());
+}
+
+TEST_CASE("environment: names and writers of the environment live in config only", "[config][env]") {
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".hpp")) continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel.parent_path() == fs::path("config") || rel.parent_path() == fs::path("include") / "config") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        static const std::regex name(R"re(L?"FAIRYFLY_[A-Z_]+")re");
+        static const std::regex writer(R"(\b(SetEnvironmentVariable[AW]?|_putenv|_wputenv|_putenv_s|setenv)\s*\()");
+        for (std::sregex_iterator m(text.begin(), text.end(), name), end; m != end; ++m)
+            offenders.push_back(rel.string() + ": " + m->str());
+        // the windowless starter is its own small exe without fairyfly_core: it writes with the Win32 call itself
+        if (rel == fs::path("tray_launcher") / "fairyfly_tray.cpp") continue;
+        for (std::sregex_iterator m(text.begin(), text.end(), writer), end; m != end; ++m)
+            offenders.push_back(rel.string() + ": " + (*m)[1].str());
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}

@@ -26,7 +26,7 @@ RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string
     if (!tray_requested || is_child || !has_console) return plan;
     plan.relaunch = true;
     plan.command_line = join_command_line(exe, args);
-    plan.extra_env.emplace_back(kTrayChildEnv, "1");
+    plan.extra_env.emplace_back(config::env::kTrayChild, "1");
     plan.no_window = true;
     return plan;
 }

@@ -84,12 +84,11 @@ public:
         si.lpAttributeList = attributes;
         PROCESS_INFORMATION pi{};
 
-        const std::wstring env_name = text::utf8_to_wide(kParamsEnvVar);
-        SetEnvironmentVariableW(env_name.c_str(), text::utf8_to_wide(params_json).c_str());
+        config::set_process_env(kParamsEnvVar, params_json);
         const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
                                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                                             nullptr, nullptr, &si.StartupInfo, &pi);
-        SetEnvironmentVariableW(env_name.c_str(), nullptr);
+        config::unset_process_env(kParamsEnvVar);
         CloseHandle(out_w);
         CloseHandle(err_w);
         if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);

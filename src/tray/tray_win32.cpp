@@ -555,28 +555,6 @@ private:
     HANDLE handle_ = nullptr;
 };
 
-class Win32Clipboard : public Clipboard {
-public:
-    bool set_text(const std::string& text) override {
-        const std::wstring wide = display_wide(text);
-        if (!OpenClipboard(nullptr)) return false;
-        EmptyClipboard();
-        const size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
-        HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-        bool ok = false;
-        if (mem) {
-            if (void* dst = GlobalLock(mem)) {
-                memcpy(dst, wide.c_str(), bytes);
-                GlobalUnlock(mem);
-                ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
-            }
-            if (!ok) GlobalFree(mem);
-        }
-        CloseClipboard();
-        return ok;
-    }
-};
-
 } // namespace
 
 std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind) { return std::make_unique<Win32TrayHost>(kind); }
@@ -587,7 +565,6 @@ std::unique_ptr<RegistryRunKey> make_win32_run_key() { return std::make_unique<W
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name) {
     return std::make_unique<Win32SingleInstance>(name);
 }
-std::unique_ptr<Clipboard> make_win32_clipboard() { return std::make_unique<Win32Clipboard>(); }
 
 std::string current_exe_path() {
     wchar_t buffer[MAX_PATH * 4];
@@ -616,9 +593,9 @@ bool startup_error_needs_dialog_here() {
     return startup_error_needs_dialog(is_tray_child_process(), process_has_console(), console_process_count());
 }
 
-bool is_tray_child_process() { return config::process_env()(kTrayChildEnv) == "1"; }
+bool is_tray_child_process() { return config::process_env()(config::env::kTrayChild) == "1"; }
 
-bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(kTrayLaunchedEnv) == "1"; }
+bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(config::env::kTrayLaunched) == "1"; }
 
 bool path_exists(const std::filesystem::path& path) {
     std::error_code ec;
@@ -628,8 +605,8 @@ bool path_exists(const std::filesystem::path& path) {
 void detach_console() { FreeConsole(); }
 
 void clear_tray_child_marker() {
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", nullptr);
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", nullptr);
+    config::unset_process_env(config::env::kTrayChild);
+    config::unset_process_env(config::env::kTrayLaunched);
 }
 
 std::string route_logging_to_file(const std::string& file_name) {
