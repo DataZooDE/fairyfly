@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fewer copies in the handler, engine, screen filter and trays (2026-10-25 code review)
+
+- `@active` paths resolve through one helper; click, fill and F4 build their ELEMENT_NOT_FOUND answer through one
+  tested function; the screen filter scans a grid's rows once; both trays build their menus from the same entries.
+- `screen read --output markdown` variants without a screen hierarchy (`--dump-object-tree`, `--no-children`)
+  render generically again, with all their fields (a regression of the explicit render kinds).
+
 ### Dispatcher and HTTP endpoint in named steps (2026-10-25 code review)
 
 - `CommandDispatcher::execute_call` has its admission checks (`admission_refusal`) and its post-call transaction
