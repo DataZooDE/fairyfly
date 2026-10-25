@@ -604,8 +604,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     net->state_path = sp;
     // the tray's Quit may come before this point (request_stop): only a console run starts from a clean flag
     if (!o.tray) g_stop = false;
-    std::signal(SIGINT, on_signal);
-    std::signal(SIGTERM, on_signal);
+    // Ctrl+C and termination stop the link; the previous handlers come back when run_link returns
+    const SignalScope stop_on_ctrl_c(SIGINT, on_signal);
+    const SignalScope stop_on_term(SIGTERM, on_signal);
     printer->starting(is_paused(sp));
     // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
     SupervisorOptions supervision;
