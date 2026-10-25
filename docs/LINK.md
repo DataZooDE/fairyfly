@@ -184,8 +184,9 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 ## What runs where
 
 - Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
-  itself (with several open, the assistant is told to pick one or to ask you). See "Automatic attach" in
-  [MCP.md](MCP.md).
+  itself (with several open, the assistant is told to pick one or to ask you). After SAP Logon or the tray restarted,
+  a closed default connection is re-attached the same way, only to a session of the same SAP system, client and user,
+  inside the call you already approved. See "Automatic attach" in [MCP.md](MCP.md).
 - Which tools the AI assistant sees is decided by the gateway: your organisation's policy for the user can offer fewer
   tools than this desktop serves (for example only reading tools, without `gui_transaction_start`). Navigation and
   `gui_session_attach` then have to be granted there; the desktop's read-only mode only hides `gui_element_fill`.

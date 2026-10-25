@@ -42,7 +42,10 @@ json Connection::to_json() const {
         {"connection_string", connection_string},
         {"window_title", window_title},
         {"created_at", created_at},
-        {"last_validated", last_validated}
+        {"last_validated", last_validated},
+        {"system", identity.system},
+        {"client", identity.client},
+        {"user", identity.user}
     };
 }
 
@@ -58,6 +61,10 @@ Connection Connection::from_json(const json& j) {
     conn.window_title = j.value("window_title", "");
     conn.created_at = j.value("created_at", "");
     conn.last_validated = j.value("last_validated", "");
+    // added 2026-10-25; older files have none
+    if (j.contains("system") && j["system"].is_string()) conn.identity.system = j["system"].get<std::string>();
+    if (j.contains("client") && j["client"].is_string()) conn.identity.client = j["client"].get<std::string>();
+    if (j.contains("user") && j["user"].is_string()) conn.identity.user = j["user"].get<std::string>();
     return conn;
 }
 
@@ -535,7 +542,8 @@ Connection ConnectionManager::create_or_update_connection(
     const std::string& description,
     const std::string& connection_string,
     const std::string& window_title,
-    const std::string& server_session_key)
+    const std::string& server_session_key,
+    const ConnectionIdentity& identity)
 {
     TraceGuard trace("ConnectionManager::create_or_update_connection");
     (void)trace;
@@ -568,6 +576,7 @@ Connection ConnectionManager::create_or_update_connection(
         conn.connection_string = connection_string;
         conn.window_title = window_title;
         conn.last_validated = timestamp;
+        if (identity.complete()) conn.identity = identity;  // an unknown identity keeps the recorded one
 
         spdlog::info("Updating existing connection {}", conn.id);
     } else {
@@ -582,6 +591,7 @@ Connection ConnectionManager::create_or_update_connection(
         conn.window_title = window_title;
         conn.created_at = timestamp;
         conn.last_validated = timestamp;
+        if (identity.complete()) conn.identity = identity;
 
         spdlog::info("Creating new connection {}", conn.id);
     }
