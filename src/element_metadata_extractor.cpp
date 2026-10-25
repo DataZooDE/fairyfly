@@ -19,24 +19,6 @@ bool looks_like_prog_id(const std::string& text) {
 }
 } // namespace
 
-// Static cache member definition
-std::map<std::string, json> ElementMetadataExtractor::tree_grid_cache_;
-bool ElementMetadataExtractor::skip_trees_ = false;
-
-void ElementMetadataExtractor::clear_cache() {
-    tree_grid_cache_.clear();
-}
-
-void ElementMetadataExtractor::set_skip_trees(bool skip) {
-    skip_trees_ = skip;
-    if (skip) {
-        spdlog::info("Tree extraction disabled (--skip-trees)");
-    }
-}
-
-bool ElementMetadataExtractor::get_skip_trees() {
-    return skip_trees_;
-}
 
 json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
     if (!elem) return nullptr;
@@ -67,7 +49,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
 
         // If skip_trees is enabled, completely skip tree controls to avoid segfaults
         // Check type BEFORE calling get_text() which might trigger COM calls
-        if (skip_trees_ && type == "GuiTree") {
+        if (options_.skip_trees && type == "GuiTree") {
             spdlog::debug("extract: Skipping GuiTree element {} (--skip-trees enabled)", elem_id);
             return nullptr;
         }
@@ -98,7 +80,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
         }
 
         // Also skip GuiShell elements that contain tree controls
-        if (skip_trees_ && type == "GuiShell" &&
+        if (options_.skip_trees && type == "GuiShell" &&
             (text.find("TableTreeControl") != std::string::npos ||
              text.find("TreeControl") != std::string::npos)) {
             spdlog::debug("extract: Skipping GuiShell tree control {} (--skip-trees enabled)", elem_id);
@@ -308,7 +290,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
                             spdlog::debug("Extracted table control data: {} rows × {} columns",
                                          table_data.rows.size(), table_data.columns.size());
                         }
-                    } else if (is_tree_control && !skip_trees_) {
+                    } else if (is_tree_control && !options_.skip_trees) {
                         auto tree_data = extractor.extract_tree_data(elem);
                         if (!tree_data.nodes.empty()) {
                             json tree_json;

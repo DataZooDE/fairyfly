@@ -813,10 +813,10 @@ TEST_CASE("Screen metadata reports selected radio and checkbox state", "[com][me
         auto* dispatch = new TextFieldDispatch(type, 9400, L"/app/con[0]/ses[0]/wnd[0]/usr/radTEST");
         auto element = ComGuiElement::create(IDispatchPtr(dispatch, true));
         dispatch->selected = true;
-        const auto checked = ElementMetadataExtractor::extract(element);
+        const auto checked = ElementMetadataExtractor().extract(element);
         REQUIRE(checked.at("selected") == true);
         dispatch->selected = false;
-        const auto unchecked = ElementMetadataExtractor::extract(element);
+        const auto unchecked = ElementMetadataExtractor().extract(element);
         REQUIRE(unchecked.at("selected") == false);
     }
 }
@@ -1620,7 +1620,7 @@ TEST_CASE("Unknown GuiShell subtype keeps its subtype and drops the ProgID text"
     auto* dispatch = new TextFieldDispatch(L"GuiShell", 460, L"wnd[0]/usr/cntlPARAM/shellcont/shell",
                                            L"", L"Calendar", L"SAP.HTMLControl.1");
     auto shell = ComGuiElement::create(IDispatchPtr(dispatch, true));
-    const auto data = ElementMetadataExtractor::extract(shell);
+    const auto data = ElementMetadataExtractor().extract(shell);
     REQUIRE(data.at("type") == "GuiShell");
     REQUIRE(data.at("subtype") == "Calendar");
     REQUIRE_FALSE(data.contains("text"));
@@ -2108,7 +2108,7 @@ TEST_CASE("ComGuiElement properties", "[com][gui_element][.][live]") {
         try {
             auto table = session->find_element_by_id("/app/con[0]/ses[0]/wnd[0]/usr/tabsTAB_STRIP/tabpDEF/ssubTS_SCREEN:SAPLSD41:2201/tblSAPLSD41TC0");
             REQUIRE(table != nullptr);
-            auto metadata = ElementMetadataExtractor::extract(table);
+            auto metadata = ElementMetadataExtractor().extract(table);
             REQUIRE(metadata.contains("table_data"));
             REQUIRE(metadata["table_data"].contains("columns"));
             REQUIRE(metadata["table_data"]["columns"].size() == 10);
@@ -2415,7 +2415,7 @@ TEST_CASE("Enumeration failure mid-way falls back to indexed children without du
     auto element = ComGuiElement::create(parent);
     parent->Release();
 
-    const auto metadata = ElementMetadataExtractor::extract(element);
+    const auto metadata = ElementMetadataExtractor().extract(element);
     REQUIRE(metadata.contains("children"));
     REQUIRE(metadata.at("children") == json::array({"a", "b", "c"}));
 
@@ -2471,7 +2471,7 @@ TEST_CASE("ElementMetadataExtractor output for a text field is unchanged", "[com
                                            L"Field label", L"", L"abc");
     auto element = ComGuiElement::create(dispatch);
     dispatch->Release();
-    const auto metadata = ElementMetadataExtractor::extract(element);
+    const auto metadata = ElementMetadataExtractor().extract(element);
     // Golden: the memoised Changeable read and the shell negative cache must not change the output.
     REQUIRE(metadata.dump() ==
             R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,)"
@@ -3574,7 +3574,7 @@ TEST_CASE("ElementMetadataExtractor plain elements keep their recorded JSON", "[
     container->dispatches[L"Children"] = kids;
 
     const auto dump = [](FakeNode* node) {
-        return ElementMetadataExtractor::extract(ComGuiElement::create(node)).dump();
+        return ElementMetadataExtractor().extract(ComGuiElement::create(node)).dump();
     };
     CHECK(dump(field) == R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiTextField","visible":true})");
     CHECK(dump(ctext) == R"({"capabilities":["fillable","readable","has_f4_help"],"changeable":true,"enabled":true,"has_f4_help":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiCTextField","visible":true})");

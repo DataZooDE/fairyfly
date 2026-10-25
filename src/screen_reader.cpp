@@ -1494,7 +1494,7 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
                 spdlog::debug("read: Extracting metadata for element {}/{}: {} (type: {})",
                              elem_index + 1, element_ids.size(), elem_id, debug_type);
 
-                json elem_data = ElementMetadataExtractor::extract(elem);
+                json elem_data = metadata_.extract(elem);
                 if (!elem_data.is_null()) {
                     elements.push_back(elem_data);
                 }
@@ -1728,9 +1728,9 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         bool used_bulk = false;
 
         if (include_structure) {
-            // Clear extraction cache at start of each screen read
-            ElementMetadataExtractor::clear_cache();
-            ElementMetadataExtractor::set_skip_trees(skip_trees);
+            // a fresh extractor (options and cache) for this screen read
+            metadata_ = ElementMetadataExtractor({skip_trees});
+            if (skip_trees) spdlog::info("Tree extraction disabled (--skip-trees)");
 
             json elements;
             if (mode != TreeReaderMode::Legacy) {
@@ -1743,7 +1743,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
                     return bulk_unavailable_error(bulk_reason);
                 if (!used_bulk) {
                     // Fresh state for the legacy read (a failed bulk attempt may have run phase 2).
-                    ElementMetadataExtractor::clear_cache();
+                    metadata_.clear_cache();
                 }
             }
 
@@ -2013,8 +2013,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         attach_status_bar(result, read_action_status(session_, window_id));
         result.data["child_count"] = window->get_child_count();
 
-        ElementMetadataExtractor::clear_cache();
-        ElementMetadataExtractor::set_skip_trees(skip_trees);
+        metadata_ = ElementMetadataExtractor({skip_trees});
+        if (skip_trees) spdlog::info("Tree extraction disabled (--skip-trees)");
 
         // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
         std::vector<LocatedTabStrip> strips;

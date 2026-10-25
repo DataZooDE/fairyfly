@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Element metadata state per screen read (2026-10-25 code review)
+
+- The table/tree cache and the `--skip-trees` option of the element metadata extractor belong to one screen read
+  instead of being process-wide statics that every reader had to reset by hand.
+
 ### CommandHandler gets its engine injected (2026-10-25 code review)
 
 - `CommandHandler` takes its automation engine and connection store from outside (the default constructor still

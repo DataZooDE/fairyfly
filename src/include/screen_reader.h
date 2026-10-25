@@ -194,6 +194,8 @@ public:
     json extract_grid_data_immediately(ComGuiElementPtr element, const std::string& elem_id);
 
 private:
+    /// The metadata extractor of the current read (fresh per read: options and cache never leak into the next one).
+    ElementMetadataExtractor metadata_;
     ComGuiSessionPtr session_;
     int max_rows_ = 20;
     int row_offset_ = 0;
