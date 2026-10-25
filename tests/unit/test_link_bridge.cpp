@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "include/link/main_thread_tools.h"
+#include "include/mcp/protocol_session.h"
+#include "include/mcp/tool_catalog.h"
 #include "assertion.hpp"
 #include "signer.hpp"
 
@@ -134,4 +136,75 @@ TEST_CASE("link bridge: posted tasks run on the pumping thread between calls", "
     CHECK(ran_on == pumping);
     tools.shutdown();
     CHECK_FALSE(tools.post([] {}));
+}
+
+namespace {
+// fairyfly's own tool catalog as libffl's agent reads it; every call succeeds (nothing reaches SAP)
+struct CatalogTools : ffy::link::LocalTools {
+    std::vector<std::string> called;
+    json rpc(const std::string& method, const json& params, int, const ffy::link::CallInfo&) override {
+        if (method == "tools/list") {
+            json tools = json::array();
+            for (const auto& spec : fairyfly::mcp::all_tool_specs()) tools.push_back(fairyfly::mcp::tool_to_json(spec.def));
+            return {{"jsonrpc", "2.0"}, {"id", 1}, {"result", {{"tools", tools}}}};
+        }
+        called.push_back(params.value("name", ""));
+        return {{"jsonrpc", "2.0"}, {"id", 1}, {"result", {{"content", json::array({{{"type", "text"}, {"text", "closed"}}})}, {"isError", false}}}};
+    }
+    bool per_call_read_only() const override { return true; }
+};
+struct CountingApprover : ffy::link::Approver {
+    std::atomic<int> asked{0};
+    bool approve(const std::string&) override { return false; }
+    ffy::link::ApprovalResult decide(const ffy::link::ApprovalPrompt&) override {
+        ++asked;
+        return {false, "denied"};
+    }
+};
+}  // namespace
+
+TEST_CASE("link bridge: gui_popup_close asks for approval only when it confirms the popup", "[link]") {
+    // review of #34: annotated destructive, gui_popup_close asked on every close, F12 (Cancel) too. With fairyfly's
+    // catalog it is no change by its annotation; libffl asks for the keys that confirm a popup (read-only guard rule).
+    const auto specs = fairyfly::mcp::all_tool_specs();
+    for (const auto& spec : specs)
+        if (spec.def.name == "gui_popup_close") CHECK(spec.def.annotations["destructiveHint"] == false);
+    TestSigner gw;
+    auto tools = std::make_shared<CatalogTools>();
+    auto who = std::make_shared<CountingApprover>();
+    ffy::link::State st;
+    st.device_id = "dev_1"; st.issuer = "ffy-gateway"; st.tenant = "acme"; st.gateway_keys = gw.public_keys(); st.key = ffy::ec_generate();
+    ffy::link::AgentConfig cfg;
+    cfg.local = tools;
+    cfg.approver = who;
+    cfg.approve_window_s = 0;  // as fairyfly's link runs it: every change asks
+    ffy::link::Agent agent(st, cfg);
+    REQUIRE(agent.refresh_local());
+    auto call = [&](const std::string& tool, const json& args) {
+        ffy::assertion::Claims c;
+        c.iss = "ffy-gateway"; c.aud = "dev_1"; c.tenant = "acme"; c.sub = "lee@acme.example"; c.jti = ffy::rand_hex(8); c.client = "claude";
+        c.iat = ffy::now_unix(); c.exp = c.iat + 60; c.req = "inst." + c.jti;
+        c.grants.tools = {"gui_batch", "gui_popup_close"};
+        c.grants.allow_write = true;
+        c.grants.approval = "device";
+        ffy::proto::Frame f;
+        f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
+        f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", tool}, {"arguments", args}}}};
+        auto res = agent.process(f);
+        return res.error ? res.error->code : std::string();
+    };
+    auto batch = [](const json& args) { return json{{"items", json::array({{{"tool", "gui_popup_close"}, {"arguments", args}}})}}; };
+    // Enter confirms the popup: asked, single and in a batch
+    CHECK(call("gui_popup_close", {{"vkey", 0}}) == "APPROVAL_DENIED");
+    CHECK(who->asked == 1);
+    CHECK(call("gui_batch", batch({{"vkey", 0}})) == "APPROVAL_DENIED");
+    CHECK(who->asked == 2);
+    // F12 (also the default) and Shift+F3 cancel it: not asked, the call runs
+    for (const json& args : {json{{"vkey", 12}}, json{{"vkey", 15}}, json::object()}) {
+        INFO(args.dump());
+        CHECK(call("gui_popup_close", args) == "");
+        CHECK(call("gui_batch", batch(args)) == "");
+    }
+    CHECK(who->asked == 2);
+    CHECK(tools->called.size() == 6);
 }
