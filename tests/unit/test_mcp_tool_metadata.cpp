@@ -85,10 +85,11 @@ TEST_CASE("tool metadata: annotations are consistent with write_tool", "[mcp][me
             // "Guarded" tools stay visible in read-only mode (policy refuses only their state-changing arguments),
             // but advertise themselves as not read-only. The set is explicit: a NEW tool must either be a read tool
             // (readOnlyHint true) or a write tool (write_tool), or be added here on purpose.
+            // (Navigation that changes no SAP data is a read tool for clients: gui_transaction_start, gui_session_attach,
+            // gui_element_f4.)
             static const std::set<std::string> guarded = {
-                "gui_batch",          "gui_connection_list", "gui_element_click",   "gui_element_f4",
-                "gui_key_send",       "gui_menu_select",     "gui_popup_close",     "gui_session_attach",
-                "gui_session_disconnect", "gui_session_launch", "gui_session_login", "gui_transaction_start"};
+                "gui_batch",       "gui_connection_list",    "gui_element_click",  "gui_key_send",     "gui_menu_select",
+                "gui_popup_close", "gui_session_disconnect", "gui_session_launch", "gui_session_login"};
             INFO(spec.def.name << " is neither read-only nor write_tool: mark it write_tool or add it to the guarded list");
             CHECK(guarded.count(spec.def.name) == 1);
         }

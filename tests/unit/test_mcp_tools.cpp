@@ -133,6 +133,24 @@ TEST_CASE("MCP catalog: every tool is well formed", "[mcp][tools]") {
         CHECK(seen.count(name) == 1);
 }
 
+TEST_CASE("MCP catalog: navigation is read-only for clients; what can change data or local state is not", "[mcp][tools]") {
+    // Gemini Enterprise asks the user to confirm every tool without readOnlyHint true. Starting a transaction, attaching to
+    // an open session (a saved connection file, the default connection) and opening the F4 help change no SAP data.
+    // Annotations are hints for clients: the read-only guard, token scopes and the cloud link's approval (destructiveHint)
+    // decide by the tool and its arguments, never by readOnlyHint.
+    const auto specs = read_tool_specs();
+    for (const char* name : {"gui_transaction_start", "gui_session_attach", "gui_element_f4"}) {
+        INFO(name);
+        const auto& a = spec_of(specs, name).def.annotations;
+        CHECK(a["readOnlyHint"] == true);
+        CHECK(a["destructiveHint"] == false);
+        CHECK_FALSE(spec_of(specs, name).write_tool);
+    }
+    // cleanup=true deletes saved connection files; vkey 0 confirms a popup
+    CHECK(spec_of(specs, "gui_connection_list").def.annotations["readOnlyHint"] == false);
+    CHECK(spec_of(specs, "gui_popup_close").def.annotations["readOnlyHint"] == false);
+}
+
 TEST_CASE("MCP catalog: batch annotations and destructive flags", "[mcp][tools]") {
     const auto specs = read_tool_specs();
     const auto& batch = spec_of(specs, "gui_batch");
