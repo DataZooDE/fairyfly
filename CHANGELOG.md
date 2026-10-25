@@ -12,10 +12,12 @@
 
 ### Review fixes (2026-10-25 code review)
 
-- `mcp.yaml`'s `audit.enabled`, `audit.required` and `audit.file` (and `FAIRYFLY_MCP_AUDIT_*`) are applied. They were
-  validated and documented but ignored, so `audit.required: true` did nothing. Precedence: `--no-audit` /
-  `--audit-required` > `FAIRYFLY_AUDIT` / `FAIRYFLY_AUDIT_FILE` > `mcp.yaml` > default; required still wins over
-  every disable.
+- `mcp.yaml`'s `audit.enabled`, `audit.required` and `audit.file` (and `FAIRYFLY_MCP_AUDIT_*`) are applied to the MCP
+  server (stdio, HTTP and tray). They were validated and documented but ignored, so `audit.required: true` did
+  nothing. On/off and the file: flag > environment > `mcp.yaml` > default.
+- "Required" is monotonic: once `--audit-required`, `FAIRYFLY_AUDIT=required`, `audit.required: true` or
+  `FAIRYFLY_MCP_AUDIT_REQUIRED=true` asks for it, no disable switches it off. Before, `--no-audit` beat
+  `FAIRYFLY_AUDIT=required`.
 - `auth.token_prefix` is removed (it was never applied; tokens always start with `ffy_`). A file that still has it
   gets the usual "unknown key (removed: ...)" warning.
 - A result no command set reports `INTERNAL_NO_STATUS` instead of "not implemented … Phase 1 scaffolding".

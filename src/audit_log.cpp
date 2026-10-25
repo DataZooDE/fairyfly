@@ -165,17 +165,14 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     const config::Environment env(getenv_fn);
     AuditConfig config;
 
-    // lowest layer: mcp.yaml (required beats a disable there too)
-    if (file_settings.enabled == false) config.mode = Mode::Disabled;
-    if (file_settings.required == true) config.mode = Mode::Required;
-    // then FAIRYFLY_AUDIT
+    // enabled/disabled: mcp.yaml, then FAIRYFLY_AUDIT, then --no-audit
     const std::string mode_env = env.get(config::env::kAudit);
+    if (file_settings.enabled == false) config.mode = Mode::Disabled;
     if (config::parse_off(mode_env)) config.mode = Mode::Disabled;
-    else if (config::normalized(mode_env) == "required") config.mode = Mode::Required;
     else if (config::parse_flag(mode_env)) config.mode = Mode::Enabled;
-    // then the command line
     if (cli_no_audit) config.mode = Mode::Disabled;
-    if (cli_required) config.mode = Mode::Required;  // fail safe: required beats any disable
+    // required is monotonic (fail safe): any source that asks for it wins over every disable
+    if (file_settings.required == true || config::normalized(mode_env) == "required" || cli_required) config.mode = Mode::Required;
 
     if (const std::string file_env = env.get(config::env::kAuditFile); !file_env.empty()) {
         config.file = std::filesystem::path(file_env);

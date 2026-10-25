@@ -508,6 +508,17 @@ audit::AuditFileSettings audit_settings(const McpConfig& c) {
     return s;
 }
 
+audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags) {
+    audit::AuditFileSettings s;
+    for (const McpConfig* layer : {&yaml, &env, &flags}) {  // lowest first: a higher layer overrides
+        const auto one = audit_settings(*layer);
+        if (one.enabled) s.enabled = one.enabled;
+        if (one.file) s.file = one.file;
+        if (one.required == true) s.required = true;
+    }
+    return s;
+}
+
 void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     o.audit_file = audit_settings(c);
     if (auto v = c.get_bool("mode.read_only")) o.read_only = *v;

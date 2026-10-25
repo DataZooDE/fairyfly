@@ -414,3 +414,18 @@ TEST_CASE("config: audit.* reaches the audit trail settings, from the file and f
     const McpConfig env = env_layer(fake_env({{"FAIRYFLY_MCP_AUDIT_REQUIRED", "true"}}));
     CHECK(audit_settings(env).required == true);
 }
+
+TEST_CASE("config: audit.required from any layer cannot be switched off by a higher layer", "[config][audit]") {
+    // review 2026-10-25: merged layers let FAIRYFLY_MCP_AUDIT_REQUIRED=false erase the file's audit.required: true
+    McpConfig yaml;
+    yaml.set("audit.required", true);
+    McpConfig flags;
+    const McpConfig env = env_layer(fake_env({{"FAIRYFLY_MCP_AUDIT_REQUIRED", "false"}, {"FAIRYFLY_MCP_AUDIT_ENABLED", "false"}}));
+    mcp::ServeOptions o;
+    apply_config(merged_layers(yaml, flags, fake_env({{"FAIRYFLY_MCP_AUDIT_REQUIRED", "false"}})), o);
+    o.audit_file = audit_settings(yaml, env, flags);
+    CHECK(o.audit_file.required == true);
+    CHECK(o.audit_file.enabled == false);  // the rest keeps flag > env > yaml
+    McpConfig none;
+    CHECK_FALSE(audit_settings(none, none, none).required.value_or(false));
+}
