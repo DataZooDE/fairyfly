@@ -108,7 +108,7 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     r.id = id;
     r.nonce = random_nonce();
     r.client = client_name(p.client);
-    r.client_id = p.client;
+    r.client_id = client_id(p);
     r.user = p.user;
     r.tool = p.tool;
     r.summary = readable_step(p.summary.empty() ? p.text : p.summary);
@@ -194,6 +194,12 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
                     return clock::now() >= deadline || noticed_ == Answer::Approve || noticed_ == Answer::Deny || !can_ask();
                 },
                 remember);
+            if (a == Answer::Approve && !(clock::now() < deadline && can_ask())) {
+                // a click between the deadline (or the lock) and the window's next check: not a yes, nothing remembered
+                d = {false, can_ask() ? "expired" : "locked"};
+                spdlog::info("approval {}: a yes in the window came after the time was up or the screen locked", id);
+                break;
+            }
             if (a == Answer::Approve || a == Answer::Deny) {
                 d = {a == Answer::Approve, a == Answer::Approve ? "approved" : "denied"};
                 if (a == Answer::Approve && remember) {

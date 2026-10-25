@@ -35,7 +35,7 @@ struct Request {
     uint64_t id = 0;
     std::string nonce;  ///< part of the notification's answers: an answer has to name the question it was shown with
     std::string client;     ///< the assistant's name ("Claude"; client_name)
-    std::string client_id;  ///< what the gateway names it ("https://claude.ai/oauth/"), shown in the window
+    std::string client_id;  ///< what the gateway names it, all of it ("https://claude.ai/oauth/claude-code-..."), shown in the window
     std::string user, tool, summary;
     std::vector<std::string> steps;
     int remember_s = 300;  ///< what the window's "Don't ask again" offers
@@ -113,7 +113,11 @@ public:
 
 private:
     Request build(const ffy::link::ApprovalPrompt& p, uint64_t id) const;
-    static std::string remember_key(const ffy::link::ApprovalPrompt& p) { return p.client + "\n" + p.user; }
+    /// "Don't ask again" is keyed by the whole client id: prompt.client is cut to 24 characters for display, so
+    /// "https://claude.ai/oauth/claude-code-..." and every other "https://claude.ai/oauth/..." would share it. An agent
+    /// from before client_id: its client.
+    static const std::string& client_id(const ffy::link::ApprovalPrompt& p) { return p.client_id.empty() ? p.client : p.client_id; }
+    static std::string remember_key(const ffy::link::ApprovalPrompt& p) { return client_id(p) + "\n" + p.user; }
 
     std::shared_ptr<Ui> ui_;
     Desk desk_;
