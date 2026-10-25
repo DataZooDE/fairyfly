@@ -395,6 +395,55 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
     const Principal& principal = ctx.principal;
+    // stdio and link (auto_attach): the default connection's session is gone. Attach to the only open SAP GUI session
+    // when its system/client/user is `recorded` ("SYS/CLIENT/USER"; empty: not recorded, then unchecked with a
+    // warning), make it the default bound to that session and return its connection id; nullopt: nothing attached.
+    std::string reattach_note;  // said in the result when a default connection was re-attached
+    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) -> std::optional<int> {
+        const Result listed = invoke({"session", "list"});
+        const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
+        if (sessions.size() != 1) {
+            spdlog::info("{}: saved connection {} is stale and {} SAP GUI sessions are open; not re-attached",
+                         name, stale_id, sessions.size());
+            return std::nullopt;
+        }
+        const std::string session_id = sessions[0].value("session_id", "");
+        const std::string live = sap_identity_of(listed_session(listed, session_id));
+        if (!recorded.empty() && live != recorded) {
+            spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
+                         name, stale_id, recorded, session_id, live);
+            return std::nullopt;
+        }
+        if (recorded.empty())
+            spdlog::warn("{}: saved connection {} is stale and records no SAP system/client/user; re-attaching "
+                         "to the only open SAP session {} ({}) unchecked", name, stale_id, session_id, live);
+        const Result attached = invoke({"session", "attach", "--session-id", session_id});
+        std::optional<int> id;
+        if (attached.status == Result::Status::Success && attached.data.is_object() &&
+            attached.data.contains("connection_file_id"))
+            id = int_from_json(attached.data["connection_file_id"]);
+        if (!id) {
+            spdlog::warn("{}: re-attaching to SAP session {} failed", name, session_id);
+            return std::nullopt;
+        }
+        std::string session_identity, sap_identity;
+        if (facts_provider_) {
+            try {
+                const auto facts = facts_provider_(*id);
+                if (facts && facts->connection_id == *id) {
+                    session_identity = facts->session_identity;
+                    if (!facts->system.empty() && !facts->client.empty() && !facts->user.empty())
+                        sap_identity = facts->system + "/" + facts->client + "/" + facts->user;
+                }
+            } catch (...) {}
+        }
+        set_sticky_connection(principal_key(principal), *id, session_identity, sap_identity);
+        spdlog::info("{}: saved connection {} was stale; re-attached to the only open SAP session {} ({}), now connection {}",
+                     name, stale_id, session_id, live, *id);
+        reattach_note = "note: the saved SAP connection " + stale_id + " had closed; re-attached to the only open SAP session (" +
+                        live + "), now connection " + std::to_string(*id) + ".";
+        return id;
+    };
     if (!auth::scope_allows(principal, spec->family, name))
         return fail("SCOPE_DENIED", "token lacks the required scope for this tool");
     if (ctx.http && !policy_.owner_sap_identities.empty() && !owner_token_bound(policy_, principal))
@@ -475,34 +524,55 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                        name != "gui_doctor" &&
                                        name != "gui_session_attach" &&
                                        name != "gui_session_launch";
+        // the live facts of the connection this call acts on; false: they refer to another saved connection
+        const auto apply_live_facts = [&]() -> bool {
+            record.sap = *live_facts;
+            if (record.connection && live_facts->connection_id && *record.connection != *live_facts->connection_id)
+                return false;
+            if (!live_facts->system.empty()) current_system = live_facts->system + "/" + live_facts->client;
+            if (!live_facts->transaction.empty()) current_tcode = live_facts->transaction;
+            input_context.program = live_facts->program;
+            input_context.screen_number = live_facts->screen_number;
+            input_context.session_identity = live_facts->session_identity;
+            // The connection this call acts on: explicit/sticky/default, else the id the facts lookup resolved
+            // (automatic single-connection resolution). Two different answers = unknown.
+            if (!record.connection)
+                input_context.connection = live_facts->connection_id;
+            policy_state_key = session_policy_key(principal, live_facts->session_identity,
+                                                  live_facts->connection_id ? live_facts->connection_id : record.connection);
+            policy_fallback_key = session_policy_key(principal, "",
+                                                     live_facts->connection_id ? live_facts->connection_id : record.connection);
+            return true;
+        };
         if ((!principal.sap_systems.empty() || !principal.tcodes.empty() || owner_needs_facts ||
              (sticky_target && !sticky_target->session_identity.empty())) && facts_provider_) {
             const auto started = std::chrono::steady_clock::now();
             try { live_facts = facts_provider_(record.connection); } catch (...) {}
             note_step("facts_pre", name, principal.name, started, record.facts_pre_ms);
-            if (live_facts && live_facts->any()) {
-                record.sap = *live_facts;
-                if (record.connection && live_facts->connection_id && *record.connection != *live_facts->connection_id)
-                    return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
-                if (!live_facts->system.empty()) current_system = live_facts->system + "/" + live_facts->client;
-                if (!live_facts->transaction.empty()) current_tcode = live_facts->transaction;
-                input_context.program = live_facts->program;
-                input_context.screen_number = live_facts->screen_number;
-                input_context.session_identity = live_facts->session_identity;
-                // The connection this call acts on: explicit/sticky/default, else the id the facts lookup resolved
-                // (automatic single-connection resolution). Two different answers = unknown.
-                if (!record.connection)
-                    input_context.connection = live_facts->connection_id;
-                policy_state_key = session_policy_key(principal, live_facts->session_identity,
-                                                      live_facts->connection_id ? live_facts->connection_id : record.connection);
-                policy_fallback_key = session_policy_key(principal, "",
-                                                         live_facts->connection_id ? live_facts->connection_id : record.connection);
-            }
+            if (live_facts && live_facts->any() && !apply_live_facts())
+                return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
         }
         if (sticky_target && !sticky_target->session_identity.empty() &&
             (!live_facts || live_facts->connection_id != sticky_target->connection ||
-             live_facts->session_identity != sticky_target->session_identity))
-            return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session");
+             live_facts->session_identity != sticky_target->session_identity)) {
+            // The default's session is GONE (SAP Logon restarted: no live facts for it), not replaced by another live
+            // session: like 5c, the only open session of the same recorded system, client and user takes its place,
+            // inside this call. A connection that now names another live session stays SESSION_TARGET_CHANGED.
+            const bool target_gone = !live_facts || !live_facts->any();
+            std::optional<int> reattached;
+            if (policy_.auto_attach && !ctx.http && policy_.owner_sap_identities.empty() && target_gone &&
+                !sticky_target->sap_identity.empty() && name.rfind("gui_session_", 0) != 0)
+                reattached = reattach_only_session(sticky_target->sap_identity, std::to_string(sticky_target->connection));
+            if (!reattached)
+                return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session");
+            record.connection = reattached;
+            record.sap = {};
+            policy_state_key = policy_fallback_key = session_policy_key(principal, "", record.connection);
+            live_facts.reset();
+            try { live_facts = facts_provider_(record.connection); } catch (...) {}
+            if (live_facts && live_facts->any() && !apply_live_facts())
+                return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
+        }
         if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_session_login") {
             const bool known = live_facts && live_facts->connection_id && !live_facts->system.empty() &&
                 !live_facts->session_identity.empty() && live_facts->user.empty() &&
@@ -847,7 +917,6 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     } owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
 
     // 5. invoke
-    std::string reattach_note;  // 5c: said in the result when a stale default connection was re-attached
     if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
     const auto invoke_started = std::chrono::steady_clock::now();
     const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
@@ -1088,55 +1157,22 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         // the link tray restarted). With exactly one open session of the same SAP system, client and user it is
         // re-attached and the call runs again, inside this call: over the link its desktop approval still holds.
         // An explicit `connection`, the HTTP endpoint, no or several sessions, another identity: refused as before.
-        if (policy_.auto_attach && !ctx.http && !worker_bound && implicit_sticky &&
+        if (policy_.auto_attach && !ctx.http && !worker_bound && implicit_sticky && reattach_note.empty() &&
             name.rfind("gui_session_", 0) != 0 && result.status != Result::Status::Success &&
             result_error_code(result) == "INVALID_CONNECTION") {
             const json stale = result.error.is_object() && result.error.contains("stale_connection")
                                    ? result.error["stale_connection"] : json::object();
             const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
-            const Result listed = invoke({"session", "list"});
-            const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
-            if (sessions.size() != 1) {
-                spdlog::info("{}: saved connection {} is stale and {} SAP GUI sessions are open; not re-attached",
-                             name, stale_id, sessions.size());
-            } else {
-                const std::string session_id = sessions[0].value("session_id", "");
-                const std::string recorded = sap_identity_of(stale);
-                const std::string live = sap_identity_of(listed_session(listed, session_id));
-                const bool recorded_known = sap_identity_complete(stale);
-                if (recorded_known && live != recorded) {
-                    spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
-                                 name, stale_id, recorded, session_id, live);
-                    result.error["message"] = result.error.value("message", std::string()) +
-                                              "; the only open SAP session belongs to another system, client or user";
-                } else {
-                    if (!recorded_known)
-                        spdlog::warn("{}: saved connection {} is stale and records no SAP system/client/user; re-attaching "
-                                     "to the only open SAP session {} ({}) unchecked", name, stale_id, session_id, live);
-                    Result attached = invoke({"session", "attach", "--session-id", session_id});
-                    std::optional<int> id;
-                    if (attached.status == Result::Status::Success && attached.data.is_object() &&
-                        attached.data.contains("connection_file_id"))
-                        id = int_from_json(attached.data["connection_file_id"]);
-                    if (!id) {
-                        spdlog::warn("{}: re-attaching to SAP session {} failed", name, session_id);
-                    } else {
-                        set_sticky_connection(principal_key(principal), *id, "");
-                        record.connection = id;
-                        Policy reattached_policy = effective;
-                        reattached_policy.default_connection = id;
-                        std::vector<std::string> reattached_argv;
-                        try { reattached_argv = spec->build_argv(args, reattached_policy); }
-                        catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
-                        record.argv = reattached_argv;
-                        spdlog::info("{}: saved connection {} was stale; re-attached to the only open SAP session {} ({}), "
-                                     "now connection {}", name, stale_id, session_id, live, *id);
-                        reattach_note = "note: the saved SAP connection " + stale_id +
-                                        " had closed; re-attached to the only open SAP session (" + live +
-                                        "), now connection " + std::to_string(*id) + ".";
-                        result = invoke_selected(reattached_argv);
-                    }
-                }
+            if (const auto id = reattach_only_session(sap_identity_complete(stale) ? sap_identity_of(stale) : std::string(),
+                                                      stale_id)) {
+                record.connection = id;
+                Policy reattached_policy = effective;
+                reattached_policy.default_connection = id;
+                std::vector<std::string> reattached_argv;
+                try { reattached_argv = spec->build_argv(args, reattached_policy); }
+                catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
+                record.argv = reattached_argv;
+                result = invoke_selected(reattached_argv);
             }
         }
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
@@ -1618,16 +1654,20 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
         result.data.is_object() && result.data.contains("connection_file_id")) {
         if (auto id = int_from_json(result.data["connection_file_id"])) {
-            std::string identity;
+            std::string identity, sap_identity;  // sap_identity: a closed default re-attaches only to this user
             if (facts_provider_) {
                 try {
                     const auto facts = facts_provider_(*id);
-                    if (facts && facts->connection_id == *id) identity = facts->session_identity;
+                    if (facts && facts->connection_id == *id) {
+                        identity = facts->session_identity;
+                        if (!facts->system.empty() && !facts->client.empty() && !facts->user.empty())
+                            sap_identity = facts->system + "/" + facts->client + "/" + facts->user;
+                    }
                 } catch (...) {}
             }
             const bool stored = !ctx.http || policy_.owner_sap_identities.empty() || !identity.empty();
             if (stored)
-                set_sticky_connection(principal_key(ctx.principal), *id, std::move(identity));
+                set_sticky_connection(principal_key(ctx.principal), *id, std::move(identity), std::move(sap_identity));
             record.connection = id;
             if (stored) {
                 const std::string note = "connection " + std::to_string(*id) +

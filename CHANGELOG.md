@@ -8,11 +8,14 @@
   Connection N session no longer exists` when exactly one SAP GUI session is open: fairyfly re-attaches the saved
   default connection to that session, runs the call and says so in the result ("re-attached to the only open SAP
   session"). Over the link this happens inside the approved call, so a change is approved once, not twice.
+- The same holds for a default set by an earlier `gui_session_attach` (until now `SESSION_TARGET_CHANGED` after SAP
+  Logon restarted). It applies only when that session is gone; a default that now names another live session is
+  still refused with `SESSION_TARGET_CHANGED`.
 - Only for the implicit default connection, and only when the open session is the same SAP system, client and user
   as the closed one. A saved connection now records them (`system`, `client`, `user` in `fairyfly.N.con`); for an
   older file without them the only open session is used and a warning is logged.
 - Unchanged: an explicit `connection`, no or several open sessions, another system/client/user, and the HTTP endpoint
-  still get `INVALID_CONNECTION`.
+  still get `INVALID_CONNECTION` (or `SESSION_TARGET_CHANGED`).
 
 ## 2026.10.25.1 (2026-10-25)
 
