@@ -1478,21 +1478,11 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
             // Build nodes array with keys and text
             json nodes = json::array();
-            std::vector<std::string> tree_column_names;
-            bool tree_column_names_loaded = false;
+            sap::TreeNodeTexts node_texts(*tree_elem);
             for (const auto& key : node_keys) {
                 json node;
                 node["key"] = key;
-                std::string node_text = as_tree(*tree_elem).get_node_text_by_key(key);
-                if (node_text.empty() && !tree_column_names_loaded) {
-                    tree_column_names = as_tree(*tree_elem).get_tree_column_names();
-                    tree_column_names_loaded = true;
-                }
-                node["text"] = sap::recover_tree_node_text(
-                    node_text, tree_column_names,
-                    [&](const std::string& name) {
-                        return as_tree(*tree_elem).get_item_text(key, name);
-                    });
+                node["text"] = node_texts.text(key);
                 nodes.push_back(node);
             }
 

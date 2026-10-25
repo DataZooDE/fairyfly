@@ -473,8 +473,7 @@ void TableDataExtractor::traverse_tree_nodes(
 
             spdlog::trace("TREE_EXTRACT: Processing {} nodes...", node_keys.size());
             int node_count = 0;
-            std::vector<std::string> tree_column_names;
-            bool tree_column_names_loaded = false;
+            TreeNodeTexts node_texts(*tree_element);
             for (const auto& key : node_keys) {
                 try {
                     spdlog::trace("TREE_EXTRACT: Processing node {}/{}: key={}", ++node_count, node_keys.size(), key);
@@ -483,16 +482,7 @@ void TableDataExtractor::traverse_tree_nodes(
 
                     // Get node text with error handling
                     try {
-                        node.text = as_tree(*tree_element).get_node_text_by_key(key);
-                        if (node.text.empty() && !tree_column_names_loaded) {
-                            tree_column_names = as_tree(*tree_element).get_tree_column_names();
-                            tree_column_names_loaded = true;
-                        }
-                        node.text = recover_tree_node_text(
-                            node.text, tree_column_names,
-                            [&](const std::string& name) {
-                                return as_tree(*tree_element).get_item_text(key, name);
-                            });
+                        node.text = node_texts.text(key);
                         spdlog::trace("TREE_EXTRACT: Got text for node {}", key);
                     } catch (const std::exception& e) {
                         spdlog::warn("Failed to get text for node {}: {}", key, e.what());

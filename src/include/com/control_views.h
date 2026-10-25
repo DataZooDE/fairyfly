@@ -42,6 +42,7 @@ inline ComGuiGrid as_grid(ComGuiElement& element) { return ComGuiGrid(element); 
 class ComGuiToolbar {
 public:
     explicit ComGuiToolbar(const ComGuiElement& element) : element_(element), dispatch_(element.get_com_object()) {}
+    ComGuiToolbar(const ComGuiElement&&) = delete;   // a temporary element would leave the view dangling
 
     /// Get number of toolbar buttons in GuiShell Toolbar
     /// Returns 0 if not a toolbar or property not available
@@ -83,6 +84,7 @@ private:
 };
 
 inline ComGuiToolbar as_toolbar(const ComGuiElement& element) { return ComGuiToolbar(element); }
+ComGuiToolbar as_toolbar(const ComGuiElement&&) = delete;
 
 } // namespace sap
 } // namespace fairyfly

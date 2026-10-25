@@ -1,9 +1,12 @@
 #pragma once
 // The tree methods of a GuiTree or a tree shell, as a view over its ComGuiElement (the element stays the owner).
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "include/com/wrapper.h"
+#include "include/table_data_extractor.h"   // recover_tree_node_text
 
 namespace fairyfly {
 namespace sap {
@@ -45,11 +48,46 @@ public:
     void select_node_context_item(const std::string& node_key, const std::string& item_text);
 
 private:
+    std::string string_by_key(const wchar_t* method, const std::string& key, const char* operation) const;
+
     ComGuiElement& element_;
     IDispatch* dispatch_;
 };
 
 inline ComGuiTree as_tree(ComGuiElement& element) { return ComGuiTree(element); }
+
+/// The texts of a tree's nodes: a node whose text is empty gets its first non-empty column item
+/// (recover_tree_node_text); the tree's column names are read once, when the first such node needs them.
+/// Throws as the reads do; the caller marks the node.
+class TreeNodeTexts {
+public:
+    using NodeText = std::function<std::string(const std::string& key)>;
+    using ColumnNames = std::function<std::vector<std::string>()>;
+    using ItemText = std::function<std::string(const std::string& key, const std::string& column)>;
+    TreeNodeTexts(NodeText node_text, ColumnNames column_names, ItemText item_text)
+        : node_text_(std::move(node_text)), column_names_(std::move(column_names)), item_text_(std::move(item_text)) {}
+    /// Over a tree control (the element must outlive this).
+    explicit TreeNodeTexts(ComGuiElement& tree)
+        : TreeNodeTexts([&tree](const std::string& key) { return as_tree(tree).get_node_text_by_key(key); },
+                        [&tree] { return as_tree(tree).get_tree_column_names(); },
+                        [&tree](const std::string& key, const std::string& column) { return as_tree(tree).get_item_text(key, column); }) {}
+
+    std::string text(const std::string& key) {
+        const std::string own = node_text_(key);
+        if (own.empty() && !names_loaded_) {
+            names_ = column_names_();
+            names_loaded_ = true;
+        }
+        return recover_tree_node_text(own, names_, [&](const std::string& column) { return item_text_(key, column); });
+    }
+
+private:
+    NodeText node_text_;
+    ColumnNames column_names_;
+    ItemText item_text_;
+    std::vector<std::string> names_;
+    bool names_loaded_ = false;
+};
 
 } // namespace sap
 } // namespace fairyfly

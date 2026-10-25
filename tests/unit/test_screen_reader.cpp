@@ -3,6 +3,7 @@
 #include "include/screen_reader.h"
 #include "include/table_data_extractor.h"
 #include "include/com/wrapper.h"
+#include "include/com/tree_view.h"
 #include "include/sensitive_data.h"
 #include "include/element_renderers.h"
 #include "include/formatters/screen_markdown_formatter.h"
@@ -756,4 +757,21 @@ TEST_CASE("id_probe_candidates with probe_all restores the exhaustive legacy set
     collector.add_id(id + "/ssubSCR_PRESEL");
     REQUIRE_FALSE(contains(id_probe_candidates("GuiBox", id, 3, collector, true),
                            id + "/ssubSCR_PRESEL"));
+}
+
+TEST_CASE("tree node texts: an empty node text is recovered from a column, the column names are read once", "[screen_reader][tree]") {
+    // review 2026-10-25: the screen reader, the table extractor and the handler each repeated this
+    int column_name_reads = 0;
+    TreeNodeTexts texts(
+        [](const std::string& key) { return key == "N1" ? std::string("Folder") : std::string(); },
+        [&] { ++column_name_reads; return std::vector<std::string>{"COL1", "COL2"}; },
+        [](const std::string& key, const std::string& column) { return column == "COL2" ? key + "-user" : std::string(); });
+    CHECK(texts.text("N1") == "Folder");
+    CHECK(column_name_reads == 0);   // not needed while the node has its own text
+    CHECK(texts.text("N2") == "N2-user");
+    CHECK(texts.text("N3") == "N3-user");
+    CHECK(column_name_reads == 1);   // once for the whole tree
+    TreeNodeTexts failing([](const std::string&) -> std::string { throw std::runtime_error("COM"); },
+                          [] { return std::vector<std::string>{}; }, [](const std::string&, const std::string&) { return std::string(); });
+    CHECK_THROWS(failing.text("N1"));   // the caller marks the node
 }

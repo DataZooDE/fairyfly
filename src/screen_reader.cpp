@@ -356,8 +356,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         // Extract each node with robust per-property error handling
         json nodes_array = json::array();
         int failed_nodes = 0;
-        std::vector<std::string> tree_column_names;
-        bool tree_column_names_loaded = false;
+        TreeNodeTexts node_texts(*element);
 
         for (size_t i = 0; i < node_keys.size(); ++i) {
             const auto& key = node_keys[i];
@@ -371,14 +370,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                 // Extract node text with individual error handling
                 try {
                     spdlog::debug("  -> Getting node text for key '{}'", key);
-                    std::string node_text = as_tree(*element).get_node_text_by_key(key);
-                    if (node_text.empty() && !tree_column_names_loaded) {
-                        tree_column_names = as_tree(*element).get_tree_column_names();
-                        tree_column_names_loaded = true;
-                    }
-                    node["text"] = recover_tree_node_text(
-                        node_text, tree_column_names,
-                        [&](const std::string& name) { return as_tree(*element).get_item_text(key, name); });
+                    node["text"] = node_texts.text(key);
                     spdlog::debug("  -> Got node text for key '{}'", key);
                 } catch (const std::exception& e) {
                     node["text"] = "[extraction_failed]";

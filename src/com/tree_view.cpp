@@ -125,73 +125,40 @@ std::vector<std::string> ComGuiTree::get_tree_column_names() const {
     return names;
 }
 
-std::string ComGuiTree::get_node_text_by_key(const std::string& key) const {
+/// A string the tree answers for a node key (GetNodeTextByKey, GetNodePathByKey): "" when the control or the method
+/// is missing or the call fails; a null or unreadable BSTR is "" too (safe_bstr_to_string).
+std::string ComGuiTree::string_by_key(const wchar_t* method, const std::string& key, const char* operation) const {
     try {
         if (!dispatch_) {
-            spdlog::warn("get_node_text_by_key called with null dispatch pointer");
+            spdlog::warn("{} called with null dispatch pointer", operation);
             return "";
         }
-
-        // Call GetNodeTextByKey(key) method
         DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodeTextByKey", &dispid);
+        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method, &dispid);
         if (FAILED(hr)) {
-            spdlog::debug("Could not get DISPID for GetNodeTextByKey");
+            spdlog::debug("Could not get DISPID for {}", text::wide_to_utf8_lossy(method));
             return "";
         }
-
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
-
         hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(key)}, result_guard.get());
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string text;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_node_text_by_key key='{}'", key);
-            text = safe_bstr_to_string(result_var, context.c_str());
-        }
-
-        return text;
-
+        if (FAILED(hr)) return "";
+        const std::string context = fmt::format("{} key='{}'", operation, key);
+        return safe_bstr_to_string(result_var, context.c_str());
     } catch (const std::exception& e) {
-        spdlog::debug("get_node_text_by_key|exception|key={}|error={}", key, e.what());
+        spdlog::debug("{}|exception|key={}|error={}", operation, key, e.what());
         return "";
     }
+}
+
+std::string ComGuiTree::get_node_text_by_key(const std::string& key) const {
+    return string_by_key(L"GetNodeTextByKey", key, "get_node_text_by_key");
 }
 
 std::string ComGuiTree::get_node_path_by_key(const std::string& key) const {
-    try {
-        if (!dispatch_) {
-            spdlog::warn("get_node_path_by_key called with null dispatch pointer");
-            return "";
-        }
-
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodePathByKey", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(key)}, result_guard.get());
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string path;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_node_path_by_key key='{}'", key);
-            path = safe_bstr_to_string(result_var, context.c_str());
-        }
-
-        return path;
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_node_path_by_key|exception|key={}|error={}", key, e.what());
-        return "";
-    }
+    return string_by_key(L"GetNodePathByKey", key, "get_node_path_by_key");
 }
+
 
 std::string ComGuiTree::get_item_text(const std::string& node_key, const std::string& column_name) const {
     try {
