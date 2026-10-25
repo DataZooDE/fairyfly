@@ -67,11 +67,7 @@ public:
     /// Diagnostic: raw GuiSession.GetObjectTree dump of `id` (empty: the active window). Engines without COM
     /// access report NOT_SUPPORTED.
     virtual Result dump_object_tree(const std::string& /*id*/, const std::vector<std::string>& /*props*/) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NOT_SUPPORTED";
-        result.error["message"] = "This engine cannot dump the object tree";
-        return result;
+        return Result::fail("NOT_SUPPORTED", "This engine cannot dump the object tree");
     }
     /// Opt in to exhaustive FindById probing for subsequent screen reads/finds.
     virtual void set_probe_all(bool /*probe_all*/) {}
