@@ -63,6 +63,8 @@ private:
 public:
     /// Constructor - initializes COM but doesn't connect to SAP
     ComAutomationEngine();
+    /// The engine on a given SAP GUI application object (tests pass a fake one); binds its first session.
+    explicit ComAutomationEngine(ComGuiApplicationPtr app);
 
     ~ComAutomationEngine() override = default;
 

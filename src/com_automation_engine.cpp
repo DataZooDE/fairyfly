@@ -95,10 +95,12 @@ static std::optional<Result> inactive_tab_error(const ComGuiSessionPtr& session,
     }
 }
 
-ComAutomationEngine::ComAutomationEngine() {
+ComAutomationEngine::ComAutomationEngine() : ComAutomationEngine(nullptr) {}
+
+ComAutomationEngine::ComAutomationEngine(ComGuiApplicationPtr app) {
     try {
-        // Initialize COM and get SAP GUI application
-        app_ = ComGuiApplication::create();
+        // Initialize COM and get SAP GUI application (the running SAP GUI unless one is given)
+        app_ = app ? std::move(app) : ComGuiApplication::create();
         spdlog::debug("ComAutomationEngine initialized successfully");
 
         // Initialize connection launcher
