@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.25 (2026-10-25)
 
 ### Cloud link: the gateway learns why a change was refused
 
