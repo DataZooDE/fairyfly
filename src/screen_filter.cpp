@@ -46,15 +46,6 @@ static json* table_rows_owner(json& elem)
     return nullptr;
 }
 
-static size_t count_matching_rows(const json& rows, const std::string& needle)
-{
-    size_t matched = 0;
-    for (const auto& row : rows) {
-        if (json_strings_contain(row, needle)) ++matched;
-    }
-    return matched;
-}
-
 /// Text search across labels, tooltips, table/grid cells, tree nodes and text content (IMP-005).
 static bool element_text_matches(const json& elem, const std::string& needle)
 {
@@ -74,11 +65,11 @@ static void narrow_table_rows(json& elem, const std::string& needle)
     json* table = table_rows_owner(elem);
     if (!table) return;
     const json& rows = (*table)["rows"];
-    if (count_matching_rows(rows, needle) == 0) return;
     json kept = json::array();
     for (const auto& row : rows) {
         if (json_strings_contain(row, needle)) kept.push_back(row);
     }
+    if (kept.empty()) return;  // the element matched elsewhere: its rows stay untouched
     (*table)["rows_total"] = rows.size();
     (*table)["rows_matched"] = kept.size();
     (*table)["rows"] = std::move(kept);
@@ -443,6 +434,11 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
     json categorized = json::object();
     std::unordered_set<std::string> wanted_ids;
     std::unordered_set<std::string> assigned_ids;
+    // an element joins its category; with --text-contains a grid keeps only its matching rows
+    const auto keep = [&](const std::string& category, const json& element) {
+        categorized[category].push_back(element);
+        if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
+    };
     for (const auto& element : filtered) {
         if (element.is_object()) wanted_ids.insert(element.value("id", ""));
     }
@@ -452,10 +448,7 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
             for (const auto& element : elements) {
                 if (!element.is_object()) continue;
                 const std::string id = element.value("id", "");
-                if (wanted_ids.count(id) && assigned_ids.insert(id).second) {
-                    categorized[category].push_back(element);
-                    if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
-                }
+                if (wanted_ids.count(id) && assigned_ids.insert(id).second) keep(category, element);
             }
         }
     }
@@ -471,8 +464,7 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
                                type == "GuiComboBox" || type == "GuiRadioButton" ? "form_fields" :
                                type == "GuiTableControl" || type == "GuiGridView" ? "tables" :
                                type == "GuiToolbar" ? "toolbar" : "other";
-        categorized[category].push_back(element);
-        if (!text_needle.empty()) narrow_table_rows(categorized[category].back(), text_needle);
+        keep(category, element);
     }
     screen_data["elements"] = filtered;
     screen_data["element_count"] = filtered.size();
