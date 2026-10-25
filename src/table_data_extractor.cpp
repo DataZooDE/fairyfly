@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/com/tree_view.h"
 #include "include/table_data_extractor.h"
 #include "include/com/invoke.h"
@@ -207,7 +208,7 @@ TableData TableDataExtractor::extract_grid_data(ComGuiElementPtr element) const 
         bool scrolled = false;
         data.rows = read_grid_rows_loading(
             row_count, col_count, options_.max_rows, column_names,
-            [&](int row, const std::string& column) { return element->get_cell_value(row, column); },
+            [&](int row, const std::string& column) { return as_grid(*element).get_cell_value(row, column); },
             options_.row_offset,
             [&](int row) {
                 if (original_first_row < 0) original_first_row = element->get_property_int(L"FirstVisibleRow");
@@ -358,7 +359,7 @@ TreeData TableDataExtractor::extract_tree_data(ComGuiElementPtr element) const {
             // For GuiShell trees, use ColumnOrder
             if (type == "GuiShell" && subtype == "Tree") {
                 spdlog::trace("EXTRACT_TREE_DATA: Getting column order");
-                auto all_columns = element->get_column_order();
+                auto all_columns = as_grid(*element).get_column_order();
                 spdlog::trace("EXTRACT_TREE_DATA: Got {} columns", all_columns.size());
                 if (all_columns.size() > 1) {
                     // Skip first column (HierarchyHeader) - it's the text column
@@ -396,7 +397,7 @@ std::vector<std::string> TableDataExtractor::get_column_names(ComGuiElementPtr e
 
     try {
         // Try to get ColumnOrder collection (for grids/trees)
-        columns = element->get_column_order();
+        columns = as_grid(*element).get_column_order();
 
         // If ColumnOrder failed or returned empty, fall back to generic names
         if (columns.empty()) {
@@ -445,7 +446,7 @@ void TableDataExtractor::traverse_tree_nodes(
             spdlog::info("Retrieved {} nodes from GuiShell tree", node_keys.size());
 
             // Get column names (skip first column which is the hierarchy/text column)
-            auto all_columns = tree_element->get_column_order();
+            auto all_columns = as_grid(*tree_element).get_column_order();
             std::vector<std::string> data_columns;
             if (all_columns.size() > 1) {
                 data_columns = std::vector<std::string>(all_columns.begin() + 1, all_columns.end());

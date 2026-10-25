@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/com/tree_view.h"
 #include "include/cli_handler.h"
 #include "include/sap_identity.h"
@@ -1003,7 +1004,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                 if (auto session = com_engine->unchecked_session()) {
                     const std::string full_path = expand_active(elem.path);
                     if (auto target = session->find_element_by_id(full_path))
-                        target_text = node_key.empty() ? target->get_cell_value(*row, column)
+                        target_text = node_key.empty() ? as_grid(*target).get_cell_value(*row, column)
                                                        : as_tree(*target).get_node_text_by_key(node_key);
                 }
             }

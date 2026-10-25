@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/shell_kind.h"
 #include "include/element_metadata_extractor.h"
 #include "include/sensitive_data.h"
@@ -390,17 +391,17 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
             // Special handling for GuiShell Toolbar - enumerate buttons via ButtonCount API
             if (subtype == "Toolbar") {
                 try {
-                    int button_count = elem->get_button_count();
+                    int button_count = as_toolbar(*elem).get_button_count();
                     spdlog::debug("GuiShell toolbar has {} buttons", button_count);
 
                     json button_children = json::array();
                     for (int i = 0; i < button_count; ++i) {
                         try {
-                            std::string btn_id = elem->get_button_id(i);
-                            std::string btn_text = elem->get_button_text(i);
-                            std::string btn_tooltip = elem->get_button_tooltip(i);
-                            std::string btn_type = elem->get_button_type(i);
-                            bool btn_enabled = elem->get_button_enabled(i);
+                            std::string btn_id = as_toolbar(*elem).get_button_id(i);
+                            std::string btn_text = as_toolbar(*elem).get_button_text(i);
+                            std::string btn_tooltip = as_toolbar(*elem).get_button_tooltip(i);
+                            std::string btn_type = as_toolbar(*elem).get_button_type(i);
+                            bool btn_enabled = as_toolbar(*elem).get_button_enabled(i);
 
                             // Skip separators
                             if (btn_type == "Separator") continue;

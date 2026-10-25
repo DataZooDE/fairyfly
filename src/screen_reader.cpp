@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/com/tree_view.h"
 #include "include/shell_kind.h"
 #include "include/object_tree.h"
@@ -346,7 +347,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         // Get column names for extracting column data
         std::vector<std::string> columns;
         try {
-            columns = element->get_column_order();
+            columns = as_grid(*element).get_column_order();
             spdlog::debug("Tree {} has {} columns", elem_id, columns.size());
         } catch (const std::exception& e) {
             spdlog::debug("Could not get column order for {}: {}", elem_id, e.what());
@@ -533,15 +534,15 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
 
         if (type == "GuiShell" || type == "GuiGridView") {
             json buttons = json::array();
-            const int count = std::min(element->get_grid_toolbar_button_count(), 100);
+            const int count = std::min(as_toolbar(*element).get_grid_toolbar_button_count(), 100);
             for (int i = 0; i < count; ++i) {
-                const std::string button_id = element->get_grid_toolbar_button_id(i);
+                const std::string button_id = as_toolbar(*element).get_grid_toolbar_button_id(i);
                 if (button_id.empty()) continue; // Separator or menu gap.
                 buttons.push_back({
                     {"id", elem_id + "/btn_" + button_id},
                     {"type", "GuiButton"},
                     {"name", button_id},
-                    {"tooltip", element->get_grid_toolbar_button_tooltip(i)},
+                    {"tooltip", as_toolbar(*element).get_grid_toolbar_button_tooltip(i)},
                     {"capabilities", json::array({"clickable"})}
                 });
             }

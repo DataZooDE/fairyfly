@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/element_errors.h"
@@ -1120,7 +1121,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         const auto before_status = read_action_status(session);
 
         // Press the toolbar button
-        elem->press_button(button_id);
+        as_toolbar(*elem).press_button(button_id);
         session->wait_for_completion(500);
         const auto after_status = read_action_status(session);
         if (auto rejection = classify_action_status(before_status, after_status,
@@ -1309,7 +1310,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->modify_grid_cell(row, column, value, checkbox, commit);
+        as_grid(*grid).modify_grid_cell(row, column, value, checkbox, commit);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "modify_grid_cell";
@@ -1348,7 +1349,7 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->select_grid_row(row, column);
+        as_grid(*grid).select_grid_row(row, column);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "select_grid_row";
