@@ -428,3 +428,45 @@ TEST_CASE("format_output: a command's renderer applies only to the result shape 
     const Result screen = Result::ok(nlohmann::json{{"screen_id", "X/1"}, {"hierarchy", nlohmann::json::object()}});
     CHECK(cli::format_output(screen, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead).find("```json") == std::string::npos);
 }
+
+namespace {
+/// run_mcp with `options` and a handler that must not be needed: the exit code and the refusal's code (stderr JSON).
+std::pair<int, std::string> refused_start(mcp::ServeOptions options) {
+    std::ostringstream err;
+    auto* previous = std::cerr.rdbuf(err.rdbuf());
+    bool handler_requested = false;
+    const int code = mcp::run_mcp(
+        options,
+        [&handler_requested]() -> cli::CommandHandler& {
+            handler_requested = true;
+            throw std::logic_error("must not be called");
+        },
+        commands::GlobalOptions{});
+    std::cerr.rdbuf(previous);
+    CHECK_FALSE(handler_requested);
+    const auto j = nlohmann::json::parse(err.str(), nullptr, false);
+    return {code, j.is_object() && j.contains("error") ? j["error"].value("code", std::string()) : std::string()};
+}
+}  // namespace
+
+TEST_CASE("run_mcp refuses contradictory or invalid start options before anything is started", "[command_table][mcp]") {
+    // review 2026-10-25: the refusal codes of run_mcp were untested
+    mcp::ServeOptions both;
+    both.read_only = true;
+    both.allow_write = true;
+    CHECK(refused_start(both) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions loopback_only;
+    loopback_only.transport = "http";
+    loopback_only.allow_ip_include_loopback = true;
+    CHECK(refused_start(loopback_only) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions bad_cidr;
+    bad_cidr.transport = "http";
+    bad_cidr.allow_ip = {"10.0.0.0/33"};
+    CHECK(refused_start(bad_cidr) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions link;
+    link.transport = "link";   // only `fairyfly link run` starts it, with its loop
+    CHECK(refused_start(link) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+}
