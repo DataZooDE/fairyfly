@@ -54,6 +54,7 @@ add_executable(unit_tests
     unit/test_grid_renderer.cpp
     unit/test_unique_handle.cpp
     unit/test_http_probe.cpp
+    unit/test_engine_actions.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
