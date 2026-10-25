@@ -32,10 +32,7 @@ LoginCredentials parse_login_credentials(std::istream& input) {
         if (colon == std::string::npos) continue;
         const std::string key = utils::trim(line.substr(0, colon));
         const std::string value = utils::trim(line.substr(colon + 1));
-        std::string lower_key = key;
-        std::transform(lower_key.begin(), lower_key.end(), lower_key.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (lower_key == "connection") credentials.connection = value;
+        if (utils::iequals(key, "connection")) credentials.connection = value;
         else if (key == "Username") credentials.username = value;
         else if (key == "Password") credentials.password = value;
         else if (key == "New Password") credentials.new_password = value;

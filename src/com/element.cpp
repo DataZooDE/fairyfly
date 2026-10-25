@@ -1,4 +1,5 @@
 #include "include/text/utf8.h"
+#include "include/string_utils.h"
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/com/raii_helpers.h"
@@ -156,23 +157,8 @@ bool ComGuiElement::explicitly_read_only() const {
     return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
 }
 
-namespace {
-std::string trim_copy(const std::string& text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return "";
-    const auto last = text.find_last_not_of(" \t\r\n");
-    return text.substr(first, last - first + 1);
-}
-
-std::string lower_copy(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return text;
-}
-}  // namespace
-
 std::optional<bool> ComGuiElement::parse_check_value(const std::string& value) {
-    const std::string v = lower_copy(trim_copy(value));
+    const std::string v = utils::lower_ascii(utils::trim(value));
     if (v == "true" || v == "1" || v == "yes" || v == "on" || v == "x") return true;
     if (v == "false" || v == "0" || v == "no" || v == "off" || v.empty()) return false;
     return std::nullopt;
@@ -241,20 +227,20 @@ ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
 
         std::string key_to_write = value;
         if (entries_known) {
-            const std::string wanted = trim_copy(value);
-            const std::string wanted_lower = lower_copy(wanted);
+            const std::string wanted = utils::trim(value);
+            const std::string wanted_lower = utils::lower_ascii(wanted);
             const Entry* match = nullptr;
             for (const auto& entry : entries) {  // exact key first, then the displayed value
-                if (trim_copy(entry.key) == wanted) { match = &entry; break; }
+                if (utils::trim(entry.key) == wanted) { match = &entry; break; }
             }
             if (!match) {
                 for (const auto& entry : entries) {
-                    if (lower_copy(trim_copy(entry.value)) == wanted_lower) { match = &entry; break; }
+                    if (utils::lower_ascii(utils::trim(entry.value)) == wanted_lower) { match = &entry; break; }
                 }
             }
             if (!match) {  // keys that differ only in case ("en" for "EN")
                 for (const auto& entry : entries) {
-                    if (lower_copy(trim_copy(entry.key)) == wanted_lower) { match = &entry; break; }
+                    if (utils::lower_ascii(utils::trim(entry.key)) == wanted_lower) { match = &entry; break; }
                 }
             }
             if (!match) {

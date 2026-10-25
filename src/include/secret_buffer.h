@@ -60,13 +60,13 @@ public:
 
     /// UTF-8 view (converted lazily from UTF-16 when needed).
     const std::string& utf8() const {
-        if (utf8_.empty() && !utf16_.empty()) utf8_ = text::wide_to_utf8_lossy(utf16_);
+        if (utf8_.empty() && !utf16_.empty()) utf8_ = text::wide_to_utf8(utf16_);  // strict: throws std::invalid_argument
         return utf8_;
     }
 
     /// UTF-16 view (converted lazily from UTF-8 when needed).
     const std::wstring& utf16() const {
-        if (utf16_.empty() && !utf8_.empty()) utf16_ = text::utf8_to_wide_lossy(utf8_);
+        if (utf16_.empty() && !utf8_.empty()) utf16_ = text::utf8_to_wide(utf8_);  // strict: throws std::invalid_argument
         return utf16_;
     }
 

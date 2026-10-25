@@ -18,8 +18,6 @@ namespace {
 using mcp::json;
 using mcp::PolicyDecision;
 
-char lc(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
-
 PolicyDecision refuse(const char* code, std::string message) {
     PolicyDecision d;
     d.allowed = false;
@@ -275,7 +273,7 @@ bool system_allowed(const std::vector<std::string>& patterns, const std::string&
 bool glob_match(const std::string& pattern, const std::string& text) {
     std::size_t p = 0, t = 0, star = std::string::npos, mark = 0;
     while (t < text.size()) {
-        if (p < pattern.size() && (pattern[p] == '?' || lc(pattern[p]) == lc(text[t]))) {
+        if (p < pattern.size() && (pattern[p] == '?' || utils::to_lower_ascii(pattern[p]) == utils::to_lower_ascii(text[t]))) {
             ++p; ++t;
         } else if (p < pattern.size() && pattern[p] == '*') {
             star = p++;

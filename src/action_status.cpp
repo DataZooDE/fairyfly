@@ -1,4 +1,5 @@
 #include "include/action_status.h"
+#include "include/string_utils.h"
 #include "include/sensitive_data.h"
 
 #include <algorithm>
@@ -41,15 +42,8 @@ std::optional<Result> classify_transaction_modal(const std::string& window_id,
                                                  std::string message,
                                                  const std::string& tcode) {
     if (window_id.find("wnd[1]") == std::string::npos) return std::nullopt;
-    while (!message.empty() && std::isspace(static_cast<unsigned char>(message.back())))
-        message.pop_back();
-    std::string lower = message;
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    std::string expected = "cannot start transaction " + tcode;
-    std::transform(expected.begin(), expected.end(), expected.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    if (lower != expected) return std::nullopt;
+    while (!message.empty() && utils::is_ascii_space(message.back())) message.pop_back();
+    if (!utils::iequals(message, "cannot start transaction " + tcode)) return std::nullopt;
 
     Result result;
     result.status = Result::Status::Error;

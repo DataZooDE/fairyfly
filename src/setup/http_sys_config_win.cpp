@@ -65,7 +65,7 @@ std::string guid_to_string(const GUID& g) {
 
 GUID string_to_guid(const std::string& s) {
     GUID g{};
-    const std::wstring w = text::utf8_to_wide_lossy(s);
+    const std::wstring w = text::utf8_to_wide(s);
     if (CLSIDFromString(w.c_str(), &g) != S_OK) throw HostError("INVALID_ARGUMENT", "malformed AppId " + s);
     return g;
 }
@@ -74,7 +74,7 @@ class RealHttpSysConfig : public HttpSysConfig {
 public:
     std::optional<std::string> query_urlacl(const std::string& prefix) override {
         HttpConfigScope scope;
-        std::wstring wprefix = text::utf8_to_wide_lossy(prefix);
+        std::wstring wprefix = text::utf8_to_wide(prefix);
         HTTP_SERVICE_CONFIG_URLACL_QUERY query{};
         query.QueryDesc = HttpServiceConfigQueryExact;
         query.KeyDesc.pUrlPrefix = wprefix.data();
@@ -93,7 +93,7 @@ public:
 
     void add_urlacl(const std::string& prefix, const std::string& sddl) override {
         HttpConfigScope scope;
-        std::wstring wprefix = text::utf8_to_wide_lossy(prefix), wsddl = text::utf8_to_wide_lossy(sddl);
+        std::wstring wprefix = text::utf8_to_wide(prefix), wsddl = text::utf8_to_wide(sddl);
         HTTP_SERVICE_CONFIG_URLACL_SET set{};
         set.KeyDesc.pUrlPrefix = wprefix.data();
         set.ParamDesc.pStringSecurityDescriptor = wsddl.data();
@@ -105,7 +105,7 @@ public:
         const auto existing = query_urlacl(prefix);
         if (!existing) return false;
         HttpConfigScope scope;
-        std::wstring wprefix = text::utf8_to_wide_lossy(prefix), wsddl = text::utf8_to_wide_lossy(*existing);
+        std::wstring wprefix = text::utf8_to_wide(prefix), wsddl = text::utf8_to_wide(*existing);
         HTTP_SERVICE_CONFIG_URLACL_SET set{};
         set.KeyDesc.pUrlPrefix = wprefix.data();
         set.ParamDesc.pStringSecurityDescriptor = wsddl.data();
@@ -145,7 +145,7 @@ public:
         if (query_sslcert(ipport)) remove_sslcert(ipport);   // create-or-replace
         HttpConfigScope scope;
         SockAddr addr = make_sockaddr(ipport);
-        std::wstring store = text::utf8_to_wide_lossy(kCertStore);
+        std::wstring store = text::utf8_to_wide(kCertStore);
         std::vector<unsigned char> hash_copy = hash;
         HTTP_SERVICE_CONFIG_SSL_SET set{};
         set.KeyDesc.pIpPort = addr.get();

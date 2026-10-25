@@ -27,10 +27,10 @@ class WindowsPowerShellRunner final : public PowerShellRunner {
 public:
     PsResult run(const std::string& script, const std::string& params_json, int timeout_ms) override {
         PsResult result;
-        const std::wstring wide = text::utf8_to_wide_lossy(script);
+        const std::wstring wide = text::utf8_to_wide(script);
         std::vector<uint8_t> bytes(wide.size() * 2);
         std::memcpy(bytes.data(), wide.data(), bytes.size());
-        const std::wstring encoded = text::utf8_to_wide_lossy(utils::base64_encode(bytes));
+        const std::wstring encoded = text::utf8_to_wide(utils::base64_encode(bytes));
 
         wchar_t sysdir[MAX_PATH] = {};
         GetSystemDirectoryW(sysdir, MAX_PATH);
@@ -84,8 +84,8 @@ public:
         si.lpAttributeList = attributes;
         PROCESS_INFORMATION pi{};
 
-        const std::wstring env_name = text::utf8_to_wide_lossy(kParamsEnvVar);
-        SetEnvironmentVariableW(env_name.c_str(), text::utf8_to_wide_lossy(params_json).c_str());
+        const std::wstring env_name = text::utf8_to_wide(kParamsEnvVar);
+        SetEnvironmentVariableW(env_name.c_str(), text::utf8_to_wide(params_json).c_str());
         const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
                                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                                             nullptr, nullptr, &si.StartupInfo, &pi);

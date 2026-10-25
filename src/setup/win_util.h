@@ -13,7 +13,7 @@
 #include "include/text/utf8.h"
 namespace fairyfly::setup::win {
 
-inline std::filesystem::path to_path(const std::string& utf8) { return std::filesystem::path(text::utf8_to_wide_lossy(utf8)); }
+inline std::filesystem::path to_path(const std::string& utf8) { return std::filesystem::path(text::utf8_to_wide(utf8)); }
 
 inline std::string hex_upper(const unsigned char* data, size_t n) {
     static const char* digits = "0123456789ABCDEF";

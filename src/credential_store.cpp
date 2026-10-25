@@ -86,7 +86,11 @@ std::wstring target_name(const std::string& connection, std::wstring_view prefix
         throw CredentialError("INVALID_CONNECTION_NAME",
                               "Connection name must be 1-200 characters without control characters");
     }
-    return std::wstring(prefix) + text::utf8_to_wide_lossy(trimmed);
+    try {
+        return std::wstring(prefix) + text::utf8_to_wide(trimmed);  // strict: two malformed names must not share a target
+    } catch (const std::invalid_argument&) {
+        throw CredentialError("INVALID_CONNECTION_NAME", "Connection name is not valid UTF-8");
+    }
 }
 
 std::optional<std::string> connection_from_target(std::wstring_view target) {
@@ -103,7 +107,12 @@ std::optional<std::string> connection_from_target(std::wstring_view target, std:
 }
 
 std::vector<unsigned char> encode_password_blob(const std::string& utf8) {
-    std::wstring wide = text::utf8_to_wide_lossy(utf8);
+    std::wstring wide;
+    try {
+        wide = text::utf8_to_wide(utf8);  // strict: a password must reach SAP exactly as given
+    } catch (const std::invalid_argument&) {
+        throw CredentialError("INVALID_PASSWORD", "Password is not valid UTF-8");
+    }
     const size_t bytes = wide.size() * sizeof(wchar_t);
     if (bytes > kMaxPasswordBlobBytes) {
         scrub_string(wide);
@@ -124,7 +133,7 @@ SecretBuffer decode_password_blob(const unsigned char* data, size_t size) {
 // ---------------------------------------------------------------- Windows store
 
 WindowsCredentialStore::WindowsCredentialStore(std::string target_prefix)
-    : prefix_(target_prefix.empty() ? std::wstring(kTargetPrefixW) : text::utf8_to_wide_lossy(target_prefix)) {}
+    : prefix_(target_prefix.empty() ? std::wstring(kTargetPrefixW) : text::utf8_to_wide(target_prefix)) {}
 
 std::optional<StoredCredential> WindowsCredentialStore::read(const std::string& connection) {
     const std::wstring target = target_name(connection, prefix_);
@@ -156,7 +165,12 @@ void WindowsCredentialStore::write(const std::string& connection, const Credenti
     if (meta.client.size() > kMaxAttributeBytes || meta.language.size() > kMaxAttributeBytes) {
         throw CredentialError("INVALID_ARGUMENT", "Client or language value is too long");
     }
-    std::wstring user = text::utf8_to_wide_lossy(meta.username);
+    std::wstring user;
+    try {
+        user = text::utf8_to_wide(meta.username);
+    } catch (const std::invalid_argument&) {
+        throw CredentialError("INVALID_ARGUMENT", "User name is not valid UTF-8");
+    }
     std::wstring comment = L"fairyfly SAP GUI logon";
     std::wstring key_schema = L"fairyfly:schema";
     std::wstring key_client = L"fairyfly:client";

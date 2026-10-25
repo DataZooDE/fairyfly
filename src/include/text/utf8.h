@@ -1,8 +1,9 @@
 #pragma once
 // UTF-8 (fairyfly's strings) <-> UTF-16 (Windows, COM) in one place. Two policies:
 //  - strict (utf8_to_wide, wide_to_utf8): throw std::invalid_argument on invalid input; for strings that reach SAP.
-//  - lossy (*_lossy): never throw; an invalid sequence becomes U+FFFD; for logging, window titles, Win32 names,
-//    credential targets and console output, where a best-effort text beats an exception.
+//  - lossy (*_lossy): never throw; an invalid sequence becomes U+FFFD; only for text people read: logs, window
+//    titles, tooltips, console output. Never for identities, secrets, paths, command lines or anything a decision
+//    is based on: those stay strict.
 #include <windows.h>
 
 #include <limits>

@@ -56,13 +56,13 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
         WinHttpSetOption(session.h, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
     }
     const std::string connect_host = req.connect_host.empty() ? req.host : req.connect_host;
-    Handle connection(WinHttpConnect(session.h, text::utf8_to_wide_lossy(connect_host).c_str(), static_cast<INTERNET_PORT>(req.port), 0));
+    Handle connection(WinHttpConnect(session.h, text::utf8_to_wide(connect_host).c_str(), static_cast<INTERNET_PORT>(req.port), 0));
     if (!connection.h) {
         out.win_error = GetLastError();
         out.error = error_text(out.win_error);
         return out;
     }
-    Handle request(WinHttpOpenRequest(connection.h, text::utf8_to_wide_lossy(req.method).c_str(), text::utf8_to_wide_lossy(req.path).c_str(), nullptr, WINHTTP_NO_REFERER,
+    Handle request(WinHttpOpenRequest(connection.h, text::utf8_to_wide(req.method).c_str(), text::utf8_to_wide(req.path).c_str(), nullptr, WINHTTP_NO_REFERER,
                                       WINHTTP_DEFAULT_ACCEPT_TYPES, req.tls ? WINHTTP_FLAG_SECURE : 0));
     if (!request.h) {
         out.win_error = GetLastError();
@@ -77,8 +77,8 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
     DWORD no_redirect = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     WinHttpSetOption(request.h, WINHTTP_OPTION_REDIRECT_POLICY, &no_redirect, sizeof(no_redirect));
     std::wstring headers;
-    if (connect_host != req.host) headers += L"Host: " + text::utf8_to_wide_lossy(req.host + ":" + std::to_string(req.port)) + L"\r\n";
-    for (const auto& [k, v] : req.headers) headers += text::utf8_to_wide_lossy(k + ": " + v) + L"\r\n";
+    if (connect_host != req.host) headers += L"Host: " + text::utf8_to_wide(req.host + ":" + std::to_string(req.port)) + L"\r\n";
+    for (const auto& [k, v] : req.headers) headers += text::utf8_to_wide(k + ": " + v) + L"\r\n";
     const DWORD body_size = static_cast<DWORD>(req.body.size());
     const BOOL sent = WinHttpSendRequest(request.h, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
                                          headers.empty() ? 0 : static_cast<DWORD>(-1L), body_size ? const_cast<char*>(req.body.data()) : WINHTTP_NO_REQUEST_DATA,

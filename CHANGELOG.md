@@ -6,10 +6,16 @@
 
 - One `lower_ascii` / `upper_ascii` / `trim` / `iequals` / `is_loopback_host` (`string_utils.h`) instead of about
   25 private copies; ASCII only, independent of the C locale.
-- One UTF-8 <-> UTF-16 module (`text/utf8.h`) with an explicit strict policy (throws; strings sent to SAP) and a
-  lossy one (never throws, invalid input becomes U+FFFD; logs, window titles, credentials, setup, console). It
-  replaces nine hand-written converters. COM member names in log lines are UTF-8 now (they went through the
-  ANSI code page). Tray tooltips and message boxes no longer throw on a UTF-8 sequence cut at the length limit.
+- One UTF-8 <-> UTF-16 module (`text/utf8.h`) replaces nine hand-written converters, with two explicit policies.
+  Strict (throws) for everything a decision or an identity depends on: SAP strings, credential targets, user
+  names and passwords, setup's account names, URL prefixes, SDDL and the elevated command line, PowerShell
+  parameters, the tray's command lines, environment, registry and mutex names. Lossy (never throws, U+FFFD) only
+  for text people read: logs, window titles, tooltips, balloons, menus, console output.
+- Malformed UTF-8 in a connection name, user name or password is now refused (`INVALID_CONNECTION_NAME`,
+  `INVALID_ARGUMENT`, `INVALID_PASSWORD`) instead of being replaced. Before, two malformed names could share one
+  Credential Manager entry, and a password could change before it reached SAP.
+- COM member names in log lines are UTF-8 now (they went through the ANSI code page). Tray tooltips no longer
+  throw on a UTF-8 sequence cut at the length limit.
 
 ### Dead code removed (2026-10-25 code review)
 

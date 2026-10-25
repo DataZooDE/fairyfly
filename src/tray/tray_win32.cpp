@@ -19,8 +19,10 @@ namespace fairyfly::tray {
 
 namespace {
 
-// display text (tooltips, balloons, message boxes): never throw on a cut or invalid UTF-8 sequence
-std::wstring utf8_to_wide(std::string_view s) { return text::utf8_to_wide_lossy(s); }
+// Display text (tooltips, balloons, menu labels, message boxes) never throws on a cut or invalid UTF-8 sequence;
+// command lines, environment blocks, registry names/values and mutex names stay strict (com::utf8_to_wide).
+std::wstring display_wide(std::string_view s) { return text::utf8_to_wide_lossy(s); }
+using com::utf8_to_wide;
 
 constexpr UINT kTrayCallback = WM_APP + 1;
 constexpr UINT kMsgRefresh = WM_APP + 2;
@@ -170,11 +172,11 @@ public:
         if (HWND hwnd = hwnd_) PostMessageW(hwnd, kMsgBalloon, 0, 0);
     }
     bool confirm(const std::string& title, const std::string& text) override {
-        return MessageBoxW(hwnd_, utf8_to_wide(text).c_str(), utf8_to_wide(title).c_str(),
+        return MessageBoxW(hwnd_, display_wide(text).c_str(), display_wide(title).c_str(),
                            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND | MB_TOPMOST) == IDYES;
     }
     void message_box(const std::string& title, const std::string& text) override {
-        MessageBoxW(hwnd_, utf8_to_wide(text).c_str(), utf8_to_wide(title).c_str(),
+        MessageBoxW(hwnd_, display_wide(text).c_str(), display_wide(title).c_str(),
                     MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST);
     }
     bool show_running_instance() override {
@@ -298,7 +300,7 @@ private:
     bool modify_icon() {
         NOTIFYICONDATAW nid = base_data();
         nid.uFlags = NIF_TIP;
-        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), utf8_to_wide(current_tip_));
+        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), display_wide(current_tip_));
         return Shell_NotifyIconW(NIM_MODIFY, &nid) == TRUE;
     }
 
@@ -323,7 +325,7 @@ private:
         nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         nid.uCallbackMessage = kTrayCallback;
         nid.hIcon = icon_for_state(view.icon);
-        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), utf8_to_wide(view.tooltip));
+        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), display_wide(view.tooltip));
         current_icon_ = view.icon;
         current_tip_ = view.tooltip;
         return Shell_NotifyIconW(NIM_ADD, &nid) == TRUE;
@@ -335,7 +337,7 @@ private:
         NOTIFYICONDATAW nid = base_data();
         nid.uFlags = NIF_ICON | NIF_TIP;
         nid.hIcon = icon_for_state(view.icon);
-        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), utf8_to_wide(view.tooltip));
+        copy_wide(nid.szTip, ARRAYSIZE(nid.szTip), display_wide(view.tooltip));
         Shell_NotifyIconW(NIM_MODIFY, &nid);
         current_icon_ = view.icon;
         current_tip_ = view.tooltip;
@@ -350,8 +352,8 @@ private:
         NOTIFYICONDATAW nid = base_data();
         nid.uFlags = NIF_INFO;
         nid.dwInfoFlags = NIIF_INFO;
-        copy_wide(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), utf8_to_wide(title));
-        copy_wide(nid.szInfo, ARRAYSIZE(nid.szInfo), utf8_to_wide(text));
+        copy_wide(nid.szInfoTitle, ARRAYSIZE(nid.szInfoTitle), display_wide(title));
+        copy_wide(nid.szInfo, ARRAYSIZE(nid.szInfo), display_wide(text));
         Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
@@ -365,7 +367,7 @@ private:
             UINT flags = MF_STRING;
             if (!item.enabled) flags |= MF_GRAYED;
             if (item.checked) flags |= MF_CHECKED;
-            const std::wstring label = utf8_to_wide(item.label);
+            const std::wstring label = display_wide(item.label);
             if (!item.children.empty()) {
                 HMENU sub = build_native(item.children, ids);
                 AppendMenuW(menu, flags | MF_POPUP, reinterpret_cast<UINT_PTR>(sub), label.c_str());
@@ -556,7 +558,7 @@ private:
 class Win32Clipboard : public Clipboard {
 public:
     bool set_text(const std::string& text) override {
-        const std::wstring wide = utf8_to_wide(text);
+        const std::wstring wide = display_wide(text);
         if (!OpenClipboard(nullptr)) return false;
         EmptyClipboard();
         const size_t bytes = (wide.size() + 1) * sizeof(wchar_t);

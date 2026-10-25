@@ -10,11 +10,16 @@ namespace utils {
 /// ASCII white space: space, \t, \n, \r, \f, \v.
 constexpr bool is_ascii_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
 
+/// A-Z -> a-z for one byte; every other byte stays as it is.
+constexpr char to_lower_ascii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+
+/// 0-9, A-Z, a-z (never a non-ASCII byte, whatever the C locale says).
+constexpr bool is_ascii_alnum(char c) { return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+
 /// A-Z -> a-z; every other byte (also non-ASCII) stays as it is, whatever the C locale says.
 [[nodiscard]] inline std::string lower_ascii(std::string_view s) {
     std::string out(s);
-    for (char& c : out)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    for (char& c : out) c = to_lower_ascii(c);
     return out;
 }
 
@@ -26,12 +31,15 @@ constexpr bool is_ascii_space(char c) { return c == ' ' || c == '\t' || c == '\n
     return out;
 }
 
-/// Without ASCII white space at both ends.
-[[nodiscard]] inline std::string trim(std::string_view s) {
+/// Without ASCII white space at both ends, as a view into `s` (no allocation).
+[[nodiscard]] constexpr std::string_view trim_view(std::string_view s) {
     while (!s.empty() && is_ascii_space(s.front())) s.remove_prefix(1);
     while (!s.empty() && is_ascii_space(s.back())) s.remove_suffix(1);
-    return std::string(s);
+    return s;
 }
+
+/// Without ASCII white space at both ends.
+[[nodiscard]] inline std::string trim(std::string_view s) { return std::string(trim_view(s)); }
 
 /// Equal ignoring ASCII case.
 [[nodiscard]] inline bool iequals(std::string_view a, std::string_view b) {

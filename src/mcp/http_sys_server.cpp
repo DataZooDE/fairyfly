@@ -530,7 +530,7 @@ bool McpHttpServer::bind(std::string* error) {
     rc = ::HttpSetRequestQueueProperty(s.queue, HttpServer503VerbosityProperty, &verbosity, sizeof(verbosity), 0, nullptr);
     if (rc != NO_ERROR) spdlog::warn("HttpSetRequestQueueProperty(503 verbosity) failed: {}", win_error(rc));
 
-    const std::wstring wide_prefix = text::utf8_to_wide_lossy(prefix);
+    const std::wstring wide_prefix = text::utf8_to_wide(prefix);
     rc = ::HttpAddUrlToUrlGroup(s.group, wide_prefix.c_str(), 0, 0);
     if (rc == ERROR_ACCESS_DENIED)
         return fail("no_url_reservation", "no URL reservation for " + prefix + " (access denied): run 'fairyfly mcp setup' "

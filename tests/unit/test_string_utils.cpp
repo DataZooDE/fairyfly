@@ -20,6 +20,20 @@ TEST_CASE("string utils: trim removes ASCII white space at both ends only", "[ut
     CHECK(trim("x") == "x");
 }
 
+TEST_CASE("string utils: trim_view trims without allocating, char helpers are ASCII only", "[utils][string]") {
+    const std::string s = "  Host: x \r\n";
+    const std::string_view v = trim_view(s);
+    CHECK(v == "Host: x");
+    CHECK(v.data() == s.data() + 2);  // a view into the input
+    CHECK(trim_view("   ").empty());
+    CHECK(to_lower_ascii('Q') == 'q');
+    CHECK(to_lower_ascii('\xC4') == '\xC4');
+    CHECK(is_ascii_alnum('z'));
+    CHECK(is_ascii_alnum('7'));
+    CHECK_FALSE(is_ascii_alnum('_'));
+    CHECK_FALSE(is_ascii_alnum('\xE4'));
+}
+
 TEST_CASE("string utils: iequals compares ASCII case-insensitively", "[utils][string]") {
     CHECK(iequals("LocalHost", "localhost"));
     CHECK_FALSE(iequals("localhost", "localhost."));

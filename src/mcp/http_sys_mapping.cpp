@@ -10,12 +10,6 @@ namespace fairyfly::mcp::httpsys {
 
 namespace {
 
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
-    return s;
-}
-
 void fail(std::string* error, const std::string& message) {
     if (error) *error = message;
 }
@@ -69,7 +63,7 @@ std::string make_prefix(std::string_view scheme, std::string_view host_in, int p
         fail(error, "invalid endpoint path '" + std::string(path) + "'");
         return {};
     }
-    std::string host = utils::lower_ascii(trim(host_in));
+    std::string host = utils::lower_ascii(utils::trim_view(host_in));
     if (host.empty() || host == "+" || host == "*" || host == "0.0.0.0") {
         host = "+";
     } else if (host == "localhost" || host == "127.0.0.1") {
@@ -206,7 +200,7 @@ bool is_http11(const HTTP_REQUEST& request) {
 
 ContentLength parse_content_length(std::string_view header_value) {
     ContentLength out;
-    const std::string_view v = trim(header_value);
+    const std::string_view v = utils::trim_view(header_value);
     if (header_value.empty()) return out;
     out.present = true;
     if (v.empty()) return out;

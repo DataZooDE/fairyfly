@@ -100,7 +100,7 @@ public:
     }
 
     std::optional<std::string> resolve_user_sid(const std::string& user) override {
-        const std::wstring name = text::utf8_to_wide_lossy(user);
+        const std::wstring name = text::utf8_to_wide(user);
         DWORD sid_size = 0, domain_size = 0;
         SID_NAME_USE use;
         LookupAccountNameW(nullptr, name.c_str(), nullptr, &sid_size, nullptr, &domain_size, &use);
@@ -145,11 +145,11 @@ public:
         }
         const std::string exe = exe_path();
         std::wstring params = L"mcp setup --apply-plan \"" + plan_file.wstring() + L"\" --result-file \"" + result_file.wstring() +
-                              L"\" --plan-sha256 " + text::utf8_to_wide_lossy(request.plan_sha256) + L" --plan-nonce " + text::utf8_to_wide_lossy(request.nonce) +
+                              L"\" --plan-sha256 " + text::utf8_to_wide(request.plan_sha256) + L" --plan-nonce " + text::utf8_to_wide(request.nonce) +
                               L" --plan-parent-pid " + std::to_wstring(request.parent_pid);
-        if (!request.sid.empty()) params += L" --plan-sid " + text::utf8_to_wide_lossy(request.sid);
+        if (!request.sid.empty()) params += L" --plan-sid " + text::utf8_to_wide(request.sid);
         if (request.force_binding) params += L" --plan-force-binding";
-        const std::wstring wexe = text::utf8_to_wide_lossy(exe);
+        const std::wstring wexe = text::utf8_to_wide(exe);
         const std::wstring wdir = win::to_path(exe).parent_path().wstring();
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         SHELLEXECUTEINFOW info{};
