@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "include/audit_log.h"
@@ -164,4 +165,13 @@ TEST_CASE("fill: one field is validated by one rule set for the CLI, MCP and the
     std::string list_why;
     CHECK_FALSE(sap::parse_fill_fields(json::array({json{{"element", "e"}}}), list_why));
     CHECK(list_why == "fields[0]: provide 'value' or set 'clear' to true");
+}
+
+TEST_CASE("fill: a single field keeps its row range; only a fields list caps rows at a million", "[fill]") {
+    // codex 2026-10-25: the shared rules brought the list's 1,000,000 row cap to the single MCP fill
+    const Argv argv = fill_argv(json{{"element", "wnd[0]/usr/cntlGRID/shellcont/shell"}, {"value", "1"}, {"row", 1000001}, {"column", "MENGE"}});
+    CHECK(std::find(argv.begin(), argv.end(), "1000001") != argv.end());
+    std::string why;
+    CHECK_FALSE(sap::parse_fill_fields(json::array({json{{"element", "g"}, {"value", "1"}, {"row", 1000001}, {"column", "C"}}}), why));
+    CHECK(why == "fields[0]: 'row' must be a zero-based integer >= 0");
 }
