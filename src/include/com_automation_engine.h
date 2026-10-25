@@ -59,6 +59,16 @@ private:
     std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> find_session_by_id(
         const std::string& session_id) const;
     bool owner_window_allowed(const ComGuiSessionPtr& session) const noexcept;
+    /// What SAP GUI's own OpenConnection yielded (launch_connection).
+    struct NativeOpen {
+        bool session_created = false;     ///< a session came up and is bound
+        bool opened = false;              ///< the connection opened
+        bool scripting_disabled = false;  ///< SAP reports backend GUI scripting disabled
+        bool logon_missing = false;       ///< SAP Logon is not running
+        std::string error;
+    };
+    NativeOpen open_native_connection(const std::string& connection_name, json& trace);
+    std::vector<ConnectionLauncher::ExistingSession> open_sessions_now() const;
 
 public:
     /// Constructor - initializes COM but doesn't connect to SAP

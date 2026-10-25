@@ -137,3 +137,33 @@ TEST_CASE("engine: reading a field answers its text", "[engine][actions]") {
     REQUIRE(r.status == Result::Status::Success);
     CHECK(r.data.dump().find("DEVELOPER") != std::string::npos);
 }
+
+TEST_CASE("engine: a launch through SAP GUI's OpenConnection binds the new session", "[engine][actions][launch]") {
+    SapScene scene;
+    auto engine = scene.engine();
+    FakeNode* opened = scene.make(L"GuiConnection", L"/app/con[1]");
+    FakeNode* opened_sessions = scene.make(L"GuiComponentCollection", L"");
+    FakeNode* new_session = scene.make(L"GuiSession", L"/app/con[1]/ses[0]");
+    opened->dispatches[L"Children"] = opened_sessions;
+    opened->bools[L"DisabledByServer"] = false;
+    opened_sessions->items = {new_session};
+    scene.app->methods.insert(L"OpenConnection");
+    scene.app->dispatches[L"OpenConnection"] = opened;
+    const Result r = engine->launch_connection("BIG", false);
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Success);
+    REQUIRE(scene.app->calls.size() == 1);
+    CHECK(scene.app->calls[0].first == L"OpenConnection");
+    CHECK(scene.app->calls[0].second.rfind(L"BIG,", 0) == 0);   // the SAP Logon entry first
+    CHECK(r.data.dump().find("/app/con[1]/ses[0]") != std::string::npos);
+}
+
+TEST_CASE("engine: a launch SAP GUI cannot open, without the sapshcut fallback, names the entry", "[engine][actions][launch]") {
+    SapScene scene;
+    auto engine = scene.engine();   // the fake application has no OpenConnection
+    const Result r = engine->launch_connection("BIG", false);
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "CONNECTION_OPEN_FAILED");
+    CHECK(r.error["connection_name"] == "BIG");
+}

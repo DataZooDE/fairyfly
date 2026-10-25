@@ -253,6 +253,70 @@ Result ComAutomationEngine::attach_by_session_id(const std::string& session_id) 
     return result;
 }
 
+/// Step 1 of a launch: SAP GUI's own OpenConnection (fast, in-process, no sapshcut security prompt), bound when it
+/// yields a session within two seconds.
+ComAutomationEngine::NativeOpen ComAutomationEngine::open_native_connection(const std::string& connection_name, json& trace) {
+    NativeOpen out;
+    try {
+        if (!app_) {
+            app_ = ComGuiApplication::create();
+        }
+        if (app_) {
+            spdlog::info("Attempting native COM OpenConnection('{}')", connection_name);
+            auto conn = app_->open_connection(connection_name, true, false);
+            out.opened = conn != nullptr;
+            if (conn) {
+                try {
+                    out.scripting_disabled = conn->get_bool_property(L"DisabledByServer");
+                } catch (const ComException&) {
+                    // Older SAP GUI versions may not expose this property.
+                }
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                while (!out.scripting_disabled && conn->get_session_count() == 0 &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
+                }
+            }
+            if (conn && conn->get_session_count() > 0) {
+                bind_session(conn, conn->get_session(0));
+                out.session_created = true;
+                spdlog::info("Native COM OpenConnection established session: {}", current_session_->get_id());
+                trace.push_back({
+                    {"step", "native_open_connection"},
+                    {"success", true},
+                    {"session_id", current_session_->get_id()}
+                });
+            }
+        }
+    } catch (const SapLogonNotRunningException& e) {
+        out.logon_missing = true;
+        out.error = e.what();
+        spdlog::warn("Launch refused: {}", out.error);
+    } catch (const std::exception& e) {
+        out.error = e.what();
+        spdlog::debug("Native COM OpenConnection attempt failed: {}", out.error);
+    }
+    return out;
+}
+
+/// Every session SAP GUI has open now (a launch must yield a new one; an existing session on the same SAP Logon
+/// entry is no evidence that it worked).
+std::vector<ConnectionLauncher::ExistingSession> ComAutomationEngine::open_sessions_now() const {
+    std::vector<ConnectionLauncher::ExistingSession> existing_sessions;
+    for (int c = 0; c < app_->get_connection_count(); ++c) {
+        auto existing_connection = app_->get_connection(c);
+        if (!existing_connection) continue;
+        for (int s = 0; s < existing_connection->get_session_count(); ++s) {
+            auto existing_session = existing_connection->get_session(s);
+            if (existing_session) {
+                existing_sessions.push_back({existing_session->get_id(), existing_session->get_server_session_key(),
+                                             existing_session});
+            }
+        }
+    }
+    return existing_sessions;
+}
+
 Result ComAutomationEngine::launch_connection(const std::string& connection_name, bool allow_sapshcut) {
     const Stopwatch timer;
     Result result;
@@ -265,51 +329,13 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         trace.push_back({{"step", "launch_start"}, {"connection_name", connection_name}});
 
         // Step 1: Try native COM OpenConnection first (fast, in-process, avoids sapshcut security prompt)
-        bool session_created = false;
-        bool native_connection_opened = false;
-        bool backend_scripting_disabled = false;
+        const NativeOpen native = open_native_connection(connection_name, trace);
+        bool session_created = native.session_created;
+        const bool native_connection_opened = native.opened;
+        const bool backend_scripting_disabled = native.scripting_disabled;
+        const bool sap_logon_missing = native.logon_missing;
+        const std::string& native_error = native.error;
         bool used_sapshcut = false;
-        bool sap_logon_missing = false;
-        std::string native_error;
-        try {
-            if (!app_) {
-                app_ = ComGuiApplication::create();
-            }
-            if (app_) {
-                spdlog::info("Attempting native COM OpenConnection('{}')", connection_name);
-                auto conn = app_->open_connection(connection_name, true, false);
-                native_connection_opened = conn != nullptr;
-                if (conn) {
-                    try {
-                        backend_scripting_disabled = conn->get_bool_property(L"DisabledByServer");
-                    } catch (const ComException&) {
-                        // Older SAP GUI versions may not expose this property.
-                    }
-                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-                    while (!backend_scripting_disabled && conn->get_session_count() == 0 &&
-                           std::chrono::steady_clock::now() < deadline) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-                    }
-                }
-                if (conn && conn->get_session_count() > 0) {
-                    bind_session(conn, conn->get_session(0));
-                    session_created = true;
-                    spdlog::info("Native COM OpenConnection established session: {}", current_session_->get_id());
-                    trace.push_back({
-                        {"step", "native_open_connection"},
-                        {"success", true},
-                        {"session_id", current_session_->get_id()}
-                    });
-                }
-            }
-        } catch (const SapLogonNotRunningException& e) {
-            sap_logon_missing = true;
-            native_error = e.what();
-            spdlog::warn("Launch refused: {}", native_error);
-        } catch (const std::exception& e) {
-            native_error = e.what();
-            spdlog::debug("Native COM OpenConnection attempt failed: {}", native_error);
-        }
 
         if (!session_created && (native_connection_opened || !allow_sapshcut || sap_logon_missing)) {
             const char* code = native_connection_opened ? "SESSION_NOT_READY"
@@ -338,21 +364,9 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             used_sapshcut = true;
             // A launched session must be new; an existing session on the same
             // SAP Logon entry is not evidence that this launch succeeded.
-            std::vector<ConnectionLauncher::ExistingSession> existing_sessions;
             if (!app_) throw std::runtime_error("Cannot inspect SAP sessions before launch");
             connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
-            for (int c = 0; c < app_->get_connection_count(); ++c) {
-                auto existing_connection = app_->get_connection(c);
-                if (!existing_connection) continue;
-                for (int s = 0; s < existing_connection->get_session_count(); ++s) {
-                    auto existing_session = existing_connection->get_session(s);
-                    if (existing_session) {
-                        existing_sessions.push_back({existing_session->get_id(),
-                                                     existing_session->get_server_session_key(),
-                                                     existing_session});
-                    }
-                }
-            }
+            const std::vector<ConnectionLauncher::ExistingSession> existing_sessions = open_sessions_now();
 
             bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name);
             trace.push_back({
