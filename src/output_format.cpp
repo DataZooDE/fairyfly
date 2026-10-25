@@ -1,5 +1,6 @@
 // format_output: a Result as JSON, Markdown, plain text or TOON for the CLI and the MCP server. The command that
-// produced the result says how it renders (command_table::Render); nothing is guessed from the result's keys.
+// produced the result says how it renders (command_table::Render); a result of another command is never rendered
+// as a screen or a diagnosis, and a variant of the command whose data has another shape renders generically.
 #include "include/cli_handler.h"
 #include "include/formatters/compact_json.h"
 #include "include/formatters/screen_markdown_formatter.h"
@@ -116,9 +117,22 @@ std::string generic_markdown(const json& response, bool verbose_errors) {
     return oss.str();
 }
 
+/// The data a command's own renderer is written for. Other variants of the same command (`screen read
+/// --dump-object-tree`, `screen read --no-children`, ...) return other data and render generically.
+bool renders_as(Render render, const json& data) {
+    switch (render) {
+        case Render::ScreenFind: return data.contains("scanned_count") && data.contains("elements") && data["elements"].is_array();
+        case Render::ScreenRead: return data.contains("screen_id") && data.contains("hierarchy");
+        case Render::Doctor: return data.contains("overall_health") && data.contains("checks");
+        case Render::Generic: return false;
+    }
+    return false;
+}
+
 std::string markdown(const Result& result, bool verbose_errors, Render render) {
     const json response = result.to_json();
-    if (response["status"] == "success" && response.contains("data") && response["data"].is_object()) {
+    if (response["status"] == "success" && response.contains("data") && response["data"].is_object() &&
+        renders_as(render, response["data"])) {
         switch (render) {
             case Render::ScreenFind: return screen_find_markdown(response["data"]);
             case Render::ScreenRead: return screen_read_markdown(response);
