@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.25.2 (2026-10-25)
 
 ### Cloud link and stdio MCP: a closed default connection is re-attached
 
