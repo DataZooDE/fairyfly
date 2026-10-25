@@ -16,6 +16,8 @@
 - No notification for a change fairyfly refuses anyway (`--read-only`, `FAIRYFLY_READ_ONLY`).
 - Keys are named in the approval: "press Save (Ctrl+S)" instead of "press 11".
 - `link run --allow-write` is still accepted and has no effect.
+- A cloud call gets write rights only for the change approved at this desktop (or by **Allow changes in SAP**),
+  whatever the gateway's grant says about approval; any other call runs read-only.
 
 ### Cloud link: approval follow-ups (fairyfly #36)
 
