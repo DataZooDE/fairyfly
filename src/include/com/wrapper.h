@@ -245,6 +245,8 @@ public:
     /// Get button ID at specified position (0-based)
     /// Returns empty string if position invalid or method fails
     std::string get_button_id(int position) const;
+    /// One of the toolbar's by-position string getters (GetButtonId, GetButtonText, ...); "" on failure.
+    std::string button_string(const wchar_t* method, int position) const;
 
     /// Get button text at specified position
     /// Returns empty string if position invalid or method fails

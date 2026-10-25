@@ -1542,136 +1542,36 @@ int ComGuiElement::get_button_count() const {
     return get_int_property(L"ButtonCount");
 }
 
-std::string ComGuiElement::get_button_id(int position) const {
+namespace {
+/// A toolbar's by-position answer that is a string ("" when the call fails or answers something else).
+std::string text_result(HRESULT hr, const _variant_t& result) {
+    return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : std::string();
+}
+}  // namespace
+
+std::string ComGuiElement::button_string(const wchar_t* method, int position) const {
     try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonId", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("GetButtonId method not found", hr);
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
         _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            throw ComException("Failed to get button ID", hr);
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
+        const HRESULT hr = call_method(method, {_variant_t(position)}, result);
+        if (FAILED(hr))
+            spdlog::debug("{} failed for position {}: hr=0x{:08X}", text::wide_to_utf8_lossy(method), position, (unsigned)hr);
+        return text_result(hr, result);
     } catch (const std::exception& e) {
-        spdlog::debug("get_button_id failed for position {}: {}", position, e.what());
+        spdlog::debug("{} failed for position {}: {}", text::wide_to_utf8_lossy(method), position, e.what());
         return "";
     }
 }
 
-std::string ComGuiElement::get_button_text(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonText", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_text failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
-
-std::string ComGuiElement::get_button_tooltip(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonTooltip", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_tooltip failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
-
-std::string ComGuiElement::get_button_type(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonType", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_type failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
+std::string ComGuiElement::get_button_id(int position) const { return button_string(L"GetButtonId", position); }
+std::string ComGuiElement::get_button_text(int position) const { return button_string(L"GetButtonText", position); }
+std::string ComGuiElement::get_button_tooltip(int position) const { return button_string(L"GetButtonTooltip", position); }
+std::string ComGuiElement::get_button_type(int position) const { return button_string(L"GetButtonType", position); }
 
 bool ComGuiElement::get_button_enabled(int position) const {
     try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonEnabled", &dispid);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
         _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        // Result is a byte (VT_UI1) or boolean
-        if (result.vt == VT_UI1 || result.vt == VT_BOOL) {
-            return result.boolVal != 0;
-        }
-        return false;
+        if (FAILED(call_method(L"GetButtonEnabled", {_variant_t(position)}, result))) return false;
+        return (result.vt == VT_UI1 || result.vt == VT_BOOL) && result.boolVal != 0;   // a byte or a boolean
     } catch (const std::exception& e) {
         spdlog::debug("get_button_enabled failed for position {}: {}", position, e.what());
         return false;

@@ -116,6 +116,11 @@ std::string safe_bstr_to_string(const VARIANT& var, const char* context = nullpt
 /// Safely invoke an IDispatch method or property with Win32 SEH protection
 /// Catches access violations (0xC0000005) inside native SAP GUI COM controls
 HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, DISPPARAMS* params, VARIANT* result);
+/// safe_invoke with `args` in reading order (DispArgs).
+inline HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, std::initializer_list<_variant_t> args, VARIANT* result) {
+    DispArgs params(flags, args);
+    return safe_invoke(obj, dispid, flags, params.get(), result);
+}
 
 } // namespace sap
 } // namespace fairyfly
