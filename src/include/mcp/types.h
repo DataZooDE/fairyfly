@@ -173,6 +173,8 @@ struct ServeOptions {
     bool insecure_http = false;
     /// Exact SID/CLIENT/USER identities allowed through this HTTP endpoint; empty disables owner filtering.
     std::vector<std::string> owner_sap_identities;
+    /// mcp.yaml / FAIRYFLY_MCP_AUDIT_*: below FAIRYFLY_AUDIT* and --no-audit/--audit-required (audit::resolve_config).
+    audit::AuditFileSettings audit_file;
 };
 
 /// How a tool renders its result.

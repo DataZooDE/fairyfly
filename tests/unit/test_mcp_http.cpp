@@ -2261,7 +2261,8 @@ TEST_CASE("Loopback http.sys: unauthenticated slow bodies cannot exhaust the wor
 
 // Documents a limit, stays [!mayfail]: the per-URL-group HeaderWait (10 s) does NOT apply to a connection that has
 // not delivered a complete header; only the machine-wide http.sys timer (default 120 s) closes it (measured 125 s).
-TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][!mayfail]") {
+// [.][slow]: 16 s per run; run it with `unit_tests "[slow]"`.
+TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][.][slow][!mayfail]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
     BIND_OR_SKIP(server);
@@ -2281,7 +2282,8 @@ TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the ker
 
 // A request whose headers are complete (and authenticated) but whose body never arrives: the URL group's
 // EntityBody timer (15 s) is what ends it. Measured, not assumed.
-TEST_CASE("Loopback http.sys: an unfinished body with a valid token is cut by the kernel", "[httpsys][loopback][loris]") {
+// [.][slow]: 22 s per run; run it with `unit_tests "[slow]"`.
+TEST_CASE("Loopback http.sys: an unfinished body with a valid token is cut by the kernel", "[httpsys][loopback][loris][.][slow]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
     BIND_OR_SKIP(server);

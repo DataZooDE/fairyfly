@@ -161,36 +161,30 @@ std::string monthly_file_name(std::chrono::system_clock::time_point now) {
 }
 
 AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cli_required,
-                           std::chrono::system_clock::time_point now) {
-    auto get = [&](const char* name) { return getenv_fn ? getenv_fn(name) : std::string(); };
+                           std::chrono::system_clock::time_point now, const AuditFileSettings& file_settings) {
+    const config::Environment env(getenv_fn);
     AuditConfig config;
 
-    const std::string mode_env = get(config::env::kAudit);
+    // lowest layer: mcp.yaml (required beats a disable there too)
+    if (file_settings.enabled == false) config.mode = Mode::Disabled;
+    if (file_settings.required == true) config.mode = Mode::Required;
+    // then FAIRYFLY_AUDIT
+    const std::string mode_env = env.get(config::env::kAudit);
     if (config::parse_off(mode_env)) config.mode = Mode::Disabled;
     else if (config::normalized(mode_env) == "required") config.mode = Mode::Required;
+    else if (config::parse_flag(mode_env)) config.mode = Mode::Enabled;
+    // then the command line
     if (cli_no_audit) config.mode = Mode::Disabled;
     if (cli_required) config.mode = Mode::Required;  // fail safe: required beats any disable
 
-    const std::string file_env = get(config::env::kAuditFile);
-    if (!file_env.empty()) {
+    if (const std::string file_env = env.get(config::env::kAuditFile); !file_env.empty()) {
         config.file = std::filesystem::path(file_env);
-        return config;
+    } else if (file_settings.file && !file_settings.file->empty()) {
+        config.file = std::filesystem::path(*file_settings.file);
+    } else {
+        const std::filesystem::path data = env.data_dir();
+        config.file = (data.has_parent_path() ? data : std::filesystem::path(".fairyfly")) / "audit" / monthly_file_name(now);
     }
-
-    std::filesystem::path dir;
-#ifdef _WIN32
-    const std::string local = get(config::env::kLocalAppData);
-    if (!local.empty()) dir = std::filesystem::path(local) / "fairyfly" / "audit";
-#else
-    const std::string home = get(config::env::kHome);
-    if (!home.empty()) dir = std::filesystem::path(home) / ".local" / "share" / "fairyfly" / "audit";
-#endif
-    if (dir.empty()) {
-        std::error_code ec;
-        auto tmp = std::filesystem::temp_directory_path(ec);
-        dir = (ec ? std::filesystem::path(".fairyfly") : tmp / "fairyfly") / "audit";
-    }
-    config.file = dir / monthly_file_name(now);
     return config;
 }
 

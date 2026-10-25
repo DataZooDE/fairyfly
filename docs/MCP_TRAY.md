@@ -117,8 +117,7 @@ Keys (every active line of the generated template equals the default):
 | `tools.families[]` | all | expose only these families |
 | `default_connection`, `format` | unset, markdown | defaults for tool calls |
 | `tray.enabled` / `start_minimized_notice` / `autostart` | false / true / false | tray behavior (`autostart` documents intent; use `--install-autostart`) |
-| `audit.enabled` / `required` / `file` | true / false / default | audit trail settings |
-| `auth.token_prefix` | ffy | prefix of generated tokens |
+| `audit.enabled` / `required` / `file` | true / false / default | audit trail settings; `FAIRYFLY_AUDIT`, `FAIRYFLY_AUDIT_FILE`, `--no-audit` and `--audit-required` override them |
 
 No secrets belong in this file. Unknown keys and keys named password/secret/token* produce a warning; a
 secret-like key with a value, or a value that looks like a token or `Bearer ...`, is refused with

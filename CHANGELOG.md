@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Review fixes (2026-10-25 code review)
+
+- `mcp.yaml`'s `audit.enabled`, `audit.required` and `audit.file` (and `FAIRYFLY_MCP_AUDIT_*`) are applied. They were
+  validated and documented but ignored, so `audit.required: true` did nothing. Precedence: `--no-audit` /
+  `--audit-required` > `FAIRYFLY_AUDIT` / `FAIRYFLY_AUDIT_FILE` > `mcp.yaml` > default; required still wins over
+  every disable.
+- `auth.token_prefix` is removed (it was never applied; tokens always start with `ffy_`). A file that still has it
+  gets the usual "unknown key (removed: ...)" warning.
+- A result no command set reports `INTERNAL_NO_STATUS` instead of "not implemented … Phase 1 scaffolding".
+- The unit tests that attach to a live SAP GUI session (and could select tabs in it) are tagged `[.][live]` and no
+  longer run by default; the two slow http.sys timeout tests are tagged `[.][slow]`. The unit run takes about 48 s
+  instead of 84 s.
+
 ### One reader for environment variables
 
 - `FAIRYFLY_READ_ONLY` and the other switches are read by one shared reader (`config::Environment`). They are on

@@ -19,11 +19,27 @@ struct Result {
         NotImplemented
     };
 
-    Status status = Status::NotImplemented;
+    /// A Result nobody set is an error (INTERNAL_NO_STATUS in to_json), never a silent success.
+    Status status = Status::Error;
     json data;
     json error;
     json diagnostics;  // Detailed trace for autonomous debugging
     std::chrono::milliseconds duration{0};
+
+    static Result ok(json data = nullptr) {
+        Result r;
+        r.status = Status::Success;
+        r.data = std::move(data);
+        return r;
+    }
+    /// {"code", "message"} plus "suggestions" when given.
+    static Result fail(std::string code, std::string message, json suggestions = nullptr) {
+        Result r;
+        r.status = Status::Error;
+        r.error = {{"code", std::move(code)}, {"message", std::move(message)}};
+        if (!suggestions.is_null()) r.error["suggestions"] = std::move(suggestions);
+        return r;
+    }
 
     json to_json() const {
         json response;
@@ -34,15 +50,15 @@ struct Result {
                 break;
             case Status::Error:
                 response["status"] = "error";
-                response["error"] = error;
+                response["error"] = error.is_null() || error.empty()
+                                        ? json{{"code", "INTERNAL_NO_STATUS"}, {"message", "The command produced no result"}}
+                                        : error;
                 break;
             case Status::NotImplemented:
                 response["status"] = "error";
-                response["error"]["code"] = "NOT_IMPLEMENTED";
-                response["error"]["message"] = "Command not yet implemented";
-                response["error"]["suggestions"] = json::array({
-                    "This is Phase 1 scaffolding - SAP COM integration coming next"
-                });
+                response["error"] = error.is_null() || error.empty()
+                                        ? json{{"code", "NOT_IMPLEMENTED"}, {"message", "Command not yet implemented"}}
+                                        : error;
                 break;
         }
         response["metadata"]["duration_ms"] = duration.count();
@@ -65,7 +81,7 @@ struct ResultT {
         NotImplemented
     };
 
-    Status status = Status::NotImplemented;
+    Status status = Status::Error;
     T value;
     json error;
     json diagnostics;

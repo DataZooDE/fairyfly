@@ -112,14 +112,7 @@ std::vector<KeySpec> build_specs() {
     add(make("audit.required", ValueType::Bool, Value{false}, "Fail calls when the audit trail cannot be written"));
     add(make("audit.file", ValueType::String, std::nullopt, "Audit file (unset = %LOCALAPPDATA%\\fairyfly\\audit\\YYYY-MM.jsonl)"));
 
-    k = make("auth.token_prefix", ValueType::String, Value{std::string("ffy")}, "Prefix of generated bearer tokens (2-8 lower-case letters/digits)");
-    add(k);
     return s;
-}
-
-bool valid_token_prefix(const std::string& s) {
-    if (s.size() < 2 || s.size() > 8) return false;
-    return std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::islower(c) || std::isdigit(c); });
 }
 
 /// Range/enum/format checks shared by YAML, environment and flags.
@@ -142,8 +135,6 @@ bool validate_value(const KeySpec& spec, const Value& value, std::string* error)
         }
         if (spec.key == "server.host" && (text.empty() || text.find_first_of(" \t/") != std::string::npos))
             return fail("must be a host name, an IP address, '+' or '*' without spaces or slashes");
-        if (spec.key == "auth.token_prefix" && !valid_token_prefix(text))
-            return fail("must be 2-8 lower-case letters or digits");
         if (spec.key == "audit.file" && text.empty()) return fail("must not be empty (remove the key for the default)");
     } else if (spec.type == ValueType::StringList && spec.key == "server.allow_ip") {
         for (const auto& entry : std::get<Vec>(value))
@@ -204,10 +195,8 @@ struct Walker {
     void unknown_key(const std::string& path, const YAML::Node& key_node, const YAML::Node& value) {
         const int line = key_node.Mark().line + 1;
         const auto dot = path.rfind('.');
-        if (removed_key(path)) {
-            issue(Severity::Warning, "CONFIG_UNKNOWN_KEY",
-                  "unknown key '" + path + "' is ignored (removed: fairyfly no longer trusts a reverse proxy; "
-                  "it listens with http.sys directly)", line, path);
+        if (const char* why = removed_key(path)) {
+            issue(Severity::Warning, "CONFIG_UNKNOWN_KEY", "unknown key '" + path + "' is ignored (removed: " + why + ")", line, path);
             return;
         }
         if (looks_secret_key(dot == std::string::npos ? path : path.substr(dot + 1))) {
@@ -224,8 +213,15 @@ struct Walker {
         issue(Severity::Warning, "CONFIG_UNKNOWN_KEY", "unknown key '" + path + "' is ignored", line, path);
     }
 
-    /// Keys of earlier versions: reported as unknown, with the reason.
-    static bool removed_key(const std::string& path) { return path == "auth.proxy_secret_source"; }
+    /// Keys of earlier versions: reported as unknown, with the reason (nullptr: not a removed key).
+    static const char* removed_key(const std::string& path) {
+        static const std::map<std::string, const char*> removed = {
+            {"auth.proxy_secret_source", "fairyfly no longer trusts a reverse proxy; it listens with http.sys directly"},
+            {"auth.token_prefix", "it was never applied; tokens always start with ffy_"},
+        };
+        const auto i = removed.find(path);
+        return i == removed.end() ? nullptr : i->second;
+    }
 
     void leaf(const KeySpec& spec, const YAML::Node& key_node, const YAML::Node& node) {
         const int line = key_node.Mark().line + 1;
@@ -504,7 +500,16 @@ McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const Env
     return out;
 }
 
+audit::AuditFileSettings audit_settings(const McpConfig& c) {
+    audit::AuditFileSettings s;
+    s.enabled = c.get_bool("audit.enabled");
+    s.required = c.get_bool("audit.required");
+    s.file = c.get_string("audit.file");
+    return s;
+}
+
 void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
+    o.audit_file = audit_settings(c);
     if (auto v = c.get_bool("mode.read_only")) o.read_only = *v;
     if (auto v = c.get_bool("mode.allow_write")) o.allow_write = *v;
     if (auto v = c.get_int("default_connection")) o.default_connection = static_cast<int>(*v);

@@ -1775,7 +1775,9 @@ TEST_CASE("ComGuiApplication initialization", "[com][gui_application]") {
     }
 }
 
-TEST_CASE("ComGuiApplication with SAP GUI present", "[com][gui_application][!mayfail]") {
+// [live]: these attach to whatever SAP GUI session is open and may change it (select tabs). They are hidden
+// from the unit run; run them deliberately with `unit_tests "[live]"` on a test system.
+TEST_CASE("ComGuiApplication with SAP GUI present", "[com][gui_application][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();
@@ -1803,7 +1805,7 @@ TEST_CASE("ComGuiApplication with SAP GUI present", "[com][gui_application][!may
 
 }
 
-TEST_CASE("ComGuiConnection properties", "[com][gui_connection][!mayfail]") {
+TEST_CASE("ComGuiConnection properties", "[com][gui_connection][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();
@@ -1839,7 +1841,7 @@ TEST_CASE("ComGuiConnection properties", "[com][gui_connection][!mayfail]") {
     }
 }
 
-TEST_CASE("ComGuiSession basic operations", "[com][gui_session][!mayfail]") {
+TEST_CASE("ComGuiSession basic operations", "[com][gui_session][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();
@@ -1882,7 +1884,7 @@ TEST_CASE("ComGuiSession basic operations", "[com][gui_session][!mayfail]") {
     }
 }
 
-TEST_CASE("ComGuiWindow operations", "[com][gui_window][!mayfail]") {
+TEST_CASE("ComGuiWindow operations", "[com][gui_window][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();
@@ -1931,7 +1933,7 @@ TEST_CASE("ComGuiWindow operations", "[com][gui_window][!mayfail]") {
     }
 }
 
-TEST_CASE("ComGuiElement properties", "[com][gui_element][!mayfail]") {
+TEST_CASE("ComGuiElement properties", "[com][gui_element][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();
@@ -2151,7 +2153,7 @@ TEST_CASE("ComGuiElement properties", "[com][gui_element][!mayfail]") {
 
 
 
-TEST_CASE("ComGuiElement find_element_by_id", "[com][gui_element][!mayfail]") {
+TEST_CASE("ComGuiElement find_element_by_id", "[com][gui_element][.][live]") {
     ComGuiApplicationPtr app;
     try {
         app = ComGuiApplication::create();

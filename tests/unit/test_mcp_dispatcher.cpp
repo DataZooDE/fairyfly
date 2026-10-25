@@ -757,7 +757,8 @@ TEST_CASE("Result shaper: direct behaviours", "[mcp][shaper]") {
     auto empty_header = shape_result(ok({{"scanned_count", 0}, {"elements", json::array()}}), spec, policy, "");
     CHECK(text_of(empty_header).rfind("# Screen matches", 0) == 0);
 
-    Result not_implemented;  // default status is NotImplemented
+    Result not_implemented;
+    not_implemented.status = Result::Status::NotImplemented;
     auto ni = shape_result(not_implemented, spec, policy, "hdr");
     CHECK(ni.is_error);
     CHECK(text_of(ni).rfind("ERROR NOT_IMPLEMENTED", 0) == 0);

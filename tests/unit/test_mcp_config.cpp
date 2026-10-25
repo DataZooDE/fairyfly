@@ -39,9 +39,7 @@ TEST_CASE("config: a valid file is parsed into typed values", "[config]") {
         "tools:\n"
         "  families: [session, screen]\n"
         "default_connection: 2\n"
-        "format: json\n"
-        "auth:\n"
-        "  token_prefix: ffy\n");
+        "format: json\n");
     REQUIRE(r.ok());
     CHECK(r.issues.empty());
     CHECK(r.config.get_int("server.port") == 9000);
@@ -96,7 +94,6 @@ TEST_CASE("config: validation errors carry line numbers", "[config]") {
         {"tools:\n  families: [session, nonsense]\n", "CONFIG_INVALID_VALUE", 2},
         {"server:\n  allowed_hosts: notalist\n", "CONFIG_INVALID_VALUE", 2},
         {"server: 5\n", "CONFIG_INVALID_STRUCTURE", 1},
-        {"auth:\n  token_prefix: BAD!\n", "CONFIG_INVALID_VALUE", 2},
         {"server:\n  allow_ip: [10.0.0.0/33]\n", "CONFIG_INVALID_VALUE", 2},
         {"server:\n  tls: maybe\n", "CONFIG_INVALID_VALUE", 2},
         {"format: xml\n", "CONFIG_INVALID_VALUE", 1},
@@ -147,10 +144,14 @@ TEST_CASE("config: unknown keys warn, secret-like keys and values are handled", 
         const auto bearer = parse_yaml("server:\n  allowed_hosts: [\"Bearer abcdef\"]\n");
         CHECK(bearer.has_secret());
     }
-    SECTION("the known auth keys are not mistaken for secrets") {
+    SECTION("the removed auth.token_prefix key is reported as unknown, with the reason (tokens start with ffy_)") {
+        // review 2026-10-25: it was validated and documented but never applied
         const auto r = parse_yaml("auth:\n  token_prefix: ffy\n");
         CHECK(r.ok());
-        CHECK(r.issues.empty());
+        const auto* issue = find_issue(r, "CONFIG_UNKNOWN_KEY");
+        REQUIRE(issue != nullptr);
+        CHECK(issue->message.find("removed") != std::string::npos);
+        CHECK(config::find_key("auth.token_prefix") == nullptr);
     }
     SECTION("the removed auth.proxy_secret_source key is reported as unknown, with the reason") {
         const auto r = parse_yaml("auth:\n  proxy_secret_source: credential-manager\n");
@@ -395,4 +396,21 @@ TEST_CASE("config: issue formatting", "[config]") {
     CHECK(format_issue(issue, "mcp.yaml") == "mcp.yaml:12: error CONFIG_INVALID_VALUE: bad");
     issue.line = 0;
     CHECK(format_issue(issue, "mcp.yaml") == "mcp.yaml: error CONFIG_INVALID_VALUE: bad");
+}
+
+TEST_CASE("config: audit.* reaches the audit trail settings, from the file and from FAIRYFLY_MCP_AUDIT_*", "[config]") {
+    const auto r = parse_yaml("audit:\n  enabled: false\n  required: true\n  file: D:/a.jsonl\n");
+    REQUIRE(r.ok());
+    const auto s = audit_settings(r.config);
+    CHECK(s.enabled == false);
+    CHECK(s.required == true);
+    CHECK(s.file == std::string("D:/a.jsonl"));
+    // apply_config carries them to the server options (cli_entry reconfigures the audit sink with them)
+    mcp::ServeOptions o;
+    apply_config(r.config, o);
+    CHECK(o.audit_file.required == true);
+    CHECK(o.audit_file.file == std::string("D:/a.jsonl"));
+    CHECK_FALSE(audit_settings(McpConfig{}).required.has_value());
+    const McpConfig env = env_layer(fake_env({{"FAIRYFLY_MCP_AUDIT_REQUIRED", "true"}}));
+    CHECK(audit_settings(env).required == true);
 }

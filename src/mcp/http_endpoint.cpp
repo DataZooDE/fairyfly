@@ -11,6 +11,7 @@
 
 #include "include/auth/ip.h"
 #include "include/mcp/authenticators.h"
+#include "include/mcp/http_sys_mapping.h"
 #include "include/mcp/json_rpc.h"
 #include "include/mcp/protocol_session.h"
 
@@ -62,10 +63,6 @@ std::string host_name(const std::string& header) {
     const auto first = h.find(':');
     if (first != std::string::npos && first == h.rfind(':')) return h.substr(0, first);
     return h;
-}
-
-bool is_loopback_host(const std::string& name) {
-    return name == "127.0.0.1" || name == "localhost" || name == "[::1]" || name == "::1";
 }
 
 std::string strip_slash(std::string s) {
@@ -356,7 +353,7 @@ void HttpEndpoint::set_session_router(SessionExecutorPool* pool, SessionRouter r
 bool HttpEndpoint::host_allowed(const std::string& host_header) const {
     const std::string name = host_name(host_header);
     if (name.empty()) return false;
-    if (is_loopback_host(name)) return true;
+    if (httpsys::is_loopback_host(name)) return true;
     const std::string raw = lower(trim(host_header));
     for (const auto& allowed : options_.allowed_hosts)
         if (allowed == name || allowed == raw) return true;

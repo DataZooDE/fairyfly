@@ -108,6 +108,8 @@ McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const Env
 /// Sets mode.*, limits.*, tools.families, default_connection, format and server.transport/port/host/sse/
 /// allowed_hosts/cors_origins. insecure_no_auth is never set from configuration (flag only).
 void apply_config(const McpConfig& layers, mcp::ServeOptions& options);
+/// audit.enabled / audit.required / audit.file of one layer (or of merged layers).
+audit::AuditFileSettings audit_settings(const McpConfig& layers);
 
 // ---- Paths and text -----------------------------------------------------------------------------
 /// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %LOCALAPPDATA%\fairyfly\mcp.yaml.

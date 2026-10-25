@@ -377,3 +377,38 @@ TEST_CASE("AuditRecord with huge MCP fields stays within the record cap", "[audi
     REQUIRE(j["tool"].get<std::string>().size() <= 64);
     REQUIRE(j["request_id"].get<std::string>().size() <= 64);
 }
+
+TEST_CASE("resolve_config: mcp.yaml's audit.* sits below FAIRYFLY_AUDIT* and the command-line flags", "[audit]") {
+    // review 2026-10-25: audit.enabled/required/file were validated and documented but never applied
+    const auto now = utc(2026, 9, 29, 12, 0, 0);
+    const auto none = env_of({{"LOCALAPPDATA", "C:/L"}});
+    AuditFileSettings required;
+    required.required = true;
+    AuditFileSettings disabled;
+    disabled.enabled = false;
+    AuditFileSettings file;
+    file.file = "D:/yaml/audit.jsonl";
+
+    CHECK(resolve_config(none, false, false, now, required).mode == Mode::Required);
+    CHECK(resolve_config(none, false, false, now, disabled).mode == Mode::Disabled);
+    AuditFileSettings both = disabled;
+    both.required = true;  // fail safe inside the file too
+    CHECK(resolve_config(none, false, false, now, both).mode == Mode::Required);
+    CHECK(resolve_config(none, false, false, now, file).file == fs::path("D:/yaml/audit.jsonl"));
+    // the environment beats the file
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now, disabled).mode == Mode::Enabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "off"}}), false, false, now, required).mode == Mode::Disabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT_FILE", "E:/env.jsonl"}}), false, false, now, file).file == fs::path("E:/env.jsonl"));
+    // and the flags beat both (--audit-required wins over every disable)
+    CHECK(resolve_config(none, true, false, now, required).mode == Mode::Disabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "off"}}), false, true, now, disabled).mode == Mode::Required);
+    // nothing set: as before
+    CHECK(resolve_config(none, false, false, now, {}).mode == Mode::Enabled);
+}
+
+TEST_CASE("AuditSink::reconfigure switches mode and file", "[audit]") {
+    AuditSink sink(AuditConfig{Mode::Enabled, "a.jsonl"});
+    sink.reconfigure(AuditConfig{Mode::Required, "b.jsonl"});
+    CHECK(sink.mode() == Mode::Required);
+    CHECK(sink.file() == fs::path("b.jsonl"));
+}
