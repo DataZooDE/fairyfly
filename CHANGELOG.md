@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### `fairyfly update apply`: the publisher is pinned (security)
+
+- A release must be signed by `O=DataZoo GmbH, C=DE` (organisation and country of the signer's certificate, compared
+  normalised, not the whole subject). Until now an unsigned installation accepted an executable validly signed by
+  *any* publisher whose `SHA256SUMS` in the same release matched, and a signed installation compared the full
+  certificate subject, so a new address in a re-validated certificate would have blocked every update. A signer
+  other than the pinned one is refused with `UPDATE_SIGNER_UNEXPECTED` (it replaces `UPDATE_SIGNER_CHANGED`).
+- A signature that is present but does not verify (expired without a time stamp, revoked, tampered) is refused with
+  `UPDATE_SIGNATURE_INVALID` also with `--allow-unsigned`; it was taken as "unsigned" before.
+- Unchanged: `SHA256SUMS` is mandatory, a signed installation never takes an unsigned release, and an unsigned
+  installation (the releases up to 2026.10.x are unsigned) takes an unsigned release only with `--allow-unsigned`; the
+  result now carries a `warning` that nothing proves who built it.
+- Forks set their own publisher with the CMake options `FAIRYFLY_UPDATE_SIGNER_ORGANIZATION` and
+  `FAIRYFLY_UPDATE_SIGNER_COUNTRY` ([docs/SIGNING.md](docs/SIGNING.md#updates)).
+
 ### Cloud link and stdio MCP: re-attach without a verified SAP user only for reads
 
 - A closed default connection is re-attached for a change (a write or destructive tool such as `gui_element_click`,
