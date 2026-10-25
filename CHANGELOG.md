@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link and stdio MCP: re-attach without a verified SAP user only for reads
+
+- A closed default connection is re-attached for a change (a write or destructive tool such as `gui_element_click`,
+  `gui_key_send`, `gui_element_fill`, `gui_batch`) only when the only open SAP session has the same SAP system,
+  client and logged-on user that the saved connection recorded.
+- A connection file of an older version (no system, client or user recorded), one saved before anybody logged on,
+  or an open session where nobody is logged on (the SAP logon screen) is re-attached for read-only tools only; the
+  note in the result says so. A change keeps `INVALID_CONNECTION` (or `SESSION_TARGET_CHANGED`) with the hint
+  "attach the SAP session again (gui_session_attach) and retry". Found live: after a tray restart an old connection
+  file was re-attached to a session on the logon screen (`A4H/000/`) instead of the previous `A4H/001/DEVELOPER`.
+
 ## 2026.10.25.2 (2026-10-25)
 
 ### Cloud link and stdio MCP: a closed default connection is re-attached

@@ -83,6 +83,19 @@ std::string sap_identity_of(const json& j) {
 bool sap_identity_complete(const json& j) {
     return !identity_field(j, "system").empty() && !identity_field(j, "client").empty() && !identity_field(j, "user").empty();
 }
+/// What a stale connection record says it was attached to, for the re-attach check: "SYS/CLIENT/USER" when complete,
+/// "SYS/CLIENT/" when it was attached before anybody logged on, empty when it records nothing (a file of an older version).
+std::string recorded_sap_identity(const json& j) {
+    if (sap_identity_complete(j)) return sap_identity_of(j);
+    if (!identity_field(j, "system").empty() && !identity_field(j, "client").empty())
+        return identity_field(j, "system") + "/" + identity_field(j, "client") + "/";
+    return {};
+}
+/// A tool that only reads SAP (the catalog's readOnlyHint, never a write tool): the only kind of call a stale default
+/// connection may be re-attached for without a verified, logged-on SAP user.
+bool reads_only(const ToolSpec& spec) {
+    return !spec.write_tool && spec.def.annotations.is_object() && spec.def.annotations.value("readOnlyHint", false);
+}
 
 /// The `session list` entry of one open session (system, client, user, ...), or null.
 json listed_session(const Result& listed, const std::string& session_id) {
@@ -396,9 +409,15 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 2b. token authorization (scope, token read-only, SAP system, T-code); the stdio principal allows everything
     const Principal& principal = ctx.principal;
     // stdio and link (auto_attach): the default connection's session is gone. Attach to the only open SAP GUI session
-    // when its system/client/user is `recorded` ("SYS/CLIENT/USER"; empty: not recorded, then unchecked with a
-    // warning), make it the default bound to that session and return its connection id; nullopt: nothing attached.
+    // when its system/client/user is `recorded` ("SYS/CLIENT/USER"), make it the default bound to that session and
+    // return its connection id; nullopt: nothing attached. Without that verified, logged-on identity (`recorded` empty:
+    // a file of an older version; "SYS/CLIENT/": only the system and client must match; or nobody logged on in the
+    // session) only a read-only tool re-attaches: a change is refused and `reattach_refused` says so.
     std::string reattach_note;  // said in the result when a default connection was re-attached
+    bool reattach_refused = false;
+    const std::string reattach_again_hint =
+        "the saved SAP connection had closed and the open SAP session is not verified as the same logged-on SAP user: "
+        "attach the SAP session again (gui_session_attach) and retry";
     const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) -> std::optional<int> {
         const Result listed = invoke({"session", "list"});
         const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
@@ -408,15 +427,26 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             return std::nullopt;
         }
         const std::string session_id = sessions[0].value("session_id", "");
-        const std::string live = sap_identity_of(listed_session(listed, session_id));
-        if (!recorded.empty() && live != recorded) {
+        const json candidate = listed_session(listed, session_id);
+        const std::string live = sap_identity_of(candidate);
+        const bool recorded_user = !recorded.empty() && recorded.back() != '/';
+        if (recorded_user ? live != recorded : (!recorded.empty() && live.rfind(recorded, 0) != 0)) {
             spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
                          name, stale_id, recorded, session_id, live);
             return std::nullopt;
         }
-        if (recorded.empty())
-            spdlog::warn("{}: saved connection {} is stale and records no SAP system/client/user; re-attaching "
-                         "to the only open SAP session {} ({}) unchecked", name, stale_id, session_id, live);
+        const bool verified = recorded_user && !identity_field(candidate, "user").empty();
+        if (!verified && !reads_only(*spec)) {
+            spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} ({}) is not verified as the "
+                         "same logged-on SAP user: not re-attached for a change", name, stale_id,
+                         recorded.empty() ? "no SAP system/client/user recorded" : recorded, session_id, live);
+            reattach_refused = true;
+            return std::nullopt;
+        }
+        if (!verified)
+            spdlog::warn("{}: saved connection {} ({}) is stale; re-attaching the only open SAP session {} ({}) "
+                         "for a read only", name, stale_id, recorded.empty() ? "no SAP system/client/user recorded" : recorded,
+                         session_id, live);
         const Result attached = invoke({"session", "attach", "--session-id", session_id});
         std::optional<int> id;
         if (attached.status == Result::Status::Success && attached.data.is_object() &&
@@ -442,6 +472,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                      name, stale_id, session_id, live, *id);
         reattach_note = "note: the saved SAP connection " + stale_id + " had closed; re-attached to the only open SAP session (" +
                         live + "), now connection " + std::to_string(*id) + ".";
+        if (!verified)
+            reattach_note += " It is not verified as the same logged-on SAP user, so it was re-attached for this read-only "
+                             "call only; before changing anything, attach the SAP session again (gui_session_attach).";
         return id;
     };
     if (!auth::scope_allows(principal, spec->family, name))
@@ -564,7 +597,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 !sticky_target->sap_identity.empty() && name.rfind("gui_session_", 0) != 0)
                 reattached = reattach_only_session(sticky_target->sap_identity, std::to_string(sticky_target->connection));
             if (!reattached)
-                return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session");
+                return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session",
+                            reattach_refused ? reattach_again_hint : "");
             record.connection = reattached;
             record.sap = {};
             policy_state_key = policy_fallback_key = session_policy_key(principal, "", record.connection);
@@ -1163,8 +1197,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             const json stale = result.error.is_object() && result.error.contains("stale_connection")
                                    ? result.error["stale_connection"] : json::object();
             const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
-            if (const auto id = reattach_only_session(sap_identity_complete(stale) ? sap_identity_of(stale) : std::string(),
-                                                      stale_id)) {
+            if (const auto id = reattach_only_session(recorded_sap_identity(stale), stale_id)) {
                 record.connection = id;
                 Policy reattached_policy = effective;
                 reattached_policy.default_connection = id;
@@ -1592,6 +1625,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // 6. shape
     if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
+    if (reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;
     if (name == "gui_element_fill" && result.status == Result::Status::Success && !args.contains("fields") &&
         result.data.is_object()) {
         const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
