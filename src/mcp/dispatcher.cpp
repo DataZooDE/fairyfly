@@ -35,8 +35,6 @@ namespace fairyfly::mcp {
 
 namespace {
 
-const std::set<std::string> kScreenDataTools = {"gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list"};
-
 std::string dump_compact(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
 
 ToolResult error_result(const std::string& code, const std::string& message, const std::string& hint = "") {
@@ -577,7 +575,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
         // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
         // until gui_transaction_start succeeds with an allowed code (nothing navigates back automatically).
-        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->family) &&
+        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->def.name) &&
             (tcode_blocked(policy_state_key) || tcode_blocked(policy_fallback_key)))
             return fail("TCODE_DENIED", "an earlier call of token '" + principal.name + "' left its allowed transactions; screen "
                                         "tools stay blocked until gui_transaction_start opens an allowed transaction");
@@ -1369,7 +1367,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // flag (the next call fails closed on them anyway); a known transaction outside the allowlist does.
     // Serialised with the blocked-state check above (single executor thread), see docs/MCP_REMOTE.md.
     bool tcode_left = false;
-    if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->family) || name == "gui_transaction_start")) {
+    if (!principal.tcodes.empty() && facts_provider_ && (auth::acts_on_screen(spec->def.name) || name == "gui_transaction_start")) {
         std::string after;
         std::string after_program, after_screen, after_identity;
         std::optional<int> after_connection;
@@ -1484,7 +1482,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (format == "json") shaped_spec.output = ToolOutput::Json;
     }
     std::optional<int> connection = record.connection;
-    const std::string header = kScreenDataTools.count(name) ? make_untrusted_header(result, connection) : std::string();
+    const std::string header =
+        command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
     const std::set<std::string> visible_now = visible_tool_names(&principal);
     ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
     if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_screen_read" &&
@@ -1617,9 +1616,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         for (auto& item : items) {
             const std::string name = item["tool"].get<std::string>();
             const ToolSpec* item_spec = find_spec(name);
-            if (!item_spec || (item_spec->family != "screen" && item_spec->family != "element" &&
-                               item_spec->family != "menu" && item_spec->family != "key" &&
-                               item_spec->family != "popup" && item_spec->family != "transaction"))
+            if (!item_spec || !command_table::tool_has(name, command_table::Trait::ScreenBound))
                 return batch_fail("BATCH_SESSION_REQUIRED", "owner-mode batches may contain only calls to one established SAP session");
             json arguments = item.value("arguments", json::object());
             if (arguments.contains("connection") && arguments["connection"] != connection)

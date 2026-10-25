@@ -1,5 +1,6 @@
 #include "include/mcp/http_endpoint.h"
 
+#include "include/command_table.h"
 #include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include <algorithm>
@@ -654,11 +655,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
             session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
             session_route.error_message = "the SAP session could not be routed";
         }
-        const bool global_control = session_route.global_control ||
-                                    tool == "gui_session_list" || tool == "gui_connection_list" ||
-                                    tool == "gui_credentials_list" || tool == "gui_doctor" ||
-                                    tool == "gui_session_lease" || tool == "gui_session_attach" ||
-                                    tool == "gui_session_login" || tool == "gui_session_launch";
+        const bool global_control =
+            session_route.global_control || command_table::tool_has(tool, command_table::Trait::GlobalControl);
         if (!session_route.error_code.empty() ||
             (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
             (!session_route.handled && !global_control)) {

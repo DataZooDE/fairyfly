@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Tool classification in the command table (2026-10-25 code review)
+
+- What a tool is (global control, targetless, listing, session system, lease-capable, worker-bound, screen-bound,
+  acts on the open transaction, returns screen data) is a trait of its row in `command_table.cpp`. Routing,
+  authorization, leases, the session worker, owner-mode batches and the untrusted-data header read it there
+  instead of nine hand-written lists in seven files.
+
 ### Tests: shared support, no fixed sleeps, faster (2026-10-25 code review)
 
 - `tests/unit/support/`: `TempDir` (removed also when a test fails; replaces five helpers and 12 inline

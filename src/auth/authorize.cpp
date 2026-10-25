@@ -1,5 +1,6 @@
 #include "include/auth/authorize.h"
 
+#include "include/command_table.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -173,7 +174,7 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
     if (!principal.tcodes.empty()) {
         // Screen-acting tools run inside the transaction that is open NOW: it must be allowlisted too.
         // Fails closed when it is unknown (residual race: it can change during the call, see docs/MCP.md).
-        if (check_system && acts_on_screen(family)) {
+        if (check_system && acts_on_screen(spec.def.name)) {
             const std::string open = current_tcode ? normalize_tcode(*current_tcode) : std::string();
             if (open.empty())
                 return refuse("TCODE_DENIED", "the open SAP transaction is not known and the token is limited to specific "
@@ -304,9 +305,7 @@ std::string normalize_tcode(const std::string& raw) {
     return utils::upper_ascii(s);
 }
 
-bool acts_on_screen(const std::string& family) {
-    return family == "screen" || family == "element" || family == "key" || family == "popup" || family == "menu";
-}
+bool acts_on_screen(const std::string& tool) { return command_table::tool_has(tool, command_table::Trait::ActsOnScreen); }
 
 std::string tcode_safe_key_spellings() {
     return "enter, f4, f8, pageup (page_up, pgup), pagedown (page_down, pgdn), pagetop (ctrl+pageup), "
@@ -341,16 +340,12 @@ mcp::PolicyDecision authorize_call(const mcp::Principal& principal, const mcp::T
 
 namespace {
 
+bool targetless_tool(const std::string& tool) { return command_table::tool_has(tool, command_table::Trait::Targetless); }
+
 bool session_system_tool(const std::string& tool, const mcp::json& args) {
-    if (tool == "gui_session_launch" || tool == "gui_session_login" || tool == "gui_session_attach" ||
-        tool == "gui_session_lease") return true;
+    if (command_table::tool_has(tool, command_table::Trait::SessionSystem)) return true;
     return tool == "gui_session_disconnect" && args.is_object() && args.contains("close_session") &&
            args["close_session"].is_boolean() && args["close_session"].get<bool>();
-}
-
-bool targetless_tool(const std::string& tool) {
-    return tool == "gui_session_list" || tool == "gui_connection_list" || tool == "gui_credentials_list" ||
-           tool == "gui_doctor" || tool == "gui_batch";
 }
 
 } // namespace
@@ -489,8 +484,7 @@ bool filter_named_rows(json& data, const char* rows_key, const char* name_key, c
 } // namespace
 
 bool listing_needs_filter(const mcp::Principal& principal, const std::string& tool) {
-    return !principal.connections.empty() &&
-           (tool == "gui_session_list" || tool == "gui_connection_list" || tool == "gui_credentials_list");
+    return !principal.connections.empty() && command_table::tool_has(tool, command_table::Trait::Listing);
 }
 
 bool filter_listing_for_connections(const mcp::Principal& principal, const std::string& tool, Result& result) {

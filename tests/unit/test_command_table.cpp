@@ -341,3 +341,48 @@ TEST_CASE("mcp tools table lists every tool and matches docs/MCP.md", "[command_
     REQUIRE(end != std::string::npos);
     CHECK(text.substr(begin + begin_marker.size(), end - begin - begin_marker.size()) == markdown);
 }
+
+namespace {
+std::set<std::string> tools_with(ct::Trait trait) {
+    std::set<std::string> out;
+    for (const auto& spec : ct::all_commands())
+        if (spec.is_tool() && spec.has(trait)) out.insert(spec.tool_name);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("command table: tool classification has one source", "[command_table][traits]") {
+    // review 2026-10-25: these sets were hand-written lists in seven files (route plan, HTTP endpoint, authorize,
+    // dispatcher batch, lease policy, worker protocol), and two of them already disagreed
+    using S = std::set<std::string>;
+    CHECK(tools_with(ct::Trait::GlobalControl) ==
+          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_session_lease",
+            "gui_session_attach", "gui_session_login", "gui_session_launch"});
+    CHECK(tools_with(ct::Trait::Targetless) ==
+          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch"});
+    CHECK(tools_with(ct::Trait::Listing) == S{"gui_session_list", "gui_connection_list", "gui_credentials_list"});
+    CHECK(tools_with(ct::Trait::SessionSystem) ==
+          S{"gui_session_launch", "gui_session_login", "gui_session_attach", "gui_session_lease"});
+    CHECK(tools_with(ct::Trait::LeaseCapable) ==
+          S{"gui_element_click", "gui_element_fill", "gui_element_f4", "gui_element_get", "gui_key_send", "gui_menu_select",
+            "gui_popup_close", "gui_screen_read", "gui_transaction_start", "gui_session_disconnect"});
+    CHECK(tools_with(ct::Trait::WorkerBound) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close",
+            "gui_transaction_start", "gui_session_disconnect"});
+    // one established session's screen: batch items in owner mode
+    CHECK(tools_with(ct::Trait::ScreenBound) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close",
+            "gui_transaction_start"});
+    // runs inside the transaction open now (T-code allowlists); starting a transaction is checked by its argument
+    CHECK(tools_with(ct::Trait::ActsOnScreen) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close"});
+    // returns SAP screen content: the result gets the "untrusted data" header
+    CHECK(tools_with(ct::Trait::ScreenData) == S{"gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list"});
+    CHECK(ct::tool_has("gui_screen_read", ct::Trait::WorkerBound));
+    CHECK_FALSE(ct::tool_has("gui_no_such_tool", ct::Trait::WorkerBound));
+    CHECK(ct::path_has({"screen", "read"}, ct::Trait::WorkerBound));
+    CHECK_FALSE(ct::path_has({"credentials", "set"}, ct::Trait::WorkerBound));
+}
