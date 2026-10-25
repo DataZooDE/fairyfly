@@ -166,6 +166,30 @@ private:
                                                                const std::function<bool()>& listing_interrupted);
     void auto_attach_and_retry(Result& result, const std::string& name, const Principal& principal, McpCallRecord& record,
                                const std::function<Result()>& retry);
+    // execute_call's shaping steps (dispatcher.cpp)
+    void hint_single_fills(Result& result);
+    void attach_screen_guard(ToolResult& shaped, const McpCallRecord& record, const audit::SapFacts& owner_pre_facts);
+    static void mark_tcode_left(ToolResult& shaped);
+    void remember_sticky_connection(ToolResult& shaped, const Result& result, McpCallRecord& record, const CallContext& ctx);
+    /// execute_call's refusal: maps the owner-mode boundary codes and records the code.
+    using RefuseCall = std::function<ToolResult(const std::string& code, const std::string& message, const std::string& hint)>;
+    ToolResult run_session_lease(const ToolSpec& spec, const json& args, const Principal& principal, McpCallRecord& record,
+                                 const std::optional<audit::SapFacts>& owner_pre_facts, const CallContext& ctx,
+                                 const RefuseCall& fail);
+    std::optional<CallRefusal> verify_owner_login_outcome(const Principal& principal, const json& args, McpCallRecord& record,
+                                                          const std::optional<audit::SapFacts>& login_pre_facts,
+                                                          const std::optional<audit::SapFacts>& anticipated_login);
+    std::optional<CallRefusal> verify_owner_launch_outcome(Result& result, const Principal& principal, McpCallRecord& record,
+                                                           const std::optional<audit::SapFacts>& checked_launch_facts,
+                                                           const LaunchTargetGuard& owner_launch_guard);
+    // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
+    std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
+                                                   McpCallRecord& record, const CallContext& ctx,
+                                                   std::optional<audit::SapFacts>& login_pre_facts,
+                                                   std::shared_ptr<void>& login_lane_reservation,
+                                                   const std::function<bool()>& acquire_control_probe_gate);
+    std::optional<CallRefusal> admit_prelogin_close(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
+                                                    const McpCallRecord& record, std::optional<std::string>& current_system);
     std::optional<CallRefusal> admission_refusal(const ToolSpec* spec, const std::string& name, const json& args,
                                                  const CallContext& ctx, bool selection_input);
     /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a
