@@ -7,7 +7,7 @@
 - COM errors and logs print an HRESULT as Windows documents it (`0x80020009`), not as a signed number
   (`0x-7FFDFFF7`); for example "SendVKey invoke failed", "OpenConnection failed: hr=..." and the screenshot errors.
 
-### No function over 150 lines (2026-10-25 code review)
+### Shorter functions, shared tree and tab steps (2026-10-25 code review)
 
 - The two tree readers share the item texts, the data columns and the nesting by path, which no longer asks SAP
   for every node's path a second time. `read_tab` and `read_with_tabs` share their tab steps.
