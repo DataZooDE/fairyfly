@@ -34,7 +34,7 @@ struct LinkOptions {
     std::string qr_style = "auto";  ///< auto | blocks | ascii (see link_console.h)
     int pair_timeout_s = 300;
     // run
-    bool allow_write = false;     ///< like `mcp --allow-write`; each write still needs the gateway's grant and an approval
+    bool allow_write = false;     ///< no effect since approval model v2 (changes are possible, each approved); kept for old command lines
     bool read_only = false;
     std::vector<std::string> families;
     std::string approve = "desktop";  ///< desktop (dialog) | no
@@ -80,8 +80,9 @@ int run_link(const LinkOptions& options, const std::function<cli::CommandHandler
              const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);
 /// Thread-safe: makes a running run_link() return, like Ctrl+C (the tray's Quit).
 void request_stop();
-/// The write mode of the run_link() in this process ("Allow changes in SAP" in the link tray).
-std::unique_ptr<tray::LinkWriteMode> make_write_mode_control();
+/// "Allow changes in SAP" in the link tray: the standing approval of run_link() in this process (saved for the user).
+/// `read_only`: the link runs with --read-only, the switch stays off.
+std::unique_ptr<tray::LinkWriteMode> make_write_mode_control(bool read_only);
 
 /// `link run --tray` (and its --install-autostart/--remove-autostart): relaunches detached from the console, then runs
 /// run_link() on this thread under the link tray. No MCP server, no HTTP. Returns the process exit code.

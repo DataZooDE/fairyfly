@@ -30,6 +30,9 @@ inline constexpr const char* TCatalog = "catalog";
 inline constexpr const char* TTrail = "trail";  // gateway -> desktop: the trail policy of this desktop changed
 inline constexpr const char* TStep = "step";    // desktop -> gateway: the record of one step (after its res)
 inline constexpr const char* TShot = "shot";    // desktop -> gateway: one chunk of a screenshot of that step
+// gateway -> desktop: the link policy of this desktop changed (LinkPolicy in `policy`; also in ready.policy). Sent to
+// every desktop; one from before approval model v2 ignores the frame and the ready field.
+inline constexpr const char* TPolicy = "policy";
 
 inline constexpr const char* kCapTrail = "trail/1";           // records steps and screenshots
 inline constexpr const char* kCapTrailBlur = "trail-blur/1";  // can blur password and bank fields on screenshots
@@ -45,6 +48,9 @@ inline constexpr const char* kCapCancel = "cancel/1";
 // crossed it still stops the call). Without that evt by its approval deadline the gateway cancels and, after a short
 // grace, answers APPROVAL_EXPIRED (before the assistant's MCP client gives up). res.approval is desktop-reported.
 inline constexpr const char* kCapApproval = "approval/1";
+// Approval model v2: the desktop applies the link policy (ApprovalPrompt::enforced, refuses anything but a person's yes
+// while enforced). An organisation that enforces the question sends changes only to desktops that announce it.
+inline constexpr const char* kCapApprovalPolicy = "approval-policy/1";
 inline constexpr size_t kShotMaxBytes = 4u << 20;             // one screenshot, encoded (PNG or WebP)
 inline constexpr size_t kShotChunkBytes = 512u << 10;         // raw bytes per shot frame (base64 in the frame)
 inline constexpr size_t kStepMaxBytes = 128u << 10;           // one step frame
@@ -72,6 +78,17 @@ struct TrailPolicy {
     static TrailPolicy from_json(const nlohmann::json& j);
 };
 
+// What the organisation decided for its desktops beyond a single call (approval model v2, 2026-10-25). Sent in
+// ready.policy on connect and in a policy frame whenever an admin changes it. Anything malformed reads as the default.
+struct LinkPolicy {
+    // The organisation's approval is "always" (the admin enforces it): every change asks the person at the desktop; the
+    // tray's "Allow changes in SAP" and the window's "Don't ask again" are greyed out. false: the user decides ("user").
+    // The gateway also signs it into each call (grants.approval "always"), which decides that call (link::Agent).
+    bool approval_enforced = false;
+    nlohmann::json to_json() const;  // {"v":1,"approval_enforced":bool}
+    static LinkPolicy from_json(const nlohmann::json& j);
+};
+
 struct Frame {
     std::string t;
     std::string id;         // request id "<instance>.<random>"
@@ -87,8 +104,9 @@ struct Frame {
     // {"v":1,"shots":bool,"blur":bool}), step record, shot chunk (kind before|after, seq from 0, last, base64 data)
     std::vector<std::string> caps;
     nlohmann::json trail, step;
+    nlohmann::json policy;  // ready and policy frames: LinkPolicy
     std::string data;
-    // approval (kCapApproval): req "await"; res and evt (kind "approval"): approved|remembered|denied|expired|locked|none
+    // approval (kCapApproval): req "await"; res and evt (kind "approval"): approved|remembered|standing|denied|expired|locked|none
     std::string approval;
     int seq = 0;
     bool last = false;

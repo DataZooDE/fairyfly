@@ -12,7 +12,7 @@ namespace ffy::link {
 
 ApprovalResult normalize(ApprovalResult r) {
     namespace k = approval_reason;
-    if (r.approved) r.reason = r.reason == k::kRemembered ? k::kRemembered : k::kApproved;
+    if (r.approved) r.reason = r.reason == k::kRemembered || r.reason == k::kStanding || r.reason == k::kUnattended ? r.reason : std::string(k::kApproved);
     else if (r.reason == k::kExpired || r.reason == "expired_in_queue") r.reason = k::kExpired;
     else if (r.reason != k::kLocked) r.reason = k::kDenied;
     return r;
@@ -22,7 +22,13 @@ namespace {
 struct Fixed : Approver {
     explicit Fixed(bool a) : a_(a) {}
     bool approve(const std::string&) override { return a_; }
+    // nobody was asked: a yes is "unattended", never a person's "approved"
+    ApprovalResult decide(const ApprovalPrompt&) override { return a_ ? ApprovalResult{true, approval_reason::kUnattended} : ApprovalResult{false, approval_reason::kDenied}; }
     bool a_;
+};
+struct Standing : Approver {
+    bool approve(const std::string&) override { return false; }
+    ApprovalResult decide(const ApprovalPrompt&) override { return {true, approval_reason::kStanding}; }
 };
 #ifdef _WIN32
 struct Desktop : Approver {
@@ -46,6 +52,7 @@ struct Desktop : Approver {
 }  // namespace
 
 std::shared_ptr<Approver> fixed_approver(bool a) { return std::make_shared<Fixed>(a); }
+std::shared_ptr<Approver> standing_approver() { return std::make_shared<Standing>(); }
 std::shared_ptr<Approver> desktop_approver() {
 #ifdef _WIN32
     return std::make_shared<Desktop>();
