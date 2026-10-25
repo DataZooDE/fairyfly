@@ -396,7 +396,7 @@ TEST_CASE("desktop approval: a yes in the window after the time is up is not a y
     CHECK(ui->windows.size() == 2);
 }
 
-TEST_CASE("desktop approval: the notification's Deny before the window's yes denies, and remembers nothing", "[link][approval]") {
+TEST_CASE("desktop approval: the notification's Deny before the window's yes denies, and turns nothing on", "[link][approval]") {
     // review of #36: the window notices the notification's answer only at its next timer tick; a yes in between came through
     auto ui = std::make_shared<FakeUi>();
     ui->window_answer = Answer::Approve;
@@ -424,7 +424,7 @@ TEST_CASE("desktop approval: the notification's Deny before the window's yes den
     CHECK(ui->windows.size() == 2);
 }
 
-TEST_CASE("desktop approval: the notification's Approve before the window's yes approves, and remembers nothing", "[link][approval]") {
+TEST_CASE("desktop approval: the notification's Approve before the window's yes approves, and turns nothing on", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     ui->window_answer = Answer::Approve;
     ui->window_remember = true;
