@@ -6,6 +6,7 @@
 
 #include "include/commands/cli_app.h"
 #include "include/commands/global_options.h"
+#include "include/commands/mcp_extras.h"
 
 #include <CLI/CLI.hpp>
 using namespace fairyfly;
@@ -520,4 +521,31 @@ TEST_CASE("config: every CLI option a key names exists on `fairyfly mcp`", "[con
         }
     }
     CHECK(bound >= 20);  // --mcp-host, --mcp-port/--port, --transport, --tls, ... (the server's flags)
+}
+
+TEST_CASE("config: the flags of a real `fairyfly mcp` command line become the flag layer", "[config][keys]") {
+    // review 2026-10-25 (Codex): the key-table test only checked that the options exist, not that they are read
+    CLI::App app{"fairyfly"};
+    commands::GlobalOptions global;
+    commands::add_global_options(app, global);
+    commands::build_command_tree(app);
+    const char* argv[] = {"fairyfly", "mcp", "--port", "9100", "--tools", "screen,element", "--allow-write",
+                          "--mcp-host", "0.0.0.0", "--call-timeout-ms", "5000"};
+    app.parse(static_cast<int>(std::size(argv)), argv);
+    const CLI::App* mcp_app = app.get_subcommand_no_throw("mcp");
+    REQUIRE(mcp_app != nullptr);
+    const McpConfig flags = commands::flags_layer(*mcp_app);
+    CHECK(flags.get_int("server.port") == 9100);  // --port is the second spelling of --mcp-port
+    CHECK(flags.get_list("tools.families") == std::vector<std::string>{"screen", "element"});
+    CHECK(flags.get_bool("mode.allow_write") == true);
+    CHECK(flags.get_string("server.host") == "0.0.0.0");
+    CHECK(flags.get_int("limits.call_timeout_ms") == 5000);
+    CHECK_FALSE(flags.has("mode.read_only"));  // not given: not in the layer
+    // applied over the defaults, the rest of the options keep their values
+    mcp::ServeOptions o;
+    apply_config(given(resolve_layers(McpConfig{}, McpConfig{}, flags)), o);
+    CHECK(o.port == 9100);
+    CHECK(o.allow_write);
+    CHECK(o.format == mcp::ServeOptions{}.format);
+    CHECK(o.max_calls_per_minute == mcp::ServeOptions{}.max_calls_per_minute);
 }
