@@ -72,6 +72,30 @@ json open_sessions(const Result& listed) {
     return sessions;
 }
 
+/// The SAP identity ("SYS/CLIENT/USER") of a `session list` session or a stale connection record; a missing or null
+/// field (a busy session, no user logged on, an older connection file) is empty.
+std::string identity_field(const json& j, const char* key) {
+    return j.is_object() && j.contains(key) && j[key].is_string() ? j[key].get<std::string>() : std::string();
+}
+std::string sap_identity_of(const json& j) {
+    return identity_field(j, "system") + "/" + identity_field(j, "client") + "/" + identity_field(j, "user");
+}
+bool sap_identity_complete(const json& j) {
+    return !identity_field(j, "system").empty() && !identity_field(j, "client").empty() && !identity_field(j, "user").empty();
+}
+
+/// The `session list` entry of one open session (system, client, user, ...), or null.
+json listed_session(const Result& listed, const std::string& session_id) {
+    const json& conns = listed.data.is_object() && listed.data.contains("connections") ? listed.data["connections"] : json::array();
+    if (!conns.is_array()) return nullptr;
+    for (const auto& c : conns) {
+        if (!c.is_object() || !c.contains("sessions") || !c["sessions"].is_array()) continue;
+        for (const auto& s : c["sessions"])
+            if (s.is_object() && s.value("id", "") == session_id) return s;
+    }
+    return nullptr;
+}
+
 /// Errors whose CLI suggestions ("Run 'fairyfly session attach'") mean nothing to an AI assistant get a hint that names
 /// a tool or what to ask the person at the desktop.
 /// Why a call runs read-only, for the assistant: the call's own grant (over the link: the organisation's switch in the
@@ -823,6 +847,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     } owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
 
     // 5. invoke
+    std::string reattach_note;  // 5c: said in the result when a stale default connection was re-attached
     if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
     const auto invoke_started = std::chrono::steady_clock::now();
     const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
@@ -1059,6 +1084,62 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 }
             }
         }
+        // 5c. re-attach (stdio, link): the implicit default connection names a session that is gone (SAP Logon or
+        // the link tray restarted). With exactly one open session of the same SAP system, client and user it is
+        // re-attached and the call runs again, inside this call: over the link its desktop approval still holds.
+        // An explicit `connection`, the HTTP endpoint, no or several sessions, another identity: refused as before.
+        if (policy_.auto_attach && !ctx.http && !worker_bound && implicit_sticky &&
+            name.rfind("gui_session_", 0) != 0 && result.status != Result::Status::Success &&
+            result_error_code(result) == "INVALID_CONNECTION") {
+            const json stale = result.error.is_object() && result.error.contains("stale_connection")
+                                   ? result.error["stale_connection"] : json::object();
+            const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
+            const Result listed = invoke({"session", "list"});
+            const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
+            if (sessions.size() != 1) {
+                spdlog::info("{}: saved connection {} is stale and {} SAP GUI sessions are open; not re-attached",
+                             name, stale_id, sessions.size());
+            } else {
+                const std::string session_id = sessions[0].value("session_id", "");
+                const std::string recorded = sap_identity_of(stale);
+                const std::string live = sap_identity_of(listed_session(listed, session_id));
+                const bool recorded_known = sap_identity_complete(stale);
+                if (recorded_known && live != recorded) {
+                    spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
+                                 name, stale_id, recorded, session_id, live);
+                    result.error["message"] = result.error.value("message", std::string()) +
+                                              "; the only open SAP session belongs to another system, client or user";
+                } else {
+                    if (!recorded_known)
+                        spdlog::warn("{}: saved connection {} is stale and records no SAP system/client/user; re-attaching "
+                                     "to the only open SAP session {} ({}) unchecked", name, stale_id, session_id, live);
+                    Result attached = invoke({"session", "attach", "--session-id", session_id});
+                    std::optional<int> id;
+                    if (attached.status == Result::Status::Success && attached.data.is_object() &&
+                        attached.data.contains("connection_file_id"))
+                        id = int_from_json(attached.data["connection_file_id"]);
+                    if (!id) {
+                        spdlog::warn("{}: re-attaching to SAP session {} failed", name, session_id);
+                    } else {
+                        set_sticky_connection(principal_key(principal), *id, "");
+                        record.connection = id;
+                        Policy reattached_policy = effective;
+                        reattached_policy.default_connection = id;
+                        std::vector<std::string> reattached_argv;
+                        try { reattached_argv = spec->build_argv(args, reattached_policy); }
+                        catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
+                        record.argv = reattached_argv;
+                        spdlog::info("{}: saved connection {} was stale; re-attached to the only open SAP session {} ({}), "
+                                     "now connection {}", name, stale_id, session_id, live, *id);
+                        reattach_note = "note: the saved SAP connection " + stale_id +
+                                        " had closed; re-attached to the only open SAP session (" + live +
+                                        "), now connection " + std::to_string(*id) + ".";
+                        result = invoke_selected(reattached_argv);
+                    }
+                }
+            }
+        }
+        if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts) {
@@ -1494,6 +1575,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     const std::string header = kScreenDataTools.count(name) ? make_untrusted_header(result, connection) : std::string();
     const std::set<std::string> visible_now = visible_tool_names(&principal);
     ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
+    if (!reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", reattach_note}});
     if (ctx.http && !policy_.owner_sap_identities.empty() && name == "gui_screen_read" &&
         result.status == Result::Status::Success && owner_pre_facts && facts_provider_) {
         std::optional<audit::SapFacts> current;

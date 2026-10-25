@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link and stdio MCP: a closed default connection is re-attached
+
+- After the link tray or SAP Logon restarted, the first tool call no longer fails with `INVALID_CONNECTION:
+  Connection N session no longer exists` when exactly one SAP GUI session is open: fairyfly re-attaches the saved
+  default connection to that session, runs the call and says so in the result ("re-attached to the only open SAP
+  session"). Over the link this happens inside the approved call, so a change is approved once, not twice.
+- Only for the implicit default connection, and only when the open session is the same SAP system, client and user
+  as the closed one. A saved connection now records them (`system`, `client`, `user` in `fairyfly.N.con`); for an
+  older file without them the only open session is used and a warning is logged.
+- Unchanged: an explicit `connection`, no or several open sessions, another system/client/user, and the HTTP endpoint
+  still get `INVALID_CONNECTION`.
+
 ## 2026.10.25.1 (2026-10-25)
 
 ### Cloud link: "Allow changes in SAP" is the approval (approval model v2)
