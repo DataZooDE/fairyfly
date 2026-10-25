@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Setup and process handles (2026-10-25 code review)
+
+- `mcp setup` and `mcp teardown` share their gates (dry run, nothing to do, read-only, consent, elevation) and their
+  step bookkeeping; messages and exit codes are unchanged.
+- Win32 handles are owned by one `UniqueHandle`: the PowerShell runner no longer leaks its pipes when a step in
+  between fails, and three local handle types are gone.
+
 ### One way to call SAP GUI's COM objects (2026-10-25 code review)
 
 - `SapGuiObject`'s six setter/invoker bodies are one `invoke_checked()`, and about 60 hand-built `DISPPARAMS` went
