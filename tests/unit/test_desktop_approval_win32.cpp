@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "include/link/desktop_approval_win32.h"
+#include "include/tray/tray_win32.h"
 
 using namespace fairyfly::link::approval;
 using namespace std::chrono_literals;
@@ -71,6 +72,23 @@ TEST_CASE("desktop approval window: \"Don't ask again\" turns on Allow changes i
     CHECK(contains(window_text(r), L"Approval is required by your administrator"));
 }
 
+TEST_CASE("standing approval: saved in the real tray settings (HKCU) and read back by a new process' Standing", "[link][approval][win32]") {
+    // the same key as "Allow changes in SAP" (link_allow_changes), under a value of its own that the test removes
+    const char* name = "link_allow_changes_unit_test";
+    std::shared_ptr<fairyfly::tray::TraySettings> settings = fairyfly::tray::make_win32_tray_settings();
+    auto open = [&] {
+        return std::make_shared<Standing>([&] { return settings->get(name); }, [&](const std::string& v) { return settings->set(name, v); });
+    };
+    CHECK_FALSE(open()->on());
+    CHECK(open()->set(true));
+    CHECK(settings->get(name) == std::optional<std::string>("1"));
+    CHECK(open()->on());  // a restart (or the next version) reads it back
+    CHECK(open()->set(false));
+    CHECK_FALSE(open()->on());
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\DataZoo\\fairyfly\\tray", L"link_allow_changes_unit_test");
+    CHECK_FALSE(settings->get(name).has_value());
+}
+
 TEST_CASE("desktop approval window: closes by itself when stopped (expired), nothing left on screen", "[link][approval][win32]") {
     auto ui = make_win32_ui([](const std::string&) {});
     Request r = sample();
@@ -122,6 +140,17 @@ TEST_CASE("manual: the approval window for 20 s (screenshots)", "[.][approval_ma
     auto ui = make_win32_ui([](const std::string&) {});
     Request r = sample();
     r.client = "Claude";
+    r.deadline = std::chrono::steady_clock::now() + 20s;
+    bool remember = false;
+    const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; }, remember);
+    std::cout << "answer " << int(a) << " remember " << remember << std::endl;
+}
+
+TEST_CASE("manual: the approval window when the administrator requires approval, 20 s (screenshots)", "[.][approval_manual][window_enforced]") {
+    auto ui = make_win32_ui([](const std::string&) {});
+    Request r = sample();
+    r.client = "Claude";
+    r.offer_standing = false;
     r.deadline = std::chrono::steady_clock::now() + 20s;
     bool remember = false;
     const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; }, remember);

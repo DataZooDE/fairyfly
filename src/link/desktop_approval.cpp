@@ -8,6 +8,8 @@
 #include <cctype>
 #include <random>
 
+#include "include/vkey.h"
+
 namespace fairyfly::link::approval {
 
 namespace {
@@ -31,6 +33,27 @@ std::string random_nonce() {
         for (int k = 0; k < 16; k++, v >>= 4) out += hex[v & 0xF];
     }
     return out;
+}
+
+// "press <key>" as people know the key; nullopt: not a key fairyfly knows
+std::optional<std::string> key_name(const std::string& key) {
+    const auto v = sap::parse_vkey(key);
+    if (!v) return std::nullopt;
+    switch (*v) {
+        case 0: return "Enter";
+        case 3: return "Back (F3)";
+        case 8: return "Execute (F8)";
+        case 11: return "Save (Ctrl+S)";
+        case 12: return "Cancel (F12)";
+        case 15: return "Exit (Shift+F3)";
+        case 80: return "First Page";
+        case 81: return "Page Up";
+        case 82: return "Page Down";
+        case 83: return "Last Page";
+    }
+    static const char* mods[] = {"", "Shift+", "Ctrl+", "Ctrl+Shift+"};
+    if (*v >= 1 && *v <= 48) return std::string(mods[(*v - 1) / 12]) + "F" + std::to_string((*v - 1) % 12 + 1);
+    return "VKey " + std::to_string(*v);
 }
 
 }  // namespace
@@ -79,7 +102,57 @@ std::string readable_step(const std::string& step) {
             at = begin + named.size() - 1;
         }
     }
+    // keys: "press 11" (gui_key_send), ", then press f8" (a fill's then_key); up to the next ',' or ';'
+    static const std::string press = "press ";
+    for (size_t at = out.find(press); at != std::string::npos; at = out.find(press, at + 1)) {
+        if (at > 0 && out[at - 1] != ' ') continue;
+        const size_t from = at + press.size();
+        size_t end = out.find_first_of(",;", from);
+        if (end == std::string::npos) end = out.size();
+        if (const auto name = key_name(out.substr(from, end - from))) {
+            out.replace(from, end - from, *name);
+            at = from + name->size() - 1;
+        }
+    }
     return out;
+}
+
+Standing::Standing(Load load, Save save) : save_(std::move(save)) {
+    if (load) {
+        try {
+            saved_ = load().value_or("0") == "1";
+        } catch (const std::exception& e) {
+            spdlog::warn("approval: \"Allow changes in SAP\" could not be read: {}", e.what());
+        }
+    }
+}
+
+bool Standing::on() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return saved_ && !enforced_;
+}
+
+bool Standing::saved() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return saved_;
+}
+
+bool Standing::enforced() const {
+    std::lock_guard<std::mutex> l(mu_);
+    return enforced_;
+}
+
+bool Standing::set(bool on) {
+    std::lock_guard<std::mutex> l(mu_);
+    if (on && enforced_) return false;
+    if (save_ && !save_(on ? "1" : "0")) return false;
+    saved_ = on;
+    return true;
+}
+
+void Standing::set_enforced(bool enforced) {
+    std::lock_guard<std::mutex> l(mu_);
+    enforced_ = enforced;
 }
 
 std::string answer_text(Answer a, const Request& r) { return std::string(verb(a)) + ":" + std::to_string(r.id) + ":" + r.nonce; }
@@ -114,7 +187,7 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     r.summary = readable_step(p.summary.empty() ? p.text : p.summary);
     for (const auto& s : p.steps) r.steps.push_back(readable_step(s));
     if (r.steps.empty()) r.steps.push_back(r.summary);
-    r.remember_s = int(std::chrono::duration_cast<std::chrono::seconds>(options_.remember_for).count());
+    r.offer_standing = desk_.standing && !desk_.standing->enforced();
     if (desk_.sap) {
         try {
             r.sap = desk_.sap();
@@ -131,6 +204,17 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     if (prompt.answer_s > 0) within = std::min(within, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(prompt.answer_s)));
     const auto deadline = clock::now() + within;
     const auto can_ask = [this] { return !desk_.can_ask || desk_.can_ask(); };
+    const std::string what = prompt.summary.empty() ? prompt.tool : prompt.summary;
+    // nobody is asked for a change fairyfly refuses anyway, or one the standing approval covers (also while the screen
+    // is locked: the person turned it on for when they are away)
+    if (desk_.can_change && !desk_.can_change()) {
+        spdlog::info("approval: not asked, fairyfly here runs read-only and refuses the change ({} {})", prompt.client, what);
+        return {true, "not_asked"};
+    }
+    if (desk_.standing && desk_.standing->on()) {
+        spdlog::info("approval: standing (\"Allow changes in SAP\" is on) for {} by {}: {}", client_name(prompt.client), prompt.user, what);
+        return {true, "standing"};
+    }
     uint64_t id = 0;
     // one question at a time, in the order they came; waiting counts against the question's own time
     {
@@ -160,18 +244,6 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
         spdlog::info("approval {}: denied, the screen is locked or there is no interactive session ({} {})", id, prompt.client, prompt.tool);
         return {false, "locked"};
     }
-    {
-        std::lock_guard<std::mutex> l(mu_);
-        auto i = remembered_.find(remember_key(prompt));
-        if (i != remembered_.end()) {
-            if (clock::now() < i->second) {
-                spdlog::info("approval {}: remembered (\"don't ask again\" for {} by {}: {})", id, client_name(prompt.client), prompt.user,
-                             prompt.summary.empty() ? prompt.tool : prompt.summary);
-                return {true, "remembered"};
-            }
-            remembered_.erase(i);
-        }
-    }
     Request r = build(prompt, id);
     r.deadline = deadline;
     r.expires_at = std::chrono::system_clock::now() + std::chrono::duration_cast<std::chrono::system_clock::duration>(deadline - clock::now());
@@ -195,18 +267,15 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
                 },
                 remember);
             if (a == Answer::Approve && !(clock::now() < deadline && can_ask())) {
-                // a click between the deadline (or the lock) and the window's next check: not a yes, nothing remembered
+                // a click between the deadline (or the lock) and the window's next check: not a yes, nothing turned on
                 d = {false, can_ask() ? "expired" : "locked"};
                 spdlog::info("approval {}: a yes in the window came after the time was up or the screen locked", id);
                 break;
             }
             if (a == Answer::Approve || a == Answer::Deny) {
                 d = {a == Answer::Approve, a == Answer::Approve ? "approved" : "denied"};
-                if (a == Answer::Approve && remember) {
-                    std::lock_guard<std::mutex> l(mu_);
-                    remembered_[remember_key(prompt)] = clock::now() + options_.remember_for;
-                    spdlog::info("approval {}: further changes by {} for {} approved without asking until the time is up", id, r.client, r.user);
-                }
+                if (a == Answer::Approve && remember && r.offer_standing && desk_.standing->set(true))
+                    spdlog::info("approval {}: \"Don't ask again\" turned on \"Allow changes in SAP\": further changes run without asking", id);
                 break;
             }
             window = false;  // stopped: the notification answered, it expired or the screen locked

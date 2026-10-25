@@ -11,7 +11,7 @@ organisation has connected there can use your SAP GUI:
 |---|---|
 | `fairyfly link pair [--gateway https://fairyfly.io]` | Shows a QR code and a number. Scan the code with your phone, sign in, type the number. The desktop then shows **which account and organisation** it would act for (and whether the identity provider verified the e-mail address); type `yes` only if that is you |
 | `fairyfly link status` | Paired or not, with device, account, organisation and gateway |
-| `fairyfly link run [--allow-write] [--tools session,screen] [--approve desktop\|no]` | Connects and serves tool calls until Ctrl+C |
+| `fairyfly link run [--read-only] [--tools session,screen] [--approve desktop\|no]` | Connects and serves tool calls until Ctrl+C |
 | `fairyfly link run --tray [--install-autostart\|--remove-autostart]` | The same link in the system tray, without the MCP server (see [Tray](#tray)) |
 | `fairyfly link pause` | Disconnects a running link until resumed: the AI assistant cannot reach this desktop meanwhile (the gateway answers `DEVICE_OFFLINE`). Works from any console; the running link follows within a second |
 | `fairyfly link resume` | Lets a paused link connect again |
@@ -78,10 +78,12 @@ or an HTTP endpoint.
   - while the audit trail is on: *Audit trail on — your admin records steps and screenshots on this desktop* (see
     "Audit trail" below; a balloon also tells when it turns on or off);
   - **Pause** / **Resume**;
-  - **Allow changes in SAP** (a check mark): switches the running link between read-only and write mode without a
-    restart. Turning it on asks first. The link then reconnects and offers its new tool list again. The switch is
-    audited (`read_only` / `write_mode`). It is off at start unless `--allow-write` was given, and it is locked by
-    `--read-only` / `FAIRYFLY_READ_ONLY=1`. Every change still needs the gateway's grant and an approval;
+  - **Allow changes in SAP** (a check mark): the standing approval at this desktop. On, the cloud's changes run
+    without asking; off (the default), every change asks at this desktop (see "Approval" below). Turning it on asks
+    first. It is saved for the Windows user (`HKCU\Software\DataZoo\fairyfly\tray`, value `link_allow_changes`), so it
+    stays as it is after a restart and an update; uninstalling removes it. It is greyed out when your organisation
+    requires approval ("Approval is required by your administrator") and with `--read-only` / `FAIRYFLY_READ_ONLY=1`.
+    Changes always need the organisation's grant;
   - **Health check**: `link status` in a console;
   - **Pair again**: `link pair` in a console (pairing needs the person at the desktop);
   - **Start local MCP server**: starts the MCP server in its own tray (`fairyfly mcp --tray --http`, plain HTTP on
@@ -93,12 +95,13 @@ or an HTTP endpoint.
     of an older version that starts `fairyfly.exe` directly is moved to `fairyfly-tray.exe`, its options kept;
   - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
   - **Quit**, which disconnects the link and ends the process.
-- The other `link run` options apply as usual: `fairyfly link run --tray --allow-write --tools session,screen`.
+- The other `link run` options apply as usual: `fairyfly link run --tray --tools session,screen`. `--allow-write` is
+  still accepted and has no effect (changes are possible, each approved).
 - If the link ends with an error, a message box points to the log.
 
 Autostart at logon:
 
-    fairyfly link run --tray --install-autostart [--allow-write] [--tools ...]
+    fairyfly link run --tray --install-autostart [--tools ...]
     fairyfly link run --tray --remove-autostart
 
 This writes or removes the value `fairyfly-link` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The
@@ -190,20 +193,19 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   `catalog_publishers` list; otherwise it describes the tools from its own built-in catalog.
 - Data entry goes screen by screen: the assistant reads the screen with `only=editable` and fills all its fields in
   one `gui_element_fill` call with `fields`, optionally pressing Enter or F8 afterwards. That is one call and one
-  approval per screen. It needs write access on both sides: the gateway must allow writes for you, and
-  **Allow changes in SAP** must be on in the link tray.
+  approval per screen (none while **Allow changes in SAP** is on). The gateway must allow writes for you.
 
 - `link run` serves calls through **fairyfly's own MCP dispatcher, in-process**. No local HTTP endpoint and no local
   bearer token are involved.
 - The same guards apply as for `fairyfly mcp`, in the same order:
   1. `--read-only` / `FAIRYFLY_READ_ONLY=1` (hard cap);
-  2. read-only unless `--allow-write` (or **Allow changes in SAP** in the link tray);
+  2. changes are possible (approval model v2): each needs the gateway's grant and the approval at this desktop;
   3. `--tools` families;
   4. the policy limits.
 - Each call additionally carries the gateway's grant. A call the gateway granted read-only runs with fairyfly's
   read-only guard switched on, even when this desktop allows writes.
   Its refusals say which side blocks: the organisation (the fairyfly web app, Settings, "Allow changes in SAP"; only
-  an administrator can change it) or this desktop (the tray), or both.
+  an administrator can change it) or this desktop (`--read-only` / `FAIRYFLY_READ_ONLY`), or both.
 - A grant limited to transactions (`grants.tcodes`) applies the same rules as `mcp token create --tcode` to every link
   call and batch step: the open transaction must be listed, `gui_menu_select` is refused, `gui_key_send` takes only
   Enter, F4, F8 and the page keys, and a call that ends outside the list blocks screen tools until an allowed
@@ -213,21 +215,27 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   answers; its result lists the steps that ran (structuredContent `cancelled`, `items`), and the gateway names them in
   its `CALL_TIMEOUT`.
 - A change needs the approval of the person at this desktop (`--approve desktop`, the default; there is no phone
-  approval since 2026-10-24, the desktop where SAP GUI runs is the second factor):
+  approval since 2026-10-24, the desktop where SAP GUI runs is the second factor). Approval model v2 (2026-10-25):
+  - **Allow changes in SAP** on in the link tray: changes run without asking (the standing approval; also while the
+    screen is locked, the person turned it on for when they are away). The decision is `standing`;
+  - off (the default):
   - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and
     **Details**; it stays on screen until answered and can be answered from the notification centre too;
   - **Details** (or a click on the notification) opens the approval window: the assistant by name ("Claude", the
     client's URL in brackets), the account it acts for, the SAP system, client and transaction, every step numbered
     (standard toolbar buttons named: "click Save (wnd[0]/tbar[0]/btn[11])"), a countdown; **Deny** is the default
     button and Esc;
-  - every change asks: a yes approves that change (all steps of that batch) only. The window's **Don't ask again for
-    5 minutes**, unticked by default, approves further changes of the same assistant for the same account without
-    asking for 5 minutes (never while the screen is locked);
+  - every change asks: a yes approves that change (all steps of that batch) only. The window's **Don't ask again**,
+    unticked by default, approves the change and turns on **Allow changes in SAP**;
+  - when the organisation requires approval, the switch and the checkbox are off and greyed out ("Approval is required
+    by your administrator"): every change asks;
+  - fairyfly started with `--read-only` / `FAIRYFLY_READ_ONLY` asks nothing: it refuses the change itself;
+  - keys are named in the steps: "press Save (Ctrl+S)" for `gui_key_send` key 11, "then press Execute (F8)";
   - no answer in 45 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked
     one after another, never together;
   - with notifications turned off for fairyfly (or without the Start-menu entry's registration) the window opens at
-    once. `--approve no` denies every change. Each decision is in the log (`approval <n>: approved|remembered|denied|
-    expired|locked`). Source: `src/link/desktop_approval.cpp` (decisions), `src/link/desktop_approval_win32.cpp` (UI).
+    once. `--approve no` denies every change. Each decision is in the log (`approval: standing`, `approval <n>:
+    approved|denied|expired|locked`). Source: `src/link/desktop_approval.cpp` (decisions), `src/link/desktop_approval_win32.cpp` (UI).
 - Every call is written to fairyfly's audit trail with `audit_source: "link"`, the principal `link:<organisation
   id>/<user>`, the AI client and the gateway's request id, so it can be matched with the cloud audit.
 - Calls arrive on the link's network threads and are handed to the main (COM) thread one at a time

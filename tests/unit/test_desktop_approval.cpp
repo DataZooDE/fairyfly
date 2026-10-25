@@ -138,8 +138,8 @@ TEST_CASE("desktop approval: the notification's Approve approves, and the notifi
     CHECK(r.user == "jr@example.com");
     CHECK(r.sap.system == "BIG");
     CHECK(r.sap.transaction == "VA02");
-    CHECK(r.steps == std::vector<std::string>{"fill fields ctxtA, ctxtB, then press f8"});
-    CHECK(r.remember_s == 300);  // what the window's "Don't ask again" offers
+    CHECK(r.steps == std::vector<std::string>{"fill fields ctxtA, ctxtB, then press Execute (F8)"});
+    CHECK(r.offer_standing);  // the window offers "Don't ask again"
     CHECK(!r.nonce.empty());
     b.answer(r.id, r.nonce, Answer::Approve);
     const Decision d = f.get();
@@ -276,7 +276,7 @@ TEST_CASE("desktop approval: several questions are asked one after another, each
     CHECK(first.get().approved);
     REQUIRE(eventually([&] { return ui->notified_count() == 2; }));
     const Request r2 = ui->last_notified();
-    CHECK(r2.summary == "press enter");
+    CHECK(r2.summary == "press Enter");
     CHECK(r2.id != r1.id);
     // the first question's answer does not answer the second
     b.answer(r1.id, r1.nonce, Answer::Approve);
@@ -520,7 +520,7 @@ TEST_CASE("desktop approval: the standard toolbar's buttons are named in the ste
     CHECK(readable_step("click wnd[0]/tbar[0]/btn[11]") == "click Save (wnd[0]/tbar[0]/btn[11])");
     CHECK(readable_step("click wnd[0]/tbar[0]/btn[3]") == "click Back (wnd[0]/tbar[0]/btn[3])");
     CHECK(readable_step("run 2 steps: 1. press enter; 2. click wnd[0]/tbar[0]/btn[11]; 3. click wnd[1]/tbar[0]/btn[0]") ==
-          "run 2 steps: 1. press enter; 2. click Save (wnd[0]/tbar[0]/btn[11]); 3. click Enter (wnd[1]/tbar[0]/btn[0])");
+          "run 2 steps: 1. press Enter; 2. click Save (wnd[0]/tbar[0]/btn[11]); 3. click Enter (wnd[1]/tbar[0]/btn[0])");
     CHECK(readable_step("click wnd[0]/tbar[0]/btn[110]") == "click wnd[0]/tbar[0]/btn[110]");
     CHECK(readable_step("click wnd[0]/tbar[1]/btn[8]") == "click wnd[0]/tbar[1]/btn[8]");  // application toolbar: varies
 }

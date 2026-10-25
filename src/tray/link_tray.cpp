@@ -43,11 +43,13 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         if (link.paused) model.items.push_back(item("Resume", TrayAction::LinkResume));
         else model.items.push_back(item("Pause", TrayAction::LinkPause));
         if (writes.available) {
-            MenuItem allow = item(writes.locked ? "Allow changes in SAP (off: FAIRYFLY_READ_ONLY / --read-only)"
-                                                : "Allow changes in SAP",
-                                  TrayAction::LinkToggleWrites, !writes.locked);
+            // the standing approval: on, changes run without asking; off, every change asks at this desktop
+            const std::string label = writes.locked     ? "Allow changes in SAP (off: FAIRYFLY_READ_ONLY / --read-only)"
+                                      : writes.enforced ? "Allow changes in SAP (off: Approval is required by your administrator)"
+                                                        : "Allow changes in SAP";
+            MenuItem allow = item(label, TrayAction::LinkToggleWrites, !writes.locked && !writes.enforced);
             allow.checkable = true;
-            allow.checked = writes.allowed && !writes.locked;
+            allow.checked = writes.allowed && !writes.locked && !writes.enforced;
             model.items.push_back(std::move(allow));
         }
         model.items.push_back(item("Health check (console)", TrayAction::LinkStatus));
@@ -80,7 +82,10 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(item("Quit", TrayAction::Quit));
 
     std::string tooltip = "fairyfly link: " + (link.paired ? link.state : std::string("not paired - click to pair"));
-    if (writes.available) tooltip += writes.allowed && !writes.locked ? " (changes allowed)" : " (read-only)";
+    if (writes.available)
+        tooltip += writes.locked                                ? " (read-only)"
+                   : writes.allowed && !writes.enforced ? " (changes allowed)"
+                                                        : " (changes need your approval)";
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
     if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
@@ -97,6 +102,7 @@ LinkWritesView LinkTrayController::writes_view() {
     v.available = true;
     v.allowed = services_.writes->allowed();
     v.locked = services_.writes->locked();
+    v.enforced = services_.writes->enforced();
     return v;
 }
 
@@ -165,16 +171,17 @@ void LinkTrayController::on_action(TrayAction action) {
         break;
     }
     case TrayAction::LinkToggleWrites: {
-        if (!services_.writes || services_.writes->locked()) break;
+        if (!services_.writes || services_.writes->locked() || services_.writes->enforced()) break;
         const bool allow = !services_.writes->allowed();
         if (allow && services_.host &&
             !services_.host->confirm("fairyfly link",
-                                     "Allow AI assistants to change data in SAP through the cloud link?\n\nEach change still "
-                                     "needs your organisation's grant and your approval at this desktop."))
+                                     "Let AI assistants change data in SAP through the cloud link without asking at this "
+                                     "desktop?\n\nChanges still need your organisation's grant. Turn this off again to "
+                                     "approve every change yourself."))
             break;
-        if (!services_.writes->set_allowed(allow)) notify("Could not change the link's mode");
-        else notify(allow ? "Changes in SAP allowed; the link reconnects with the write tools"
-                          : "Read-only: the link reconnects without the write tools");
+        if (!services_.writes->set_allowed(allow)) notify("Could not change \"Allow changes in SAP\"");
+        else notify(allow ? "Changes in SAP allowed: they run without asking"
+                          : "Every change in SAP asks for your approval at this desktop");
         break;
     }
     case TrayAction::LinkStatus: console({"link", "status"}); break;

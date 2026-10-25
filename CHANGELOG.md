@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Cloud link: "Allow changes in SAP" is the approval (approval model v2)
+
+- **Allow changes in SAP** in the link tray no longer switches between read-only and write mode. It is the standing
+  approval at this desktop: on, the cloud's changes run without asking; off (the default), every change asks with the
+  notification and a yes approves that one change. Changes are possible either way; they still need the organisation's
+  grant.
+- The switch is saved for the Windows user and stays as it is after a restart or an update.
+- The approval window's **Don't ask again** (was: for 5 minutes) approves the change and turns on **Allow changes in
+  SAP**.
+- When the organisation requires approval, the switch and the checkbox are greyed out ("Approval is required by your
+  administrator"). The gateway's setting for this follows with the next libffl sync.
+- No notification for a change fairyfly refuses anyway (`--read-only`, `FAIRYFLY_READ_ONLY`).
+- Keys are named in the approval: "press Save (Ctrl+S)" instead of "press 11".
+- `link run --allow-write` is still accepted and has no effect.
+
 ### Cloud link: approval follow-ups (fairyfly #36)
 
 - "Don't ask again for 5 minutes" covers exactly the assistant it was given for. It was keyed by the assistant's

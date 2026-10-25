@@ -24,6 +24,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include "include/link/desktop_approval.h"
 #include "include/link/link_console.h"
 #include "include/link/link_call.h"
 #include "include/link/link_control.h"
@@ -63,36 +64,36 @@ bool env_read_only() {
     return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
 }
 
-/// The running link's write mode, for the link tray (same process). Set up by run_link while it serves.
-struct WriteMode {
-    std::mutex m;
-    std::shared_ptr<MainThreadTools> tools;            // null while no link is serving
-    std::function<bool(bool read_only)> set_read_only;  // run_mcp's switch, main thread only
-    std::atomic<bool> allowed{false};
-    std::atomic<bool> locked{false};
-    std::atomic<bool> reconnect{false};  // read by the supervisor
-};
-WriteMode g_write_mode;
+/// "Allow changes in SAP" (approval model v2): the standing approval at this desktop, saved for the user in the tray
+/// settings (HKCU), shared by the link tray's switch and the approval window's "Don't ask again".
+std::shared_ptr<approval::Standing> standing() {
+#ifdef _WIN32
+    static auto s = [] {
+        std::shared_ptr<tray::TraySettings> settings = tray::make_win32_tray_settings();
+        return std::make_shared<approval::Standing>([settings] { return settings->get("link_allow_changes"); },
+                                                    [settings](const std::string& v) { return settings->set("link_allow_changes", v); });
+    }();
+#else
+    static auto s = std::make_shared<approval::Standing>();
+#endif
+    return s;
+}
 
-class RunningWriteMode : public tray::LinkWriteMode {
+class StandingSwitch : public tray::LinkWriteMode {
 public:
-    bool allowed() override { return g_write_mode.allowed; }
-    bool locked() override { return g_write_mode.locked; }
+    explicit StandingSwitch(bool read_only) : read_only_(read_only) {}
+    bool allowed() override { return standing()->saved(); }
+    bool locked() override { return read_only_ || env_read_only(); }
+    bool enforced() override { return standing()->enforced(); }
     bool set_allowed(bool allowed) override {
-        if (allowed && g_write_mode.locked) return false;
-        std::lock_guard<std::mutex> l(g_write_mode.m);
-        if (!g_write_mode.tools || !g_write_mode.set_read_only) return false;
-        return g_write_mode.tools->post([allowed] {
-            std::function<bool(bool)> set;
-            {
-                std::lock_guard<std::mutex> l(g_write_mode.m);
-                set = g_write_mode.set_read_only;
-            }
-            if (!set || !set(!allowed)) return;
-            g_write_mode.allowed = allowed;
-            g_write_mode.reconnect = true;  // the gateway learns the new tool catalog on the next connect
-        });
+        if (allowed && locked()) return false;
+        if (!standing()->set(allowed)) return false;
+        spdlog::info("fairyfly link: \"Allow changes in SAP\" {}", allowed ? "on: changes run without asking" : "off: every change asks");
+        return true;
     }
+
+private:
+    bool read_only_;
 };
 
 /// Installs a signal handler and puts the previous one back.
@@ -475,7 +476,7 @@ std::unique_ptr<tray::LinkControl> make_link_control(const std::string& path) {
 
 void request_stop() { g_stop = true; }
 
-std::unique_ptr<tray::LinkWriteMode> make_write_mode_control() { return std::make_unique<RunningWriteMode>(); }
+std::unique_ptr<tray::LinkWriteMode> make_write_mode_control(bool read_only) { return std::make_unique<StandingSwitch>(read_only); }
 
 int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
              audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
@@ -544,11 +545,13 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     cfg.local = tools;
     cfg.version = fairyfly::FAIRYFLY_VERSION;
 #ifdef _WIN32
-    // a change is approved at this desktop: a notification, the approval window on Details (desktop_approval_win32).
-    // Every change asks: libffl's blanket window is off; only the window's "Don't ask again" remembers a yes.
+    // a change is approved at this desktop: "Allow changes in SAP" (the standing approval), or a notification and the
+    // approval window on Details (desktop_approval_win32). libffl's own window is off: a yes approves one change.
     cfg.approve_window_s = 0;
-    cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false)
-                                     : approval::make_desktop_approver([weak = std::weak_ptr<MainThreadTools>(tools), peek] {
+    approval::Desk desk;
+    desk.standing = standing();
+    desk.can_change = [read_only = o.read_only] { return !read_only && !env_read_only(); };
+    desk.sap = [weak = std::weak_ptr<MainThreadTools>(tools), peek] {
                                            // the SAP session the change would run in, read on the main (COM) thread
                                            auto out = std::make_shared<approval::SapContext>();
                                            auto t = weak.lock();
@@ -566,7 +569,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
                                                },
                                                2000);
                                            return ran ? *read : *out;
-                                       });
+                                       };
+    cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : approval::make_desktop_approver(std::move(desk));
 #else
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : ffy::link::desktop_approver();
 #endif
@@ -603,8 +607,6 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     printer->starting(is_paused(sp));
     // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
     SupervisorOptions supervision;
-    g_write_mode.reconnect = false;
-    supervision.reconnect = &g_write_mode.reconnect;
     supervision.status_changed = trail_changed.get();
     supervision.status_extra = [recorder] { return json{{"trail", recorder->current_policy().to_json()}}; };
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
@@ -623,19 +625,14 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
 
     mcp::ServeOptions so;
     so.transport = "link";
-    so.allow_write = o.allow_write;
+    // changes are possible: each needs the organisation's grant (per call) and the approval at this desktop; only
+    // --read-only / FAIRYFLY_READ_ONLY make fairyfly refuse them here
+    so.allow_write = !o.read_only && !env_read_only();
     so.read_only = o.read_only;
     so.families = o.families;
     mcp::HttpRunHooks hooks;
     hooks.keep_logging = true;  // the logger above; run_mcp would replace it
-    hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>& set_read_only) -> int {
-        {
-            std::lock_guard<std::mutex> l(g_write_mode.m);
-            g_write_mode.tools = tools;
-            g_write_mode.set_read_only = set_read_only;
-            g_write_mode.allowed = o.allow_write && !o.read_only && !env_read_only();
-            g_write_mode.locked = o.read_only || env_read_only();
-        }
+    hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>&) -> int {
         {
             // the tools that change SAP (destructiveHint): their steps carry field changes
             std::set<std::string> change_tools;
@@ -656,11 +653,6 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         spdlog::info("fairyfly link: serving {} for {} ({})", st.tenant_name.empty() ? st.tenant : st.tenant_name, st.email, st.device_id);
         tools->pump(g_stop);  // this is the main (COM) thread
         tools->shutdown();
-        {
-            std::lock_guard<std::mutex> l(g_write_mode.m);
-            g_write_mode.tools.reset();
-            g_write_mode.set_read_only = nullptr;
-        }
         return 0;
     };
     const int rc = mcp::run_mcp(so, get_handler, global, sink, peek, &hooks);
