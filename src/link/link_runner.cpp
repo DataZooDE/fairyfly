@@ -484,22 +484,22 @@ std::unique_ptr<tray::LinkWriteMode> make_write_mode_control(bool read_only, Lin
     return std::make_unique<StandingSwitch>(read_only, runtime.standing);
 }
 
-int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
-             audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
-    LinkRuntime& runtime = LinkRuntime::process();
+namespace {
+
+/// Before `link run` connects: the state guard, the per-pairing lock (one link per pairing), the pairing state and
+/// its link address. The exit code when it must not run (the reason on stderr); nullopt with `run_lock` and `st` set.
+std::optional<int> prepare_link_run(const LinkOptions& o, std::unique_ptr<tray::SingleInstance>& run_lock, ffy::link::State& st) {
     if (auto refused = state_guard(o)) {
         std::cerr << refused->to_json().dump() << std::endl;
         return 2;
     }
     if (!o.tray) write_utf8("state: " + state_path(o) + "\n");
     // one link per pairing: a second `link run` (or the tray's) next to a running one would fight over the connection
-    std::unique_ptr<tray::SingleInstance> run_lock;
     if (auto refused = claim_link_run(state_path(o), run_lock)) {
         spdlog::error("LINK_ALREADY_RUNNING: {}", refused->error.value("message", std::string()));   // the tray's link.log
         std::cerr << refused->to_json().dump() << std::endl;
         return tray::kLinkAlreadyRunningExitCode;   // the link tray waits on it (run_link_with_tray)
     }
-    ffy::link::State st;
     try {
         st = ffy::link::load_state(state_path(o));
     } catch (const std::exception& e) {
@@ -514,6 +514,37 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         std::cerr << r.to_json().dump() << std::endl;
         return 2;
     }
+    return std::nullopt;
+}
+
+/// spdlog for `link run`: the console (filtered by --log-level) or, in the tray, link.log; and the status printer that
+/// shows the person one line per change of the connection (libffl's agent reports only through spdlog).
+void route_link_logging(bool tray, const std::shared_ptr<LinkStatusPrinter>& printer) {
+    const auto user_level = spdlog::get_level();  // --log-level / FFLYLOG_LEVEL, applied by the CLI
+    std::vector<spdlog::sink_ptr> sinks;
+    if (tray) {
+        sinks = spdlog::default_logger()->sinks();  // link.log (run_link_tray), no console
+    } else {
+        auto to_stderr = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+        to_stderr->set_level(user_level);
+        sinks.push_back(to_stderr);
+    }
+    auto status = make_status_sink(printer);
+    status->set_level(spdlog::level::info);
+    sinks.push_back(status);
+    auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
+    logger->set_level(std::min(user_level, spdlog::level::info));
+    spdlog::set_default_logger(logger);
+}
+
+}  // namespace
+
+int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
+             audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
+    LinkRuntime& runtime = LinkRuntime::process();
+    std::unique_ptr<tray::SingleInstance> run_lock;
+    ffy::link::State st;
+    if (auto exit_code = prepare_link_run(o, run_lock, st)) return *exit_code;
     // The person at the desktop sees one line per change of the connection. libffl's agent reports it only through
     // spdlog, so its messages go to the status printer as well as, filtered by --log-level, to stderr.
     const std::string sp = state_path(o);
@@ -521,23 +552,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
                                                        [tray = o.tray](const std::string& line) {
                                                            if (!tray) write_utf8(line + "\n");  // the tray shows the state itself
                                                        });
-    {
-        const auto user_level = spdlog::get_level();  // --log-level / FFLYLOG_LEVEL, applied by the CLI
-        std::vector<spdlog::sink_ptr> sinks;
-        if (o.tray) {
-            sinks = spdlog::default_logger()->sinks();  // link.log (run_link_tray), no console
-        } else {
-            auto to_stderr = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-            to_stderr->set_level(user_level);
-            sinks.push_back(to_stderr);
-        }
-        auto status = make_status_sink(printer);
-        status->set_level(spdlog::level::info);
-        sinks.push_back(status);
-        auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
-        logger->set_level(std::min(user_level, spdlog::level::info));
-        spdlog::set_default_logger(logger);
-    }
+    route_link_logging(o.tray, printer);
 
     // Everything the network thread uses lives here: when it does not end in time after Ctrl+C (a connect in
     // progress cannot be interrupted), the process ends without waiting for it.
