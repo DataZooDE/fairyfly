@@ -128,8 +128,8 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     policy.owner_sap_identities = options.owner_sap_identities;
     policy.auto_attach = !http;  // stdio and link; an HTTP endpoint keeps explicit attaches (tokens, owner routing)
     if (link)
-        policy.allow_write_hint = "the person at the desktop can allow changes with 'Allow changes in SAP' in the fairyfly "
-                                  "link tray, or by restarting with `fairyfly link run --allow-write`";
+        policy.allow_write_hint = "fairyfly on this desktop was started with --read-only or FAIRYFLY_READ_ONLY; the person "
+                                  "at the desktop can restart the fairyfly link without it";
     if (link)  // the gateway granted this call read-only: the organisation's switch, which no desktop setting overrides
         policy.grant_write_hint = "changes in SAP are not allowed for your organisation in the fairyfly web app (Settings, "
                                   "'Allow changes in SAP'); an administrator can turn it on there - the desktop's own "

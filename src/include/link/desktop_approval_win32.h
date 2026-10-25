@@ -22,14 +22,17 @@ bool desktop_can_ask();
 /// The toast's XML: headline, transaction and summary, who it is for and when it expires, Approve / Deny / Details
 /// with answer_text() as their arguments (a click on the toast itself is Details).
 std::wstring toast_xml(const Request& r);
-/// The approval window's text: the assistant, the user, the SAP session and every step, numbered.
+/// The approval window's text: the assistant, the user, the SAP session and every step, numbered; when the organisation
+/// enforces asking, why there is no "Don't ask again".
 std::wstring window_text(const Request& r);
+/// The window's checkbox; empty (no checkbox) without offer_standing.
+std::wstring dont_ask_text(const Request& r);
 
 /// The toast and window UI; `on_answer` receives a notification's answer text (Broker::answer_text).
 std::shared_ptr<Ui> make_win32_ui(std::function<void(const std::string&)> on_answer);
 
-/// libffl's Approver for this desktop: the Broker over the Windows UI. `sap` reads the SAP session a change would run
-/// in (called once per question, may return an empty context).
-std::shared_ptr<ffy::link::Approver> make_desktop_approver(std::function<SapContext()> sap, Options options = {});
+/// libffl's Approver for this desktop: the Broker over the Windows UI. `desk.sap` reads the SAP session a change would
+/// run in (called once per question, may return an empty context); `desk.can_ask` is set to desktop_can_ask.
+std::shared_ptr<ffy::link::Approver> make_desktop_approver(Desk desk, Options options = {});
 
 }  // namespace fairyfly::link::approval

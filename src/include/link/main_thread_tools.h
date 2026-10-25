@@ -27,6 +27,10 @@ public:
     MainThreadTools() = default;
     /// Main thread: what to run. Set before pumping (the dispatcher exists only inside the run loop).
     void set_handlers(ListFn list, CallFn call);
+    /// Set: a tools/call with the write grant keeps it only when `permit(tool, args)` says this desktop approved that
+    /// call (approval::take_permit); otherwise it runs read-only. Asked on the caller's thread. Unset: as granted.
+    using PermitFn = std::function<bool(const std::string& tool, const nlohmann::json& args)>;
+    void set_write_permit(PermitFn permit);
 
     /// Any thread (libffl's agent): queues the call and waits for the main thread. Throws ffy::Error on timeout
     /// (nothing ran) or after shutdown.
@@ -58,6 +62,7 @@ private:
         bool done = false, abandoned = false;
     };
     nlohmann::json run(Job& job);
+    PermitFn permit_;
     std::mutex mu_;
     std::condition_variable work_cv_, done_cv_;
     std::deque<std::shared_ptr<Job>> queue_;
