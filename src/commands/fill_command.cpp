@@ -61,10 +61,7 @@ Examples:
     }
 
     static Result invalid(const std::string& message) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error = {{"code", "INVALID_ARGUMENT"}, {"message", message}};
-        return result;
+        return Result::fail("INVALID_ARGUMENT", message);
     }
 
     Result execute_fields(cli::CommandHandler& handler) {

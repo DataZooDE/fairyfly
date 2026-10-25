@@ -49,13 +49,6 @@ ToolResult error_result(const std::string& code, const std::string& message, con
     return r;
 }
 
-Result error_from(const std::string& code, const std::string& message) {
-    Result r;
-    r.status = Result::Status::Error;
-    r.error = {{"code", code}, {"message", message}};
-    return r;
-}
-
 /// The open SAP GUI sessions of a `session list` result: [{session_id, connection, window_title}].
 json open_sessions(const Result& listed) {
     json sessions = json::array();
@@ -262,9 +255,9 @@ Result CommandDispatcher::invoke(const std::vector<std::string>& argv) {
     try {
         return invoker_(argv);
     } catch (const std::exception& e) {
-        return error_from("INTERNAL_ERROR", e.what());
+        return Result::fail("INTERNAL_ERROR", e.what());
     } catch (...) {
-        return error_from("INTERNAL_ERROR", "Unknown failure while executing command");
+        return Result::fail("INTERNAL_ERROR", "Unknown failure while executing command");
     }
 }
 
@@ -834,7 +827,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
         if (!worker_bound) return invoke(selected_argv);
         if (!worker_command_allowed(selected_argv))
-            return error_from("WORKER_UNSUPPORTED", "the session retry cannot be routed to its private worker");
+            return Result::fail("WORKER_UNSUPPORTED", "the session retry cannot be routed to its private worker");
         WorkerCall worker_call;
         worker_call.connection = *record.connection;
         worker_call.session_identity = owner_pre_facts->session_identity;
@@ -872,8 +865,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             return session_invoker_with_gate_ ? session_invoker_with_gate_(worker_call, before_send)
                                               : session_invoker_(worker_call);
         }
-        catch (const WorkerTransportError& e) { return error_from(e.code(), e.what()); }
-        catch (...) { return error_from("OUTCOME_UNKNOWN", "session worker command outcome is unknown"); }
+        catch (const WorkerTransportError& e) { return Result::fail(e.code(), e.what()); }
+        catch (...) { return Result::fail("OUTCOME_UNKNOWN", "session worker command outcome is unknown"); }
     };
     if (ctx.http && !policy_.owner_sap_identities.empty() &&
         (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
@@ -1038,9 +1031,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (listed.status != Result::Status::Success) {
                 // keep NO_CONNECTIONS: SAP GUI could not be asked
             } else if (sessions.empty()) {
-                result = error_from("NO_SESSIONS", "no SAP GUI session is open on this desktop");
+                result = Result::fail("NO_SESSIONS", "no SAP GUI session is open on this desktop");
             } else if (sessions.size() > 1) {
-                result = error_from("MULTIPLE_SESSIONS", std::to_string(sessions.size()) +
+                result = Result::fail("MULTIPLE_SESSIONS", std::to_string(sessions.size()) +
                                                              " SAP GUI sessions are open and none is attached. Sessions: " +
                                                              dump_compact(sessions));
             } else {
@@ -1744,23 +1737,23 @@ Invoker make_registry_invoker(const std::function<cli::CommandHandler&()>& get_h
         try {
             app.parse(static_cast<int>(ptrs.size()), ptrs.data());  // never app.exit(): it prints
         } catch (const CLI::ParseError& e) {
-            return error_from("INVALID_ARGUMENT", e.what());
+            return Result::fail("INVALID_ARGUMENT", e.what());
         }
 
         try {
             return commands::CommandRegistry::instance().execute_active_command(get_handler());
         } catch (const UserError& e) {
-            return error_from("USER_ERROR", e.what());
+            return Result::fail("USER_ERROR", e.what());
         } catch (const SystemError& e) {
-            return error_from("SYSTEM_ERROR", e.what());
+            return Result::fail("SYSTEM_ERROR", e.what());
 #ifdef _WIN32
         } catch (const _com_error& e) {
-            return error_from("COM_ERROR", "COM operation failed (HRESULT " + std::to_string(static_cast<unsigned long>(e.Error())) + ")");
+            return Result::fail("COM_ERROR", "COM operation failed (HRESULT " + std::to_string(static_cast<unsigned long>(e.Error())) + ")");
 #endif
         } catch (const std::exception& e) {
-            return error_from("INTERNAL_ERROR", e.what());
+            return Result::fail("INTERNAL_ERROR", e.what());
         } catch (...) {
-            return error_from("INTERNAL_ERROR", "Unknown failure while executing command");
+            return Result::fail("INTERNAL_ERROR", "Unknown failure while executing command");
         }
     };
 }

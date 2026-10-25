@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### One way to build an error result (2026-10-25 code review)
+
+- `Result::fail(code, message[, suggestions])` and `Result::set_error(...)` replace about 230 hand-built error
+  results (status, code, message, suggestions set field by field) and seven private copies of the same factory.
+  `set_error` keeps a result's data, diagnostics, duration and extra error fields, so outputs are unchanged.
+
 ### Shared string and UTF-8 helpers (2026-10-25 code review)
 
 - One `lower_ascii` / `upper_ascii` / `trim` / `iequals` / `is_loopback_host` (`string_utils.h`) instead of about

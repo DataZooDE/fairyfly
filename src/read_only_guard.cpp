@@ -182,9 +182,7 @@ Result make_read_only_refusal(const std::string& element_id, const std::string& 
                               const std::string& text, const std::string& tooltip,
                               const std::string& rule) {
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "READ_ONLY_REFUSED";
-    result.error["message"] = "Refused in read-only mode: action would change SAP state (rule " + rule + ")";
+    result.set_error("READ_ONLY_REFUSED", "Refused in read-only mode: action would change SAP state (rule " + rule + ")");
     result.error["element_id"] = element_id;
     result.error["element_type"] = element_type;
     // Never echo the text of input elements: it can hold a password or other credential.

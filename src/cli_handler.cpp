@@ -482,14 +482,10 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
             try { login_result = handle_login("", conn.id, false, credential_name, multiple_logon); }
             catch (const std::exception& e) {
                 spdlog::error("SAP login after launch failed unexpectedly: {}", e.what());
-                login_result.status = Result::Status::Error;
-                login_result.error = {{"code", "OUTCOME_UNKNOWN"},
-                                      {"message", "SAP login outcome is unknown; inspect the launched session before retrying"}};
+                login_result.set_error("OUTCOME_UNKNOWN", "SAP login outcome is unknown; inspect the launched session before retrying");
             } catch (...) {
                 spdlog::error("SAP login after launch failed unexpectedly");
-                login_result.status = Result::Status::Error;
-                login_result.error = {{"code", "OUTCOME_UNKNOWN"},
-                                      {"message", "SAP login outcome is unknown; inspect the launched session before retrying"}};
+                login_result.set_error("OUTCOME_UNKNOWN", "SAP login outcome is unknown; inspect the launched session before retrying");
             }
             return compose_launch_login_result(std::move(result), login_result);
         }
@@ -627,9 +623,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         if (password_typed) {
             try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
         }
-        result.status = Result::Status::Error;
-        result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"},
-                        {"message", "the requested SAP logon is unavailable"}};
+        result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
         return result;
     };
     if (login_target_guard_) {
@@ -641,9 +635,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
 
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
     if (!com_engine || !com_engine->get_session()) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "ENGINE_TYPE_MISMATCH"},
-                        {"message", "SAP GUI logon requires the COM automation engine"}};
+        result.set_error("ENGINE_TYPE_MISMATCH", "SAP GUI logon requires the COM automation engine");
         return result;
     }
     const auto session = com_engine->get_session();
@@ -659,9 +651,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         return screen;
     };
     if (!is_sap_logon_screen(snapshot())) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "NOT_LOGON_SCREEN"},
-                        {"message", "Selected session is not on the SAP logon screen"}};
+        result.set_error("NOT_LOGON_SCREEN", "Selected session is not on the SAP logon screen");
         return result;
     }
 
@@ -708,9 +698,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         const auto plan = plan_multiple_logon(multiple_logon, true, read_only_);
         using Action = MultipleLogonPlan::Action;
         if (plan.action == Action::Refuse) {
-            result.status = Result::Status::Error;
-            result.error = {{"code", plan.error_code.value_or("INVALID_ARGUMENT")},
-                            {"message", "--multiple-logon end is refused under --read-only"}};
+            result.set_error(plan.error_code.value_or("INVALID_ARGUMENT"), "--multiple-logon end is refused under --read-only");
             return result;
         }
         if (plan.action == Action::Fail) {
@@ -758,9 +746,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     }
     if (password_change_required) {
         if (credentials.new_password.empty()) {
-            result.status = Result::Status::Error;
-            result.error = {{"code", "PASSWORD_CHANGE_REQUIRED"},
-                            {"message", "SAP requires a new password; provide New Password in the credential input"}};
+            result.set_error("PASSWORD_CHANGE_REQUIRED", "SAP requires a new password; provide New Password in the credential input");
             return result;
         }
         for (const auto* field : {"@active/usr/pwdRSYST-NCODE", "@active/usr/pwdRSYST-NCOD2"}) {
@@ -792,17 +778,13 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         const audit::SapFacts authenticated = audit_facts_for_connection(selected.value.id);
         if (authenticated.system.empty() || authenticated.client != credentials.client ||
             !sap_user_matches(authenticated.user, credentials.username) || !owner_login_allowed()) {
-            result.status = Result::Status::Error;
-            result.error = {{"code", "OUTCOME_UNKNOWN"},
-                            {"message", "SAP logon may have completed but its owner cannot be verified; inspect or attach before retry"}};
+            result.set_error("OUTCOME_UNKNOWN", "SAP logon may have completed but its owner cannot be verified; inspect or attach before retry");
             return result;
         }
         const std::string key = engine_->current_server_session_key();
         if (key.empty() || (!selected.value.server_session_key.empty() &&
                             selected.value.server_session_key != key)) {
-            result.status = Result::Status::Error;
-            result.error = {{"code", "OUTCOME_UNKNOWN"},
-                            {"message", "SAP logon completed but its saved session identity changed; attach it again"}};
+            result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session identity changed; attach it again");
             return result;
         }
         if (selected.value.server_session_key.empty()) {
@@ -813,9 +795,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
                     pending_owner_launch_ = updated;
             }
             catch (...) {
-                result.status = Result::Status::Error;
-                result.error = {{"code", "OUTCOME_UNKNOWN"},
-                                {"message", "SAP logon completed but its saved session could not be updated"}};
+                result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session could not be updated");
                 return result;
             }
             if (connection_changed_hook_) {
@@ -849,20 +829,15 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
         auto connections = conn_mgr_->list_connections();
 
         if (connections.empty()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_CONNECTIONS";
-            result.error["message"] = "No connection files found";
+            result.set_error("NO_CONNECTIONS", "No connection files found");
             return result;
         }
 
         if (connections.size() > 1) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "MULTIPLE_CONNECTIONS";
-            result.error["message"] = fmt::format("Found {} connections, specify which one to disconnect", connections.size());
-            result.error["suggestions"] = json::array({
+            result.set_error("MULTIPLE_CONNECTIONS", fmt::format("Found {} connections, specify which one to disconnect", connections.size()), json::array({
                 "Use --connection <id> to specify which connection to disconnect",
                 "Run 'fairyfly connection list' to see all connections"
-            });
+            }));
             return result;
         }
 
@@ -872,9 +847,7 @@ Result CommandHandler::handle_disconnect(std::optional<int> connection_id, bool 
     // Load the connection
     auto conn = conn_mgr_->load_connection(connection_id.value());
     if (!conn.has_value()) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "CONNECTION_NOT_FOUND";
-        result.error["message"] = fmt::format("Connection {} not found", connection_id.value());
+        result.set_error("CONNECTION_NOT_FOUND", fmt::format("Connection {} not found", connection_id.value()));
         return result;
     }
 
@@ -1000,14 +973,9 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
 
     ElementId elem(element_id);
     if (!elem.is_valid()) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ELEMENT";
-        result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
-        result.error["suggestions"] = json::array({
+        return Result::fail("INVALID_ELEMENT", fmt::format("Invalid element ID: {}", element_id), json::array({
             "Element IDs should start with 'wnd' or '@active' (e.g., wnd[0]/usr/btn[3] or @active/usr/btn[3])"
-        });
-        return result;
+        }));
     }
 
     // Check if this is a synthetic toolbar button (pattern: .../shell/btn_XXXX)
@@ -1068,16 +1036,12 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
 
     if (row.has_value() || !column.empty()) {
         if (!row.has_value() || *row < 0 || column.empty() || !node_key.empty() || is_synthetic_button) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "GRID_ROW_OPTIONS_REQUIRED";
-            result.error["message"] = "GridView selection requires --row >= 0 and --column on a grid element";
+            result.set_error("GRID_ROW_OPTIONS_REQUIRED", "GridView selection requires --row >= 0 and --column on a grid element");
             return result;
         }
         auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
         if (!com_engine) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ENGINE_TYPE_MISMATCH";
-            result.error["message"] = "GridView row selection requires the COM automation engine";
+            result.set_error("ENGINE_TYPE_MISMATCH", "GridView row selection requires the COM automation engine");
             return result;
         }
         result = doubleclick ? com_engine->doubleclick_grid_cell(elem, *row, column)
@@ -1090,9 +1054,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     // Check if node_key is provided - if so, this is a tree operation
     if (!node_key.empty()) {
         if (tree_action == "contextmenu" && menu_item.empty()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "MENU_ITEM_REQUIRED";
-            result.error["message"] = "--menu-item is required for tree context-menu actions";
+            result.set_error("MENU_ITEM_REQUIRED", "--menu-item is required for tree context-menu actions");
             return result;
         }
         spdlog::info("Tree operation requested: action='{}', node_key='{}'", tree_action, node_key);
@@ -1103,17 +1065,13 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             // Get the ComAutomationEngine to access session
             auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
             if (!com_engine) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "ENGINE_TYPE_MISMATCH";
-                result.error["message"] = "Tree operations require COM automation engine (stub mode active)";
+                result.set_error("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
                 return result;
             }
 
             auto session = com_engine->get_session();
             if (!session) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "NO_SESSION";
-                result.error["message"] = "No active session";
+                result.set_error("NO_SESSION", "No active session");
                 return result;
             }
 
@@ -1128,9 +1086,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             // Find element by ID
             auto tree_elem = session->find_element_by_id(full_path);
             if (!tree_elem) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "ELEMENT_NOT_FOUND";
-                result.error["message"] = fmt::format("Element not found: {}", full_path);
+                result.set_error("ELEMENT_NOT_FOUND", fmt::format("Element not found: {}", full_path));
                 return result;
             }
 
@@ -1182,9 +1138,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             return result;
 
         } catch (const std::exception& e) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TREE_ACTION_FAILED";
-            result.error["message"] = fmt::format("Tree action '{}' failed: {}", tree_action, e.what());
+            result.set_error("TREE_ACTION_FAILED", fmt::format("Tree action '{}' failed: {}", tree_action, e.what()));
             result.error["node_key"] = node_key;
             result.error["tree_action"] = tree_action;
             result.error["suggestions"] = json::array({
@@ -1274,14 +1228,9 @@ Result CommandHandler::handle_press_f4(const std::string& element_id, std::optio
 
     ElementId elem(element_id);
     if (!elem.is_valid()) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ELEMENT";
-        result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
-        result.error["suggestions"] = json::array({
+        return Result::fail("INVALID_ELEMENT", fmt::format("Invalid element ID: {}", element_id), json::array({
             "Element IDs should start with 'wnd' or '@active' (e.g., wnd[0]/usr/ctxtFIELD or @active/usr/ctxtFIELD)"
-        });
-        return result;
+        }));
     }
 
     spdlog::info("Pressing F4 for element: {} on connection {}", element_id, conn_result.value.id);
@@ -1316,11 +1265,7 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
 
     ElementId elem(element_id);
     if (!elem.is_valid()) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ELEMENT";
-        result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
-        return result;
+        return Result::fail("INVALID_ELEMENT", fmt::format("Invalid element ID: {}", element_id));
     }
 
     const bool grid_requested = row.has_value() || !column.empty() || checkbox || commit;
@@ -1334,9 +1279,7 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
     } selection_scope{*engine_};
     if (selection_input_only_) {
         if (grid_requested) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INPUT_TARGET_DENIED";
-            result.error["message"] = "typing is only allowed into plain selection fields, not into table or grid cells";
+            result.set_error("INPUT_TARGET_DENIED", "typing is only allowed into plain selection fields, not into table or grid cells");
             return result;
         }
         sap::SelectionInputPolicy policy;
@@ -1345,24 +1288,18 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
         policy.screen_number = selection_screen_;
         selection_scope.active = true;
         if (!engine_->set_selection_input_policy(policy)) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INPUT_TARGET_DENIED";
-            result.error["message"] = "the automation engine cannot validate the field before typing (fail closed)";
+            result.set_error("INPUT_TARGET_DENIED", "the automation engine cannot validate the field before typing (fail closed)");
             return result;
         }
     }
     if (grid_requested) {
         if (!row.has_value() || *row < 0 || column.empty()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "GRID_CELL_OPTIONS_REQUIRED";
-            result.error["message"] = "GridView fill requires --row >= 0 and --column";
+            result.set_error("GRID_CELL_OPTIONS_REQUIRED", "GridView fill requires --row >= 0 and --column");
             return result;
         }
         auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
         if (!com_engine) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ENGINE_TYPE_MISMATCH";
-            result.error["message"] = "GridView editing requires the COM automation engine";
+            result.set_error("ENGINE_TYPE_MISMATCH", "GridView editing requires the COM automation engine");
             return result;
         }
         result = com_engine->fill_grid_cell(elem, *row, column, value, checkbox, commit);
@@ -1386,16 +1323,12 @@ Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fie
     if (!then_key.empty()) {
         then_vkey = sap::fill_then_vkey(then_key);
         if (!then_vkey) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ARGUMENT";
-            result.error["message"] = "then_key must be enter or f8; save, back and cancel are separate calls";
+            result.set_error("INVALID_ARGUMENT", "then_key must be enter or f8; save, back and cancel are separate calls");
             return result;
         }
     }
     if (fields.empty()) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ARGUMENT";
-        result.error["message"] = "at least one field is required";
+        result.set_error("INVALID_ARGUMENT", "at least one field is required");
         return result;
     }
 
@@ -1458,10 +1391,8 @@ Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fie
     auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
     const std::string active = com_engine ? com_engine->get_active_window_id().id : std::string();
     if (!com_engine || WindowId(active).get_index() != 0) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "THEN_KEY_NOT_ON_MAIN_WINDOW";
-        result.error["message"] = fmt::format("all {} fields were filled, but a popup ({}) is open, so {} was not pressed",
-                                              fields.size(), active.empty() ? "unknown window" : active, then_key);
+        result.set_error("THEN_KEY_NOT_ON_MAIN_WINDOW", fmt::format("all {} fields were filled, but a popup ({}) is open, so {} was not pressed",
+                                              fields.size(), active.empty() ? "unknown window" : active, then_key));
         result.error["hint"] = "read the popup, then answer it with gui_popup_close or gui_key_send";
         result.error["filled"] = filled;
         result.error["fields"] = entries;
@@ -1495,11 +1426,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
     ElementId elem(element_id);
     if (!elem.is_valid()) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ELEMENT";
-        result.error["message"] = fmt::format("Invalid element ID: {}", element_id);
-        return result;
+        return Result::fail("INVALID_ELEMENT", fmt::format("Invalid element ID: {}", element_id));
     }
 
     // Handle tree node listing
@@ -1510,20 +1437,14 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
             // Get the actual element COM object
             auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
             if (!com_engine) {
-                Result result;
-                result.status = Result::Status::Error;
-                result.error["code"] = "ENGINE_TYPE_MISMATCH";
-                result.error["message"] = "Tree operations require COM automation engine (stub mode active)";
-                return result;
+                return Result::fail("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
             }
 
             // Check for modal dialog blocking access to main window
             auto dialog_info = com_engine->detect_modal_dialog();
             if (!dialog_info.empty()) {
                 Result result;
-                result.status = Result::Status::Error;
-                result.error["code"] = "MODAL_DIALOG_ACTIVE";
-                result.error["message"] = "Cannot access element - modal dialog is active";
+                result.set_error("MODAL_DIALOG_ACTIVE", "Cannot access element - modal dialog is active");
                 result.error["dialog"] = dialog_info;
                 result.error["suggestions"] = json::array({
                     fmt::format("Close the dialog first: fairyfly element click '@active/tbar[0]/btn[0]'"),
@@ -1540,11 +1461,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
             auto session = com_engine->get_session();
             if (!session) {
-                Result result;
-                result.status = Result::Status::Error;
-                result.error["code"] = "NO_SESSION";
-                result.error["message"] = "No active session";
-                return result;
+                return Result::fail("NO_SESSION", "No active session");
             }
 
             // Resolve element path to full path
@@ -1558,20 +1475,14 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
             // Find element by ID
             auto tree_elem = session->find_element_by_id(full_path);
             if (!tree_elem) {
-                Result result;
-                result.status = Result::Status::Error;
-                result.error["code"] = "ELEMENT_NOT_FOUND";
-                result.error["message"] = fmt::format("Element not found: {}", full_path);
-                return result;
+                return Result::fail("ELEMENT_NOT_FOUND", fmt::format("Element not found: {}", full_path));
             }
 
             // Check if element is a tree
             std::string elem_type = tree_elem->get_type();
             if (elem_type != "GuiShell" && elem_type != "GuiTree") {
                 Result result;
-                result.status = Result::Status::Error;
-                result.error["code"] = "NOT_A_TREE";
-                result.error["message"] = fmt::format("Element is not a tree control (type: {})", elem_type);
+                result.set_error("NOT_A_TREE", fmt::format("Element is not a tree control (type: {})", elem_type));
                 result.error["element"] = full_path;
                 result.error["element_type"] = elem_type;
                 return result;
@@ -1618,11 +1529,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
             return result;
 
         } catch (const std::exception& e) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error["code"] = "TREE_LIST_FAILED";
-            result.error["message"] = fmt::format("Failed to list tree nodes: {}", e.what());
-            return result;
+            return Result::fail("TREE_LIST_FAILED", fmt::format("Failed to list tree nodes: {}", e.what()));
         }
     }
 
@@ -2243,9 +2150,7 @@ Result CommandHandler::handle_list_all()
         json info = engine_->get_application_info();
         result.data = info;
         if (info.contains("error")) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ENUMERATION_FAILED";
-            result.error["message"] = info["error"];
+            result.set_error("ENUMERATION_FAILED", info["error"]);
             return result;
         }
         
@@ -2255,9 +2160,7 @@ Result CommandHandler::handle_list_all()
         spdlog::info("Found {} connection(s) with {} total session(s)", total_conns, total_sess);
         
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "ENUMERATION_FAILED";
-        result.error["message"] = e.what();
+        result.set_error("ENUMERATION_FAILED", e.what());
         spdlog::error("Failed to enumerate SAP GUI: {}", e.what());
     }
     

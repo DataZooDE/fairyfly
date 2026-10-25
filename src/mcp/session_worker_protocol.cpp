@@ -200,9 +200,7 @@ int run_worker_loop(std::istream& input, std::ostream& output, const WorkerInvok
         catch (...) {
             const bool read_only_control = call.probe || call.enumerate;
             uncertain = !read_only_control;
-            result.status = Result::Status::Error;
-            result.error = {{"code", read_only_control ? "WORKER_UNAVAILABLE" : "OUTCOME_UNKNOWN"},
-                            {"message", read_only_control ? "worker read failed" : "worker command outcome is unknown"}};
+            result.set_error(read_only_control ? "WORKER_UNAVAILABLE" : "OUTCOME_UNKNOWN", read_only_control ? "worker read failed" : "worker command outcome is unknown");
         }
         json response{{"version", 1}, {"id", call.id}, {"result", result.to_json()}};
         std::string encoded = response.dump(-1, ' ', false, json::error_handler_t::replace);

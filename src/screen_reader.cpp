@@ -1531,29 +1531,21 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
     const auto start = std::chrono::high_resolution_clock::now();
     Result result;
     if (query.limit < 1 || query.limit > 100) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_FIND_LIMIT";
-        result.error["message"] = "Find limit must be between 1 and 100";
+        result.set_error("INVALID_FIND_LIMIT", "Find limit must be between 1 and 100");
         return result;
     }
     if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty()) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EMPTY_FIND_QUERY";
-        result.error["message"] = "Specify --id-contains, --name-contains, or --type";
+        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, or --type");
         return result;
     }
     if (!session_) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SESSION";
-        result.error["message"] = "No active SAP session";
+        result.set_error("NO_SESSION", "No active SAP session");
         return result;
     }
     try {
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
         ScreenSearchContext search{query};
@@ -1573,13 +1565,9 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -1713,24 +1701,18 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
 
     try {
         if (max_rows < 1 || max_rows > constants::MAX_REQUESTED_TABLE_ROWS) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_MAX_ROWS";
-            result.error["message"] = "Requested row limit must be between 1 and 200";
+            result.set_error("INVALID_MAX_ROWS", "Requested row limit must be between 1 and 200");
             return result;
         }
         max_rows_ = max_rows;
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
 
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
 
@@ -1812,14 +1794,10 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
                      result.data.value("element_count", 0), result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         spdlog::error("Screen read failed: {}", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -2011,24 +1989,18 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
 
     try {
         if (max_rows < 1 || max_rows > constants::MAX_REQUESTED_TABLE_ROWS) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_MAX_ROWS";
-            result.error["message"] = "Requested row limit must be between 1 and 200";
+            result.set_error("INVALID_MAX_ROWS", "Requested row limit must be between 1 and 200");
             return result;
         }
         max_rows_ = max_rows;
         tab_bulk_ = TabBulkStats();
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
 
@@ -2094,9 +2066,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             json available = json::array();
             for (const auto& tab : all_tabs()) available.push_back(tab.value("id", ""));
             result.data = json::object();
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_NOT_FOUND";
-            result.error["message"] = "No tab matches '" + only_tab + "'";
+            result.set_error("TAB_NOT_FOUND", "No tab matches '" + only_tab + "'");
             result.error["tab_id"] = only_tab;
             result.error["reason"] = "not_found";
             result.error["available_tabs"] = available;
@@ -2121,9 +2091,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             return ComGuiElement::create(selected_dispatch)->get_id();
         });
         if (selected_tabs.selected_ids.size() != owner_strips.size()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_SELECTION_UNAVAILABLE";
-            result.error["message"] = "Cannot expand tabs without knowing which tab to restore";
+            result.set_error("TAB_SELECTION_UNAVAILABLE", "Cannot expand tabs without knowing which tab to restore");
             return result;
         }
         std::map<std::string, std::string> current_selected;
@@ -2190,9 +2158,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             if (current_selected[tab_strip_id(original_id)] != original_id)
                 to_restore.selected_ids.push_back(original_id);
         if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_RESTORE_FAILED";
-            result.error["message"] = "Screen read could not restore the original tab";
+            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
             return result;
         }
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
@@ -2200,10 +2166,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
             result.data = json::object();
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_LOAD_FAILED";
-            result.error["message"] = "Tab '" + first.value("tab_id", "") + "' could not be read: " +
-                                      first.value("reason", "error");
+            result.set_error("TAB_LOAD_FAILED", "Tab '" + first.value("tab_id", "") + "' could not be read: " +
+                                      first.value("reason", "error"));
             result.error["tab_id"] = first.value("tab_id", "");
             result.error["reason"] = first.value("reason", "error");
             result.error["tabs_failed"] = tabs_failed;
@@ -2233,13 +2197,9 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
             std::chrono::high_resolution_clock::now() - start);
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -2329,9 +2289,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
 
     try {
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
 
@@ -2386,9 +2344,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             for (const auto& tab : tab_elements) available.push_back(tab.value("id", ""));
             tab_elements = select_tabs(tab_elements, only_tab);
             if (tab_elements.empty()) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "TAB_NOT_FOUND";
-                result.error["message"] = "No tab matches '" + only_tab + "'";
+                result.set_error("TAB_NOT_FOUND", "No tab matches '" + only_tab + "'");
                 result.error["tab_id"] = only_tab;
                 result.error["reason"] = "not_found";
                 result.error["available_tabs"] = available;
@@ -2494,19 +2450,15 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
             if (current_selected[tab_strip_id(original_id)] != original_id)
                 to_restore.selected_ids.push_back(original_id);
         if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_RESTORE_FAILED";
-            result.error["message"] = "Screen read could not restore the original tab";
+            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
             return result;
         }
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_LOAD_FAILED";
-            result.error["message"] = "No tab could be read (first failure: " +
-                                      first.value("tab_id", "") + ", " + first.value("reason", "error") + ")";
+            result.set_error("TAB_LOAD_FAILED", "No tab could be read (first failure: " +
+                                      first.value("tab_id", "") + ", " + first.value("reason", "error") + ")");
             result.error["tab_id"] = first.value("tab_id", "");
             result.error["reason"] = first.value("reason", "error");
             result.error["tabs_failed"] = tabs_failed;
@@ -2531,14 +2483,10 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
                     tabs_content.size(), result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         spdlog::error("Screen read with tabs failed: {}", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
         spdlog::error("Exception in read_with_tabs: {}", e.what());
     }
 

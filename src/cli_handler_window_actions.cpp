@@ -11,11 +11,7 @@ namespace cli {
 
 namespace {
 Result engine_mismatch(const char* what) {
-    Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "ENGINE_TYPE_MISMATCH";
-    result.error["message"] = std::string(what) + " requires the COM automation engine";
-    return result;
+    return Result::fail("ENGINE_TYPE_MISMATCH", std::string(what) + " requires the COM automation engine");
 }
 } // namespace
 

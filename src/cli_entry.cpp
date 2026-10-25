@@ -168,9 +168,7 @@ namespace {
         } else {
             std::string message = err.str();
             while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) message.pop_back();
-            parse_result.status = Result::Status::Error;
-            parse_result.error["code"] = "PARSE_ERROR";
-            parse_result.error["message"] = message;
+            parse_result.set_error("PARSE_ERROR", message);
             audit_out.error_code = "PARSE_ERROR";
         }
         print_compact_json(parse_result.to_json());
@@ -220,9 +218,7 @@ namespace {
             auto* batch_command = dynamic_cast<BatchCommand*>(command.get());
             if (!batch_command || !batch_command->was_invoked()) continue;
             if (batch_mode) {
-                command_result.status = Result::Status::Error;
-                command_result.error["code"] = "BATCH_NESTED";
-                command_result.error["message"] = "batch cannot be nested inside a batch";
+                command_result.set_error("BATCH_NESTED", "batch cannot be nested inside a batch");
                 note_result(audit_out, command_result);
                 print_result();
                 return 1;
@@ -236,9 +232,7 @@ namespace {
             auto* mcp_command = dynamic_cast<McpCommand*>(command.get());
             if (!mcp_command || !mcp_command->was_invoked()) continue;
             if (batch_mode) {
-                command_result.status = Result::Status::Error;
-                command_result.error["code"] = "MCP_UNAVAILABLE";
-                command_result.error["message"] = "mcp cannot run inside a batch";
+                command_result.set_error("MCP_UNAVAILABLE", "mcp cannot run inside a batch");
                 note_result(audit_out, command_result);
                 print_result();
                 return 1;
@@ -277,9 +271,7 @@ namespace {
                 return command_result.status == Result::Status::Success ? 0 : 1;
             }
             if (batch_mode) {
-                command_result.status = Result::Status::Error;
-                command_result.error["code"] = "LINK_UNAVAILABLE";
-                command_result.error["message"] = "link run cannot run inside a batch";
+                command_result.set_error("LINK_UNAVAILABLE", "link run cannot run inside a batch");
                 note_result(audit_out, command_result);
                 print_result();
                 return 1;
@@ -318,17 +310,13 @@ namespace {
 
     } catch (const UserError& e) {
         spdlog::error("User error: {}", e.what());
-        command_result.status = Result::Status::Error;
-        command_result.error["code"] = "USER_ERROR";
-        command_result.error["message"] = e.what();
+        command_result.set_error("USER_ERROR", e.what());
         note_result(audit_out, command_result);
         print_result();
         return 1;
     } catch (const SystemError& e) {
         spdlog::error("System error: {}", e.what());
-        command_result.status = Result::Status::Error;
-        command_result.error["code"] = "SYSTEM_ERROR";
-        command_result.error["message"] = e.what();
+        command_result.set_error("SYSTEM_ERROR", e.what());
         note_result(audit_out, command_result);
         print_result();
         return 1;
@@ -346,16 +334,12 @@ namespace {
 #endif
     } catch (const std::exception& e) {
         spdlog::error("Exception: {}", e.what());
-        command_result.status = Result::Status::Error;
-        command_result.error["code"] = "INTERNAL_ERROR";
-        command_result.error["message"] = e.what();
+        command_result.set_error("INTERNAL_ERROR", e.what());
         note_result(audit_out, command_result);
         print_result();
         return 1;
     } catch (...) {
-        command_result.status = Result::Status::Error;
-        command_result.error["code"] = "INTERNAL_ERROR";
-        command_result.error["message"] = "Unknown failure while executing command";
+        command_result.set_error("INTERNAL_ERROR", "Unknown failure while executing command");
         note_result(audit_out, command_result);
         print_result();
         return 1;
@@ -404,9 +388,7 @@ namespace {
             file_stream.open(file);
             if (!file_stream) {
                 Result failure;
-                failure.status = Result::Status::Error;
-                failure.error["code"] = "BATCH_FILE_ERROR";
-                failure.error["message"] = "Cannot open batch file: " + file;
+                failure.set_error("BATCH_FILE_ERROR", "Cannot open batch file: " + file);
                 print_compact_json(failure.to_json());
                 return 1;
             }
@@ -424,9 +406,7 @@ namespace {
             int exit_code = 0;
             if (!parsed.ok) {
                 Result failure;
-                failure.status = Result::Status::Error;
-                failure.error["code"] = "BATCH_PARSE_ERROR";
-                failure.error["message"] = parsed.error;
+                failure.set_error("BATCH_PARSE_ERROR", parsed.error);
                 failure.error["line"] = line_number;
                 print_compact_json(failure.to_json());
                 exit_code = 1;
@@ -474,9 +454,7 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
 
     if (const auto refusal = audit::preflight_error(sink.mode(), sink.mode() != audit::Mode::Required || sink.probe())) {
         Result failure;
-        failure.status = Result::Status::Error;
-        failure.error["code"] = *refusal;
-        failure.error["message"] = "Audit trail is required but cannot be written: " + sink.file().string();
+        failure.set_error(*refusal, "Audit trail is required but cannot be written: " + sink.file().string());
         print_compact_json(failure.to_json());
         return 1;
     }

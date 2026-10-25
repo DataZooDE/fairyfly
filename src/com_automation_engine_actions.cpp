@@ -34,16 +34,8 @@ bool apply_status_outcome(Result& result, const ActionStatus& before, const Acti
     return false;
 }
 
-Result error_result(const char* code, const std::string& message) {
-    Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = code;
-    result.error["message"] = message;
-    return result;
-}
-
 Result exception_result(const std::exception& e, bool com) {
-    return error_result(com ? "COM_ERROR" : "EXCEPTION", e.what());
+    return Result::fail(com ? "COM_ERROR" : "EXCEPTION", e.what());
 }
 
 } // namespace
@@ -56,14 +48,14 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
         auto session = ensure_session();
         auto grid = session->find_element_by_id(resolved.path);
         if (!grid) {
-            auto result = error_result("ELEMENT_NOT_FOUND", "GridView not found: " + resolved.path);
+            auto result = Result::fail("ELEMENT_NOT_FOUND", "GridView not found: " + resolved.path);
             result.error["element"] = resolved.path;
             return result;
         }
         const std::string type = grid->get_type();
         if (type != "GuiGridView" &&
             (type != "GuiShell" || grid->get_string_property(L"SubType") != "GridView")) {
-            return error_result("WRONG_ELEMENT_TYPE", "Element is not a GridView");
+            return Result::fail("WRONG_ELEMENT_TYPE", "Element is not a GridView");
         }
 
         const auto before_status = read_action_status(session);
@@ -102,7 +94,7 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
             if (element) target = ComGuiWindow::create(element->get_dispatch());
         }
         if (!target) {
-            auto result = error_result("WINDOW_NOT_FOUND", "Window not found: " +
+            auto result = Result::fail("WINDOW_NOT_FOUND", "Window not found: " +
                                        (window.empty() ? std::string("@active") : window));
             result.error["window"] = window;
             return result;
@@ -145,11 +137,11 @@ Result ComAutomationEngine::close_popup(int vkey) {
     try {
         auto session = ensure_session();
         auto window = session->get_active_window();
-        if (!window) return error_result("NO_ACTIVE_WINDOW", "Could not get the active window");
+        if (!window) return Result::fail("NO_ACTIVE_WINDOW", "Could not get the active window");
         const std::string window_before = window->get_id();
         const int before_index = WindowId(window_before).get_index();
         if (classify_close_outcome(before_index, before_index) == CloseOutcome::NoPopup) {
-            auto result = error_result("NO_POPUP",
+            auto result = Result::fail("NO_POPUP",
                 "The active window is the main window; there is no popup to close");
             result.error["window"] = window_before;
             return result;
@@ -160,7 +152,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
             [&] { window->send_vkey(vkey); },
             [&] { window->close(); });
         if (close_attempt.method == CloseMethod::Unsupported) {
-            auto result = error_result("CLOSE_NOT_SUPPORTED",
+            auto result = Result::fail("CLOSE_NOT_SUPPORTED",
                 "The popup could not be closed: SendVKey " + std::to_string(vkey) +
                 " failed and the window Close method is unavailable. Original error: " +
                 close_attempt.original_error);
@@ -192,7 +184,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
         }
 
         if (!closed) {
-            auto result = error_result("POPUP_STILL_OPEN",
+            auto result = Result::fail("POPUP_STILL_OPEN",
                 close_attempt.method == CloseMethod::WindowClose
                     ? std::string("The popup did not close after calling the window Close method")
                     : "The popup did not close after sending VKey " + std::to_string(vkey));
@@ -231,7 +223,7 @@ Result ComAutomationEngine::read_menu(const std::string& window) {
         auto session = ensure_session();
         auto menubar = session->find_element_by_id(resolved.path);
         if (!menubar) {
-            auto result = error_result("MENU_NOT_FOUND", "Menu bar not found: " + resolved.path);
+            auto result = Result::fail("MENU_NOT_FOUND", "Menu bar not found: " + resolved.path);
             result.error["element"] = resolved.path;
             return result;
         }
@@ -254,19 +246,19 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
     const auto start = Clock::now();
     try {
         const auto segments = split_menu_path(menu_path);
-        if (segments.empty()) return error_result("INVALID_MENU_PATH", "Menu path is empty");
+        if (segments.empty()) return Result::fail("INVALID_MENU_PATH", "Menu path is empty");
 
         ElementId resolved = resolve_element_path(ElementId((window.empty() ? "wnd[0]" : window) + "/mbar"));
         auto session = ensure_session();
         auto menubar = session->find_element_by_id(resolved.path);
         if (!menubar) {
-            auto result = error_result("MENU_NOT_FOUND", "Menu bar not found: " + resolved.path);
+            auto result = Result::fail("MENU_NOT_FOUND", "Menu bar not found: " + resolved.path);
             result.error["element"] = resolved.path;
             return result;
         }
         auto item = find_menu_by_path(menubar, segments);
         if (!item) {
-            auto result = error_result("MENU_ITEM_NOT_FOUND", "No menu item matches: " + menu_path);
+            auto result = Result::fail("MENU_ITEM_NOT_FOUND", "No menu item matches: " + menu_path);
             result.error["menu_path"] = menu_path;
             result.error["suggestions"] = nlohmann::json::array({"Run 'menu list' to list available menu items"});
             return result;
@@ -280,7 +272,7 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
             if (!rule.empty()) return make_read_only_refusal(item_id, "GuiMenu", real_text, "", rule);
         }
         if (!item->is_enabled()) {
-            auto result = error_result("ELEMENT_DISABLED", "Menu item is disabled: " + menu_path);
+            auto result = Result::fail("ELEMENT_DISABLED", "Menu item is disabled: " + menu_path);
             result.error["element"] = item_id;
             return result;
         }

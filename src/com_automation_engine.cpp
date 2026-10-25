@@ -203,13 +203,10 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
         SAPGuiWindow window = app_->find_window_by_hwnd(selected_hwnd);
 
         if (!window.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "WINDOW_NOT_FOUND";
-            result.error["message"] = "Selected window is not an active SAP GUI session";
-            result.error["suggestions"] = json::array({
+            result.set_error("WINDOW_NOT_FOUND", "Selected window is not an active SAP GUI session", json::array({
                 "Ensure the window you clicked is a SAP transaction window (not just SAP Logon)",
                 "The window must have an active SAP session with a transaction open"
-            });
+            }));
             return result;
         }
 
@@ -227,9 +224,7 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
         spdlog::info("Attached to SAP session via window click (duration: {}ms)", result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "ATTACH_FAILED";
-        result.error["message"] = e.what();
+        result.set_error("ATTACH_FAILED", e.what());
         spdlog::error("Window selection failed: {}", e.what());
     }
 
@@ -239,10 +234,8 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
 Result ComAutomationEngine::attach_by_session_id(const std::string& session_id) {
     Result result;
     if (!select_session(session_id)) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "SESSION_NOT_FOUND"},
-                        {"message", "The exact SAP GUI session ID is not accessible"},
-                        {"session_id", session_id}};
+        result.set_error("SESSION_NOT_FOUND", "The exact SAP GUI session ID is not accessible");
+        result.error["session_id"] = session_id;
         return result;
     }
 
@@ -317,14 +310,13 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         }
 
         if (!session_created && (native_connection_opened || !allow_sapshcut || sap_logon_missing)) {
-            result.status = Result::Status::Error;
-            result.error["code"] = native_connection_opened ? "SESSION_NOT_READY"
-                                   : sap_logon_missing      ? "SAP_LOGON_NOT_RUNNING"
-                                                            : "CONNECTION_OPEN_FAILED";
-            result.error["message"] = native_connection_opened ? "SAP connection opened but no session is available"
-                                      : sap_logon_missing
-                                          ? "SAP Logon (saplogon.exe) is not running on this desktop; start it, then retry"
-                                          : "Native SAP connection did not open";
+            const char* code = native_connection_opened ? "SESSION_NOT_READY"
+                               : sap_logon_missing      ? "SAP_LOGON_NOT_RUNNING"
+                                                        : "CONNECTION_OPEN_FAILED";
+            const char* message = native_connection_opened ? "SAP connection opened but no session is available"
+                                  : sap_logon_missing ? "SAP Logon (saplogon.exe) is not running on this desktop; start it, then retry"
+                                                      : "Native SAP connection did not open";
+            result.set_error(code, message);
             result.error["connection_name"] = connection_name;
             if (backend_scripting_disabled) {
                 result.error["detail"] = "SAP reports that backend GUI scripting is disabled for this connection";
@@ -452,15 +444,12 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             {"message", e.what()}
         });
 
-        result.status = Result::Status::Error;
-        result.error["code"] = "LAUNCH_FAILED";
-        result.error["message"] = e.what();
-        result.error["suggestions"] = json::array({
+        result.set_error("LAUNCH_FAILED", e.what(), json::array({
             "Verify the SAP Logon entry is configured and reachable",
             "Verify sapshcut.exe is installed (part of SAP GUI)",
             "Check SAP GUI scripting is enabled (Options → Accessibility & Scripting)",
             fmt::format("Verify connection '{}' is configured in SAP Logon", connection_name)
-        });
+        }));
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         result.diagnostics["trace"] = trace;
         result.diagnostics["timing_ms"] = result.duration.count();
@@ -490,9 +479,7 @@ Result ComAutomationEngine::disconnect() {
         spdlog::info("Disconnected from SAP");
 
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -576,8 +563,7 @@ Result ComAutomationEngine::close_current_session() {
                    {"message", "SAP GUI did not close the selected session"}};
         return result;
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error = {{"code", "SESSION_CLOSE_FAILED"}, {"message", e.what()}};
+        result.set_error("SESSION_CLOSE_FAILED", e.what());
         return result;
     }
 }
@@ -709,9 +695,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         auto session = ensure_session();
         const auto request = normalize_transaction_request(tcode);
         if (!request.valid) {
-            result.status = Result::Status::Error;
-            result.error["code"] = request.error_code;
-            result.error["message"] = request.error_message;
+            result.set_error(request.error_code, request.error_message);
             result.error["tcode"] = tcode;
             result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::high_resolution_clock::now() - start);
@@ -769,9 +753,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
             const bool is_new_message = (post_sbar_text != prev_sbar_text || post_sbar_type != prev_sbar_type);
             if (post_sbar_type == "E" || post_sbar_type == "A") {
                 if (is_new_message) {
-                    result.status = Result::Status::Error;
-                    result.error["code"] = (post_sbar_type == "A") ? "TRANSACTION_ABORTED" : "TRANSACTION_FAILED";
-                    result.error["message"] = post_sbar_text;
+                    result.set_error((post_sbar_type == "A") ? "TRANSACTION_ABORTED" : "TRANSACTION_FAILED", post_sbar_text);
                     result.error["tcode"] = tcode;
                     result.error["message_type"] = post_sbar_type;
                     attach_status_bar(result, prev_status, post_status);
@@ -808,9 +790,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 if (same_tcode(actual_tcode, expected_tcode)) break;
             }
             if (!same_tcode(actual_tcode, expected_tcode)) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "TRANSACTION_NOT_STARTED";
-                result.error["message"] = "Requested transaction did not become active";
+                result.set_error("TRANSACTION_NOT_STARTED", "Requested transaction did not become active");
                 attach_status_bar(result, prev_status, post_status);
                 if (!post_sbar_text.empty() && (post_sbar_type == "E" || post_sbar_type == "A")) {
                     // The same message may be a repeated rejection or a stale
@@ -840,17 +820,13 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         spdlog::info("Executed transaction {} (duration: {}ms)", tcode, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "TRANSACTION_FAILED";
-        result.error["message"] = e.what();
+        result.set_error("TRANSACTION_FAILED", e.what());
         result.error["tcode"] = tcode;
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
         spdlog::error("Transaction {} failed: {}", tcode, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     }
@@ -884,9 +860,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
 
     try {
         if (!element.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ELEMENT";
-            result.error["message"] = "Invalid element ID format";
+            result.set_error("INVALID_ELEMENT", "Invalid element ID format");
             result.error["element"] = element.path;
             return result;
         }
@@ -898,9 +872,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
 
         if (!elem) {
             if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "Element not found at path: " + resolved_element.path;
+            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
             result.error["element"] = resolved_element.path;
 
             // Check if window mismatch (element path specifies different window than active)
@@ -935,9 +907,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         }
 
         if (!elem->is_enabled()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_DISABLED";
-            result.error["message"] = "Element is disabled and cannot be clicked";
+            result.set_error("ELEMENT_DISABLED", "Element is disabled and cannot be clicked");
             result.error["element"] = resolved_element.path;
             return result;
         }
@@ -961,9 +931,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
             auto window = session->get_active_window();
             if (!window) throw ComException("No active window for list selection");
             if (WindowId(window->get_id()).get_index() != target_window_index) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "WINDOW_MISMATCH";
-                result.error["message"] = "List row is not in the active popup";
+                result.set_error("WINDOW_MISMATCH", "List row is not in the active popup");
                 result.error["element"] = resolved_element.path;
                 return result;
             }
@@ -973,9 +941,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
             elem->set_focus();
             window->send_vkey(2);
         } else if (elem_type == "GuiLabel") {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_CLICKABLE";
-            result.error["message"] = "Label is not an interactive hotspot";
+            result.set_error("ELEMENT_NOT_CLICKABLE", "Label is not an interactive hotspot");
             result.error["element"] = resolved_element.path;
             return result;
         } else {
@@ -1035,15 +1001,11 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         spdlog::info("Clicked element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         result.error["element"] = element.path;
         spdlog::error("Click failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -1055,9 +1017,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
 
     try {
         if (!element.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ELEMENT";
-            result.error["message"] = "Invalid element ID format";
+            result.set_error("INVALID_ELEMENT", "Invalid element ID format");
             result.error["element"] = element.path;
             return result;
         }
@@ -1068,9 +1028,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         auto elem = find_element_if_present(session, resolved_element.path);
 
         if (!elem) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "Element not found at path: " + resolved_element.path;
+            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
             result.error["element"] = resolved_element.path;
             result.error["suggestions"] = json::array({
                 "Verify element path is correct",
@@ -1084,9 +1042,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         // Check if element type supports F4 (GuiCTextField)
         std::string elem_type = elem->get_type();
         if (elem_type != "GuiCTextField") {
-            result.status = Result::Status::Error;
-            result.error["code"] = "F4_NOT_SUPPORTED";
-            result.error["message"] = "Element does not support F4 search help";
+            result.set_error("F4_NOT_SUPPORTED", "Element does not support F4 search help");
             result.error["element"] = resolved_element.path;
             result.error["element_type"] = elem_type;
             result.error["suggestions"] = json::array({
@@ -1099,18 +1055,14 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         }
 
         if (!elem->is_enabled()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_DISABLED";
-            result.error["message"] = "Element is disabled and F4 cannot be pressed";
+            result.set_error("ELEMENT_DISABLED", "Element is disabled and F4 cannot be pressed");
             result.error["element"] = resolved_element.path;
             return result;
         }
 
         auto window = session->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_ACTIVE_WINDOW";
-            result.error["message"] = "Could not get active window for sending F4";
+            result.set_error("NO_ACTIVE_WINDOW", "Could not get active window for sending F4");
             return result;
         }
         if (auto mismatch = classify_f4_target_window(window->get_id(), resolved_element.path)) {
@@ -1152,15 +1104,11 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         spdlog::info("Pressed F4 for element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         result.error["element"] = element.path;
         spdlog::error("Press F4 failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -1172,9 +1120,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
 
     try {
         if (!toolbar_element.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ELEMENT";
-            result.error["message"] = "Invalid toolbar element ID format";
+            result.set_error("INVALID_ELEMENT", "Invalid toolbar element ID format");
             result.error["element"] = toolbar_element.path;
             return result;
         }
@@ -1185,9 +1131,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         auto elem = session->find_element_by_id(resolved_element.path);
 
         if (!elem) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "Toolbar element not found at path: " + resolved_element.path;
+            result.set_error("ELEMENT_NOT_FOUND", "Toolbar element not found at path: " + resolved_element.path);
             result.error["element"] = resolved_element.path;
             result.error["suggestions"] = json::array({
                 "Verify toolbar path is correct",
@@ -1201,9 +1145,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         // Verify element is a GuiShell toolbar
         std::string elem_type = elem->get_type();
         if (elem_type != "GuiShell") {
-            result.status = Result::Status::Error;
-            result.error["code"] = "WRONG_ELEMENT_TYPE";
-            result.error["message"] = "Element is not a GuiShell toolbar (type: " + elem_type + ")";
+            result.set_error("WRONG_ELEMENT_TYPE", "Element is not a GuiShell toolbar (type: " + elem_type + ")");
             result.error["element"] = resolved_element.path;
             result.error["element_type"] = elem_type;
             return result;
@@ -1238,16 +1180,12 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
                     button_id, resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         result.error["toolbar"] = toolbar_element.path;
         result.error["button_id"] = button_id;
         spdlog::error("Press toolbar button failed for {} / {}: {}", toolbar_element.path, button_id, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -1259,9 +1197,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
 
     try {
         if (!element.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ELEMENT";
-            result.error["message"] = "Invalid element ID format";
+            result.set_error("INVALID_ELEMENT", "Invalid element ID format");
             return result;
         }
 
@@ -1272,9 +1208,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
 
         if (!elem) {
             if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "Element not found at path: " + resolved_element.path;
+            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
             result.error["element"] = resolved_element.path;
 
             // Check if window mismatch
@@ -1309,9 +1243,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         }
 
         if (!elem->is_enabled()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_DISABLED";
-            result.error["message"] = "Element is disabled";
+            result.set_error("ELEMENT_DISABLED", "Element is disabled");
             result.error["element"] = resolved_element.path;
             return result;
         }
@@ -1333,9 +1265,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
                 return elem->read_string_property_strict(first.c_str());
             };
             if (auto refusal = collect_selection_probe(reader, live)) {
-                result.status = Result::Status::Error;
-                result.error["code"] = refusal->code;
-                result.error["message"] = refusal->message;
+                result.set_error(refusal->code, refusal->message);
                 result.error["element"] = resolved_element.path;
                 return result;
             }
@@ -1351,9 +1281,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             live.program = screen.program;
             live.screen_number = screen.screen_number;
             if (auto refusal = evaluate_selection_input(live, selection_input_policy_)) {
-                result.status = Result::Status::Error;
-                result.error["code"] = refusal->code;
-                result.error["message"] = refusal->message;
+                result.set_error(refusal->code, refusal->message);
                 result.error["element"] = resolved_element.path;
                 return result;
             }
@@ -1380,16 +1308,12 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         const auto outcome = elem->fill_value(value);
         const auto after_status = read_action_status(session);
         if (outcome.status == ComGuiElement::FillOutcome::Status::InvalidArgument) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ARGUMENT";
-            result.error["message"] = outcome.message;
+            result.set_error("INVALID_ARGUMENT", outcome.message);
             result.error["element"] = resolved_element.path;
             return result;
         }
         if (outcome.status == ComGuiElement::FillOutcome::Status::ReadOnly) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_READ_ONLY";
-            result.error["message"] = "Element is not changeable on the current SAP screen";
+            result.set_error("ELEMENT_READ_ONLY", "Element is not changeable on the current SAP screen");
             result.error["element"] = resolved_element.path;
             attach_fresh_status_bar(result, before_status, after_status);
             return result;
@@ -1422,14 +1346,10 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         spdlog::info("Filled field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         spdlog::error("Fill failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -1445,15 +1365,11 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         auto session = ensure_session();
         auto grid = session->find_element_by_id(resolved.path);
         if (!grid) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "GridView not found: " + resolved.path;
+            result.set_error("ELEMENT_NOT_FOUND", "GridView not found: " + resolved.path);
             return result;
         }
         if (grid->get_type() != "GuiShell" && grid->get_type() != "GuiGridView") {
-            result.status = Result::Status::Error;
-            result.error["code"] = "WRONG_ELEMENT_TYPE";
-            result.error["message"] = "Element is not a GridView";
+            result.set_error("WRONG_ELEMENT_TYPE", "Element is not a GridView");
             return result;
         }
         const auto before_status = read_action_status(session);
@@ -1471,13 +1387,9 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -1491,17 +1403,13 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         auto session = ensure_session();
         auto grid = session->find_element_by_id(resolved.path);
         if (!grid) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "ELEMENT_NOT_FOUND";
-            result.error["message"] = "GridView not found: " + resolved.path;
+            result.set_error("ELEMENT_NOT_FOUND", "GridView not found: " + resolved.path);
             return result;
         }
         const std::string type = grid->get_type();
         if (type != "GuiGridView" &&
             (type != "GuiShell" || grid->get_string_property(L"SubType") != "GridView")) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "WRONG_ELEMENT_TYPE";
-            result.error["message"] = "Element is not a GridView";
+            result.set_error("WRONG_ELEMENT_TYPE", "Element is not a GridView");
             return result;
         }
         const auto before_status = read_action_status(session);
@@ -1516,13 +1424,9 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start);
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -1583,9 +1487,7 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
 
     try {
         if (!element.is_valid()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_ELEMENT";
-            result.error["message"] = "Invalid element ID format";
+            result.set_error("INVALID_ELEMENT", "Invalid element ID format");
             return result;
         }
 
@@ -1647,14 +1549,10 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         spdlog::info("Read field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = error_code_for_com_message(e.what());
-        result.error["message"] = e.what();
+        result.set_error(error_code_for_com_message(e.what()), e.what());
         spdlog::error("Read failed for {}: {}", element.path, e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     // A read is observational: put the tabs back as they were (innermost first), whatever the read returned.
@@ -1678,9 +1576,7 @@ Result ComAutomationEngine::read_screen(bool include_structure, bool skip_trees,
     }
     if (!screen_reader_) {
         Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SESSION";
-        result.error["message"] = "Unable to initialize screen reader - no session";
+        result.set_error("NO_SESSION", "Unable to initialize screen reader - no session");
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
@@ -1698,9 +1594,7 @@ Result ComAutomationEngine::read_screen_with_tabs(bool skip_trees, int max_rows,
     }
     if (!screen_reader_) {
         Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SESSION";
-        result.error["message"] = "Unable to initialize screen reader - no session";
+        result.set_error("NO_SESSION", "Unable to initialize screen reader - no session");
     return result;
 }
     screen_reader_->set_probe_all(probe_all_);
@@ -1716,11 +1610,7 @@ Result ComAutomationEngine::find_screen(const ScreenFindOptions& query) {
         initialize_services();
     }
     if (!screen_reader_) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SESSION";
-        result.error["message"] = "Unable to initialize screen reader - no session";
-        return result;
+        return Result::fail("NO_SESSION", "Unable to initialize screen reader - no session");
     }
     screen_reader_->set_probe_all(probe_all_ || query.probe_all);
     return screen_reader_->find(query);
@@ -1742,9 +1632,7 @@ Result ComAutomationEngine::dump_object_tree(const std::string& id, const std::v
             });
         result.status = Result::Status::Success;
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     }
     return result;
 }

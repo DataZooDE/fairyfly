@@ -41,6 +41,17 @@ struct Result {
         return r;
     }
 
+    /// Makes this result an error with "code", "message" (and "suggestions"); data, diagnostics, duration and any
+    /// other error fields stay as they are.
+    Result& set_error(std::string code, std::string message, json suggestions = nullptr) {
+        status = Status::Error;
+        if (!error.is_object()) error = json::object();
+        error["code"] = std::move(code);
+        error["message"] = std::move(message);
+        if (!suggestions.is_null()) error["suggestions"] = std::move(suggestions);
+        return *this;
+    }
+
     json to_json() const {
         json response;
         switch (status) {

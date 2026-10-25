@@ -22,13 +22,6 @@
 namespace fairyfly::mcp {
 namespace {
 
-Result worker_error(const char* code, const char* message) {
-    Result result;
-    result.status = Result::Status::Error;
-    result.error = {{"code", code}, {"message", message}};
-    return result;
-}
-
 } // namespace
 
 int run_session_worker_stdio() {
@@ -49,7 +42,7 @@ int run_session_worker_stdio() {
     std::optional<BoundSession> bound;
     return run_worker_loop(std::cin, std::cout, [&](const WorkerCall& call) -> Result {
         if (call.enumerate) {
-            if (bound) return worker_error("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
+            if (bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
             if (!handler) {
                 handler = std::make_unique<cli::CommandHandler>();
                 handler->set_batch_mode(true);
@@ -58,7 +51,7 @@ int run_session_worker_stdio() {
             Result result = handler->handle_list_all();
             if (result.status != Result::Status::Success || !result.data.is_object() ||
                 !result.data.contains("connections") || !result.data["connections"].is_array())
-                return worker_error("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");
+                return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");
             for (auto& connection : result.data["connections"]) {
                 if (!connection.is_object() || !connection.contains("sessions") ||
                     !connection["sessions"].is_array()) continue;
@@ -78,7 +71,7 @@ int run_session_worker_stdio() {
         }
         if (call.probe) {
             if (bound && bound->connection != call.connection)
-                return worker_error("WORKER_SESSION_MISMATCH", "worker is bound to another saved connection");
+                return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to another saved connection");
             if (!handler) {
                 handler = std::make_unique<cli::CommandHandler>();
                 handler->set_batch_mode(true);
@@ -89,7 +82,7 @@ int run_session_worker_stdio() {
             if (!facts.connection_id || (selected && facts.connection_id != selected) ||
                 facts.system.empty() || facts.client.empty() ||
                 facts.user.empty() || facts.session_identity.empty())
-                return worker_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+                return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
             const auto target = handler->peek_session_target("", "", facts.connection_id);
             Result result;
             result.status = Result::Status::Success;
@@ -102,10 +95,10 @@ int run_session_worker_stdio() {
         if (bound) {
             if (bound->connection != call.connection || bound->identity != call.session_identity ||
                 bound->owner != call.owner_identity)
-                return worker_error("WORKER_SESSION_MISMATCH", "worker is bound to another SAP session");
+                return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to another SAP session");
         }
         if (config::read_only_cap() && call.selection_input)
-            return worker_error("READ_ONLY", "selection input is disabled by FAIRYFLY_READ_ONLY");
+            return Result::fail("READ_ONLY", "selection input is disabled by FAIRYFLY_READ_ONLY");
         if (!handler) {
             handler = std::make_unique<cli::CommandHandler>();
             handler->set_batch_mode(true);
@@ -115,9 +108,9 @@ int run_session_worker_stdio() {
         const std::string live_owner = live.system + "/" + live.client + "/" + live.user;
         if (live.connection_id != call.connection || live.session_identity != call.session_identity ||
             live_owner != call.owner_identity || live.system.empty() || live.client.empty() || live.user.empty())
-            return worker_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+            return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
         if (!call.expected_screen_guard.empty() && screen_guard_for(live) != call.expected_screen_guard)
-            return worker_error("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
+            return Result::fail("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
         if (!bound) bound = BoundSession{call.connection, call.session_identity, call.owner_identity};
         handler->set_read_only(config::read_only_cap() || (call.read_only && !call.selection_input));
         handler->set_selection_input_only(call.selection_input, call.selection_program, call.selection_screen);

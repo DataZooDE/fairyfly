@@ -209,9 +209,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
 
     try {
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
 
@@ -221,9 +219,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         // Get active window
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
 
@@ -264,9 +260,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
 
             IDispatch* window_dispatch = window->get_dispatch();
             if (!window_dispatch) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "INVALID_WINDOW";
-                result.error["message"] = "Window COM object is invalid or has been closed";
+                result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
                 VariantClear(&filename_var);
                 VariantClear(&image_type);
                 return result;
@@ -349,9 +343,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             std::error_code file_error;
             if (!std::filesystem::is_regular_file(output_path, file_error) ||
                 std::filesystem::file_size(output_path, file_error) == 0 || file_error) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "SCREENSHOT_NOT_CREATED";
-                result.error["message"] = "SAP GUI did not create the screenshot at the requested path";
+                result.set_error("SCREENSHOT_NOT_CREATED", "SAP GUI did not create the screenshot at the requested path");
                 return result;
             }
 
@@ -363,9 +355,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             json capture_geometry = json::object();
             std::vector<uint8_t> png_bytes = hard_copy_png(window);
             if (png_bytes.empty()) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "INVALID_WINDOW";
-                result.error["message"] = "Window COM object is invalid or has been closed";
+                result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
                 return result;
             }
 
@@ -461,14 +451,10 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
     } catch (const std::invalid_argument& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_ARGUMENT";
-        result.error["message"] = e.what();
+        result.set_error("INVALID_ARGUMENT", e.what());
         spdlog::error("Invalid argument in capture_screenshot: {}", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
         spdlog::error("Exception in capture_screenshot: {}", e.what());
     }
 
