@@ -74,7 +74,30 @@
 - `FAIRYFLY_DIAG` and `FAIRYFLY_PROBE_ALL` follow the same rule (they took only `1`). `FAIRYFLY_AUDIT` and
   `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no` or `off` in any case (`OFF` or `no` left the tray's
   update check on). `mcp.yaml` booleans use the same spellings.
-- The cloud link's tray still reads `FAIRYFLY_READ_ONLY` on its own until approval model v2 moves it over.
+- The cloud link and its tray read them the same way too (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_LINK_GATEWAY`,
+  `FAIRYFLY_LINK_FORBID_DEFAULT_STATE`).
+
+## 2026.10.25.1 (2026-10-25)
+
+### Cloud link: "Allow changes in SAP" is the approval (approval model v2)
+
+- **Allow changes in SAP** in the link tray no longer switches between read-only and write mode. It is the standing
+  approval at this desktop: on, the cloud's changes run without asking; off (the default), every change asks with the
+  notification and a yes approves that one change. Changes are possible either way; they still need the organisation's
+  grant.
+- The switch is saved for the Windows user and stays as it is after a restart or an update.
+- The approval window's **Don't ask again** (was: for 5 minutes) approves the change and turns on **Allow changes in
+  SAP**.
+- When the organisation requires approval (fairyfly.io settings: "Always ask at the desktop", gateway v0.5.8), the
+  switch and the checkbox are greyed out ("Approval is required by your administrator") and every change asks. The
+  saved switch comes back when the organisation lets the user decide again.
+- libffl synced from the gateway (v0.5.8): every cloud change asks this desktop, whatever the gateway's grant says
+  about approval; the audit tells `standing` (ran under **Allow changes in SAP**) from `approved`.
+- No notification for a change fairyfly refuses anyway (`--read-only`, `FAIRYFLY_READ_ONLY`).
+- Keys are named in the approval: "press Save (Ctrl+S)" instead of "press 11".
+- `link run --allow-write` is still accepted and has no effect.
+- A cloud call gets write rights only for the change approved at this desktop (or by **Allow changes in SAP**),
+  whatever the gateway's grant says about approval; any other call runs read-only.
 
 ### MCP: navigation is annotated read-only
 

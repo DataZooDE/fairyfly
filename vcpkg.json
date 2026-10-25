@@ -1,6 +1,6 @@
 {
   "name": "fairyfly",
-  "version": "2026.10.25",
+  "version": "2026.10.25.1",
   "description": "LLM-powered SAP GUI automation CLI tool",
   "homepage": "https://github.com/DataZooDE/fairyfly",
   "license": "BUSL-1.1",

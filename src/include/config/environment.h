@@ -34,6 +34,9 @@ inline constexpr const char* kAuthHeader = "FAIRYFLY_AUTH_HEADER";      // clien
 inline constexpr const char* kLinkGateway = "FAIRYFLY_LINK_GATEWAY";
 inline constexpr const char* kLinkForbidDefaultState = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE";
 inline constexpr const char* kLocalAppData = "LOCALAPPDATA";
+inline constexpr const char* kXdgConfigHome = "XDG_CONFIG_HOME";
+inline constexpr const char* kComputerName = "COMPUTERNAME";
+inline constexpr const char* kHostName = "HOSTNAME";
 inline constexpr const char* kHome = "HOME";
 }  // namespace env
 

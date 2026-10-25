@@ -1123,10 +1123,11 @@ TEST_CASE("run_link_with_tray: a failing link shows a message; a second instance
 
 namespace {
 struct FakeWrites : LinkWriteMode {
-    bool is_allowed = false, is_locked = false, ok = true;
+    bool is_allowed = false, is_locked = false, is_enforced = false, ok = true;
     std::vector<bool> requests;
     bool allowed() override { return is_allowed; }
     bool locked() override { return is_locked; }
+    bool enforced() override { return is_enforced; }
     bool set_allowed(bool a) override {
         requests.push_back(a);
         if (ok) is_allowed = a;
@@ -1135,21 +1136,34 @@ struct FakeWrites : LinkWriteMode {
 };
 } // namespace
 
-TEST_CASE("link tray: Allow changes in SAP asks first, switches the link, is locked by the read-only cap", "[tray][link_tray]") {
+TEST_CASE("link tray: Allow changes in SAP is the standing approval: asks first, greyed when enforced or read-only", "[tray][link_tray]") {
     LinkWritesView writes;
     writes.available = true;
     auto m = build_link_menu(paired("connected"), writes);
     const MenuItem* allow = find_item(m, TrayAction::LinkToggleWrites);
     REQUIRE(allow != nullptr);
     CHECK(allow->checkable);
+    CHECK(allow->enabled);
     CHECK_FALSE(allow->checked);
-    CHECK(m.tooltip.find("(read-only)") != std::string::npos);
+    CHECK(m.tooltip.find("(changes need your approval)") != std::string::npos);   // off: every change asks
     writes.allowed = true;
-    CHECK(find_item(build_link_menu(paired("connected"), writes), TrayAction::LinkToggleWrites)->checked);
-    writes.locked = true;
-    allow = find_item(build_link_menu(paired("connected"), writes), TrayAction::LinkToggleWrites);
+    m = build_link_menu(paired("connected"), writes);
+    CHECK(find_item(m, TrayAction::LinkToggleWrites)->checked);
+    CHECK(m.tooltip.find("(changes allowed)") != std::string::npos);
+    writes.enforced = true;   // the organisation: "Always ask at the desktop"
+    m = build_link_menu(paired("connected"), writes);
+    allow = find_item(m, TrayAction::LinkToggleWrites);
     CHECK_FALSE(allow->enabled);
     CHECK_FALSE(allow->checked);
+    CHECK(allow->label.find("Approval is required by your administrator") != std::string::npos);
+    CHECK(m.tooltip.find("(changes need your approval)") != std::string::npos);
+    writes.enforced = false;
+    writes.locked = true;     // --read-only / FAIRYFLY_READ_ONLY
+    m = build_link_menu(paired("connected"), writes);
+    allow = find_item(m, TrayAction::LinkToggleWrites);
+    CHECK_FALSE(allow->enabled);
+    CHECK_FALSE(allow->checked);
+    CHECK(m.tooltip.find("(read-only)") != std::string::npos);
     CHECK(find_item(build_link_menu(paired("connected")), TrayAction::LinkToggleWrites) == nullptr);   // no switch: no item
 
     Fixture f;
@@ -1164,18 +1178,23 @@ TEST_CASE("link tray: Allow changes in SAP asks first, switches the link, is loc
     controller.on_action(TrayAction::LinkToggleWrites);
     CHECK(fake.requests.empty());
     REQUIRE(f.host.confirms.size() == 1);
-    CHECK(f.host.confirms[0].find("change data in SAP") != std::string::npos);
+    CHECK(f.host.confirms[0].find("without asking") != std::string::npos);
 
     f.host.confirm_answer = true;
     controller.on_action(TrayAction::LinkToggleWrites);
     CHECK(fake.requests == std::vector<bool>{true});
     CHECK(f.host.balloons.back().find("Changes in SAP allowed") != std::string::npos);
 
-    controller.on_action(TrayAction::LinkToggleWrites);   // back to read-only: no question
+    controller.on_action(TrayAction::LinkToggleWrites);   // back to asking: no question
     CHECK(fake.requests == std::vector<bool>{true, false});
     CHECK(f.host.confirms.size() == 2);
+    CHECK(f.host.balloons.back().find("asks for your approval") != std::string::npos);
 
     fake.is_locked = true;
+    controller.on_action(TrayAction::LinkToggleWrites);
+    CHECK(fake.requests.size() == 2);
+    fake.is_locked = false;
+    fake.is_enforced = true;
     controller.on_action(TrayAction::LinkToggleWrites);
     CHECK(fake.requests.size() == 2);
 }
