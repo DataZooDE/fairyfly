@@ -1105,34 +1105,9 @@ std::string ComGuiElement::get_item_text(const std::string& node_key, const std:
             return "";
         }
 
-        // Two arguments: node_key and column_name (in reverse order for DISPPARAMS)
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        // This ensures proper BSTR ownership by the VARIANT
-        VARIANT args[2];
-        com::VariantGuard arg_guards[2] = {
-            com::VariantGuard(&args[0]),
-            com::VariantGuard(&args[1])
-        };
-
-        args[1].vt = VT_BSTR;  // First argument (node_key)
-        const auto wide_key = com::utf8_to_wide(node_key);
-        args[1].bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        args[0].vt = VT_BSTR;  // Second argument (column_name)
-        const auto wide_column = com::utf8_to_wide(column_name);
-        args[0].bstrVal = SysAllocStringLen(wide_column.data(), static_cast<UINT>(wide_column.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 2;
-        params.rgvarg = args;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, result_guard.get(), nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(node_key), bstr_arg(column_name)}, result_guard.get());
 
         // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
         std::string text;
@@ -1177,20 +1152,8 @@ void ComGuiElement::select_node(const std::string& node_key) {
             throw ComException("SelectNode method not found - element may not be a tree control", hr);
         }
 
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
+        // the key as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(node_key)});
 
         if (FAILED(hr)) {
             throw ComException("Failed to select tree node '" + node_key + "'", hr);
@@ -1212,20 +1175,8 @@ void ComGuiElement::expand_node(const std::string& node_key) {
             throw ComException("ExpandNode method not found - element may not be a tree control", hr);
         }
 
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
+        // the key as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(node_key)});
 
         if (FAILED(hr)) {
             throw ComException("Failed to expand tree node '" + node_key + "'", hr);
@@ -1247,20 +1198,8 @@ void ComGuiElement::collapse_node(const std::string& node_key) {
             throw ComException("CollapseNode method not found - element may not be a tree control", hr);
         }
 
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
+        // the key as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(node_key)});
 
         if (FAILED(hr)) {
             throw ComException("Failed to collapse tree node '" + node_key + "'", hr);
@@ -1285,20 +1224,8 @@ void ComGuiElement::doubleclick_node(const std::string& node_key) {
                 !get_item_text(node_key, "TEXT").empty()) {
                 DISPID item_dispid;
                 if (SUCCEEDED(get_dispid_via_typeinfo(dispatch_, L"DoubleClickItem", &item_dispid))) {
-                    const auto wide_key = com::utf8_to_wide(node_key);
-                    VARIANT args[2];
-                    com::VariantGuard guards[2] = {com::VariantGuard(&args[0]),
-                                                   com::VariantGuard(&args[1])};
-                    args[0].vt = VT_BSTR;
-                    args[0].bstrVal = SysAllocString(L"TEXT");
-                    args[1].vt = VT_BSTR;
-                    args[1].bstrVal = SysAllocStringLen(wide_key.data(),
-                                                        static_cast<UINT>(wide_key.size()));
-                    if (!args[0].bstrVal || !args[1].bstrVal)
-                        throw ComException("Could not allocate tree item arguments", E_OUTOFMEMORY);
-                    DISPPARAMS params = {args, nullptr, 2, 0};
-                    HRESULT hr = dispatch_->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                   DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
+                    // DoubleClickItem(node key, item name "TEXT")
+                    HRESULT hr = invoke(dispatch_, item_dispid, DISPATCH_METHOD, {bstr_arg(node_key), bstr_arg("TEXT")});
                     if (FAILED(hr)) throw ComException("Failed to double-click tree text item", hr);
                     return;
                 }
@@ -1311,20 +1238,8 @@ void ComGuiElement::doubleclick_node(const std::string& node_key) {
             throw ComException("DoubleClickNode method not found - element may not be a tree control", hr);
         }
 
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
+        // the key as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(node_key)});
 
         if (FAILED(hr)) {
             throw ComException("Failed to double-click tree node '" + node_key + "'", hr);
@@ -1343,21 +1258,10 @@ void ComGuiElement::select_node_context_item(const std::string& node_key,
     if (!dispatch_) throw ComException("Null tree element");
     if (item_text.empty()) throw ComException("Context-menu item text is empty");
 
-    auto invoke_with_string = [this](const wchar_t* method_name,
-                                     const std::string& value) {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-        if (FAILED(hr)) throw ComException("Tree context-menu method not found", hr);
-
-        _variant_t argument(value.c_str());
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Tree context-menu action failed", hr);
-    };
-
-    invoke_with_string(L"NodeContextMenu", node_key);
-    invoke_with_string(L"SelectContextMenuItemByText", item_text);
+    // UTF-8 key and item text (they went through the ANSI code page before)
+    call(L"NodeContextMenu", {bstr_arg(node_key)}, "Tree context-menu method not found", "Tree context-menu action failed");
+    call(L"SelectContextMenuItemByText", {bstr_arg(item_text)}, "Tree context-menu method not found",
+         "Tree context-menu action failed");
 }
 
 // ============================================================================
