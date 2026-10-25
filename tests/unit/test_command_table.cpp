@@ -449,7 +449,7 @@ std::pair<int, std::string> refused_start(mcp::ServeOptions options) {
 }
 }  // namespace
 
-TEST_CASE("run_mcp refuses contradictory or invalid start options before anything is started", "[command_table][mcp]") {
+TEST_CASE("run_mcp refuses contradictory or invalid start options without asking for a handler", "[command_table][mcp]") {
     // review 2026-10-25: the refusal codes of run_mcp were untested
     mcp::ServeOptions both;
     both.read_only = true;
