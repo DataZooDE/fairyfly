@@ -1668,17 +1668,61 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     return shaped;
 }
 
+/// gui_batch in owner mode: every item a screen-bound call on the batch's one explicit saved connection (set into
+/// its arguments, as the lease when one is required), and that connection a session of an allowed owner identity.
+/// Sets `connection`, `lease_id`, `needs_lease` and the session's `facts`.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::prepare_owner_batch(
+    const json& args, const CallContext& ctx, json& items, int& connection, std::string& lease_id, bool& needs_lease,
+    std::optional<audit::SapFacts>& facts) {
+    if (!args.contains("connection"))
+        return CallRefusal{"BATCH_SESSION_REQUIRED", "owner-mode batches need an explicit saved connection"};
+    connection = args["connection"].get<int>();
+    lease_id = args.value("lease_id", std::string());
+    needs_lease = false;
+    for (auto& item : items) {
+        const std::string name = item["tool"].get<std::string>();
+        const ToolSpec* item_spec = find_spec(name);
+        if (!item_spec || !command_table::tool_has(name, command_table::Trait::ScreenBound))
+            return CallRefusal{"BATCH_SESSION_REQUIRED", "owner-mode batches may contain only calls to one established SAP session"};
+        json arguments = item.value("arguments", json::object());
+        if (arguments.contains("connection") && arguments["connection"] != connection)
+            return CallRefusal{"BATCH_MIXED_SESSIONS", "batch items target different saved connections"};
+        arguments["connection"] = connection;
+        if (arguments.contains("lease_id") && arguments["lease_id"] != lease_id)
+            return CallRefusal{"BATCH_MIXED_LEASES", "batch items present different session leases"};
+        if (lease_required_for_call(name, arguments)) {
+            needs_lease = true;
+            if (lease_id.empty()) return CallRefusal{"LEASE_REQUIRED", "acquire a session lease for this batch"};
+            arguments["lease_id"] = lease_id;
+        }
+        item["arguments"] = std::move(arguments);
+    }
+    if (facts_provider_) {
+        try { facts = facts_provider_(connection); } catch (...) {}
+    }
+    if (!facts || facts->connection_id != connection || facts->system.empty() || facts->client.empty() ||
+        facts->user.empty() || facts->session_identity.empty() ||
+        !owner_identity_allowed(policy_, ctx.principal,
+            sap_identity(*facts)))
+        return CallRefusal{"OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable"};
+    return std::nullopt;
+}
+
 ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext& ctx) {
     const ToolSpec* spec = find_spec("gui_batch");
     json args = raw_args.is_null() ? json::object() : raw_args;
+    // a refusal of the whole batch: one audit record
+    auto batch_fail = [&](const std::string& reason, const std::string& message) {
+        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
+            code = reason;
+            return error_result(reason, message);
+        }, ctx, nullptr);
+    };
 
     // Reject the whole batch while a required audit sink is unavailable. If a
     // denial append repairs the sink, a later request may run; this batch may not.
     if (policy_.audit_required && (!hook_ || mcp_audit_failed()))
-        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
-            code = "AUDIT_UNAVAILABLE";
-            return error_result(code, "The required audit trail is unavailable; no batch action was run.");
-        }, ctx, nullptr);
+        return batch_fail("AUDIT_UNAVAILABLE", "The required audit trail is unavailable; no batch action was run.");
 
     // Validate the whole batch up front (one audit record when it is rejected).
     std::string problem;
@@ -1689,11 +1733,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     } catch (const std::exception& e) {
         problem = e.what();
     }
-    if (!problem.empty())
-        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
-            code = "INVALID_ARGUMENT";
-            return error_result("INVALID_ARGUMENT", problem);
-        }, ctx, nullptr);
+    if (!problem.empty()) return batch_fail("INVALID_ARGUMENT", problem);
 
     // Token authorization of the whole batch up front (scope "batch" + the static rules of every item; the
     // server's own read-only refusals and the SAP-system rule are applied per item at execution time).
@@ -1702,19 +1742,9 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         static_policy.read_only = false;
         const PolicyDecision authz = auth::authorize_call(ctx.principal, *spec, spec->family, args, static_policy, std::nullopt,
                                                           std::nullopt, [this](const std::string& n) { return find_spec(n); });
-        if (!authz.allowed)
-            return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
-                code = authz.code.empty() ? "REFUSED" : authz.code;
-                return error_result(code, authz.message);
-            }, ctx, nullptr);
+        if (!authz.allowed) return batch_fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message);
     }
 
-    auto batch_fail = [&](const std::string& reason, const std::string& message) {
-        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
-            code = reason;
-            return error_result(reason, message);
-        }, ctx, nullptr);
-    };
     json items = args["items"];
     struct BatchPin {
         std::shared_ptr<SessionLeases> leases;
@@ -1726,38 +1756,12 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     } pin;
     CallContext item_ctx = ctx;
     if (owner_mode(ctx)) {
-        if (!args.contains("connection"))
-            return batch_fail("BATCH_SESSION_REQUIRED", "owner-mode batches need an explicit saved connection");
-        const int connection = args["connection"].get<int>();
-        const std::string lease_id = args.value("lease_id", std::string());
+        int connection = 0;
+        std::string lease_id;
         bool needs_lease = false;
-        for (auto& item : items) {
-            const std::string name = item["tool"].get<std::string>();
-            const ToolSpec* item_spec = find_spec(name);
-            if (!item_spec || !command_table::tool_has(name, command_table::Trait::ScreenBound))
-                return batch_fail("BATCH_SESSION_REQUIRED", "owner-mode batches may contain only calls to one established SAP session");
-            json arguments = item.value("arguments", json::object());
-            if (arguments.contains("connection") && arguments["connection"] != connection)
-                return batch_fail("BATCH_MIXED_SESSIONS", "batch items target different saved connections");
-            arguments["connection"] = connection;
-            if (arguments.contains("lease_id") && arguments["lease_id"] != lease_id)
-                return batch_fail("BATCH_MIXED_LEASES", "batch items present different session leases");
-            if (lease_required_for_call(name, arguments)) {
-                needs_lease = true;
-                if (lease_id.empty()) return batch_fail("LEASE_REQUIRED", "acquire a session lease for this batch");
-                arguments["lease_id"] = lease_id;
-            }
-            item["arguments"] = std::move(arguments);
-        }
         std::optional<audit::SapFacts> facts;
-        if (facts_provider_) {
-            try { facts = facts_provider_(connection); } catch (...) {}
-        }
-        if (!facts || facts->connection_id != connection || facts->system.empty() || facts->client.empty() ||
-            facts->user.empty() || facts->session_identity.empty() ||
-            !owner_identity_allowed(policy_, ctx.principal,
-                sap_identity(*facts)))
-            return batch_fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+        if (auto refused = prepare_owner_batch(args, ctx, items, connection, lease_id, needs_lease, facts))
+            return batch_fail(refused->code, refused->message);
         if (needs_lease) {
             if (!session_leases_ || ctx.principal.id.empty())
                 return batch_fail("LEASE_UNAVAILABLE", "the session lease cannot be verified");

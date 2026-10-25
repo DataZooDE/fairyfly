@@ -182,6 +182,9 @@ private:
     std::optional<CallRefusal> verify_owner_launch_outcome(Result& result, const Principal& principal, McpCallRecord& record,
                                                            const std::optional<audit::SapFacts>& checked_launch_facts,
                                                            const LaunchTargetGuard& owner_launch_guard);
+    std::optional<CallRefusal> prepare_owner_batch(const json& args, const CallContext& ctx, json& items, int& connection,
+                                                   std::string& lease_id, bool& needs_lease,
+                                                   std::optional<audit::SapFacts>& facts);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,
