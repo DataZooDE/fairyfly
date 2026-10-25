@@ -579,6 +579,126 @@ std::optional<HttpResponse> HttpEndpoint::protocol_refusal(const HttpRequest& re
     return std::nullopt;
 }
 
+/// A tools/call on a routed endpoint: the token is authenticated again, then the router assigns the SAP session; a
+/// call that is neither routed nor global control is refused (SESSION_ROUTE_REQUIRED). Sets the re-authenticated
+/// `admission_principal` and the `route`.
+std::optional<HttpEndpoint::RouteRefusal> HttpEndpoint::admit_session_route(const json& params, const Principal& principal,
+                                                                            const AuthRequest& execution_auth,
+                                                                            Principal& admission_principal,
+                                                                            SessionRoute& session_route) {
+    AuthOutcome refreshed = reauthenticate(execution_auth);
+    if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
+        const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+        return RouteRefusal{"authorization changed before route admission", code};
+    }
+    admission_principal = std::move(refreshed.principal);
+    const std::string tool = params["name"].get<std::string>();
+    try {
+        session_route = session_router_(admission_principal, tool,
+                                        params.value("arguments", json::object()));
+    } catch (...) {
+        session_route.handled = true;
+        session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
+        session_route.error_message = "the SAP session could not be routed";
+    }
+    const bool global_control =
+        session_route.global_control || command_table::tool_has(tool, command_table::Trait::GlobalControl);
+    if (!session_route.error_code.empty() ||
+        (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
+        (!session_route.handled && !global_control)) {
+        const std::string code = session_route.error_code.empty() ? "SESSION_ROUTE_UNAVAILABLE" : session_route.error_code;
+        const std::string effective_code = !session_route.handled && !global_control && session_route.error_code.empty()
+                                               ? "SESSION_ROUTE_REQUIRED" : code;
+        const std::string reason = session_route.error_message.empty() ? "the SAP session could not be routed"
+                                                                : session_route.error_message;
+        return RouteRefusal{reason, effective_code};
+    }
+    return std::nullopt;
+}
+
+/// What an executor job of tools/list or tools/call needs: the request, who sent it, how to answer, its route.
+struct HttpEndpoint::ToolJob {
+    Pending pending;
+    Principal principal;
+    AuthRequest execution_auth;
+    ProtocolEra era;
+    bool stateless;
+    json server_info;
+    json client_info;
+    json progress_token;
+    bool want_progress;
+    std::shared_ptr<ToolProvider> route_provider;
+    std::string route_identity;
+    std::string route_lane_key;
+    bool routed;
+    std::shared_ptr<Waiter> waiter;
+};
+
+/// The job on the main thread (or the session's lane): the token and the route are checked again at dequeue, then
+/// tools/list or tools/call runs with progress frames when the client asked for them.
+json HttpEndpoint::run_tool_job(const ToolJob& job, CallState& state) {
+    AuthOutcome refreshed = reauthenticate(job.execution_auth);
+    if (!refreshed.ok || !same_security_principal(refreshed.principal, job.principal)) {
+        const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+        json denied = make_error(job.pending.id, kInvalidParams, "authorization changed before execution",
+                                 json{{"code", reason}});
+        return job.stateless ? decorate_stateless(std::move(denied), job.pending.method, job.server_info) : denied;
+    }
+    const Principal& current_principal = refreshed.principal;
+    if (job.routed) {
+        bool valid_route = false;
+        try {
+            const SessionRoute current = session_recheck_router_(current_principal,
+                job.pending.params.at("name").get<std::string>(),
+                job.pending.params.value("arguments", json::object()));
+            valid_route = current.handled && current.error_code.empty() &&
+                          current.identity == job.route_identity &&
+                          (current.lane_key.empty() ? current.identity : current.lane_key) == job.route_lane_key &&
+                          current.provider.get() == job.route_provider.get();
+        } catch (...) {
+            valid_route = false;
+        }
+        if (!valid_route) {
+            json denied = make_error(job.pending.id, kInvalidParams, "SAP session routing changed before execution",
+                                     json{{"code", "SESSION_ROUTE_CHANGED"}});
+            return job.stateless ? decorate_stateless(std::move(denied), job.pending.method, job.server_info) : denied;
+        }
+    }
+    ToolProvider& selected_provider = job.route_provider ? *job.route_provider : provider_;
+    json out;
+    if (job.pending.method == "tools/list") {
+        out = tools_list_message(selected_provider, job.pending, true, &current_principal);
+    } else {
+        try {
+            selected_provider.set_client_info(job.client_info.is_object() ? job.client_info : json::object());
+        } catch (const std::exception& e) {
+            spdlog::warn("set_client_info failed: {}", e.what());
+        }
+        CallContext ctx;
+        ctx.principal = current_principal;
+        ctx.era = job.era;
+        ctx.http = true;
+        ctx.cancelled = [&state] { return state.cancelled.load(); };
+        ctx.reauthorize = [this, execution_auth = job.execution_auth, bound = current_principal]() {
+            const AuthOutcome latest = reauthenticate(execution_auth);
+            return latest.ok && same_security_principal(latest.principal, bound);
+        };
+        auto last = std::make_shared<double>(0.0);
+        if (job.want_progress) {
+            job.waiter->push_frame(progress_frame(job.progress_token, 0.0, std::nullopt, "started"));
+            ctx.report_progress = [waiter = job.waiter, progress_token = job.progress_token,
+                                   last](double progress, std::optional<double> total, const std::string& text) {
+                if (progress <= *last) return;
+                *last = progress;
+                waiter->push_frame(progress_frame(progress_token, progress, total, text));
+            };
+        }
+        out = call_tool_message(selected_provider, job.pending, std::move(ctx));
+        if (job.want_progress) job.waiter->push_frame(progress_frame(job.progress_token, *last + 1.0, std::nullopt, "finished"));
+    }
+    return job.stateless ? decorate_stateless(std::move(out), job.pending.method, job.server_info) : out;
+}
+
 HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
     json parse_error;
     Message message = parse_message(request.body, parse_error);
@@ -662,34 +782,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     Principal admission_principal = principal;
     if (is_call && session_pool_ && session_router_ && params.is_object() &&
         params.contains("name") && params["name"].is_string()) {
-        AuthOutcome refreshed = reauthenticate(execution_auth);
-        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
-            const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
-            return reply(make_error(message.id, kInvalidParams, "authorization changed before route admission",
-                                    json{{"code", code}}));
-        }
-        admission_principal = std::move(refreshed.principal);
-        const std::string tool = params["name"].get<std::string>();
-        try {
-            session_route = session_router_(admission_principal, tool,
-                                            params.value("arguments", json::object()));
-        } catch (...) {
-            session_route.handled = true;
-            session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
-            session_route.error_message = "the SAP session could not be routed";
-        }
-        const bool global_control =
-            session_route.global_control || command_table::tool_has(tool, command_table::Trait::GlobalControl);
-        if (!session_route.error_code.empty() ||
-            (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
-            (!session_route.handled && !global_control)) {
-            const std::string code = session_route.error_code.empty() ? "SESSION_ROUTE_UNAVAILABLE" : session_route.error_code;
-            const std::string effective_code = !session_route.handled && !global_control && session_route.error_code.empty()
-                                                   ? "SESSION_ROUTE_REQUIRED" : code;
-            const std::string reason = session_route.error_message.empty() ? "the SAP session could not be routed"
-                                                                    : session_route.error_message;
-            return reply(make_error(message.id, kInvalidParams, reason, json{{"code", effective_code}}));
-        }
+        if (auto refused = admit_session_route(params, principal, execution_auth, admission_principal, session_route))
+            return reply(make_error(message.id, kInvalidParams, refused->message, json{{"code", refused->code}}));
     }
     const bool routed = session_route.handled;
     const std::string route_identity = session_route.identity;
@@ -711,69 +805,10 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
     Pending pending{message.id, method, params};
     const bool want_progress = sse && !progress_token.is_null();
-    job.run = [this, pending, principal = admission_principal, execution_auth, era, stateless, server_info, client_info, progress_token, want_progress,
-               route_provider, route_identity, route_lane_key, routed,
-               waiter](CallState& state) -> json {
-        AuthOutcome refreshed = reauthenticate(execution_auth);
-        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
-            const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
-            json denied = make_error(pending.id, kInvalidParams, "authorization changed before execution",
-                                     json{{"code", reason}});
-            return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
-        }
-        const Principal& current_principal = refreshed.principal;
-        if (routed) {
-            bool valid_route = false;
-            try {
-                const SessionRoute current = session_recheck_router_(current_principal,
-                    pending.params.at("name").get<std::string>(),
-                    pending.params.value("arguments", json::object()));
-                valid_route = current.handled && current.error_code.empty() &&
-                              current.identity == route_identity &&
-                              (current.lane_key.empty() ? current.identity : current.lane_key) == route_lane_key &&
-                              current.provider.get() == route_provider.get();
-            } catch (...) {
-                valid_route = false;
-            }
-            if (!valid_route) {
-                json denied = make_error(pending.id, kInvalidParams, "SAP session routing changed before execution",
-                                         json{{"code", "SESSION_ROUTE_CHANGED"}});
-                return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
-            }
-        }
-        ToolProvider& selected_provider = route_provider ? *route_provider : provider_;
-        json out;
-        if (pending.method == "tools/list") {
-            out = tools_list_message(selected_provider, pending, true, &current_principal);
-        } else {
-            try {
-                selected_provider.set_client_info(client_info.is_object() ? client_info : json::object());
-            } catch (const std::exception& e) {
-                spdlog::warn("set_client_info failed: {}", e.what());
-            }
-            CallContext ctx;
-            ctx.principal = current_principal;
-            ctx.era = era;
-            ctx.http = true;
-            ctx.cancelled = [&state] { return state.cancelled.load(); };
-            ctx.reauthorize = [this, execution_auth, bound = current_principal]() {
-                const AuthOutcome latest = reauthenticate(execution_auth);
-                return latest.ok && same_security_principal(latest.principal, bound);
-            };
-            auto last = std::make_shared<double>(0.0);
-            if (want_progress) {
-                waiter->push_frame(progress_frame(progress_token, 0.0, std::nullopt, "started"));
-                ctx.report_progress = [waiter, progress_token, last](double progress, std::optional<double> total,
-                                                                      const std::string& text) {
-                    if (progress <= *last) return;
-                    *last = progress;
-                    waiter->push_frame(progress_frame(progress_token, progress, total, text));
-                };
-            }
-            out = call_tool_message(selected_provider, pending, std::move(ctx));
-            if (want_progress) waiter->push_frame(progress_frame(progress_token, *last + 1.0, std::nullopt, "finished"));
-        }
-        return stateless ? decorate_stateless(std::move(out), pending.method, server_info) : out;
+    job.run = [this, tool_job = ToolJob{pending, admission_principal, execution_auth, era, stateless, server_info,
+                                         client_info, progress_token, want_progress, route_provider, route_identity,
+                                         route_lane_key, routed, waiter}](CallState& state) -> json {
+        return run_tool_job(tool_job, state);
     };
 
     std::shared_ptr<CallState> state;
