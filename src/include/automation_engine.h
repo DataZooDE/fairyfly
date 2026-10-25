@@ -85,7 +85,8 @@ public:
     virtual bool set_selection_input_policy(const sap::SelectionInputPolicy& /*policy*/) { return false; }
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
     /// The SAP GUI session calls currently run against, without attaching one (the audit trail reads its screen).
-    /// nullptr when nothing is attached or this engine has no COM session.
+    /// Owner-window checked: nullptr when the session's window does not belong to this desktop's owner, when
+    /// nothing is attached or when this engine has no COM session (SapGuiScripting::unchecked_session skips the check).
     virtual std::shared_ptr<sap::ComGuiSession> attached_com_session() const { return nullptr; }
     /// SAP GUI scripting beyond the basic actions (sap_gui_scripting.h); nullptr for an engine without it.
     virtual SapGuiScripting* scripting() { return nullptr; }

@@ -11,7 +11,7 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
     try {
         auto* engine = engine_->scripting();
         if (!engine) return facts;
-        auto session = engine->get_session();
+        auto session = engine->unchecked_session();
         if (!session) return facts;
         if (!engine->current_session_owner_window_allowed()) return facts;
         // The audit record of every call reads these: never wait long for a busy session (2 s), unknown facts are fine.

@@ -66,7 +66,7 @@ void CommandHandler::describe_element(const std::string& element_id, std::string
     auto* com_engine = engine_->scripting();
     if (!com_engine) return;
     try {
-        auto session = com_engine->get_session();
+        auto session = com_engine->unchecked_session();
         if (!session) return;
         std::string full_path = element_id;
         if (full_path.rfind("@active", 0) == 0)
@@ -101,7 +101,7 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
         type = "GuiButton";
         try {
             auto* com_engine = engine_->scripting();
-            auto session = com_engine ? com_engine->get_session() : nullptr;
+            auto session = com_engine ? com_engine->unchecked_session() : nullptr;
             if (session) {
                 std::string toolbar_path = element_id.substr(0, btn_pos);
                 if (toolbar_path.rfind("@active", 0) == 0)
@@ -422,7 +422,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         if (!attach_owner_identities_.empty()) {
             auto* com = engine_->scripting();
             checked_server_key = com ? engine_->current_server_session_key() : std::string();
-            const auto selected = com ? com->get_session() : nullptr;
+            const auto selected = com ? com->unchecked_session() : nullptr;
             bool selected_matches = false;
             try { selected_matches = selected && selected->is_alive() && selected->get_id() == session_id; }
             catch (...) {}
@@ -640,11 +640,11 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     }
 
     auto* com_engine = engine_->scripting();
-    if (!com_engine || !com_engine->get_session()) {
+    if (!com_engine || !com_engine->unchecked_session()) {
         result.set_error("ENGINE_TYPE_MISMATCH", "SAP GUI logon requires the COM automation engine");
         return result;
     }
-    const auto session = com_engine->get_session();
+    const auto session = com_engine->unchecked_session();
     const auto password_path = selected.value.session_id + "/wnd[0]/usr/pwdRSYST-BCODE";
     const auto snapshot = [&]() {
         json screen = {{"transaction", session->get_transaction_code()}, {"elements", json::array()}};
@@ -1009,7 +1009,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         describe_element(element_id, type, text, tooltip);
         try {
             if (auto* com_engine = engine_->scripting()) {
-                if (auto session = com_engine->get_session()) {
+                if (auto session = com_engine->unchecked_session()) {
                     std::string full_path = elem.path;
                     if (full_path.rfind("@active", 0) == 0)
                         full_path = engine_->get_active_window_id().id + full_path.substr(7);
@@ -1075,7 +1075,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                 return result;
             }
 
-            auto session = com_engine->get_session();
+            auto session = com_engine->unchecked_session();
             if (!session) {
                 result.set_error("NO_SESSION", "No active session");
                 return result;
@@ -1465,7 +1465,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
                 return result;
             }
 
-            auto session = com_engine->get_session();
+            auto session = com_engine->unchecked_session();
             if (!session) {
                 return Result::fail("NO_SESSION", "No active session");
             }

@@ -128,7 +128,8 @@ public:
     // Getters for testing/debugging
     ComGuiApplicationPtr get_app() const { return app_; }
     ComGuiConnectionPtr get_connection() const { return current_connection_; }
-    ComGuiSessionPtr get_session() const override { return current_session_; }
+    ComGuiSessionPtr get_session() const { return current_session_; }
+    ComGuiSessionPtr unchecked_session() const override { return current_session_; }
     SapGuiScripting* scripting() override { return this; }
 
     /// Read-only lookup of system/client/user/transaction of a NAMED session; never selects, attaches or

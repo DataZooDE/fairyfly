@@ -20,8 +20,9 @@ class SapGuiScripting {
 public:
     virtual ~SapGuiScripting() = default;
 
-    /// The session subsequent calls use (no owner-window check; see AutomationEngine::attached_com_session).
-    virtual std::shared_ptr<sap::ComGuiSession> get_session() const = 0;
+    /// The session subsequent calls use, WITHOUT the owner-window check of AutomationEngine::attached_com_session:
+    /// a caller that acts for a remote owner checks current_session_owner_window_allowed() itself.
+    virtual std::shared_ptr<sap::ComGuiSession> unchecked_session() const = 0;
     virtual void set_owner_window_guard(bool enabled) noexcept = 0;
     virtual bool current_session_owner_window_allowed() const noexcept = 0;
 

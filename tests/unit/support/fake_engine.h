@@ -17,7 +17,7 @@ public:
     std::vector<std::string> calls;
     Result next = Result::ok(json::object());
 
-    std::shared_ptr<sap::ComGuiSession> get_session() const override { return nullptr; }
+    std::shared_ptr<sap::ComGuiSession> unchecked_session() const override { return nullptr; }
     void set_owner_window_guard(bool) noexcept override {}
     bool current_session_owner_window_allowed() const noexcept override { return true; }
     audit::SapFacts peek_session_facts(const std::string&, const std::string&) const noexcept override { return {}; }
