@@ -6,6 +6,7 @@
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 
@@ -248,6 +249,48 @@ TEST_CASE("update: the publisher pin, current signer x candidate signer", "[upda
         }
     }
 }
+
+TEST_CASE("update: subject attributes and the publisher pin helpers", "[update][update-signer]") {
+    const std::string s = "CN=DataZoo GmbH, O=\"Data, \"\"Zoo\"\" GmbH\", OU=Dev + L=Berlin; C=DE";
+    CHECK(subject_values(s, "O") == std::vector<std::string>{"Data, \"Zoo\" GmbH"});
+    CHECK(subject_values(s, "o") == std::vector<std::string>{"Data, \"Zoo\" GmbH"});
+    CHECK(subject_values(s, "L") == std::vector<std::string>{"Berlin"});
+    CHECK(subject_values(s, "C") == std::vector<std::string>{"DE"});
+    CHECK(subject_values(s, "S").empty());
+    CHECK(subject_values("", "O").empty());
+    CHECK(subject_values("garbage", "O").empty());
+    CHECK(normalize_name("  DataZoo \t  GmbH ") == "datazoo gmbh");
+    CHECK(std::string(kExpectedSignerOrganization) == "DataZoo GmbH");  // the default of the CMake option
+    CHECK(std::string(kExpectedSignerCountry) == "DE");
+    CHECK(signer_matches(Signature{true, "O=DataZoo GmbH, C=DE"}));
+    CHECK_FALSE(signer_matches(Signature{false, "O=DataZoo GmbH, C=DE"}));  // only a valid signature
+    CHECK(signer_matches(Signature{true, "O=Fork Ltd, C=GB"}, "Fork Ltd", "GB"));
+    CHECK(signer_matches(Signature{true, "O=Fork Ltd"}, "Fork Ltd", ""));  // no country pinned
+    CHECK_FALSE(signer_matches(Signature{true, "O=DataZoo GmbH, C=DE"}, "", ""));  // an empty pin matches nothing
+    CHECK(is_signed(Signature{false, "", true}));
+    CHECK(is_signed(Signature{false, "CN=x"}));
+    CHECK_FALSE(is_signed(Signature{}));
+}
+
+#ifdef _WIN32
+// The CryptoAPI part for real: an unsigned file (this test executable) and, when present, a file Microsoft signs with
+// an embedded signature (vswhere.exe ships with every Visual Studio installation and on the GitHub runners).
+TEST_CASE("update: authenticode() reads a real signature and a real absence of one", "[update][update-signer]") {
+    const auto none = authenticode(current_exe());
+    CHECK_FALSE(none.valid);
+    CHECK_FALSE(is_signed(none));
+    const std::filesystem::path vswhere = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+    if (!std::filesystem::exists(vswhere)) SKIP("no vswhere.exe on this machine");
+    const auto ms = authenticode(vswhere);
+    INFO(ms.subject);
+    CHECK(is_signed(ms));
+    CHECK(subject_values(ms.subject, "O") == std::vector<std::string>{"Microsoft Corporation"});
+    if (ms.valid) {  // revocation needs the network; without it the signature is present but not valid
+        CHECK(signer_matches(ms, "Microsoft Corporation", "US"));
+        CHECK_FALSE(signer_matches(ms));  // not the pinned publisher
+    }
+}
+#endif
 
 namespace {
 const std::string kExe = "https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.05/fairyfly.exe";

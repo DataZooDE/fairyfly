@@ -264,8 +264,9 @@ pairing), pairing, the DPAPI state and the link agent:
   CI builds it, installs it on the runner, starts the tray through the shortcut's target, checks the result and
   uninstalls it again (the tray must be closed and the Run value gone).
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
-  when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the
-  installed one. An unsigned self-built installation accepts an unsigned release only with `--allow-unsigned`.
+  when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the pinned publisher `O=DataZoo GmbH, C=DE`.
+  A signed installation never takes an unsigned release; an unsigned installation accepts an unsigned release only
+  with `--allow-unsigned` ([SIGNING.md](SIGNING.md#updates)).
 - The tray announces a newer release once (`FAIRYFLY_UPDATE_CHECK=0` turns that off).
 
 ## Live test

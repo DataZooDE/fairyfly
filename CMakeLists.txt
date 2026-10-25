@@ -305,6 +305,17 @@ endif()
 # Set library properties
 target_include_directories(fairyfly_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
+# The publisher `fairyfly update apply` accepts: O= and C= of the release's Authenticode leaf certificate (compared
+# normalised, not the whole subject). A fork that signs its own releases sets its own (docs/SIGNING.md, "Updates").
+set(FAIRYFLY_UPDATE_SIGNER_ORGANIZATION "DataZoo GmbH" CACHE STRING "Organisation (O=) an update must be signed by")
+set(FAIRYFLY_UPDATE_SIGNER_COUNTRY "DE" CACHE STRING "Country (C=) of the update signer; empty: not checked")
+if(FAIRYFLY_UPDATE_SIGNER_ORGANIZATION STREQUAL "")
+    message(FATAL_ERROR "FAIRYFLY_UPDATE_SIGNER_ORGANIZATION must not be empty (it would accept no signed update)")
+endif()
+target_compile_definitions(fairyfly_core PUBLIC
+    "FAIRYFLY_UPDATE_SIGNER_ORGANIZATION=\"${FAIRYFLY_UPDATE_SIGNER_ORGANIZATION}\""
+    "FAIRYFLY_UPDATE_SIGNER_COUNTRY=\"${FAIRYFLY_UPDATE_SIGNER_COUNTRY}\"")
+
 # Link library dependencies
 target_link_libraries(fairyfly_core PUBLIC
     ffl
