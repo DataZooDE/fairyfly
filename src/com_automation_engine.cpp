@@ -186,7 +186,7 @@ bool ComAutomationEngine::owner_window_allowed(const ComGuiSessionPtr& session) 
 }
 
 Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -221,8 +221,7 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
         result.data["connection_id"] = current_connection_->get_id();
         result.data["session_id"] = current_session_->get_id();
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Attached to SAP session via window click (duration: {}ms)", result.duration.count());
 
     } catch (const ComException& e) {
@@ -254,7 +253,7 @@ Result ComAutomationEngine::attach_by_session_id(const std::string& session_id) 
 }
 
 Result ComAutomationEngine::launch_connection(const std::string& connection_name, bool allow_sapshcut) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     json trace = json::array();  // Diagnostic trace
 
@@ -328,8 +327,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
                                        "(it can stay minimized), then call the launch again.";
             }
             if (!native_error.empty()) result.error["native_error"] = native_error;
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            result.duration = timer.elapsed();
             result.diagnostics["trace"] = trace;
             return result;
         }
@@ -400,8 +398,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
                     "Try increasing timeout or manual login first"
                 });
             }
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            result.duration = timer.elapsed();
             result.diagnostics["trace"] = trace;
             return result;
         }
@@ -418,7 +415,6 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             {"status", "success"}
         });
 
-        auto end = std::chrono::high_resolution_clock::now();
         result.status = Result::Status::Success;
         result.data["connection_name"] = connection_name;
         result.data["connection_id"] = conn_id;
@@ -426,7 +422,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         result.data["message"] = fmt::format("Launched SAP connection '{}' using {}", connection_name,
                                                used_sapshcut ? "sapshcut" : "native COM");
 
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         result.diagnostics["trace"] = trace;
         result.diagnostics["timing_ms"] = result.duration.count();
 
@@ -438,7 +434,6 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         spdlog::info("Successfully launched SAP connection '{}' (duration: {}ms)", connection_name, result.duration.count());
 
     } catch (const std::exception& e) {
-        auto end = std::chrono::high_resolution_clock::now();
 
         trace.push_back({
             {"step", "exception"},
@@ -452,7 +447,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             "Check SAP GUI scripting is enabled (Options → Accessibility & Scripting)",
             fmt::format("Verify connection '{}' is configured in SAP Logon", connection_name)
         }));
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         result.diagnostics["trace"] = trace;
         result.diagnostics["timing_ms"] = result.duration.count();
 
@@ -463,7 +458,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
 }
 
 Result ComAutomationEngine::disconnect() {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -476,8 +471,7 @@ Result ComAutomationEngine::disconnect() {
         result.status = Result::Status::Success;
         result.data["message"] = "Disconnected from SAP";
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Disconnected from SAP");
 
     } catch (const std::exception& e) {
@@ -690,7 +684,7 @@ std::string ComAutomationEngine::current_server_session_key() const {
 }
 
 Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -699,8 +693,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         if (!request.valid) {
             result.set_error(request.error_code, request.error_message);
             result.error["tcode"] = tcode;
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            result.duration = timer.elapsed();
             return result;
         }
         const std::string& expected_tcode = request.expected_tcode;
@@ -736,8 +729,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 if (message) {
                     if (auto rejection = classify_transaction_modal(active_window_id,
                                                                      message->get_text(), expected_tcode)) {
-                        rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::high_resolution_clock::now() - start);
+                        rejection->duration = timer.elapsed();
                         return *rejection;
                     }
                 }
@@ -760,8 +752,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                     result.error["message_type"] = post_sbar_type;
                     attach_status_bar(result, prev_status, post_status);
 
-                    result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::high_resolution_clock::now() - start);
+                    result.duration = timer.elapsed();
                     spdlog::warn("Transaction {} failed with statusbar error [{}]: {}", tcode, post_sbar_type, post_sbar_text);
                     return result;
                 }
@@ -805,8 +796,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 }
                 result.error["tcode"] = tcode;
                 result.error["actual_tcode"] = actual_tcode;
-                result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start);
+                result.duration = timer.elapsed();
                 return result;
             }
         }
@@ -817,20 +807,17 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         result.data["message"] = "Transaction started";
         attach_status_bar(result, prev_status, post_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Executed transaction {} (duration: {}ms)", tcode, result.duration.count());
 
     } catch (const ComException& e) {
         result.set_error("TRANSACTION_FAILED", e.what());
         result.error["tcode"] = tcode;
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
         spdlog::error("Transaction {} failed: {}", tcode, e.what());
     } catch (const std::exception& e) {
         result.set_error("EXCEPTION", e.what());
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     }
 
     return result;
@@ -857,7 +844,7 @@ ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
 }
 
 Result ComAutomationEngine::click_element(const ElementId& element) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -928,8 +915,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         if (auto rejection = classify_action_status(before_status, after_status, resolved_element.path,
                 elem_type == "GuiButton" || activate_list_label)) {
             attach_status_bar(*rejection, before_status, after_status);
-            rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            rejection->duration = timer.elapsed();
             return *rejection;
         }
         if (activate_list_label) {
@@ -953,8 +939,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
                     same_label, same_window, same_title, before_status, after_status,
                     resolved_element.path)) {
                 attach_status_bar(*unchanged, before_status, after_status);
-                unchanged->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start);
+                unchanged->duration = timer.elapsed();
                 return *unchanged;
             }
         }
@@ -971,8 +956,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         result.data["window"] = resolved_element.get_window().id;
         attach_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Clicked element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -987,7 +971,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
 }
 
 Result ComAutomationEngine::press_f4(const ElementId& element) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1051,8 +1035,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         if (!f4_dialog) {
             auto outcome = classify_f4_outcome(false, read_action_status(session), resolved_element.path);
             result = *outcome;
-            auto end = std::chrono::high_resolution_clock::now();
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            result.duration = timer.elapsed();
             spdlog::warn("F4 dialog did not open for {}: {}", resolved_element.path,
                          result.error.value("message", ""));
             return result;
@@ -1068,8 +1051,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         result.data["window"] = resolved_element.get_window().id;
         result.data["f4_dialog_opened"] = (f4_dialog != nullptr);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Pressed F4 for element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -1084,7 +1066,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
 }
 
 Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_element, const std::string& button_id) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1129,8 +1111,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         if (auto rejection = classify_action_status(before_status, after_status,
                                              resolved_element.path + "/btn_" + button_id, true)) {
             attach_status_bar(*rejection, before_status, after_status);
-            rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            rejection->duration = timer.elapsed();
             return *rejection;
         }
 
@@ -1143,8 +1124,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         }
         attach_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Pressed toolbar button {} on {} (duration: {}ms)",
                     button_id, resolved_element.path, result.duration.count());
 
@@ -1161,7 +1141,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
 }
 
 Result ComAutomationEngine::fill_field(const ElementId& element, const std::string& value) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1283,8 +1263,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         if (outcome.display_value) result.data["display_value"] = *outcome.display_value;
         attach_fresh_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Filled field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -1300,7 +1279,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
 Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
                                             const std::string& column, const std::string& value,
                                             bool checkbox, bool commit) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     try {
         ElementId resolved = resolve_element_path(element);
@@ -1326,8 +1305,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         result.data["checkbox"] = checkbox;
         result.data["committed"] = commit;
         attach_status_bar(result, before_status, after_status);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
@@ -1338,7 +1316,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
 
 Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
                                              const std::string& column) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     try {
         ElementId resolved = resolve_element_path(element);
@@ -1363,8 +1341,7 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         result.data["row"] = row;
         result.data["column"] = column;
         attach_status_bar(result, before_status, after_status);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
@@ -1412,7 +1389,7 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
 }
 
 Result ComAutomationEngine::read_field(const ElementId& element, bool activate_tab) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     // Tabs activated for the read are put back on EVERY exit path (success, error result, exception): the guard records the
@@ -1486,8 +1463,7 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         }
         attach_status_bar(result, read_action_status(session));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
