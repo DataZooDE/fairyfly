@@ -1,4 +1,5 @@
 #include "include/auth/ip.h"
+#include "include/auth/token_store.h"
 #include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include "include/config/mcp_config.h"
@@ -156,7 +157,7 @@ bool looks_secret_key(const std::string& key) {
 bool looks_secret_value(const std::string& value) {
     const std::string l = utils::lower_ascii(utils::trim(value));
     if (l.rfind("bearer ", 0) == 0 || l.rfind("-----begin", 0) == 0) return true;
-    static const std::regex token(R"(ffy_[A-Za-z0-9]+_[A-Za-z0-9_\-]{8,})");
+    static const std::regex token(std::string(auth::kTokenPrefix) + R"([A-Za-z0-9]+_[A-Za-z0-9_\-]{8,})");
     return std::regex_search(value, token);
 }
 

@@ -736,7 +736,7 @@ int run_mcp_http(HttpRunArgs args, bool* restart_requested) {
 
     HttpServerConfig config;
     config.host = o.host.empty() ? std::string("127.0.0.1") : o.host;
-    config.port = o.port > 0 ? o.port : (o.tls ? 8443 : 8383);
+    config.port = o.port > 0 ? o.port : default_port(o.tls);
     config.tls = o.tls;
     config.allow_ip = o.allow_ip;
     config.insecure_http = o.insecure_http;

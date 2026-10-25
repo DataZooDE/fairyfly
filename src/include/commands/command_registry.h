@@ -41,12 +41,7 @@ public:
             }
         }
 
-        // No command invoked
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_COMMAND";
-        result.error["message"] = "No subcommand specified";
-        return result;
+        return Result::fail("NO_COMMAND", "No subcommand specified");
     }
 
     /// Get all registered commands (for testing/debugging)

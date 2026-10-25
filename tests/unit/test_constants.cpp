@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "include/auth/token_store.h"
+#include "include/config/client_config.h"
 #include "include/config/mcp_config.h"
 #include "include/config/mcp_doctor.h"
 #include "include/mcp/constants.h"
@@ -28,6 +29,10 @@ TEST_CASE("constants: every default port is the one constant", "[constants]") {
     CHECK(config::DoctorInput{}.port == mcp::kDefaultHttpPort);
     CHECK(setup::kDefaultTlsPort == mcp::kDefaultTlsPort);
     CHECK(setup::kDefaultNoTlsPort == mcp::kDefaultHttpPort);
+    // the runtime fallback for "no port given"
+    CHECK(mcp::default_port(true) == mcp::kDefaultTlsPort);
+    CHECK(mcp::default_port(false) == mcp::kDefaultHttpPort);
+    CHECK(config::ClientConfigOptions{}.url == "https://vm:" + std::to_string(mcp::kDefaultTlsPort) + "/mcp");
 }
 
 TEST_CASE("constants: protocol versions come from one table", "[constants][mcp]") {
@@ -46,6 +51,9 @@ TEST_CASE("constants: tokens start with the one prefix", "[constants][auth]") {
     const std::string token = auth::format_token("0123abcd", "s3cr3t");
     CHECK(token.rfind(auth::kTokenPrefix, 0) == 0);
     CHECK_FALSE(auth::parse_token("abc_0123abcd_s3cr3t").has_value());
+    // the secret detectors of mcp.yaml and client-config recognise the same prefix
+    const std::string token_like = std::string(auth::kTokenPrefix) + "0123abcd_abcdefghijk";
+    CHECK(config::parse_yaml("server:\n  host: " + token_like + "\n").has_secret());
 }
 
 TEST_CASE("http: one builder for {error_code, message} responses, escaped and never cached", "[constants][mcp][http]") {

@@ -8,6 +8,8 @@ namespace fairyfly::mcp {
 
 inline constexpr int kDefaultHttpPort = 8383;  ///< plain HTTP (loopback, development) and `--no-tls` setups
 inline constexpr int kDefaultTlsPort = 8443;   ///< HTTPS after `mcp setup`
+/// The port when none is configured.
+constexpr int default_port(bool tls) { return tls ? kDefaultTlsPort : kDefaultHttpPort; }
 
 /// WWW-Authenticate of a 401 (RFC 6750); with error="invalid_token" when a token was given but is not valid.
 inline constexpr const char* kBearerChallenge = "Bearer realm=\"fairyfly\"";
