@@ -19,6 +19,24 @@ namespace sap {
 
 using utils::TraceGuard;
 
+namespace {
+
+/// `method` of a SAP GUI window with `args`, resolved through IDispatch::GetIDsOfNames. Throws
+/// "<label> method unavailable" or "<label> failed" with the HRESULT.
+_variant_t call_window(IDispatch* window, const wchar_t* method, const char* label,
+                       std::initializer_list<_variant_t> args) {
+    DISPID dispid;
+    LPOLESTR method_name = const_cast<LPOLESTR>(method);
+    HRESULT hr = window->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} method unavailable: 0x{:08X}", label, hr));
+    _variant_t answer;
+    hr = invoke(window, dispid, DISPATCH_METHOD, args, &answer);
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} failed: 0x{:08X}", label, hr));
+    return answer;
+}
+
+}  // namespace
+
 ScreenshotHandler::ScreenshotHandler(ComGuiSessionPtr session) : session_(session) {
 }
 
@@ -165,35 +183,144 @@ std::vector<uint8_t> ScreenshotHandler::hard_copy_png(const ComGuiWindowPtr& win
     IDispatch* window_dispatch = window->get_dispatch();
     if (!window_dispatch) return {};
 
-    VARIANT image_type;
-    VariantInit(&image_type);
-    image_type.vt = VT_I4;
-    image_type.lVal = constants::IMAGE_TYPE_PNG;
-
-    VARIANT png_bytes_var;
-    VariantInit(&png_bytes_var);
-
-    DISPID dispid;
-    LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopyToMemory");
-    HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-    if (FAILED(hr)) throw std::runtime_error(fmt::format("HardCopyToMemory method unavailable: 0x{:08X}", hr));
-
-    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD, {_variant_t(image_type)}, &png_bytes_var);
-    VariantClear(&image_type);
-    if (FAILED(hr)) {
-        VariantClear(&png_bytes_var);
-        throw std::runtime_error(fmt::format("HardCopyToMemory failed: 0x{:08X}", hr));
-    }
-    std::vector<uint8_t> png_bytes;
-    try {
-        png_bytes = extract_safearray_bytes(png_bytes_var);
-    } catch (...) {
-        VariantClear(&png_bytes_var);
-        throw;
-    }
-    VariantClear(&png_bytes_var);
-    return png_bytes;
+    _variant_t png_bytes_var = call_window(window_dispatch, L"HardCopyToMemory", "HardCopyToMemory",
+                                           {_variant_t(static_cast<long>(constants::IMAGE_TYPE_PNG))});
+    return extract_safearray_bytes(png_bytes_var);
 }
+
+namespace {
+
+/// A PNG as a CImg image (CImg reads PNGs from a file: a temporary one, closed by its RAII guard).
+cimg_library::CImg<unsigned char> load_png(const std::vector<uint8_t>& png_bytes) {
+    cimg_library::CImg<unsigned char> img;
+    auto tmpfile = com::create_temp_file();
+    if (!tmpfile) {
+        throw std::runtime_error("Failed to create temporary file for PNG loading");
+    }
+    std::fwrite(png_bytes.data(), 1, png_bytes.size(), tmpfile.get());
+    std::rewind(tmpfile.get());
+    img.load_png(tmpfile.get());
+    return img;
+}
+
+/// The image's PNG bytes (written to a temporary file and read back).
+std::vector<uint8_t> encode_png(const cimg_library::CImg<unsigned char>& img) {
+    auto mem_tmpfile = com::create_temp_file();
+    if (!mem_tmpfile) {
+        throw std::runtime_error("Failed to create temporary file for PNG encoding");
+    }
+    img.save_png(mem_tmpfile.get());
+    std::fseek(mem_tmpfile.get(), 0, SEEK_END);
+    const long file_size = std::ftell(mem_tmpfile.get());
+    std::rewind(mem_tmpfile.get());
+    std::vector<uint8_t> output_bytes(file_size);
+    std::fread(output_bytes.data(), 1, file_size, mem_tmpfile.get());
+    return output_bytes;
+}
+
+/// The fast path: SAP GUI writes the PNG itself (HardCopy). SAP GUI runs in another process and resolves relative
+/// HardCopy paths against its own working directory, so the path is made absolute here.
+Result save_hard_copy(const ComGuiWindowPtr& window, const std::string& output_file) {
+    Result result;
+    const auto output_path = std::filesystem::absolute(std::filesystem::path(com::utf8_to_wide(output_file)));
+    const std::string filename = com::wide_to_utf8(output_path.wstring());
+    IDispatch* window_dispatch = window->get_dispatch();
+    if (!window_dispatch) {
+        result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
+        return result;
+    }
+    (void)call_window(window_dispatch, L"HardCopy", "HardCopy",
+                      {bstr_arg(filename), _variant_t(static_cast<long>(constants::IMAGE_TYPE_PNG))});
+
+    std::error_code file_error;
+    if (!std::filesystem::is_regular_file(output_path, file_error) ||
+        std::filesystem::file_size(output_path, file_error) == 0 || file_error) {
+        result.set_error("SCREENSHOT_NOT_CREATED", "SAP GUI did not create the screenshot at the requested path");
+        return result;
+    }
+    result.status = Result::Status::Success;
+    result.data["filepath"] = filename;
+    spdlog::info("Screenshot saved directly to: {}", filename);
+    return result;
+}
+
+/// The processing path: HardCopyToMemory, then crop (native pixels), scale, preview and the output as base64, to
+/// stdout or to a file.
+Result capture_processed(const ComGuiWindowPtr& window, const std::string& window_title,
+                         const cli::ScreenshotOptions& options) {
+    Result result;
+    // Processing path: Use HardCopyToMemory + CImg
+    json capture_geometry = json::object();
+    std::vector<uint8_t> png_bytes = ScreenshotHandler::hard_copy_png(window);
+    if (png_bytes.empty()) {
+        result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
+        return result;
+    }
+
+    spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
+
+    cimg_library::CImg<unsigned char> img = load_png(png_bytes);
+
+    spdlog::debug("Loaded PNG into CImg: {}x{} pixels", img.width(), img.height());
+
+    // Crop (native pixels) first, then scale: plan both before touching the image so a rectangle
+    // outside the screenshot is an error with the native size, never a blank image.
+    const CaptureGeometry geometry = ScreenshotHandler::plan_capture_geometry(img.width(), img.height(), options);
+    if (geometry.cropped) {
+        img.crop(geometry.crop_x, geometry.crop_y, geometry.crop_x + geometry.crop_width - 1,
+                 geometry.crop_y + geometry.crop_height - 1);
+        spdlog::debug("Cropped to: {}x{} pixels", img.width(), img.height());
+    }
+    if (!options.scale.empty()) {
+        img.resize(geometry.output_width, geometry.output_height, -100, -100,
+                   constants::INTERPOLATION_LANCZOS);
+        spdlog::debug("Scaled to: {}x{} pixels", geometry.output_width, geometry.output_height);
+    }
+    capture_geometry = ScreenshotHandler::geometry_json(geometry);
+
+    // Display if requested
+    if (options.show) {
+        std::string window_display_title = "fairyfly - Screenshot Preview";
+        cimg_library::CImgDisplay display(img, window_display_title.c_str());
+
+        spdlog::info("Displaying screenshot. Close window to continue...");
+
+        // Wait for user to close the window
+        while (!display.is_closed()) {
+            display.wait();
+        }
+
+        spdlog::info("Preview window closed");
+        result.data["displayed"] = true;
+    }
+
+    // Output
+    if (options.format == "base64") {
+        std::string base64_data = utils::base64_encode(encode_png(img));
+        ScreenshotHandler::emit_base64_output(result, base64_data, options.output_file);
+        spdlog::info("Screenshot encoded as base64 ({} bytes)", base64_data.size());
+    } else if (options.output_file == "-") {
+        // Write to stdout
+        img.save_png(stdout);
+        result.data["output"] = "stdout";
+        spdlog::info("Screenshot written to stdout");
+    } else {
+        // Save to file
+        std::string filename = options.output_file.empty()
+            ? utils::generate_screenshot_filename(window_title)
+            : options.output_file;
+
+        img.save_png(filename.c_str());
+        result.data["filepath"] = filename;
+        spdlog::info("Screenshot saved to: {}", filename);
+    }
+
+    result.status = Result::Status::Success;
+    for (const auto& [key, value] : capture_geometry.items()) result.data[key] = value;
+    return result;
+}
+
+}  // namespace
 
 Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
     TraceGuard trace("ScreenshotHandler::capture");
@@ -218,212 +345,16 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
         }
 
         // Get window title for filename generation
-        std::string window_title = window->get_title();
+        const std::string window_title = window->get_title();
 
-        // Determine if we need CImg processing
         // A crop always goes through the processing path: the rectangle is checked against the real native
         // size there (SAP's own HardCopy subsection cannot report it and can silently produce a blank image).
-        bool needs_processing = options.show ||
-                               !options.scale.empty() ||
-                               options.format == "base64" ||
-                               options.output_file == "-" ||
-                               options.crop_x.has_value();
-
-        if (!needs_processing && !options.output_file.empty() && options.output_file != "-") {
-            // Fast path: Direct HardCopy to file with subsection support
-            // SAP GUI runs in another process and resolves relative HardCopy
-            // paths against its own working directory, not the CLI's.
-            const auto output_path = std::filesystem::absolute(
-                std::filesystem::path(com::utf8_to_wide(options.output_file)));
-            const std::string filename = com::wide_to_utf8(output_path.wstring());
-
-            // Call HardCopy COM method
-            VARIANT filename_var;
-            VariantInit(&filename_var);
-            filename_var.vt = VT_BSTR;
-            const auto wide_filename = com::utf8_to_wide(filename);
-            filename_var.bstrVal = SysAllocStringLen(wide_filename.data(), static_cast<UINT>(wide_filename.size()));
-
-            VARIANT image_type;
-            VariantInit(&image_type);
-            image_type.vt = VT_I4;
-            image_type.lVal = constants::IMAGE_TYPE_PNG;
-
-            VARIANT result_path;
-            VariantInit(&result_path);
-
-            IDispatch* window_dispatch = window->get_dispatch();
-            if (!window_dispatch) {
-                result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
-                VariantClear(&filename_var);
-                VariantClear(&image_type);
-                return result;
-            }
-
-            if (options.crop_x.has_value()) {
-                // HardCopy with subsection
-                DISPID dispid;
-                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
-                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-                if (FAILED(hr)) {
-                    VariantClear(&filename_var);
-                    VariantClear(&image_type);
-                    throw std::runtime_error(fmt::format("HardCopy method unavailable: 0x{:08X}", hr));
-                }
-
-                if (SUCCEEDED(hr)) {
-                    // HardCopy(file, type, x, y, width, height); the crop values are VT_I4
-                    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD,
-                                {_variant_t(filename_var), _variant_t(image_type),
-                                 _variant_t(static_cast<long>(options.crop_x.value())),
-                                 _variant_t(static_cast<long>(options.crop_y.value())),
-                                 _variant_t(static_cast<long>(options.crop_width.value())),
-                                 _variant_t(static_cast<long>(options.crop_height.value()))},
-                                &result_path);
-
-                    if (FAILED(hr)) {
-                        VariantClear(&filename_var);
-                        VariantClear(&image_type);
-                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
-                    }
-                }
-            } else {
-                // HardCopy without subsection
-                DISPID dispid;
-                LPOLESTR method_name = const_cast<LPOLESTR>(L"HardCopy");
-                HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-
-                if (FAILED(hr)) {
-                    VariantClear(&filename_var);
-                    VariantClear(&image_type);
-                    throw std::runtime_error(fmt::format("HardCopy method unavailable: 0x{:08X}", hr));
-                }
-
-                if (SUCCEEDED(hr)) {
-                    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD, {_variant_t(filename_var), _variant_t(image_type)},
-                                &result_path);
-
-                    if (FAILED(hr)) {
-                        VariantClear(&filename_var);
-                        VariantClear(&image_type);
-                        throw std::runtime_error(fmt::format("HardCopy failed: 0x{:08X}", hr));
-                    }
-                }
-            }
-
-            VariantClear(&filename_var);
-            VariantClear(&image_type);
-            VariantClear(&result_path);
-
-            std::error_code file_error;
-            if (!std::filesystem::is_regular_file(output_path, file_error) ||
-                std::filesystem::file_size(output_path, file_error) == 0 || file_error) {
-                result.set_error("SCREENSHOT_NOT_CREATED", "SAP GUI did not create the screenshot at the requested path");
-                return result;
-            }
-
-            result.status = Result::Status::Success;
-            result.data["filepath"] = filename;
-            spdlog::info("Screenshot saved directly to: {}", filename);
-        } else {
-            // Processing path: Use HardCopyToMemory + CImg
-            json capture_geometry = json::object();
-            std::vector<uint8_t> png_bytes = hard_copy_png(window);
-            if (png_bytes.empty()) {
-                result.set_error("INVALID_WINDOW", "Window COM object is invalid or has been closed");
-                return result;
-            }
-
-            spdlog::debug("Captured {} bytes from HardCopyToMemory", png_bytes.size());
-
-            // Load into CImg using RAII file handle
-            cimg_library::CImg<unsigned char> img;
-            auto tmpfile = com::create_temp_file();
-            if (!tmpfile) {
-                throw std::runtime_error("Failed to create temporary file for PNG loading");
-            }
-            std::fwrite(png_bytes.data(), 1, png_bytes.size(), tmpfile.get());
-            std::rewind(tmpfile.get());
-            img.load_png(tmpfile.get());
-            // File automatically closed by RAII guard
-
-            spdlog::debug("Loaded PNG into CImg: {}x{} pixels", img.width(), img.height());
-
-            // Crop (native pixels) first, then scale: plan both before touching the image so a rectangle
-            // outside the screenshot is an error with the native size, never a blank image.
-            const CaptureGeometry geometry = plan_capture_geometry(img.width(), img.height(), options);
-            if (geometry.cropped) {
-                img.crop(geometry.crop_x, geometry.crop_y, geometry.crop_x + geometry.crop_width - 1,
-                         geometry.crop_y + geometry.crop_height - 1);
-                spdlog::debug("Cropped to: {}x{} pixels", img.width(), img.height());
-            }
-            if (!options.scale.empty()) {
-                img.resize(geometry.output_width, geometry.output_height, -100, -100,
-                           constants::INTERPOLATION_LANCZOS);
-                spdlog::debug("Scaled to: {}x{} pixels", geometry.output_width, geometry.output_height);
-            }
-            capture_geometry = geometry_json(geometry);
-
-            // Display if requested
-            if (options.show) {
-                std::string window_display_title = "fairyfly - Screenshot Preview";
-                cimg_library::CImgDisplay display(img, window_display_title.c_str());
-
-                spdlog::info("Displaying screenshot. Close window to continue...");
-
-                // Wait for user to close the window
-                while (!display.is_closed()) {
-                    display.wait();
-                }
-
-                spdlog::info("Preview window closed");
-                result.data["displayed"] = true;
-            }
-
-            // Output
-            if (options.format == "base64") {
-                // Save to temporary memory buffer using RAII file handle
-                auto mem_tmpfile = com::create_temp_file();
-                if (!mem_tmpfile) {
-                    throw std::runtime_error("Failed to create temporary file for PNG encoding");
-                }
-                img.save_png(mem_tmpfile.get());
-                std::rewind(mem_tmpfile.get());
-
-                // Read back bytes
-                std::fseek(mem_tmpfile.get(), 0, SEEK_END);
-                long file_size = std::ftell(mem_tmpfile.get());
-                std::rewind(mem_tmpfile.get());
-
-                std::vector<uint8_t> output_bytes(file_size);
-                std::fread(output_bytes.data(), 1, file_size, mem_tmpfile.get());
-                // File automatically closed by RAII guard
-
-                std::string base64_data = utils::base64_encode(output_bytes);
-                emit_base64_output(result, base64_data, options.output_file);
-                spdlog::info("Screenshot encoded as base64 ({} bytes)", base64_data.size());
-            } else if (options.output_file == "-") {
-                // Write to stdout
-                img.save_png(stdout);
-                result.data["output"] = "stdout";
-                spdlog::info("Screenshot written to stdout");
-            } else {
-                // Save to file
-                std::string filename = options.output_file.empty()
-                    ? utils::generate_screenshot_filename(window_title)
-                    : options.output_file;
-
-                img.save_png(filename.c_str());
-                result.data["filepath"] = filename;
-                spdlog::info("Screenshot saved to: {}", filename);
-            }
-
-            result.status = Result::Status::Success;
-            for (const auto& [key, value] : capture_geometry.items()) result.data[key] = value;
-        }
-
-        result.duration = timer.elapsed();
+        const bool needs_processing = options.show || !options.scale.empty() || options.format == "base64" ||
+                                      options.output_file == "-" || options.crop_x.has_value();
+        result = !needs_processing && !options.output_file.empty()
+            ? save_hard_copy(window, options.output_file)
+            : capture_processed(window, window_title, options);
+        if (result.status == Result::Status::Success) result.duration = timer.elapsed();
 
     } catch (const std::invalid_argument& e) {
         result.set_error("INVALID_ARGUMENT", e.what());
