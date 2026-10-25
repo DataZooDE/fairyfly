@@ -393,7 +393,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                     node["available_columns"] = columns;
 
                     const Stopwatch col_timer;
-                    node["column_values"] = as_tree(*element).item_texts(key, columns);
+                    node["column_values"] = as_tree(*element).item_texts(key, columns, /*skip_hierarchy=*/true);
                     const auto col_ms = col_timer.elapsed().count();
                     if (col_ms > 500) {
                         spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);

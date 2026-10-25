@@ -9,6 +9,7 @@
 
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
+#include "include/table_data_extractor.h"
 #include "include/com/control_views.h"
 #include "include/com/tree_view.h"
 #include "include/com_automation_engine.h"
@@ -225,16 +226,60 @@ TEST_CASE("collection walks: each caller keeps its own items, every index is VT_
     CHECK(as_grid(element).get_column_order().empty());
 }
 
-TEST_CASE("tree item texts: one value per column, the hierarchy and unnamed columns empty and not asked", "[com][tree]") {
+TEST_CASE("tree item texts: one value per column; a failed read is empty and the next column is still read", "[com][tree]") {
     // review 2026-10-25: the screen reader and the table extractor each read a node's column values in their own loop
     ScopedDispatchCacheReset cache_reset;
     auto* control = new FakeNode();
     control->strings[L"Type"] = L"GuiShell";
     control->methods = {L"GetItemText"};
-    control->method_answers = {{L"GetItemText(N1,COL1)", L"a"}, {L"GetItemText(N1,COL2)", L"b"}};
+    control->method_answers = {{L"GetItemText(N1,COL1)", L"a"}, {L"GetItemText(N1,COL2)", L"b"},
+                               {L"GetItemText(N1,HierarchyHeader)", L"h"}};
+    control->failing_calls = {L"GetItemText(N1,COL3)"};
     ComGuiElement element(IDispatchPtr(control, false));
-    CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL1", "", "COL2", "COL3"}) ==
-          std::vector<std::string>{"", "a", "", "b", ""});
-    REQUIRE(control->calls.size() == 3);   // COL1, COL2, COL3
-    CHECK(control->calls[0].second == L"N1,COL1");
+    using Calls = std::vector<std::pair<std::wstring, std::wstring>>;
+
+    SECTION("the screen reader skips the hierarchy and unnamed columns") {
+        CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL1", "", "COL3", "COL2"}, true) ==
+              std::vector<std::string>{"", "a", "", "", "b"});
+        CHECK(control->calls == Calls{{L"GetItemText", L"N1,COL1"}, {L"GetItemText", L"N1,COL3"}, {L"GetItemText", L"N1,COL2"}});
+    }
+    SECTION("the table extractor asks every data column, as before") {
+        CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL3", "COL2"}, false) ==
+              std::vector<std::string>{"h", "", "b"});
+        CHECK(control->calls == Calls{{L"GetItemText", L"N1,HierarchyHeader"}, {L"GetItemText", L"N1,COL3"},
+                                      {L"GetItemText", L"N1,COL2"}});
+    }
+}
+
+TEST_CASE("tree shell extraction: each node path is read once; nodes nest, data columns and texts come along", "[com][tree]") {
+    // Codex on #88: the hierarchy used to ask SAP for every node's path a second time
+    ScopedDispatchCacheReset cache_reset;
+    auto* tree = new FakeNode();
+    tree->strings[L"Type"] = L"GuiShell";
+    tree->strings[L"SubType"] = L"Tree";
+    auto* keys = new FakeNode();
+    auto* order = new FakeNode();
+    IDispatchPtr keys_holder(keys, false), order_holder(order, false);
+    keys->values = {_variant_t(L"N1"), _variant_t(L"N2")};
+    order->values = {_variant_t(L"HierarchyHeader"), _variant_t(L"COL1")};
+    tree->methods = {L"GetAllNodeKeys", L"GetNodeTextByKey", L"GetNodePathByKey", L"GetItemText"};
+    tree->dispatches[L"GetAllNodeKeys"] = keys;
+    tree->dispatches[L"ColumnOrder"] = order;
+    tree->method_answers = {{L"GetNodeTextByKey(N1)", L"Folder"}, {L"GetNodeTextByKey(N2)", L"Leaf"},
+                            {L"GetNodePathByKey(N1)", L"1"}, {L"GetNodePathByKey(N2)", L"1\\1"},
+                            {L"GetItemText(N1,COL1)", L"v1"}, {L"GetItemText(N2,COL1)", L"v2"}};
+    const auto element = ComGuiElement::create(IDispatchPtr(tree, false));
+
+    const TreeData data = TableDataExtractor().extract_tree_data(element);
+    CHECK(data.columns == std::vector<std::string>{"COL1"});
+    REQUIRE(data.nodes.size() == 1);
+    CHECK(data.nodes[0].text == "Folder");
+    CHECK(data.nodes[0].column_values == std::vector<std::string>{"v1"});
+    REQUIRE(data.nodes[0].children.size() == 1);
+    CHECK(data.nodes[0].children[0].text == "Leaf");
+    CHECK(data.nodes[0].children[0].level == 1);
+    CHECK(data.nodes[0].children[0].column_values == std::vector<std::string>{"v2"});
+    const auto path_reads = std::count_if(tree->calls.begin(), tree->calls.end(),
+                                          [](const auto& call) { return call.first == L"GetNodePathByKey"; });
+    CHECK(path_reads == 2);   // once per node
 }

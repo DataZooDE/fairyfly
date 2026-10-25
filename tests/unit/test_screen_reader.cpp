@@ -797,4 +797,11 @@ TEST_CASE("tree nodes nest under the node whose path is their parent path", "[sc
     CHECK(roots[0].children[0].children[0].key == "C");
     CHECK(roots[1].key == "D");
     CHECK(roots[1].children.empty());   // E's parent path 9 is no node: E is left out, as before
+
+    // key order, not tree order: a child whose key sorts before its parent's is left out too (inherited limitation)
+    std::map<std::string, TreeNode> child_first{{"A", node("A", 1)}, {"Z", node("Z", 0)}};
+    std::vector<TreeNode> late_parent;
+    nest_tree_nodes_by_path(child_first, {{"A", "1\\1"}, {"Z", "1"}}, late_parent);
+    REQUIRE(late_parent.size() == 1);
+    CHECK(late_parent[0].children.empty());
 }

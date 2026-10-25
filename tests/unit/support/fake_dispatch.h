@@ -130,6 +130,7 @@ public:
     std::set<std::wstring> methods;
     std::vector<std::pair<std::wstring, std::wstring>> calls;
     std::map<std::wstring, std::wstring> method_answers;   ///< "Name(arg,arg)" -> the BSTR a generic method answers
+    std::set<std::wstring> failing_calls;                  ///< "Name(arg,arg)" answers DISP_E_EXCEPTION (still recorded)
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -242,6 +243,7 @@ public:
                 else return DISP_E_TYPEMISMATCH;
             }
             calls.emplace_back(name, text);
+            if (failing_calls.count(name + L"(" + text + L")")) return DISP_E_EXCEPTION;
             auto returned = dispatches.find(name);
             if (result && returned != dispatches.end() && returned->second) {
                 VariantInit(result);

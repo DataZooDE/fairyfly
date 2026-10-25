@@ -509,7 +509,7 @@ void TableDataExtractor::read_shell_tree(const ComGuiElementPtr& tree_element, s
 
             // Get column values for this node with error handling
             spdlog::trace("TREE_EXTRACT: Getting {} column values for node {}...", data_columns.size(), key);
-            node.column_values = as_tree(*tree_element).item_texts(key, data_columns);
+            node.column_values = as_tree(*tree_element).item_texts(key, data_columns, /*skip_hierarchy=*/false);
             spdlog::trace("TREE_EXTRACT: Node {} processed successfully", key);
 
             node.expanded = false;

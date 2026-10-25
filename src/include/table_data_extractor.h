@@ -84,8 +84,8 @@ struct TreeNode {
 };
 
 /// Nests the nodes of a tree shell by their paths (GetNodePathByKey, levels separated by '\\'): a level-0 node is a
-/// root, any other goes under the node whose path is its parent path. A node whose parent is not among them is left
-/// out. Iterates `by_key` in key order and moves its nodes.
+/// root, any other goes under the node whose path is its parent path. Iterates `by_key` in key order and moves its
+/// nodes, so a node is left out when its parent is missing OR comes later in key order (as before the extraction).
 void nest_tree_nodes_by_path(std::map<std::string, TreeNode>& by_key, const std::map<std::string, std::string>& paths,
                              std::vector<TreeNode>& roots);
 
