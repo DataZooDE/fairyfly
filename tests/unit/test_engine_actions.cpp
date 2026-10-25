@@ -118,9 +118,14 @@ TEST_CASE("engine: a field SAP shows as not changeable is refused and not writte
 TEST_CASE("engine: a transaction is started on the bound session", "[engine][actions]") {
     SapScene scene;
     auto engine = scene.engine();
+    FakeNode* info = scene.make(L"GuiSessionInfo", L"");
+    info->strings[L"Transaction"] = L"SU01";   // where the session is afterwards
+    scene.session->dispatches[L"Info"] = info;
     const Result r = engine->execute_transaction("SU01");
     INFO(r.to_json().dump());
     CHECK(scene.session->start_transaction_calls == 1);
+    CHECK(scene.session->start_transaction_code == L"SU01");
+    CHECK(r.status == Result::Status::Success);
 }
 
 TEST_CASE("engine: reading a field answers its text", "[engine][actions]") {
