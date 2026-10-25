@@ -377,324 +377,79 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
     return nullptr;
 }
 
-void SapGuiObject::set_string_property(const wchar_t* name, const std::string& value) {
-    TraceGuard trace("SapGuiObject::set_string_property");
-
+_variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* name, WORD flags, VARIANT* argument,
+                                        const std::string& log_value) const {
+    const bool property = flags == DISPATCH_PROPERTYPUT;
+    const char* kind = property ? "prop" : "method";
+    const std::string member = text::wide_to_utf8_lossy(name);
     if (!dispatch_) {
-        spdlog::error("set_string_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
-        throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_string_property");
+        spdlog::error("{}|null dispatch|{}={}", operation, kind, member);
+        throw SapGuiException(property ? "Cannot set property on null object" : "Cannot invoke method on null object",
+                              E_POINTER, "SapGuiObject", operation);
     }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
+    // DISPID through the per-type cache (falling back to ITypeInfo)
     DISPID dispid;
     HRESULT hr = resolve_dispid(name, &dispid);
     if (FAILED(hr)) {
-        spdlog::error("set_string_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
-        throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_string_property");
+        spdlog::error("{}|GetIDsOfNames failed|{}={}|hr={:#010x}", operation, kind, member, (unsigned int)hr);
+        throw SapGuiException(property ? "Failed to get property DISPID" : "Failed to get method DISPID", hr, "SapGuiObject",
+                              operation);
     }
-
-    // Prepare parameters
-    const auto wide_value = com::utf8_to_wide(value);
-    _variant_t var_value(wide_value.c_str());
-    DISPID dispid_named = DISPID_PROPERTYPUT;
-    DISPPARAMS params;
-    params.rgvarg = &var_value;
-    params.rgdispidNamedArgs = &dispid_named;
-    params.cArgs = 1;
-    params.cNamedArgs = 1;
-
-    // Invoke property setter
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYPUT,
-        &params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
+    // a property put names its single argument DISPID_PROPERTYPUT; a method takes it positionally
+    DISPID put_name = DISPID_PROPERTYPUT;
+    DISPPARAMS params = {argument, property ? &put_name : nullptr, argument ? 1u : 0u, property ? 1u : 0u};
+    _variant_t result;
+    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, flags, &params, property ? nullptr : &result, nullptr,
+                           nullptr);
     if (FAILED(hr)) {
-        spdlog::error("set_string_property|Invoke failed|prop={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
-        throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_string_property");
+        spdlog::error("{}|Invoke failed|{}={}{}|hr={:#010x}", operation, kind, member, log_value, (unsigned int)hr);
+        throw SapGuiException(property ? "Failed to set property" : "Failed to invoke method", hr, "SapGuiObject", operation);
     }
+    spdlog::debug("{}|success|{}={}{}", operation, kind, member, log_value);
+    return result;
+}
 
-    spdlog::debug("set_string_property|success|prop={}", text::wide_to_utf8_lossy(name));
+void SapGuiObject::set_string_property(const wchar_t* name, const std::string& value) {
+    TraceGuard trace("SapGuiObject::set_string_property");
+    _variant_t argument(com::utf8_to_wide(value).c_str());
+    invoke_checked("set_string_property", name, DISPATCH_PROPERTYPUT, &argument);   // the value is not logged
 }
 
 void SapGuiObject::set_int_property(const wchar_t* name, int value) {
     TraceGuard trace("SapGuiObject::set_int_property");
-
-    if (!dispatch_) {
-        spdlog::error("set_int_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
-        throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_int_property");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("set_int_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
-        throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_int_property");
-    }
-
-    // Prepare parameters
-    _variant_t var_value(value);
-    DISPID dispid_named = DISPID_PROPERTYPUT;
-    DISPPARAMS params;
-    params.rgvarg = &var_value;
-    params.rgdispidNamedArgs = &dispid_named;
-    params.cArgs = 1;
-    params.cNamedArgs = 1;
-
-    // Invoke property setter
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYPUT,
-        &params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("set_int_property|Invoke failed|prop={}|value={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), value, (unsigned int)hr);
-        throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_int_property");
-    }
-
-    spdlog::debug("set_int_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
+    _variant_t argument(value);
+    invoke_checked("set_int_property", name, DISPATCH_PROPERTYPUT, &argument, "|value=" + std::to_string(value));
 }
 
 void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
     TraceGuard trace("SapGuiObject::set_bool_property");
-
-    if (!dispatch_) {
-        spdlog::error("set_bool_property|null dispatch|prop={}", text::wide_to_utf8_lossy(name));
-        throw SapGuiException("Cannot set property on null object", E_POINTER, "SapGuiObject", "set_bool_property");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("set_bool_property|GetIDsOfNames failed|prop={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), (unsigned int)hr);
-        throw SapGuiException("Failed to get property DISPID", hr, "SapGuiObject", "set_bool_property");
-    }
-
-    // Prepare parameters
-    _variant_t var_value(value);
-    DISPID dispid_named = DISPID_PROPERTYPUT;
-    DISPPARAMS params;
-    params.rgvarg = &var_value;
-    params.rgdispidNamedArgs = &dispid_named;
-    params.cArgs = 1;
-    params.cNamedArgs = 1;
-
-    // Invoke property setter
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYPUT,
-        &params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("set_bool_property|Invoke failed|prop={}|value={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(name), value, (unsigned int)hr);
-        throw SapGuiException("Failed to set property", hr, "SapGuiObject", "set_bool_property");
-    }
-
-    spdlog::debug("set_bool_property|success|prop={}|value={}", text::wide_to_utf8_lossy(name), value);
+    _variant_t argument(value);
+    invoke_checked("set_bool_property", name, DISPATCH_PROPERTYPUT, &argument, value ? "|value=true" : "|value=false");
 }
 
 IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) const {
     TraceGuard trace("SapGuiObject::invoke_method_dispatch");
-
-    if (!dispatch_) {
-        spdlog::error("invoke_method_dispatch|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
-        throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_dispatch");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(method_name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_dispatch|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_dispatch");
-    }
-
-    // Invoke method
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    _variant_t result;
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &no_params,
-        &result,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_dispatch|Invoke failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_dispatch");
-    }
-
-    if (result.vt == VT_DISPATCH && result.pdispVal) {
-        spdlog::debug("invoke_method_dispatch|success|method={}", text::wide_to_utf8_lossy(method_name));
-        return IDispatchPtr(result.pdispVal, true); // Attach without AddRef
-    }
-
+    _variant_t result = invoke_checked("invoke_method_dispatch", method_name, DISPATCH_METHOD, nullptr);
+    if (result.vt == VT_DISPATCH && result.pdispVal) return IDispatchPtr(result.pdispVal, true);   // AddRef: result owns its own
     spdlog::warn("invoke_method_dispatch|unexpected type|method={}|vt={}", text::wide_to_utf8_lossy(method_name), (int)result.vt);
     return nullptr;
 }
 
 void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const std::string& param) {
     TraceGuard trace("SapGuiObject::invoke_method_with_string");
-
-    if (!dispatch_) {
-        spdlog::error("invoke_method_with_string|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
-        throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_string");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(method_name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_with_string|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_with_string");
-    }
-
-    // Prepare parameters
-    const auto wide_param = com::utf8_to_wide(param);
-    _variant_t var_param(wide_param.c_str());
-    DISPPARAMS params;
-    params.rgvarg = &var_param;
-    params.rgdispidNamedArgs = nullptr;
-    params.cArgs = 1;
-    params.cNamedArgs = 0;
-
-    // Invoke method
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_with_string|Invoke failed|method={}|param={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), param, (unsigned int)hr);
-        throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_with_string");
-    }
-
-    spdlog::debug("invoke_method_with_string|success|method={}|param={}", text::wide_to_utf8_lossy(method_name), param);
+    _variant_t argument(com::utf8_to_wide(param).c_str());
+    invoke_checked("invoke_method_with_string", method_name, DISPATCH_METHOD, &argument, "|param=" + param);
 }
 
 void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param) {
     TraceGuard trace("SapGuiObject::invoke_method_with_int");
-
-    if (!dispatch_) {
-        spdlog::error("invoke_method_with_int|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
-        throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_with_int");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(method_name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_with_int|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_with_int");
-    }
-
-    // Prepare parameters
-    _variant_t var_param(param);
-    DISPPARAMS params;
-    params.rgvarg = &var_param;
-    params.rgdispidNamedArgs = nullptr;
-    params.cArgs = 1;
-    params.cNamedArgs = 0;
-
-    // Invoke method
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_with_int|Invoke failed|method={}|param={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), param, (unsigned int)hr);
-        throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_with_int");
-    }
-
-    spdlog::debug("invoke_method_with_int|success|method={}|param={}", text::wide_to_utf8_lossy(method_name), param);
+    _variant_t argument(param);
+    invoke_checked("invoke_method_with_int", method_name, DISPATCH_METHOD, &argument, "|param=" + std::to_string(param));
 }
 
 void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
     TraceGuard trace("SapGuiObject::invoke_method_void");
-
-    if (!dispatch_) {
-        spdlog::error("invoke_method_void|null dispatch|method={}", text::wide_to_utf8_lossy(method_name));
-        throw SapGuiException("Cannot invoke method on null object", E_POINTER, "SapGuiObject", "invoke_method_void");
-    }
-
-    // Get DISPID using cached type lookup (falling back to ITypeInfo)
-    DISPID dispid;
-    HRESULT hr = resolve_dispid(method_name, &dispid);
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_void|GetIDsOfNames failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to get method DISPID", hr, "SapGuiObject", "invoke_method_void");
-    }
-
-    // Invoke method
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &no_params,
-        nullptr,
-        nullptr,
-        nullptr
-    );
-
-    if (FAILED(hr)) {
-        spdlog::error("invoke_method_void|Invoke failed|method={}|hr={:#010x}",
-                     text::wide_to_utf8_lossy(method_name), (unsigned int)hr);
-        throw SapGuiException("Failed to invoke method", hr, "SapGuiObject", "invoke_method_void");
-    }
-
-    spdlog::debug("invoke_method_void|success|method={}", text::wide_to_utf8_lossy(method_name));
+    invoke_checked("invoke_method_void", method_name, DISPATCH_METHOD, nullptr);
 }
 
 std::string SapGuiObject::get_id() const {

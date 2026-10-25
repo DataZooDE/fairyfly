@@ -2719,6 +2719,10 @@ public:
     // Property writes: recorded in `puts` and stored into strings/bools; names in put_fails answer DISP_E_EXCEPTION.
     std::vector<std::pair<std::wstring, std::wstring>> puts;
     std::set<std::wstring> put_fails;
+    // Generic methods: a name in `methods` is recorded in `calls` as {name, argument text} (no argument: "") and
+    // answers its `dispatches` entry (AddRef'd) when there is one; names in put_fails answer DISP_E_EXCEPTION.
+    std::set<std::wstring> methods;
+    std::vector<std::pair<std::wstring, std::wstring>> calls;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -2818,9 +2822,37 @@ public:
             it->second->AddRef();
             return S_OK;
         }
+        if ((flags & DISPATCH_METHOD) && methods.count(name)) {
+            if (put_fails.count(name)) return DISP_E_EXCEPTION;
+            std::wstring text;
+            if (params && params->cArgs == 1) {
+                const VARIANT& arg = params->rgvarg[0];
+                if (arg.vt == VT_BSTR) text = arg.bstrVal;
+                else if (arg.vt == VT_I4 || arg.vt == VT_INT) text = std::to_wstring(arg.vt == VT_INT ? arg.intVal : arg.lVal);
+                else return DISP_E_TYPEMISMATCH;
+            } else if (params && params->cArgs > 1) {
+                return DISP_E_BADPARAMCOUNT;
+            }
+            calls.emplace_back(name, text);
+            auto returned = dispatches.find(name);
+            if (result && returned != dispatches.end() && returned->second) {
+                VariantInit(result);
+                result->vt = VT_DISPATCH;
+                result->pdispVal = returned->second;
+                returned->second->AddRef();
+            }
+            return S_OK;
+        }
         if ((flags & DISPATCH_PROPERTYPUT) && params && params->cArgs == 1) {
             if (put_fails.count(name)) return DISP_E_EXCEPTION;
+            if (!params->rgdispidNamedArgs || params->cNamedArgs != 1 || params->rgdispidNamedArgs[0] != DISPID_PROPERTYPUT)
+                return DISP_E_PARAMNOTOPTIONAL;   // a property put names its value DISPID_PROPERTYPUT
             const VARIANT& arg = params->rgvarg[0];
+            if (arg.vt == VT_I4 || arg.vt == VT_INT) {   // _variant_t(int) is VT_INT
+                ints[name] = arg.vt == VT_INT ? arg.intVal : arg.lVal;
+                puts.emplace_back(name, std::to_wstring(ints[name]));
+                return S_OK;
+            }
             if (arg.vt == VT_BSTR) {
                 strings[name] = arg.bstrVal;
                 puts.emplace_back(name, std::wstring(arg.bstrVal));
@@ -3855,4 +3887,76 @@ TEST_CASE("Screen read header names system, client, user and transaction", "[com
                                             {L"ApplicationServer", L"vhcala4hci_A4H_00"}}, false);
     CHECK(screen_header_info(*session) == nlohmann::json{{"system", "A4H"}, {"client", "001"},
                                                         {"user", "DEVELOPER"}, {"transaction", "SM37"}});
+}
+
+
+// ---- SapGuiObject setters and invokers (characterization before merging the six bodies) ----------------------
+TEST_CASE("SapGuiObject: property setters put a string, an int and a bool by name", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiTextField";
+    SapGuiObject object(IDispatchPtr(node, false));
+    object.set_string_property(L"Text", "J\xC3\xB6rg");
+    object.set_int_property(L"CaretPosition", 3);
+    object.set_bool_property(L"Selected", true);
+    REQUIRE(node->puts.size() == 3);
+    CHECK(node->puts[0] == std::make_pair(std::wstring(L"Text"), std::wstring(L"Jörg")));
+    CHECK(node->puts[1] == std::make_pair(std::wstring(L"CaretPosition"), std::wstring(L"3")));
+    CHECK(node->puts[2] == std::make_pair(std::wstring(L"Selected"), std::wstring(L"true")));
+}
+
+TEST_CASE("SapGuiObject: methods are invoked with no, a string or an int argument", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiMainWindow";
+    node->methods = {L"SetFocus", L"PressButton", L"SendVKey", L"FindAllByName"};
+    auto* child = new FakeNode();
+    node->dispatches[L"FindAllByName"] = child;
+    SapGuiObject object(IDispatchPtr(node, false));
+    object.invoke_method_void(L"SetFocus");
+    object.invoke_method_with_string(L"PressButton", "BTN1");
+    object.invoke_method_with_int(L"SendVKey", 8);
+    IDispatchPtr returned = object.invoke_method_dispatch(L"FindAllByName");
+    CHECK(returned.GetInterfacePtr() == child);
+    REQUIRE(node->calls.size() == 4);
+    CHECK(node->calls[0] == std::make_pair(std::wstring(L"SetFocus"), std::wstring()));
+    CHECK(node->calls[1] == std::make_pair(std::wstring(L"PressButton"), std::wstring(L"BTN1")));
+    CHECK(node->calls[2] == std::make_pair(std::wstring(L"SendVKey"), std::wstring(L"8")));
+    CHECK(node->calls[3].first == L"FindAllByName");
+    // a method answering no object gives nullptr (not an exception)
+    node->methods.insert(L"Nothing");
+    CHECK(object.invoke_method_dispatch(L"Nothing") == nullptr);
+    returned = nullptr;
+    child->Release();
+}
+
+TEST_CASE("SapGuiObject: a failed lookup, put or call throws SapGuiException with its operation", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiButton";
+    node->unknown_names = {L"Missing"};
+    node->methods = {L"Press"};
+    node->put_fails = {L"Text", L"Press"};
+    SapGuiObject object(IDispatchPtr(node, false));
+    const auto expect = [](auto&& call, const std::string& message, const std::string& operation) {
+        try {
+            call();
+            FAIL("no exception");
+        } catch (const SapGuiException& e) {
+            CHECK(std::string(e.what()) == message);
+            CHECK(e.operation() == operation);
+        }
+    };
+    expect([&] { object.set_string_property(L"Missing", "x"); }, "Failed to get property DISPID", "set_string_property");
+    expect([&] { object.set_string_property(L"Text", "x"); }, "Failed to set property", "set_string_property");
+    expect([&] { object.set_int_property(L"Missing", 1); }, "Failed to get property DISPID", "set_int_property");
+    expect([&] { object.set_bool_property(L"Missing", true); }, "Failed to get property DISPID", "set_bool_property");
+    expect([&] { object.invoke_method_void(L"Missing"); }, "Failed to get method DISPID", "invoke_method_void");
+    expect([&] { object.invoke_method_void(L"Press"); }, "Failed to invoke method", "invoke_method_void");
+    expect([&] { object.invoke_method_with_string(L"Press", "a"); }, "Failed to invoke method", "invoke_method_with_string");
+    expect([&] { object.invoke_method_with_int(L"Press", 1); }, "Failed to invoke method", "invoke_method_with_int");
+    expect([&] { (void)object.invoke_method_dispatch(L"Press"); }, "Failed to invoke method", "invoke_method_dispatch");
+    SapGuiObject empty(nullptr);
+    expect([&] { empty.set_bool_property(L"Selected", true); }, "Cannot set property on null object", "set_bool_property");
+    expect([&] { empty.invoke_method_with_int(L"SendVKey", 0); }, "Cannot invoke method on null object", "invoke_method_with_int");
 }

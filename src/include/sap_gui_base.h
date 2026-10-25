@@ -90,6 +90,12 @@ public:
     /// Invoke method with no parameters, no return
     void invoke_method_void(const wchar_t* method_name);
 
+    /// One checked IDispatch call: DISPATCH_PROPERTYPUT with `argument`, or DISPATCH_METHOD with `argument` or none.
+    /// Throws SapGuiException(operation) for a null object, an unknown name or a failed call; `log_value` follows
+    /// the member name in the log lines. Returns the method's result (empty for a put).
+    _variant_t invoke_checked(const char* operation, const wchar_t* name, WORD flags, VARIANT* argument,
+                              const std::string& log_value = {}) const;
+
     /// Resolve DISPID using type-based cache, falling back to ITypeInfo
     HRESULT resolve_dispid(const wchar_t* name, DISPID* dispid) const;
 
