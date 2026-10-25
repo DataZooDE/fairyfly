@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "include/com/wrapper.h"
+#include "include/com/wrapper_helpers.h"
 #include "include/com_automation_engine.h"
 #include "support/fake_dispatch.h"
 
@@ -166,4 +167,27 @@ TEST_CASE("engine: a launch SAP GUI cannot open, without the sapshcut fallback, 
     REQUIRE(r.status == Result::Status::Error);
     CHECK(r.error["code"] == "CONNECTION_OPEN_FAILED");
     CHECK(r.error["connection_name"] == "BIG");
+}
+
+TEST_CASE("collection_member_items walks Count/Item of a member collection, up to a limit", "[com][collection]") {
+    // review 2026-10-25: GetAllNodeKeys, GetColumnNames and ColumnOrder each repeated this walk
+    ScopedDispatchCacheReset cache_reset;
+    auto* owner = new FakeNode();
+    IDispatchPtr owner_holder(owner, false);
+    auto* collection = new FakeNode();
+    IDispatchPtr collection_holder(collection, false);
+    std::vector<IDispatchPtr> children;
+    for (int i = 0; i < 3; ++i) {
+        children.emplace_back(new FakeNode(), false);
+        collection->items.push_back(children.back());
+    }
+    owner->methods.insert(L"GetAllNodeKeys");
+    owner->dispatches[L"GetAllNodeKeys"] = collection;
+    owner->dispatches[L"ColumnOrder"] = collection;
+
+    CHECK(fairyfly::sap::collection_member_items(owner, L"GetAllNodeKeys", DISPATCH_METHOD).size() == 3);
+    CHECK(fairyfly::sap::collection_member_items(owner, L"ColumnOrder", DISPATCH_PROPERTYGET, 2).size() == 2);
+    collection->count_override = 5;   // Item(3), Item(4) fail: skipped
+    CHECK(fairyfly::sap::collection_member_items(owner, L"ColumnOrder", DISPATCH_PROPERTYGET).size() == 3);
+    CHECK(fairyfly::sap::collection_member_items(owner, L"Missing", DISPATCH_PROPERTYGET).empty());   // not a collection
 }

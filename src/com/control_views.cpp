@@ -128,63 +128,16 @@ void ComGuiGrid::modify_grid_cell(int row, const std::string& column_name,
 
 std::vector<std::string> ComGuiGrid::get_column_order() const {
     std::vector<std::string> columns;
-
     try {
-        // Get ColumnOrder property (returns a collection)
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"ColumnOrder", &dispid);
-        if (FAILED(hr)) {
-            return columns;
+        const auto items = collection_member_items(dispatch_, L"ColumnOrder", DISPATCH_PROPERTYGET);
+        for (size_t i = 0; i < items.size(); ++i) {
+            const std::string context = fmt::format("get_column_order item[{}]", i);
+            std::string column = safe_bstr_to_string(items[i], context.c_str());
+            if (!column.empty()) columns.push_back(std::move(column));
         }
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYGET, {}, result_guard.get());
-
-        if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
-            IDispatch* coll = result_var.pdispVal;
-
-            // Get Count property
-            DISPID count_dispid;
-            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
-            if (SUCCEEDED(hr)) {
-                VARIANT count_result_var;
-                com::VariantGuard count_result_guard(&count_result_var);
-
-                hr = invoke(coll, count_dispid, DISPATCH_PROPERTYGET, {}, count_result_guard.get());
-
-                if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
-                    int count = count_result_var.lVal;
-
-                    // Get Item method dispid
-                    DISPID item_dispid;
-                    hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
-                    if (SUCCEEDED(hr)) {
-                        for (int i = 0; i < count; ++i) {
-                            VARIANT item_result_var;
-                            com::VariantGuard item_result_guard(&item_result_var);
-
-                            hr = invoke(coll, item_dispid, DISPATCH_METHOD, {_variant_t(static_cast<long>(i))}, item_result_guard.get());   // VT_I4, as SAP expects
-
-                            // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-                            if (SUCCEEDED(hr)) {
-                                std::string context = fmt::format("get_column_order item[{}]", i);
-                                std::string col = safe_bstr_to_string(item_result_var, context.c_str());
-                                if (!col.empty()) {
-                                    columns.push_back(col);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
     } catch (const std::exception& e) {
         spdlog::debug("get_column_order failed: {}", e.what());
     }
-
     return columns;
 }
 

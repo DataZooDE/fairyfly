@@ -5,6 +5,8 @@
 #include "include/com/utf8.h"
 #include <spdlog/spdlog.h>
 #include <comdef.h>
+#include <climits>
+#include <vector>
 
 #include "include/com/invoke.h"
 
@@ -14,6 +16,12 @@ namespace sap {
 /// Read a COM collection count for session-close verification. Unlike the
 /// ordinary screen-reading helper, a failed read must not mean zero items.
 int get_collection_count_checked(IDispatch* collection);
+
+/// The items of the collection that `owner`'s member answers (a method or property, by `flags`): Count (VT_I4) and
+/// Item(i) with a VT_I4 index, as SAP expects, at most `limit` of them. Empty when the member, the collection or its
+/// Count is missing; an Item read that fails is skipped. COM exceptions propagate to the caller.
+std::vector<_variant_t> collection_member_items(IDispatch* owner, const wchar_t* member, WORD flags,
+                                                int limit = INT_MAX);
 
 /// Get an integer property from COM object (free function helper)
 inline int get_int_property(IDispatch* obj, const char* prop_name) {
