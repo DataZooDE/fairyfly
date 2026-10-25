@@ -380,9 +380,8 @@ std::optional<Value> parse_value(const KeySpec& spec, const std::string& text, s
         break;
     }
     case ValueType::Bool: {
-        const std::string t = lower(trim(text));
-        if (t == "1" || t == "true" || t == "yes" || t == "on") value = true;
-        else if (t == "0" || t == "false" || t == "no" || t == "off") value = false;
+        if (parse_flag(text)) value = true;
+        else if (parse_off(text)) value = false;
         else return fail("expected true or false");
         break;
     }

@@ -211,9 +211,8 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray_services.launcher = launcher.get();
     auto link_control = link::make_link_control();
     tray_services.link = link_control.get();
-    // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0 turns it off
-    const std::string update_check = config::Environment::process().get(config::env::kUpdateCheck);
-    if (update_check != "0" && update_check != "off" && update_check != "false")
+    // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0|false|no|off turns it off
+    if (config::Environment::process().enabled(config::env::kUpdateCheck))
         tray_services.latest_update = []() -> std::optional<std::string> {
             auto c = update::check(FAIRYFLY_VERSION);
             return c.available ? std::optional<std::string>(c.latest) : std::nullopt;

@@ -1,7 +1,7 @@
 #include "include/config/environment.h"
 
-#include <cctype>
 #include <cstdlib>
+#include <system_error>
 #include <utility>
 
 namespace fairyfly::config {
@@ -22,13 +22,17 @@ std::string read_process_variable(const char* name) {
     return v ? v : "";
 #endif
 }
+
+bool ascii_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
 }  // namespace
 
 std::string normalized(std::string_view value) {
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) value.remove_prefix(1);
-    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) value.remove_suffix(1);
-    std::string lower;
-    for (char c : value) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    // ASCII only, independent of the C locale
+    while (!value.empty() && ascii_space(value.front())) value.remove_prefix(1);
+    while (!value.empty() && ascii_space(value.back())) value.remove_suffix(1);
+    std::string lower(value);
+    for (char& c : lower)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
     return lower;
 }
 
@@ -53,7 +57,10 @@ std::string Environment::get(const char* name) const { return lookup_ ? lookup_(
 
 std::filesystem::path Environment::local_app_data() const {
     const std::string dir = get(env::kLocalAppData);
-    return dir.empty() ? std::filesystem::temp_directory_path() : std::filesystem::path(dir);
+    if (!dir.empty()) return dir;
+    std::error_code ec;
+    auto tmp = std::filesystem::temp_directory_path(ec);
+    return ec ? std::filesystem::path() : tmp;
 }
 
 EnvLookup process_env() { return Environment::process().lookup(); }

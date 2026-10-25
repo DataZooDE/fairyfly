@@ -15,9 +15,11 @@
 #include <vector>
 
 #include "include/audit_log.h"
+#include "support/env_guard.h"
 #include "include/cli_entry.h"
 
 using namespace fairyfly::audit;
+using fairyfly::test::EnvGuard;
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
@@ -56,17 +58,6 @@ std::vector<std::string> read_lines(const fs::path& file) {
     while (std::getline(in, line)) lines.push_back(line);
     return lines;
 }
-
-struct EnvGuard {
-    std::string name;
-    std::string old;
-    bool had = false;
-    EnvGuard(const std::string& n, const std::string& value) : name(n) {
-        if (const char* v = std::getenv(n.c_str())) { had = true; old = v; }
-        _putenv_s(n.c_str(), value.c_str());
-    }
-    ~EnvGuard() { _putenv_s(name.c_str(), had ? old.c_str() : ""); }
-};
 
 GetEnvFn env_of(std::map<std::string, std::string> vars) {
     return [vars = std::move(vars)](const char* name) {

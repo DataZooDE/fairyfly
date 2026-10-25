@@ -4,11 +4,13 @@
 
 #include "include/config/environment.h"
 #include "include/mcp/policy.h"
+#include "support/env_guard.h"
 
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <regex>
 #include <vector>
 #include <map>
 #include <string>
@@ -23,14 +25,6 @@ config::EnvLookup env_of(std::map<std::string, std::string> vars) {
     };
 }
 
-void set_process_env(const char* name, const char* value) {
-#ifdef _WIN32
-    _putenv_s(name, value);
-#else
-    if (*value) setenv(name, value, 1);
-    else unsetenv(name);
-#endif
-}
 }  // namespace
 
 TEST_CASE("environment: a flag is on for 1/true/yes/on in any case, with surrounding spaces", "[config][env]") {
@@ -41,6 +35,17 @@ TEST_CASE("environment: a flag is on for 1/true/yes/on in any case, with surroun
     // explicitly off: 0/false/no/off, same rules; anything else (also "") is not an explicit off
     for (const char* off : {"0", "false", "FALSE", "No", "off", " Off "}) CHECK(config::parse_off(off));
     for (const char* other : {"", "1", "yes", "2", "required"}) CHECK_FALSE(config::parse_off(other));
+    // ASCII case folding only: no locale may turn a non-ASCII letter into a match
+    CHECK_FALSE(config::parse_flag("\xC4N"));
+    CHECK(config::normalized(" TrUe\t") == "true");
+}
+
+TEST_CASE("environment: a switch that is on by default is off only for 0/false/no/off", "[config][env]") {
+    // FAIRYFLY_UPDATE_CHECK: "OFF" or " no " must turn the check off, an unknown value keeps it on
+    for (const char* off : {"0", "OFF", " no ", "False"})
+        CHECK_FALSE(config::Environment(env_of({{config::env::kUpdateCheck, off}})).enabled(config::env::kUpdateCheck));
+    for (const char* on : {"", "1", "yes", "sometimes"})
+        CHECK(config::Environment(env_of({{config::env::kUpdateCheck, on}})).enabled(config::env::kUpdateCheck));
 }
 
 TEST_CASE("environment: an injected lookup answers get, flag and the read-only cap", "[config][env]") {
@@ -57,10 +62,11 @@ TEST_CASE("environment: the process environment is one shared instance and reads
     const config::Environment& a = config::Environment::process();
     const config::Environment& b = config::Environment::process();
     CHECK(&a == &b);
-    set_process_env("FAIRYFLY_ENV_TEST_FLAG", "On");
-    CHECK(a.get("FAIRYFLY_ENV_TEST_FLAG") == "On");
-    CHECK(a.flag("FAIRYFLY_ENV_TEST_FLAG"));
-    set_process_env("FAIRYFLY_ENV_TEST_FLAG", "");
+    {
+        test::EnvGuard on("FAIRYFLY_ENV_TEST_FLAG", "On");
+        CHECK(a.get("FAIRYFLY_ENV_TEST_FLAG") == "On");
+        CHECK(a.flag("FAIRYFLY_ENV_TEST_FLAG"));
+    }
     CHECK_FALSE(a.flag("FAIRYFLY_ENV_TEST_FLAG"));
     CHECK(config::process_env()("FAIRYFLY_ENV_TEST_FLAG").empty());
 }
@@ -72,10 +78,12 @@ TEST_CASE("environment: FAIRYFLY_READ_ONLY=Yes is the hard cap for the MCP polic
         CHECK(mcp::env_read_only(env));
         CHECK(config::Environment(env).read_only_cap());
     }
-    set_process_env(config::env::kReadOnly, "On");
-    CHECK(config::read_only_cap());
-    CHECK(mcp::env_read_only({}));  // no lookup: the process environment
-    set_process_env(config::env::kReadOnly, "");
+    {
+        test::EnvGuard on(config::env::kReadOnly, " On ");
+        CHECK(config::read_only_cap());
+        CHECK(mcp::env_read_only({}));  // no lookup: the process environment
+    }
+    test::EnvGuard off(config::env::kReadOnly, "");
     CHECK_FALSE(config::read_only_cap());
 }
 
@@ -99,11 +107,14 @@ TEST_CASE("environment: no file under src/ reads the environment except config/e
     for (const auto& e : fs::recursive_directory_iterator(src)) {
         const auto ext = e.path().extension();
         if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".hpp")) continue;
-        if (e.path().filename() == "environment.cpp") continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel == fs::path("config") / "environment.cpp") continue;
         std::ifstream in(e.path(), std::ios::binary);
+        REQUIRE(in.good());
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        for (const char* call : {"getenv(", "_dupenv_s(", "GetEnvironmentVariableA(", "GetEnvironmentVariableW("})
-            if (text.find(call) != std::string::npos) offenders.push_back(fs::relative(e.path(), src).string() + ": " + call);
+        static const std::regex call(R"(\b(std::)?(getenv|_dupenv_s|_wgetenv|_wdupenv_s|GetEnvironmentVariable[AW]?)\s*\()");
+        for (std::sregex_iterator m(text.begin(), text.end(), call), end; m != end; ++m)
+            offenders.push_back(rel.string() + ": " + (*m)[2].str());
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());

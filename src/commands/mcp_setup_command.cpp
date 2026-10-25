@@ -54,7 +54,7 @@ struct RealHosts {
 RunEnv make_env(const McpExtras& x, const GlobalOptions& global) {
     RunEnv env;
     env.stdin_is_tty = cred::stdin_is_console();
-    env.read_only = global.read_only || config::read_only_cap();
+    env.read_only = setup::setup_read_only(global.read_only);
     if (const CLI::Option* ro = x.mcp_app ? x.mcp_app->get_option_no_throw("--read-only") : nullptr; ro && ro->count() > 0) env.read_only = true;
     env.confirm = [](const std::string& prompt) {
         std::cerr << prompt << std::flush;

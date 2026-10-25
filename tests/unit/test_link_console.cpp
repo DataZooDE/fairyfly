@@ -32,6 +32,7 @@
 #include "link_agent.hpp"
 #include "link_state.hpp"
 #include "qr.hpp"
+#include "support/env_guard.h"
 
 using namespace fairyfly::link;
 using Catch::Matchers::ContainsSubstring;
@@ -370,18 +371,7 @@ TEST_CASE("link pair: https://fairyfly.io is prefilled; --gateway and FAIRYFLY_L
 
 TEST_CASE("link pair: asks for the address with https://fairyfly.io prefilled; a typed address replaces it", "[link][pair]") {
     // the live checks have developers set FAIRYFLY_LINK_GATEWAY: clear it for this test, restore it afterwards
-    struct EnvCleared {
-        std::string saved;
-        bool had = false;
-        EnvCleared() {
-            char* v = nullptr;
-            size_t n = 0;
-            if (_dupenv_s(&v, &n, "FAIRYFLY_LINK_GATEWAY") == 0 && v) { saved = v; had = true; }
-            free(v);
-            _putenv_s("FAIRYFLY_LINK_GATEWAY", "");
-        }
-        ~EnvCleared() { _putenv_s("FAIRYFLY_LINK_GATEWAY", had ? saved.c_str() : ""); }
-    } env_cleared;
+    fairyfly::test::EnvGuard env_cleared("FAIRYFLY_LINK_GATEWAY", "");
     FakePairing gw;
     SharedOut buf;
     std::ostream out(&buf);
@@ -449,19 +439,7 @@ TEST_CASE("gateway url: the link's WebSocket address needs wss://, ws:// only to
 }
 
 namespace {
-/// Sets (or, with "", clears) an environment variable for one test and restores it afterwards.
-struct EnvSet {
-    std::string name, saved;
-    bool had = false;
-    EnvSet(const std::string& n, const std::string& value) : name(n) {
-        char* v = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&v, &len, n.c_str()) == 0 && v) { saved = v; had = true; }
-        free(v);
-        _putenv_s(n.c_str(), value.c_str());
-    }
-    ~EnvSet() { _putenv_s(name.c_str(), had ? saved.c_str() : ""); }
-};
+using EnvSet = fairyfly::test::EnvGuard;
 }  // namespace
 
 TEST_CASE("link pair: a plain-http gateway that is not this computer is refused before anything is sent", "[link][pair][gateway-url]") {

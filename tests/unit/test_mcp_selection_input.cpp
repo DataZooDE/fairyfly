@@ -16,6 +16,7 @@
 #include "include/mcp/mcp_audit.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/tool_catalog.h"
+#include "support/env_guard.h"
 
 // Selection input: a read-only token created with --allow-selection-input (and a T-code allowlist) may type into plain
 // selection fields on the INITIAL screen of its transaction, and nowhere else. Pure fakes, no SAP.
@@ -539,7 +540,7 @@ TEST_CASE("selection input: the read-only override is restored when the invocati
 }
 
 TEST_CASE("selection input: FAIRYFLY_READ_ONLY hard cap still allows it (typing cannot commit)", "[mcp][selection-input]") {
-    _putenv_s("FAIRYFLY_READ_ONLY", "1");
+    std::optional<fairyfly::test::EnvGuard> cap(std::in_place, "FAIRYFLY_READ_ONLY", "1");
     Env env;
     auto d = env.make(true);  // run_mcp forces the server read-only under the cap
     const Principal p = ro_token("basis");
@@ -550,7 +551,7 @@ TEST_CASE("selection input: FAIRYFLY_READ_ONLY hard cap still allows it (typing 
     const Principal plain = ro_token("plain", false);
     CHECK_FALSE(start_su01(*d, plain).is_error);
     const auto plain_fill = d->call_tool("gui_element_fill", fill(), ctx_for(plain));
-    _putenv_s("FAIRYFLY_READ_ONLY", "");
+    cap.reset();
     CHECK(fill_ok);
     CHECK(has_code(plain_fill, "TOOL_UNAVAILABLE_READ_ONLY"));
 }

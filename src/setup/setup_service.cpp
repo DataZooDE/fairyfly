@@ -727,6 +727,8 @@ bool old_protocol(const std::string& p) { return p == "TLS 1.0" || p == "TLS 1.1
 } // namespace
 
 // ---- run_setup ---------------------------------------------------------------------------------------------------
+bool setup_read_only(bool read_only_flag, const config::Environment& env) { return read_only_flag || env.read_only_cap(); }
+
 int run_setup(Hosts& h, Options o, const RunEnv& env) {
     fill_defaults(h, o);
     if (const auto e = validate_options(o)) return finish_error(env, o.json, *e);

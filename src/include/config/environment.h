@@ -53,9 +53,11 @@ public:
 
     std::string get(const char* name) const;
     bool flag(const char* name) const { return parse_flag(get(name)); }
+    /// A switch that is on by default: off only for parse_off (FAIRYFLY_UPDATE_CHECK).
+    bool enabled(const char* name) const { return !parse_off(get(name)); }
     /// FAIRYFLY_READ_ONLY: refuse every state-changing action, whatever flags or tokens say.
     bool read_only_cap() const { return flag(env::kReadOnly); }
-    /// LOCALAPPDATA, or the temp directory when it is unset.
+    /// LOCALAPPDATA, or the temp directory when it is unset (an empty path when that cannot be resolved; never throws).
     std::filesystem::path local_app_data() const;
     /// local_app_data() / "fairyfly": where fairyfly keeps its config, logs, audit trail and state.
     std::filesystem::path data_dir() const { return local_app_data() / "fairyfly"; }
