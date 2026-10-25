@@ -843,6 +843,272 @@ ElementProbeSource ScreenReader::element_probe_source() const {
     };
 }
 
+namespace {
+
+/// Types that are never walked as containers. GuiMenu is one so top-level menus are captured, but the 100+ nested
+/// submenus are skipped.
+bool is_known_leaf(const std::string& type) {
+    return type == "GuiButton" || type == "GuiTextField" || type == "GuiCTextField" || type == "GuiPasswordField" ||
+           type == "GuiRadioButton" || type == "GuiCheckBox" || type == "GuiLabel" || type == "GuiStatusbar" || type == "GuiMenu";
+}
+
+/// Types walked as containers even when they report no children (subscreens, toolbars, tab strips, group boxes, ...).
+bool is_container_type(const std::string& type) {
+    static const char* const kContainers[] = {"GuiContainerShell", "GuiSplitterShell", "GuiSimpleContainer", "GuiScrollContainer", "GuiUserArea", "GuiCustomControl", "GuiToolbar", "GuiToolbarControl", "GuiTitlebar", "GuiTabStrip", "GuiTab", "GuiSubScreen", "GuiBox"};
+    return std::any_of(std::begin(kContainers), std::end(kContainers), [&](const char* t) { return type == t; });
+}
+
+}  // namespace
+
+/// Shells and grids are not walked: their ids are collected for phase 2 (fresh COM pointers), a metadata shell is
+/// added as it is. True when the element was handled here.
+bool ScreenReader::collect_shell_or_grid(const ComGuiElementPtr& element, const std::string& type, const std::string& elem_id,
+                                         ScreenElementCollector& collector, int depth, bool skip_trees) {
+    // Check GuiShell controls - distinguish between GridView and Tree controls
+    if (type == "GuiShell") {
+        std::string subtype = "";
+        try {
+            subtype = element->get_string_property(L"SubType");
+        } catch (...) {
+            // Some GuiShell instances might not expose SubType
+        }
+
+        const auto extraction_kind = classify_shell_extraction(subtype);
+        if (extraction_kind == ShellExtractionKind::Grid) {
+            spdlog::debug("Found GuiShell GridView {} at depth {} - collecting ID for Phase 2 grid extraction", elem_id, depth);
+            collector.add_grid_id(elem_id);
+            return true;
+        }
+
+        if (extraction_kind == ShellExtractionKind::Metadata) {
+            collector.add(element);
+            return true;
+        }
+
+        if (skip_trees) {
+            // When --skip-trees is enabled, completely skip GuiShell elements
+            spdlog::debug("{}[depth={}] Skipping GuiShell element {} (--skip-trees enabled)",
+                         std::string(depth * 2, ' '), depth, elem_id);
+            return true;
+        } else {
+            // PHASE 1: Collect tree ID for later extraction with fresh COM pointer
+            // Don't extract now - the traversal pointer may become stale
+            // Will extract in Phase 2 after traversal completes using session->find_element_by_id()
+            spdlog::debug("Found GuiShell {} (subtype='{}') at depth {} - collecting ID for Phase 2 extraction", elem_id, subtype, depth);
+            collector.add_tree_id(elem_id);
+
+            // Don't traverse children or store COM pointer - will extract later
+            return true;
+        }
+    }
+
+    // Check for GuiGridView / GuiTableControl - collect for Phase 2 extraction
+    if (type == "GuiGridView" || type == "GuiTableControl") {
+        spdlog::debug("Found grid {} (type={}) at depth {} - collecting ID for Phase 2 extraction",
+                     elem_id, type, depth);
+        collector.add_grid_id(elem_id);
+        // Don't traverse children - grids are leaf elements with no meaningful child structure
+        return true;
+    }
+    return false;
+}
+
+/// GuiUserArea: tabular grid cells (/lbl[col,row]) become one grid, other children are walked as usual. False: stop
+/// here (searching, or no --probe-all: a user area has no /shell or /shellcont children to probe for).
+bool ScreenReader::walk_user_area(const ComGuiElementPtr& element, const std::string& elem_id, int child_count,
+                                  ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search) {
+    spdlog::debug("{}Enumerating GuiUserArea children for {}", std::string(depth * 2, ' '), elem_id);
+    try {
+        auto children_collection = element->children();
+        int total_items = std::max(child_count, 500);
+        struct CellInfo {
+            ComGuiElementPtr ptr;
+            int col;
+            int row;
+            std::string text;
+        };
+        std::vector<CellInfo> grid_cells;
+
+        // Handles one child; returns false to stop the walk (first error, like before).
+        auto handle_child = [&](const ComGuiElementPtr& child_ptr) -> bool {
+            try {
+                std::string child_id = child_ptr->get_id();
+
+                if (search) {
+                    traverse_element_tree(child_ptr, collector, depth + 1,
+                                          skip_trees, search);
+                    return true;
+                }
+
+                // Check if child is a grid cell label: /lbl[col,row]
+                size_t bracket_pos = child_id.find("/lbl[");
+                if (bracket_pos != std::string::npos) {
+                    size_t comma_pos = child_id.find(",", bracket_pos);
+                    size_t close_bracket = child_id.find("]", comma_pos);
+                    if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
+                        try {
+                            int col = std::stoi(child_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5));
+                            int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
+                            std::string text = read_positioned_label_text(child_ptr, child_id);
+                            grid_cells.push_back({child_ptr, col, row, text});
+                            return true; // Captured as grid cell, do not recurse or add to collector
+                        } catch (...) {}
+                    }
+                }
+
+                // Non-label child: traverse recursively (e.g. buttons, subscreens, input fields)
+                traverse_element_tree(child_ptr, collector, depth + 1, skip_trees, search);
+                return true;
+            } catch (const std::exception&) {
+                return false; // Stop on first error
+            }
+        };
+
+        // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of item(i)
+        // (~4-5 round trips per child). Same order, same limit, same stop conditions.
+        int enumerated = 0;
+        bool enumerated_ok = children_collection.for_each(
+            [&](const ComGuiElementPtr& child_ptr) {
+                if (enumerated >= total_items) return false;
+                if (search && search->stopped) return false;
+                ++enumerated;
+                return handle_child(child_ptr);
+            });
+        if (search && search->stopped) return false;
+
+        if (!enumerated_ok || enumerated == 0) {
+            for (int i = 0; i < total_items; ++i) {
+                if (search && search->stopped) return false;
+                try {
+                    ComGuiElementPtr child_ptr = children_collection.item(i);
+                    if (!child_ptr) {
+                        break; // Stop at first null
+                    }
+                    if (!handle_child(child_ptr)) break;
+                } catch (const std::exception&) {
+                    break; // Stop on first error
+                }
+            }
+        }
+
+        // Evaluate whether collected grid cells form a tabular grid
+        if (!grid_cells.empty()) {
+            std::vector<std::tuple<int, int, std::string>> cell_tuples;
+            cell_tuples.reserve(grid_cells.size());
+            for (const auto& cell : grid_cells)
+                cell_tuples.emplace_back(cell.col, cell.row, cell.text);
+
+            const bool is_table = is_tabular_userarea(cell_tuples);
+
+            if (is_table) {
+                spdlog::info("GuiUserArea {} contains tabular grid ({} cells) - registering for table extraction",
+                             elem_id, grid_cells.size());
+                collector.add_grid_id(elem_id);
+                collector.set_grid_cells(elem_id, cell_tuples);
+            } else {
+                // Not a tabular grid: traverse each cell as a normal form label
+                for (const auto& cell : grid_cells) {
+                    traverse_element_tree(cell.ptr, collector, depth + 1, skip_trees);
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("{}GuiUserArea children enumeration failed: {}", std::string(depth * 2, ' '), e.what());
+    }
+
+    // --probe-all keeps going into the exhaustive FindById probing below.
+    if (search && !probe_all_ && !probe_all_from_environment()) return false;
+
+    // GuiUserArea does not contain /shell or /shellcont container children
+    if (!probe_all_ && !probe_all_from_environment()) return false;
+    return true;
+}
+
+/// The Children collection (one enumeration), or by index when that yields nothing. Errors on single children are
+/// skipped: the ID probing afterwards may still reach them.
+void ScreenReader::walk_children(const ComGuiElementPtr& element, int child_count, ScreenElementCollector& collector, int depth,
+                                 bool skip_trees, ScreenSearchContext* search) {
+    // Try Children collection first, but track if it actually works
+    try {
+        if (child_count > 0) {
+            // Fast path: one enumeration for all children (get_child(i) re-enumerates per index).
+            int visited = 0;
+            bool enumerated_ok = false;
+            try {
+                enumerated_ok = element->children().for_each(
+                    [&](const ComGuiElementPtr& child) {
+                        if (visited >= child_count) return false;
+                        if (search && search->stopped) return false;
+                        ++visited;
+                        try {
+                            traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                        } catch (const std::exception&) {
+                            // Child access failed, will fall back to ID-based
+                        }
+                        return true;
+                    });
+            } catch (const std::exception&) {
+                // Children collection not available
+            }
+            if (search && search->stopped) return;
+
+            if (!enumerated_ok || visited == 0) {
+                for (int i = 0; i < child_count; ++i) {
+                    if (search && search->stopped) return;
+                    try {
+                        auto child = element->get_child(i);
+                        if (child) {
+                            traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                        }
+                    } catch (const SapGuiException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const ComException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const std::exception&) {
+                        // Child access failed, will fall back to ID-based
+                    }
+                }
+            }
+            // Don't return here - continue with ID-based discovery
+            // SAP GUI can have elements accessible via FindById but not Children collection
+        }
+    } catch (const std::exception&) {
+        // Children collection not available
+    }
+}
+
+/// The safety net for controls FindById reaches but Children does not list (see id_probe_candidates).
+void ScreenReader::probe_children_by_id(const std::string& type, const std::string& elem_id, int child_count,
+                                        ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search) {
+    // ID-based discovery is only a safety net for controls that FindById can reach but
+    // Children does not list. Which paths are worth a FindById round trip depends on the
+    // control type and on whether Children yielded anything (see id_probe_candidates).
+    const auto probes = id_probe_candidates(type, elem_id, child_count, collector,
+                                            probe_all_ || probe_all_from_environment());
+    if (!probes.empty()) {
+        spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
+                      std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
+    }
+    std::string missed_index_family;
+    for (const auto& probe_id : probes) {
+        if (search && search->stopped) return;
+        const auto bracket = probe_id.find('[');
+        const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
+        // Indexed families (/shell[N], /shellcont[N], /sub[N], /cntl[N]) end at the first miss.
+        if (!family.empty() && family == missed_index_family) continue;
+        try {
+            auto probed = session_->find_element_by_id(probe_id);
+            if (probed) {
+                spdlog::debug("Found probed child: {}", probe_id);
+                traverse_element_tree(probed, collector, depth + 1, skip_trees, search);
+            }
+        } catch (const std::exception& e) {
+            spdlog::trace("No probed child {}: {}", probe_id, e.what());
+            if (!family.empty()) missed_index_family = family;
+        }
+    }
+}
+
 void ScreenReader::traverse_element_tree(
     ComGuiElementPtr element,
     ScreenElementCollector& collector,
@@ -887,52 +1153,7 @@ void ScreenReader::traverse_element_tree(
         if (search->stopped) return;
     }
 
-    // Check GuiShell controls - distinguish between GridView and Tree controls
-    if (type == "GuiShell") {
-        std::string subtype = "";
-        try {
-            subtype = element->get_string_property(L"SubType");
-        } catch (...) {
-            // Some GuiShell instances might not expose SubType
-        }
-
-        const auto extraction_kind = classify_shell_extraction(subtype);
-        if (extraction_kind == ShellExtractionKind::Grid) {
-            spdlog::debug("Found GuiShell GridView {} at depth {} - collecting ID for Phase 2 grid extraction", elem_id, depth);
-            collector.add_grid_id(elem_id);
-            return;
-        }
-
-        if (extraction_kind == ShellExtractionKind::Metadata) {
-            collector.add(element);
-            return;
-        }
-
-        if (skip_trees) {
-            // When --skip-trees is enabled, completely skip GuiShell elements
-            spdlog::debug("{}[depth={}] Skipping GuiShell element {} (--skip-trees enabled)",
-                         std::string(depth * 2, ' '), depth, elem_id);
-            return;
-        } else {
-            // PHASE 1: Collect tree ID for later extraction with fresh COM pointer
-            // Don't extract now - the traversal pointer may become stale
-            // Will extract in Phase 2 after traversal completes using session->find_element_by_id()
-            spdlog::debug("Found GuiShell {} (subtype='{}') at depth {} - collecting ID for Phase 2 extraction", elem_id, subtype, depth);
-            collector.add_tree_id(elem_id);
-
-            // Don't traverse children or store COM pointer - will extract later
-            return;
-        }
-    }
-
-    // Check for GuiGridView / GuiTableControl - collect for Phase 2 extraction
-    if (type == "GuiGridView" || type == "GuiTableControl") {
-        spdlog::debug("Found grid {} (type={}) at depth {} - collecting ID for Phase 2 extraction",
-                     elem_id, type, depth);
-        collector.add_grid_id(elem_id);
-        // Don't traverse children - grids are leaf elements with no meaningful child structure
-        return;
-    }
+    if (collect_shell_or_grid(element, type, elem_id, collector, depth, skip_trees)) return;
 
     try {
         // CRITICAL: Do NOT add the element to collector if it might cause problems later
@@ -951,13 +1172,7 @@ void ScreenReader::traverse_element_tree(
 
         // Known leaf types that should never be traversed as containers
         // GuiMenu is treated as a leaf so top-level menus are captured, but 100+ deep nested submenus are skipped
-        bool is_known_leaf = (type == "GuiButton" || type == "GuiTextField" || type == "GuiCTextField" ||
-                              type == "GuiPasswordField" || type == "GuiRadioButton" || type == "GuiCheckBox" ||
-                              type == "GuiLabel" || type == "GuiStatusbar" || type == "GuiMenu");
-
-        if (is_known_leaf) {
-            return;
-        }
+        if (is_known_leaf(type)) return;
 
         // Introspect child count directly from element
         int child_count = 0;
@@ -967,212 +1182,15 @@ void ScreenReader::traverse_element_tree(
             child_count = 0;
         }
 
-        // Container types that have nested structure or report child_count > 0
-        bool is_container = (child_count > 0 ||
-                           type == "GuiContainerShell" ||
-                           type == "GuiSplitterShell" ||
-                           type == "GuiSimpleContainer" ||   // Subscreen containers (SE16 selection screens)
-                           type == "GuiScrollContainer" ||   // Scrollable subscreen containers
-                           type == "GuiUserArea" ||
-                           type == "GuiCustomControl" ||
-                           type == "GuiToolbar" ||           // Toolbar contains buttons
-                           type == "GuiToolbarControl" ||    // Toolbar control
-                           type == "GuiTitlebar" ||          // Title bar may contain buttons
-                           type == "GuiTabStrip" ||          // Tab strip contains tabs
-                           type == "GuiTab" ||               // Tab contains controls
-                           type == "GuiSubScreen" ||         // Subscreen contains controls
-                           type == "GuiBox");                // Group box contains controls
+        if (child_count <= 0 && !is_container_type(type)) return;  // a leaf: no children to walk
 
-        if (!is_container) {
-            return;  // Leaf element, no children to traverse
-        }
+        if (type == "GuiUserArea" && !walk_user_area(element, elem_id, child_count, collector, depth, skip_trees, search))
+            return;
 
-        // Special handling for GuiUserArea: separate tabular grid cells (/lbl[col,row]) from form controls
-        // to avoid polluting the element collector with hundreds of individual cell labels.
-        if (type == "GuiUserArea") {
-            spdlog::debug("{}Enumerating GuiUserArea children for {}", std::string(depth * 2, ' '), elem_id);
-            try {
-                auto children_collection = element->children();
-                int total_items = std::max(child_count, 500);
-                struct CellInfo {
-                    ComGuiElementPtr ptr;
-                    int col;
-                    int row;
-                    std::string text;
-                };
-                std::vector<CellInfo> grid_cells;
-
-                // Handles one child; returns false to stop the walk (first error, like before).
-                auto handle_child = [&](const ComGuiElementPtr& child_ptr) -> bool {
-                    try {
-                        std::string child_id = child_ptr->get_id();
-
-                        if (search) {
-                            traverse_element_tree(child_ptr, collector, depth + 1,
-                                                  skip_trees, search);
-                            return true;
-                        }
-
-                        // Check if child is a grid cell label: /lbl[col,row]
-                        size_t bracket_pos = child_id.find("/lbl[");
-                        if (bracket_pos != std::string::npos) {
-                            size_t comma_pos = child_id.find(",", bracket_pos);
-                            size_t close_bracket = child_id.find("]", comma_pos);
-                            if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
-                                try {
-                                    int col = std::stoi(child_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5));
-                                    int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
-                                    std::string text = read_positioned_label_text(child_ptr, child_id);
-                                    grid_cells.push_back({child_ptr, col, row, text});
-                                    return true; // Captured as grid cell, do not recurse or add to collector
-                                } catch (...) {}
-                            }
-                        }
-
-                        // Non-label child: traverse recursively (e.g. buttons, subscreens, input fields)
-                        traverse_element_tree(child_ptr, collector, depth + 1, skip_trees, search);
-                        return true;
-                    } catch (const std::exception&) {
-                        return false; // Stop on first error
-                    }
-                };
-
-                // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of item(i)
-                // (~4-5 round trips per child). Same order, same limit, same stop conditions.
-                int enumerated = 0;
-                bool enumerated_ok = children_collection.for_each(
-                    [&](const ComGuiElementPtr& child_ptr) {
-                        if (enumerated >= total_items) return false;
-                        if (search && search->stopped) return false;
-                        ++enumerated;
-                        return handle_child(child_ptr);
-                    });
-                if (search && search->stopped) return;
-
-                if (!enumerated_ok || enumerated == 0) {
-                    for (int i = 0; i < total_items; ++i) {
-                        if (search && search->stopped) return;
-                        try {
-                            ComGuiElementPtr child_ptr = children_collection.item(i);
-                            if (!child_ptr) {
-                                break; // Stop at first null
-                            }
-                            if (!handle_child(child_ptr)) break;
-                        } catch (const std::exception&) {
-                            break; // Stop on first error
-                        }
-                    }
-                }
-
-                // Evaluate whether collected grid cells form a tabular grid
-                if (!grid_cells.empty()) {
-                    std::vector<std::tuple<int, int, std::string>> cell_tuples;
-                    cell_tuples.reserve(grid_cells.size());
-                    for (const auto& cell : grid_cells)
-                        cell_tuples.emplace_back(cell.col, cell.row, cell.text);
-
-                    const bool is_table = is_tabular_userarea(cell_tuples);
-
-                    if (is_table) {
-                        spdlog::info("GuiUserArea {} contains tabular grid ({} cells) - registering for table extraction",
-                                     elem_id, grid_cells.size());
-                        collector.add_grid_id(elem_id);
-                        collector.set_grid_cells(elem_id, cell_tuples);
-                    } else {
-                        // Not a tabular grid: traverse each cell as a normal form label
-                        for (const auto& cell : grid_cells) {
-                            traverse_element_tree(cell.ptr, collector, depth + 1, skip_trees);
-                        }
-                    }
-                }
-            } catch (const std::exception& e) {
-                spdlog::debug("{}GuiUserArea children enumeration failed: {}", std::string(depth * 2, ' '), e.what());
-            }
-
-            // --probe-all keeps going into the exhaustive FindById probing below.
-            if (search && !probe_all_ && !probe_all_from_environment()) return;
-
-            // GuiUserArea does not contain /shell or /shellcont container children
-            if (!probe_all_ && !probe_all_from_environment()) return;
-        }
-
-        // Try Children collection first, but track if it actually works
-        try {
-            if (child_count > 0) {
-                // Fast path: one enumeration for all children (get_child(i) re-enumerates per index).
-                int visited = 0;
-                bool enumerated_ok = false;
-                try {
-                    enumerated_ok = element->children().for_each(
-                        [&](const ComGuiElementPtr& child) {
-                            if (visited >= child_count) return false;
-                            if (search && search->stopped) return false;
-                            ++visited;
-                            try {
-                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
-                            } catch (const std::exception&) {
-                                // Child access failed, will fall back to ID-based
-                            }
-                            return true;
-                        });
-                } catch (const std::exception&) {
-                    // Children collection not available
-                }
-                if (search && search->stopped) return;
-
-                if (!enumerated_ok || visited == 0) {
-                    for (int i = 0; i < child_count; ++i) {
-                        if (search && search->stopped) return;
-                        try {
-                            auto child = element->get_child(i);
-                            if (child) {
-                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
-                            }
-                        } catch (const SapGuiException&) {
-                            // Child access failed, will fall back to ID-based
-                        } catch (const ComException&) {
-                            // Child access failed, will fall back to ID-based
-                        } catch (const std::exception&) {
-                            // Child access failed, will fall back to ID-based
-                        }
-                    }
-                }
-                // Don't return here - continue with ID-based discovery
-                // SAP GUI can have elements accessible via FindById but not Children collection
-            }
-        } catch (const std::exception&) {
-            // Children collection not available
-        }
-
+        walk_children(element, child_count, collector, depth, skip_trees, search);
         if (search && search->stopped) return;
 
-        // ID-based discovery is only a safety net for controls that FindById can reach but
-        // Children does not list. Which paths are worth a FindById round trip depends on the
-        // control type and on whether Children yielded anything (see id_probe_candidates).
-        const auto probes = id_probe_candidates(type, elem_id, child_count, collector,
-                                                probe_all_ || probe_all_from_environment());
-        if (!probes.empty()) {
-            spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
-                          std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
-        }
-        std::string missed_index_family;
-        for (const auto& probe_id : probes) {
-            if (search && search->stopped) return;
-            const auto bracket = probe_id.find('[');
-            const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
-            // Indexed families (/shell[N], /shellcont[N], /sub[N], /cntl[N]) end at the first miss.
-            if (!family.empty() && family == missed_index_family) continue;
-            try {
-                auto probed = session_->find_element_by_id(probe_id);
-                if (probed) {
-                    spdlog::debug("Found probed child: {}", probe_id);
-                    traverse_element_tree(probed, collector, depth + 1, skip_trees, search);
-                }
-            } catch (const std::exception& e) {
-                spdlog::trace("No probed child {}: {}", probe_id, e.what());
-                if (!family.empty()) missed_index_family = family;
-            }
-        }
+        probe_children_by_id(type, elem_id, child_count, collector, depth, skip_trees, search);
     } catch (const SapGuiException& e) {
         spdlog::debug("traverse_element_tree: SapGuiException: {}", e.what());
         // Skip elements that throw exceptions during processing

@@ -239,6 +239,16 @@ private:
     void discover_elements(ComGuiWindowPtr window, ScreenElementCollector& collector,
                            bool skip_trees = false, ScreenSearchContext* search = nullptr);
 
+    // the stages of traverse_element_tree (screen_reader.cpp)
+    bool collect_shell_or_grid(const ComGuiElementPtr& element, const std::string& type, const std::string& elem_id,
+                               ScreenElementCollector& collector, int depth, bool skip_trees);
+    bool walk_user_area(const ComGuiElementPtr& element, const std::string& elem_id, int child_count,
+                        ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search);
+    void walk_children(const ComGuiElementPtr& element, int child_count, ScreenElementCollector& collector, int depth,
+                       bool skip_trees, ScreenSearchContext* search);
+    void probe_children_by_id(const std::string& type, const std::string& elem_id, int child_count,
+                              ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search);
+
     /// Recursively traverse element tree and collect unique elements
     void traverse_element_tree(
         ComGuiElementPtr element,
