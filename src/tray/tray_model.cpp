@@ -1,3 +1,4 @@
+#include "include/link/link_state_names.h"
 #include "include/tray/tray.h"
 #include "include/version.h"
 
@@ -109,7 +110,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     } else {
         cloud.children.push_back(item(lv.organisation + " (" + lv.account + "): " + lv.state, TrayAction::None, false));
         if (lv.trail_on) cloud.children.push_back(item(trail_menu_text(lv), TrayAction::None, false));
-        cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == "not running"));
+        cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == link::state::kNotRunning));
         if (lv.paused) cloud.children.push_back(item("Resume", TrayAction::LinkResume));
         else cloud.children.push_back(item("Pause", TrayAction::LinkPause));
         cloud.children.push_back(item("Health check (console)", TrayAction::LinkStatus));

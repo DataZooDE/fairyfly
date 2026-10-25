@@ -23,6 +23,7 @@
 // small interface below; unit tests use fakes, the Win32 implementations live in src/tray/tray_win32.cpp
 // and are exercised by hidden manual tests only.
 
+#include "include/link/link_state_names.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -67,7 +68,7 @@ enum class TrayAction {
 struct LinkView {
     bool paired = false;
     std::string organisation, account;
-    std::string state = "not running";   ///< connected | paused | not running
+    std::string state = link::state::kNotRunning;   ///< link::state: connected | paused | not running
     bool paused = false;
     /// The audit trail (the running link's status file): while on, the person at this desktop must see it.
     bool trail_on = false;

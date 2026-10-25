@@ -1,4 +1,5 @@
 // The link tray (`fairyfly link run --tray`): the cloud link on its own, without the MCP server.
+#include "include/link/link_state_names.h"
 #include <thread>
 
 #include <spdlog/spdlog.h>
@@ -18,8 +19,8 @@ std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp,
                               const AutostartView& autostart) {
     TrayMenuModel model;
-    if (link.state == "connected") model.icon = IconState::Running;
-    else if (link.state == "paused") model.icon = IconState::Warning;
+    if (link.state == link::state::kConnected) model.icon = IconState::Running;
+    else if (link.state == link::state::kPaused) model.icon = IconState::Warning;
     else model.icon = IconState::Stopped;
 
     if (link.paired) {
@@ -130,8 +131,8 @@ void LinkTrayController::on_tick() {
     const std::string state = link_.state;
     if (state == last_state_) return;
     // "not running" before the first status is written (start) or after Quit says nothing new
-    if (state == "connected") notify(last_state_ == "paused" ? "Cloud link resumed" : "Cloud link running for " + who(link_));
-    else if (state == "paused") notify("Cloud link paused: the AI assistant cannot reach this desktop");
+    if (state == link::state::kConnected) notify(last_state_ == link::state::kPaused ? "Cloud link resumed" : "Cloud link running for " + who(link_));
+    else if (state == link::state::kPaused) notify("Cloud link paused: the AI assistant cannot reach this desktop");
     else if (!last_state_.empty() && !quit_requested_) notify("Cloud link stopped");
     last_state_ = state;
 }

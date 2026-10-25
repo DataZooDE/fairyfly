@@ -1,3 +1,4 @@
+#include "include/link/link_state_names.h"
 #include "include/link/link_runner.h"
 
 #include <algorithm>
@@ -393,7 +394,7 @@ Result link_status(const LinkOptions& o) {
                   {"paused", is_paused(state_path(o))}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
         // the audit trail this desktop runs under, as the running link last wrote it
         const json status = read_status(state_path(o));
-        const bool running = r.data["link"] != "not running";
+        const bool running = r.data["link"] != state::kNotRunning;
         r.data["audit_trail"] = running && status.contains("trail") ? trail::status_text(status["trail"]) : std::string("off");
         return r;
     } catch (const std::exception&) {
@@ -451,7 +452,7 @@ public:
         }
         const json status = read_status(path_);
         v.state = describe(status, ffy::now_unix());
-        if (v.state != "not running" && status.contains("trail")) {
+        if (v.state != state::kNotRunning && status.contains("trail")) {
             const auto p = ffy::proto::TrailPolicy::from_json(status["trail"]);
             v.trail_on = p.on;
             v.trail_mode = p.mode;
@@ -614,8 +615,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     supervision.status_extra = [recorder] { return json{{"trail", recorder->current_policy().to_json()}}; };
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {
-            if (state == "paused") printer->paused();
-            else if (last == "paused") printer->resumed();
+            if (state == link::state::kPaused) printer->paused();
+            else if (last == link::state::kPaused) printer->resumed();
         }
         last = state;
     };
@@ -668,7 +669,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         net_thread.join();
     } else {
         net_thread.detach();  // owns `net`; the process ends without it
-        write_status(sp, "stopped");
+        write_status(sp, state::kStopped);
     }
     printer->stopped();
     return rc;
