@@ -8,11 +8,17 @@
 #include "audit_log.h"
 #include "fill_fields.h"
 #include "screen_snapshot.h"
+#include "login_flow.h"
 #include <string>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
+
+namespace fairyfly::sap {
+class ComGuiSession;
+using ComGuiSessionPtr = std::shared_ptr<ComGuiSession>;
+}
 
 namespace fairyfly {
 namespace cli {
@@ -101,6 +107,15 @@ private:
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
+    // the parts of handle_login (cli_handler.cpp)
+    bool owner_login_permitted(const Connection& selected, const LoginCredentials& credentials);
+    Result refuse_owner_login(Result result, bool password_typed);
+    std::optional<Result> answer_multiple_logon_dialog(const sap::ComGuiSessionPtr& session, const Connection& selected,
+                                                       const LoginCredentials& credentials,
+                                                       const std::string& multiple_logon, Result& result, json& info);
+    bool confirm_owner_logon(Result& result, const Connection& selected, const LoginCredentials& credentials);
+    /// connection_changed_hook_ for a saved connection; a failing hook is logged, never thrown.
+    void notify_connection_changed(int connection_id);
     // the parts of handle_click (cli_handler.cpp)
     Result click_tree_node(const ElementId& elem, const std::string& element_id, const std::string& node_key,
                            const std::string& tree_action, const std::string& menu_item, int connection_id);

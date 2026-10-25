@@ -56,16 +56,6 @@ namespace sap {
 
 using utils::TraceGuard;
 
-static ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session,
-                                                const std::string& path) {
-    try {
-        return session->find_element_by_id(path);
-    } catch (const ComException& error) {
-        if (!is_missing_element_error(error.what())) throw;
-        return nullptr;
-    }
-}
-
 /// State of a tab page for the inactive-tab check: whether it exists, its caption and whether it is the strip's
 /// SelectedTab. Any COM failure reads as "unknown" (not found), so the check never turns into a new error.
 static TabPageLookup make_tab_lookup(const ComGuiSessionPtr& session) {
