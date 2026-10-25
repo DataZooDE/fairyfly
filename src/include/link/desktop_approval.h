@@ -67,8 +67,9 @@ struct Desk {
 };
 
 struct Options {
-    /// How long a question waits for an answer, also in the queue. The gateway gives a call 125 s.
-    std::chrono::milliseconds answer_within{std::chrono::seconds(90)};
+    /// How long a question waits for an answer, also in the queue, at most: the prompt's answer_s (45 s, so the
+    /// answer reaches the assistant before its MCP client gives up) applies when it is shorter.
+    std::chrono::milliseconds answer_within{std::chrono::seconds(45)};
     /// How often a waiting question checks for expiry and a locked screen.
     std::chrono::milliseconds poll{std::chrono::milliseconds(250)};
     /// "Don't ask again" in the window: further changes of the same assistant for the same account are approved
@@ -129,8 +130,10 @@ private:
     std::map<std::string, std::chrono::steady_clock::time_point> remembered_;
 };
 
-/// libffl's Approver over a Broker: approve_change asks the broker; approve(text) (an agent without the structured
-/// question) asks it with the text as the only step.
+/// libffl's Approver over a Broker: decide asks the broker and returns its Decision with the reason the gateway
+/// audits (approved | remembered | denied | expired | locked; expired_in_queue is reported as expired);
+/// approve_change is its yes/no; approve(text) (an agent without the structured question) asks it with the text as
+/// the only step.
 std::shared_ptr<ffy::link::Approver> make_approver(std::shared_ptr<Broker> broker);
 
 }  // namespace fairyfly::link::approval

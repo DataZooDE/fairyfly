@@ -37,7 +37,7 @@ Example: fairyfly link status
 Connects to the gateway (outbound WebSocket) and serves the AI assistant's tool calls through
 fairyfly's own MCP dispatcher. Read-only unless --allow-write; even then every change needs the
 gateway's grant and an approval at this desktop (a notification: Approve, Deny or Details; no
-answer in 90 s, a locked screen or no interactive session deny it). Calls are audited with
+answer in 45 s, a locked screen or no interactive session deny it). Calls are audited with
 audit_source "link". Stop with Ctrl+C.
 --tray runs the link alone in the system tray (Pause/Resume, Allow changes in SAP, Health check,
 Quit); it needs no

@@ -605,10 +605,10 @@ std::vector<ToolSpec> read_tool_specs() {
     specs.push_back(make_spec(
         "gui_popup_close", "Close the active SAP popup",
         "Closes the active modal popup by sending a VKey to it (default 12 = F12/Cancel). Use vkey 0 (Enter) only "
-        "when you intend to confirm the dialog.",
+        "when you intend to confirm the dialog. Annotated destructive: confirming a dialog can change SAP data.",
         make_schema({{"vkey", integer("SAP VKey to send to the popup (default 12 = Cancel).", 0, 99)},
                      {"connection", conn}}),
-        annotations("Close the active SAP popup", false, false, false), ToolOutput::Json,
+        annotations("Close the active SAP popup", false, true, false), ToolOutput::Json,
         [](const json& a, const Policy& p) {
             Argv argv{"popup", "close"};
             if (a.contains("vkey")) { argv.push_back("--vkey"); argv.push_back(std::to_string(a["vkey"].get<int>())); }
