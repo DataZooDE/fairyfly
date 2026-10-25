@@ -51,6 +51,11 @@ bool owner_bound_session_matches(const Connection& saved, const audit::SapFacts&
         std::all_of(handle.begin(), handle.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
 }
 
+std::string CommandHandler::expand_active(const std::string& path) const {
+    if (path.rfind("@active", 0) != 0) return path;  // asks SAP for the active window only when needed
+    return sap::expand_active_window_prefix(path, engine_->get_active_window_id().id);
+}
+
 void CommandHandler::describe_element(const std::string& element_id, std::string& type,
                                        std::string& text, std::string& tooltip)
 {
@@ -59,9 +64,7 @@ void CommandHandler::describe_element(const std::string& element_id, std::string
     try {
         auto session = com_engine->unchecked_session();
         if (!session) return;
-        std::string full_path = element_id;
-        if (full_path.rfind("@active", 0) == 0)
-            full_path = engine_->get_active_window_id().id + full_path.substr(7);
+        const std::string full_path = expand_active(element_id);
         auto element = session->find_element_by_id(full_path);
         if (!element) return;
         try { type = element->get_type(); } catch (const std::exception&) {}
@@ -94,9 +97,7 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
             auto* com_engine = engine_->scripting();
             auto session = com_engine ? com_engine->unchecked_session() : nullptr;
             if (session) {
-                std::string toolbar_path = element_id.substr(0, btn_pos);
-                if (toolbar_path.rfind("@active", 0) == 0)
-                    toolbar_path = engine_->get_active_window_id().id + toolbar_path.substr(7);
+                const std::string toolbar_path = expand_active(element_id.substr(0, btn_pos));
                 auto shell = session->find_element_by_id(toolbar_path);
                 if (shell) {
                     rule = sap::read_only_toolbar_button_rule(*shell, element_id.substr(btn_pos + 5),
@@ -113,12 +114,10 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
         describe_element(element_id, type, text, tooltip);
     }
     std::string judged_id = element_id;
-    if (judged_id.rfind("@active", 0) == 0) {
-        try {
-            judged_id = sap::expand_active_window_prefix(judged_id, engine_->get_active_window_id().id);
-        } catch (const std::exception& e) {
-            spdlog::debug("Read-only guard could not resolve the active window for {}: {}", element_id, e.what());
-        }
+    try {
+        judged_id = expand_active(element_id);
+    } catch (const std::exception& e) {
+        spdlog::debug("Read-only guard could not resolve the active window for {}: {}", element_id, e.what());
     }
     rule = sap::matched_read_only_rule(type, text, tooltip, judged_id);
     if (rule.empty()) return std::nullopt;
@@ -1001,9 +1000,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         try {
             if (auto* com_engine = engine_->scripting()) {
                 if (auto session = com_engine->unchecked_session()) {
-                    std::string full_path = elem.path;
-                    if (full_path.rfind("@active", 0) == 0)
-                        full_path = engine_->get_active_window_id().id + full_path.substr(7);
+                    const std::string full_path = expand_active(elem.path);
                     if (auto target = session->find_element_by_id(full_path))
                         target_text = node_key.empty() ? target->get_cell_value(*row, column)
                                                        : target->get_node_text_by_key(node_key);
@@ -1072,13 +1069,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                 return result;
             }
 
-            // Resolve element path to full path
-            std::string full_path = elem.path;
-            if (elem.path.rfind("@active", 0) == 0) {  // Starts with "@active"
-                WindowId active_window = engine_->get_active_window_id();
-                // Replace @active with actual window ID
-                full_path = active_window.id + elem.path.substr(7);  // Skip "@active"
-            }
+            const std::string full_path = expand_active(elem.path);
 
             // Find element by ID
             auto tree_elem = session->find_element_by_id(full_path);
@@ -1461,13 +1452,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
                 return Result::fail("NO_SESSION", "No active session");
             }
 
-            // Resolve element path to full path
-            std::string full_path = elem.path;
-            if (elem.path.rfind("@active", 0) == 0) {  // Starts with "@active"
-                WindowId active_window = engine_->get_active_window_id();
-                // Replace @active with actual window ID
-                full_path = active_window.id + elem.path.substr(7);  // Skip "@active"
-            }
+            const std::string full_path = expand_active(elem.path);
 
             // Find element by ID
             auto tree_elem = session->find_element_by_id(full_path);

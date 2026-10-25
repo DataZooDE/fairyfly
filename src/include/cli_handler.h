@@ -100,6 +100,8 @@ private:
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
+    /// `@active...` with the active window's id in front; any other path unchanged.
+    std::string expand_active(const std::string& path) const;
     void describe_element(const std::string& element_id, std::string& type, std::string& text, std::string& tooltip);
 
     /// In read-only mode: READ_ONLY_REFUSED result when the element's action changes SAP state.
