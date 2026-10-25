@@ -250,7 +250,7 @@ Get-Content $env:LOCALAPPDATA\fairyfly\audit\2026-10.jsonl | ConvertFrom-Json |
 
 Switches (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_PROBE_ALL`, `FAIRYFLY_DIAG`) are on for `1`, `true`, `yes` or `on` in any
 case, ignoring surrounding spaces; `FAIRYFLY_AUDIT` and `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no`
-or `off`. The CLI, the MCP server, its session workers and `mcp setup`/`mcp config` read them the same way.
+or `off`. Every part of fairyfly (CLI, MCP server, session workers, setup, cloud link) reads them the same way.
 
 | Variable | Effect |
 |---|---|

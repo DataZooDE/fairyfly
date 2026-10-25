@@ -11,7 +11,8 @@
 - `FAIRYFLY_DIAG` and `FAIRYFLY_PROBE_ALL` follow the same rule (they took only `1`). `FAIRYFLY_AUDIT` and
   `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no` or `off` in any case (`OFF` or `no` left the tray's
   update check on). `mcp.yaml` booleans use the same spellings.
-- The cloud link's tray still reads `FAIRYFLY_READ_ONLY` on its own until approval model v2 moves it over.
+- The cloud link and its tray read them the same way too (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_LINK_GATEWAY`,
+  `FAIRYFLY_LINK_FORBID_DEFAULT_STATE`).
 
 ## 2026.10.25.1 (2026-10-25)
 

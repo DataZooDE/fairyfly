@@ -59,12 +59,6 @@ std::atomic<bool> g_pair_stop{false};
 void on_pair_signal(int) { g_pair_stop = true; }
 std::atomic<int> g_background{0};  // see background_threads()
 
-bool env_read_only() {
-    std::string v = config::process_env()("FAIRYFLY_READ_ONLY");
-    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return char(std::tolower(c)); });  // as run_mcp reads it
-    return v == "1" || v == "true" || v == "yes" || v == "on";
-}
-
 /// "Allow changes in SAP" (approval model v2): the standing approval at this desktop, saved for the user in the tray
 /// settings (HKCU), shared by the link tray's switch and the approval window's "Don't ask again".
 std::shared_ptr<approval::Standing> standing() {
@@ -84,7 +78,7 @@ class StandingSwitch : public tray::LinkWriteMode {
 public:
     explicit StandingSwitch(bool read_only) : read_only_(read_only) {}
     bool allowed() override { return standing()->saved(); }
-    bool locked() override { return read_only_ || env_read_only(); }
+    bool locked() override { return read_only_ || config::read_only_cap(); }
     bool enforced() override { return standing()->enforced(); }
     bool set_allowed(bool allowed) override {
         if (allowed && locked()) return false;
@@ -172,8 +166,7 @@ std::string state_path(const LinkOptions& o) { return o.state_path.empty() ? def
 /// FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1 (tests, tests/integration/link_trail_live.ps1): refuse the pairing state the
 /// person at this desktop relies on, so a test copy can never pause, unpair or overwrite it.
 bool guard_on() {
-    const std::string v = ffy::env_or("FAIRYFLY_LINK_FORBID_DEFAULT_STATE");
-    return v == "1" || v == "true" || v == "yes" || v == "on";
+    return config::Environment::process().flag(config::env::kLinkForbidDefaultState);
 }
 
 /// The pairing directories to protect: from LOCALAPPDATA (what default_state_path uses) and, on Windows, from the
@@ -207,8 +200,10 @@ std::optional<Result> state_guard_for(const std::string& path) {
 std::optional<Result> state_guard(const LinkOptions& o) { return state_guard_for(state_path(o)); }
 
 std::string host_name() {
-    std::string h = ffy::env_or("COMPUTERNAME");
-    return h.empty() ? ffy::env_or("HOSTNAME", "unknown") : h;
+    const auto& env = config::Environment::process();
+    std::string h = env.get(config::env::kComputerName);
+    if (h.empty()) h = env.get(config::env::kHostName);
+    return h.empty() ? "unknown" : h;
 }
 
 json tools_json(const mcp::ToolProvider& provider) {
@@ -296,10 +291,14 @@ std::optional<Result> claim_link_run(const std::string& path, std::unique_ptr<tr
 
 std::string default_state_path() {
 #ifdef _WIN32
-    std::string base = ffy::env_or("LOCALAPPDATA", ".");
+    std::string base = config::Environment::process().get(config::env::kLocalAppData);
+    if (base.empty()) base = ".";
 #else
-    std::string base = ffy::env_or("XDG_CONFIG_HOME");
-    if (base.empty()) base = ffy::env_or("HOME", ".") + "/.config";
+    std::string base = config::Environment::process().get(config::env::kXdgConfigHome);
+    if (base.empty()) {
+        const std::string home = config::Environment::process().get(config::env::kHome);
+        base = (home.empty() ? std::string(".") : home) + "/.config";
+    }
 #endif
     return (std::filesystem::path(base) / "fairyfly" / "link" / "state.json").string();
 }
@@ -320,7 +319,7 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     if (auto refused = state_guard(options)) return *refused;
     out << "state: " << state_path(options) << std::endl;
     LinkOptions o = options;
-    const PairGateway gateway = pair_gateway(o.gateway, ffy::env_or("FAIRYFLY_LINK_GATEWAY"));
+    const PairGateway gateway = pair_gateway(o.gateway, config::Environment::process().get(config::env::kLinkGateway));
     o.gateway = gateway.address;
     if (gateway.ask) {  // e.g. from the tray's "Pair with the fairyfly cloud": https://fairyfly.io, Enter accepts it
         if (stop) return cancelled();
@@ -551,7 +550,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     cfg.approve_window_s = 0;
     approval::Desk desk;
     desk.standing = standing();
-    desk.can_change = [read_only = o.read_only] { return !read_only && !env_read_only(); };
+    desk.can_change = [read_only = o.read_only] { return !read_only && !config::read_only_cap(); };
     desk.sap = [weak = std::weak_ptr<MainThreadTools>(tools), peek] {
                                            // the SAP session the change would run in, read on the main (COM) thread
                                            auto out = std::make_shared<approval::SapContext>();
@@ -630,7 +629,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     so.transport = "link";
     // changes are possible: each needs the organisation's grant (per call) and the approval at this desktop; only
     // --read-only / FAIRYFLY_READ_ONLY make fairyfly refuse them here
-    so.allow_write = !o.read_only && !env_read_only();
+    so.allow_write = !o.read_only && !config::read_only_cap();
     so.read_only = o.read_only;
     so.families = o.families;
     mcp::HttpRunHooks hooks;
