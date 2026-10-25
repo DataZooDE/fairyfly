@@ -331,7 +331,7 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
         spdlog::warn("{}", format_issue(issue));
     }
     const McpConfig flags = flags_layer(*x.mcp_app);
-    const McpConfig layers = merged_layers(loaded.parsed.config, flags, env);
+    const McpConfig layers = given(resolve_layers(loaded.parsed.config, env_config, flags));  // the env layer read once
     apply_config(layers, options);
     options.audit_file = audit_settings(loaded.parsed.config, env_config, flags);  // audit.required from any layer
     if (!x.tray && layers.get_bool("tray.enabled") != true && !x.install_autostart && !x.remove_autostart) return std::nullopt;

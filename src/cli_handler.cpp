@@ -287,7 +287,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             const std::string identity = sap_identity(facts);
             const bool allowed = !facts.system.empty() && !facts.client.empty() && !facts.user.empty() &&
                 (!session_id || *session_id == attached_session_id) &&
-                std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) != attach_owner_identities_.end();
+                identity_listed(attach_owner_identities_, identity);
             if (!allowed) return owner_attach_unavailable();
         }
 
@@ -312,7 +312,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
                 ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
             const std::string identity = sap_identity(checked_facts);
             if (checked_facts.system.empty() || checked_facts.client.empty() || checked_facts.user.empty() ||
-                std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) == attach_owner_identities_.end())
+                !identity_listed(attach_owner_identities_, identity))
                 return owner_attach_unavailable();
             bool token_allowed = false;
             try { token_allowed = attach_target_guard_ && attach_target_guard_(checked_facts, description); }
