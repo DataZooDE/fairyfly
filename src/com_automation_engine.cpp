@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/element_errors.h"
 #include "include/object_tree_diag.h"
@@ -1328,7 +1329,7 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         }
         const std::string type = grid->get_type();
         if (type != "GuiGridView" &&
-            (type != "GuiShell" || grid->get_string_property(L"SubType") != "GridView")) {
+            (type != "GuiShell" || !is_grid_shell(grid->get_string_property(L"SubType")))) {
             result.set_error("WRONG_ELEMENT_TYPE", "Element is not a GridView");
             return result;
         }

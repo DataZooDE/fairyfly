@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include/shell_kind.h"
 #include "bulk_screen_reader.h"
 #include "core.h"
 #include "com/wrapper.h"
@@ -13,21 +14,11 @@
 #include <tuple>
 #include <vector>
 #include <string>
+#include "include/shell_kind.h"
 
 namespace fairyfly {
 namespace sap {
 
-enum class ShellExtractionKind { Grid, Tree, Metadata };
-
-inline ShellExtractionKind classify_shell_extraction(const std::string& subtype) {
-    if (subtype == "GridView") return ShellExtractionKind::Grid;
-    if (subtype == "Tree" || subtype == "TableTreeControl")
-        return ShellExtractionKind::Tree;
-    // Everything else (Toolbar, HTMLViewer, AbapEditor, TextEdit, Calendar,
-    // unknown or empty SubType) goes through the metadata probe so its
-    // content is not silently dropped (ERR-137).
-    return ShellExtractionKind::Metadata;
-}
 
 /// Whether `screen find` can report a simple text value for this element type.
 inline bool find_type_has_simple_text(const std::string& type) {

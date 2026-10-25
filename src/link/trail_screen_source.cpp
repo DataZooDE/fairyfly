@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/link/trail_screen_source.h"
 
 #include <exception>
@@ -62,7 +63,7 @@ bool control_host(const std::string& type) {
 /// without any column does not exist.
 void read_columns(Field& f, const ComGuiElementPtr& e, const std::string& subtype) {
     if (f.type != "GuiShell" || !e) return;
-    if (subtype == "GridView") {
+    if (sap::is_grid_shell(subtype)) {
         try {
             f.columns = e->get_column_order();
         } catch (const std::exception&) {
@@ -197,7 +198,7 @@ private:
                 try {
                     read_columns(f, session->find_element_by_id(n->id), n->prop("SubType"));
                 } catch (const std::exception&) {
-                    if (n->prop("SubType") == "GridView") f.opaque = true;
+                    if (sap::is_grid_shell(n->prop("SubType"))) f.opaque = true;
                 }
             }
             s.fields.push_back(std::move(f));

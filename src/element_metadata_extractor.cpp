@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/element_metadata_extractor.h"
 #include "include/sensitive_data.h"
 #include "include/constants.h"
@@ -69,7 +70,7 @@ void ElementMetadataExtractor::extract_table_or_tree(const ComGuiElementPtr& ele
 
     // Check if GuiShell has SubType=GridView
     std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
-    bool is_gridview = (type == "GuiGridView" || probe_grid || (type == "GuiShell" && subtype == "GridView"));
+    bool is_gridview = (type == "GuiGridView" || probe_grid || (type == "GuiShell" && is_grid_shell(subtype)));
 
     if (is_gridview || type == "GuiTableControl" || is_tree_control) {
         spdlog::debug("extract: Element {} is gridview={} table={} tree={}", elem_id, is_gridview, type == "GuiTableControl", is_tree_control);
@@ -441,10 +442,7 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
         bool probe_grid = false;
         if (type == "GuiShell") {
             const std::string shell_subtype = metadata.value("subtype", "");
-            const bool known = shell_subtype == "GridView" || shell_subtype == "Tree" ||
-                               shell_subtype == "TableTreeControl" || shell_subtype == "Toolbar" ||
-                               shell_subtype == "HTMLViewer" || shell_subtype == "AbapEditor" ||
-                               shell_subtype == "TextEdit";
+            const bool known = has_dedicated_shell_reader(shell_subtype);
             if (!known) {
                 try {
                     probe_grid = elem->get_property_int(L"RowCount") > 0 &&

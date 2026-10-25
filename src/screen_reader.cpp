@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/object_tree.h"
 #include "include/string_utils.h"
 #include "include/config/environment.h"
@@ -189,7 +190,7 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
             std::string subtype = elem.value("subtype", "");
             if (subtype == "Toolbar") {
                 grouped["toolbar"].push_back(elem);
-            } else if (subtype == "GridView" ||
+            } else if (is_grid_shell(subtype) ||
                        (elem.contains("table_data") && !elem["table_data"].is_null())) {
                 grouped["tables"].push_back(elem);
             } else {
@@ -230,7 +231,7 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
             grouped["form_fields"].push_back(elem);
         } else if (container == "table" || container == "grid" ||
                    type == "GuiTableControl" || type == "GuiGridView" ||
-                   (type == "GuiShell" && elem.value("subtype", "") == "GridView") ||
+                   (type == "GuiShell" && is_grid_shell(elem.value("subtype", ""))) ||
                    (elem.contains("table_data") && !elem["table_data"].is_null())) {
             grouped["tables"].push_back(elem);
         } else if (container == "tabs" || type == "GuiTabStrip" || type == "GuiTab") {

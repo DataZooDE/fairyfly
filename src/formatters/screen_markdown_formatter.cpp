@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
@@ -637,7 +638,7 @@ void render_tables(std::ostringstream& oss, [[maybe_unused]] const json& data, [
 
             // Use TableFormatter for GuiGridView, GuiTableControl, or GuiShell with GridView subtype
             if (table_formatter.can_format(type) ||
-                (type == "GuiShell" && subtype == "GridView") ||
+                (type == "GuiShell" && sap::is_grid_shell(subtype)) ||
                 elem.contains("table_data")) {
                 // Use new formatter with table_data support
                 table_formatter.format_to_markdown(elem, oss);
@@ -721,7 +722,7 @@ void render_other(std::ostringstream& oss, [[maybe_unused]] const json& data, [[
             // Check if this element is truly semantic (has meaningful content)
             bool is_truly_semantic = (subtype == "TextEdit" || subtype == "HTMLViewer") ||
                                     (subtype == "Tree" || elem.contains("tree_data")) ||
-                                    (subtype == "GridView" || elem.contains("table_data")) ||
+                                    (sap::is_grid_shell(subtype) || elem.contains("table_data")) ||
                                     (type == "GuiShell" && (elem.value("content_available", false) ||
                                                             (!subtype.empty() && subtype != "N/A")));
 

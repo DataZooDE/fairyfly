@@ -1,5 +1,6 @@
 // Window-level and grid/menu actions for ComAutomationEngine: doubleclick_grid_cell,
 // send_key, close_popup, read_menu and select_menu.
+#include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
 #include "include/constants.h"
@@ -14,12 +15,6 @@ namespace fairyfly {
 namespace sap {
 
 namespace {
-
-using Clock = std::chrono::high_resolution_clock;
-
-std::chrono::milliseconds elapsed_since(Clock::time_point start) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
-}
 
 /// Single switch point for status-bar handling of the actions in this file.
 /// Replace the body with the shared attach_status_bar helper once it exists.
@@ -42,7 +37,7 @@ Result exception_result(const std::exception& e, bool com) {
 
 Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int row,
                                                   const std::string& column) {
-    const auto start = Clock::now();
+    const Stopwatch timer;
     try {
         ElementId resolved = resolve_element_path(element);
         auto session = ensure_session();
@@ -54,7 +49,7 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
         }
         const std::string type = grid->get_type();
         if (type != "GuiGridView" &&
-            (type != "GuiShell" || grid->get_string_property(L"SubType") != "GridView")) {
+            (type != "GuiShell" || !is_grid_shell(grid->get_string_property(L"SubType")))) {
             return Result::fail("WRONG_ELEMENT_TYPE", "Element is not a GridView");
         }
 
@@ -65,7 +60,7 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
 
         Result result;
         if (apply_status_outcome(result, before_status, after_status, resolved.path, true)) {
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
         result.status = Result::Status::Success;
@@ -73,7 +68,7 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
         result.data["element"] = resolved.path;
         result.data["row"] = row;
         result.data["column"] = column;
-        result.duration = elapsed_since(start);
+        result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {
         return exception_result(e, true);
@@ -83,7 +78,7 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
 }
 
 Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
-    const auto start = Clock::now();
+    const Stopwatch timer;
     try {
         auto session = ensure_session();
         ComGuiWindowPtr target;
@@ -115,7 +110,7 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
         // Enter, Execute (F8) and Save (Ctrl+S = 11) submit; other keys navigate.
         const bool submitting = vkey == 0 || vkey == 8 || vkey == 11;
         if (apply_status_outcome(result, before_status, after_status, window_before, submitting)) {
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
         result.status = Result::Status::Success;
@@ -123,7 +118,7 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
         result.data["vkey"] = vkey;
         result.data["window"] = window_before;
         result.data["window_after"] = window_after;
-        result.duration = elapsed_since(start);
+        result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {
         return exception_result(e, true);
@@ -133,7 +128,7 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
 }
 
 Result ComAutomationEngine::close_popup(int vkey) {
-    const auto start = Clock::now();
+    const Stopwatch timer;
     try {
         auto session = ensure_session();
         auto window = session->get_active_window();
@@ -160,7 +155,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
             result.error["vkey"] = vkey;
             result.error["original_error"] = close_attempt.original_error;
             if (!close_attempt.close_error.empty()) result.error["close_error"] = close_attempt.close_error;
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
         try { session->wait_for_completion(500); } catch (const ComException&) { /* poll below */ }
@@ -190,14 +185,14 @@ Result ComAutomationEngine::close_popup(int vkey) {
                     : "The popup did not close after sending VKey " + std::to_string(vkey));
             result.error["window"] = window_before;
             result.error["vkey"] = vkey;
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
 
         Result result;
         const auto after_status = read_action_status(session, window_after);
         if (apply_status_outcome(result, before_status, after_status, window_before, false)) {
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
         result.status = Result::Status::Success;
@@ -207,7 +202,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
         result.data["window_before"] = window_before;
         result.data["window_after"] = window_after;
         result.data["closed"] = true;
-        result.duration = elapsed_since(start);
+        result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {
         return exception_result(e, true);
@@ -217,7 +212,7 @@ Result ComAutomationEngine::close_popup(int vkey) {
 }
 
 Result ComAutomationEngine::read_menu(const std::string& window) {
-    const auto start = Clock::now();
+    const Stopwatch timer;
     try {
         ElementId resolved = resolve_element_path(ElementId((window.empty() ? "wnd[0]" : window) + "/mbar"));
         auto session = ensure_session();
@@ -232,7 +227,7 @@ Result ComAutomationEngine::read_menu(const std::string& window) {
         result.data["action"] = "read_menu";
         result.data["element"] = resolved.path;
         result.data["menu"] = read_menu_tree(menubar);
-        result.duration = elapsed_since(start);
+        result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {
         return exception_result(e, true);
@@ -243,7 +238,7 @@ Result ComAutomationEngine::read_menu(const std::string& window) {
 
 Result ComAutomationEngine::select_menu(const std::string& menu_path, const std::string& window,
                                         bool read_only) {
-    const auto start = Clock::now();
+    const Stopwatch timer;
     try {
         const auto segments = split_menu_path(menu_path);
         if (segments.empty()) return Result::fail("INVALID_MENU_PATH", "Menu path is empty");
@@ -284,7 +279,7 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
 
         Result result;
         if (apply_status_outcome(result, before_status, after_status, item_id, true)) {
-            result.duration = elapsed_since(start);
+            result.duration = timer.elapsed();
             return result;
         }
         result.status = Result::Status::Success;
@@ -292,7 +287,7 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
         result.data["menu_path"] = menu_path;
         result.data["element"] = item_id;
         result.data["window_after"] = get_active_window_id().id;
-        result.duration = elapsed_since(start);
+        result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {
         return exception_result(e, true);
