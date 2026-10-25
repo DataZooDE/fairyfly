@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "include/mcp/call_executor.h"
+#include "include/mcp/json_rpc.h"
 #include "include/mcp/session_executor_pool.h"
 #include "include/mcp/principal.h"
 #include "include/mcp/types.h"
@@ -140,6 +141,12 @@ private:
     /// Authenticates `auth` again past the cache (a token can be revoked or changed while a call waits); exceptions
     /// become AUTH_UNAVAILABLE. Not ok without an authenticator.
     AuthOutcome reauthenticate(const AuthRequest& auth);
+    /// How a request speaks MCP (protocol_refusal).
+    struct RequestProtocol {
+        bool modern = false;   ///< 2026-07-28 stateless (by _meta, server/discover or the header)
+        std::string version;   ///< the body's _meta version, else the header's
+    };
+    std::optional<HttpResponse> protocol_refusal(const HttpRequest& request, const Message& message, RequestProtocol& out) const;
     HttpResponse dispatch(const HttpRequest& request, const Principal& principal);
     HttpResponse finish(const HttpRequest& request, HttpResponse response) const;
     bool host_allowed(const std::string& host_header) const;

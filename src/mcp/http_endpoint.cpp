@@ -492,20 +492,11 @@ HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
     return handle_authenticated(request, pre.principal);
 }
 
-HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
-    json parse_error;
-    Message message = parse_message(request.body, parse_error);
-    switch (message.kind) {
-    case Message::Kind::Invalid:
-        return json_response(400, parse_error.is_null() ? make_error(nullptr, kInvalidRequest, "Invalid request")
-                                                        : parse_error);
-    case Message::Kind::Response:
-    case Message::Kind::Notification:
-        return empty_response(202);
-    case Message::Kind::Request:
-        break;
-    }
-
+/// The request's protocol before anything else: _meta spellings that disagree, the era (2026-07-28 stateless or
+/// legacy), MCP-Protocol-Version against the body, an unsupported version, and the Mcp-Method / Mcp-Name headers.
+/// The answer for a refused request, or nullopt with `out` filled.
+std::optional<HttpResponse> HttpEndpoint::protocol_refusal(const HttpRequest& request, const Message& message,
+                                                           RequestProtocol& out) const {
     const std::string& method = message.method;
     const json& params = message.params;
 
@@ -582,6 +573,33 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     } else {
         if (auto refused = check_method_name_headers(false)) return std::move(*refused);
     }
+
+    out.modern = modern;
+    out.version = version;
+    return std::nullopt;
+}
+
+HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
+    json parse_error;
+    Message message = parse_message(request.body, parse_error);
+    switch (message.kind) {
+    case Message::Kind::Invalid:
+        return json_response(400, parse_error.is_null() ? make_error(nullptr, kInvalidRequest, "Invalid request")
+                                                        : parse_error);
+    case Message::Kind::Response:
+    case Message::Kind::Notification:
+        return empty_response(202);
+    case Message::Kind::Request:
+        break;
+    }
+
+    const std::string& method = message.method;
+    const json& params = message.params;
+
+    RequestProtocol protocol;
+    if (auto refused = protocol_refusal(request, message, protocol)) return std::move(*refused);
+    const bool modern = protocol.modern;
+    const std::string& version = protocol.version;
 
     // ---- protocol era ------------------------------------------------------------------------------
     ProtocolEra era = ProtocolEra::Legacy;
