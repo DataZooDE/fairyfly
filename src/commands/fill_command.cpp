@@ -48,13 +48,10 @@ Examples:
         if (fields_option_->count() > 0) return execute_fields(handler);
         if (!then_key_.empty() || keep_going_) return invalid("--then-key and --keep-going need --fields");
         if (element_option_->count() == 0) return invalid("an element id (or --fields) is required");
-        // the rules of every fill (sap::parse_fill_field), before a connection is resolved
-        nlohmann::json field = {{"element", element_}, {"clear", clear_}, {"checkbox", checkbox_}, {"commit", commit_}};
-        if (value_option_->count() > 0) field["value"] = value_;
-        if (row_) field["row"] = *row_;
-        if (!column_.empty()) field["column"] = column_;
-        std::string why;
-        if (!sap::parse_fill_field(field, why)) return invalid(why);
+        // value or --clear here; the grid options are checked by the handler after the read-only refusal and the
+        // connection (GRID_CELL_OPTIONS_REQUIRED), as callers of the CLI rely on
+        if (clear_ == (value_option_->count() > 0))
+            return invalid(clear_ ? "Use either a value or --clear" : "A value or --clear is required");
         return handler.handle_fill(element_, value_, conn_id_, row_, column_, checkbox_, commit_, allow_fill_);
     }
 

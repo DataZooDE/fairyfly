@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <optional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -21,10 +22,13 @@ struct FillField {
 };
 
 constexpr std::size_t kMaxFillFields = 50;
+constexpr long long kMaxFillListRow = 1000000;   ///< the highest row of a fields list entry
 
 /// One field object (element | id | element_id, value | clear, row + column, checkbox, commit): the rules every fill
 /// follows, from the CLI, MCP or a fields list. nullopt with `why` when it breaks one.
-std::optional<FillField> parse_fill_field(const nlohmann::json& field, std::string& why);
+/// `max_row`: a fields list caps rows at kMaxFillListRow; a single fill takes any row an int holds.
+std::optional<FillField> parse_fill_field(const nlohmann::json& field, std::string& why,
+                                          long long max_row = std::numeric_limits<int>::max());
 
 /// Parses and validates a fields array (1..kMaxFillFields objects of element, value | clear, row + column, checkbox,
 /// commit; `id` / `element_id` are aliases of `element`). On error returns nullopt and sets `why`.
