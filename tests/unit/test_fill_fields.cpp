@@ -142,3 +142,26 @@ TEST_CASE("fill fields: every entry meets the token rules", "[fill][fields][auth
     const auto ro = decide(tcode_token(true, false), {{"fields", {{{"element", "wnd[0]/usr/ctxtA"}, {"value", "1"}}}}});
     CHECK_FALSE(ro.allowed);
 }
+
+TEST_CASE("fill: one field is validated by one rule set for the CLI, MCP and the fields list", "[fill]") {
+    // review 2026-10-25: tool_catalog_write, fill_command and parse_fill_fields each checked value/clear/grid by hand
+    std::string why;
+    const auto ok = sap::parse_fill_field(json{{"element", "wnd[0]/usr/txtA"}, {"value", "v"}}, why);
+    REQUIRE(ok);
+    CHECK(ok->element == "wnd[0]/usr/txtA");
+    CHECK(ok->value == "v");
+    const auto cell = sap::parse_fill_field(json{{"element", "g"}, {"value", "X"}, {"row", 2}, {"column", "C"}, {"checkbox", true}}, why);
+    REQUIRE(cell);
+    CHECK(cell->row == 2);
+    CHECK(cell->checkbox);
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}, {"value", "v"}, {"checkbox", true}}, why));
+    CHECK(why == "GridView cells need both 'row' and 'column' (also required with 'checkbox' or 'commit')");
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}}, why));
+    CHECK(why == "provide 'value' or set 'clear' to true");
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}, {"value", "maybe"}, {"row", 1}, {"column", "C"}, {"checkbox", true}}, why));
+    CHECK(why == "with 'checkbox', 'value' must be X, 1, true (checked) or 0, false (unchecked)");
+    // the list keeps naming the field
+    std::string list_why;
+    CHECK_FALSE(sap::parse_fill_fields(json::array({json{{"element", "e"}}}), list_why));
+    CHECK(list_why == "fields[0]: provide 'value' or set 'clear' to true");
+}

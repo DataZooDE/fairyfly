@@ -22,6 +22,10 @@ struct FillField {
 
 constexpr std::size_t kMaxFillFields = 50;
 
+/// One field object (element | id | element_id, value | clear, row + column, checkbox, commit): the rules every fill
+/// follows, from the CLI, MCP or a fields list. nullopt with `why` when it breaks one.
+std::optional<FillField> parse_fill_field(const nlohmann::json& field, std::string& why);
+
 /// Parses and validates a fields array (1..kMaxFillFields objects of element, value | clear, row + column, checkbox,
 /// commit; `id` / `element_id` are aliases of `element`). On error returns nullopt and sets `why`.
 std::optional<std::vector<FillField>> parse_fill_fields(const nlohmann::json& fields, std::string& why);
