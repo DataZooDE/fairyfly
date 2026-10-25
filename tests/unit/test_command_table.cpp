@@ -286,6 +286,31 @@ TEST_CASE("run_mcp rejects an unknown family with exit code 99", "[command_table
     CHECK_FALSE(handler_requested);
 }
 
+TEST_CASE("run_mcp: mcp.yaml's audit.required reaches the audit sink and refuses to start when it cannot write", "[command_table][mcp][audit]") {
+    // review 2026-10-25: the sink was reconfigured before mcp.yaml was applied, so audit.required did nothing
+    namespace fs = std::filesystem;
+    const fs::path blocker = fs::temp_directory_path() / "fairyfly_audit_blocker.txt";
+    { std::ofstream(blocker) << "a file, not a directory"; }
+    const fs::path unwritable = blocker / "audit" / "2026-10.jsonl";  // under a file: cannot be created
+    audit::AuditSink sink(audit::AuditConfig{audit::Mode::Disabled, unwritable});
+    mcp::ServeOptions options;
+    options.audit_file.required = true;
+    options.audit_file.file = unwritable.string();
+    bool handler_requested = false;
+    const int code = mcp::run_mcp(
+        options,
+        [&handler_requested]() -> cli::CommandHandler& {
+            handler_requested = true;
+            throw std::logic_error("must not be called");
+        },
+        commands::GlobalOptions{}, &sink);
+    CHECK(code == 2);
+    CHECK(sink.mode() == audit::Mode::Required);
+    CHECK_FALSE(handler_requested);
+    std::error_code ec;
+    fs::remove(blocker, ec);
+}
+
 TEST_CASE("mcp tools table lists every tool and matches docs/MCP.md", "[command_table][mcp][docs]") {
     const std::string markdown = mcp::tool_table_text(true);
     const std::string plain = mcp::tool_table_text(false);

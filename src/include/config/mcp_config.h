@@ -110,6 +110,8 @@ McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const Env
 void apply_config(const McpConfig& layers, mcp::ServeOptions& options);
 /// audit.enabled / audit.required / audit.file of one layer (or of merged layers).
 audit::AuditFileSettings audit_settings(const McpConfig& layers);
+/// The same from the three layers: enabled and file flag > env > yaml, required from ANY layer (monotonic, fail safe).
+audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags);
 
 // ---- Paths and text -----------------------------------------------------------------------------
 /// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %LOCALAPPDATA%\fairyfly\mcp.yaml.

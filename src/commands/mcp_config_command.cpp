@@ -353,14 +353,16 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
     if (!loaded.parsed.ok()) return startup_error(x.tray, loaded.parsed.first_error_code(), label + " is invalid; run 'fairyfly mcp config validate'", 2);
 
     std::vector<ConfigIssue> env_issues;
-    env_layer(env, &env_issues);
+    const McpConfig env_config = env_layer(env, &env_issues);
     for (const auto& issue : env_issues) {
         if (issue.severity == Severity::Error)
             return startup_error(x.tray, issue.code, issue.message, 2);
         spdlog::warn("{}", format_issue(issue));
     }
-    const McpConfig layers = merged_layers(loaded.parsed.config, flags_layer(*x.mcp_app), env);
+    const McpConfig flags = flags_layer(*x.mcp_app);
+    const McpConfig layers = merged_layers(loaded.parsed.config, flags, env);
     apply_config(layers, options);
+    options.audit_file = audit_settings(loaded.parsed.config, env_config, flags);  // audit.required from any layer
     if (!x.tray && layers.get_bool("tray.enabled") != true && !x.install_autostart && !x.remove_autostart) return std::nullopt;
     return run_tray(x, layers, options, loaded);
 }
