@@ -56,7 +56,7 @@ std::string exe_path() {
     }
 }
 
-std::string local_app_data_dir() { return config::Environment::process().local_app_data().string(); }
+std::string local_app_data_dir() { return text::path_utf8(config::Environment::process().local_app_data()); }
 
 class RealElevator : public Elevator {
 public:

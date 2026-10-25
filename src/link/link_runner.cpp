@@ -1,4 +1,5 @@
 #include "include/link/link_state_names.h"
+#include "include/text/utf8.h"
 #include "include/link/link_runner.h"
 
 #include <algorithm>
@@ -302,7 +303,7 @@ std::string default_state_path() {
         base = (home.empty() ? std::string(".") : home) + "/.config";
     }
 #endif
-    return (std::filesystem::path(base) / "fairyfly" / "link" / "state.json").string();
+    return (text::utf8_path(base) / "fairyfly" / "link" / "state.json").string();
 }
 
 Result link_pair(const LinkOptions& options, const PairIo& io) {

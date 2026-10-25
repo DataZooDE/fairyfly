@@ -54,7 +54,7 @@ std::string Environment::get(const char* name) const { return lookup_ ? lookup_(
 
 std::filesystem::path Environment::local_app_data() const {
     const std::string dir = get(env::kLocalAppData);
-    if (!dir.empty()) return dir;
+    if (!dir.empty()) return text::utf8_path(dir);
     std::error_code ec;
     auto tmp = std::filesystem::temp_directory_path(ec);
     return ec ? std::filesystem::path() : tmp;
