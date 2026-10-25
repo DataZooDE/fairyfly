@@ -753,6 +753,8 @@ struct AgentRig {
         ffy::link::AgentConfig cfg;
         cfg.local = tools;
         cfg.recorder = rec;
+        // libffl asks the approver for every change (gateway #131): the rig answers yes unattended
+        cfg.approver = ffy::link::fixed_approver(true);
         agent = std::make_unique<ffy::link::Agent>(st, cfg);
     }
     ffy::proto::Frame req(const std::string& tool, json args, json trail) {
@@ -795,8 +797,9 @@ std::string reassemble(const std::vector<ffy::proto::Frame>& frames, const std::
 
 TEST_CASE("trail agent: with fairyfly's recorder a recorded call yields a step frame and blurred shot frames", "[trail][link]") {
     AgentRig rig;
-    // the desktop announces the trail, blurring and (libffl since gateway #121) that it reports approval decisions
-    CHECK(rig.agent->caps() == std::vector<std::string>{"trail/1", "trail-blur/1", "approval/1"});
+    // the desktop announces the trail, blurring, that it reports approval decisions (gateway #121) and that it applies
+    // the organisation's approval policy (gateway #131)
+    CHECK(rig.agent->caps() == std::vector<std::string>{"trail/1", "trail-blur/1", "approval/1", "approval-policy/1"});
     const json per_call = {{"v", 1}, {"shots", true}, {"blur", true}};
 
     // without the policy: no recording, whatever the request says
