@@ -15,7 +15,7 @@ bool checkbox_value_ok(const std::string& v) {
 
 }  // namespace
 
-std::optional<FillField> parse_fill_field(const nlohmann::json& f, std::string& why) {
+std::optional<FillField> parse_fill_field(const nlohmann::json& f, std::string& why, long long max_row) {
     if (!f.is_object()) {
         why = "must be an object";
         return std::nullopt;
@@ -67,7 +67,7 @@ std::optional<FillField> parse_fill_field(const nlohmann::json& f, std::string& 
     }
     if (has_value) field.value = f["value"].get<std::string>();
     if (f.contains("row") && !f["row"].is_null()) {
-        if (!f["row"].is_number_integer() || f["row"].get<long long>() < 0 || f["row"].get<long long>() > 1000000) {
+        if (!f["row"].is_number_integer() || f["row"].get<long long>() < 0 || f["row"].get<long long>() > max_row) {
             why = "'row' must be a zero-based integer >= 0";
             return std::nullopt;
         }
@@ -100,7 +100,7 @@ std::optional<std::vector<FillField>> parse_fill_fields(const nlohmann::json& fi
     std::vector<FillField> out;
     out.reserve(fields.size());
     for (std::size_t i = 0; i < fields.size(); ++i) {
-        auto field = parse_fill_field(fields[i], why);
+        auto field = parse_fill_field(fields[i], why, kMaxFillListRow);
         if (!field) {
             why = "fields[" + std::to_string(i) + "]: " + why;   // the list names the field
             return std::nullopt;
