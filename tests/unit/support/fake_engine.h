@@ -20,7 +20,12 @@ public:
     std::shared_ptr<sap::ComGuiSession> unchecked_session() const override { return nullptr; }
     void set_owner_window_guard(bool) noexcept override {}
     bool current_session_owner_window_allowed() const noexcept override { return true; }
-    audit::SapFacts peek_session_facts(const std::string&, const std::string&) const noexcept override { return {}; }
+    audit::SapFacts facts;              ///< what peek_session_facts answers (the live session's SAP facts)
+    mutable int facts_reads = 0;        ///< how often SAP was asked for them
+    audit::SapFacts peek_session_facts(const std::string&, const std::string&) const noexcept override {
+        ++facts_reads;
+        return facts;
+    }
     std::uintptr_t peek_session_window_handle(const std::string&) const noexcept override { return 0; }
     std::string peek_session_connection_description(const std::string&) const noexcept override { return {}; }
     sap::ScreenSnapshot capture_screen_snapshot() const override { return {}; }

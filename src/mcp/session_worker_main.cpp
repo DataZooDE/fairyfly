@@ -54,26 +54,26 @@ WorkerCallFlags::~WorkerCallFlags() {
     handler_.set_read_only(true);
 }
 
-int run_session_worker_stdio() {
-    // stdout is exclusively the versioned IPC stream. No CLI diagnostics or
-    // spdlog output may share it, even when command execution fails.
-    spdlog::set_default_logger(std::make_shared<spdlog::logger>(
-        "mcp-session-worker", std::make_shared<spdlog::sinks::stderr_sink_mt>()));
-#ifdef _WIN32
-    // Workers only exist for owner-mode endpoints and must reach SAP Logon's windows, never host their own.
-    sap::ComGuiApplication::set_embedded_fallback_allowed(false);
-#endif
-    std::unique_ptr<cli::CommandHandler> handler;
-    std::optional<WorkerBinding> bound;
-    return run_worker_loop(std::cin, std::cout, [&](const WorkerCall& call) -> Result {
-        if (call.enumerate) {
-            if (bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
-            if (!handler) {
-                handler = std::make_unique<cli::CommandHandler>();
-                handler->set_batch_mode(true);
-                handler->set_owner_window_guard(true);
+WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::CommandHandler>()> make_handler) {
+    struct State {
+        std::unique_ptr<cli::CommandHandler> handler;
+        std::optional<WorkerBinding> bound;
+    };
+    auto state = std::make_shared<State>();
+    return [state, make_handler = std::move(make_handler)](const WorkerCall& call) -> Result {
+        // the handler (and with it SAP) is created on the first call that needs it
+        const auto ensure_handler = [&]() -> cli::CommandHandler& {
+            if (!state->handler) {
+                state->handler = make_handler();
+                state->handler->set_batch_mode(true);
+                state->handler->set_owner_window_guard(true);
             }
-            Result result = handler->handle_list_all();
+            return *state->handler;
+        };
+        if (call.enumerate) {
+            if (state->bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
+            cli::CommandHandler& handler = ensure_handler();
+            Result result = handler.handle_list_all();
             if (result.status != Result::Status::Success || !result.data.is_object() ||
                 !result.data.contains("connections") || !result.data["connections"].is_array())
                 return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");
@@ -83,7 +83,7 @@ int run_session_worker_stdio() {
                 for (auto& session : connection["sessions"]) {
                     if (!session.is_object() || !session.contains("id") || !session["id"].is_string()) continue;
                     try {
-                        const auto target = handler->peek_session_target("", session["id"].get<std::string>(), std::nullopt);
+                        const auto target = handler.peek_session_target("", session["id"].get<std::string>(), std::nullopt);
                         if (target.ambiguous || target.facts.system.empty() || target.facts.client.empty() ||
                             target.facts.user.empty()) continue;
                         session["verified_target"] = {{"system", target.facts.system + "/" + target.facts.client},
@@ -95,20 +95,16 @@ int run_session_worker_stdio() {
             return result;
         }
         if (call.probe) {
-            if (bound && bound->connection != call.connection)
+            if (state->bound && state->bound->connection != call.connection)
                 return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to another saved connection");
-            if (!handler) {
-                handler = std::make_unique<cli::CommandHandler>();
-                handler->set_batch_mode(true);
-                handler->set_owner_window_guard(true);
-            }
+            cli::CommandHandler& handler = ensure_handler();
             const std::optional<int> selected = call.connection < 0 ? std::nullopt : std::optional<int>(call.connection);
-            const audit::SapFacts facts = handler->audit_facts_for_connection(selected);
+            const audit::SapFacts facts = handler.audit_facts_for_connection(selected);
             if (!facts.connection_id || (selected && facts.connection_id != selected) ||
                 facts.system.empty() || facts.client.empty() ||
                 facts.user.empty() || facts.session_identity.empty())
                 return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
-            const auto target = handler->peek_session_target("", "", facts.connection_id);
+            const auto target = handler.peek_session_target("", "", facts.connection_id);
             Result result;
             result.status = Result::Status::Success;
             result.data = {{"connection_id", *facts.connection_id}, {"session_identity", facts.session_identity},
@@ -118,19 +114,27 @@ int run_session_worker_stdio() {
             return result;
         }
         // a mismatch and the read-only cap are refused before the handler (SAP) is touched
-        if (auto refused = worker_binding_refusal(call, bound, config::read_only_cap())) return *refused;
-        if (!handler) {
-            handler = std::make_unique<cli::CommandHandler>();
-            handler->set_batch_mode(true);
-            handler->set_owner_window_guard(true);
-        }
-        const audit::SapFacts live = handler->audit_facts_for_connection(call.connection);
+        if (auto refused = worker_binding_refusal(call, state->bound, config::read_only_cap())) return *refused;
+        cli::CommandHandler& handler = ensure_handler();
+        const audit::SapFacts live = handler.audit_facts_for_connection(call.connection);
         if (auto refused = worker_live_refusal(call, live)) return *refused;
-        if (!bound) bound = WorkerBinding{call.connection, call.session_identity, call.owner_identity};
-        const WorkerCallFlags flags(*handler, call, config::read_only_cap());
-        Result result = make_registry_invoker([&]() -> cli::CommandHandler& { return *handler; })(call.argv);
+        if (!state->bound) state->bound = WorkerBinding{call.connection, call.session_identity, call.owner_identity};
+        const WorkerCallFlags flags(handler, call, config::read_only_cap());
+        Result result = make_registry_invoker([&]() -> cli::CommandHandler& { return handler; })(call.argv);
         return result;
-    });
+    };
+}
+
+int run_session_worker_stdio() {
+    // stdout is exclusively the versioned IPC stream. No CLI diagnostics or
+    // spdlog output may share it, even when command execution fails.
+    spdlog::set_default_logger(std::make_shared<spdlog::logger>(
+        "mcp-session-worker", std::make_shared<spdlog::sinks::stderr_sink_mt>()));
+#ifdef _WIN32
+    // Workers only exist for owner-mode endpoints and must reach SAP Logon's windows, never host their own.
+    sap::ComGuiApplication::set_embedded_fallback_allowed(false);
+#endif
+    return run_worker_loop(std::cin, std::cout, make_session_worker_invoker([] { return std::make_unique<cli::CommandHandler>(); }));
 }
 
 } // namespace fairyfly::mcp

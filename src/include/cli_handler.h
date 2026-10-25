@@ -153,6 +153,9 @@ public:
         expected_mcp_session_ = std::move(session_identity);
         expected_mcp_owner_ = std::move(sap_identity);
     }
+    /// The session (and owner) one MCP call expects; empty outside such a call.
+    const std::string& expected_mcp_session() const { return expected_mcp_session_; }
+    const std::string& expected_mcp_owner() const { return expected_mcp_owner_; }
 
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }

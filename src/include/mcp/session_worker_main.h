@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -41,6 +43,10 @@ public:
 private:
     cli::CommandHandler& handler_;
 };
+
+/// The worker's call handling: probes, enumeration and acting calls on the handler `make_handler` creates on first use
+/// (SAP GUI's in production). An acting call binds the worker to its session; later calls must match.
+WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::CommandHandler>()> make_handler);
 
 /// Internal stdio worker entrypoint. The broker starts it with private inherited
 /// pipes in the tray user's interactive Windows session.
