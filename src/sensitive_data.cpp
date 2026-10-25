@@ -1,4 +1,6 @@
 #include "include/sensitive_data.h"
+
+#include <functional>
 #include <cctype>
 #include <map>
 #include <regex>
@@ -178,6 +180,127 @@ void redact_sensitive_report_labels(nlohmann::json& elements) {
     }
 }
 
+namespace {
+
+/// "Name", "HeaderName", "Key" or "FieldName" (normalized): a generic field whose value names the field.
+bool is_generic_name_label(const std::string& normalized) {
+    return normalized == "name" || normalized == "headername" || normalized == "key" || normalized == "fieldname";
+}
+
+std::string as_is(const std::string& text) { return text; }
+
+/// Some match of `pattern` in `text` whose group `group`, decoded, names a secret.
+bool any_match_names_secret(const std::string& text, const std::regex& pattern, int group,
+                            std::string (*decode)(const std::string&) = as_is) {
+    for (std::sregex_iterator it(text.begin(), text.end(), pattern), end; it != end; ++it)
+        if (contains_sensitive_data_name(decode((*it)[group].str()))) return true;
+    return false;
+}
+
+/// `text` with every match of `pattern` replaced by `replace(match)`.
+std::string replace_matches(const std::string& text, const std::regex& pattern,
+                            const std::function<std::string(const std::smatch&)>& replace) {
+    std::string out;
+    std::string::const_iterator cursor = text.cbegin();
+    for (std::sregex_iterator it(text.cbegin(), text.cend(), pattern), end; it != end; ++it) {
+        out.append(cursor, (*it)[0].first);
+        out += replace(*it);
+        cursor = (*it)[0].second;
+    }
+    out.append(cursor, text.cend());
+    return out;
+}
+
+/// Masks the values of secret-named keys, every other value of an object whose generic name field names a secret,
+/// and the rest of an array whose first item names one. true when something was masked.
+bool mask_json_secrets(nlohmann::json& node) {
+    bool changed = false;
+    if (node.is_object()) {
+        bool named_secret = false;
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            if (is_generic_name_label(normalize_sensitive_name(it.key())) && it.value().is_string() &&
+                contains_sensitive_data_name(it.value().get<std::string>())) {
+                named_secret = true;
+                break;
+            }
+        }
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            const bool sensitive_label = is_generic_name_label(normalize_sensitive_name(it.key())) &&
+                it.value().is_string() && contains_sensitive_data_name(it.value().get<std::string>());
+            if (contains_sensitive_data_name(it.key()) || (named_secret && !sensitive_label)) {
+                it.value() = "[REDACTED]";
+                changed = true;
+            } else {
+                changed = mask_json_secrets(it.value()) || changed;
+            }
+        }
+    } else if (node.is_array()) {
+        if (node.size() >= 2 && node[0].is_string() && contains_sensitive_data_name(node[0].get<std::string>())) {
+            for (size_t i = 1; i < node.size(); ++i) node[i] = "[REDACTED]";
+            changed = true;
+        } else {
+            for (auto& item : node) changed = mask_json_secrets(item) || changed;
+        }
+    }
+    return changed;
+}
+
+/// A JSON text that does not parse (a truncated response) cannot be rewritten field by field: true when a
+/// recognizable credential key remains in it.
+bool truncated_json_names_secret(const std::string& text) {
+    // A truncated JSON response cannot be safely rewritten field by
+    // field. Suppress it when a recognizable credential key remains.
+    static const std::regex json_key(
+        R"rx("((?:[^"\\]|\\u[0-9A-Fa-f]{4})+)"[ \t\r\n]*:)rx");
+    // Some GUI editors contain object-like text with unquoted keys and
+    // values. A generic FieldName/Value pair must still fail closed.
+    static const std::regex unquoted_key(
+        R"rx((?:^|[\{,])[ \t\r\n]*((?:[A-Za-z_]|\\u[0-9A-Fa-f]{4})(?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){0,80})[ \t\r\n]*:)rx");
+    static const std::regex object_pair(
+        R"rx((?:^|[\{,])[ \t\r\n]*["']?((?:[A-Za-z_]|\\u[0-9A-Fa-f]{4})(?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){0,80})["']?[ \t\r\n]*:[ \t\r\n]*["']?([^,"'\{\[\}\]\r\n]+))rx");
+    static const std::regex array_pair_name(
+        R"rx(\[[ \t\r\n]*["']?([A-Za-z_][A-Za-z0-9_.-]{0,80})["']?[ \t\r\n]*,)rx");
+    if (any_match_names_secret(text, json_key, 1, decode_json_name_escapes) ||
+        any_match_names_secret(text, unquoted_key, 1, decode_json_name_escapes))
+        return true;
+    for (std::sregex_iterator it(text.begin(), text.end(), object_pair), end; it != end; ++it) {
+        if (is_generic_name_label(normalize_sensitive_name(decode_json_name_escapes((*it)[1].str()))) &&
+            contains_sensitive_data_name(decode_json_name_escapes((*it)[2].str())))
+            return true;
+    }
+    return any_match_names_secret(text, array_pair_name, 1);
+}
+
+/// Without an XML parser a sensitive element or attribute is not rewritten: true when the XML-like text names a
+/// secret in a generic name element/attribute (also unclosed or unquoted), a tag or an attribute name.
+bool xml_names_secret(const std::string& text) {
+    static const std::regex xml_named_key(
+        R"(<[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(Name|HeaderName|Key|FieldName)(?:[ \t\r\n][^>]*)?>([\s\S]*?)</[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?\1[ \t\r\n]*>)",
+        std::regex_constants::icase);
+    // A bounded or malformed editor read may end before the generic key's
+    // closing tag. Its immediately visible text is still enough to classify.
+    static const std::regex xml_partial_named_key(
+        R"(<[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)(?:[ \t\r\n][^>]*)?>([^<]*))",
+        std::regex_constants::icase);
+    static const std::regex xml_named_attribute(
+        R"rx((?:[< \t\r\n])(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)[ \t\r\n]*=[ \t\r\n]*(["'])(.*?)\1)rx",
+        std::regex_constants::icase);
+    // A diagnostic editor may contain incomplete or malformed XML. Keep
+    // the same fail-closed behavior when a generic key has no quotes.
+    static const std::regex xml_unquoted_named_attribute(
+        R"((?:[< \t\r\n])(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)[ \t\r\n]*=[ \t\r\n]*([^"' \t\r\n/>][^ \t\r\n/>]*))",
+        std::regex_constants::icase);
+    static const std::regex xml_tag(R"(<[ \t\r\n]*/?([^ \t\r\n/>]+)(?:[ \t\r\n/>]))");
+    static const std::regex xml_attribute(R"(([^ \t\r\n/=>]+)[ \t\r\n]*=[ \t\r\n]*["'])");
+    return any_match_names_secret(text, xml_named_key, 2, decode_xml_name_entities) ||
+           any_match_names_secret(text, xml_partial_named_key, 1, decode_xml_name_entities) ||
+           any_match_names_secret(text, xml_named_attribute, 2, decode_xml_name_entities) ||
+           any_match_names_secret(text, xml_unquoted_named_attribute, 1, decode_xml_name_entities) ||
+           any_match_names_secret(text, xml_tag, 1) || any_match_names_secret(text, xml_attribute, 1);
+}
+
+}  // namespace
+
 std::string redact_sensitive_response_text(const std::string& text) {
     std::string result = text;
     auto first = result.find_first_not_of(" \t\r\n");
@@ -187,127 +310,12 @@ std::string redact_sensitive_response_text(const std::string& text) {
     if (first != std::string::npos && (result[first] == '{' || result[first] == '[')) {
         auto document = nlohmann::json::parse(result, nullptr, false);
         if (!document.is_discarded()) {
-            bool changed = false;
-            auto mask = [&](auto&& self, nlohmann::json& node) -> void {
-                if (node.is_object()) {
-                    bool named_secret = false;
-                    for (auto it = node.begin(); it != node.end(); ++it) {
-                        const auto label = normalize_sensitive_name(it.key());
-                        if ((label == "name" || label == "headername" ||
-                             label == "key" || label == "fieldname") &&
-                            it.value().is_string() &&
-                            contains_sensitive_data_name(it.value().get<std::string>())) {
-                            named_secret = true;
-                            break;
-                        }
-                    }
-                    for (auto it = node.begin(); it != node.end(); ++it) {
-                        const auto label = normalize_sensitive_name(it.key());
-                        const bool is_label = label == "name" || label == "headername" ||
-                                              label == "key" || label == "fieldname";
-                        const bool sensitive_label = is_label && it.value().is_string() &&
-                            contains_sensitive_data_name(it.value().get<std::string>());
-                        if (contains_sensitive_data_name(it.key()) ||
-                            (named_secret && !sensitive_label)) {
-                            it.value() = "[REDACTED]";
-                            changed = true;
-                        } else {
-                            self(self, it.value());
-                        }
-                    }
-                } else if (node.is_array()) {
-                    if (node.size() >= 2 && node[0].is_string() &&
-                        contains_sensitive_data_name(node[0].get<std::string>())) {
-                        for (size_t i = 1; i < node.size(); ++i) node[i] = "[REDACTED]";
-                        changed = true;
-                    } else {
-                        for (auto& item : node) self(self, item);
-                    }
-                }
-            };
-            mask(mask, document);
-            if (changed) result = document.dump(2);
-        } else {
-            // A truncated JSON response cannot be safely rewritten field by
-            // field. Suppress it when a recognizable credential key remains.
-            static const std::regex json_key(
-                R"rx("((?:[^"\\]|\\u[0-9A-Fa-f]{4})+)"[ \t\r\n]*:)rx");
-            // Some GUI editors contain object-like text with unquoted keys and
-            // values. A generic FieldName/Value pair must still fail closed.
-            static const std::regex unquoted_key(
-                R"rx((?:^|[\{,])[ \t\r\n]*((?:[A-Za-z_]|\\u[0-9A-Fa-f]{4})(?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){0,80})[ \t\r\n]*:)rx");
-            static const std::regex object_pair(
-                R"rx((?:^|[\{,])[ \t\r\n]*["']?((?:[A-Za-z_]|\\u[0-9A-Fa-f]{4})(?:[A-Za-z0-9_.-]|\\u[0-9A-Fa-f]{4}){0,80})["']?[ \t\r\n]*:[ \t\r\n]*["']?([^,"'\{\[\}\]\r\n]+))rx");
-            static const std::regex array_pair_name(
-                R"rx(\[[ \t\r\n]*["']?([A-Za-z_][A-Za-z0-9_.-]{0,80})["']?[ \t\r\n]*,)rx");
-            for (std::sregex_iterator it(result.begin(), result.end(), json_key), end;
-                 it != end; ++it) {
-                if (contains_sensitive_data_name(decode_json_name_escapes((*it)[1].str())))
-                    return "[REDACTED]";
-            }
-            for (std::sregex_iterator it(result.begin(), result.end(), unquoted_key), end;
-                 it != end; ++it) {
-                if (contains_sensitive_data_name(decode_json_name_escapes((*it)[1].str())))
-                    return "[REDACTED]";
-            }
-            for (std::sregex_iterator it(result.begin(), result.end(), object_pair), end;
-                 it != end; ++it) {
-                const auto label = normalize_sensitive_name(decode_json_name_escapes((*it)[1].str()));
-                if ((label == "name" || label == "headername" || label == "key" ||
-                     label == "fieldname") &&
-                    contains_sensitive_data_name(decode_json_name_escapes((*it)[2].str())))
-                    return "[REDACTED]";
-            }
-            for (std::sregex_iterator it(result.begin(), result.end(), array_pair_name), end;
-                 it != end; ++it) {
-                if (contains_sensitive_data_name((*it)[1].str())) return "[REDACTED]";
-            }
+            if (mask_json_secrets(document)) result = document.dump(2);
+        } else if (truncated_json_names_secret(result)) {
+            return "[REDACTED]";
         }
-    } else if (first != std::string::npos && result[first] == '<') {
-        // Without an XML parser, avoid leaking partial values from a sensitive
-        // element or attribute by suppressing that response as a whole.
-        static const std::regex xml_named_key(
-            R"(<[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(Name|HeaderName|Key|FieldName)(?:[ \t\r\n][^>]*)?>([\s\S]*?)</[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?\1[ \t\r\n]*>)",
-            std::regex_constants::icase);
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_named_key), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name(decode_xml_name_entities((*it)[2].str()))) return "[REDACTED]";
-        }
-        // A bounded or malformed editor read may end before the generic key's
-        // closing tag. Its immediately visible text is still enough to classify.
-        static const std::regex xml_partial_named_key(
-            R"(<[ \t\r\n]*(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)(?:[ \t\r\n][^>]*)?>([^<]*))",
-            std::regex_constants::icase);
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_partial_named_key), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name(decode_xml_name_entities((*it)[1].str()))) return "[REDACTED]";
-        }
-        static const std::regex xml_named_attribute(
-            R"rx((?:[< \t\r\n])(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)[ \t\r\n]*=[ \t\r\n]*(["'])(.*?)\1)rx",
-            std::regex_constants::icase);
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_named_attribute), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name(decode_xml_name_entities((*it)[2].str()))) return "[REDACTED]";
-        }
-        // A diagnostic editor may contain incomplete or malformed XML. Keep
-        // the same fail-closed behavior when a generic key has no quotes.
-        static const std::regex xml_unquoted_named_attribute(
-            R"((?:[< \t\r\n])(?:[A-Za-z_][A-Za-z0-9_.-]*:)?(?:Name|HeaderName|Key|FieldName)[ \t\r\n]*=[ \t\r\n]*([^"' \t\r\n/>][^ \t\r\n/>]*))",
-            std::regex_constants::icase);
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_unquoted_named_attribute), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name(decode_xml_name_entities((*it)[1].str()))) return "[REDACTED]";
-        }
-        static const std::regex xml_tag(R"(<[ \t\r\n]*/?([^ \t\r\n/>]+)(?:[ \t\r\n/>]))");
-        static const std::regex xml_attribute(R"(([^ \t\r\n/=>]+)[ \t\r\n]*=[ \t\r\n]*["'])");
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_tag), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name((*it)[1].str())) return "[REDACTED]";
-        }
-        for (std::sregex_iterator it(result.begin(), result.end(), xml_attribute), end;
-             it != end; ++it) {
-            if (contains_sensitive_data_name((*it)[1].str())) return "[REDACTED]";
-        }
+    } else if (first != std::string::npos && result[first] == '<' && xml_names_secret(result)) {
+        return "[REDACTED]";
     }
 
     // SAP GUI editors can return CR-only lines. A generic name/value pair may
@@ -315,50 +323,27 @@ std::string redact_sensitive_response_text(const std::string& text) {
     static const std::regex plain_named_pair(
         R"((?:^|[\r\n])[ \t]*(?:Name|HeaderName|Key|FieldName)[ \t]*[:=][ \t]*([^\r\n]*)(?:\r\n|\r|\n)[ \t]*(?:Value|HeaderValue|FieldValue)[ \t]*[:=])",
         std::regex_constants::icase);
-    for (std::sregex_iterator it(result.begin(), result.end(), plain_named_pair), end;
-         it != end; ++it) {
-        if (contains_sensitive_data_name((*it)[1].str())) return "[REDACTED]";
-    }
+    if (any_match_names_secret(result, plain_named_pair, 1)) return "[REDACTED]";
 
     // API tools also display form-style and YAML-like responses. Match complete
     // lines so ordinary prose containing the same words remains readable.
     static const std::regex named_line(
         R"((^|[\r\n])([ \t]*)([A-Za-z_][A-Za-z0-9_.-]{0,80})([ \t]*[:=][ \t]*)([^\r\n]*))");
-    std::string filtered;
-    std::string::const_iterator cursor = result.cbegin();
-    for (std::sregex_iterator it(result.cbegin(), result.cend(), named_line), end;
-         it != end; ++it) {
-        const auto& match = *it;
-        filtered.append(cursor, match[0].first);
-        if (contains_sensitive_data_name(match[3].str())) {
-            filtered += match[1].str() + match[2].str() + match[3].str() +
-                        match[4].str() + "[REDACTED]";
-        } else {
-            filtered += match.str();
-        }
-        cursor = match[0].second;
-    }
-    filtered.append(cursor, result.cend());
+    const std::string filtered = replace_matches(result, named_line, [](const std::smatch& match) {
+        return contains_sensitive_data_name(match[3].str())
+            ? match[1].str() + match[2].str() + match[3].str() + match[4].str() + "[REDACTED]"
+            : match.str();
+    });
 
     // A credential can also be embedded in a URL query or fragment that appears
     // in an editor, HTTP status line, or JSON string under a generic field name.
     static const std::regex query_parameter(
         R"(([?&#;])([A-Za-z_%][A-Za-z0-9_.%+-]{0,80})=([^&#; \t\r\n"'<>),\]]*))");
-    std::string query_filtered;
-    cursor = filtered.cbegin();
-    for (std::sregex_iterator it(filtered.cbegin(), filtered.cend(), query_parameter), end;
-         it != end; ++it) {
-        const auto& match = *it;
-        query_filtered.append(cursor, match[0].first);
-        if (contains_sensitive_data_name(decode_url_parameter_name(match[2].str()))) {
-            query_filtered += match[1].str() + match[2].str() + "=[REDACTED]";
-        } else {
-            query_filtered += match.str();
-        }
-        cursor = match[0].second;
-    }
-    query_filtered.append(cursor, filtered.cend());
-    return query_filtered;
+    return replace_matches(filtered, query_parameter, [](const std::smatch& match) {
+        return contains_sensitive_data_name(decode_url_parameter_name(match[2].str()))
+            ? match[1].str() + match[2].str() + "=[REDACTED]"
+            : match.str();
+    });
 }
 
 std::string redact_sensitive_abap_source(const std::string& text) {
