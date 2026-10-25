@@ -12,7 +12,7 @@
 #include <mutex>
 #include <thread>
 
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 #include "include/tray/tray_contract.h"
 
 #include <windows.h>
@@ -1552,4 +1552,13 @@ TEST_CASE("tray actions: open, console and detached start, shared by both trays"
     CHECK_FALSE(none.start_detached({"mcp"}));
     none.open("y", "the log");
     CHECK(notices.size() == before + 1);   // only the failed open
+}
+
+TEST_CASE("tray headers: the shared tray header does not pull in the MCP server", "[tray][contract]") {
+    // review 2026-10-25: tray.h (488 lines) pulled mcp/* into the link; the MCP server's tray is mcp_tray.h
+    std::ifstream in(std::filesystem::path(FAIRYFLY_SOURCE_DIR) / "include" / "tray" / "tray.h", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(text.empty());
+    CHECK(text.find("include/mcp/") == std::string::npos);
+    CHECK(text.find("mcp::") == std::string::npos);
 }

@@ -11,7 +11,7 @@
 #include "include/link/link_runner.h"
 #include "include/update/updater.h"
 #include "include/version.h"
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 #include "include/tray/tray_win32.h"
 
 namespace fairyfly {

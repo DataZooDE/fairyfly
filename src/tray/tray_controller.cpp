@@ -5,7 +5,7 @@
 #include <mutex>
 #include <thread>
 
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 
 namespace fairyfly::tray {
 
