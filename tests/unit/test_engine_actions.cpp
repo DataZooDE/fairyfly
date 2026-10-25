@@ -2,12 +2,15 @@
 // window -> controls (review 2026-10-25: ~40 engine methods had no test).
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cwchar>
 #include <memory>
 #include <utility>
 
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
+#include "include/com/control_views.h"
+#include "include/com/tree_view.h"
 #include "include/com_automation_engine.h"
 #include "support/fake_dispatch.h"
 
@@ -190,4 +193,34 @@ TEST_CASE("collection_member_items walks Count/Item of a member collection, up t
     collection->count_override = 5;   // Item(3), Item(4) fail: skipped
     CHECK(fairyfly::sap::collection_member_items(owner, L"ColumnOrder", DISPATCH_PROPERTYGET).size() == 3);
     CHECK(fairyfly::sap::collection_member_items(owner, L"Missing", DISPATCH_PROPERTYGET).empty());   // not a collection
+}
+
+TEST_CASE("collection walks: each caller keeps its own items, every index is VT_I4, a VT_I2 Count reads as none", "[com][collection]") {
+    // Codex on #84: GetColumnNames used to pass _variant_t(int) (VT_INT); the shared walk passes VT_I4 like the others
+    ScopedDispatchCacheReset cache_reset;
+    auto* control = new FakeNode();
+    control->strings[L"Type"] = L"GuiShell";
+    auto* keys = new FakeNode();
+    auto* names = new FakeNode();
+    auto* order = new FakeNode();
+    IDispatchPtr keys_holder(keys, false), names_holder(names, false), order_holder(order, false);
+    control->methods = {L"GetAllNodeKeys", L"GetColumnNames"};
+    control->dispatches[L"GetAllNodeKeys"] = keys;
+    control->dispatches[L"GetColumnNames"] = names;
+    control->dispatches[L"ColumnOrder"] = order;
+    keys->values = {_variant_t(L"N1"), _variant_t(L""), _variant_t(7L), _variant_t(true)};
+    names->values = {_variant_t(L"COL1"), _variant_t(L""), _variant_t(3L)};
+    order->values = {_variant_t(L"C1"), _variant_t(L"")};
+    ComGuiElement element(IDispatchPtr(control, false));
+
+    CHECK(as_tree(element).get_all_node_keys() == std::vector<std::string>{"N1", "7"});        // non-empty BSTR or VT_I4
+    CHECK(as_tree(element).get_tree_column_names() == std::vector<std::string>{"COL1", ""});   // every BSTR
+    CHECK(as_grid(element).get_column_order() == std::vector<std::string>{"C1"});              // non-empty strings
+    for (auto* collection : {keys, names, order}) {
+        CHECK(collection->item_index_types.size() == collection->values.size());
+        CHECK(std::all_of(collection->item_index_types.begin(), collection->item_index_types.end(),
+                          [](VARTYPE vt) { return vt == VT_I4; }));
+    }
+    order->count_type = VT_I2;   // only a VT_I4 Count is read, as before
+    CHECK(as_grid(element).get_column_order().empty());
 }

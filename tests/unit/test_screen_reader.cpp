@@ -773,5 +773,5 @@ TEST_CASE("tree node texts: an empty node text is recovered from a column, the c
     CHECK(column_name_reads == 1);   // once for the whole tree
     TreeNodeTexts failing([](const std::string&) -> std::string { throw std::runtime_error("COM"); },
                           [] { return std::vector<std::string>{}; }, [](const std::string&, const std::string&) { return std::string(); });
-    CHECK_THROWS(failing.text("N1"));   // the caller marks the node
+    CHECK_THROWS(failing.text("N1"));   // a failing read propagates (the ComGuiTree readers answer "" instead of throwing)
 }
