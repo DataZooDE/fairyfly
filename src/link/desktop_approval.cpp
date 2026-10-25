@@ -191,7 +191,7 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     r.summary = readable_step(p.summary.empty() ? p.text : p.summary);
     for (const auto& s : p.steps) r.steps.push_back(readable_step(s));
     if (r.steps.empty()) r.steps.push_back(r.summary);
-    r.offer_standing = desk_.standing && !desk_.standing->enforced();
+    r.offer_standing = desk_.standing && !desk_.standing->enforced() && !p.enforced;
     if (desk_.sap) {
         try {
             r.sap = desk_.sap();
@@ -210,12 +210,13 @@ Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     const auto can_ask = [this] { return !desk_.can_ask || desk_.can_ask(); };
     const std::string what = prompt.summary.empty() ? prompt.tool : prompt.summary;
     // nobody is asked for a change fairyfly refuses anyway, or one the standing approval covers (also while the screen
-    // is locked: the person turned it on for when they are away)
+    // is locked: the person turned it on for when they are away) unless the administrator requires asking it: libffl
+    // says so for this call (signed "always", or pushed) and refuses "standing" then
     if (desk_.can_change && !desk_.can_change()) {
         spdlog::info("approval: not asked, fairyfly here runs read-only and refuses the change ({} {})", prompt.client, what);
         return {true, "not_asked"};
     }
-    if (desk_.standing && desk_.standing->on()) {
+    if (!prompt.enforced && desk_.standing && desk_.standing->on()) {
         spdlog::info("approval: standing (\"Allow changes in SAP\" is on) for {} by {}: {}", client_name(prompt.client), prompt.user, what);
         return {true, "standing"};
     }
@@ -335,6 +336,10 @@ void Broker::answer(uint64_t id, const std::string& nonce, Answer a) {
     cv_.notify_all();
 }
 
+void Broker::approval_enforced(bool enforced) {
+    if (desk_.standing) desk_.standing->set_enforced(enforced);
+}
+
 void Broker::answer_text(const std::string& text) {
     if (auto p = parse_answer(text)) answer(p->id, p->nonce, p->answer);
 }
@@ -378,6 +383,7 @@ struct BrokerApprover : ffy::link::Approver {
         if (d.approved) grant_permit(prompt);
         return {d.approved, d.reason == "expired_in_queue" ? ffy::link::approval_reason::kExpired : d.reason};
     }
+    void approval_enforced(bool enforced) override { broker->approval_enforced(enforced); }
     std::shared_ptr<Broker> broker;
 };
 }  // namespace

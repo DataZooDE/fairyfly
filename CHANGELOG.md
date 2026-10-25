@@ -11,8 +11,11 @@
 - The switch is saved for the Windows user and stays as it is after a restart or an update.
 - The approval window's **Don't ask again** (was: for 5 minutes) approves the change and turns on **Allow changes in
   SAP**.
-- When the organisation requires approval, the switch and the checkbox are greyed out ("Approval is required by your
-  administrator"). The gateway's setting for this follows with the next libffl sync.
+- When the organisation requires approval (fairyfly.io settings: "Always ask at the desktop", gateway v0.5.8), the
+  switch and the checkbox are greyed out ("Approval is required by your administrator") and every change asks. The
+  saved switch comes back when the organisation lets the user decide again.
+- libffl synced from the gateway (v0.5.8): every cloud change asks this desktop, whatever the gateway's grant says
+  about approval; the audit tells `standing` (ran under **Allow changes in SAP**) from `approved`.
 - No notification for a change fairyfly refuses anyway (`--read-only`, `FAIRYFLY_READ_ONLY`).
 - Keys are named in the approval: "press Save (Ctrl+S)" instead of "press 11".
 - `link run --allow-write` is still accepted and has no effect.

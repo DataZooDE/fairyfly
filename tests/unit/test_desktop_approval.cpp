@@ -732,6 +732,41 @@ TEST_CASE("desktop approval: when the organisation enforces asking, every change
     CHECK_FALSE(standing->on());
 }
 
+TEST_CASE("desktop approval: a change the administrator requires asked for asks with the switch on, and offers no \"Don't ask again\"", "[link][approval]") {
+    // libffl: the call was signed "always", or the push said so (ApprovalPrompt::enforced); it refuses "standing" then
+    auto ui = std::make_shared<FakeUi>();
+    ui->can_notify = false;
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    Saved saved;
+    auto standing = saved.standing();
+    REQUIRE(standing->set(false));
+    Broker b(ui, desk(std::make_shared<std::atomic<bool>>(true), standing), fast());
+    auto p = prompt();
+    p.enforced = true;
+    CHECK(b.decide(p).reason == "approved");
+    REQUIRE(ui->windows.size() == 1);
+    CHECK_FALSE(ui->windows[0].offer_standing);
+    CHECK_FALSE(standing->on());  // the tick turned nothing on
+    REQUIRE(standing->set(true));
+    CHECK(b.decide(p).reason == "approved");  // asked, not "standing"
+    CHECK(ui->windows.size() == 2);
+    CHECK(b.decide(prompt()).reason == "standing");
+}
+
+TEST_CASE("desktop approval: libffl's approval_enforced greys out the switch until the administrator lets the user decide", "[link][approval]") {
+    auto standing = std::make_shared<Standing>();
+    REQUIRE(standing->set(true));
+    auto approver = make_approver(std::make_shared<Broker>(std::make_shared<FakeUi>(), desk(std::make_shared<std::atomic<bool>>(true), standing), fast()));
+    approver->approval_enforced(true);
+    CHECK(standing->enforced());
+    CHECK_FALSE(standing->on());
+    CHECK(standing->saved());
+    approver->approval_enforced(false);
+    CHECK_FALSE(standing->enforced());
+    CHECK(standing->on());
+}
+
 TEST_CASE("desktop approval: a change that cannot run here (fairyfly read-only) is never asked", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     Desk d = desk();

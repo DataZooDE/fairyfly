@@ -227,8 +227,10 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
     button and Esc;
   - every change asks: a yes approves that change (all steps of that batch) only. The window's **Don't ask again**,
     unticked by default, approves the change and turns on **Allow changes in SAP**;
-  - when the organisation requires approval, the switch and the checkbox are off and greyed out ("Approval is required
-    by your administrator"): every change asks;
+  - when the organisation requires approval (web settings: "Always ask at the desktop"), the switch and the checkbox
+    are off and greyed out ("Approval is required by your administrator"): every change asks, also while the setting
+    is on its way to this desktop (the gateway signs it into each call). The saved switch comes back when the
+    organisation lets the user decide again;
   - fairyfly started with `--read-only` / `FAIRYFLY_READ_ONLY` asks nothing: it refuses the change itself;
   - keys are named in the steps: "press Save (Ctrl+S)" for `gui_key_send` key 11, "then press Execute (F8)";
   - no answer in 45 s, a locked screen, a disconnected or non-interactive session: denied. Several questions are asked

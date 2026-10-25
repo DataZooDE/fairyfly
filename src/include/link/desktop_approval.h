@@ -147,6 +147,9 @@ public:
     void answer(uint64_t id, const std::string& nonce, Answer a);
     /// Any thread: the text of a notification's button (parse_answer).
     void answer_text(const std::string& text);
+    /// The organisation's setting as the gateway pushes it (libffl Approver::approval_enforced, the link's connection
+    /// thread): "Always ask at the desktop" turns "Allow changes in SAP" off until it lets the person decide again.
+    void approval_enforced(bool enforced);
 
 private:
     Request build(const ffy::link::ApprovalPrompt& p, uint64_t id) const;
@@ -166,8 +169,9 @@ private:
     Answer noticed_ = Answer::None;
 };
 
-/// The desktop's own proof that a cloud change was approved here. libffl skips the approver for a grant with approval
-/// "none"; the desktop is the second factor and does not trust that (Codex review). A yes (also "standing") leaves a
+/// The desktop's own proof that a cloud change was approved here. libffl asks the approver for every change (since
+/// gateway #131; it skipped it for a grant with approval "none" before); the desktop is the second factor and checks
+/// that itself too (Codex review). A yes (also "standing") leaves a
 /// permit for exactly that call - tool and libffl's summary - on the thread that asked (libffl's serve(), which then
 /// calls fairyfly on the same thread); the call takes it, once, within 30 s. A call with the write grant and no permit
 /// runs read-only (MainThreadTools::set_write_permit).
@@ -175,7 +179,8 @@ void grant_permit(const ffy::link::ApprovalPrompt& prompt);
 bool take_permit(const std::string& tool, const nlohmann::json& args);
 
 /// libffl's Approver over a Broker: decide asks the broker and returns its Decision with the reason the gateway
-/// audits (approved | standing | denied | expired | locked; expired_in_queue is reported as expired);
+/// audits (approved | standing | denied | expired | locked; expired_in_queue is reported as expired) and
+/// approval_enforced tells the broker;
 /// approve_change is its yes/no; approve(text) (an agent without the structured question) asks it with the text as
 /// the only step.
 std::shared_ptr<ffy::link::Approver> make_approver(std::shared_ptr<Broker> broker);
