@@ -408,10 +408,11 @@ _variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* na
     return result;
 }
 
-HRESULT SapGuiObject::call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result) const {
+HRESULT SapGuiObject::call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result,
+                                  Lookup lookup) const {
     if (!dispatch_) return E_POINTER;
     DISPID dispid;
-    const HRESULT hr = get_dispid_via_typeinfo(dispatch_, name, &dispid);
+    const HRESULT hr = lookup == Lookup::Cached ? resolve_dispid(name, &dispid) : get_dispid_via_typeinfo(dispatch_, name, &dispid);
     if (FAILED(hr)) return hr;
     return safe_invoke(dispatch_, dispid, DISPATCH_METHOD, args, &result);
 }

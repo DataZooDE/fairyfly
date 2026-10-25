@@ -96,9 +96,12 @@ public:
     _variant_t invoke_checked(const char* operation, const wchar_t* name, WORD flags, VARIANT* argument,
                               const std::string& log_value = {}) const;
 
-    /// Calls method `name` (DISPID via ITypeInfo) with `args` in reading order, protected against access violations in
-    /// SAP GUI's native controls; `result` receives the answer. The lookup's or the call's HRESULT. Never throws.
-    HRESULT call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result) const;
+    /// How call_method finds the DISPID: ITypeInfo every time, or the per-type cache (resolve_dispid).
+    enum class Lookup { TypeInfo, Cached };
+    /// Calls method `name` with `args` in reading order, protected against access violations in SAP GUI's native
+    /// controls; `result` receives the answer. The lookup's or the call's HRESULT. Never throws.
+    HRESULT call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result,
+                        Lookup lookup = Lookup::TypeInfo) const;
 
     /// Resolve DISPID using type-based cache, falling back to ITypeInfo
     HRESULT resolve_dispid(const wchar_t* name, DISPID* dispid) const;

@@ -18,6 +18,14 @@
 namespace fairyfly {
 namespace sap {
 
+namespace {
+/// A toolbar's by-position answer that is a string ("" when the call fails or answers something else).
+std::string text_result(HRESULT hr, const _variant_t& result) {
+    return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : std::string();
+}
+}  // namespace
+
+
 // ============================================================================
 // ComGuiElement Implementation
 // ============================================================================
@@ -1238,25 +1246,15 @@ int ComGuiElement::get_grid_toolbar_button_count() const {
 
 std::string ComGuiElement::get_grid_toolbar_button_id(int position) const {
     try {
-        DISPID dispid;
-        HRESULT hr = resolve_dispid(L"GetToolbarButtonId", &dispid);
-        if (FAILED(hr)) return "";
-        _variant_t argument(position), result;
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
-        return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
+        _variant_t result;
+        return text_result(call_method(L"GetToolbarButtonId", {_variant_t(position)}, result, Lookup::Cached), result);
     } catch (const std::exception&) { return ""; }
 }
 
 std::string ComGuiElement::get_grid_toolbar_button_tooltip(int position) const {
     try {
-        DISPID dispid;
-        HRESULT hr = resolve_dispid(L"GetToolbarButtonTooltip", &dispid);
-        if (FAILED(hr)) return "";
-        _variant_t argument(position), result;
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
-        return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
+        _variant_t result;
+        return text_result(call_method(L"GetToolbarButtonTooltip", {_variant_t(position)}, result, Lookup::Cached), result);
     } catch (const std::exception&) { return ""; }
 }
 
@@ -1542,13 +1540,6 @@ int ComGuiElement::get_button_count() const {
     return get_int_property(L"ButtonCount");
 }
 
-namespace {
-/// A toolbar's by-position answer that is a string ("" when the call fails or answers something else).
-std::string text_result(HRESULT hr, const _variant_t& result) {
-    return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : std::string();
-}
-}  // namespace
-
 std::string ComGuiElement::button_string(const wchar_t* method, int position) const {
     try {
         _variant_t result;
@@ -1604,21 +1595,13 @@ bool ComGuiElement::find_toolbar_button_labels(const std::string& button_id, std
 
 void ComGuiElement::press_button(const std::string& button_id) {
     try {
-        _variant_t button_id_var(button_id.c_str());
-        DISPPARAMS params = {(VARIANT*)&button_id_var, nullptr, 1, 0};
+        const std::wstring wide_id = com::utf8_to_wide(button_id);
         HRESULT last_error = DISP_E_MEMBERNOTFOUND;
         // GuiShell Toolbar uses PressButton; GuiGridView's built-in toolbar
         // uses PressToolbarButton. Both are exposed as synthetic CLI buttons.
         for (const wchar_t* method_name : {L"PressButton", L"PressToolbarButton"}) {
-            DISPID dispid;
-            HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-            if (FAILED(hr)) {
-                last_error = hr;
-                continue;
-            }
             _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                   DISPATCH_METHOD, &params, &result, nullptr, nullptr);
+            const HRESULT hr = call_method(method_name, {_variant_t(wide_id.c_str())}, result);
             if (SUCCEEDED(hr)) {
                 spdlog::debug("Pressed toolbar button: {}", button_id);
                 return;
@@ -1634,30 +1617,14 @@ void ComGuiElement::press_button(const std::string& button_id) {
 
 void ComGuiElement::press_f4() {
     try {
-        // F4 is sent as a virtual key event to the element
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetFocus", &dispid);
-        if (SUCCEEDED(hr)) {
-            DISPPARAMS params = {nullptr, nullptr, 0, 0};
-            dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                            &params, nullptr, nullptr, nullptr);
-        }
-
-        // Send F4 key directly on element if supported
-        hr = get_dispid_via_typeinfo(dispatch_, L"SendVKey", &dispid);
-        if (SUCCEEDED(hr)) {
-            // VK_F4 = 115 (0x73)
-            _variant_t vkey_var(4);  // SAP uses index 4 for F4
-            DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
-            _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                  &params, &result, nullptr, nullptr);
-            if (SUCCEEDED(hr)) {
-                spdlog::debug("Sent F4 key directly to element");
-            }
-        } else {
-            spdlog::debug("Element does not expose SendVKey directly; focus set for window send_vkey");
-        }
+        // F4 is sent as a virtual key event to the element (focus first; a failure is ignored)
+        _variant_t ignored;
+        (void)call_method(L"SetFocus", {}, ignored);
+        _variant_t result;
+        if (SUCCEEDED(call_method(L"SendVKey", {_variant_t(4)}, result)))   // SAP's index 4 is F4
+            spdlog::debug("Sent F4 key directly to element");
+        else
+            spdlog::debug("Element does not take SendVKey directly; focus set for window send_vkey");
     } catch (const std::exception& e) {
         spdlog::error("press_f4 failed: {}", e.what());
         throw;
