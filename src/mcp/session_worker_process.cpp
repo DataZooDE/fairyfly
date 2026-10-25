@@ -1,5 +1,6 @@
 #include "include/mcp/session_worker_process.h"
 
+#include "include/text/command_line.h"
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -104,7 +105,7 @@ void start_child(SessionWorkerProcess::Impl& child) {
     startup.StartupInfo.hStdError = stderr_handle.value;
     startup.lpAttributeList = attributes;
     PROCESS_INFORMATION pi{};
-    std::wstring command = L"\"" + child.executable + L"\"";
+    std::wstring command = text::quote_argument_always<wchar_t>(child.executable);
     if (!child.argument.empty()) command += L" " + child.argument;
     if (!CreateProcessW(child.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW, nullptr, nullptr,
