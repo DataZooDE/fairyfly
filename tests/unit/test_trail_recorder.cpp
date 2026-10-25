@@ -753,7 +753,8 @@ struct AgentRig {
         ffy::link::AgentConfig cfg;
         cfg.local = tools;
         cfg.recorder = rec;
-        cfg.approver = ffy::link::standing_approver();  // "Allow changes in SAP" on: every change asks, nobody is shown a question
+        // libffl asks the approver for every change (gateway #131): the rig answers yes unattended
+        cfg.approver = ffy::link::fixed_approver(true);
         agent = std::make_unique<ffy::link::Agent>(st, cfg);
     }
     ffy::proto::Frame req(const std::string& tool, json args, json trail) {
@@ -762,7 +763,7 @@ struct AgentRig {
         c.iat = ffy::now_unix(); c.exp = c.iat + 60; c.req = "inst." + ffy::rand_hex(8);
         c.grants.tools = {"screen", "element"};
         c.grants.allow_write = true;
-        c.grants.approval = "device";
+        c.grants.approval = "none";
         ffy::proto::Frame f;
         f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
         f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", tool}, {"arguments", args}}}};
@@ -796,8 +797,8 @@ std::string reassemble(const std::vector<ffy::proto::Frame>& frames, const std::
 
 TEST_CASE("trail agent: with fairyfly's recorder a recorded call yields a step frame and blurred shot frames", "[trail][link]") {
     AgentRig rig;
-    // the desktop announces the trail, blurring, that it reports approval decisions (libffl since gateway #121) and
-    // that it follows the administrator's approval setting (approval model v2, gateway #131)
+    // the desktop announces the trail, blurring, that it reports approval decisions (gateway #121) and that it applies
+    // the organisation's approval policy (gateway #131)
     CHECK(rig.agent->caps() == std::vector<std::string>{"trail/1", "trail-blur/1", "approval/1", "approval-policy/1"});
     const json per_call = {{"v", 1}, {"shots", true}, {"blur", true}};
 
