@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -42,12 +43,15 @@ inline HRESULT invoke(IDispatch* obj, DISPID dispid, WORD flags, std::initialize
     return obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, flags, params.get(), result, excepinfo, argerr);
 }
 
-/// A BSTR argument from UTF-8 with its exact length (embedded NULs stay). Throws on invalid UTF-8 (strict).
+/// A BSTR argument from UTF-8 with its exact length (embedded NULs stay). Throws on invalid UTF-8 (strict) and
+/// std::bad_alloc when the BSTR cannot be allocated (never a null BSTR to SAP).
 inline _variant_t bstr_arg(const std::string& utf8) {
     const std::wstring wide = text::utf8_to_wide(utf8);
+    BSTR text = SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+    if (!text) throw std::bad_alloc();
     _variant_t value;
     value.vt = VT_BSTR;
-    value.bstrVal = SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+    value.bstrVal = text;
     return value;
 }
 

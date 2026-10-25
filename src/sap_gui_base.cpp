@@ -374,8 +374,8 @@ IDispatchPtr SapGuiObject::get_dispatch_property(const wchar_t* name) const {
     return nullptr;
 }
 
-_variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* name, WORD flags, VARIANT* argument,
-                                        const std::string& log_value) const {
+_variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* name, WORD flags,
+                                        const std::function<_variant_t()>& argument, const std::string& log_value) const {
     const bool property = flags == DISPATCH_PROPERTYPUT;
     const char* kind = property ? "prop" : "method";
     const std::string member = text::wide_to_utf8_lossy(name);
@@ -393,7 +393,8 @@ _variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* na
                               operation);
     }
     _variant_t result;
-    hr = argument ? invoke(dispatch_, dispid, flags, {_variant_t(*argument)}, property ? nullptr : &result)
+    // the argument is made only now: a null object or an unknown member keeps its own error
+    hr = argument ? invoke(dispatch_, dispid, flags, {argument()}, property ? nullptr : &result)
                   : invoke(dispatch_, dispid, flags, {}, &result);
     if (FAILED(hr)) {
         spdlog::error("{}|Invoke failed|{}={}{}|hr={:#010x}", operation, kind, member, log_value, (unsigned int)hr);
@@ -404,35 +405,36 @@ _variant_t SapGuiObject::invoke_checked(const char* operation, const wchar_t* na
 }
 
 HRESULT SapGuiObject::call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result,
-                                  Lookup lookup) const {
+                                  Lookup lookup, Protection protection) const {
     if (!dispatch_) return E_POINTER;
     DISPID dispid;
     const HRESULT hr = lookup == Lookup::Cached ? resolve_dispid(name, &dispid) : get_dispid_via_typeinfo(dispatch_, name, &dispid);
     if (FAILED(hr)) return hr;
-    return safe_invoke(dispatch_, dispid, DISPATCH_METHOD, args, &result);
+    return protection == Protection::Seh ? safe_invoke(dispatch_, dispid, DISPATCH_METHOD, args, &result)
+                                         : invoke(dispatch_, dispid, DISPATCH_METHOD, args, &result);
 }
 
 void SapGuiObject::set_string_property(const wchar_t* name, const std::string& value) {
     TraceGuard trace("SapGuiObject::set_string_property");
-    _variant_t argument(com::utf8_to_wide(value).c_str());
-    invoke_checked("set_string_property", name, DISPATCH_PROPERTYPUT, &argument);   // the value is not logged
+    invoke_checked("set_string_property", name, DISPATCH_PROPERTYPUT,
+                   [&] { return _variant_t(com::utf8_to_wide(value).c_str()); });   // the value is not logged
 }
 
 void SapGuiObject::set_int_property(const wchar_t* name, int value) {
     TraceGuard trace("SapGuiObject::set_int_property");
-    _variant_t argument(value);
-    invoke_checked("set_int_property", name, DISPATCH_PROPERTYPUT, &argument, "|value=" + std::to_string(value));
+    invoke_checked("set_int_property", name, DISPATCH_PROPERTYPUT, [&] { return _variant_t(value); },
+                   "|value=" + std::to_string(value));
 }
 
 void SapGuiObject::set_bool_property(const wchar_t* name, bool value) {
     TraceGuard trace("SapGuiObject::set_bool_property");
-    _variant_t argument(value);
-    invoke_checked("set_bool_property", name, DISPATCH_PROPERTYPUT, &argument, value ? "|value=true" : "|value=false");
+    invoke_checked("set_bool_property", name, DISPATCH_PROPERTYPUT, [&] { return _variant_t(value); },
+                   value ? "|value=true" : "|value=false");
 }
 
 IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) const {
     TraceGuard trace("SapGuiObject::invoke_method_dispatch");
-    _variant_t result = invoke_checked("invoke_method_dispatch", method_name, DISPATCH_METHOD, nullptr);
+    _variant_t result = invoke_checked("invoke_method_dispatch", method_name, DISPATCH_METHOD, {});
     if (result.vt == VT_DISPATCH && result.pdispVal) return IDispatchPtr(result.pdispVal, true);   // AddRef: result owns its own
     spdlog::warn("invoke_method_dispatch|unexpected type|method={}|vt={}", text::wide_to_utf8_lossy(method_name), (int)result.vt);
     return nullptr;
@@ -440,19 +442,19 @@ IDispatchPtr SapGuiObject::invoke_method_dispatch(const wchar_t* method_name) co
 
 void SapGuiObject::invoke_method_with_string(const wchar_t* method_name, const std::string& param) {
     TraceGuard trace("SapGuiObject::invoke_method_with_string");
-    _variant_t argument(com::utf8_to_wide(param).c_str());
-    invoke_checked("invoke_method_with_string", method_name, DISPATCH_METHOD, &argument, "|param=" + param);
+    invoke_checked("invoke_method_with_string", method_name, DISPATCH_METHOD,
+                   [&] { return _variant_t(com::utf8_to_wide(param).c_str()); }, "|param=" + param);
 }
 
 void SapGuiObject::invoke_method_with_int(const wchar_t* method_name, int param) {
     TraceGuard trace("SapGuiObject::invoke_method_with_int");
-    _variant_t argument(param);
-    invoke_checked("invoke_method_with_int", method_name, DISPATCH_METHOD, &argument, "|param=" + std::to_string(param));
+    invoke_checked("invoke_method_with_int", method_name, DISPATCH_METHOD, [&] { return _variant_t(param); },
+                   "|param=" + std::to_string(param));
 }
 
 void SapGuiObject::invoke_method_void(const wchar_t* method_name) {
     TraceGuard trace("SapGuiObject::invoke_method_void");
-    invoke_checked("invoke_method_void", method_name, DISPATCH_METHOD, nullptr);
+    invoke_checked("invoke_method_void", method_name, DISPATCH_METHOD, {});
 }
 
 std::string SapGuiObject::get_id() const {

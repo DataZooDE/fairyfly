@@ -2,6 +2,7 @@
 
 #include <string>
 #include "include/com/invoke.h"
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
@@ -94,15 +95,17 @@ public:
     /// One checked IDispatch call: DISPATCH_PROPERTYPUT with `argument`, or DISPATCH_METHOD with `argument` or none.
     /// Throws SapGuiException(operation) for a null object, an unknown name or a failed call; `log_value` follows
     /// the member name in the log lines. Returns the method's result (empty for a put).
-    _variant_t invoke_checked(const char* operation, const wchar_t* name, WORD flags, VARIANT* argument,
-                              const std::string& log_value = {}) const;
+    _variant_t invoke_checked(const char* operation, const wchar_t* name, WORD flags,
+                              const std::function<_variant_t()>& argument, const std::string& log_value = {}) const;
 
     /// How call_method finds the DISPID: ITypeInfo every time, or the per-type cache (resolve_dispid).
     enum class Lookup { TypeInfo, Cached };
+    /// Whether an access violation inside SAP GUI's native control becomes E_FAIL (safe_invoke) or is not caught.
+    enum class Protection { Seh, Plain };
     /// Calls method `name` with `args` in reading order, protected against access violations in SAP GUI's native
     /// controls; `result` receives the answer. The lookup's or the call's HRESULT. Never throws.
     HRESULT call_method(const wchar_t* name, std::initializer_list<_variant_t> args, _variant_t& result,
-                        Lookup lookup = Lookup::TypeInfo) const;
+                        Lookup lookup = Lookup::TypeInfo, Protection protection = Protection::Seh) const;
 
     /// Resolve DISPID using type-based cache, falling back to ITypeInfo
     HRESULT resolve_dispid(const wchar_t* name, DISPID* dispid) const;
