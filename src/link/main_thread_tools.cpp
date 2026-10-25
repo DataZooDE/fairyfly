@@ -12,11 +12,26 @@ void MainThreadTools::set_handlers(ListFn list, CallFn call) {
     call_ = std::move(call);
 }
 
+void MainThreadTools::set_write_permit(PermitFn permit) {
+    std::lock_guard<std::mutex> l(mu_);
+    permit_ = std::move(permit);
+}
+
 json MainThreadTools::rpc(const std::string& method, const json& params, int timeout_ms, const ffy::link::CallInfo& info) {
     auto job = std::make_shared<Job>();
     job->method = method;
     job->params = params;
     job->info = info;
+    PermitFn permit;
+    {
+        std::lock_guard<std::mutex> l(mu_);
+        permit = permit_;
+    }
+    if (permit && method == "tools/call" && info.write_granted) {
+        // here, on libffl's thread that asked the approver: the permit is thread-local
+        const json args = params.contains("arguments") && params["arguments"].is_object() ? params["arguments"] : json::object();
+        job->info.write_granted = permit(params.value("name", std::string()), args);
+    }
     std::unique_lock<std::mutex> l(mu_);
     if (shutdown_) throw ffy::Error("fairyfly link is stopping");
     queue_.push_back(job);

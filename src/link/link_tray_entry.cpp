@@ -81,7 +81,7 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();
     tray_services.link = link_control.get();
-    auto write_mode = make_write_mode_control();
+    auto write_mode = make_write_mode_control(o.read_only);
     tray_services.writes = write_mode.get();
     auto mcp_tray = tray::make_win32_single_instance(tray::kTrayMutexName);   // probed only: "Start local MCP server"
     tray_services.mcp_tray = mcp_tray.get();
