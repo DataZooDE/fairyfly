@@ -1547,7 +1547,7 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
 }
 
 Result ScreenReader::find(const ScreenFindOptions& query) {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     if (query.limit < 1 || query.limit > 100) {
         result.set_error("INVALID_FIND_LIMIT", "Find limit must be between 1 and 100");
@@ -1581,8 +1581,7 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.data["match_limit_reached"] = search.match_limit_reached;
         result.data["scan_limit_reached"] = search.scan_limit_reached;
         result.data["hierarchy"] = group_elements_by_container(search.matches);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
@@ -1715,7 +1714,7 @@ bool ScreenReader::read_elements_bulk(const std::string& root_id, bool is_window
 }
 
 Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1807,8 +1806,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
             result.diagnostics["screen_reader"] = std::move(info);
         }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read screen with {} elements (duration: {}ms)",
                      result.data.value("element_count", 0), result.duration.count());
 
@@ -2049,7 +2047,7 @@ void ScreenReader::add_tab_strips_by_search(const ComGuiWindowPtr& window, bool 
 
 Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int max_rows) {
     TraceGuard trace("ScreenReader::read_tab");
-    const auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -2220,8 +2218,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["expanded_tab_count"] = tabs_content.size();
         if (!tabs_failed.empty()) result.data["tabs_failed"] = tabs_failed;
         attach_tab_diagnostics(result, effective_tree_reader_mode());
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
@@ -2311,7 +2308,7 @@ TabReadStatus ScreenReader::read_tab_content(const std::string& tab_id, bool nee
 
 Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::string& only_tab) {
     TraceGuard trace("ScreenReader::read_with_tabs");
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -2503,8 +2500,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         result.diagnostics = initial_result.diagnostics;
         attach_tab_diagnostics(result, effective_tree_reader_mode());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
 
         spdlog::info("Read screen with {} tabs expanded (duration: {}ms)",
                     tabs_content.size(), result.duration.count());

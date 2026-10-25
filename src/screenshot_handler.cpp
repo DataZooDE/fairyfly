@@ -197,7 +197,7 @@ std::vector<uint8_t> ScreenshotHandler::hard_copy_png(const ComGuiWindowPtr& win
 
 Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
     TraceGuard trace("ScreenshotHandler::capture");
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
 
     Result result;
 
@@ -423,8 +423,7 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
             for (const auto& [key, value] : capture_geometry.items()) result.data[key] = value;
         }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
 
     } catch (const std::invalid_argument& e) {
         result.set_error("INVALID_ARGUMENT", e.what());
