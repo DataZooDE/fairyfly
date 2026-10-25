@@ -1,4 +1,5 @@
 #include "include/cli_handler.h"
+#include "include/sap_identity.h"
 #include "include/string_utils.h"
 #include "include/read_only_guard.h"
 #include "include/sensitive_data.h"
@@ -47,7 +48,7 @@ bool owner_bound_session_matches(const Connection& saved, const audit::SapFacts&
                                  const std::string& expected_session, const std::string& expected_owner) {
     if (!live.connection_id || *live.connection_id != saved.id || expected_session.empty() ||
         live.session_identity != expected_session || live.system.empty() || live.client.empty() ||
-        expected_owner != live.system + "/" + live.client + "/" + live.user) return false;
+        expected_owner != sap_identity(live)) return false;
     if (!saved.server_session_key.empty()) return true;
     if (!live.user.empty() || live.transaction != "S000" || saved.cache_generation.empty()) return false;
     const std::string prefix = saved.session_id + "||" + saved.cache_generation + "|hwnd:";
@@ -278,7 +279,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             checked_server_key = com ? com->current_server_session_key() : std::string();
             const audit::SapFacts facts = com && !attached_session_id.empty() && !checked_server_key.empty()
                 ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
-            const std::string identity = facts.system + "/" + facts.client + "/" + facts.user;
+            const std::string identity = sap_identity(facts);
             const bool allowed = !facts.system.empty() && !facts.client.empty() && !facts.user.empty() &&
                 (!session_id || *session_id == attached_session_id) &&
                 std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) != attach_owner_identities_.end();
@@ -304,7 +305,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
             checked_facts = com && com->current_server_session_key() == checked_server_key
                 ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
-            const std::string identity = checked_facts.system + "/" + checked_facts.client + "/" + checked_facts.user;
+            const std::string identity = sap_identity(checked_facts);
             if (checked_facts.system.empty() || checked_facts.client.empty() || checked_facts.user.empty() ||
                 std::find(attach_owner_identities_.begin(), attach_owner_identities_.end(), identity) == attach_owner_identities_.end())
                 return owner_attach_unavailable();

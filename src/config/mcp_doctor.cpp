@@ -1,5 +1,6 @@
 #include "include/config/mcp_doctor.h"
 
+#include "include/sap_identity.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -19,9 +20,8 @@ SapState::Tri classify_logged_in_users(const std::vector<std::optional<std::stri
 bool owner_sap_identity_allowed(const std::string& system, const std::string& client,
                                 const std::string& user, const std::vector<std::string>& identities) {
     if (identities.empty()) return true;
-    if (system.empty() || client.empty() || user.empty()) return false;
-    const std::string identity = system + "/" + client + "/" + user;
-    return std::find(identities.begin(), identities.end(), identity) != identities.end();
+    struct Facts { const std::string& system; const std::string& client; const std::string& user; } facts{system, client, user};
+    return sap_identity_known(facts) && identity_listed(identities, sap_identity(facts));
 }
 
 namespace {

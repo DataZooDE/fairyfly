@@ -62,16 +62,6 @@ bool tool_visible(const ToolSpec& spec, const Policy& policy) {
     return !(spec.write_tool && policy.read_only);
 }
 
-bool RateLimiter::allow(std::chrono::steady_clock::time_point now) {
-    if (per_minute_ <= 0) return true;
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto window = std::chrono::seconds(60);
-    while (!calls_.empty() && now - calls_.front() >= window) calls_.pop_front();
-    if (static_cast<int>(calls_.size()) >= per_minute_) return false;
-    calls_.push_back(now);
-    return true;
-}
-
 } // namespace fairyfly::mcp
 
 namespace fairyfly::mcp {

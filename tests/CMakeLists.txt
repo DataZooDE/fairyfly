@@ -44,6 +44,7 @@ add_executable(unit_tests
     unit/test_constants.cpp
     unit/test_sensitive_data.cpp
     unit/test_read_only_guard.cpp
+    unit/test_sap_identity.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp

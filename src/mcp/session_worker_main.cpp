@@ -1,4 +1,5 @@
 #include "include/mcp/session_worker_main.h"
+#include "include/sap_identity.h"
 #include "include/config/environment.h"
 
 #include <iostream>
@@ -105,7 +106,7 @@ int run_session_worker_stdio() {
             handler->set_owner_window_guard(true);
         }
         const audit::SapFacts live = handler->audit_facts_for_connection(call.connection);
-        const std::string live_owner = live.system + "/" + live.client + "/" + live.user;
+        const std::string live_owner = sap_identity(live);
         if (live.connection_id != call.connection || live.session_identity != call.session_identity ||
             live_owner != call.owner_identity || live.system.empty() || live.client.empty() || live.user.empty())
             return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");

@@ -1,5 +1,6 @@
 #include "include/mcp/dispatcher.h"
 
+#include "include/sap_identity.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -541,7 +542,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                !live_facts->user.empty() && !live_facts->session_identity.empty() &&
                                (!record.connection || (live_facts->connection_id && *record.connection == *live_facts->connection_id));
             if (!known) return fail("OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified");
-            const std::string identity = live_facts->system + "/" + live_facts->client + "/" + live_facts->user;
+            const std::string identity = sap_identity(*live_facts);
             const bool allowed = owner_identity_allowed(policy_, principal, identity);
             if (!allowed) return fail("OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint");
             // Implicit resolution must use the same saved connection that was checked above.
@@ -609,7 +610,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (target.system.empty() || target.user.empty() || target.ambiguous ||
                 target.system.find('/') == std::string::npos)
                 return PolicyDecision{false, "OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified"};
-            const std::string identity = target.system + "/" + target.user;
+            const std::string identity = target.identity();
             if (!owner_identity_allowed(policy_, principal, identity))
                 return PolicyDecision{false, "OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint"};
         }
@@ -806,7 +807,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         bool active;
         OwnerSessionScope(const OwnerSessionOverride& h, const std::optional<audit::SapFacts>& facts)
             : hook(h), active(static_cast<bool>(facts) && static_cast<bool>(h)) {
-            if (active) hook(facts->session_identity, facts->system + "/" + facts->client + "/" + facts->user);
+            if (active) hook(facts->session_identity, sap_identity(*facts));
         }
         ~OwnerSessionScope() {
             if (active) { try { hook("", ""); } catch (...) {} }
@@ -829,7 +830,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         WorkerCall worker_call;
         worker_call.connection = *record.connection;
         worker_call.session_identity = owner_pre_facts->session_identity;
-        worker_call.owner_identity = owner_pre_facts->system + "/" + owner_pre_facts->client + "/" + owner_pre_facts->user;
+        worker_call.owner_identity = sap_identity(*owner_pre_facts);
         worker_call.argv = selected_argv;
         worker_call.read_only = policy_.read_only || principal.read_only;
         worker_call.expected_screen_guard = expected_screen_guard;
@@ -985,7 +986,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 bool authorized = false;
                 try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
                 if (!authorized) return false;
-                const std::string owner = facts.system + "/" + facts.client + "/" + facts.user;
+                const std::string owner = sap_identity(facts);
                 if (!owner_identity_allowed(policy_, principal, owner)) return false;
                 auth::SessionTarget target;
                 target.system = facts.system + "/" + facts.client;
@@ -1129,7 +1130,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 if (listing_interrupted())
                     return fail("OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time");
                 if (target.ambiguous || target.system.empty() || target.user.empty()) continue;
-                const std::string identity = target.system + "/" + target.user;
+                const std::string identity = target.identity();
                 if (!owner_identity_allowed(policy_, principal, identity)) continue;
                 if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, target.system)) continue;
                 // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
@@ -1192,7 +1193,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                 facts->system.empty() || facts->client.empty() || facts->user.empty() ||
                 target.ambiguous || target.system != facts->system + "/" + facts->client ||
                 target.user != facts->user || target.connection_name.empty()) continue;
-            const std::string identity = target.system + "/" + target.user;
+            const std::string identity = target.identity();
             if (!owner_identity_allowed(policy_, principal, identity)) continue;
             if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, target.system)) continue;
             kept.push_back({{"id", *id}, {"session_id", session_id},
@@ -1339,7 +1340,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (!attached || attached->system.empty() || attached->client.empty() || attached->user.empty() ||
             attached->connection_id != id || attached->session_identity.rfind(requested + "|", 0) != 0)
             return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
-        const std::string identity = attached->system + "/" + attached->client + "/" + attached->user;
+        const std::string identity = sap_identity(*attached);
         if (!owner_identity_allowed(policy_, principal, identity))
             return attach_fail("OWNER_IDENTITY_DENIED", "the attached session's SAP identity is not allowed for this endpoint");
         auth::SessionTarget current_target;
@@ -1638,7 +1639,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         if (!facts || facts->connection_id != connection || facts->system.empty() || facts->client.empty() ||
             facts->user.empty() || facts->session_identity.empty() ||
             !owner_identity_allowed(policy_, ctx.principal,
-                facts->system + "/" + facts->client + "/" + facts->user))
+                sap_identity(*facts)))
             return batch_fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
         if (needs_lease) {
             if (!session_leases_ || ctx.principal.id.empty())

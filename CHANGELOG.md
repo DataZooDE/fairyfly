@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### One spelling of a SAP identity (2026-10-25 code review)
+
+- "SID/CLIENT/USER" is built by `sap_identity()` / `SessionTarget::identity()` and looked up by `identity_listed()`
+  instead of 15 hand-written concatenations and two separate matchers; `RateLimiter` is one budget of the keyed
+  limiter instead of a second sliding-window implementation.
+
 ### One table for the mcp.yaml keys (2026-10-25 code review)
 
 - Each key of `mcp.yaml` names its `fairyfly mcp` options and the server option it sets in the key table; the flag
