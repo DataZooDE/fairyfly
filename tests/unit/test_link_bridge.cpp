@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 
+#include "include/link/desktop_approval.h"
 #include "include/link/main_thread_tools.h"
 #include "include/mcp/protocol_session.h"
 #include "include/mcp/tool_catalog.h"
@@ -57,6 +58,35 @@ TEST_CASE("link bridge: worker-thread calls run on the pumping thread, one at a 
     }
     CHECK(writes == 1);
     CHECK(tools.per_call_read_only());
+}
+
+TEST_CASE("link bridge: a call with the write grant keeps it only with the desktop's permit", "[link]") {
+    // the desktop's own check that this exact call was approved here (approval::take_permit in the link)
+    MainThreadTools tools;
+    std::vector<bool> seen;
+    tools.set_handlers([] { return json::array(); },
+                       [&](const std::string&, const json&, const ffy::link::CallInfo& info) {
+                           seen.push_back(info.write_granted);
+                           return json{{"content", json::array()}, {"isError", false}};
+                       });
+    std::vector<std::string> asked;
+    tools.set_write_permit([&](const std::string& tool, const json& args) {
+        asked.push_back(tool);
+        return args.value("ok", false);
+    });
+    std::atomic<bool> stop{false};
+    std::thread worker([&] {
+        ffy::link::CallInfo granted{"acme", "alice", "claude", "r1", true};
+        ffy::link::CallInfo read_only{"acme", "alice", "claude", "r2", false};
+        tools.rpc("tools/call", {{"name", "gui_key_send"}, {"arguments", {{"ok", true}}}}, 5000, granted);
+        tools.rpc("tools/call", {{"name", "gui_key_send"}, {"arguments", {{"ok", false}}}}, 5000, granted);
+        tools.rpc("tools/call", {{"name", "gui_screen_read"}, {"arguments", json::object()}}, 5000, read_only);
+        stop = true;
+    });
+    tools.pump(stop);
+    worker.join();
+    CHECK(seen == std::vector<bool>{true, false, false});
+    CHECK(asked == std::vector<std::string>{"gui_key_send", "gui_key_send"});  // a read-only grant needs no permit
 }
 
 TEST_CASE("link bridge: tools/list, timeouts when nobody pumps, shutdown", "[link]") {
@@ -207,4 +237,74 @@ TEST_CASE("link bridge: gui_popup_close asks for approval only when it confirms 
     }
     CHECK(who->asked == 2);
     CHECK(tools->called.size() == 6);
+}
+
+namespace {
+// the person at the desktop, scripted: the window approves and ticks "Don't ask again"; no notification
+struct WindowUi : fairyfly::link::approval::Ui {
+    std::vector<fairyfly::link::approval::Request> windows;
+    bool notify(const fairyfly::link::approval::Request&) override { return false; }
+    void withdraw(const fairyfly::link::approval::Request&) override {}
+    fairyfly::link::approval::Answer ask(const fairyfly::link::approval::Request& r, const std::function<bool()>&, bool& remember) override {
+        windows.push_back(r);
+        remember = true;
+        return fairyfly::link::approval::Answer::Approve;
+    }
+};
+}  // namespace
+
+TEST_CASE("link bridge: the administrator's \"Always ask at the desktop\" asks every change, \"Allow changes in SAP\" on or not", "[link]") {
+    // approval model v2: the gateway pushes approval_enforced (ready.policy, policy frames) and signs "always" into
+    // each call; the tray's switch then counts as off and the window offers no "Don't ask again"
+    namespace approval = fairyfly::link::approval;
+    TestSigner gw;
+    auto tools = std::make_shared<CatalogTools>();
+    auto ui = std::make_shared<WindowUi>();
+    auto standing = std::make_shared<approval::Standing>();
+    REQUIRE(standing->set(true));
+    approval::Desk desk;
+    desk.standing = standing;
+    ffy::link::State st;
+    st.device_id = "dev_1"; st.issuer = "ffy-gateway"; st.tenant = "acme"; st.gateway_keys = gw.public_keys(); st.key = ffy::ec_generate();
+    ffy::link::AgentConfig cfg;
+    cfg.local = tools;
+    cfg.approver = approval::make_approver(std::make_shared<approval::Broker>(ui, desk));
+    cfg.approve_window_s = 0;
+    ffy::link::Agent agent(st, cfg);
+    REQUIRE(agent.refresh_local());
+    auto call = [&](const std::string& approval_setting) {
+        ffy::assertion::Claims c;
+        c.iss = "ffy-gateway"; c.aud = "dev_1"; c.tenant = "acme"; c.sub = "lee@acme.example"; c.jti = ffy::rand_hex(8); c.client = "claude";
+        c.iat = ffy::now_unix(); c.exp = c.iat + 60; c.req = "inst." + c.jti;
+        c.grants.tools = {"gui_key_send"};
+        c.grants.allow_write = true;
+        c.grants.approval = approval_setting;
+        ffy::proto::Frame f;
+        f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
+        f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", "gui_key_send"}, {"arguments", {{"vkey", 11}}}}}};
+        auto res = agent.process(f);
+        return res.error ? res.error->code : std::string();
+    };
+    // the user decides: the switch is on, nobody is asked
+    CHECK(call("device") == "");
+    CHECK(ui->windows.empty());
+    // the admin's push greys out the switch: the change asks, a yes runs it, the tick turns nothing on
+    agent.set_link_policy(ffy::proto::LinkPolicy{true});
+    CHECK(standing->enforced());
+    CHECK_FALSE(standing->on());
+    CHECK(call("device") == "");
+    REQUIRE(ui->windows.size() == 1);
+    CHECK_FALSE(ui->windows[0].offer_standing);
+    // the admin lets the user decide again: the saved switch is back
+    agent.set_link_policy(ffy::proto::LinkPolicy{false});
+    CHECK_FALSE(standing->enforced());
+    CHECK(standing->on());
+    CHECK(call("device") == "");
+    CHECK(ui->windows.size() == 1);
+    // a call signed "always" asks even before the push reached this desktop
+    CHECK(call("always") == "");
+    REQUIRE(ui->windows.size() == 2);
+    CHECK_FALSE(ui->windows[1].offer_standing);
+    CHECK(standing->on());
+    CHECK(tools->called.size() == 4);
 }

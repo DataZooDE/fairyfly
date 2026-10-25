@@ -112,8 +112,8 @@ bool Agent::refresh_local() {
 // a yes covers that assistant acting for that account, like fairyfly's "don't ask again" (#32)
 static std::string remember_key(const assertion::Claims& c) { return c.client + "\n" + c.sub; }
 
-ApprovalResult Agent::approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args) {
-    {
+ApprovalResult Agent::approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args, bool enforced) {
+    if (!enforced) {  // enforced: every change asks, an earlier yes covers nothing
         std::lock_guard<std::mutex> l(mu_);
         auto i = approved_until_.find(remember_key(c));
         if (i != approved_until_.end() && now_unix() < i->second) return {true, approval_reason::kRemembered};
@@ -127,8 +127,9 @@ ApprovalResult Agent::approved(const assertion::Claims& c, const std::string& to
     p.steps = approval::steps(tool, args);
     p.window_s = cfg_.approve_window_s;
     p.answer_s = cfg_.approval_answer_s;
+    p.enforced = enforced;
     p.text = "An AI assistant (" + p.client + ") acting for " + c.sub + " wants to change data in your SAP session:\n\n" + p.summary + "\n\n" +
-             (cfg_.approve_window_s >= 60 ? "Allow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?" : std::string("Allow this change?")) +
+             (cfg_.approve_window_s >= 60 && !enforced ? "Allow SAP changes for the next " + std::to_string(cfg_.approve_window_s / 60) + " minutes?" : std::string("Allow this change?")) +
              "\n\n(No answer within " + std::to_string(p.answer_s) + " s: the change is not made.)";
     return normalize(cfg_.approver->decide(p));  // the window opens in serve(), once the call will run
 }
@@ -139,6 +140,12 @@ std::pair<std::string, std::string> refusal(const std::string& reason, int answe
     if (reason == approval_reason::kExpired)
         return {"APPROVAL_EXPIRED", "Nobody approved the change at the desktop within " + std::to_string(answer_s) +
                                         " s; nothing was changed in SAP. Ask the person at the desktop to watch for the fairyfly approval, then try again."};
+    if (reason == approval_reason::kUnattended)  // only while enforced
+        return {"APPROVAL_REQUIRED", "Your administrator requires an approval at the desktop for every change, and this desktop runs unattended "
+                                     "(nobody is asked there); nothing was changed in SAP."};
+    if (reason == approval_reason::kStanding || reason == approval_reason::kRemembered)  // only while enforced
+        return {"APPROVAL_REQUIRED", "Your administrator requires an approval at the desktop for every change, and this one was not asked; "
+                                     "nothing was changed in SAP. Ask the person at the desktop to approve it when fairyfly asks, then try again."};
     if (reason == approval_reason::kLocked)
         return {"APPROVAL_LOCKED", "The desktop is locked or nobody is signed in, so nobody could approve the change; nothing was changed in SAP. "
                                    "Ask the person to unlock the desktop, then try again."};
@@ -227,13 +234,21 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
         verdict = approval_reason::kExpired;
         return deny("APPROVAL_EXPIRED", "The change was approved at the desktop only after the gateway stopped waiting; nothing was changed in SAP. Try again.");
     };
-    if (g.allow_write && change && g.approval != "none") {
-        // the person at this desktop decides; every mode but "none" asks here (also "phone" / "phone_or_desktop" of a
-        // gateway from before 2026-10-24: there is no phone approval any more, an "approval" claim is ignored)
+    // The administrator enforces a question for every change (approval model v2): signed into this call by the gateway
+    // (grants.approval "always", the setting it decided the call under), or pushed since (LinkPolicy). The stricter wins,
+    // so a switch on while the call is in flight never lets it run unasked here.
+    const bool enforced = g.approval == "always" || enforced_.load();
+    if (g.allow_write && change) {
+        // The person at this desktop decides every change, whatever grants.approval says: the desktop is the second
+        // factor and does not trust the gateway to skip it ("none" of an older gateway or a self-hosted policy file,
+        // "phone" / "phone_or_desktop" from before 2026-10-24, anything unknown: all asked like "device"). The tray
+        // answers "standing" at once while its "Allow changes in SAP" is on and approval is not enforced.
         if (!approval::summarize(tool, args))
             return deny("BATCH_TOO_LONG_TO_APPROVE", "this call is too long to show at the desktop for approval; split it into several smaller calls");
-        r = approved(c, tool, args);
+        r = approved(c, tool, args, enforced);
         verdict = r.reason;
+        // enforced: only the person's answer to this question runs it, never the desktop's own setting or an earlier yes
+        if (r.approved && enforced && r.reason != approval_reason::kApproved) r.approved = false;
         if (!r.approved) {
             auto [code, msg] = refusal(r.reason, cfg_.approval_answer_s);
             return deny(code, msg);
@@ -247,7 +262,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
         send(ev);
         if (asked && late()) return late_yes();  // its cancel crossed the evt: the gateway may already have answered
     }
-    if (asked && r.reason == approval_reason::kApproved && cfg_.approve_window_s > 0) {  // only a yes for a call that runs
+    if (asked && r.reason == approval_reason::kApproved && cfg_.approve_window_s > 0 && !enforced) {  // only a yes for a call that runs
         std::lock_guard<std::mutex> l(mu_);
         approved_until_[remember_key(c)] = now_unix() + cfg_.approve_window_s;
     }
@@ -379,6 +394,18 @@ void Agent::set_trail_policy(const proto::TrailPolicy& p) {
     if (cfg_.recorder) cfg_.recorder->policy(p);
 }
 
+void Agent::set_link_policy(const proto::LinkPolicy& p) {
+    std::lock_guard<std::mutex> l(policy_mu_);
+    enforced_ = p.approval_enforced;
+    if (told_ == int(p.approval_enforced)) return;
+    told_ = int(p.approval_enforced);
+    if (p.approval_enforced) spdlog::warn("approval is required by your administrator: every change asks at this desktop");
+    else spdlog::info("approval: the user decides at this desktop");
+    if (cfg_.approver) {
+        try { cfg_.approver->approval_enforced(p.approval_enforced); } catch (const std::exception& e) { spdlog::warn("approver: {}", e.what()); }
+    }
+}
+
 std::vector<std::string> Agent::caps() const {
     std::vector<std::string> c;
     if (cfg_.recorder) {
@@ -388,6 +415,7 @@ std::vector<std::string> Agent::caps() const {
     if (cfg_.local_enforces_tcodes) c.push_back(proto::kCapTcodes);
     if (cfg_.local_honours_cancel) c.push_back(proto::kCapCancel);
     c.push_back(proto::kCapApproval);
+    c.push_back(proto::kCapApprovalPolicy);
     return c;
 }
 
@@ -517,6 +545,7 @@ bool Agent::session(const std::atomic<bool>& stop) {
     ready = true;
     spdlog::info("link up: device={} gateway={}", st_.device_id, st_.link_url);
     set_trail_policy(proto::TrailPolicy::from_json(rd->trail));  // a gateway without the audit trail: off
+    set_link_policy(proto::LinkPolicy::from_json(rd->policy));    // a gateway before approval model v2: not enforced
 
     if (refresh_local() && cfg_.publish_catalog) {
         proto::Frame cf;
@@ -547,6 +576,8 @@ bool Agent::session(const std::atomic<bool>& stop) {
             if (auto i = inflight_.find(f->id); i != inflight_.end()) *i->second = true;
         } else if (f->t == proto::TTrail) {
             set_trail_policy(proto::TrailPolicy::from_json(f->trail));
+        } else if (f->t == proto::TPolicy) {
+            set_link_policy(proto::LinkPolicy::from_json(f->policy));
         } else if (f->t == proto::TGoaway) {
             spdlog::info("gateway asked to reconnect ({})", f->kind);
             ws->close();

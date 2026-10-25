@@ -129,13 +129,18 @@ public:
     proto::Frame process(const proto::Frame& req, std::shared_ptr<const std::atomic<bool>> cancel = nullptr) { return serve(req, std::move(cancel)).res; }
     // ready.trail and trail frames: the policy this desktop runs under (tells the recorder to show the notice)
     void set_trail_policy(const proto::TrailPolicy& p);
+    // ready.policy and policy frames: the organisation's link policy (approval model v2). Tells the Approver
+    // (Approver::approval_enforced) on the first call and whenever approval_enforced changes; a gateway that sends
+    // none reads as not enforced. Every change is decided under the stricter of this and the call's own grant.
+    void set_link_policy(const proto::LinkPolicy& p);
+    bool approval_enforced() const { return enforced_.load(); }  // the last pushed setting (a tray may poll it)
     std::vector<std::string> caps() const;  // what hello announces
     bool refresh_local();  // reads the local tool catalog; false if fairyfly is unreachable
 
 private:
     struct LocalTool { bool destructive = false; };
     bool session(const std::atomic<bool>& stop);
-    ApprovalResult approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args);
+    ApprovalResult approved(const assertion::Claims& c, const std::string& tool, const nlohmann::json& args, bool enforced);
     nlohmann::json call_local(const std::string& method, const nlohmann::json& params, int timeout_ms, const CallInfo& info = {});
 
     State st_;
@@ -152,6 +157,9 @@ private:
     std::map<std::string, std::shared_ptr<std::atomic<bool>>> inflight_;
     std::atomic<int> active_{0};
     proto::TrailPolicy trail_;  // guarded by mu_
+    std::atomic<bool> enforced_{false};  // LinkPolicy::approval_enforced, as last pushed
+    std::mutex policy_mu_;               // orders set_link_policy calls and what the Approver is told
+    int told_ = -1;                      // what the Approver was last told (-1: nothing yet); guarded by policy_mu_
     std::vector<proto::Frame> trail_frames(const StepRequest& s, StepRecord rec);
 };
 
