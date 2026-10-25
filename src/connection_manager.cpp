@@ -1,4 +1,5 @@
 #include "include/connection_manager.h"
+#include "include/text/utf8.h"
 #include "include/config/environment.h"
 #include "include/exceptions.h"
 #include "include/trace.h"
@@ -307,7 +308,7 @@ std::string ConnectionManager::get_default_cache_directory() {
     // 1. FAIRYFLY_CACHE_DIR environment variable override
     std::string env_dir = get_env(config::env::kCacheDir);
     if (!env_dir.empty()) {
-        fs::path p(env_dir);
+        const fs::path p = text::utf8_path(env_dir);
         fs::create_directories(p, ec);
         if (!ec && fs::exists(p)) {
             return p.string();
@@ -318,7 +319,7 @@ std::string ConnectionManager::get_default_cache_directory() {
 #ifdef _WIN32
     std::string local_app_data = get_env(config::env::kLocalAppData);
     if (!local_app_data.empty()) {
-        fs::path p = fs::path(local_app_data) / "fairyfly" / "sessions";
+        fs::path p = text::utf8_path(local_app_data) / "fairyfly" / "sessions";
         fs::create_directories(p, ec);
         if (!ec && fs::exists(p)) {
             return p.string();
@@ -327,7 +328,7 @@ std::string ConnectionManager::get_default_cache_directory() {
 #else
     std::string home = get_env(config::env::kHome);
     if (!home.empty()) {
-        fs::path p = fs::path(home) / ".cache" / "fairyfly" / "sessions";
+        fs::path p = text::utf8_path(home) / ".cache" / "fairyfly" / "sessions";
         fs::create_directories(p, ec);
         if (!ec && fs::exists(p)) {
             return p.string();

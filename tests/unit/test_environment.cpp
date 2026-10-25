@@ -141,7 +141,7 @@ TEST_CASE("environment: names and writers of the environment live in config only
         std::ifstream in(e.path(), std::ios::binary);
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         static const std::regex name(R"re(L?"FAIRYFLY_[A-Z_]+")re");
-        static const std::regex writer(R"(\b(SetEnvironmentVariable[AW]?|_putenv|_wputenv|_putenv_s|setenv)\s*\()");
+        static const std::regex writer(R"(\b(SetEnvironmentVariable[AW]?|_w?putenv(_s)?|(un)?setenv)\s*\()");
         for (std::sregex_iterator m(text.begin(), text.end(), name), end; m != end; ++m)
             offenders.push_back(rel.string() + ": " + m->str());
         // the windowless starter is its own small exe without fairyfly_core: it writes with the Win32 call itself
@@ -151,4 +151,13 @@ TEST_CASE("environment: names and writers of the environment live in config only
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());
+}
+
+TEST_CASE("environment: the writer guard recognises every writer spelling", "[config][env]") {
+    // codex 2026-10-25: the guard missed _wputenv_s (config's own writer) and unsetenv
+    const std::regex writer(R"(\b(SetEnvironmentVariable[AW]?|_w?putenv(_s)?|(un)?setenv)\s*\()");
+    for (const char* call : {"SetEnvironmentVariableW(", "SetEnvironmentVariable (", "_putenv(", "_putenv_s(", "_wputenv(",
+                             "_wputenv_s(", "setenv(", "unsetenv("})
+        CHECK(std::regex_search(std::string(call), writer));
+    CHECK_FALSE(std::regex_search(std::string("set_process_env("), writer));
 }

@@ -37,6 +37,7 @@ add_executable(unit_tests
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
     unit/test_environment.cpp
+    unit/test_env_paths.cpp
     unit/test_core_result.cpp
     unit/test_string_utils.cpp
     unit/test_text_utf8.cpp
