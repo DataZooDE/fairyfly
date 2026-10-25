@@ -108,6 +108,7 @@ public:
     int busy_true_reads = -1;
     int start_transaction_calls = 0;
     std::chrono::steady_clock::time_point start_transaction_at{};
+    std::wstring start_transaction_code;   ///< StartTransaction's argument
     // GuiSession.GetObjectTree(Id, [props]): records the call, answers object_tree_payload (a UTF-16
     // string) or fails with object_tree_hresult. Names in unknown_names do not resolve a DISPID.
     int object_tree_calls = 0;
@@ -178,6 +179,7 @@ public:
         }
         if ((flags & DISPATCH_METHOD) && name == L"StartTransaction") {
             ++start_transaction_calls;
+            if (params && params->cArgs == 1 && params->rgvarg[0].vt == VT_BSTR) start_transaction_code = params->rgvarg[0].bstrVal;
             start_transaction_at = std::chrono::steady_clock::now();
             return S_OK;
         }
