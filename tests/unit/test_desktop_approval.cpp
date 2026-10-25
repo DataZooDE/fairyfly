@@ -438,6 +438,59 @@ TEST_CASE("desktop approval: a yes in the window after the time is up is not a y
     CHECK(ui->windows.size() == 2);
 }
 
+TEST_CASE("desktop approval: the notification's Deny before the window's yes denies, and remembers nothing", "[link][approval]") {
+    // review of #36: the window notices the notification's answer only at its next timer tick; a yes in between came through
+    auto ui = std::make_shared<FakeUi>();
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    ui->window_delay = 150ms;
+    ui->ignore_stop = true;
+    Broker b(ui, desk(), fast());
+    auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
+    REQUIRE(eventually([&] { return ui->notified_count() == 1; }));
+    const Request r = ui->last_notified();
+    b.answer(r.id, r.nonce, Answer::Details);
+    REQUIRE(eventually([&] { return ui->open_windows.load() == 1; }));
+    b.answer(r.id, r.nonce, Answer::Deny);  // before the click arrives
+    const Decision d = f.get();
+    CHECK_FALSE(d.approved);
+    CHECK(d.reason == "denied");
+    CHECK(ui->withdrawn.size() == 1);
+    // nothing was remembered: the next change is asked
+    ui->can_notify = false;
+    ui->window_delay = 0ms;
+    ui->ignore_stop = false;
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    CHECK(b.decide(prompt()).reason == "denied");
+    CHECK(ui->windows.size() == 2);
+}
+
+TEST_CASE("desktop approval: the notification's Approve before the window's yes approves, and remembers nothing", "[link][approval]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->window_answer = Answer::Approve;
+    ui->window_remember = true;
+    ui->window_delay = 150ms;
+    ui->ignore_stop = true;
+    Broker b(ui, desk(), fast());
+    auto f = std::async(std::launch::async, [&] { return b.decide(prompt()); });
+    REQUIRE(eventually([&] { return ui->notified_count() == 1; }));
+    const Request r = ui->last_notified();
+    b.answer(r.id, r.nonce, Answer::Details);
+    REQUIRE(eventually([&] { return ui->open_windows.load() == 1; }));
+    b.answer(r.id, r.nonce, Answer::Approve);
+    const Decision d = f.get();
+    CHECK(d.approved);
+    CHECK(d.reason == "approved");
+    ui->can_notify = false;
+    ui->window_delay = 0ms;
+    ui->ignore_stop = false;
+    ui->window_remember = false;
+    ui->window_answer = Answer::Deny;
+    CHECK(b.decide(prompt()).reason == "denied");  // asked again: the notification's Approve never remembers
+    CHECK(ui->windows.size() == 2);
+}
+
 TEST_CASE("desktop approval: a yes in the window after the screen locked is not a yes", "[link][approval]") {
     auto ui = std::make_shared<FakeUi>();
     ui->can_notify = false;
