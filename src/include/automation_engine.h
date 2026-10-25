@@ -14,6 +14,7 @@ namespace sap {
     struct ScreenFindOptions;
     class ComGuiSession;
 }
+class SapGuiScripting;
 
 class AutomationEngine {
 public:
@@ -86,6 +87,9 @@ public:
     /// The SAP GUI session calls currently run against, without attaching one (the audit trail reads its screen).
     /// nullptr when nothing is attached or this engine has no COM session.
     virtual std::shared_ptr<sap::ComGuiSession> attached_com_session() const { return nullptr; }
+    /// SAP GUI scripting beyond the basic actions (sap_gui_scripting.h); nullptr for an engine without it.
+    virtual SapGuiScripting* scripting() { return nullptr; }
+    const SapGuiScripting* scripting() const { return const_cast<AutomationEngine*>(this)->scripting(); }
 
     // Enumeration and diagnostics
     virtual nlohmann::json get_application_info() const = 0;

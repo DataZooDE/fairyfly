@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "com/wrapper.h"
+#include "screen_snapshot.h"
 #include <optional>
 #include <string>
 
@@ -54,14 +55,6 @@ struct TransactionRequest {
 /// "/nex" are rejected because they change or close sessions.
 TransactionRequest normalize_transaction_request(const std::string& input);
 
-struct ScreenSnapshot {
-    std::string window_id;
-    std::string title;
-    std::string transaction;
-    std::string statusbar_text;
-};
-
-bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after);
 
 std::optional<Result> classify_list_label_outcome(bool same_label,
                                                   bool same_window,

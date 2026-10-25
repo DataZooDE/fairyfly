@@ -3,7 +3,9 @@
 #include "include/string_utils.h"
 #include "include/read_only_guard.h"
 #include "include/sensitive_data.h"
-#include "include/com_automation_engine.h"
+#include "include/connection_launcher.h"
+#include "include/sap_gui_scripting.h"
+#include "include/com/wrapper.h"
 #include "include/action_status.h"
 #include "include/server_clock.h"
 #include "include/action_argument_checks.h"
@@ -61,7 +63,7 @@ bool owner_bound_session_matches(const Connection& saved, const audit::SapFacts&
 void CommandHandler::describe_element(const std::string& element_id, std::string& type,
                                        std::string& text, std::string& tooltip)
 {
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_engine = engine_->scripting();
     if (!com_engine) return;
     try {
         auto session = com_engine->get_session();
@@ -98,7 +100,7 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
         // through the shell's toolbar APIs before pressing. If that fails, the id rules decide.
         type = "GuiButton";
         try {
-            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            auto* com_engine = engine_->scripting();
             auto session = com_engine ? com_engine->get_session() : nullptr;
             if (session) {
                 std::string toolbar_path = element_id.substr(0, btn_pos);
@@ -133,16 +135,19 @@ std::optional<Result> CommandHandler::guard_element(const std::string& element_i
 }
 
 CommandHandler::CommandHandler(std::unique_ptr<cred::CredentialStore> store)
-    : engine_(AutomationEngine::create()),
-      conn_mgr_(std::make_unique<ConnectionManager>()),
+    : CommandHandler(std::move(store), AutomationEngine::create(), std::make_unique<ConnectionManager>()) {}
+
+CommandHandler::CommandHandler(std::unique_ptr<cred::CredentialStore> store, std::unique_ptr<AutomationEngine> engine,
+                               std::unique_ptr<ConnectionManager> connections)
+    : engine_(std::move(engine)),
+      conn_mgr_(std::move(connections)),
       credential_store_(store ? std::move(store) : cred::make_default_store())
 {
-    // Initialize command handler
     spdlog::debug("CommandHandler initialized");
 }
 
 void CommandHandler::set_owner_window_guard(bool enabled) {
-    if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
+    if (auto* com = engine_->scripting())
         com->set_owner_window_guard(enabled);
 }
 
@@ -264,8 +269,8 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             // attach_by_session_id already selected the target in the engine. Drop that
             // local binding so a denied foreign session cannot appear in later audit facts.
             // disconnect() here does not close the SAP GUI window.
-            if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
-                (void)com->disconnect();
+            if (auto* com = engine_->scripting())
+                (void)engine_->disconnect();
             result.status = Result::Status::Error;
             result.data = json::object();
             result.error = {{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "the requested SAP session is unavailable"}};
@@ -275,8 +280,8 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
         // The MCP endpoint's owner rule must run before create_or_update_connection.
         // The later dispatcher postcheck conditionally removes this generation if it changes.
         if (!attach_owner_identities_.empty()) {
-            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-            checked_server_key = com ? com->current_server_session_key() : std::string();
+            auto* com = engine_->scripting();
+            checked_server_key = com ? engine_->current_server_session_key() : std::string();
             const audit::SapFacts facts = com && !attached_session_id.empty() && !checked_server_key.empty()
                 ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
             const std::string identity = sap_identity(facts);
@@ -302,8 +307,8 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
         }
 
         if (!attach_owner_identities_.empty()) {
-            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-            checked_facts = com && com->current_server_session_key() == checked_server_key
+            auto* com = engine_->scripting();
+            checked_facts = com && engine_->current_server_session_key() == checked_server_key
                 ? com->peek_session_facts(attached_session_id, checked_server_key) : audit::SapFacts{};
             const std::string identity = sap_identity(checked_facts);
             if (checked_facts.system.empty() || checked_facts.client.empty() || checked_facts.user.empty() ||
@@ -403,8 +408,8 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         // Owner-mode HTTP launches may open a prelogin window with no SAP user yet.
         // Check the exact new live window before writing any saved connection.
         auto owner_launch_unavailable = [&]() {
-            if (auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get()))
-                (void)com->disconnect();  // detach Fairyfly; leave the SAP window for operator inspection
+            if (auto* com = engine_->scripting())
+                (void)engine_->disconnect();  // detach Fairyfly; leave the SAP window for operator inspection
             result.status = Result::Status::Error;
             result.data = json::object();
             result.diagnostics = json::object();
@@ -415,8 +420,8 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         std::string checked_server_key;
         std::string checked_description;
         if (!attach_owner_identities_.empty()) {
-            auto* com = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-            checked_server_key = com ? com->current_server_session_key() : std::string();
+            auto* com = engine_->scripting();
+            checked_server_key = com ? engine_->current_server_session_key() : std::string();
             const auto selected = com ? com->get_session() : nullptr;
             bool selected_matches = false;
             try { selected_matches = selected && selected->is_alive() && selected->get_id() == session_id; }
@@ -634,7 +639,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         }
     }
 
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_engine = engine_->scripting();
     if (!com_engine || !com_engine->get_session()) {
         result.set_error("ENGINE_TYPE_MISMATCH", "SAP GUI logon requires the COM automation engine");
         return result;
@@ -1003,7 +1008,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         std::string type, text, tooltip, target_text;
         describe_element(element_id, type, text, tooltip);
         try {
-            if (auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get())) {
+            if (auto* com_engine = engine_->scripting()) {
                 if (auto session = com_engine->get_session()) {
                     std::string full_path = elem.path;
                     if (full_path.rfind("@active", 0) == 0)
@@ -1023,7 +1028,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
     // Get current active window before click (if monitoring for new windows)
     WindowId window_before;
     sap::ScreenSnapshot snapshot_before;
-    auto* snapshot_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* snapshot_engine = engine_->scripting();
     if (wait_for_window) {
         if (snapshot_engine) snapshot_before = snapshot_engine->capture_screen_snapshot();
         window_before = engine_->get_active_window_id();
@@ -1040,7 +1045,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             result.set_error("GRID_ROW_OPTIONS_REQUIRED", "GridView selection requires --row >= 0 and --column on a grid element");
             return result;
         }
-        auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        auto* com_engine = engine_->scripting();
         if (!com_engine) {
             result.set_error("ENGINE_TYPE_MISMATCH", "GridView row selection requires the COM automation engine");
             return result;
@@ -1064,7 +1069,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
             auto start = std::chrono::high_resolution_clock::now();
 
             // Get the ComAutomationEngine to access session
-            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            auto* com_engine = engine_->scripting();
             if (!com_engine) {
                 result.set_error("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
                 return result;
@@ -1298,7 +1303,7 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
             result.set_error("GRID_CELL_OPTIONS_REQUIRED", "GridView fill requires --row >= 0 and --column");
             return result;
         }
-        auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        auto* com_engine = engine_->scripting();
         if (!com_engine) {
             result.set_error("ENGINE_TYPE_MISMATCH", "GridView editing requires the COM automation engine");
             return result;
@@ -1389,8 +1394,8 @@ Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fie
     }
 
     // The key goes to the main window only: on a popup, Enter could confirm a save or delete dialog.
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
-    const std::string active = com_engine ? com_engine->get_active_window_id().id : std::string();
+    auto* com_engine = engine_->scripting();
+    const std::string active = com_engine ? engine_->get_active_window_id().id : std::string();
     if (!com_engine || WindowId(active).get_index() != 0) {
         result.set_error("THEN_KEY_NOT_ON_MAIN_WINDOW", fmt::format("all {} fields were filled, but a popup ({}) is open, so {} was not pressed",
                                               fields.size(), active.empty() ? "unknown window" : active, then_key));
@@ -1436,7 +1441,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
         try {
             // Get the actual element COM object
-            auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+            auto* com_engine = engine_->scripting();
             if (!com_engine) {
                 return Result::fail("ENGINE_TYPE_MISMATCH", "Tree operations require COM automation engine (stub mode active)");
             }
@@ -1536,7 +1541,7 @@ Result CommandHandler::handle_read_field(const std::string& element_id, std::opt
 
     // Regular field reading
     spdlog::info("Reading field: {} on connection {}", element_id, conn_result.value.id);
-    auto* com_read_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_read_engine = engine_->scripting();
     auto result = (activate_tab && com_read_engine) ? com_read_engine->read_field(elem, true)
                                                     : engine_->read_field(elem);
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### CommandHandler gets its engine injected (2026-10-25 code review)
+
+- `CommandHandler` takes its automation engine and connection store from outside (the default constructor still
+  builds the real ones), and asks the engine for SAP GUI scripting (`SapGuiScripting`: session, keys, popups,
+  menus, grid cells, read-only peeks) instead of 23 downcasts to the COM engine. A fake engine now tests the
+  handlers without SAP GUI: read-only refusals before SAP is asked, connection resolution, error passing, keys and
+  popups.
+
 ### One spelling of a SAP identity (2026-10-25 code review)
 
 - "SID/CLIENT/USER" is built by `sap_identity()` / `SessionTarget::identity()` and looked up by `identity_listed()`

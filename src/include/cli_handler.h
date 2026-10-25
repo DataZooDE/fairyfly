@@ -117,6 +117,9 @@ private:
 
 public:
     explicit CommandHandler(std::unique_ptr<cred::CredentialStore> store = nullptr);
+    /// With an injected engine and connection store (tests: a fake engine and a temporary directory).
+    CommandHandler(std::unique_ptr<cred::CredentialStore> store, std::unique_ptr<AutomationEngine> engine,
+                   std::unique_ptr<ConnectionManager> connections);
 
     /// Credential store used by login and the credentials command (Windows Credential Manager by default).
     cred::CredentialStore& credential_store() { return *credential_store_; }
