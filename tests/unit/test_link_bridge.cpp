@@ -10,6 +10,9 @@
 #include "include/link/main_thread_tools.h"
 #include "include/mcp/protocol_session.h"
 #include "include/mcp/tool_catalog.h"
+#include "include/mcp/dispatcher.h"
+#include "include/command_table.h"
+#include "include/link/link_call.h"
 #include "assertion.hpp"
 #include "signer.hpp"
 
@@ -307,4 +310,101 @@ TEST_CASE("link bridge: the administrator's \"Always ask at the desktop\" asks e
     CHECK_FALSE(ui->windows[1].offer_standing);
     CHECK(standing->on());
     CHECK(tools->called.size() == 4);
+}
+
+namespace {
+struct ApprovingApprover : ffy::link::Approver {
+    std::atomic<int> asked{0};
+    bool approve(const std::string&) override { return true; }
+    ffy::link::ApprovalResult decide(const ffy::link::ApprovalPrompt&) override {
+        ++asked;
+        return {true, "approved"};
+    }
+};
+}  // namespace
+
+TEST_CASE("link bridge: a change approved at the desktop runs after a stale default connection is re-attached, asked once", "[link][reattach]") {
+    // seen live 2026-10-24/25: after the link tray or SAP Logon restarted, the approved change failed with
+    // INVALID_CONNECTION and had to be approved again. libffl asks before the call reaches fairyfly, so the re-attach
+    // happens inside the same call and uses the approval it already has.
+    using fairyfly::Result;
+    using Argv = std::vector<std::string>;
+    TestSigner gw;
+    std::vector<Argv> calls;
+    bool attached = false;
+    auto invoker = [&](const Argv& argv) {
+        calls.push_back(argv);
+        Result r;
+        const std::string command = fairyfly::command_table::command_of_argv(argv);
+        if (command == "session list") {
+            r.status = Result::Status::Success;
+            r.data = {{"connections", json::array({{{"description", "Bigfox"},
+                                                    {"sessions", json::array({{{"id", "/app/con[1]/ses[0]"}, {"system", "BFX"},
+                                                                               {"client", "100"}, {"user", "LEE"}}})}}})}};
+        } else if (command == "session attach") {
+            attached = true;
+            r.status = Result::Status::Success;
+            r.data = {{"connection_file_id", 1}};
+        } else if (attached) {
+            r.status = Result::Status::Success;
+            r.data = {{"message", "key sent"}};
+        } else {
+            r.status = Result::Status::Error;
+            r.error = {{"code", "INVALID_CONNECTION"}, {"message", "Connection 0 session no longer exists"},
+                       {"stale_connection", {{"id", 0}, {"system", "BFX"}, {"client", "100"}, {"user", "LEE"}}}};
+        }
+        return r;
+    };
+    fairyfly::mcp::Policy policy;
+    policy.auto_attach = true;
+    policy.read_only = false;
+    policy.allow_write = true;
+    fairyfly::mcp::CommandDispatcher dispatcher(invoker, policy, nullptr);
+    std::atomic<bool> stop{false};
+    auto tools = std::make_shared<MainThreadTools>();
+    tools->set_handlers([&] {
+                            json list = json::array();
+                            for (const auto& t : dispatcher.list_tools()) list.push_back(fairyfly::mcp::tool_to_json(t));
+                            return list;
+                        },
+                        [&](const std::string& name, const json& args, const ffy::link::CallInfo& info) {
+                            auto r = dispatcher.call_tool(name, args, fairyfly::link::link_call_context(info, stop));
+                            return json{{"content", r.content}, {"isError", r.is_error}};
+                        });
+    auto who = std::make_shared<ApprovingApprover>();
+    ffy::link::State st;
+    st.device_id = "dev_1"; st.issuer = "ffy-gateway"; st.tenant = "acme"; st.gateway_keys = gw.public_keys(); st.key = ffy::ec_generate();
+    ffy::link::AgentConfig cfg;
+    cfg.local = tools;
+    cfg.approver = who;
+    cfg.approve_window_s = 0;  // every change asks
+    ffy::link::Agent agent(st, cfg);
+    ffy::assertion::Claims c;
+    c.iss = "ffy-gateway"; c.aud = "dev_1"; c.tenant = "acme"; c.sub = "lee@acme.example"; c.jti = ffy::rand_hex(8); c.client = "claude";
+    c.iat = ffy::now_unix(); c.exp = c.iat + 60; c.req = "inst.1";
+    c.grants.tools = {"gui_key_send"};
+    c.grants.allow_write = true;
+    c.grants.approval = "device";
+    ffy::proto::Frame f;
+    f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
+    f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", "gui_key_send"}, {"arguments", {{"vkey", 11}}}}}};
+    ffy::proto::Frame res;
+    bool refreshed = false;
+    std::thread worker([&] {  // libffl's thread: reads the catalog, asks the approver, then the call runs on the main thread
+        refreshed = agent.refresh_local();
+        if (refreshed) res = agent.process(f);
+        stop = true;
+    });
+    tools->pump(stop);
+    worker.join();
+    REQUIRE(refreshed);
+    REQUIRE_FALSE(res.error);
+    CHECK_FALSE(res.rpc["result"].value("isError", true));
+    CHECK(res.rpc["result"].dump().find("re-attached to the only open SAP session") != std::string::npos);
+    CHECK(who->asked == 1);
+    REQUIRE(calls.size() == 4);
+    CHECK(fairyfly::command_table::command_of_argv(calls[0]) == "key send");
+    CHECK(calls[1] == Argv{"session", "list"});
+    CHECK(calls[2] == Argv{"session", "attach", "--session-id", "/app/con[1]/ses[0]"});
+    CHECK(fairyfly::command_table::command_of_argv(calls[3]) == "key send");
 }
