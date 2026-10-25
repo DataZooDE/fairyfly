@@ -47,6 +47,10 @@ public:
     /// Open a tree node's context menu and select an item by its visible text.
     void select_node_context_item(const std::string& node_key, const std::string& item_text);
 
+    /// The node's item text in each column, in order; a column without a name or the hierarchy column
+    /// ("HierarchyHeader", the node text itself) is "" and not asked. A failed read is "" (get_item_text).
+    std::vector<std::string> item_texts(const std::string& key, const std::vector<std::string>& columns) const;
+
 private:
     std::string string_by_key(const wchar_t* method, const std::string& key, const char* operation) const;
 

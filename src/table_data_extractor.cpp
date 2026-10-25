@@ -505,15 +505,7 @@ void TableDataExtractor::traverse_tree_nodes(
 
                     // Get column values for this node with error handling
                     spdlog::trace("TREE_EXTRACT: Getting {} column values for node {}...", data_columns.size(), key);
-                    for (const auto& col_name : data_columns) {
-                        try {
-                            std::string col_value = as_tree(*tree_element).get_item_text(key, col_name);
-                            node.column_values.push_back(col_value);
-                        } catch (const std::exception& e) {
-                            spdlog::debug("Failed to get column {} for node {}: {}", col_name, key, e.what());
-                            node.column_values.push_back("");  // Empty value on error
-                        }
-                    }
+                    node.column_values = as_tree(*tree_element).item_texts(key, data_columns);
                     spdlog::trace("TREE_EXTRACT: Node {} processed successfully", key);
 
                     node.expanded = false;

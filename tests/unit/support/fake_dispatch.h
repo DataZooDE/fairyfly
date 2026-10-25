@@ -129,6 +129,7 @@ public:
     // answers its `dispatches` entry (AddRef'd) when there is one; names in put_fails answer DISP_E_EXCEPTION.
     std::set<std::wstring> methods;
     std::vector<std::pair<std::wstring, std::wstring>> calls;
+    std::map<std::wstring, std::wstring> method_answers;   ///< "Name(arg,arg)" -> the BSTR a generic method answers
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -247,6 +248,10 @@ public:
                 result->vt = VT_DISPATCH;
                 result->pdispVal = returned->second;
                 returned->second->AddRef();
+            } else if (auto answer = method_answers.find(name + L"(" + text + L")"); result && answer != method_answers.end()) {
+                VariantInit(result);
+                result->vt = VT_BSTR;
+                result->bstrVal = SysAllocString(answer->second.c_str());
             }
             return S_OK;
         }

@@ -78,6 +78,14 @@ std::string ComGuiTree::string_by_key(const wchar_t* method, const std::string& 
     }
 }
 
+std::vector<std::string> ComGuiTree::item_texts(const std::string& key, const std::vector<std::string>& columns) const {
+    std::vector<std::string> texts;
+    texts.reserve(columns.size());
+    for (const auto& column : columns)
+        texts.push_back(column.empty() || column == "HierarchyHeader" ? std::string() : get_item_text(key, column));
+    return texts;
+}
+
 std::string ComGuiTree::get_node_text_by_key(const std::string& key) const {
     return string_by_key(L"GetNodeTextByKey", key, "get_node_text_by_key");
 }

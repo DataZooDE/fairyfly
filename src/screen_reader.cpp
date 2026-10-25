@@ -362,7 +362,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
             const auto& key = node_keys[i];
             try {
                 spdlog::debug("Extracting node {}/{}: key='{}'", i+1, node_keys.size(), key);
-                auto node_start = std::chrono::high_resolution_clock::now();
+                const Stopwatch node_timer;
 
                 json node;
                 node["key"] = key;
@@ -392,32 +392,9 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                     spdlog::debug("  -> Extracting {} columns for key '{}'", columns.size(), key);
                     node["available_columns"] = columns;
 
-                    json column_values = json::array();
-                    auto col_start = std::chrono::high_resolution_clock::now();
-
-                    for (const json& col_name_json : columns) {
-                        try {
-                            std::string col_name_str = col_name_json.is_string() ? col_name_json.get<std::string>() : "";
-                            if (col_name_str.empty() || col_name_str == "HierarchyHeader") {
-                                // Skip hierarchy column (already have text/path)
-                                column_values.push_back("");
-                                continue;
-                            }
-
-                            std::string col_value = as_tree(*element).get_item_text(key, col_name_str);
-                            column_values.push_back(col_value);
-
-                        } catch (const std::exception& e) {
-                            spdlog::debug("  -> Failed to get column '{}' for key '{}': {}",
-                                        col_name_json.is_string() ? col_name_json.get<std::string>() : "?", key, e.what());
-                            column_values.push_back("");  // Empty value on failure
-                        }
-                    }
-
-                    node["column_values"] = column_values;
-
-                    auto col_duration = std::chrono::high_resolution_clock::now() - col_start;
-                    auto col_ms = std::chrono::duration_cast<std::chrono::milliseconds>(col_duration).count();
+                    const Stopwatch col_timer;
+                    node["column_values"] = as_tree(*element).item_texts(key, columns);
+                    const auto col_ms = col_timer.elapsed().count();
                     if (col_ms > 500) {
                         spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);
                     }
@@ -426,8 +403,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
                 nodes_array.push_back(node);
 
                 // Log if this node took unusually long
-                auto node_duration = std::chrono::high_resolution_clock::now() - node_start;
-                auto node_ms = std::chrono::duration_cast<std::chrono::milliseconds>(node_duration).count();
+                const auto node_ms = node_timer.elapsed().count();
                 if (node_ms > 1000) {
                     spdlog::warn("Node '{}' extraction took {}ms", key, node_ms);
                 }

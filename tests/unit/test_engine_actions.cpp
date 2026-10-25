@@ -224,3 +224,17 @@ TEST_CASE("collection walks: each caller keeps its own items, every index is VT_
     order->count_type = VT_I2;   // only a VT_I4 Count is read, as before
     CHECK(as_grid(element).get_column_order().empty());
 }
+
+TEST_CASE("tree item texts: one value per column, the hierarchy and unnamed columns empty and not asked", "[com][tree]") {
+    // review 2026-10-25: the screen reader and the table extractor each read a node's column values in their own loop
+    ScopedDispatchCacheReset cache_reset;
+    auto* control = new FakeNode();
+    control->strings[L"Type"] = L"GuiShell";
+    control->methods = {L"GetItemText"};
+    control->method_answers = {{L"GetItemText(N1,COL1)", L"a"}, {L"GetItemText(N1,COL2)", L"b"}};
+    ComGuiElement element(IDispatchPtr(control, false));
+    CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL1", "", "COL2", "COL3"}) ==
+          std::vector<std::string>{"", "a", "", "b", ""});
+    REQUIRE(control->calls.size() == 3);   // COL1, COL2, COL3
+    CHECK(control->calls[0].second == L"N1,COL1");
+}
