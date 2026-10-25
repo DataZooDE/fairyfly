@@ -387,7 +387,7 @@ TEST_CASE("link bridge: a change approved at the desktop runs after a stale defa
     c.grants.approval = "device";
     ffy::proto::Frame f;
     f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
-    f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", "gui_key_send"}, {"arguments", {{"vkey", 11}}}}}};
+    f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", "gui_key_send"}, {"arguments", {{"key", "f11"}}}}}};
     ffy::proto::Frame res;
     bool refreshed = false;
     std::thread worker([&] {  // libffl's thread: reads the catalog, asks the approver, then the call runs on the main thread
@@ -398,6 +398,7 @@ TEST_CASE("link bridge: a change approved at the desktop runs after a stale defa
     tools->pump(stop);
     worker.join();
     REQUIRE(refreshed);
+    INFO(res.rpc.dump());
     REQUIRE_FALSE(res.error);
     CHECK_FALSE(res.rpc["result"].value("isError", true));
     CHECK(res.rpc["result"].dump().find("re-attached to the only open SAP session") != std::string::npos);
