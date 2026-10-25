@@ -30,9 +30,7 @@ inline int get_int_property(IDispatch* obj, const char* prop_name) {
         }
 
         _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
+        hr = invoke(obj, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
             spdlog::debug("get_int_property|Invoke failed|prop={}|hr=0x{:08X}", prop_name, hr);
             return 0;

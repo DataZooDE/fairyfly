@@ -1,4 +1,5 @@
 #include "include/com/wrapper.h"
+#include "include/com/invoke.h"
 #include "include/com/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/core.h"
@@ -179,10 +180,8 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 }
 
                 if (SUCCEEDED(ge_hr)) {
-                    DISPPARAMS noargs = {nullptr, nullptr, 0, 0};
                     _variant_t vr;
-                    HRESULT hr_meth = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                                      DISPATCH_METHOD | DISPATCH_PROPERTYGET, &noargs, &vr, nullptr, nullptr);
+                    HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, {}, &vr);
                     if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
                         spdlog::info("Got GuiApplication via SapGui.ScriptingCtrl.1 GetScriptingEngine");
                         sap_gui->Release();

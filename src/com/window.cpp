@@ -1,4 +1,5 @@
 #include "include/com/wrapper.h"
+#include "include/com/invoke.h"
 #include "include/com/wrapper_helpers.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
@@ -100,10 +101,8 @@ void ComGuiWindow::close() {
             throw ComException(fmt::format("Close method not found: 0x{:08X}", hr), hr);
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
         if (FAILED(hr)) {
             throw ComException(fmt::format("Close invoke failed: 0x{:08X}", hr), hr);
         }

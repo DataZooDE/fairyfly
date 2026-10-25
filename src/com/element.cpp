@@ -1,4 +1,5 @@
 #include "include/text/utf8.h"
+#include "include/com/invoke.h"
 #include "include/string_utils.h"
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
@@ -166,11 +167,8 @@ std::string ComGuiElement::get_text() const {
 bool ComGuiElement::explicitly_read_only() const {
     DISPID changeable_id;
     if (FAILED(resolve_dispid(L"Changeable", &changeable_id))) return false;
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
     _variant_t changeable;
-    const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                         DISPATCH_PROPERTYGET, &no_params,
-                                         &changeable, nullptr, nullptr);
+    const HRESULT hr = invoke(dispatch_, changeable_id, DISPATCH_PROPERTYGET, {}, &changeable);
     return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
 }
 
@@ -321,9 +319,7 @@ bool ComGuiElement::is_enabled() const {
 
     // Property exists, get its value
     _variant_t result;
-    DISPPARAMS params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                           &params, &result, nullptr, nullptr);
+    hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYGET, {}, &result);
     if (FAILED(hr)) return true;  // If we can't read it, assume enabled
 
     // Verify variant type before accessing boolVal to avoid undefined behavior
@@ -434,10 +430,8 @@ void ComGuiElement::press() {
             throw ComException("Press method not found on element", hr);
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                            &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
         if (FAILED(hr)) {
             trace.mark_error(fmt::format("Invoke failed: 0x{:08X}", hr));
             throw ComException("Failed to press element", hr);
@@ -723,20 +717,10 @@ std::vector<std::string> ComGuiElement::get_all_node_keys() const {
             return keys;
         }
 
-        DISPPARAMS params = {0};
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
 
-        hr = dispatch_->Invoke(
-            dispid,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_METHOD,
-            &params,
-            result_guard.get(),
-            nullptr,
-            nullptr
-        );
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, result_guard.get());
 
         if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
             // Result is a collection - enumerate it
@@ -749,20 +733,10 @@ std::vector<std::string> ComGuiElement::get_all_node_keys() const {
                 return keys;
             }
 
-            DISPPARAMS count_params = {0};
             VARIANT count_result_var;
             com::VariantGuard count_result_guard(&count_result_var);
 
-            hr = coll->Invoke(
-                count_dispid,
-                IID_NULL,
-                LOCALE_USER_DEFAULT,
-                DISPATCH_PROPERTYGET,
-                &count_params,
-                count_result_guard.get(),
-                nullptr,
-                nullptr
-            );
+            hr = invoke(coll, count_dispid, DISPATCH_PROPERTYGET, {}, count_result_guard.get());
 
             if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
                 int count = count_result_var.lVal;
@@ -939,12 +913,10 @@ std::vector<std::string> ComGuiElement::get_column_order() const {
             return columns;
         }
 
-        DISPPARAMS params = {0};
         VARIANT result_var;
         com::VariantGuard result_guard(&result_var);
 
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                              &params, result_guard.get(), nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYGET, {}, result_guard.get());
 
         if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
             IDispatch* coll = result_var.pdispVal;
@@ -953,12 +925,10 @@ std::vector<std::string> ComGuiElement::get_column_order() const {
             DISPID count_dispid;
             hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
             if (SUCCEEDED(hr)) {
-                DISPPARAMS count_params = {0};
                 VARIANT count_result_var;
                 com::VariantGuard count_result_guard(&count_result_var);
 
-                hr = coll->Invoke(count_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                DISPATCH_PROPERTYGET, &count_params, count_result_guard.get(), nullptr, nullptr);
+                hr = invoke(coll, count_dispid, DISPATCH_PROPERTYGET, {}, count_result_guard.get());
 
                 if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
                     int count = count_result_var.lVal;
@@ -1298,9 +1268,7 @@ void ComGuiElement::select_node(const std::string& node_key) {
         if (FAILED(hr)) {
             throw ComException("UnselectAll method not found - element may not be a tree control", hr);
         }
-        DISPPARAMS no_args{};
-        hr = dispatch_->Invoke(unselect_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &no_args, nullptr, nullptr, nullptr);
+        hr = invoke(dispatch_, unselect_dispid, DISPATCH_METHOD);
         if (FAILED(hr)) {
             throw ComException("Failed to clear earlier tree selections", hr);
         }

@@ -1,4 +1,5 @@
 #include "include/table_data_extractor.h"
+#include "include/com/invoke.h"
 #include <spdlog/spdlog.h>
 #include <map>
 #include <functional>
@@ -256,9 +257,7 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
                 _variant_t count_val;
                 DISPID count_dispid;
                 if (SUCCEEDED(get_dispid_via_typeinfo(cols, L"Count", &count_dispid))) {
-                    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-                    if (SUCCEEDED(cols->Invoke(count_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                              DISPATCH_PROPERTYGET, &no_params, &count_val, nullptr, nullptr))) {
+                    if (SUCCEEDED(invoke(cols, count_dispid, DISPATCH_PROPERTYGET, {}, &count_val))) {
                         col_count = count_val.intVal;
                         SapGuiCollection<ComGuiElement> col_coll(cols);
                         // One enumeration for all columns; a short walk falls back to item(c)

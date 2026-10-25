@@ -1,4 +1,5 @@
 #include "include/com/wrapper.h"
+#include "include/com/invoke.h"
 #include "include/com/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/constants.h"
@@ -273,10 +274,8 @@ std::string ComGuiSession::get_transaction_code() const {
             return "";  // Transaction property not found
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = info->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                         &params, &result, nullptr, nullptr);
+        hr = invoke(info, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
             return "";  // Failed to get Transaction property
         }
@@ -301,10 +300,8 @@ std::string ComGuiSession::get_user() const {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(info, prop_name.GetBSTR(), &dispid);
         if (FAILED(hr)) return "";
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t value;
-        hr = info->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                          &params, &value, nullptr, nullptr);
+        hr = invoke(info, dispid, DISPATCH_PROPERTYGET, {}, &value);
         if (FAILED(hr) || value.vt != VT_BSTR) return "";
         return com::bstr_to_utf8(value.bstrVal);
     } catch (const std::exception&) {
