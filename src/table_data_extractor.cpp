@@ -301,14 +301,9 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
                 std::vector<std::string> row_data;
                 for (int c = 0; c < col_count; ++c) {
                     try {
-                        _variant_t row(r);
-                        _variant_t col(c);
-                        VARIANT args[2] = {col, row}; // reverse order for DISPPARAMS (arg[0]=col, arg[1]=row)
-                        DISPPARAMS params = {args, nullptr, 2, 0};
-                        _variant_t cell_result;
-                        HRESULT hr = element->get_dispatch()->Invoke(
-                            cell_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                            DISPATCH_METHOD, &params, &cell_result, nullptr, nullptr);
+                        _variant_t cell_result;   // GetCell(row, column)
+                        HRESULT hr = invoke(element->get_dispatch(), cell_dispid, DISPATCH_METHOD,
+                                            {_variant_t(r), _variant_t(c)}, &cell_result);
 
                         if (SUCCEEDED(hr) && cell_result.vt == VT_DISPATCH && cell_result.pdispVal) {
                             auto cell_elem = ComGuiElement::create(cell_result.pdispVal);

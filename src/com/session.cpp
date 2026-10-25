@@ -176,13 +176,8 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
             throw ComException("StartTransaction method not found", hr);
         }
 
-        _bstr_t tcode_bstr(tcode.c_str());
-        _variant_t tcode_var(tcode_bstr);
-        DISPPARAMS params = {(VARIANT*)&tcode_var, nullptr, 1, 0};
-        _variant_t result;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        _variant_t result;   // the T-code as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(tcode).c_str())}, &result);
         if (FAILED(hr)) {
             trace.mark_error(fmt::format("StartTransaction invoke failed: 0x{:08X}", hr));
             throw ComException("Failed to start transaction", hr);

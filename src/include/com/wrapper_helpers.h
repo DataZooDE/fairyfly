@@ -59,12 +59,8 @@ inline IDispatchPtr call_method_with_string_dispid(IDispatch* obj, DISPID dispid
     if (!obj) throw ComException("Null object");
 
     try {
-        HRESULT hr;
-        _variant_t param_var(param.c_str());
-        DISPPARAMS disp_params = {(VARIANT*)&param_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                        &disp_params, &result, nullptr, nullptr);
+        _variant_t result;   // the parameter as UTF-8 (it went through the ANSI code page before)
+        const HRESULT hr = invoke(obj, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(param).c_str())}, &result);
         if (FAILED(hr) || result.vt != VT_DISPATCH) return nullptr;
 
         return IDispatchPtr(result.pdispVal);

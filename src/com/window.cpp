@@ -71,11 +71,8 @@ void ComGuiWindow::send_vkey(int vkey) {
             throw ComException(fmt::format("SendVKey method not found: 0x{:08X}", hr), hr);
         }
 
-        _variant_t vkey_var(vkey);
-        DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(vkey)}, &result);
         if (FAILED(hr)) {
             throw ComException(fmt::format("SendVKey invoke failed: 0x{:08X}", hr), hr);
         }
