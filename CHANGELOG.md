@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### MCP: navigation is annotated read-only
+
+- `gui_transaction_start`, `gui_session_attach` and `gui_element_f4` now carry `readOnlyHint: true` (with
+  `destructiveHint: false`, as before). They change no SAP data: they open a transaction's start screen, attach to an
+  open session (saving a local connection file) and open the F4 value help. Gemini Enterprise asks the user to
+  confirm every tool without `readOnlyHint: true`, so it no longer asks before each navigation step; after updating,
+  reload the connector's custom actions in Gemini Enterprise. Annotations are hints for clients only: the read-only
+  guard, token scopes, T-code allowlists and the cloud link's desktop approval are unchanged. `gui_connection_list`
+  (cleanup deletes saved connection files) and `gui_popup_close` (vkey 0 confirms) stay not read-only.
+
 ### Cloud link: approval follow-ups (fairyfly #36)
 
 - "Don't ask again for 5 minutes" covers exactly the assistant it was given for. It was keyed by the assistant's
