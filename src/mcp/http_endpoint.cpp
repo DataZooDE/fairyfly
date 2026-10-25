@@ -1,5 +1,6 @@
 #include "include/mcp/http_endpoint.h"
 
+#include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -30,10 +31,6 @@ HttpResponse json_response(int status, const json& message) {
     return r;
 }
 
-/// Non-RPC failure: {"error_code","message"} (auth, routing, limits).
-HttpResponse plain_error(int status, const std::string& code, const std::string& message) {
-    return json_response(status, json{{"error_code", code}, {"message", message}});
-}
 
 HttpResponse empty_response(int status) {
     HttpResponse r;
@@ -217,6 +214,12 @@ std::string progress_frame(const json& token, double progress, std::optional<dou
 
 } // namespace
 
+HttpResponse http_json_error(int status, std::string_view code, std::string_view message) {
+    HttpResponse r = json_response(status, json{{"error_code", std::string(code)}, {"message", std::string(message)}});
+    r.set_header("Cache-Control", "no-store");
+    return r;
+}
+
 // ---- small public helpers ---------------------------------------------------------------------
 
 bool CaseInsensitiveLess::operator()(const std::string& a, const std::string& b) const {
@@ -305,7 +308,7 @@ std::string format_sse_event(std::string_view event, std::string_view data, std:
 std::string format_sse_comment(std::string_view text) { return ": " + std::string(text) + "\n\n"; }
 
 const std::vector<std::string>& HttpEndpoint::supported_versions() {
-    static const std::vector<std::string> versions = {kStatelessVersion, "2025-11-25", "2025-06-18"};
+    static const std::vector<std::string> versions = http_protocol_versions();
     return versions;
 }
 
@@ -370,23 +373,23 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         (options_.allow_ip_include_loopback || !auth::ip_is_loopback(request.peer_addr)) &&
         !auth::ip_allowed(request.peer_addr, options_.allow_ip)) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "ADDRESS_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "ADDRESS_NOT_ALLOWED",
                                            "this address is not allowed to use this server"));
     }
     // DNS-rebinding defence: it applies to every path and method.
     if (!host_allowed(request.header("Host"))) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "HOST_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "HOST_NOT_ALLOWED",
                                            "Host header not allowed; add it with --allowed-hosts"));
     }
     const std::string origin = request.header("Origin");
     if (!origin.empty() && !origin_allowed(origin)) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "ORIGIN_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "ORIGIN_NOT_ALLOWED",
                                            "Origin not allowed; add it with --cors-origin"));
     }
     if (request.path != options_.path)
-        return finish(request, plain_error(404, "NOT_FOUND", "not found; the MCP endpoint is POST " + options_.path));
+        return finish(request, http_json_error(404, "NOT_FOUND", "not found; the MCP endpoint is POST " + options_.path));
 
     if (request.method == "OPTIONS" && !origin.empty()) {  // CORS preflight of an allowed origin
         HttpResponse r = empty_response(204);
@@ -397,14 +400,14 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         return finish(request, std::move(r));
     }
     if (request.method != "POST") {
-        HttpResponse r = plain_error(405, "METHOD_NOT_ALLOWED", "only POST " + options_.path + " is supported");
+        HttpResponse r = http_json_error(405, "METHOD_NOT_ALLOWED", "only POST " + options_.path + " is supported");
         r.set_header("Allow", "POST");
         return finish(request, std::move(r));
     }
     std::string content_type = utils::lower_ascii(utils::trim(request.header("Content-Type")));
     content_type = utils::trim(content_type.substr(0, content_type.find(';')));
     if (content_type != "application/json")
-        return finish(request, plain_error(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json"));
+        return finish(request, http_json_error(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json"));
 
     const std::string length = utils::trim(request.header("Content-Length"));
     bool too_big = request.body.size() > options_.max_body_bytes;
@@ -414,7 +417,7 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         } catch (...) { too_big = true; }
     }
     if (too_big)
-        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+        return finish(request, http_json_error(413, "PAYLOAD_TOO_LARGE",
                                            "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return std::nullopt;
 }
@@ -446,11 +449,11 @@ HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) 
     if (!outcome.ok) {
         ++calls_denied_;
         const int status = outcome.http_status >= 400 ? outcome.http_status : 401;
-        HttpResponse r = plain_error(status, outcome.error_code.empty() ? "AUTH_REQUIRED" : outcome.error_code,
+        HttpResponse r = http_json_error(status, outcome.error_code.empty() ? "AUTH_REQUIRED" : outcome.error_code,
                                      outcome.message.empty() ? "authentication required" : outcome.message);
         if (status == 401)
             r.set_header("WWW-Authenticate",
-                         outcome.www_authenticate.empty() ? "Bearer realm=\"fairyfly\"" : outcome.www_authenticate);
+                         outcome.www_authenticate.empty() ? std::string(kBearerChallenge) : outcome.www_authenticate);
         else if (!outcome.www_authenticate.empty())
             r.set_header("WWW-Authenticate", outcome.www_authenticate);
         out.rejection = finish(request, std::move(r));
@@ -463,7 +466,7 @@ HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) 
 
 HttpResponse HttpEndpoint::handle_authenticated(const HttpRequest& request, const Principal& principal) {
     if (request.body.size() > options_.max_body_bytes)
-        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+        return finish(request, http_json_error(413, "PAYLOAD_TOO_LARGE",
                                            "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return finish(request, dispatch(request, principal));
 }

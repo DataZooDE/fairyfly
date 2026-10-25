@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### One definition for shared constants and command-line quoting (2026-10-25 code review)
+
+- The default ports (8383, 8443), the protocol versions (one table that says which are spoken over stdio and over
+  HTTP), the bearer challenge and the `ffy_` token prefix are each defined once (`mcp/constants.h`,
+  `auth/token_store.h`); help texts and the server banner are built from them.
+- Windows command-line quoting is one header (`text/command_line.h`) for the SAP shortcut launcher, the tray and
+  fairyfly-tray.exe, tested against `CommandLineToArgvW`.
+- HTTP failures outside JSON-RPC are built by one function: the transport's ones are now JSON-escaped, and every
+  one carries `Cache-Control: no-store`.
+
 ### One way to build an error result (2026-10-25 code review)
 
 - `Result::fail(code, message[, suggestions])` and `Result::set_error(...)` replace about 230 hand-built error

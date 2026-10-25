@@ -40,6 +40,8 @@ add_executable(unit_tests
     unit/test_core_result.cpp
     unit/test_string_utils.cpp
     unit/test_text_utf8.cpp
+    unit/test_command_line.cpp
+    unit/test_constants.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp

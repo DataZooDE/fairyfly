@@ -1,5 +1,6 @@
 // http.sys (HTTP Server API v2) adapter around the pure HttpEndpoint. Request/response mapping lives in
 // http_sys_mapping.cpp; this file owns the kernel objects, the receive workers, body/SSE I/O and the lifecycle.
+#include "include/mcp/constants.h"
 #include "include/mcp/http_sys_mapping.h"  // winsock2, ws2tcpip, windows, http (in that order)
 #include "include/mcp/http_server.h"
 
@@ -110,15 +111,6 @@ ULONG send_response(const Conn& c, const HttpResponse& r, bool disconnect, bool 
     if (more_data) flags |= HTTP_SEND_RESPONSE_FLAG_MORE_DATA;
     ULONG sent = 0;
     return ::HttpSendHttpResponse(c.queue, c.id, flags, &resp, nullptr, &sent, nullptr, 0, nullptr, nullptr);
-}
-
-HttpResponse json_error(int status, const char* code, const char* message) {
-    HttpResponse r;
-    r.status = status;
-    r.body = std::string("{\"error_code\":\"") + code + "\",\"message\":\"" + message + "\"}";
-    r.set_header("Content-Type", "application/json");
-    r.set_header("Cache-Control", "no-store");
-    return r;
 }
 
 /// SseSink over http.sys entity-body sends. connected() uses one overlapped HttpWaitForDisconnectEx.
@@ -353,7 +345,7 @@ void McpHttpServer::Impl::handle_request(const HTTP_REQUEST& req) {
         const ContentLength length = parse_content_length(request.header("Content-Length"));
         if (length.present && !length.valid) {
             responded = true;
-            send_response(conn, json_error(400, "BAD_REQUEST", "invalid Content-Length"), true, false, false);
+            send_response(conn, http_json_error(400, "BAD_REQUEST", "invalid Content-Length"), true, false, false);
             return;
         }
         HttpEndpoint::PreAuth pre = endpoint.preauthenticate(request);
@@ -368,13 +360,13 @@ void McpHttpServer::Impl::handle_request(const HTTP_REQUEST& req) {
             if (result != BodyResult::Ok) {
                 responded = true;
                 if (result == BodyResult::TooLarge)
-                    send_response(conn, json_error(413, "PAYLOAD_TOO_LARGE", "request body too large"), true, false, false);
+                    send_response(conn, http_json_error(413, "PAYLOAD_TOO_LARGE", "request body too large"), true, false, false);
                 else if (result == BodyResult::Slow)
-                    send_response(conn, json_error(408, "REQUEST_TIMEOUT", "request body took too long"), true, false, false);
+                    send_response(conn, http_json_error(408, "REQUEST_TIMEOUT", "request body took too long"), true, false, false);
                 else if (result == BodyResult::Busy)
-                    send_response(conn, json_error(503, "BUSY", "too many uploads in progress, retry shortly"), true, false, false);
+                    send_response(conn, http_json_error(503, "BUSY", "too many uploads in progress, retry shortly"), true, false, false);
                 else
-                    send_response(conn, json_error(400, "BAD_REQUEST", "request body could not be read"), true, false, false);
+                    send_response(conn, http_json_error(400, "BAD_REQUEST", "request body could not be read"), true, false, false);
                 return;
             }
             request.body = std::move(body);
@@ -417,7 +409,7 @@ void McpHttpServer::Impl::handle_request(const HTTP_REQUEST& req) {
         }
     } catch (const std::exception& e) {
         spdlog::error("HTTP handler failed: {}", e.what());
-        if (!responded) send_response(conn, json_error(500, "INTERNAL_ERROR", "internal error"), true, false, false);
+        if (!responded) send_response(conn, http_json_error(500, "INTERNAL_ERROR", "internal error"), true, false, false);
     }
 }
 
@@ -626,7 +618,11 @@ std::vector<std::string> McpHttpServer::posture_lines() const {
     std::string origins;
     for (const auto& o : config_.endpoint.cors_origins) origins += (origins.empty() ? "" : ", ") + o;
     lines.push_back("  cors origins:   " + (origins.empty() ? std::string("none (no CORS headers; requests with an Origin are rejected)") : origins));
-    lines.push_back("  protocol eras:  stateless 2026-07-28 (server/discover, _meta); legacy 2025-11-25, 2025-06-18 (no Mcp-Session-Id)");
+    std::string legacy;
+    for (const auto& v : http_protocol_versions())
+        if (v != kStatelessVersion) legacy += (legacy.empty() ? "" : ", ") + v;
+    lines.push_back(std::string("  protocol eras:  stateless ") + kStatelessVersion + " (server/discover, _meta); legacy " + legacy +
+                    " (no Mcp-Session-Id)");
     if (!loopback)
         lines.push_back("  WARNING: listening on non-loopback address '" + config_.host +
                         "': reachable from the network: " + (config_.tls ? "TLS on, " : "plain HTTP, ") + "tokens required" +

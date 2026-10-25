@@ -1,4 +1,5 @@
 #include "include/auth/ip.h"
+#include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include "include/config/mcp_config.h"
 
@@ -56,7 +57,7 @@ std::vector<KeySpec> build_specs() {
     k = make("server.host", ValueType::String, Value{std::string("127.0.0.1")},
              "URL prefix host: 127.0.0.1 (default, loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
     add(k);
-    k = make("server.port", ValueType::Int, Value{8383LL}, "Listen port of the HTTP transport");
+    k = make("server.port", ValueType::Int, Value{static_cast<long long>(mcp::kDefaultHttpPort)}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
     add(k);
     k = make("server.transport", ValueType::String, Value{std::string("stdio")}, "stdio (default) or http");

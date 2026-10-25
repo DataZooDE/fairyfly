@@ -16,6 +16,7 @@
 //
 // It links nothing of fairyfly's own; the window class and message names match src/tray/tray_win32.cpp.
 #include <windows.h>
+#include "include/text/command_line.h"
 #include <shellapi.h>
 
 #include <string>
@@ -41,29 +42,6 @@ std::wstring module_dir() {
     return slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
 }
 
-/// CommandLineToArgvW quoting of one argument.
-std::wstring quote(const std::wstring& arg) {
-    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
-    std::wstring out = L"\"";
-    size_t backslashes = 0;
-    for (wchar_t c : arg) {
-        if (c == L'\\') {
-            ++backslashes;
-        } else if (c == L'"') {
-            out.append(backslashes * 2 + 1, L'\\');
-            out += c;
-            backslashes = 0;
-        } else {
-            out.append(backslashes, L'\\');
-            out += c;
-            backslashes = 0;
-        }
-    }
-    out.append(backslashes * 2, L'\\');
-    out += L'"';
-    return out;
-}
-
 std::vector<std::wstring> arguments() {
     std::vector<std::wstring> out;
     int argc = 0;
@@ -83,8 +61,7 @@ int start(const std::wstring& dir, std::vector<std::wstring> args) {
         error_box(L"fairyfly.exe was not found next to fairyfly-tray.exe:\n" + exe + L"\n\nInstall fairyfly again.");
         return 2;
     }
-    std::wstring command = quote(exe);
-    for (const auto& a : args) command += L" " + quote(a);
+    std::wstring command = fairyfly::text::join_command_line<wchar_t>(exe, args);
     // the tray child (no relaunch, a dialog for startup errors) that this program started (Start with Windows default)
     SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", L"1");
     SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", L"1");

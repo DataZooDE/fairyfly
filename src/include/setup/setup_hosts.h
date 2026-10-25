@@ -6,6 +6,7 @@
 // New-SelfSignedCertificate, certificate removal and the firewall).
 
 #include <cstdint>
+#include "include/mcp/constants.h"
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -22,8 +23,8 @@ namespace fairyfly::setup {
 /// belongs to somebody else and is never replaced without --force-binding.
 inline constexpr const char* kAppId = "{8e2b5c3a-4d17-4f6a-b9c0-7a1d3e5f2b64}";
 inline constexpr const char* kCertStore = "MY";
-inline constexpr int kDefaultTlsPort = 8443;
-inline constexpr int kDefaultNoTlsPort = 8383;
+inline constexpr int kDefaultTlsPort = mcp::kDefaultTlsPort;
+inline constexpr int kDefaultNoTlsPort = mcp::kDefaultHttpPort;
 inline constexpr int kSelfSignedDays = 730;
 inline constexpr int kExpiryWarnDays = 30;
 

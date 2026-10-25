@@ -1,4 +1,5 @@
 #include "include/config/environment.h"
+#include "include/text/command_line.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -13,33 +14,10 @@ RunnerFactory& runner_factory() {
     return factory;
 }
 
-// ---- Command-line builders ---------------------------------------------------------------------
-std::string quote_arg(const std::string& arg) {
-    if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string::npos) return arg;
-    std::string out = "\"";
-    size_t backslashes = 0;
-    for (char c : arg) {
-        if (c == '\\') {
-            ++backslashes;
-        } else if (c == '"') {
-            out.append(backslashes * 2 + 1, '\\');
-            out += '"';
-            backslashes = 0;
-        } else {
-            out.append(backslashes, '\\');
-            out += c;
-            backslashes = 0;
-        }
-    }
-    out.append(backslashes * 2, '\\');
-    out += '"';
-    return out;
-}
-
+// ---- Command-line builders (text/command_line.h) -----------------------------------------------
+std::string quote_arg(const std::string& arg) { return text::quote_argument<char>(arg); }
 std::string join_command_line(const std::string& exe, const std::vector<std::string>& args) {
-    std::string out = quote_arg(exe);
-    for (const auto& a : args) out += " " + quote_arg(a);
-    return out;
+    return text::join_command_line<char>(exe, args);
 }
 
 RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string>& args, bool tray_requested,

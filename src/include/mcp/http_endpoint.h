@@ -62,6 +62,9 @@ struct HttpResponse {
     std::string header(const std::string& name) const;
 };
 
+/// A non-RPC failure ({"error_code", "message"}: auth, routing, limits, transport), JSON-escaped, Cache-Control: no-store.
+HttpResponse http_json_error(int status, std::string_view code, std::string_view message);
+
 /// SSE frame formatting (pure). `data` may contain newlines (one "data:" line each).
 std::string format_sse_event(std::string_view event, std::string_view data, std::string_view id = {});
 std::string format_sse_comment(std::string_view text);

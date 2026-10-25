@@ -1,4 +1,5 @@
 #include "include/connection_launcher.h"
+#include "include/text/command_line.h"
 #include "include/constants.h"
 #include "include/com/wrapper.h"
 #include "include/com/utf8.h"
@@ -56,35 +57,14 @@ ConnectionLauncher::ConnectionLauncher(ComGuiApplicationPtr app,
     }
 }
 
-std::wstring ConnectionLauncher::quote_windows_argument(const std::wstring& value) {
-    std::wstring quoted = L"\"";
-    size_t backslashes = 0;
-    for (wchar_t character : value) {
-        if (character == L'\\') {
-            ++backslashes;
-        } else if (character == L'"') {
-            quoted.append(backslashes * 2 + 1, L'\\');
-            quoted.push_back(L'"');
-            backslashes = 0;
-        } else {
-            quoted.append(backslashes, L'\\');
-            quoted.push_back(character);
-            backslashes = 0;
-        }
-    }
-    quoted.append(backslashes * 2, L'\\');
-    quoted.push_back(L'"');
-    return quoted;
-}
-
 std::wstring ConnectionLauncher::sapshcut_command_line(
     const std::wstring& executable_path, const std::string& connection_name) {
     const auto name = com::utf8_to_wide(connection_name);
     // sapshcut parses switches itself and treats a fully quoted switch as a
     // shortcut filename. Quote only the value when Windows parsing requires it.
     const bool needs_quotes = name.find_first_of(L" \t\r\n\"") != std::wstring::npos;
-    return quote_windows_argument(executable_path) + L" -sysname=" +
-        (needs_quotes ? quote_windows_argument(name) : name) + L" -maxgui";
+    return text::quote_argument_always<wchar_t>(executable_path) + L" -sysname=" +
+        (needs_quotes ? text::quote_argument_always<wchar_t>(name) : name) + L" -maxgui";
 }
 
 bool ConnectionLauncher::launch_sapshcut(const std::string& connection_name) {
