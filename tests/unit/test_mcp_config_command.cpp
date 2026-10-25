@@ -13,6 +13,7 @@
 
 #include "include/cli_entry.h"
 #include "include/config/environment.h"
+#include "include/tray/mcp_tray.h"
 #include "include/text/utf8.h"
 #include "support/env_guard.h"
 #include "support/temp_dir.h"
@@ -107,4 +108,11 @@ TEST_CASE("mcp config show reports the effective values: a flag over the file", 
     CHECK(from_file["data"]["values"].dump().find("9555") != std::string::npos);
     const json from_flag = parsed(cli({"mcp", "--port", "9666", "config", "show", "--output", "json"}));
     CHECK(from_flag["data"]["values"].dump().find("9666") != std::string::npos);
+}
+
+TEST_CASE("an mcp command leaves no tray runner factory behind", "[mcp][config][command]") {
+    // the factory captured run_cli's locals by reference: after run_cli returned it dangled, and a later test saw it
+    ConfigFile cfg;
+    REQUIRE(cli({"mcp", "config", "path", "--output", "json"}).exit_code == 0);
+    CHECK_FALSE(static_cast<bool>(fairyfly::tray::runner_factory()));
 }
