@@ -10,7 +10,11 @@ namespace ffy::link {
 // What the person at the desktop is asked. The link agent builds it from the call it is about to run (never from text
 // the gateway sends), after the assertion and the grants are verified. Nothing in it is a field value or screen content.
 struct ApprovalPrompt {
-    std::string client;              // the AI client asking (assertion "client", at most 24 characters; "unknown client")
+    std::string client;              // the AI client asking, for display (assertion "client", at most 24 characters; "unknown client")
+    // The whole assertion "client" ("unknown client" when there is none). What an Approver that remembers a yes keys
+    // it by: `client` is cut to 24 characters, so "https://claude.ai/oauth/claude-code-client-metadata" and every other
+    // client starting with "https://claude.ai/oauth/" would share it (review of fairyfly #34).
+    std::string client_id;
     std::string user;                // the account it acts for (assertion "sub")
     std::string tool;                // the tool called ("gui_batch" for a batch)
     std::string summary;             // approval::summarize: every step, its target and field names, never a value

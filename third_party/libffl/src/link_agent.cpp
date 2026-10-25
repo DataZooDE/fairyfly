@@ -119,7 +119,8 @@ ApprovalResult Agent::approved(const assertion::Claims& c, const std::string& to
         if (i != approved_until_.end() && now_unix() < i->second) return {true, approval_reason::kRemembered};
     }
     ApprovalPrompt p;
-    p.client = c.client.empty() ? "unknown client" : c.client.substr(0, 24);
+    p.client_id = c.client.empty() ? "unknown client" : c.client;
+    p.client = p.client_id.substr(0, 24);  // for display only; a remembered yes is keyed by client_id
     p.user = c.sub;
     p.tool = tool;
     p.summary = approval::summarize(tool, args).value_or(tool);  // serve() refused what does not fit
@@ -215,8 +216,9 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
         for (auto& t : checked.tools)
             if (auto i = local_.find(t); i == local_.end() || i->second.destructive) step_changes = true;
     }
-    // A single call: its annotation, a fill, or what the guard would refuse (gui_popup_close is annotated as no change,
-    // but Enter on a popup confirms it) - the same rule as for a batch step.
+    // A single call: its annotation, a fill, or what the guard would refuse - the same rule as for a batch step. So
+    // gui_popup_close (annotated as no change in fairyfly's catalog) asks only for a key that confirms the popup
+    // (Enter: "Really delete? Yes"), never for F12 / Shift+F3 / F3, which cancel it (policy::read_only_refuses).
     const bool change = checked.writes || checked.read_only_refused || (tool == "gui_batch" ? step_changes : lt.destructive);
     ApprovalResult r;
     bool asked = false;
