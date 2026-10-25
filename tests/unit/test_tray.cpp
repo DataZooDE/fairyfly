@@ -1449,3 +1449,14 @@ TEST_CASE("tray menus: both trays show the running version, greyed out, above Ch
         CHECK_FALSE(m.items[size_t(at - labels.begin())].enabled);
     }
 }
+
+TEST_CASE("tray menu entries: one builder for both trays", "[tray][menu]") {
+    const MenuItem version = version_item();
+    CHECK(version.label == kVersionItem);
+    CHECK_FALSE(version.enabled);
+    CHECK(version.action == TrayAction::None);
+    CHECK(separator().separator);
+    const MenuItem quit = item("Quit", TrayAction::Quit);
+    CHECK(quit.enabled);
+    CHECK(quit.action == TrayAction::Quit);
+}

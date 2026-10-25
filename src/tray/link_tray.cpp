@@ -4,28 +4,10 @@
 #include <spdlog/spdlog.h>
 
 #include "include/tray/tray.h"
-#include "include/version.h"
 
 namespace fairyfly::tray {
 
 namespace {
-
-MenuItem item(std::string label, TrayAction action, bool enabled = true) {
-    MenuItem m;
-    m.label = std::move(label);
-    m.action = action;
-    m.enabled = enabled;
-    return m;
-}
-
-MenuItem separator() {
-    MenuItem m;
-    m.separator = true;
-    return m;
-}
-
-// the running version, so the person can tell which fairyfly answers (greyed out, above "Check for updates")
-MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
 
 std::string who(const LinkView& link) { return link.organisation + " (" + link.account + ")"; }
 

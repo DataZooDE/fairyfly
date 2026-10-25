@@ -3,9 +3,7 @@
 
 namespace fairyfly::tray {
 
-namespace {
-
-MenuItem item(std::string label, TrayAction action, bool enabled = true) {
+MenuItem item(std::string label, TrayAction action, bool enabled) {
     MenuItem m;
     m.label = std::move(label);
     m.action = action;
@@ -19,8 +17,9 @@ MenuItem separator() {
     return m;
 }
 
-// the running version, so the person can tell which fairyfly answers (greyed out, above "Check for updates")
 MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
+
+namespace {
 
 std::string mode_text(const mcp::ServerStatus& status) { return status.read_only ? "read-only" : "write mode"; }
 

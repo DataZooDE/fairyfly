@@ -99,6 +99,12 @@ struct MenuItem {
     std::vector<MenuItem> children;   ///< non-empty: a submenu
 };
 
+/// The menu entries both trays build from.
+MenuItem item(std::string label, TrayAction action, bool enabled = true);
+MenuItem separator();
+/// "fairyfly <version>", greyed out above "Check for updates": which fairyfly answers.
+MenuItem version_item();
+
 struct TrayMenuModel {
     std::vector<MenuItem> items;
     IconState icon = IconState::Stopped;
