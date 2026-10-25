@@ -231,14 +231,15 @@ public:
     virtual bool set_paused(bool paused) = 0;   ///< `fairyfly link pause|resume`; a running link follows within a second
 };
 
-/// The running link's write mode (the link tray only; in the same process as `link run`).
+/// "Allow changes in SAP" of the link tray: the standing approval at this desktop (approval::Standing). On: the
+/// cloud's changes run without asking; off: every change asks at this desktop. Saved for the user.
 class LinkWriteMode {
 public:
     virtual ~LinkWriteMode() = default;
-    virtual bool allowed() = 0;   ///< changes in SAP are allowed (write mode)
-    virtual bool locked() = 0;    ///< --read-only / FAIRYFLY_READ_ONLY: write mode cannot be turned on
-    /// Asks the link to switch; it applies between calls and reconnects so the gateway sees the new tools.
-    virtual bool set_allowed(bool allowed) = 0;
+    virtual bool allowed() = 0;   ///< the switch is on
+    virtual bool locked() = 0;    ///< --read-only / FAIRYFLY_READ_ONLY: no change can run here, the switch is off
+    virtual bool enforced() { return false; }   ///< the organisation requires approval: the switch is off
+    virtual bool set_allowed(bool allowed) = 0;   ///< false: it could not be switched (or saved)
 };
 
 class Clipboard {
@@ -411,11 +412,12 @@ struct McpTrayView {
     bool running = false;     ///< its single-instance guard is held: the item is checked and disabled
 };
 
-/// Write mode of the link as the menu shows it.
+/// "Allow changes in SAP" as the menu shows it.
 struct LinkWritesView {
-    bool available = false;   ///< false: no write-mode switch (the item is not shown)
+    bool available = false;   ///< false: no switch (the item is not shown)
     bool allowed = false;
-    bool locked = false;
+    bool locked = false;      ///< --read-only / FAIRYFLY_READ_ONLY
+    bool enforced = false;    ///< the organisation requires approval
 };
 
 /// "Start with Windows" as the menu shows it.

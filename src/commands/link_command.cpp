@@ -35,17 +35,18 @@ Example: fairyfly link status
     run_cmd_ = add_leaf(app, {"link", "run"});
     run_cmd_->footer(R"HELP(Usage notes:
 Connects to the gateway (outbound WebSocket) and serves the AI assistant's tool calls through
-fairyfly's own MCP dispatcher. Read-only unless --allow-write; even then every change needs the
-gateway's grant and an approval at this desktop (a notification: Approve, Deny or Details; no
-answer in 45 s, a locked screen or no interactive session deny it). Calls are audited with
-audit_source "link". Stop with Ctrl+C.
+fairyfly's own MCP dispatcher. Every change needs the gateway's grant and an approval at this
+desktop (a notification: Approve, Deny or Details; no answer in 45 s, a locked screen or no
+interactive session deny it), unless "Allow changes in SAP" is on in the link tray: then changes
+run without asking. --read-only refuses every change. Calls are audited with audit_source "link".
+Stop with Ctrl+C.
 --tray runs the link alone in the system tray (Pause/Resume, Allow changes in SAP, Health check,
 Quit); it needs no
 MCP server and no HTTP endpoint. --install-autostart registers it, with the same options, at logon.
 Example: fairyfly link run
 Example: fairyfly link run --tray --install-autostart
 )HELP");
-    run_cmd_->add_flag("--allow-write", options_.allow_write, "Allow changes in SAP (each still needs a grant and an approval)");
+    run_cmd_->add_flag("--allow-write", options_.allow_write, "No effect: changes are possible, each approved at this desktop (kept for old command lines)");
     run_cmd_->add_option("--tools", tools_filter_, "Only these tool families, e.g. session,screen");
     run_cmd_->add_option("--approve", options_.approve, "Approval of changes: desktop (notification and approval window) | no (every change is denied)")
         ->check(CLI::IsMember({"desktop", "no"}));

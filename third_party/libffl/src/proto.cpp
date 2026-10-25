@@ -25,6 +25,7 @@ std::string Frame::dump() const {
     if (!caps.empty()) j["caps"] = caps;
     if (!trail.is_null()) j["trail"] = trail;
     if (!step.is_null()) j["step"] = step;
+    if (!policy.is_null()) j["policy"] = policy;
     put("data", data);
     put("approval", approval);
     if (t == TShot) {
@@ -57,6 +58,7 @@ std::optional<Frame> Frame::parse(const std::string& text) {
             if (c.is_string() && f.caps.size() < 16) f.caps.push_back(c);
     if (j.contains("trail")) f.trail = j["trail"];
     if (j.contains("step")) f.step = j["step"];
+    if (j.contains("policy")) f.policy = j["policy"];
     f.data = s("data");
     f.approval = s("approval");
     if (j.contains("seq") && j["seq"].is_number_integer()) f.seq = j["seq"];
@@ -76,6 +78,14 @@ TrailPolicy TrailPolicy::from_json(const nlohmann::json& j) {
     if (j.contains("mode") && j["mode"].is_string() && (j["mode"] == "every" || j["mode"] == "changes")) p.mode = j["mode"];
     if (j.contains("retention_days") && j["retention_days"].is_number_integer()) p.retention_days = j["retention_days"];
     if (j.contains("blur") && j["blur"].is_boolean()) p.blur = j["blur"];
+    return p;
+}
+
+nlohmann::json LinkPolicy::to_json() const { return {{"v", 1}, {"approval_enforced", approval_enforced}}; }
+
+LinkPolicy LinkPolicy::from_json(const nlohmann::json& j) {
+    LinkPolicy p;
+    if (j.is_object() && j.contains("approval_enforced") && j["approval_enforced"].is_boolean()) p.approval_enforced = j["approval_enforced"];
     return p;
 }
 
