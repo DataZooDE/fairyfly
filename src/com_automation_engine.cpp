@@ -872,37 +872,10 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
 
         if (!elem) {
             if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
-            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
-            result.error["element"] = resolved_element.path;
-
-            // Check if window mismatch (element path specifies different window than active)
-            WindowId requested_window = resolved_element.get_window();
-            WindowId active_window = get_active_window_id();
-            bool window_mismatch = !window_ids_match(requested_window, active_window);
-
-            json suggestions = json::array({
-                "Verify element path is correct",
-                "Run 'screen read' to see available elements",
-                "Check if screen is fully loaded"
-            });
-
-            if (window_mismatch) {
-                result.error["window_mismatch"] = true;
-                result.error["requested_window"] = requested_window.id;
-                result.error["active_window"] = active_window.id;
-                suggestions.push_back(
-                    "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
-                );
-                suggestions.push_back(
-                    "Try: fairyfly element click " + active_window.id + "/" + resolved_element.get_element_path()
-                );
-                suggestions.push_back(
-                    "Or use: fairyfly element click @active/" + resolved_element.get_element_path()
-                );
-            }
-
-            result.error["suggestions"] = suggestions;
-            spdlog::warn("Element not found: {}|window_mismatch={}", resolved_element.path, window_mismatch);
+            const std::string active_window = get_active_window_id().id;
+            set_element_not_found(result, resolved_element, active_window, "element click");
+            spdlog::warn("Element not found: {}|window_mismatch={}", resolved_element.path,
+                         result.error.contains("window_mismatch"));
             return result;
         }
 
@@ -1028,13 +1001,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         auto elem = find_element_if_present(session, resolved_element.path);
 
         if (!elem) {
-            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
-            result.error["element"] = resolved_element.path;
-            result.error["suggestions"] = json::array({
-                "Verify element path is correct",
-                "Run 'screen read' to see available elements",
-                "Check if screen is fully loaded"
-            });
+            set_element_not_found(result, resolved_element, "", "");  // F4: no window analysis
             spdlog::warn("Element not found: {}", resolved_element.path);
             return result;
         }
@@ -1208,37 +1175,10 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
 
         if (!elem) {
             if (auto inactive = inactive_tab_error(session, resolved_element.path, false)) return *inactive;
-            result.set_error("ELEMENT_NOT_FOUND", "Element not found at path: " + resolved_element.path);
-            result.error["element"] = resolved_element.path;
-
-            // Check if window mismatch
-            WindowId requested_window = resolved_element.get_window();
-            WindowId active_window = get_active_window_id();
-            bool window_mismatch = !window_ids_match(requested_window, active_window);
-
-            json suggestions = json::array({
-                "Verify element path is correct",
-                "Run 'screen read' to see available elements",
-                "Check if screen is fully loaded"
-            });
-
-            if (window_mismatch) {
-                result.error["window_mismatch"] = true;
-                result.error["requested_window"] = requested_window.id;
-                result.error["active_window"] = active_window.id;
-                suggestions.push_back(
-                    "Active window is " + active_window.id + ", not " + requested_window.id + " - did a popup open?"
-                );
-                suggestions.push_back(
-                    "Try: fairyfly element fill " + active_window.id + "/" + resolved_element.get_element_path() + " \"<value>\""
-                );
-                suggestions.push_back(
-                    "Or use: fairyfly element fill @active/" + resolved_element.get_element_path() + " \"<value>\""
-                );
-            }
-
-            result.error["suggestions"] = suggestions;
-            spdlog::warn("Element not found: {}|window_mismatch={}", resolved_element.path, window_mismatch);
+            const std::string active_window = get_active_window_id().id;
+            set_element_not_found(result, resolved_element, active_window, "element fill", " \"<value>\"");
+            spdlog::warn("Element not found: {}|window_mismatch={}", resolved_element.path,
+                         result.error.contains("window_mismatch"));
             return result;
         }
 
