@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <string>
 #include <vector>
+
+#include "include/text/utf8.h"
 
 namespace fairyfly {
 namespace sap {
@@ -30,13 +33,22 @@ private:
     DISPPARAMS params_{};
 };
 
-/// IDispatch::Invoke of `dispid` with `args` in reading order. `result` (optional) receives the answer. E_POINTER
-/// without an object. Never throws.
+/// IDispatch::Invoke of `dispid` with `args` in reading order. `result` (optional) receives the answer, `excepinfo`
+/// and `argerr` (optional) the server's error details. E_POINTER without an object. Never throws.
 inline HRESULT invoke(IDispatch* obj, DISPID dispid, WORD flags, std::initializer_list<_variant_t> args = {},
-                      VARIANT* result = nullptr) {
+                      VARIANT* result = nullptr, EXCEPINFO* excepinfo = nullptr, UINT* argerr = nullptr) {
     if (!obj) return E_POINTER;
     DispArgs params(flags, args);
-    return obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, flags, params.get(), result, nullptr, nullptr);
+    return obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, flags, params.get(), result, excepinfo, argerr);
+}
+
+/// A BSTR argument from UTF-8 with its exact length (embedded NULs stay). Throws on invalid UTF-8 (strict).
+inline _variant_t bstr_arg(const std::string& utf8) {
+    const std::wstring wide = text::utf8_to_wide(utf8);
+    _variant_t value;
+    value.vt = VT_BSTR;
+    value.bstrVal = SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
+    return value;
 }
 
 } // namespace sap

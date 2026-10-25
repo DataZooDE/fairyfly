@@ -20,15 +20,6 @@ namespace fairyfly {
 namespace sap {
 
 namespace {
-/// A BSTR argument from UTF-8 with its exact length (embedded NULs stay).
-_variant_t bstr_arg(const std::string& utf8) {
-    const std::wstring wide = com::utf8_to_wide(utf8);
-    _variant_t value;
-    value.vt = VT_BSTR;
-    value.bstrVal = SysAllocStringLen(wide.data(), static_cast<UINT>(wide.size()));
-    return value;
-}
-
 /// A toolbar's by-position answer that is a string ("" when the call fails or answers something else).
 std::string text_result(HRESULT hr, const _variant_t& result) {
     return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : std::string();

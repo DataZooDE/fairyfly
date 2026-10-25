@@ -298,48 +298,13 @@ ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connec
         return nullptr;
     }
 
-    // Arguments in reverse order for IDispatch::Invoke:
-    // [0] = Raise (VARIANT_BOOL)
-    // [1] = Sync (VARIANT_BOOL)
-    // [2] = Description (BSTR)
-    VARIANT args[3];
-    VariantInit(&args[0]);
-    VariantInit(&args[1]);
-    VariantInit(&args[2]);
-
-    args[0].vt = VT_BOOL;
-    args[0].boolVal = raise_error ? VARIANT_TRUE : VARIANT_FALSE;
-
-    args[1].vt = VT_BOOL;
-    args[1].boolVal = sync ? VARIANT_TRUE : VARIANT_FALSE;
-
-    args[2].vt = VT_BSTR;
-    const auto wide_name = com::utf8_to_wide(connection_name);
-    args[2].bstrVal = SysAllocStringLen(wide_name.data(), static_cast<UINT>(wide_name.size()));
-
-    DISPPARAMS params;
-    params.rgvarg = args;
-    params.rgdispidNamedArgs = nullptr;
-    params.cArgs = 3;
-    params.cNamedArgs = 0;
-
+    // (Description, Sync, Raise)
     _variant_t result;
     EXCEPINFO excepinfo;
     memset(&excepinfo, 0, sizeof(excepinfo));
     UINT argerr = 0;
-
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &params,
-        &result,
-        &excepinfo,
-        &argerr
-    );
-
-    VariantClear(&args[2]);
+    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(connection_name), _variant_t(sync), _variant_t(raise_error)},
+                &result, &excepinfo, &argerr);
 
     if (FAILED(hr)) {
         std::string err_detail = "";
@@ -385,48 +350,13 @@ ComGuiConnectionPtr ComGuiApplication::open_connection_by_connection_string(cons
         return nullptr;
     }
 
-    // Arguments in reverse order for IDispatch::Invoke:
-    // [0] = Raise (VARIANT_BOOL)
-    // [1] = Sync (VARIANT_BOOL)
-    // [2] = ConnectString (BSTR)
-    VARIANT args[3];
-    VariantInit(&args[0]);
-    VariantInit(&args[1]);
-    VariantInit(&args[2]);
-
-    args[0].vt = VT_BOOL;
-    args[0].boolVal = raise_error ? VARIANT_TRUE : VARIANT_FALSE;
-
-    args[1].vt = VT_BOOL;
-    args[1].boolVal = sync ? VARIANT_TRUE : VARIANT_FALSE;
-
-    args[2].vt = VT_BSTR;
-    const auto wide_connection = com::utf8_to_wide(connection_string);
-    args[2].bstrVal = SysAllocStringLen(wide_connection.data(), static_cast<UINT>(wide_connection.size()));
-
-    DISPPARAMS params;
-    params.rgvarg = args;
-    params.rgdispidNamedArgs = nullptr;
-    params.cArgs = 3;
-    params.cNamedArgs = 0;
-
+    // (ConnectString, Sync, Raise)
     _variant_t result;
     EXCEPINFO excepinfo;
     memset(&excepinfo, 0, sizeof(excepinfo));
     UINT argerr = 0;
-
-    hr = dispatch_->Invoke(
-        dispid,
-        IID_NULL,
-        LOCALE_USER_DEFAULT,
-        DISPATCH_METHOD,
-        &params,
-        &result,
-        &excepinfo,
-        &argerr
-    );
-
-    VariantClear(&args[2]);
+    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(connection_string), _variant_t(sync), _variant_t(raise_error)},
+                &result, &excepinfo, &argerr);
 
     if (FAILED(hr)) {
         std::string err_detail = "";
