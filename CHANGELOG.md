@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Cloud link: approval follow-ups (fairyfly #36)
+
+- "Don't ask again for 5 minutes" covers exactly the assistant it was given for. It was keyed by the assistant's
+  name cut to 24 characters, so a yes for Claude Code (`https://claude.ai/oauth/claude-code-…`) also approved every
+  other client whose id starts with `https://claude.ai/oauth/` (same account, 5 minutes). It now uses the whole client
+  id (libffl `ApprovalPrompt::client_id`), and the approval window shows all of it.
+- A click on Approve in the window that arrives after the 45 s are up, or after the screen locked, is no longer
+  taken as a yes (and remembers nothing): the window notices the deadline only every 200 ms.
+- Closing a popup with F12 (Cancel, the default) or Shift+F3 no longer asks for approval. `gui_popup_close` stays
+  annotated as no change; over the cloud link only a key that confirms the popup (vkey 0, Enter) asks.
+
 ## 2026.10.25 (2026-10-25)
 
 ### Cloud link: the gateway learns why a change was refused
@@ -9,14 +22,6 @@
   APPROVAL_LOCKED instead of one generic refusal, and the gateway's audit records the outcome.
 - An unanswered approval expires after 45 s (was 90 s), so the answer reaches the assistant before its MCP client
   gives up.
-- "Don't ask again for 5 minutes" covers exactly the assistant it was given for. It was keyed by the assistant's
-  name cut to 24 characters, so a yes for Claude Code (`https://claude.ai/oauth/claude-code-…`) also approved every
-  other client whose id starts with `https://claude.ai/oauth/` (same account, 5 minutes). It now uses the whole client
-  id (libffl `ApprovalPrompt::client_id`), and the approval window shows all of it.
-- A click on Approve in the window that arrives after the 45 s are up, or after the screen locked, is no longer
-  taken as a yes (and remembers nothing): the window notices the deadline only every 200 ms.
-- Closing a popup with F12 (Cancel, the default) or Shift+F3 no longer asks for approval. `gui_popup_close` stays
-  annotated as no change; over the cloud link only a key that confirms the popup (vkey 0, Enter) asks.
 
 ## 2026.10.24.2 (2026-10-24)
 
