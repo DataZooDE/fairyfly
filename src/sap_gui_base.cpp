@@ -145,9 +145,7 @@ HRESULT SapGuiObject::invoke_property_get(const wchar_t* name, _variant_t& resul
         return hr;
     }
 
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-                           &no_params, &result, nullptr, nullptr);
+    hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
 
     // A cached DISPID that the object now rejects is stale: drop it, re-resolve through ITypeInfo
     // and retry exactly once.
@@ -165,8 +163,7 @@ HRESULT SapGuiObject::invoke_property_get(const wchar_t* name, _variant_t& resul
                 std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
                 s_type_dispid_cache[type_name][name] = fresh;
             }
-            hr = dispatch_->Invoke(fresh, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-                                   &no_params, &result, nullptr, nullptr);
+            hr = invoke(dispatch_, fresh, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
         }
     }
     return hr;
@@ -215,9 +212,7 @@ PropertyStatus strict_property_get(const SapGuiObject& object, IDispatch* dispat
     if (lookup == DISP_E_UNKNOWNNAME || lookup == DISP_E_MEMBERNOTFOUND || lookup == TYPE_E_ELEMENTNOTFOUND)
         return PropertyStatus::NotSupported;
     if (FAILED(lookup)) return PropertyStatus::Failed;
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-    const HRESULT hr = dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-                                        &no_params, &result, nullptr, nullptr);
+    const HRESULT hr = invoke(dispatch, dispid, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
     return FAILED(hr) ? PropertyStatus::Failed : PropertyStatus::Ok;
 }
 }  // namespace
@@ -485,11 +480,8 @@ std::string SapGuiObject::get_type() const {
             if (s_universal_type_known && !s_universal_type_disabled) universal = s_universal_type_dispid;
         }
         if (universal != DISPID_UNKNOWN) {
-            DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
             _variant_t result;
-            const HRESULT hr = dispatch_->Invoke(universal, IID_NULL, LOCALE_USER_DEFAULT,
-                                                 DISPATCH_PROPERTYGET | DISPATCH_METHOD, &no_params, &result,
-                                                 nullptr, nullptr);
+            const HRESULT hr = invoke(dispatch_, universal, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
             if (SUCCEEDED(hr) && result.vt == VT_BSTR && result.bstrVal) {
                 std::string value = com::bstr_to_utf8(result.bstrVal);
                 std::lock_guard<std::mutex> lock(s_dispid_cache_mutex);
@@ -509,11 +501,8 @@ std::string SapGuiObject::get_type() const {
     std::string value;
     bool read_ok = false;
     if (have_dispid) {
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        const HRESULT hr = dispatch_->Invoke(type_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_PROPERTYGET | DISPATCH_METHOD, &no_params, &result,
-                                             nullptr, nullptr);
+        const HRESULT hr = invoke(dispatch_, type_dispid, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
         if (SUCCEEDED(hr) && result.vt == VT_BSTR && result.bstrVal) {
             value = com::bstr_to_utf8(result.bstrVal);
             read_ok = true;

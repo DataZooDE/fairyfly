@@ -73,17 +73,11 @@ ComGuiApplicationPtr ComGuiApplication::create() {
                 rot_hr = rot_wrapper->GetIDsOfNames(IID_NULL, &rot_entry_name, 1, LOCALE_USER_DEFAULT, &dispid_rot);
                 spdlog::debug("SapROTWr GetROTEntry lookup hr=0x{:08X}", static_cast<unsigned int>(rot_hr));
                 if (SUCCEEDED(rot_hr)) {
-                    VARIANT arg;
-                    VariantInit(&arg);
-                    arg.vt = VT_BSTR;
-                    arg.bstrVal = SysAllocString(L"SAPGUI");
-                    DISPPARAMS params{&arg, nullptr, 1, 0};
                     VARIANT res;
                     VariantInit(&res);
-                    HRESULT hr_call = rot_wrapper->Invoke(dispid_rot, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, &res, nullptr, nullptr);
+                    HRESULT hr_call = invoke(rot_wrapper, dispid_rot, DISPATCH_METHOD, {_variant_t(L"SAPGUI")}, &res);
                     spdlog::debug("SapROTWr GetROTEntry invoke hr=0x{:08X}, result type={}",
                                   static_cast<unsigned int>(hr_call), res.vt);
-                    VariantClear(&arg);
                     if (SUCCEEDED(hr_call) && res.vt == VT_DISPATCH && res.pdispVal) {
                         sap_gui = res.pdispVal;
                         spdlog::debug("SapROTWr.SapROTWrapper returned SAPGUI ROT entry successfully");
@@ -111,12 +105,10 @@ ComGuiApplicationPtr ComGuiApplication::create() {
             HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, ge_name, &ge_id);
 
             if (SUCCEEDED(ge_hr)) {
-                DISPPARAMS noargs{nullptr, nullptr, 0, 0};
                 _variant_t vr;
 
                 // Try PROPERTYGET
-                HRESULT hr_prop = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                                  DISPATCH_PROPERTYGET, &noargs, &vr, nullptr, nullptr);
+                HRESULT hr_prop = invoke(sap_gui, ge_id, DISPATCH_PROPERTYGET, {}, &vr);
                 if (SUCCEEDED(hr_prop) && vr.vt == VT_DISPATCH && vr.pdispVal) {
                     spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (PROPERTYGET)");
                     sap_gui->Release();
@@ -125,8 +117,7 @@ ComGuiApplicationPtr ComGuiApplication::create() {
 
                 // Try METHOD
                 VariantClear(&vr);
-                HRESULT hr_meth = sap_gui->Invoke(ge_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                                  DISPATCH_METHOD, &noargs, &vr, nullptr, nullptr);
+                HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD, {}, &vr);
                 if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
                     spdlog::debug("Got GuiApplication via ROT GetScriptingEngine (METHOD)");
                     sap_gui->Release();

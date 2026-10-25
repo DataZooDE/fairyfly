@@ -13,12 +13,8 @@ int get_collection_count_checked(IDispatch* collection) {
     DISPID dispid;
     const HRESULT lookup = get_dispid_via_typeinfo(collection, L"Count", &dispid);
     if (FAILED(lookup)) throw ComException("Cannot resolve SAP GUI collection count", lookup);
-    DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
     _variant_t result;
-    const HRESULT invoked = collection->Invoke(
-        dispid, IID_NULL, LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET, &no_arguments,
-        &result, nullptr, nullptr);
+    const HRESULT invoked = invoke(collection, dispid, DISPATCH_PROPERTYGET, {}, &result);
     if (FAILED(invoked)) throw ComException("Cannot read SAP GUI collection count", invoked);
     if (result.vt != VT_I4 && result.vt != VT_I2)
         throw ComException("SAP GUI collection count has an unexpected type");

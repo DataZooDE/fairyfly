@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "include/com/invoke.h"
 #include <memory>
 #include <stdexcept>
 #include <type_traits>
@@ -215,17 +216,7 @@ public:
 
         // Get _NewEnum property
         _variant_t enum_var;
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        HRESULT hr = collection_->Invoke(
-            DISPID_NEWENUM,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-            &no_params,
-            &enum_var,
-            nullptr,
-            nullptr
-        );
+        HRESULT hr = invoke(collection_, DISPID_NEWENUM, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &enum_var);
 
         if (FAILED(hr) || enum_var.vt != VT_UNKNOWN) {
             at_end_ = true;
@@ -325,18 +316,8 @@ public:
             return 0;
         }
 
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = collection_->Invoke(
-            dispid,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-            &no_params,
-            &result,
-            nullptr,
-            nullptr
-        );
+        hr = invoke(collection_, dispid, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &result);
 
         if (SUCCEEDED(hr) && (result.vt == VT_I4 || result.vt == VT_I2)) {
             cached_count_ = (int)result;
@@ -354,17 +335,7 @@ public:
 
         // Use IEnumVARIANT to handle sparse indices
         _variant_t enum_var;
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        HRESULT hr = collection_->Invoke(
-            DISPID_NEWENUM,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-            &no_params,
-            &enum_var,
-            nullptr,
-            nullptr
-        );
+        HRESULT hr = invoke(collection_, DISPID_NEWENUM, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &enum_var);
 
         IUnknown* punk = nullptr;
         if (SUCCEEDED(hr)) {
@@ -412,12 +383,8 @@ public:
         DISPID item_dispid;
         HRESULT item_hr = get_dispid_via_typeinfo(collection_, L"Item", &item_dispid);
         if (SUCCEEDED(item_hr)) {
-            _variant_t idx(index);
-            DISPPARAMS params = {(VARIANT*)&idx, nullptr, 1, 0};
             _variant_t item_result;
-            item_hr = collection_->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                         DISPATCH_METHOD | DISPATCH_PROPERTYGET,
-                                         &params, &item_result, nullptr, nullptr);
+            item_hr = invoke(collection_, item_dispid, DISPATCH_METHOD | DISPATCH_PROPERTYGET, {_variant_t(index)}, &item_result);
             if (SUCCEEDED(item_hr) && item_result.vt == VT_DISPATCH && item_result.pdispVal) {
                 return std::make_shared<T>(item_result.pdispVal);
             }
@@ -440,10 +407,7 @@ public:
         if (!collection_) return false;
 
         _variant_t enum_var;
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        HRESULT hr = collection_->Invoke(DISPID_NEWENUM, IID_NULL, LOCALE_USER_DEFAULT,
-                                         DISPATCH_PROPERTYGET | DISPATCH_METHOD,
-                                         &no_params, &enum_var, nullptr, nullptr);
+        HRESULT hr = invoke(collection_, DISPID_NEWENUM, DISPATCH_PROPERTYGET | DISPATCH_METHOD, {}, &enum_var);
         if (FAILED(hr)) return false;
 
         IUnknown* punk = nullptr;

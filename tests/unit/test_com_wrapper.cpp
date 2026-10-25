@@ -1,3 +1,5 @@
+#include <filesystem>
+#include <fstream>
 #include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
@@ -3987,4 +3989,23 @@ TEST_CASE("com::invoke passes the arguments in reading order and returns the ans
     CHECK(invoke(nullptr, text, DISPATCH_METHOD) == E_POINTER);
     answer.Clear();
     child->Release();
+}
+
+TEST_CASE("com: IDispatch::Invoke is called in one place (com::invoke, safe_invoke)", "[com][invoke]") {
+    // review 2026-10-25: six setter bodies and ~60 hand-built DISPPARAMS; GuiSession.GetObjectTree keeps its own
+    // (a variable argument count with a SAFEARRAY)
+    namespace fs = std::filesystem;
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(fs::path(FAIRYFLY_SOURCE_DIR))) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h")) continue;
+        const auto rel = fs::relative(e.path(), fs::path(FAIRYFLY_SOURCE_DIR)).generic_string();
+        if (rel == "include/com/invoke.h" || rel == "com/wrapper_helpers.cpp" || rel == "com/session.cpp") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (text.find("->Invoke(") != std::string::npos || text.find("DISPPARAMS ") != std::string::npos)
+            offenders.push_back(rel);
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
 }

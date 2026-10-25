@@ -1,4 +1,5 @@
 #include "include/screenshot_handler.h"
+#include "include/com/invoke.h"
 #include "include/com/utf8.h"
 #include "include/com/raii_helpers.h"
 #include "include/constants.h"
@@ -177,14 +178,7 @@ std::vector<uint8_t> ScreenshotHandler::hard_copy_png(const ComGuiWindowPtr& win
     HRESULT hr = window_dispatch->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
     if (FAILED(hr)) throw std::runtime_error(fmt::format("HardCopyToMemory method unavailable: 0x{:08X}", hr));
 
-    VARIANT args[1];
-    args[0] = image_type;
-    DISPPARAMS params;
-    params.rgvarg = args;
-    params.cArgs = 1;
-    params.rgdispidNamedArgs = nullptr;
-    params.cNamedArgs = 0;
-    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, &png_bytes_var, nullptr, nullptr);
+    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD, {_variant_t(image_type)}, &png_bytes_var);
     VariantClear(&image_type);
     if (FAILED(hr)) {
         VariantClear(&png_bytes_var);
@@ -279,22 +273,14 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
                 }
 
                 if (SUCCEEDED(hr)) {
-                    VARIANT args[6];
-                    args[5] = filename_var;
-                    args[4] = image_type;
-                    args[3].vt = VT_I4; args[3].lVal = options.crop_x.value();
-                    args[2].vt = VT_I4; args[2].lVal = options.crop_y.value();
-                    args[1].vt = VT_I4; args[1].lVal = options.crop_width.value();
-                    args[0].vt = VT_I4; args[0].lVal = options.crop_height.value();
-
-                    DISPPARAMS params;
-                    params.rgvarg = args;
-                    params.cArgs = 6;
-                    params.rgdispidNamedArgs = nullptr;
-                    params.cNamedArgs = 0;
-
-                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
+                    // HardCopy(file, type, x, y, width, height); the crop values are VT_I4
+                    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD,
+                                {_variant_t(filename_var), _variant_t(image_type),
+                                 _variant_t(static_cast<long>(options.crop_x.value())),
+                                 _variant_t(static_cast<long>(options.crop_y.value())),
+                                 _variant_t(static_cast<long>(options.crop_width.value())),
+                                 _variant_t(static_cast<long>(options.crop_height.value()))},
+                                &result_path);
 
                     if (FAILED(hr)) {
                         VariantClear(&filename_var);
@@ -315,18 +301,8 @@ Result ScreenshotHandler::capture(const cli::ScreenshotOptions& options) {
                 }
 
                 if (SUCCEEDED(hr)) {
-                    VARIANT args[2];
-                    args[1] = filename_var;
-                    args[0] = image_type;
-
-                    DISPPARAMS params;
-                    params.rgvarg = args;
-                    params.cArgs = 2;
-                    params.rgdispidNamedArgs = nullptr;
-                    params.cNamedArgs = 0;
-
-                    hr = window_dispatch->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                 DISPATCH_METHOD, &params, &result_path, nullptr, nullptr);
+                    hr = invoke(window_dispatch, dispid, DISPATCH_METHOD, {_variant_t(filename_var), _variant_t(image_type)},
+                                &result_path);
 
                     if (FAILED(hr)) {
                         VariantClear(&filename_var);
