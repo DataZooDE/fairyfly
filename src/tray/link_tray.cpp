@@ -209,8 +209,8 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     }
     const std::string log_file = paths.log_file.string();
     LinkTrayController controller(services, std::move(paths));
-    std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) {
+    const auto ui = UiThread::start(*services.host, controller);   // ended (quit + join) on every return
+    if (!ui) {
         services.host->message_box("fairyfly link", "The fairyfly link tray could not create its tray window. Details are in the log: " +
                                                         log_file);
         return 1;
@@ -225,11 +225,7 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
                                                 "\"Pair with the fairyfly cloud...\".");
         while (!controller.quit_requested() && !services.link->view().paired)
             std::this_thread::sleep_for(services.pairing_poll);
-        if (controller.quit_requested()) {
-            services.host->post_quit();
-            ui.join();
-            return 0;
-        }
+        if (controller.quit_requested()) return 0;
         spdlog::info("link tray: paired; starting the link");
     }
     // One link per pairing: a console `link run` already serving it would refuse ours (LINK_ALREADY_RUNNING).
@@ -240,11 +236,7 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
                                                 "connects as soon as it ends (Ctrl+C there).");
         while (!controller.quit_requested() && services.link_busy()) std::this_thread::sleep_for(services.pairing_poll);
     }
-    if (controller.quit_requested()) {   // Quit right after the pairing appeared (or while another link ran)
-        services.host->post_quit();
-        ui.join();
-        return 0;
-    }
+    if (controller.quit_requested()) return 0;   // Quit right after the pairing appeared (or while another link ran)
 
     int code = 1;
     try {
@@ -275,8 +267,6 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     if (code != 0 && !controller.quit_requested())
         services.host->message_box("fairyfly link", "The cloud link stopped (exit code " + std::to_string(code) +
                                                         "). Details are in the log: " + log_file);
-    services.host->post_quit();
-    ui.join();
     return code;
 }
 

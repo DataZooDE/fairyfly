@@ -199,9 +199,8 @@ void TrayController::on_action(TrayAction action) {
 }
 
 // ---- run_with_tray -------------------------------------------------------------------------------
-namespace detail {
-
-bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui) {
+std::unique_ptr<UiThread> UiThread::start(TrayHost& host, TrayListener& listener) {
+    std::thread ui;
     struct Ready {
         std::mutex m;
         std::condition_variable cv;
@@ -227,13 +226,16 @@ bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui) {
         std::unique_lock<std::mutex> lock(ready->m);
         ready->cv.wait(lock, [&] { return ready->signalled; });
     }
-    if (ready->ok) return true;
+    if (ready->ok) return std::unique_ptr<UiThread>(new UiThread(host, std::move(ui)));
     host.post_quit();
     ui.join();
-    return false;
+    return nullptr;
 }
 
-} // namespace detail
+UiThread::~UiThread() {
+    host_.post_quit();
+    if (thread_.joinable()) thread_.join();
+}
 
 int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& guard, TrayPaths paths,
                   TrayState state) {
@@ -248,8 +250,8 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
     TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
 
     // UI thread: window + icon + message pump. The main thread below stays the COM/STA server thread.
-    std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) {
+    const auto ui = UiThread::start(*services.host, controller);
+    if (!ui) {
         services.host->message_box("fairyfly MCP", "The fairyfly MCP tray could not create its tray window. Details are in the log: " +
                                                        log_file);
         return 1;
@@ -289,9 +291,7 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
         slot->quit = true;
     }
     slot->cv.notify_all();
-    services.host->post_quit();
-    ui.join();
-    return code;
+    return code;   // ~UiThread: quit and join the UI
 }
 
 // ---- Startup errors ------------------------------------------------------------------------------

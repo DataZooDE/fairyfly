@@ -420,9 +420,19 @@ private:
 int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices services, SingleInstance& guard,
                        TrayPaths paths);
 
-namespace detail {
-/// Starts the UI thread (window, icon, message pump) and waits until it is up. False: no UI, the thread has ended.
-bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui);
-} // namespace detail
+/// The tray's UI thread (window, icon, message pump). Ending it (the destructor) posts quit to the host and joins.
+class UiThread {
+public:
+    /// Starts the thread and waits until the UI is up; nullptr: no UI, the thread has already ended.
+    static std::unique_ptr<UiThread> start(TrayHost& host, TrayListener& listener);
+    ~UiThread();
+    UiThread(const UiThread&) = delete;
+    UiThread& operator=(const UiThread&) = delete;
+
+private:
+    UiThread(TrayHost& host, std::thread thread) : host_(host), thread_(std::move(thread)) {}
+    TrayHost& host_;
+    std::thread thread_;
+};
 
 } // namespace fairyfly::tray
