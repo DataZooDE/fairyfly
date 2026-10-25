@@ -2015,6 +2015,20 @@ void ScreenReader::add_tab_strips_by_search(const ComGuiWindowPtr& window, bool 
     }
 }
 
+namespace {
+
+/// TAB_LOAD_FAILED when no requested tab could be read: the first failure's tab and reason, and all failures.
+Result tab_load_failed(Result& result, const std::string& message, const json& tabs_failed) {
+    const auto& first = tabs_failed.at(0);
+    result.set_error("TAB_LOAD_FAILED", message);
+    result.error["tab_id"] = first.value("tab_id", "");
+    result.error["reason"] = first.value("reason", "error");
+    result.error["tabs_failed"] = tabs_failed;
+    return result;
+}
+
+}  // namespace
+
 /// The id of the strip's selected tab ("" when the strip or its SelectedTab cannot be read).
 std::string ScreenReader::selected_tab_of(const std::string& strip_id) const {
     auto strip = session_->find_element_by_id(strip_id);
@@ -2218,12 +2232,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
             result.data = json::object();
-            result.set_error("TAB_LOAD_FAILED", "Tab '" + first.value("tab_id", "") + "' could not be read: " +
-                                      first.value("reason", "error"));
-            result.error["tab_id"] = first.value("tab_id", "");
-            result.error["reason"] = first.value("reason", "error");
-            result.error["tabs_failed"] = tabs_failed;
-            return result;
+            return tab_load_failed(result, "Tab '" + first.value("tab_id", "") + "' could not be read: " +
+                                               first.value("reason", "error"), tabs_failed);
         }
 
         redact_sensitive_report_labels(elements);
@@ -2404,12 +2414,8 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
-            result.set_error("TAB_LOAD_FAILED", "No tab could be read (first failure: " +
-                                      first.value("tab_id", "") + ", " + first.value("reason", "error") + ")");
-            result.error["tab_id"] = first.value("tab_id", "");
-            result.error["reason"] = first.value("reason", "error");
-            result.error["tabs_failed"] = tabs_failed;
-            return result;
+            return tab_load_failed(result, "No tab could be read (first failure: " + first.value("tab_id", "") + ", " +
+                                               first.value("reason", "error") + ")", tabs_failed);
         }
 
         // Add tabs content to result
