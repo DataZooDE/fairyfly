@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
 #include "include/com/wrapper.h"
+#include "include/constants.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/collection_id_lookup.h"
 #include "include/automation_engine.h"
@@ -3010,17 +3011,23 @@ TEST_CASE("wait_for_completion checks Busy immediately and polls only while busy
     auto session = ComGuiSession::create(IDispatchPtr(node));
     node->Release();
 
-    // The Busy reads prove the sleeps: one poll sleep sits between two reads. (Wall-clock bounds of 15 and 60 ms
-    // failed about once in 20 runs on a loaded machine.)
+    // A poll sleep lasts at least the interval (sleep_for never returns early): a lower bound proves a sleep, a bound
+    // below one interval proves there was none. (Upper bounds of 15 and 60 ms on the busy path failed about once in
+    // 20 runs on a loaded machine.)
+    const auto interval = std::chrono::milliseconds(fairyfly::constants::SESSION_POLL_INTERVAL_MS);
     SECTION("an idle session costs exactly one Busy read and no sleep") {
         node->busy_true_reads = 0;
+        const auto start = std::chrono::steady_clock::now();
         session->wait_for_completion(500);
         REQUIRE(node->reads[L"Busy"] == 1);
+        REQUIRE(std::chrono::steady_clock::now() - start < interval);
     }
     SECTION("busy once then idle reads Busy twice: one poll sleep") {
         node->busy_true_reads = 1;
+        const auto start = std::chrono::steady_clock::now();
         session->wait_for_completion(500);
         REQUIRE(node->reads[L"Busy"] == 2);
+        REQUIRE(std::chrono::steady_clock::now() - start >= interval);
     }
     SECTION("busy N times then idle reads N+1 times") {
         node->busy_true_reads = 3;
