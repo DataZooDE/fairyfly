@@ -285,7 +285,14 @@ std::wstring window_text(const Request& r) {
     }
     s += L"\nWhat it will do:\n";
     for (size_t i = 0; i < r.steps.size(); i++) s += std::to_wstring(i + 1) + L". " + wide(r.steps[i]) + L"\n";
+    if (!r.offer_standing) s += L"\nApproval is required by your administrator: every change asks.\n";
     return s;
+}
+
+std::wstring dont_ask_text(const Request& r) {
+    if (!r.offer_standing) return L"";
+    return L"Don't ask again: turn on \"Allow changes in SAP\" (changes run without asking until you turn it off in the "
+           L"fairyfly tray)";
 }
 
 namespace {
@@ -407,11 +414,9 @@ public:
         const std::wstring title = L"fairyfly – approve a change in SAP";
         const std::wstring head = headline(r);
         const std::wstring body = window_text(r);
-        const int minutes = std::max(1, r.remember_s / 60);
         const std::wstring approve = r.steps.size() == 1 ? L"Approve\nThis change only" : L"Approve\nThese " + std::to_wstring(r.steps.size()) + L" steps only";
         const std::wstring deny = L"Deny\nNothing is changed in SAP";
-        const std::wstring again = L"Don't ask again for " + std::to_wstring(minutes) + (minutes == 1 ? L" minute" : L" minutes") + L" (" +
-                                   wide(r.client) + L" for " + wide(r.user) + L")";
+        const std::wstring again = dont_ask_text(r);
         const auto left = std::chrono::duration_cast<std::chrono::seconds>(r.deadline - st.opened).count();
         const std::wstring footer = countdown(std::max<long long>(0, left));
         TASKDIALOG_BUTTON buttons[] = {{kApprove, approve.c_str()}, {kDeny, deny.c_str()}};
@@ -437,7 +442,7 @@ public:
         c.cButtons = UINT(std::size(buttons));
         c.pButtons = buttons;
         c.nDefaultButton = kDeny;  // Enter and Esc deny
-        c.pszVerificationText = again.c_str();  // unticked: every change asks
+        if (!again.empty()) c.pszVerificationText = again.c_str();  // unticked: every change asks
         c.pszFooter = footer.c_str();
         c.pszFooterIcon = TD_INFORMATION_ICON;
         c.pfCallback = window_events;
@@ -486,7 +491,7 @@ bool desktop_can_ask() {
 
 std::shared_ptr<Ui> make_win32_ui(std::function<void(const std::string&)> on_answer) { return std::make_shared<Win32Ui>(std::move(on_answer)); }
 
-std::shared_ptr<ffy::link::Approver> make_desktop_approver(std::function<SapContext()> sap, Options options) {
+std::shared_ptr<ffy::link::Approver> make_desktop_approver(Desk desk, Options options) {
     // the broker and the notification's answers know each other only through this weak link
     auto link = std::make_shared<std::weak_ptr<Broker>>();
     auto on_answer = [link](const std::string& text) {
@@ -496,9 +501,7 @@ std::shared_ptr<ffy::link::Approver> make_desktop_approver(std::function<SapCont
         std::lock_guard<std::mutex> l(g_sink_mu);
         g_sink = on_answer;  // the COM activator (the notification centre)
     }
-    Desk desk;
     desk.can_ask = desktop_can_ask;
-    desk.sap = std::move(sap);
     auto broker = std::make_shared<Broker>(make_win32_ui(on_answer), std::move(desk), options);
     *link = broker;
     return make_approver(broker);
