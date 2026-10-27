@@ -456,6 +456,9 @@ public:
     /// @param raise_error Whether to raise an exception on failure (default false)
     /// @return ComGuiConnectionPtr on success, nullptr on failure
     ComGuiConnectionPtr open_connection_by_connection_string(const std::string& connection_string, bool sync = true, bool raise_error = false);
+    /// The shared body of the two above (application.cpp).
+    ComGuiConnectionPtr open_connection_with(const wchar_t* method, const char* label, const std::string& argument,
+                                             bool sync, bool raise_error);
 
     /// Get raw COM application object - deprecated, use get_dispatch()
     IDispatch* get_app_object() const { return dispatch_; }
