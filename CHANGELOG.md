@@ -11,6 +11,9 @@
   SAP Logon open, depending on what earlier tests in a random order left in COM, that call could block the whole run.
   It now uses the fake engine (whose `application_info` is now scripted) and also checks the reported sessions.
   Found by running the full suite in random order; 6 seeds that hung or failed before now pass.
+- The unit tests reset the process-wide DISPID cache before every test case (a Catch2 listener in `test_main.cpp`):
+  a fake `GuiTextField` without `Changeable` left a cached miss that made the next test's read-only field writable,
+  which failed the MSIX CI run whenever the two tests ran in that order.
 
 ### Audit: string request ids without JSON quotes
 

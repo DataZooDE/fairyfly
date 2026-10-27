@@ -1,6 +1,9 @@
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/reporters/catch_reporter_event_listener.hpp>
+#include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <nlohmann/json.hpp>
+#include "support/fake_dispatch.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -18,6 +21,15 @@ int main(int argc, char* argv[]) {
 #endif
     return Catch::Session().run(argc, argv);
 }
+
+// The DISPID cache is process-wide and keyed by SAP type: a fake GuiTextField without Changeable would otherwise
+// leave a cached miss that turns the next test's read-only GuiTextField writable (order-dependent failures).
+class DispatchCacheResetListener : public Catch::EventListenerBase {
+public:
+    using Catch::EventListenerBase::EventListenerBase;
+    void testCaseStarting(const Catch::TestCaseInfo&) override { fairyfly::test::DispatchCacheAccess::clear_dispid_cache(); }
+};
+CATCH_REGISTER_LISTENER(DispatchCacheResetListener)
 
 using json = nlohmann::json;
 
