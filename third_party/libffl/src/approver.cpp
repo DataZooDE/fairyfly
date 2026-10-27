@@ -12,7 +12,7 @@ namespace ffy::link {
 
 ApprovalResult normalize(ApprovalResult r) {
     namespace k = approval_reason;
-    if (r.approved) r.reason = r.reason == k::kRemembered || r.reason == k::kStanding || r.reason == k::kUnattended ? r.reason : std::string(k::kApproved);
+    if (r.approved) r.reason = r.reason == k::kRemembered || r.reason == k::kStanding || r.reason == k::kUnattended || r.reason == k::kNotAsked ? r.reason : std::string(k::kApproved);
     else if (r.reason == k::kExpired || r.reason == "expired_in_queue") r.reason = k::kExpired;
     else if (r.reason != k::kLocked) r.reason = k::kDenied;
     return r;
