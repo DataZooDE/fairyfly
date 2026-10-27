@@ -124,7 +124,7 @@ bool is_signed(const Signature& s) { return s.valid || s.present || !s.subject.e
 
 std::vector<std::string> subject_values(const std::string& subject, const std::string& key) {
     std::vector<std::string> out;
-    const std::string want = lower(key);
+    const std::string want = utils::lower_ascii(key);
     auto trim = [](std::string v) {
         const auto b = v.find_first_not_of(" \t"), e = v.find_last_not_of(" \t");
         return b == std::string::npos ? std::string() : v.substr(b, e - b + 1);
@@ -135,7 +135,7 @@ std::vector<std::string> subject_values(const std::string& subject, const std::s
         // one attribute: key=value up to an unquoted separator
         const size_t eq = subject.find('=', i);
         if (eq == std::string::npos) break;
-        const std::string k = lower(trim(subject.substr(i, eq - i)));
+        const std::string k = utils::lower_ascii(trim(subject.substr(i, eq - i)));
         size_t j = eq + 1;
         while (j < n && (subject[j] == ' ' || subject[j] == '\t')) j++;
         std::string value;
