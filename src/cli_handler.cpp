@@ -196,6 +196,13 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
         result.error["code"] = "INVALID_CONNECTION";
         result.error["message"] = fmt::format("Connection {} session no longer exists", conn.id);
         result.error["session_id"] = conn.session_id;
+        // what the record says it was attached to: the MCP dispatcher re-attaches an implicit default connection
+        // only to the one open session of the same system, client and user
+        result.error["stale_connection"] = {{"id", conn.id},
+                                            {"session_id", conn.session_id},
+                                            {"system", conn.identity.system},
+                                            {"client", conn.identity.client},
+                                            {"user", conn.identity.user}};
         result.error["suggestions"] = json::array({
             "The SAP session was closed or connection lost",
             "Run 'fairyfly session attach' to create a new connection"
@@ -312,6 +319,11 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             if (!token_allowed) return owner_attach_unavailable();
         }
 
+        // The SAP identity the connection belongs to: a stale default connection is re-attached later only to a
+        // session of the same system, client and user (mcp dispatcher, auto_attach).
+        const audit::SapFacts attached_facts = attach_owner_identities_.empty() ? audit_facts() : checked_facts;
+        const ConnectionIdentity identity{attached_facts.system, attached_facts.client, attached_facts.user};
+
         // Create or update connection file
         Connection conn = conn_mgr_->create_or_update_connection(
             attached_session_id,
@@ -319,7 +331,8 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             description,
             connection_string,
             window_title,
-            attach_owner_identities_.empty() ? engine_->current_server_session_key() : checked_server_key
+            attach_owner_identities_.empty() ? engine_->current_server_session_key() : checked_server_key,
+            identity
         );
         if (!attach_owner_identities_.empty()) pending_owner_attach_ = conn;
         notify_connection_changed(conn.id);
