@@ -428,3 +428,9 @@ TEST_CASE("audit: the default file on POSIX is under $HOME/.local/share/fairyfly
     CHECK(config.file.parent_path() == fs::path("/home/u") / ".local" / "share" / "fairyfly" / "audit");
 }
 #endif
+
+TEST_CASE("audit: a padded required still makes the trail mandatory, also against --no-audit", "[audit]") {
+    // final review 2026-10-27 (Codex): only switching off is strict; required is the safe direction
+    const auto now = std::chrono::system_clock::now();
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", " Required "}}), true, false, now).mode == Mode::Required);
+}

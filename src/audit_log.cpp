@@ -177,7 +177,7 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     else if (config::parse_flag(mode_env)) config.mode = Mode::Enabled;
     if (cli_no_audit) config.mode = Mode::Disabled;
     // required is monotonic (fail safe): any source that asks for it wins over every disable
-    if (file_settings.required == true || mode == "required" || cli_required) config.mode = Mode::Required;
+    if (file_settings.required == true || config::normalized(mode_env) == "required" || cli_required) config.mode = Mode::Required;
 
     if (const std::string file_env = env.get(config::env::kAuditFile); !file_env.empty()) {
         config.file = text::utf8_path(file_env);
