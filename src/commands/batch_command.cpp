@@ -105,11 +105,7 @@ CLI::App* BatchCommand::setup_cli(CLI::App& app) {
 Result BatchCommand::execute(cli::CommandHandler&) {
     // The batch loop runs inside run_cli (it rebuilds the registry per line, which would
     // destroy this object). Reaching here means batch was invoked outside run_cli.
-    Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "BATCH_UNAVAILABLE";
-    result.error["message"] = "batch must be run through the fairyfly CLI entry point";
-    return result;
+    return Result::fail("BATCH_UNAVAILABLE", "batch must be run through the fairyfly CLI entry point");
 }
 
 std::unique_ptr<CommandBase> create_batch_command() {

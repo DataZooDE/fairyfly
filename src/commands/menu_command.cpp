@@ -8,9 +8,6 @@ namespace commands {
 /// `menu list` lists the menu bar tree, `menu select PATH` selects one item.
 class MenuCommand : public CommandBase {
 public:
-    std::string name() const override { return "menu"; }
-
-    std::string description() const override { return "Menu bar operations"; }
 
     CLI::App* setup_cli(CLI::App& app) override {
         menu_cmd_ = noun_app(app, "menu");
@@ -42,18 +39,11 @@ Example: fairyfly menu select "System/Status" --connection 3
         if (*list_cmd_) return handler.handle_screen_menu("", list_window_, list_conn_id_);
         if (*select_cmd_) {
             if (select_path_.empty()) {
-                Result result;
-                result.status = Result::Status::Error;
-                result.error = {{"code", "INVALID_ARGUMENT"}, {"message", "menu select needs a non-empty menu path"}};
-                return result;
+                return Result::fail("INVALID_ARGUMENT", "menu select needs a non-empty menu path");
             }
             return handler.handle_screen_menu(select_path_, select_window_, select_conn_id_);
         }
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No menu subcommand specified (list or select)";
-        return result;
+        return Result::fail("NO_SUBCOMMAND", "No menu subcommand specified (list or select)");
     }
 
     bool was_invoked() const override { return menu_cmd_ && *menu_cmd_; }

@@ -1,4 +1,6 @@
+#include "include/com/hresult.h"
 #include "include/com/wrapper.h"
+#include "include/com/invoke.h"
 #include "include/com/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/constants.h"
@@ -145,7 +147,7 @@ std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
         if (hr == DISP_E_MEMBERNOTFOUND || hr == DISP_E_UNKNOWNNAME) {
             set_object_tree_support(ObjectTreeSupport::Missing);
         }
-        spdlog::warn("GuiSession.GetObjectTree failed hr=0x{:08X} after {} ms", static_cast<unsigned>(hr), elapsed_ms);
+        spdlog::warn("GuiSession.GetObjectTree failed hr={} after {} ms", hresult_hex(hr), elapsed_ms);
         if (hr == RPC_E_SERVERFAULT) return fail(ObjectTreeFailure::ServerFault);
         return fail(ObjectTreeFailure::Failed);
     }
@@ -171,19 +173,14 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("StartTransaction method not found: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("StartTransaction method not found: {}", hresult_hex(hr)));
             throw ComException("StartTransaction method not found", hr);
         }
 
-        _bstr_t tcode_bstr(tcode.c_str());
-        _variant_t tcode_var(tcode_bstr);
-        DISPPARAMS params = {(VARIANT*)&tcode_var, nullptr, 1, 0};
-        _variant_t result;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        _variant_t result;   // the T-code as UTF-8 (it went through the ANSI code page before)
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(tcode).c_str())}, &result);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("StartTransaction invoke failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("StartTransaction invoke failed: {}", hresult_hex(hr)));
             throw ComException("Failed to start transaction", hr);
         }
 
@@ -273,10 +270,8 @@ std::string ComGuiSession::get_transaction_code() const {
             return "";  // Transaction property not found
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = info->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                         &params, &result, nullptr, nullptr);
+        hr = invoke(info, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
             return "";  // Failed to get Transaction property
         }
@@ -301,10 +296,8 @@ std::string ComGuiSession::get_user() const {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(info, prop_name.GetBSTR(), &dispid);
         if (FAILED(hr)) return "";
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t value;
-        hr = info->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                          &params, &value, nullptr, nullptr);
+        hr = invoke(info, dispid, DISPATCH_PROPERTYGET, {}, &value);
         if (FAILED(hr) || value.vt != VT_BSTR) return "";
         return com::bstr_to_utf8(value.bstrVal);
     } catch (const std::exception&) {

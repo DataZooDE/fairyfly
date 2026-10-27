@@ -1,16 +1,24 @@
 #pragma once
 
 #include "core.h"
+#include "command_table.h"
 #include "automation_engine.h"
 #include "connection_manager.h"
 #include "credential_store.h"
 #include "audit_log.h"
 #include "fill_fields.h"
+#include "screen_snapshot.h"
+#include "login_flow.h"
 #include <string>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
+
+namespace fairyfly::sap {
+class ComGuiSession;
+using ComGuiSessionPtr = std::shared_ptr<ComGuiSession>;
+}
 
 namespace fairyfly {
 namespace cli {
@@ -99,6 +107,22 @@ private:
     std::unique_ptr<cred::CredentialStore> credential_store_;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
+    // the parts of handle_login (cli_handler.cpp)
+    bool owner_login_permitted(const Connection& selected, const LoginCredentials& credentials);
+    Result refuse_owner_login(Result result, bool password_typed);
+    std::optional<Result> answer_multiple_logon_dialog(const sap::ComGuiSessionPtr& session, const Connection& selected,
+                                                       const LoginCredentials& credentials,
+                                                       const std::string& multiple_logon, Result& result, json& info);
+    bool confirm_owner_logon(Result& result, const Connection& selected, const LoginCredentials& credentials);
+    /// connection_changed_hook_ for a saved connection; a failing hook is logged, never thrown.
+    void notify_connection_changed(int connection_id);
+    // the parts of handle_click (cli_handler.cpp)
+    Result click_tree_node(const ElementId& elem, const std::string& element_id, const std::string& node_key,
+                           const std::string& tree_action, const std::string& menu_item, int connection_id);
+    void wait_for_screen_change(Result& result, const WindowId& window_before, const sap::ScreenSnapshot& snapshot_before,
+                                SapGuiScripting* snapshot_engine, int timeout_ms);
+    /// `@active...` with the active window's id in front; any other path unchanged.
+    std::string expand_active(const std::string& path) const;
     void describe_element(const std::string& element_id, std::string& type, std::string& text, std::string& tooltip);
 
     /// In read-only mode: READ_ONLY_REFUSED result when the element's action changes SAP state.
@@ -117,6 +141,9 @@ private:
 
 public:
     explicit CommandHandler(std::unique_ptr<cred::CredentialStore> store = nullptr);
+    /// With an injected engine and connection store (tests: a fake engine and a temporary directory).
+    CommandHandler(std::unique_ptr<cred::CredentialStore> store, std::unique_ptr<AutomationEngine> engine,
+                   std::unique_ptr<ConnectionManager> connections);
 
     /// Credential store used by login and the credentials command (Windows Credential Manager by default).
     cred::CredentialStore& credential_store() { return *credential_store_; }
@@ -147,6 +174,9 @@ public:
         expected_mcp_session_ = std::move(session_identity);
         expected_mcp_owner_ = std::move(sap_identity);
     }
+    /// The session (and owner) one MCP call expects; empty outside such a call.
+    const std::string& expected_mcp_session() const { return expected_mcp_session_; }
+    const std::string& expected_mcp_owner() const { return expected_mcp_owner_; }
 
     /// Enable or disable the read-only guard (refuses saves, deletes, releases, ...).
     void set_read_only(bool read_only) { read_only_ = read_only; }
@@ -265,7 +295,10 @@ public:
 /// @param result The result to format
 /// @param format The output format
 /// @param verbose_errors If true, include detailed error suggestions; if false, show compact errors (default)
-std::string format_output(const Result& result, OutputFormat format, bool verbose_errors = false);
+/// `render`: how the command that produced `result` renders as Markdown (command_table::Render; the command table
+/// knows it per command), so a result is never guessed from its keys.
+std::string format_output(const Result& result, OutputFormat format, bool verbose_errors = false,
+                          command_table::Render render = command_table::Render::Generic);
 
 }  // namespace cli
 }  // namespace fairyfly

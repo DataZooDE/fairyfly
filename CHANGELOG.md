@@ -37,6 +37,197 @@
   winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
   `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
 
+### Fixed
+
+- COM errors and logs print an HRESULT as Windows documents it (`0x80020009`), not as a signed number
+  (`0x-7FFDFFF7`); for example "SendVKey invoke failed", "OpenConnection failed: hr=..." and the screenshot errors.
+
+### No hand-written function over 150 lines (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` (794 lines with the re-attach from 2026.10.25.2) is the admission
+  (`admit_call`, `admit_live_session` over a `CallState`), then `execute_call` (100 lines), `invoke_and_finish` (93)
+  and `run_invocation` (127) nested along their scopes, plus named checks for the lease, the screen guard, the
+  owner attach/launch/login and the image cap. `run_mcp` (HTTP: `serve_http`), `HttpEndpoint::dispatch`,
+  `ComAutomationEngine::launch_connection` and `run_setup` are split as well; the only longer functions left are the
+  tool catalog and the element registries (tables).
+- A timing test of the object tree parser compares against a plain JSON parse in the same run (it failed on a busy
+  machine).
+
+### Shorter functions, shared tree and tab steps (2026-10-25 code review)
+
+- The two tree readers share the item texts, the data columns and the nesting by path, which no longer asks SAP
+  for every node's path a second time. `read_tab` and `read_with_tabs` share their tab steps.
+- The response redaction has one classify loop instead of ten copies, with its 13 patterns unchanged. The
+  screenshot capture makes one `HardCopy` call, and the error of a failed capture keeps what it had already
+  recorded.
+- `handle_login`, `handle_click`, `run_mcp`, `run_mcp_doctor`, `run_batch`, the dispatcher's owner checks, the
+  HTTP route admission, `ComGuiApplication::create`, `run_link`, `MakeTeardownPlan` and the Markdown and grid
+  renderers are split into named parts.
+- New tests: the logon under an owner guard through the real handler, the collection walks through their callers,
+  the screenshot paths through a fake window, and the doctor's check order and setup query.
+
+### Typed views and shorter functions (2026-10-25 code review)
+
+- `ComGuiElement` keeps its general methods (59 -> 34); trees, grids and toolbars are typed views
+  (`as_tree`, `as_grid`, `as_toolbar`). One `TreeNodeTexts` recovers an empty node text from its columns for the
+  screen reader, the table extractor and `element get --list-nodes`.
+- `HttpEndpoint::dispatch`, `run_link`, `read_tab`, `launch_connection`, `MakePlan`, the dispatcher's
+  `execute_call` and `traverse_element_tree` are split into named parts; `Stopwatch` measures the actions.
+- An `mcp` command no longer leaves the tray's runner factory registered after it returns (it referred to
+  `run_cli`'s locals). New tests: the config commands, `run_mcp`'s start refusals, the session worker's admission
+  and flags, the audit trail's screen source, the engine's launch, fill, click and transaction.
+
+### Tests and seams (2026-10-25 code review)
+
+- The setup probes take their HTTP transport (tested without WinHTTP), and `ComAutomationEngine` its SAP GUI
+  application object: its fill, click, transaction and read actions are tested against a scripted SAP GUI.
+- One validation path for a fill field (CLI, MCP, fields list); the CLI keeps its error order.
+- `traverse_element_tree` and `ElementMetadataExtractor::extract` are split into named stages.
+- The rare unit-test failure was a wall-clock bound under load; sleep-ordered tests wait for an event instead;
+  the environment guard tests run in 0.16 s instead of 20 s.
+
+### Setup and process handles (2026-10-25 code review)
+
+- `mcp setup` and `mcp teardown` share their gates (dry run, nothing to do, read-only, consent, elevation) and their
+  step bookkeeping; messages and exit codes are unchanged.
+- Win32 handles are owned by one `UniqueHandle`: the PowerShell runner no longer leaks its pipes when a step in
+  between fails, and three local handle types are gone.
+
+### One way to call SAP GUI's COM objects (2026-10-25 code review)
+
+- `SapGuiObject`'s six setter/invoker bodies are one `invoke_checked()`, and about 60 hand-built `DISPPARAMS` went
+  into `com::invoke`/`safe_invoke` (arguments in reading order, the named put argument); a guard test keeps it so.
+- Tree node keys, the tree context-menu text, toolbar button ids, `StartTransaction`'s T-code and `FindById`'s id are
+  passed to SAP GUI as UTF-8; they went through the ANSI code page before (a non-ASCII value could arrive garbled).
+
+### Link runtime and tray structure (2026-10-25 code review)
+
+- The link's process-wide stop flags, abandoned-thread count and standing approval are one `LinkRuntime`; the
+  link tray's "Allow changes in SAP" switch is tested with an in-memory approval.
+- Both trays share the start sequence, the open/console/detached-start actions and the UI thread's lifetime
+  (`UiThread`). The MCP server's tray moved to `tray/mcp_tray.h`, so `tray/tray.h` no longer depends on `mcp/`.
+- `docs/ARCHITECTURE.md` has a Threads section.
+
+### One environment writer, one tray contract (2026-10-25 code review)
+
+- Environment variables are written through `config::set_process_env`/`unset_process_env` and read through the
+  wide API: a value outside the ANSI code page (for example a user profile path with an umlaut in `LOCALAPPDATA`)
+  now arrives intact. `FAIRYFLY_*` names are spelled only in `config/environment.h` (guard test).
+- The names the tray starter shares with the trays and the link (window class, messages, Run values, registry
+  keys, the notification AUMID and CLSID) live in `tray/tray_contract.h` (guard test).
+- Tray tooltips are cut at 127 UTF-16 units between characters, with an ellipsis, in both trays (a byte cut could
+  split an umlaut of an organisation or account name). The link states are named once; `link run` restores the
+  previous Ctrl+C handler when it returns; the unused tray clipboard is gone.
+
+### Fewer copies in the handler, engine, screen filter and trays (2026-10-25 code review)
+
+- `@active` paths resolve through one helper; click, fill and F4 build their ELEMENT_NOT_FOUND answer through one
+  tested function; the screen filter scans a grid's rows once; both trays build their menus from the same entries.
+- `screen read --output markdown` variants without a screen hierarchy (`--dump-object-tree`, `--no-children`)
+  render generically again, with all their fields (a regression of the explicit render kinds).
+
+### Dispatcher and HTTP endpoint in named steps (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` has its admission checks (`admission_refusal`) and its post-call transaction
+  re-check (`recheck_transaction`) as named steps; the owner-mode predicate, the listing deadline check and the
+  row visibility test are written once. The HTTP endpoint re-authenticates through one function instead of three
+  copies.
+
+### Screen Markdown in sections (2026-10-25 code review)
+
+- `ScreenMarkdownFormatter::format` (728 lines) is one function per section (header, grid layout, menu bar,
+  buttons, status, form, tabs, tables, ABAP source, other content, summary), checked byte for byte against 34
+  recorded screens. The grid layout and the menu bar share one menu renderer.
+
+### CommandHandler split; doctor checks testable; explicit result rendering (2026-10-25 code review)
+
+- `cli_handler.cpp` (2,815 lines) is split: screen filters (`screen_filter.cpp`), the doctor
+  (`cli_handler_doctor.cpp` on top of `doctor_checks.cpp`: Win32 probes plus pure, unit-tested judges) and output
+  formatting (`output_format.cpp`).
+- How a result renders as Markdown is part of its command's row in the command table (`screen read`,
+  `screen find`, `doctor`); `format_output` no longer guesses it from the keys of the result.
+
+### Element metadata state per screen read (2026-10-25 code review)
+
+- The table/tree cache and the `--skip-trees` option of the element metadata extractor belong to one screen read
+  instead of being process-wide statics that every reader had to reset by hand.
+
+### CommandHandler gets its engine injected (2026-10-25 code review)
+
+- `CommandHandler` takes its automation engine and connection store from outside (the default constructor still
+  builds the real ones), and asks the engine for SAP GUI scripting (`SapGuiScripting`: session, keys, popups,
+  menus, grid cells, read-only peeks) instead of 23 downcasts to the COM engine. A fake engine now tests the
+  handlers without SAP GUI: read-only refusals before SAP is asked, connection resolution, error passing, keys and
+  popups.
+
+### One spelling of a SAP identity (2026-10-25 code review)
+
+- "SID/CLIENT/USER" is built by `sap_identity()` / `SessionTarget::identity()` and looked up by `identity_listed()`
+  instead of 15 hand-written concatenations and two separate matchers; `RateLimiter` is one budget of the keyed
+  limiter instead of a second sliding-window implementation.
+
+### One table for the mcp.yaml keys (2026-10-25 code review)
+
+- Each key of `mcp.yaml` names its `fairyfly mcp` options and the server option it sets in the key table; the flag
+  map and `apply_config` are derived from it instead of being two more hand-kept tables. The precedence
+  (flag > environment > `mcp.yaml` > default) is implemented once (`resolve_layers`); `merged_layers` and the audit
+  settings use it.
+
+### Tool classification in the command table (2026-10-25 code review)
+
+- What a tool is (global control, targetless, listing, session system, lease-capable, worker-bound, screen-bound,
+  acts on the open transaction, returns screen data) is a trait of its row in `command_table.cpp`. Routing,
+  authorization, leases, the session worker, owner-mode batches and the untrusted-data header read it there
+  instead of nine hand-written lists in seven files.
+
+### Tests: shared support, no fixed sleeps, faster (2026-10-25 code review)
+
+- `tests/unit/support/`: `TempDir` (removed also when a test fails; replaces five helpers and 12 inline
+  directories that were left behind on a failure), `eventually`, `spec_of`, `EnvGuard`; tests use `Result::ok`.
+- Waiting on a condition instead of fixed sleeps in the HTTP queue, disconnect and executor-pool tests; the worker
+  fixture's slow call takes 600 ms instead of 2 s. A unit run takes about 40 s (84 s before this review).
+- Tests that asserted nothing are gone; the redaction tests moved to `test_sensitive_data.cpp`, the read-only
+  guard tests to `test_read_only_guard.cpp`.
+
+### One definition for shared constants and command-line quoting (2026-10-25 code review)
+
+- The default ports (8383, 8443), the protocol versions (one table that says which are spoken over stdio and over
+  HTTP), the bearer challenge and the `ffy_` token prefix are each defined once (`mcp/constants.h`,
+  `auth/token_store.h`); help texts and the server banner are built from them.
+- Windows command-line quoting is one header (`text/command_line.h`) for the SAP shortcut launcher, the tray and
+  fairyfly-tray.exe, tested against `CommandLineToArgvW`.
+- HTTP failures outside JSON-RPC are built by one function: the transport's ones are now JSON-escaped, and every
+  one carries `Cache-Control: no-store`.
+
+### One way to build an error result (2026-10-25 code review)
+
+- `Result::fail(code, message[, suggestions])` and `Result::set_error(...)` replace about 230 hand-built error
+  results (status, code, message, suggestions set field by field) and seven private copies of the same factory.
+  `set_error` keeps a result's data, diagnostics, duration and extra error fields, so outputs are unchanged.
+
+### Shared string and UTF-8 helpers (2026-10-25 code review)
+
+- One `lower_ascii` / `upper_ascii` / `trim` / `iequals` / `is_loopback_host` (`string_utils.h`) instead of about
+  25 private copies; ASCII only, independent of the C locale.
+- One UTF-8 <-> UTF-16 module (`text/utf8.h`) replaces nine hand-written converters, with two explicit policies.
+  Strict (throws) for everything a decision or an identity depends on: SAP strings, credential targets, user
+  names and passwords, setup's account names, URL prefixes, SDDL and the elevated command line, PowerShell
+  parameters, the tray's command lines, environment, registry and mutex names. Lossy (never throws, U+FFFD) only
+  for text people read: logs, window titles, tooltips, balloons, menus, console output.
+- Malformed UTF-8 in a connection name, user name or password is now refused (`INVALID_CONNECTION_NAME`,
+  `INVALID_ARGUMENT`, `INVALID_PASSWORD`) instead of being replaced. Before, two malformed names could share one
+  Credential Manager entry, and a password could change before it reached SAP.
+- COM member names in log lines are UTF-8 now (they went through the ANSI code page). Tray tooltips no longer
+  throw on a UTF-8 sequence cut at the length limit.
+
+### Dead code removed (2026-10-25 code review)
+
+- About 730 lines that nothing called: the old copy of the element metadata extractor in the automation engine
+  (the live one is `ElementMetadataExtractor`), `TreeFormatter`, the no-op `ConfigManager`/`SessionManager` stubs,
+  `retry.h`, unused free COM helpers, a placeholder tree-text helper, and `name()`/`description()` on every
+  command (help comes from the command table). `CommandBase` owns the subcommand pointer and the default
+  `was_invoked()` that 17 commands repeated. Tests that duplicated others are gone.
+
 ### Review fixes (2026-10-25 code review)
 
 - `mcp.yaml`'s `audit.enabled`, `audit.required` and `audit.file` (and `FAIRYFLY_MCP_AUDIT_*`) are applied to the MCP
@@ -63,6 +254,11 @@
   update check on). `mcp.yaml` booleans use the same spellings.
 - The cloud link and its tray read them the same way too (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_LINK_GATEWAY`,
   `FAIRYFLY_LINK_FORBID_DEFAULT_STATE`).
+
+### Tray: the running version
+
+- Both trays (the link tray and the local MCP server's tray) show the running version, greyed out, above **Check for
+  updates**, e.g. "fairyfly 2026.10.25.1".
 
 ### `fairyfly update apply`: the publisher is pinned (security)
 

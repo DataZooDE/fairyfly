@@ -1,0 +1,13 @@
+{
+ "compact": false,
+ "input": {
+  "client": "001",
+  "elements": [],
+  "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+  "system": "A4H",
+  "title": "SAP Easy Access",
+  "transaction": "S000",
+  "user": ""
+ },
+ "output": "# SAP Easy Access\n\n**Transaction:** `S000`\n\n**System:** `A4H` / client `001` / not logged on\n\n**Screen ID:** `/app/con[0]/ses[0]/wnd[0]`\n\n_No screen structure available_\n"
+}

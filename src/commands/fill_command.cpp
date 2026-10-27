@@ -13,11 +13,6 @@ namespace commands {
 
 class FillCommand : public CommandBase {
 public:
-    std::string name() const override { return "element fill"; }
-
-    std::string description() const override {
-        return "Fill text field";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","fill"});
@@ -53,23 +48,15 @@ Examples:
         if (fields_option_->count() > 0) return execute_fields(handler);
         if (!then_key_.empty() || keep_going_) return invalid("--then-key and --keep-going need --fields");
         if (element_option_->count() == 0) return invalid("an element id (or --fields) is required");
-        if (clear_ == (value_option_->count() > 0)) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error = {
-                {"code", "INVALID_ARGUMENT"},
-                {"message", clear_ ? "Use either a value or --clear" : "A value or --clear is required"}
-            };
-            return result;
-        }
+        // value or --clear here; the grid options are checked by the handler after the read-only refusal and the
+        // connection (GRID_CELL_OPTIONS_REQUIRED), as callers of the CLI rely on
+        if (clear_ == (value_option_->count() > 0))
+            return invalid(clear_ ? "Use either a value or --clear" : "A value or --clear is required");
         return handler.handle_fill(element_, value_, conn_id_, row_, column_, checkbox_, commit_, allow_fill_);
     }
 
     static Result invalid(const std::string& message) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error = {{"code", "INVALID_ARGUMENT"}, {"message", message}};
-        return result;
+        return Result::fail("INVALID_ARGUMENT", message);
     }
 
     Result execute_fields(cli::CommandHandler& handler) {
@@ -92,12 +79,7 @@ Examples:
         return handler.handle_fill_fields(*fields, then_key_, !keep_going_, conn_id_, allow_fill_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     CLI::Option* value_option_ = nullptr;
     CLI::Option* element_option_ = nullptr;
     CLI::Option* fields_option_ = nullptr;

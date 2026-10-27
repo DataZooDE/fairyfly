@@ -1,5 +1,6 @@
 #include "include/mcp/authenticators.h"
 
+#include "include/mcp/constants.h"
 namespace fairyfly::mcp {
 
 std::function<std::unique_ptr<IAuthenticator>()> g_make_authenticator;
@@ -25,7 +26,7 @@ AuthOutcome DenyAllAuthenticator::authenticate(const AuthRequest&) {
     outcome.http_status = 401;
     outcome.error_code = "AUTH_REQUIRED";
     outcome.message = "authentication required; create a token: fairyfly mcp token create <name>";
-    outcome.www_authenticate = "Bearer realm=\"fairyfly\"";
+    outcome.www_authenticate = kBearerChallenge;
     return outcome;
 }
 

@@ -11,11 +11,6 @@ namespace commands {
 
 class ScreenCommand : public CommandBase {
 public:
-    std::string name() const override { return "screen"; }
-
-    std::string description() const override {
-        return "Screen operations";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         // Create parent "screen" subcommand once
@@ -116,11 +111,7 @@ Example: fairyfly screen capture --file screen.png --connection 3
     Result execute(cli::CommandHandler& handler) override {
         if (*read_cmd_ && dump_object_tree_) {
             if (!diag::diag_enabled_from_environment()) {
-                Result denied;
-                denied.status = Result::Status::Error;
-                denied.error["code"] = "DIAG_DISABLED";
-                denied.error["message"] = "The object tree dump is raw and unredacted; set FAIRYFLY_DIAG=1 to use it";
-                return denied;
+                return Result::fail("DIAG_DISABLED", "The object tree dump is raw and unredacted; set FAIRYFLY_DIAG=1 to use it");
             }
             return handler.handle_object_tree_dump(read_conn_id_, object_tree_id_, object_tree_props_);
         }
@@ -166,11 +157,7 @@ Example: fairyfly screen capture --file screen.png --connection 3
         }
 
         // Should not reach here as CLI11 ensures a subcommand is selected
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No screen subcommand specified (read, find, or capture)";
-        return result;
+        return Result::fail("NO_SUBCOMMAND", "No screen subcommand specified (read, find, or capture)");
     }
 
     bool was_invoked() const override {

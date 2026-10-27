@@ -26,6 +26,22 @@ TEST_CASE("Result::fail builds the error envelope", "[core][result]") {
     CHECK(s.to_json()["error"]["code"] == "X");
 }
 
+TEST_CASE("Result::set_error turns a result into an error and keeps its other fields", "[core][result]") {
+    Result r = Result::ok(json{{"partial", true}});
+    r.diagnostics = json{{"step", 3}};
+    r.duration = std::chrono::milliseconds(42);
+    r.set_error("TAB_LOAD_FAILED", "the tab did not load", json::array({"retry"}));
+    CHECK(r.status == Result::Status::Error);
+    CHECK(r.error == json{{"code", "TAB_LOAD_FAILED"}, {"message", "the tab did not load"}, {"suggestions", json::array({"retry"})}});
+    CHECK(r.data == json{{"partial", true}});
+    CHECK(r.diagnostics == json{{"step", 3}});
+    CHECK(r.duration.count() == 42);
+    Result s;
+    s.error["details"] = "kept";
+    s.set_error("X", "y");
+    CHECK(s.error == json{{"details", "kept"}, {"code", "X"}, {"message", "y"}});  // like the field-by-field writes it replaces
+}
+
 TEST_CASE("Result::ok carries the data", "[core][result]") {
     const Result r = Result::ok(json{{"a", 1}});
     CHECK(r.status == Result::Status::Success);

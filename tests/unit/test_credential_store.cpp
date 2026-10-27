@@ -64,6 +64,33 @@ TEST_CASE("password blobs above 2560 bytes are rejected", "[cred]") {
     }
 }
 
+TEST_CASE("credentials: malformed UTF-8 is refused, never replaced", "[cred][utf8]") {
+    // review 2026-10-25: names and passwords went through a lossy conversion, so two malformed names could map to
+    // the same Credential Manager target and a password could change before it reached SAP
+    const std::string bad("Big\xFF" "fox");
+    try {
+        (void)target_name(bad);
+        FAIL("expected INVALID_CONNECTION_NAME");
+    } catch (const CredentialError& e) {
+        CHECK(e.code() == "INVALID_CONNECTION_NAME");
+    }
+    try {
+        (void)encode_password_blob(std::string("pa\xC3" "ss"));
+        FAIL("expected INVALID_PASSWORD");
+    } catch (const CredentialError& e) {
+        CHECK(e.code() == "INVALID_PASSWORD");
+    }
+    // valid non-ASCII still works
+    CHECK(target_name("B\xC3\xA4r") == L"fairyfly:Bär");
+}
+
+TEST_CASE("SecretBuffer: a malformed secret is refused when it is converted", "[cred][utf8]") {
+    const SecretBuffer bad(std::string("pw\xFF"));
+    CHECK_THROWS_AS(bad.utf16(), std::invalid_argument);
+    const SecretBuffer good(std::string("p\xC3\xA4ss"));
+    CHECK(good.utf16() == L"päss");
+}
+
 TEST_CASE("CredentialSummary JSON contains no password key", "[cred]") {
     CredentialSummary summary{"Bigfox", "DEVELOPER", "001", "EN", "2026-01-02T03:04:05Z"};
     const auto json = summary.to_json();

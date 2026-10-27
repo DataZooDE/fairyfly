@@ -1,0 +1,34 @@
+{
+ "compact": true,
+ "input": {
+  "hierarchy": {
+   "buttons": [
+    {
+     "id": "wnd[0]/tbar[0]/btn[3]",
+     "name": "btn[3]",
+     "text": "Back",
+     "type": "GuiButton"
+    }
+   ],
+   "tabs": [
+    {
+     "id": "wnd[0]/usr/tabsTABSPR1/tabpSP01",
+     "name": "SP01",
+     "text": "Basic data 1",
+     "type": "GuiTab"
+    },
+    {
+     "id": "wnd[0]/usr/tabsTABSPR1/tabpSP02",
+     "name": "SP02",
+     "selected": true,
+     "text": "Basic data 2",
+     "type": "GuiTab"
+    }
+   ]
+  },
+  "screen_id": "wnd[0]",
+  "title": "Display Material",
+  "transaction": "MM03"
+ },
+ "output": "# Display Material\n\n**Transaction:** `MM03`\n\n## Toolbar Buttons\n\n| Button | Tooltip | State   | Technical ID          |\n|:-------|:--------|:--------|:----------------------|\n| **Back**   |  | Enabled | `wnd[0]/tbar[0]/btn[3]` |\n\n_Click with_: `fairyfly element click '@active/<button_path>'`\n\n## 📑 Tabs\n\n**Tab Container:** `wnd[0]/usr/tabsTABSPR1`\n\n| Tab Name | Status | Technical ID |\n|----------|--------|-------------|\n| Basic data 1 | Available | `wnd[0]/usr/tabsTABSPR1/tabpSP01` |\n| Basic data 2 | Available | `wnd[0]/usr/tabsTABSPR1/tabpSP02` |\n\n_Note: Tab expansion is enabled by default. Use `--no-tabs` flag to skip tab content capture for faster execution._\n\n---\n**Screen Elements:** 0 top-level\n"
+}

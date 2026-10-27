@@ -1,4 +1,5 @@
 #include "include/field_fill_info.h"
+#include "include/string_utils.h"
 #include "include/sensitive_data.h"
 
 #include <algorithm>
@@ -9,36 +10,11 @@ namespace fairyfly::sap {
 
 namespace {
 
-std::string trim(const std::string& value) {
-    size_t begin = 0;
-    size_t end = value.size();
-    while (begin < end && std::isspace(static_cast<unsigned char>(value[begin]))) ++begin;
-    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1]))) --end;
-    return value.substr(begin, end - begin);
-}
-
-std::string upper(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    return value;
-}
-
-std::string lower(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return value;
-}
-
 bool digits_at(const std::string& text, size_t from, size_t count) {
     if (from + count > text.size()) return false;
     for (size_t i = from; i < from + count; ++i)
         if (!std::isdigit(static_cast<unsigned char>(text[i]))) return false;
     return true;
-}
-
-bool ends_with(const std::string& value, const char* suffix) {
-    const std::string s = suffix;
-    return value.size() >= s.size() && value.compare(value.size() - s.size(), s.size(), s) == 0;
 }
 
 std::vector<std::string> name_tokens(const std::string& name) {
@@ -59,7 +35,7 @@ std::vector<std::string> name_tokens(const std::string& name) {
 bool name_says_date(const std::string& name) {
     for (const auto& token : name_tokens(name)) {
         if (token == "DATUM" || token == "DATE" || token == "DATAB" || token == "DATBI" || token == "DATUV" ||
-            ends_with(token, "DAT") || ends_with(token, "DATUM") || ends_with(token, "DATE"))
+            token.ends_with("DAT") || token.ends_with("DATUM") || token.ends_with("DATE"))
             return true;
     }
     return false;
@@ -67,7 +43,7 @@ bool name_says_date(const std::string& name) {
 
 bool name_says_time(const std::string& name) {
     for (const auto& token : name_tokens(name)) {
-        if (token == "TIME" || token == "UZEIT" || ends_with(token, "UZEIT") || ends_with(token, "TIME"))
+        if (token == "TIME" || token == "UZEIT" || token.ends_with("UZEIT") || token.ends_with("TIME"))
             return true;
     }
     return false;
@@ -90,7 +66,7 @@ std::string truncate_utf8(const std::string& text, size_t max_chars) {
 } // namespace
 
 std::string date_format_of_text(const std::string& raw) {
-    const std::string text = trim(raw);
+    const std::string text = utils::trim(raw);
     if (text.size() != 10) return {};
     if (digits_at(text, 0, 2) && text[2] == '.' && digits_at(text, 3, 2) && text[5] == '.' && digits_at(text, 6, 4))
         return "DD.MM.YYYY";
@@ -108,7 +84,7 @@ std::string date_format_of_text(const std::string& raw) {
 }
 
 std::string time_format_of_text(const std::string& raw) {
-    const std::string text = trim(raw);
+    const std::string text = utils::trim(raw);
     if (text.size() == 8 && digits_at(text, 0, 2) && text[2] == ':' && digits_at(text, 3, 2) && text[5] == ':' &&
         digits_at(text, 6, 2))
         return "HH:MM:SS";
@@ -118,7 +94,7 @@ std::string time_format_of_text(const std::string& raw) {
 std::string infer_input_kind(const FieldProbe& probe) {
     if (!date_format_of_text(probe.text_before).empty()) return "date";
     if (!time_format_of_text(probe.text_before).empty()) return "time";
-    const std::string label = lower(probe.label);
+    const std::string label = utils::lower_ascii(probe.label);
     const bool length_fits_date = probe.max_length == 0 || probe.max_length == 10;
     const bool length_fits_time = probe.max_length == 0 || probe.max_length == 8;
     if (length_fits_date && (name_says_date(probe.name) || name_says_date(probe.id.substr(probe.id.rfind('/') + 1)) ||

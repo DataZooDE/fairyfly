@@ -7,11 +7,6 @@ namespace commands {
 
 class ClickCommand : public CommandBase {
 public:
-    std::string name() const override { return "element click"; }
-
-    std::string description() const override {
-        return "Click UI element";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","click"});
@@ -60,12 +55,7 @@ Examples (TREE and GRID stand for observed IDs):
                                      doubleclick_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::string element_;
     std::optional<int> conn_id_;
     bool wait_for_window_ = false;

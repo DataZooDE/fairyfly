@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/update/updater.h"
 #include "include/config/environment.h"
 
@@ -160,9 +161,7 @@ Signature authenticode(const fs::path& file) {
                     std::wstring w(n, L'\0');
                     CertNameToStrW(X509_ASN_ENCODING, &cert->pCertInfo->Subject, CERT_X500_NAME_STR, w.data(), n);
                     if (!w.empty() && w.back() == L'\0') w.pop_back();
-                    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-                    s.subject.assign(static_cast<size_t>(len), '\0');
-                    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), s.subject.data(), len, nullptr, nullptr);
+                    s.subject = text::wide_to_utf8_lossy(w);
                     CertFreeCertificateContext(cert);
                 }
             }

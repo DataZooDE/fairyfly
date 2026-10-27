@@ -1,0 +1,350 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 24,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[0,2]",
+    "text": "Delete drafts...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 3,
+    "id": "wnd[0]/usr/lbl[3,3]",
+    "text": "Deleted 0 drafts of BO /BOBF/DEMO_CUSTOMER",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 4,
+    "id": "wnd[0]/usr/lbl[3,4]",
+    "text": "Deleted 0 drafts of BO SEPMRA_I_PRODUCTWITHDRAFT",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 5,
+    "id": "wnd[0]/usr/lbl[3,5]",
+    "text": "Deleted 0 drafts of BO SEPMRA_I_PURCHASEORDERWD",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 6,
+    "id": "wnd[0]/usr/lbl[3,6]",
+    "text": "Deleted 0 drafts of BO SEPMRA_I_SALESORDERTP",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 7,
+    "id": "wnd[0]/usr/lbl[3,7]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 10,
+    "id": "wnd[0]/usr/lbl[0,10]",
+    "text": "Delete favourites...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 11,
+    "id": "wnd[0]/usr/lbl[3,11]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 14,
+    "id": "wnd[0]/usr/lbl[0,14]",
+    "text": "Delete shopping carts...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 15,
+    "id": "wnd[0]/usr/lbl[3,15]",
+    "text": "Deleted 0 shopping carts",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 16,
+    "id": "wnd[0]/usr/lbl[3,16]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 19,
+    "id": "wnd[0]/usr/lbl[0,19]",
+    "text": "Delete notifications...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 20,
+    "id": "wnd[0]/usr/lbl[3,20]",
+    "text": "Deleted 0 notifications",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 21,
+    "id": "wnd[0]/usr/lbl[3,21]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 24,
+    "id": "wnd[0]/usr/lbl[0,24]",
+    "text": "Generate EPM data...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 25,
+    "id": "wnd[0]/usr/lbl[3,25]",
+    "text": "EPM data generated successfully",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 26,
+    "id": "wnd[0]/usr/lbl[3,26]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 29,
+    "id": "wnd[0]/usr/lbl[0,29]",
+    "text": "Create notifications for generated data...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 30,
+    "id": "wnd[0]/usr/lbl[3,30]",
+    "text": "Notifications created",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 31,
+    "id": "wnd[0]/usr/lbl[3,31]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 34,
+    "id": "wnd[0]/usr/lbl[0,34]",
+    "text": "Adjust Sales Order data for analytics",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 35,
+    "id": "wnd[0]/usr/lbl[3,35]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 38,
+    "id": "wnd[0]/usr/lbl[0,38]",
+    "text": "Adjust Review Texts",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 39,
+    "id": "wnd[0]/usr/lbl[3,39]",
+    "text": "done",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "grid_col": 0,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[0,2]",
+     "text": "Delete drafts...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 3,
+     "id": "wnd[0]/usr/lbl[3,3]",
+     "text": "Deleted 0 drafts of BO /BOBF/DEMO_CUSTOMER",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 4,
+     "id": "wnd[0]/usr/lbl[3,4]",
+     "text": "Deleted 0 drafts of BO SEPMRA_I_PRODUCTWITHDRAFT",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 5,
+     "id": "wnd[0]/usr/lbl[3,5]",
+     "text": "Deleted 0 drafts of BO SEPMRA_I_PURCHASEORDERWD",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 6,
+     "id": "wnd[0]/usr/lbl[3,6]",
+     "text": "Deleted 0 drafts of BO SEPMRA_I_SALESORDERTP",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 7,
+     "id": "wnd[0]/usr/lbl[3,7]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 10,
+     "id": "wnd[0]/usr/lbl[0,10]",
+     "text": "Delete favourites...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 11,
+     "id": "wnd[0]/usr/lbl[3,11]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 14,
+     "id": "wnd[0]/usr/lbl[0,14]",
+     "text": "Delete shopping carts...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 15,
+     "id": "wnd[0]/usr/lbl[3,15]",
+     "text": "Deleted 0 shopping carts",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 16,
+     "id": "wnd[0]/usr/lbl[3,16]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 19,
+     "id": "wnd[0]/usr/lbl[0,19]",
+     "text": "Delete notifications...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 20,
+     "id": "wnd[0]/usr/lbl[3,20]",
+     "text": "Deleted 0 notifications",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 21,
+     "id": "wnd[0]/usr/lbl[3,21]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 24,
+     "id": "wnd[0]/usr/lbl[0,24]",
+     "text": "Generate EPM data...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 25,
+     "id": "wnd[0]/usr/lbl[3,25]",
+     "text": "EPM data generated successfully",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 26,
+     "id": "wnd[0]/usr/lbl[3,26]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 29,
+     "id": "wnd[0]/usr/lbl[0,29]",
+     "text": "Create notifications for generated data...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 30,
+     "id": "wnd[0]/usr/lbl[3,30]",
+     "text": "Notifications created",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 31,
+     "id": "wnd[0]/usr/lbl[3,31]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 34,
+     "id": "wnd[0]/usr/lbl[0,34]",
+     "text": "Adjust Sales Order data for analytics",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 35,
+     "id": "wnd[0]/usr/lbl[3,35]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 38,
+     "id": "wnd[0]/usr/lbl[0,38]",
+     "text": "Adjust Review Texts",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 39,
+     "id": "wnd[0]/usr/lbl[3,39]",
+     "text": "done",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "EPM Generator Output"
+ },
+ "output": "# EPM Generator Output\n\n**Screen ID:** ``\n\n## Report Output\n\n```\nDelete drafts...\n   Deleted 0 drafts of BO /BOBF/DEMO_CUSTOMER\n   Deleted 0 drafts of BO SEPMRA_I_PRODUCTWITHDRAFT\n   Deleted 0 drafts of BO SEPMRA_I_PURCHASEORDERWD\n   Deleted 0 drafts of BO SEPMRA_I_SALESORDERTP\n   done\n\n\nDelete favourites...\n   done\n\n\nDelete shopping carts...\n   Deleted 0 shopping carts\n   done\n\n\nDelete notifications...\n   Deleted 0 notifications\n   done\n\n\nGenerate EPM data...\n   EPM data generated successfully\n   done\n\n\nCreate notifications for generated data...\n   Notifications created\n   done\n\n\nAdjust Sales Order data for analytics\n   done\n\n\nAdjust Review Texts\n   done\n```\n\n---\n**Screen Elements:** 24 top-level\n"
+}

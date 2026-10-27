@@ -1,6 +1,7 @@
 // Real SystemProbe: TCP probe (ws2_32), thumbprint-pinned TLS probe (WinHTTP), files, clock, names.
 #include <winsock2.h>
 #include "include/config/environment.h"
+#include "include/text/utf8.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <winhttp.h>
@@ -11,7 +12,7 @@
 #include <sstream>
 
 #include "include/setup/setup_hosts.h"
-#include "winhttp_client.h"
+#include "include/setup/http_probe.h"
 #include "win_util.h"
 
 namespace fairyfly::setup {
@@ -59,31 +60,7 @@ public:
     }
 
     TlsProbe tls_probe(const std::string& host, int port, const std::string& expected) override {
-        TlsProbe out;
-        HttpProbeRequest req;
-        req.host = host;
-        req.port = port;
-        req.tls = true;
-        req.method = "GET";
-        req.path = "/mcp";
-        HttpProbeResponse r = winhttp_request(req);
-        if (!r.ok && (r.win_error == ERROR_WINHTTP_NAME_NOT_RESOLVED || r.win_error == ERROR_WINHTTP_CANNOT_CONNECT || r.win_error == ERROR_WINHTTP_TIMEOUT) && host != "127.0.0.1") {
-            req.connect_host = "127.0.0.1";   // the name may not resolve here; pin by thumbprint anyway
-            r = winhttp_request(req);
-        }
-        if (!r.ok) {
-            out.status = (r.win_error == ERROR_WINHTTP_SECURE_FAILURE || r.win_error == ERROR_WINHTTP_SECURE_CHANNEL_ERROR) ? "handshake_failed"
-                         : (r.win_error == ERROR_WINHTTP_CANNOT_CONNECT || r.win_error == ERROR_WINHTTP_TIMEOUT || r.win_error == ERROR_WINHTTP_NAME_NOT_RESOLVED) ? "unreachable"
-                                                                                                                                                                   : "error";
-            out.detail = r.error;
-            return out;
-        }
-        out.status = "ok";
-        out.protocol = r.protocol;
-        out.thumbprint = r.cert_thumbprint;
-        out.thumbprint_match = !expected.empty() && r.cert_thumbprint == expected;
-        out.http_status = r.status;
-        return out;
+        return probe_tls(host, port, expected, winhttp_request);
     }
 
     std::optional<std::string> read_file(const std::string& path) override {
@@ -128,13 +105,13 @@ public:
             std::wstring name(size, L'\0');
             if (GetComputerNameExW(format, name.data(), &size)) {
                 name.resize(size);
-                if (!name.empty()) return narrow(name);
+                if (!name.empty()) return text::wide_to_utf8_lossy(name);
             }
         }
         return "localhost";
     }
 
-    std::string local_app_data() override { return config::Environment::process().local_app_data().string(); }
+    std::string local_app_data() override { return text::path_utf8(config::Environment::process().local_app_data()); }
 };
 
 } // namespace

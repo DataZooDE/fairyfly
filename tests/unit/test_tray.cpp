@@ -2,14 +2,22 @@
 // window, registry key, mutex or process is ever created here.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <thread>
 
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
+#include "include/tray/tray_contract.h"
+
+#include <windows.h>
+#include <objbase.h>
+#include "include/version.h"
 
 using namespace fairyfly;
 using namespace fairyfly::tray;
@@ -179,12 +187,15 @@ struct Fixture {
 } // namespace
 
 // ================= menu model =================
+// the running version, shown (disabled) above "Check for updates" in both trays
+const std::string kVersionItem = std::string("fairyfly ") + FAIRYFLY_VERSION;
+
 TEST_CASE("tray menu: running read-only server with warnings", "[tray][menu]") {
     const auto m = build_menu(make_status(true, true, {"no tokens", "insecure"}), {});
     CHECK(top_labels(m) == std::vector<std::string>{
         "Running: http://127.0.0.1:8383/mcp (read-only)", "Warnings (2)", "---",
         "Start", "Stop", "Restart", "Read-only mode", "---",
-        "Open log", "Open audit trail folder", "Open config file", "Tokens", "Cloud link", "Check for updates (console)", "---", "Quit"});
+        "Open log", "Open audit trail folder", "Open config file", "Tokens", "Cloud link", kVersionItem, "Check for updates (console)", "---", "Quit"});
     CHECK(m.icon == IconState::Warning);
     CHECK_FALSE(m.items[0].enabled);
     REQUIRE(m.items[1].children.size() == 2);
@@ -402,7 +413,7 @@ TEST_CASE("tray controller: left click text and view", "[tray][controller]") {
     auto controller = f.make();
     CHECK(controller.left_click_text().find("write mode") != std::string::npos);
     CHECK(controller.view().icon == IconState::Warning);
-    CHECK(controller.menu().items.size() == 16);
+    CHECK(controller.menu().items.size() == 17);  // with the version line
 }
 
 // ================= entry decisions =================
@@ -735,7 +746,7 @@ TEST_CASE("link tray menu: no MCP server items, state per link", "[tray][link_tr
     CHECK(m.icon == IconState::Running);
     CHECK(top_labels(m) == std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected", "---", "Pause",
                                                     "Health check (console)", "Pair again (console)", "---", "Open log",
-                                                    "Open audit trail folder", "Check for updates (console)", "---", "Quit"});
+                                                    "Open audit trail folder", kVersionItem, "Check for updates (console)", "---", "Quit"});
     CHECK(m.tooltip == "fairyfly link: connected - Acme Purchasing (pat@acme.example)");
     CHECK(find_item(m, TrayAction::Start) == nullptr);
     CHECK(find_item(m, TrayAction::ToggleReadOnly) == nullptr);
@@ -775,7 +786,7 @@ TEST_CASE("link tray menu: Start local MCP server, checked and disabled while it
     CHECK(top_labels(m) == std::vector<std::string>{"Acme Purchasing (pat@acme.example): connected", "---", "Pause",
                                                     "Health check (console)", "Pair again (console)", "---",
                                                     "Start local MCP server", "---", "Open log", "Open audit trail folder",
-                                                    "Check for updates (console)", "---", "Quit"});
+                                                    kVersionItem, "Check for updates (console)", "---", "Quit"});
     mcp.running = true;
     const auto running_menu = build_link_menu(paired("connected"), {}, mcp);   // find_item points into it
     start = find_item(running_menu, TrayAction::StartMcpServer);
@@ -907,10 +918,16 @@ TEST_CASE("run_link_with_tray: the link runs on the calling thread, Quit stops i
     services.stop_link = [&] { stop = true; };
     const auto main_thread = std::this_thread::get_id();
     std::thread::id ran_on;
-    auto driver = drive(f.host, [&](TrayListener& l) { l.on_action(TrayAction::Quit); });
+    std::atomic<bool> started{false};
+    // Quit only once the link runs: a Quit posted before it starts ends the tray without running it (flaky 1 in 6)
+    auto driver = drive(f.host, [&](TrayListener& l) {
+        for (int i = 0; i < 500 && !started; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        l.on_action(TrayAction::Quit);
+    });
     const int code = run_link_with_tray(
         [&] {
             ran_on = std::this_thread::get_id();
+            started = true;
             for (int i = 0; i < 500 && !stop; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
             return stop ? 0 : 9;
         },
@@ -1426,6 +1443,124 @@ TEST_CASE("a second start opens the running tray's menu instead of a message box
         REQUIRE(host.boxes.size() == 1);
         CHECK(host.boxes[0].find("already running") != std::string::npos);
     }
+}
+
+TEST_CASE("tray menus: both trays show the running version, greyed out, above Check for updates", "[tray][menu]") {
+    for (const auto& m : {build_menu(make_status(true, false, {}), {}), build_link_menu(paired("connected"))}) {
+        const auto labels = top_labels(m);
+        auto at = std::find(labels.begin(), labels.end(), kVersionItem);
+        REQUIRE(at != labels.end());
+        REQUIRE(at + 1 != labels.end());
+        CHECK(*(at + 1) == "Check for updates (console)");
+        CHECK_FALSE(m.items[size_t(at - labels.begin())].enabled);
+    }
+}
+
+TEST_CASE("tray menu entries: one builder for both trays", "[tray][menu]") {
+    const MenuItem version = version_item();
+    CHECK(version.label == kVersionItem);
+    CHECK_FALSE(version.enabled);
+    CHECK(version.action == TrayAction::None);
+    CHECK(separator().separator);
+    const MenuItem quit = item("Quit", TrayAction::Quit);
+    CHECK(quit.enabled);
+    CHECK(quit.action == TrayAction::Quit);
+}
+
+TEST_CASE("tray tooltip: at most 127 UTF-16 units, cut between characters, with an ellipsis", "[tray][menu]") {
+    CHECK(fit_tooltip("fairyfly link: connected") == "fairyfly link: connected");
+    const std::string ascii(200, 'a');
+    CHECK(fit_tooltip(ascii) == std::string(124, 'a') + "...");
+    CHECK(fit_tooltip(std::string(127, 'a')) == std::string(127, 'a'));
+    // 100 "ä" (2 bytes, 1 UTF-16 unit each) fit; a byte cut at 127 would split one
+    std::string umlauts;
+    for (int i = 0; i < 100; ++i) umlauts += "\xC3\xA4";
+    CHECK(fit_tooltip(umlauts) == umlauts);
+    std::string long_umlauts;
+    for (int i = 0; i < 130; ++i) long_umlauts += "\xC3\xA4";
+    const std::string cut = fit_tooltip(long_umlauts);
+    CHECK(cut.size() == 124 * 2 + 3);
+    CHECK(cut.substr(cut.size() - 3) == "...");
+    // a character outside the BMP counts two units and is never split
+    std::string emoji;
+    for (int i = 0; i < 70; ++i) emoji += "\xF0\x9F\x98\x80";
+    const std::string cut_emoji = fit_tooltip(emoji);
+    CHECK(cut_emoji == emoji.substr(0, 62 * 4) + "...");
+}
+
+TEST_CASE("tray contract: the names other processes rely on are spelled once", "[tray][contract]") {
+    // review 2026-10-25: the launcher (installer --close, autostart cleanup) hard-coded the tray's window class,
+    // messages, registry keys and the notification CLSID; a rename on one side broke the other silently
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    const std::vector<std::string> names = {"fairyfly_tray_window", "fairyfly-tray-quit", "fairyfly-tray-show-menu",
+                                            "DAAF1065", "DataZoo.fairyfly", "DataZoo\\fairyfly\\tray",
+                                            "CurrentVersion\\Run\"", "L\"fairyfly-link\"", "L\"fairyfly-mcp\"",
+                                            "ValueName = \""};  // the Run values (not the link's client label)
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h")) continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel == fs::path("include") / "tray" / "tray_contract.h") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (const auto& name : names)
+            if (text.find(name) != std::string::npos) offenders.push_back(rel.string() + ": " + name);
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}
+
+TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][contract]") {
+    GUID clsid{};
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
+    CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
+}
+
+TEST_CASE("tray actions: open, console and detached start, shared by both trays", "[tray][actions]") {
+    FakeOpener opener;
+    FakeLauncher launcher;
+    std::vector<std::string> notices;
+    const TrayActions actions{&opener, &launcher, "C:/fairyfly/fairyfly.exe",
+                              [&](const std::string& text) { notices.push_back(text); }};
+    actions.open("C:/logs/link.log", "the log");
+    CHECK(opener.opened.size() == 1);
+    CHECK(notices.empty());
+    opener.ok = false;
+    actions.open("C:/logs/link.log", "the log");
+    REQUIRE(notices.size() == 1);
+    CHECK(notices[0] == "Could not open the log: C:/logs/link.log");
+
+    actions.console({"link", "status"});
+    REQUIRE(launcher.requests.size() == 1);
+    CHECK(launcher.requests[0].new_console);
+    CHECK(launcher.requests[0].command_line == console_command_line("C:/fairyfly/fairyfly.exe", {"link", "status"}));
+
+    CHECK(actions.start_detached({"link", "run", "--tray"}));
+    REQUIRE(launcher.requests.size() == 2);
+    CHECK(launcher.requests[1].detached);
+    CHECK(launcher.requests[1].command_line == join_command_line("C:/fairyfly/fairyfly.exe", {"link", "run", "--tray"}));
+    launcher.pid.reset();
+    CHECK_FALSE(actions.start_detached({"link", "run", "--tray"}));
+    actions.console({"update", "check"});
+    CHECK(notices.back() == "Could not open a console");
+    // without a launcher nothing starts, and a console says nothing (as before)
+    const TrayActions none{nullptr, nullptr, "x.exe", [&](const std::string& text) { notices.push_back(text); }};
+    const auto before = notices.size();
+    none.console({"link", "pair"});
+    CHECK_FALSE(none.start_detached({"mcp"}));
+    none.open("y", "the log");
+    CHECK(notices.size() == before + 1);   // only the failed open
+}
+
+TEST_CASE("tray headers: the shared tray header does not pull in the MCP server", "[tray][contract]") {
+    // review 2026-10-25: tray.h (488 lines) pulled mcp/* into the link; the MCP server's tray is mcp_tray.h
+    std::ifstream in(std::filesystem::path(FAIRYFLY_SOURCE_DIR) / "include" / "tray" / "tray.h", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(text.empty());
+    CHECK(text.find("include/mcp/") == std::string::npos);
+    CHECK(text.find("mcp::") == std::string::npos);
 }
 
 TEST_CASE("link tray: a desktop clock off by minutes is shown with the fix", "[tray][link_tray][clock]") {

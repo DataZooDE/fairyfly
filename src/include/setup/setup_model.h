@@ -229,7 +229,6 @@ struct TeardownDiagnosis {
 Plan MakeTeardownPlan(const TeardownDiagnosis& diagnosis, const TeardownOptions& options);
 
 // ---- helpers (pure, unit-tested) ------------------------------------------------------------------
-std::string lower_ascii(std::string s);
 std::string default_hostname(const std::string& computer_dns_name);
 std::string url_prefix(bool tls, const std::string& hostname, int port);   ///< https://+:8443/mcp/ | http://127.0.0.1:8383/mcp/
 std::string endpoint_url(bool tls, const std::string& hostname, int port); ///< https://host:8443/mcp

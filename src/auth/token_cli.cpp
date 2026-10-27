@@ -7,13 +7,6 @@ namespace fairyfly::auth {
 
 namespace {
 
-Result failure(const std::string& code, const std::string& message) {
-    Result r;
-    r.status = Result::Status::Error;
-    r.error = {{"code", code}, {"message", message}};
-    return r;
-}
-
 json created_json(const CreatedToken& created, const char* note) {
     json j = created.meta.to_public_json();
     j["token"] = created.token;
@@ -66,12 +59,12 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             request.tcodes = split_list(args.tcodes);
             request.connections = split_list(args.connections);
             if (args.allow_navigation && request.tcodes.empty())
-                return failure("INVALID_ARGUMENT", "--allow-navigation only makes sense together with --tcode");
+                return Result::fail("INVALID_ARGUMENT", "--allow-navigation only makes sense together with --tcode");
             request.allow_navigation = args.allow_navigation;
             if (args.allow_selection_input && request.tcodes.empty())
-                return failure("INVALID_ARGUMENT", "--allow-selection-input requires --tcode (a T-code allowlist)");
+                return Result::fail("INVALID_ARGUMENT", "--allow-selection-input requires --tcode (a T-code allowlist)");
             if (args.allow_selection_input && !request.read_only)
-                return failure("INVALID_ARGUMENT", "--allow-selection-input only makes sense for read-only tokens (add --read-only; a token with write scopes is not read-only otherwise)");
+                return Result::fail("INVALID_ARGUMENT", "--allow-selection-input only makes sense for read-only tokens (add --read-only; a token with write scopes is not read-only otherwise)");
             request.allow_selection_input = args.allow_selection_input;
             request.allowed_ips = split_list(args.ips);
             request.rate_per_minute = args.rate;
@@ -84,19 +77,19 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
                     limit = std::stoll(entry.substr(eq + 1), &used);
                     if (used != entry.size() - eq - 1) throw std::invalid_argument("shape");
                 } catch (const std::exception&) {
-                    return failure("INVALID_ARGUMENT", "--rate-family entries look like element=10 (family=calls per minute), got '" + entry + "'");
+                    return Result::fail("INVALID_ARGUMENT", "--rate-family entries look like element=10 (family=calls per minute), got '" + entry + "'");
                 }
                 if (limit < 1 || limit > 1000000)
-                    return failure("INVALID_ARGUMENT", "--rate-family limits must be 1..1000000 calls per minute");
+                    return Result::fail("INVALID_ARGUMENT", "--rate-family limits must be 1..1000000 calls per minute");
                 request.rate_families[entry.substr(0, eq)] = static_cast<int>(limit);
             }
             if (std::any_of(request.scopes.begin(), request.scopes.end(), [](const std::string& s) { return s == "*"; }) && !args.yes)
-                return failure("CONFIRMATION_REQUIRED",
+                return Result::fail("CONFIRMATION_REQUIRED",
                                "a token with scope '*' can use every tool family; repeat with --yes to confirm");
             if (!args.expires.empty()) {
                 const auto expiry = parse_expiry(args.expires, store.now());
-                if (!expiry) return failure("INVALID_ARGUMENT", "--expires must look like 30d, 12h, 90m or 2026-12-31");
-                if (*expiry <= store.now()) return failure("INVALID_ARGUMENT", "--expires lies in the past");
+                if (!expiry) return Result::fail("INVALID_ARGUMENT", "--expires must look like 30d, 12h, 90m or 2026-12-31");
+                if (*expiry <= store.now()) return Result::fail("INVALID_ARGUMENT", "--expires lies in the past");
                 request.expires = *expiry;
             }
             result.data = created_json(store.create(request), "created");
@@ -109,7 +102,7 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
         }
 
         if (args.action == "revoke") {
-            if (!store.revoke(args.name)) return failure("TOKEN_NOT_FOUND", "no token named '" + args.name + "'");
+            if (!store.revoke(args.name)) return Result::fail("TOKEN_NOT_FOUND", "no token named '" + args.name + "'");
             result.data = {{"name", args.name}, {"revoked", true}};
             return result;
         }
@@ -117,9 +110,9 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
         if (args.action == "delete") {
             // Works for revoked and expired tokens too: it removes the record itself, so nothing lingers.
             if (!args.yes)
-                return failure("CONFIRMATION_REQUIRED",
+                return Result::fail("CONFIRMATION_REQUIRED",
                                "deleting a token removes its record for good (revoke keeps it); repeat with --yes to confirm");
-            if (!store.remove(args.name)) return failure("TOKEN_NOT_FOUND", "no token named '" + args.name + "'");
+            if (!store.remove(args.name)) return Result::fail("TOKEN_NOT_FOUND", "no token named '" + args.name + "'");
             result.data = {{"name", args.name}, {"deleted", true}};
             return result;
         }
@@ -131,11 +124,11 @@ Result run_token_action(const TokenCliArgs& args, TokenStore& store) {
             return result;
         }
 
-        return failure("INVALID_ARGUMENT", "unknown token action '" + args.action + "'");
+        return Result::fail("INVALID_ARGUMENT", "unknown token action '" + args.action + "'");
     } catch (const AuthError& e) {
-        return failure(e.code(), e.what());
+        return Result::fail(e.code(), e.what());
     } catch (const std::exception& e) {
-        return failure("TOKEN_STORE_ERROR", e.what());
+        return Result::fail("TOKEN_STORE_ERROR", e.what());
     }
 }
 

@@ -1,3 +1,4 @@
+#include "include/text/utf8.h"
 #include "include/com/wrapper_helpers.h"
 #include "include/com/utf8.h"
 #include "include/sap_gui_base.h"
@@ -12,18 +13,36 @@ int get_collection_count_checked(IDispatch* collection) {
     DISPID dispid;
     const HRESULT lookup = get_dispid_via_typeinfo(collection, L"Count", &dispid);
     if (FAILED(lookup)) throw ComException("Cannot resolve SAP GUI collection count", lookup);
-    DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
     _variant_t result;
-    const HRESULT invoked = collection->Invoke(
-        dispid, IID_NULL, LOCALE_USER_DEFAULT,
-        DISPATCH_PROPERTYGET, &no_arguments,
-        &result, nullptr, nullptr);
+    const HRESULT invoked = invoke(collection, dispid, DISPATCH_PROPERTYGET, {}, &result);
     if (FAILED(invoked)) throw ComException("Cannot read SAP GUI collection count", invoked);
     if (result.vt != VT_I4 && result.vt != VT_I2)
         throw ComException("SAP GUI collection count has an unexpected type");
     const int count = static_cast<int>(result);
     if (count < 0) throw ComException("SAP GUI collection count is negative");
     return count;
+}
+
+std::vector<_variant_t> collection_member_items(IDispatch* owner, const wchar_t* member, WORD flags, int limit) {
+    std::vector<_variant_t> items;
+    if (!owner) return items;
+    DISPID member_id;
+    if (FAILED(get_dispid_via_typeinfo(owner, member, &member_id))) return items;
+    _variant_t answer;
+    if (FAILED(invoke(owner, member_id, flags, {}, &answer)) || answer.vt != VT_DISPATCH || !answer.pdispVal)
+        return items;
+    IDispatch* collection = answer.pdispVal;   // `answer` keeps it alive
+    DISPID count_id, item_id;
+    if (FAILED(get_dispid_via_typeinfo(collection, L"Count", &count_id))) return items;
+    _variant_t count;
+    if (FAILED(invoke(collection, count_id, DISPATCH_PROPERTYGET, {}, &count)) || count.vt != VT_I4) return items;
+    if (FAILED(get_dispid_via_typeinfo(collection, L"Item", &item_id))) return items;
+    for (long i = 0; i < count.lVal && i < limit; ++i) {
+        _variant_t item;
+        if (SUCCEEDED(invoke(collection, item_id, DISPATCH_METHOD, {_variant_t(i)}, &item)))
+            items.push_back(std::move(item));
+    }
+    return items;
 }
 
 // Helper function for AddRef validation with SEH (no C++ objects allowed)
@@ -64,7 +83,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     ULONG ref_count = safe_addref_check(obj);
     if (ref_count == 0) {
         spdlog::error("get_dispid_via_typeinfo: Access violation during AddRef - stale COM pointer for '{}'",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
     obj->Release();  // Restore ref count
@@ -75,7 +94,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     HRESULT hr = safe_get_typeinfo(obj, &type_info);
     if (hr == E_FAIL) {
         spdlog::error("get_dispid_via_typeinfo: Access violation calling GetTypeInfo for '{}' - stale COM pointer detected",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
 
@@ -91,7 +110,7 @@ HRESULT get_dispid_via_typeinfo(IDispatch* obj, const wchar_t* name, DISPID* dis
     hr = safe_get_ids_of_names(obj, &name_ptr, dispid);
     if (hr == E_FAIL) {
         spdlog::error("get_dispid_via_typeinfo: Access violation calling GetIDsOfNames for '{}' - stale COM pointer detected",
-                     (const char*)_bstr_t(name));
+                     text::wide_to_utf8_lossy(name));
         return E_FAIL;
     }
 
