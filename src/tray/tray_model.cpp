@@ -116,6 +116,13 @@ std::string trail_menu_text(const LinkView& link) {
     return s;
 }
 
+std::string clock_skew_text(const LinkView& link) {
+    if (link.clock_skew_s == 0) return {};
+    const auto d = link.clock_skew_s < 0 ? -link.clock_skew_s : link.clock_skew_s;
+    return "Windows clock is " + std::to_string(d) + " s " + (link.clock_skew_s < 0 ? "ahead of" : "behind") +
+           " the fairyfly cloud: calls are refused. Settings > Time & language > Date & time > Sync now";
+}
+
 std::string trail_balloon_text(const LinkView& link) {
     if (!link.trail_on) return "Audit trail off: the steps assistants take on this desktop are no longer recorded";
     return "Audit trail on: your administrator records the steps AI assistants take on this desktop, with screenshots" +
