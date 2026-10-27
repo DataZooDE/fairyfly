@@ -41,6 +41,13 @@ constexpr bool is_ascii_alnum(char c) { return (c >= '0' && c <= '9') || (c >= '
 /// Without ASCII white space at both ends.
 [[nodiscard]] inline std::string trim(std::string_view s) { return std::string(trim_view(s)); }
 
+/// Without the characters of `chars` at both ends (for inputs whose accepted padding is narrower than ASCII space).
+[[nodiscard]] inline std::string trim(std::string_view s, std::string_view chars) {
+    const auto first = s.find_first_not_of(chars);
+    if (first == std::string_view::npos) return std::string();
+    return std::string(s.substr(first, s.find_last_not_of(chars) - first + 1));
+}
+
 /// Equal ignoring ASCII case.
 [[nodiscard]] inline bool iequals(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;

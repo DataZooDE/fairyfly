@@ -43,6 +43,8 @@ struct Field {
     std::string value;    ///< Text (never filled for password fields)
     bool input = false;   ///< a field a user types into (text, combo, check box, radio button)
     std::optional<Rect> rect;            ///< screen rectangle; nullopt when it could not be read
+    /// SAP answered all four geometry properties with -1: not drawn (a closed menu entry). Not set when a read failed.
+    bool not_drawn = false;
     std::vector<std::string> columns;    ///< grids (GuiShell GridView) and column trees: technical column names
     /// What it shows could not be read (a control container whose content the tree does not list and the walk could
     /// not reach, a grid whose columns could not be read): blurred as a whole, whatever the blur setting.
@@ -90,6 +92,10 @@ bool is_password(const Field& f);
 bool is_bank(const Field& f);
 /// The rule for screenshots: password fields always, bank fields while `blur` is on.
 bool must_blur(const Field& f, bool blur);
+/// A field's geometry from ScreenLeft, ScreenTop, Width, Height (nullopt: the read failed): a rectangle when it has a
+/// size, `not_drawn` when all four read -1.
+void set_geometry(Field& f, std::optional<int> x, std::optional<int> y, std::optional<int> width,
+                  std::optional<int> height);
 
 // ---- blurring -----------------------------------------------------------------------------------------------------
 

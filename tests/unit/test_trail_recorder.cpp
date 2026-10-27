@@ -341,6 +341,48 @@ TEST_CASE("trail blur: a screenshot whose sensitive field cannot be located is d
     CHECK_FALSE(plan_blur(logon_screen(), 400, 301, true).drop);  // rounding of a scaled capture
     CHECK(plan_blur(logon_screen(), 100, 75, true).drop);   // scale 0.25: not a display scaling
 
+    // a closed menu entry named like a password (SU01's "Change Password", live on Logon data): SAP answers its
+    // geometry with -1 everywhere (not drawn), so it is not on the screenshot and does not drop the shot
+    ScreenState menu = logon_screen();
+    Field change_password = field("wnd[0]/mbar/menu[0]/menu[8]", "GuiMenu", std::nullopt);
+    change_password.name = "PASSWORD";
+    REQUIRE(is_password(change_password));
+    CHECK(must_blur(change_password, false));  // its geometry is still asked for (needs_rect)
+    set_geometry(change_password, -1, -1, -1, -1);
+    CHECK_FALSE(change_password.rect);
+    CHECK(change_password.not_drawn);
+    menu.fields.push_back(change_password);
+    const int logon_blurred = plan_blur(logon_screen(), 400, 300, true).blurred;
+    const auto with_menu = plan_blur(menu, 400, 300, true);
+    CHECK_FALSE(with_menu.drop);
+    CHECK(with_menu.blurred == logon_blurred);
+    // a menu entry whose geometry could not be read may be open on the screen: dropped (SAP can fill a caption from a
+    // program field)
+    Field unread = change_password;
+    set_geometry(unread, -1, std::nullopt, -1, -1);
+    CHECK_FALSE(unread.not_drawn);
+    menu.fields.back() = unread;
+    CHECK(plan_blur(menu, 400, 300, true).drop);
+    // a menu entry with a position is on the screenshot: blurred
+    Field open = change_password;
+    set_geometry(open, 110, 52, 40, 8);
+    CHECK(open.rect);
+    CHECK_FALSE(open.not_drawn);
+    menu.fields.back() = open;
+    CHECK(plan_blur(menu, 400, 300, true).blurred == logon_blurred + 1);
+    // "not drawn" excuses only menus: any other control without a position still drops the shot
+    Field text = change_password;
+    text.type = "GuiTextField";
+    menu.fields.back() = text;
+    CHECK(plan_blur(menu, 400, 300, true).drop);
+    // a zero or partly negative geometry is no "not drawn"
+    Field zero = change_password;
+    set_geometry(zero, 0, 0, 0, 0);
+    CHECK_FALSE(zero.not_drawn);
+    CHECK_FALSE(zero.rect);
+    set_geometry(zero, -1, -1, 40, -1);
+    CHECK_FALSE(zero.not_drawn);
+
     // a screen without sensitive fields needs no positions
     ScreenState plain;
     plain.complete = true;

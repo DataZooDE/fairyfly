@@ -46,12 +46,9 @@ std::optional<int> strict_int(const sap::SapGuiObject& o, const wchar_t* name) {
 }
 
 std::optional<Rect> strict_rect(const sap::SapGuiObject& o) {
-    auto x = strict_int(o, L"ScreenLeft");
-    auto y = strict_int(o, L"ScreenTop");
-    auto w = strict_int(o, L"Width");
-    auto h = strict_int(o, L"Height");
-    if (!x || !y || !w || !h || *w <= 0 || *h <= 0) return std::nullopt;
-    return Rect{*x, *y, *w, *h};
+    Field g;
+    set_geometry(g, strict_int(o, L"ScreenLeft"), strict_int(o, L"ScreenTop"), strict_int(o, L"Width"), strict_int(o, L"Height"));
+    return g.rect;
 }
 
 /// Containers whose content GetObjectTree does not list (object_tree.h is_phase3_skipped_container): their controls
@@ -114,7 +111,9 @@ public:
                 if (!needs_rect || !needs_rect(s.fields[i])) continue;
                 try {
                     auto e = session->find_element_by_id(full_ids[i]);
-                    if (e) s.fields[i].rect = strict_rect(*e);
+                    if (e)
+                        set_geometry(s.fields[i], strict_int(*e, L"ScreenLeft"), strict_int(*e, L"ScreenTop"),
+                                     strict_int(*e, L"Width"), strict_int(*e, L"Height"));
                 } catch (const std::exception&) {
                     // stays unknown: the screenshot is dropped
                 }

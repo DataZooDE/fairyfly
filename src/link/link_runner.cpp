@@ -223,10 +223,8 @@ bool prefill_console_line(const std::string& text) {
         !(mode & ENABLE_ECHO_INPUT))
         return false;
     FlushConsoleInputBuffer(h);   // typeahead would end up in front of the address
-    const int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    if (n <= 0) return false;
-    std::wstring wide(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), n);
+    const std::wstring wide = ::fairyfly::text::utf8_to_wide_lossy(text);
+    if (wide.empty()) return false;
     std::vector<INPUT_RECORD> keys;
     for (wchar_t c : wide)
         for (BOOL down : {TRUE, FALSE}) {

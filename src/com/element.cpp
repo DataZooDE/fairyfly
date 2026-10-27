@@ -169,8 +169,13 @@ bool ComGuiElement::explicitly_read_only() const {
     return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
 }
 
+namespace {
+/// The padding a checkbox or combo input may carry: space, tab, CR, LF (not form feed or vertical tab).
+constexpr std::string_view kInputBlanks = " \t\r\n";
+}  // namespace
+
 std::optional<bool> ComGuiElement::parse_check_value(const std::string& value) {
-    const std::string v = utils::lower_ascii(utils::trim(value));
+    const std::string v = utils::lower_ascii(utils::trim(value, kInputBlanks));
     if (v == "true" || v == "1" || v == "yes" || v == "on" || v == "x") return true;
     if (v == "false" || v == "0" || v == "no" || v == "off" || v.empty()) return false;
     return std::nullopt;
@@ -239,20 +244,20 @@ ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
 
         std::string key_to_write = value;
         if (entries_known) {
-            const std::string wanted = utils::trim(value);
+            const std::string wanted = utils::trim(value, kInputBlanks);
             const std::string wanted_lower = utils::lower_ascii(wanted);
             const Entry* match = nullptr;
             for (const auto& entry : entries) {  // exact key first, then the displayed value
-                if (utils::trim(entry.key) == wanted) { match = &entry; break; }
+                if (utils::trim(entry.key, kInputBlanks) == wanted) { match = &entry; break; }
             }
             if (!match) {
                 for (const auto& entry : entries) {
-                    if (utils::lower_ascii(utils::trim(entry.value)) == wanted_lower) { match = &entry; break; }
+                    if (utils::lower_ascii(utils::trim(entry.value, kInputBlanks)) == wanted_lower) { match = &entry; break; }
                 }
             }
             if (!match) {  // keys that differ only in case ("en" for "EN")
                 for (const auto& entry : entries) {
-                    if (utils::lower_ascii(utils::trim(entry.key)) == wanted_lower) { match = &entry; break; }
+                    if (utils::lower_ascii(utils::trim(entry.key, kInputBlanks)) == wanted_lower) { match = &entry; break; }
                 }
             }
             if (!match) {

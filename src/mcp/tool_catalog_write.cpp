@@ -16,13 +16,6 @@ const json* find_arg(const json& args, const char* key) {
     return &*it;
 }
 
-bool bool_arg(const json& args, const char* key) {
-    const json* v = find_arg(args, key);
-    if (!v) return false;
-    if (!v->is_boolean()) throw std::invalid_argument(std::string("'") + key + "' must be a boolean");
-    return v->get<bool>();
-}
-
 std::optional<int> connection_arg(const json& args, const Policy& policy) {
     if (const json* c = find_arg(args, "connection")) {
         if (!c->is_number_integer() || c->get<long long>() < 0)

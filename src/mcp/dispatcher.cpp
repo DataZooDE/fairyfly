@@ -1460,8 +1460,6 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     bool& implicit_sticky = state.implicit_sticky;
     auto& sticky_target = state.sticky_target;
     bool& selection_input = state.selection_input;
-    std::string& reattach_note = state.reattach_note;
-    bool& reattach_refused = state.reattach_refused;
     std::string& policy_state_key = state.policy_state_key;
     std::string& policy_fallback_key = state.policy_fallback_key;
 
@@ -1491,10 +1489,6 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     // return its connection id; nullopt: nothing attached. Without that verified, logged-on identity (`recorded` empty:
     // a file of an older version; "SYS/CLIENT/": only the system and client must match; or nobody logged on in the
     // session) only a read-only tool re-attaches: a change is refused and `reattach_refused` says so.
-    const std::string reattach_again_hint = kReattachAgainHint;
-    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
-        return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
-    };
     const auto acquire_control_probe_gate = [&] { return acquire_probe_gate(state, ctx); };
     // Launch changes the GUI application. Login only needs the global probe gate
     // after its own window lane is free; holding it while queued would stall all

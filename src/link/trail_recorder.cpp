@@ -21,6 +21,13 @@ namespace {
 bool window_type(const std::string& type) {
     return type == "GuiMainWindow" || type == "GuiModalWindow" || type == "GuiFrameWindow";
 }
+
+/// Menu bars and their entries: SAP answers the geometry of a closed menu entry with -1 (Field::not_drawn): it is not
+/// on the screenshot (SU01's "Change Password"). One with a position is blurred like any field (SAP can fill a caption
+/// from a program field), one whose geometry could not be read drops the shot, so menus stay in must_blur.
+bool menu_type(const std::string& type) {
+    return type == "GuiMenubar" || type == "GuiMenu" || type == "GuiContextMenu";
+}
 }  // namespace
 
 bool is_password(const Field& f) {
@@ -43,6 +50,13 @@ bool must_blur(const Field& f, bool blur) {
     return f.opaque || is_password(f) || (blur && is_bank(f));
 }
 
+void set_geometry(Field& f, std::optional<int> x, std::optional<int> y, std::optional<int> width,
+                  std::optional<int> height) {
+    f.rect.reset();
+    f.not_drawn = x == -1 && y == -1 && width == -1 && height == -1;
+    if (x && y && width && height && *width > 0 && *height > 0) f.rect = Rect{*x, *y, *width, *height};
+}
+
 std::string relative_id(const std::string& id) {
     auto i = id.find("wnd[");
     return i == std::string::npos ? id : id.substr(i);
@@ -62,8 +76,10 @@ BlurPlan plan_blur(const ScreenState& screen, int image_width, int image_height,
     if (!screen.complete) return drop("the screen's elements could not be read");
     if (image_width <= 0 || image_height <= 0) return drop("empty image");
     std::vector<const Field*> sensitive;
-    for (const auto& f : screen.fields)
-        if (must_blur(f, blur)) sensitive.push_back(&f);
+    for (const auto& f : screen.fields) {
+        const bool closed_menu = menu_type(f.type) && f.not_drawn;  // SAP says it is not on the screen
+        if (must_blur(f, blur) && !closed_menu) sensitive.push_back(&f);
+    }
     if (sensitive.empty()) return plan;
     if (!screen.window || screen.window->empty()) return drop("the window's position is unknown");
     const Rect& w = *screen.window;

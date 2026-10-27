@@ -2,6 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "include/string_utils.h"
+#include "include/com/wrapper.h"
+
+#include <optional>
 
 using namespace fairyfly::utils;
 
@@ -53,4 +56,16 @@ TEST_CASE("string utils: screenshot names are slug_timestamp_random.png", "[util
     CHECK(name.rfind("va02_display_", 0) == 0);
     CHECK(name.size() == std::string("va02_display_").size() + 14 + 1 + 4 + 4);
     CHECK(name.substr(name.size() - 4) == ".png");
+}
+
+TEST_CASE("trim with a character set: only those characters, at both ends", "[strings]") {
+    CHECK(fairyfly::utils::trim(" \t a b \r\n", " \t\r\n") == "a b");
+    CHECK(fairyfly::utils::trim("\vtrue", " \t\r\n") == "\vtrue");   // a vertical tab is not in the set
+    CHECK(fairyfly::utils::trim(" \t ", " \t\r\n").empty());
+}
+
+TEST_CASE("a check value with a vertical tab is not a check value, as before the shared trim", "[strings][com]") {
+    // final review 2026-10-27: the checkbox/combo input trims space, tab, CR and LF only
+    CHECK_FALSE(fairyfly::sap::ComGuiElement::parse_check_value("\vtrue").has_value());
+    CHECK(fairyfly::sap::ComGuiElement::parse_check_value(" true\r\n") == std::optional<bool>(true));
 }

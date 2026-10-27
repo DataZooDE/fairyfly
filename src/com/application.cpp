@@ -288,31 +288,35 @@ SapGuiCollection<ComGuiConnection> ComGuiApplication::connections() const {
     return SapGuiCollection<ComGuiConnection>(connections_dispatch);
 }
 
-ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connection_name, bool sync, bool raise_error) {
+/// GuiApplication.<method>(argument, Sync, Raise) - OpenConnection by SAP Logon entry name or
+/// OpenConnectionByConnectionString - and its connection. With `raise_error` a failure throws (with SAP's own
+/// description when it gives one), otherwise it is logged and null.
+ComGuiConnectionPtr ComGuiApplication::open_connection_with(const wchar_t* method, const char* label,
+                                                            const std::string& argument, bool sync, bool raise_error) {
     if (!dispatch_) {
         if (raise_error) throw ComException("GuiApplication dispatch is null");
         return nullptr;
     }
 
     DISPID dispid = -1;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"OpenConnection", &dispid);
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method, &dispid);
     if (FAILED(hr)) {
-        _bstr_t name(L"OpenConnection");
+        _bstr_t name(method);
         hr = dispatch_->GetIDsOfNames(IID_NULL, (LPOLESTR*)&name, 1, LOCALE_USER_DEFAULT, &dispid);
     }
 
     if (FAILED(hr)) {
-        spdlog::error("OpenConnection method DISPID not found (hr={})", hresult_hex(hr));
-        if (raise_error) throw ComException("OpenConnection method not found", hr);
+        spdlog::error("{} method DISPID not found (hr={})", label, hresult_hex(hr));
+        if (raise_error) throw ComException(std::string(label) + " method not found", hr);
         return nullptr;
     }
 
-    // (Description, Sync, Raise)
+    // (Description or ConnectString, Sync, Raise)
     _variant_t result;
     EXCEPINFO excepinfo;
     memset(&excepinfo, 0, sizeof(excepinfo));
     UINT argerr = 0;
-    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(connection_name), _variant_t(sync), _variant_t(raise_error)},
+    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(argument), _variant_t(sync), _variant_t(raise_error)},
                 &result, &excepinfo, &argerr);
 
     if (FAILED(hr)) {
@@ -324,72 +328,29 @@ ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connec
         if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
         if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
 
-        spdlog::warn("OpenConnection('{}') failed: hr={} {}", connection_name, hresult_hex(hr), err_detail);
+        spdlog::warn("{}('{}') failed: hr={} {}", label, argument, hresult_hex(hr), err_detail);
         if (raise_error) {
-            throw ComException(fmt::format("OpenConnection failed: {}", err_detail.empty() ? fmt::format("hr={}", hresult_hex(hr)) : err_detail), hr);
+            throw ComException(fmt::format("{} failed: {}", label, err_detail.empty() ? fmt::format("hr={}", hresult_hex(hr)) : err_detail), hr);
         }
         return nullptr;
     }
 
     if (result.vt == VT_DISPATCH && result.pdispVal) {
-        spdlog::info("OpenConnection('{}') succeeded", connection_name);
+        spdlog::info("{}('{}') succeeded", label, argument);
         return std::make_shared<ComGuiConnection>(IDispatchPtr(result.pdispVal, true));
     }
 
-    spdlog::warn("OpenConnection('{}') returned unexpected result type: {}", connection_name, result.vt);
+    spdlog::warn("{}('{}') returned unexpected result type: {}", label, argument, result.vt);
     return nullptr;
 }
 
+ComGuiConnectionPtr ComGuiApplication::open_connection(const std::string& connection_name, bool sync, bool raise_error) {
+    return open_connection_with(L"OpenConnection", "OpenConnection", connection_name, sync, raise_error);
+}
+
 ComGuiConnectionPtr ComGuiApplication::open_connection_by_connection_string(const std::string& connection_string, bool sync, bool raise_error) {
-    if (!dispatch_) {
-        if (raise_error) throw ComException("GuiApplication dispatch is null");
-        return nullptr;
-    }
-
-    DISPID dispid = -1;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"OpenConnectionByConnectionString", &dispid);
-    if (FAILED(hr)) {
-        _bstr_t name(L"OpenConnectionByConnectionString");
-        hr = dispatch_->GetIDsOfNames(IID_NULL, (LPOLESTR*)&name, 1, LOCALE_USER_DEFAULT, &dispid);
-    }
-
-    if (FAILED(hr)) {
-        spdlog::error("OpenConnectionByConnectionString method DISPID not found (hr={})", hresult_hex(hr));
-        if (raise_error) throw ComException("OpenConnectionByConnectionString method not found", hr);
-        return nullptr;
-    }
-
-    // (ConnectString, Sync, Raise)
-    _variant_t result;
-    EXCEPINFO excepinfo;
-    memset(&excepinfo, 0, sizeof(excepinfo));
-    UINT argerr = 0;
-    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(connection_string), _variant_t(sync), _variant_t(raise_error)},
-                &result, &excepinfo, &argerr);
-
-    if (FAILED(hr)) {
-        std::string err_detail = "";
-        if (excepinfo.bstrDescription) {
-            err_detail = com::bstr_to_utf8(excepinfo.bstrDescription);
-            SysFreeString(excepinfo.bstrDescription);
-        }
-        if (excepinfo.bstrSource) SysFreeString(excepinfo.bstrSource);
-        if (excepinfo.bstrHelpFile) SysFreeString(excepinfo.bstrHelpFile);
-
-        spdlog::warn("OpenConnectionByConnectionString('{}') failed: hr={} {}", connection_string, hresult_hex(hr), err_detail);
-        if (raise_error) {
-            throw ComException(fmt::format("OpenConnectionByConnectionString failed: {}", err_detail.empty() ? fmt::format("hr={}", hresult_hex(hr)) : err_detail), hr);
-        }
-        return nullptr;
-    }
-
-    if (result.vt == VT_DISPATCH && result.pdispVal) {
-        spdlog::info("OpenConnectionByConnectionString('{}') succeeded", connection_string);
-        return std::make_shared<ComGuiConnection>(IDispatchPtr(result.pdispVal, true));
-    }
-
-    spdlog::warn("OpenConnectionByConnectionString('{}') returned unexpected result type: {}", connection_string, result.vt);
-    return nullptr;
+    return open_connection_with(L"OpenConnectionByConnectionString", "OpenConnectionByConnectionString", connection_string,
+                                sync, raise_error);
 }
 
 // ============================================================================

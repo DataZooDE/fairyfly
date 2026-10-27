@@ -251,8 +251,10 @@ Get-Content $env:LOCALAPPDATA\fairyfly\audit\2026-10.jsonl | ConvertFrom-Json |
 ## Environment variables
 
 Switches (`FAIRYFLY_READ_ONLY`, `FAIRYFLY_PROBE_ALL`, `FAIRYFLY_DIAG`) are on for `1`, `true`, `yes` or `on` in any
-case, ignoring surrounding spaces; `FAIRYFLY_AUDIT` and `FAIRYFLY_UPDATE_CHECK` are switched off by `0`, `false`, `no`
-or `off`. Every part of fairyfly (CLI, MCP server, session workers, setup, cloud link) reads them the same way.
+case, ignoring surrounding spaces; `FAIRYFLY_UPDATE_CHECK` is switched off by `0`, `false`, `no` or `off`. The audit
+trail is switched off only by `FAIRYFLY_AUDIT=0` or `off` (any case, no other words: turning it off must be deliberate)
+and made mandatory by `required`. Every part of fairyfly (CLI, MCP server, session workers, setup, cloud link) reads
+them the same way.
 
 | Variable | Effect |
 |---|---|

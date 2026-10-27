@@ -205,9 +205,8 @@ TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "OFF"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), false, false, now).mode == Mode::Required);
-    // the off spellings of every fairyfly flag (config::parse_off) switch it off too
-    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "false"}}), false, false, now).mode == Mode::Disabled);
-    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", " No "}}), false, false, now).mode == Mode::Disabled);
+    // only the documented words switch it off (see "audit: only 0 and off turn it off")
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "false"}}), false, false, now).mode == Mode::Enabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now).mode == Mode::Enabled);
     REQUIRE(resolve_config(env_of({}), true, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({}), false, true, now).mode == Mode::Required);
@@ -408,4 +407,30 @@ TEST_CASE("AuditSink::reconfigure switches mode and file", "[audit]") {
     sink.reconfigure(AuditConfig{Mode::Required, "b.jsonl"});
     CHECK(sink.mode() == Mode::Required);
     CHECK(sink.file() == fs::path("b.jsonl"));
+}
+
+TEST_CASE("audit: only 0 and off turn it off; false or no leave it on, as before the shared parser", "[audit]") {
+    // final review 2026-10-27: turning the audit trail off is security relevant; the shared flag parser's wider
+    // "off" words (false, no, padding) must not reach it
+    const auto now = std::chrono::system_clock::now();
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "OFF"}}), false, false, now).mode == Mode::Disabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, false, now).mode == Mode::Disabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "false"}}), false, false, now).mode == Mode::Enabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "no"}}), false, false, now).mode == Mode::Enabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", " off "}}), false, false, now).mode == Mode::Enabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "Required"}}), false, false, now).mode == Mode::Required);
+}
+
+#ifndef _WIN32
+TEST_CASE("audit: the default file on POSIX is under $HOME/.local/share/fairyfly/audit", "[audit]") {
+    const auto now = std::chrono::system_clock::now();
+    const auto config = resolve_config(env_of({{"HOME", "/home/u"}}), false, false, now);
+    CHECK(config.file.parent_path() == fs::path("/home/u") / ".local" / "share" / "fairyfly" / "audit");
+}
+#endif
+
+TEST_CASE("audit: a padded required still makes the trail mandatory, also against --no-audit", "[audit]") {
+    // final review 2026-10-27 (Codex): only switching off is strict; required is the safe direction
+    const auto now = std::chrono::system_clock::now();
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", " Required "}}), true, false, now).mode == Mode::Required);
 }
