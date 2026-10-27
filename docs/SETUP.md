@@ -35,8 +35,10 @@ terminal; the package is per user and winget refuses it in an administrator cont
 
 **Update.** `fairyfly update check` asks the releases page whether a newer version exists. `fairyfly update apply`
 installs it:
-- it downloads the release, checks it against `SHA256SUMS` and checks its Authenticode signature (a signed
-  installation only accepts the same signer);
+- it downloads the release, checks it against `SHA256SUMS` and checks its Authenticode signature: it must be
+  signed by the publisher `O=DataZoo GmbH, C=DE` (organisation and country of the certificate, not its address), a
+  signed installation never takes an unsigned release, and an unsigned installation takes an unsigned release only
+  with `--allow-unsigned` (details in [SIGNING.md](SIGNING.md#updates));
 - only then it replaces `fairyfly.exe`; the previous one stays as `fairyfly.exe.old` until the next update.
 
 The tray checks once in the background and shows a notice when an update is available (`FAIRYFLY_UPDATE_CHECK=0`
