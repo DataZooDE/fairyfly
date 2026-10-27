@@ -1207,6 +1207,87 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::authorization_r
     return std::nullopt;
 }
 
+/// Owner mode with private session workers: the call goes to the worker of its session, with the session's identity,
+/// the read-only mode, the screen guard and the selection input; right before sending, the audit, cancellation,
+/// token and lease are checked again (also by the gated invoker at the worker's turn).
+Result CommandDispatcher::invoke_on_worker(const std::vector<std::string>& selected_argv, const std::string& name,
+                                           const json& args, const CallContext& ctx, const Principal& principal,
+                                           std::optional<int> connection, const audit::SapFacts& owner_pre_facts,
+                                           const std::string& expected_screen_guard, bool selection_input,
+                                           const auth::InitialScreen& selection_initial) {
+    if (!worker_command_allowed(selected_argv))
+        return Result::fail("WORKER_UNSUPPORTED", "the session retry cannot be routed to its private worker");
+    WorkerCall worker_call;
+    worker_call.connection = *connection;
+    worker_call.session_identity = owner_pre_facts.session_identity;
+    worker_call.owner_identity = sap_identity(owner_pre_facts);
+    worker_call.argv = selected_argv;
+    worker_call.read_only = policy_.read_only || principal.read_only;
+    worker_call.expected_screen_guard = expected_screen_guard;
+    worker_call.selection_input = selection_input;
+    if (selection_input) {
+        worker_call.selection_program = selection_initial.program;
+        worker_call.selection_screen = selection_initial.screen_number;
+    }
+    const auto before_send = [&] {
+        if (policy_.audit_required && mcp_audit_failed())
+            throw WorkerTransportError("AUDIT_UNAVAILABLE", "the required audit trail failed before the worker action");
+        if (ctx.cancelled && ctx.cancelled())
+            throw WorkerTransportError("CANCELLED", "session call was cancelled before the worker action");
+        if (ctx.http) {
+            if (!ctx.reauthorize)
+                throw WorkerTransportError("AUTH_UNAVAILABLE", "worker authorization check is unavailable");
+            bool current = false;
+            try { current = ctx.reauthorize(); } catch (...) {}
+            if (!current)
+                throw WorkerTransportError("TOKEN_CHANGED", "authorization changed before the worker action");
+        }
+        if (owner_mode(ctx) && lease_required_for_call(name, args)) {
+            const std::string id = args.value("lease_id", std::string());
+            if (!session_leases_ || !session_leases_->permits_write(owner_pre_facts.session_identity,
+                    principal.id, id, SessionLeases::Clock::now()))
+                throw WorkerTransportError("LEASE_REQUIRED", "session lease changed before the worker action");
+        }
+    };
+    try {
+        before_send();
+        return session_invoker_with_gate_ ? session_invoker_with_gate_(worker_call, before_send)
+                                          : session_invoker_(worker_call);
+    }
+    catch (const WorkerTransportError& e) { return Result::fail(e.code(), e.what()); }
+    catch (...) { return Result::fail("OUTCOME_UNKNOWN", "session worker command outcome is unknown"); }
+}
+
+/// After a successful owner-mode disconnect: the session's lease, route and policy state go. The handler may have
+/// closed/detached the old GUI window while a new cache generation took its numeric ID: the ID fallback is cleared
+/// only when the bound saved record was actually deleted.
+void CommandDispatcher::retire_disconnected_session(const Result& result, const json& args,
+                                                    const audit::SapFacts& owner_pre_facts) {
+    const bool file_deleted = result.data.is_object() && result.data.value("file_deleted", false);
+    if (session_leases_) session_leases_->retire_session(owner_pre_facts.session_identity);
+    if (routing_state_) routing_state_->retire_session(owner_pre_facts.session_identity);
+    if (session_policy_state_ && owner_pre_facts.connection_id) {
+        if (args.is_object() && args.value("close_session", false))
+            session_policy_state_->retire_session(owner_pre_facts.session_identity, *owner_pre_facts.connection_id,
+                                                  file_deleted);
+        else if (file_deleted)
+            session_policy_state_->retire_connection(*owner_pre_facts.connection_id);
+    }
+}
+
+/// The owner session checked before the call is still the call's session (identity, system, client, user); its
+/// current facts go into the audit record when they still match.
+bool CommandDispatcher::owner_session_unchanged(const audit::SapFacts& owner_pre_facts, McpCallRecord& record) {
+    std::optional<audit::SapFacts> current;
+    try { current = facts_provider_(record.connection); } catch (...) {}
+    const auto same_session = [&](const audit::SapFacts& f) {
+        return f.session_identity == owner_pre_facts.session_identity && f.system == owner_pre_facts.system &&
+               f.client == owner_pre_facts.client && f.user == owner_pre_facts.user;
+    };
+    if (current && current->connection_id == owner_pre_facts.connection_id && same_session(*current)) record.sap = *current;
+    return current && current->connection_id == record.connection && same_session(*current);
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1498,47 +1579,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         return fail("OWNER_SESSION_UNAVAILABLE", "the checked SAP session has no saved connection");
     const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
         if (!worker_bound) return invoke(selected_argv);
-        if (!worker_command_allowed(selected_argv))
-            return Result::fail("WORKER_UNSUPPORTED", "the session retry cannot be routed to its private worker");
-        WorkerCall worker_call;
-        worker_call.connection = *record.connection;
-        worker_call.session_identity = owner_pre_facts->session_identity;
-        worker_call.owner_identity = sap_identity(*owner_pre_facts);
-        worker_call.argv = selected_argv;
-        worker_call.read_only = policy_.read_only || principal.read_only;
-        worker_call.expected_screen_guard = expected_screen_guard;
-        worker_call.selection_input = selection_input;
-        if (selection_input) {
-            worker_call.selection_program = selection_initial.program;
-            worker_call.selection_screen = selection_initial.screen_number;
-        }
-        const auto before_send = [&] {
-            if (policy_.audit_required && mcp_audit_failed())
-                throw WorkerTransportError("AUDIT_UNAVAILABLE", "the required audit trail failed before the worker action");
-            if (ctx.cancelled && ctx.cancelled())
-                throw WorkerTransportError("CANCELLED", "session call was cancelled before the worker action");
-            if (ctx.http) {
-                if (!ctx.reauthorize)
-                    throw WorkerTransportError("AUTH_UNAVAILABLE", "worker authorization check is unavailable");
-                bool current = false;
-                try { current = ctx.reauthorize(); } catch (...) {}
-                if (!current)
-                    throw WorkerTransportError("TOKEN_CHANGED", "authorization changed before the worker action");
-            }
-            if (owner_mode(ctx) && lease_required_for_call(name, args)) {
-                const std::string id = args.value("lease_id", std::string());
-                if (!session_leases_ || !session_leases_->permits_write(owner_pre_facts->session_identity,
-                        principal.id, id, SessionLeases::Clock::now()))
-                    throw WorkerTransportError("LEASE_REQUIRED", "session lease changed before the worker action");
-            }
-        };
-        try {
-            before_send();
-            return session_invoker_with_gate_ ? session_invoker_with_gate_(worker_call, before_send)
-                                              : session_invoker_(worker_call);
-        }
-        catch (const WorkerTransportError& e) { return Result::fail(e.code(), e.what()); }
-        catch (...) { return Result::fail("OUTCOME_UNKNOWN", "session worker command outcome is unknown"); }
+        return invoke_on_worker(selected_argv, name, args, ctx, principal, record.connection, *owner_pre_facts,
+                                expected_screen_guard, selection_input, selection_initial);
     };
     if (owner_mode(ctx) &&
         (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
@@ -1698,21 +1740,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
-    if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts) {
-        // The handler may have closed/detached the old GUI window while a new
-        // cache generation took its numeric ID. Only clear the ID fallback if
-        // deletion of the bound saved record actually succeeded.
-        const bool file_deleted = result.data.is_object() && result.data.value("file_deleted", false);
-        if (session_leases_) session_leases_->retire_session(owner_pre_facts->session_identity);
-        if (routing_state_) routing_state_->retire_session(owner_pre_facts->session_identity);
-        if (session_policy_state_ && owner_pre_facts->connection_id) {
-            if (args.is_object() && args.value("close_session", false))
-                session_policy_state_->retire_session(owner_pre_facts->session_identity, *owner_pre_facts->connection_id,
-                                                      file_deleted);
-            else if (file_deleted)
-                session_policy_state_->retire_connection(*owner_pre_facts->connection_id);
-        }
-    }
+    if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts)
+        retire_disconnected_session(result, args, *owner_pre_facts);
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && prelogin_close_facts)
         routing_state_->finish_prelogin(principal.id, *prelogin_close_facts->connection_id,
                                         prelogin_close_facts->session_identity);
@@ -1720,17 +1749,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // A session can close or be replaced after the owner precheck. Reuse this check after
     // every invocation whose result might be returned, including a screenshot retry.
     const auto owner_unchanged = [&]() {
-        if (!owner_pre_facts || name == "gui_session_disconnect") return true;
-        std::optional<audit::SapFacts> current;
-        try { current = facts_provider_(record.connection); } catch (...) {}
-        if (current && current->connection_id == owner_pre_facts->connection_id &&
-            current->session_identity == owner_pre_facts->session_identity &&
-            current->system == owner_pre_facts->system && current->client == owner_pre_facts->client &&
-            current->user == owner_pre_facts->user) record.sap = *current;
-        return current && current->connection_id == record.connection &&
-            current->session_identity == owner_pre_facts->session_identity &&
-            current->system == owner_pre_facts->system && current->client == owner_pre_facts->client &&
-            current->user == owner_pre_facts->user;
+        return !owner_pre_facts || name == "gui_session_disconnect" || owner_session_unchanged(*owner_pre_facts, record);
     };
     if (!owner_unchanged())
         return fail("OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld");

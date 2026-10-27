@@ -202,6 +202,12 @@ private:
                                                      auth::SelectionInputContext& input_context,
                                                      const std::string& policy_state_key,
                                                      const std::string& policy_fallback_key);
+    Result invoke_on_worker(const std::vector<std::string>& selected_argv, const std::string& name, const json& args,
+                            const CallContext& ctx, const Principal& principal, std::optional<int> connection,
+                            const audit::SapFacts& owner_pre_facts, const std::string& expected_screen_guard,
+                            bool selection_input, const auth::InitialScreen& selection_initial);
+    void retire_disconnected_session(const Result& result, const json& args, const audit::SapFacts& owner_pre_facts);
+    bool owner_session_unchanged(const audit::SapFacts& owner_pre_facts, McpCallRecord& record);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,
