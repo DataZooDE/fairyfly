@@ -13,6 +13,15 @@ namespace cli {
 using json = nlohmann::json;
 
 /// Connection information stored in fairyfly.N.con files
+/// The SAP system, client and user a saved connection was attached to (empty when unknown: an older file, or a
+/// session without a logged-on user). A stale default connection is re-attached only to a session of the same identity.
+struct ConnectionIdentity {
+    std::string system;
+    std::string client;
+    std::string user;
+    bool complete() const { return !system.empty() && !client.empty() && !user.empty(); }
+};
+
 struct Connection {
     int id;                           ///< Connection ID (N in fairyfly.N.con)
     std::string session_id;           ///< Full session path (e.g., /app/con[0]/ses[0])
@@ -24,6 +33,7 @@ struct Connection {
     std::string window_title;         ///< Window title at attachment time
     std::string created_at;           ///< ISO 8601 timestamp of creation
     std::string last_validated;       ///< ISO 8601 timestamp of last validation
+    ConnectionIdentity identity;      ///< SAP system/client/user at attachment (empty: unknown)
 
     /// Convert to JSON for serialization
     json to_json() const;
@@ -96,7 +106,8 @@ public:
         const std::string& description,
         const std::string& connection_string,
         const std::string& window_title,
-        const std::string& server_session_key = ""
+        const std::string& server_session_key = "",
+        const ConnectionIdentity& identity = {}
     );
 
     /// Create a new saved connection for an owner-mode launch. Never rewrites an

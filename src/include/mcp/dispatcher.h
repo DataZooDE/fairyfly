@@ -216,8 +216,9 @@ private:
     std::string client_;
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
-    void set_sticky_connection(const std::string& principal_name, int id, std::string session_identity) {
-        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity));
+    void set_sticky_connection(const std::string& principal_name, int id, std::string session_identity,
+                               std::string sap_identity = "") {
+        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity), std::move(sap_identity));
     }
     std::shared_ptr<SessionRoutingState> routing_state_ = std::make_shared<SessionRoutingState>();
     /// Principals whose last screen-acting call ended outside their T-code allowlist: their next screen-acting
