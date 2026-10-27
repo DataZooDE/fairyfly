@@ -12,6 +12,17 @@ namespace fairyfly {
 using json = nlohmann::json;
 
 // Core result type for all operations
+/// Time since construction in whole milliseconds (an action's Result::duration).
+class Stopwatch {
+public:
+    std::chrono::milliseconds elapsed() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_);
+    }
+
+private:
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
+};
+
 struct Result {
     enum class Status {
         Success,

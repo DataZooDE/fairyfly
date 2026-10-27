@@ -1,4 +1,5 @@
 // Screen filters of `screen read` (--only, --text, --tab, ...) and the tab coverage notes: pure JSON, no SAP.
+#include "include/shell_kind.h"
 #include "include/cli_handler.h"
 #include "include/string_utils.h"
 
@@ -81,7 +82,7 @@ static bool element_is_table(const json& elem)
     if (!elem.is_object()) return false;
     const std::string type = elem.value("type", "");
     if (type == "GuiGridView" || type == "GuiTableControl") return true;
-    if (elem.value("subtype", "") == "GridView") return true;
+    if (sap::is_grid_shell(elem.value("subtype", ""))) return true;
     for (const char* key : {"table_data", "grid_data"}) {
         if (elem.contains(key) && elem[key].is_object()) return true;
     }
