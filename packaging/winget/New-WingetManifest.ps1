@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Renders the winget manifests (schema 1.10.0) of DataZoo.fairyfly for one release from the built per-user MSI.
+  Renders the winget manifests (schema 1.12.0) of DataZoo.fairyfly for one release from the built per-user MSI.
 .DESCRIPTION
   Reads ProductCode, UpgradeCode, ProductVersion, Manufacturer and the summary-information word count of fairyfly.msi
   through the Windows Installer COM API (WindowsInstaller.Installer, read-only), computes the SHA-256 and fills the
