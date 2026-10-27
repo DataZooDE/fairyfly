@@ -1,4 +1,5 @@
 #include "include/formatters/grid_renderer.h"
+#include "include/string_utils.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
@@ -75,11 +76,7 @@ int value_row_for(const RowCells& rows, int label_row) {
         for (const auto& cell : row_cells) {
             // Only check cells in label columns
             if (label_cols.count(cell.col)) {
-                // Trim and check if there's actual content
-                std::string trimmed = cell.text;
-                trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-                trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-                if (!trimmed.empty()) {
+                if (!utils::trim(cell.text).empty()) {
                     has_content_in_label_cols = true;
                     break;
                 }
