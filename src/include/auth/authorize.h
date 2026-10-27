@@ -24,9 +24,9 @@ bool scope_allows(const mcp::Principal& principal, const std::string& family, co
 /// match a plain allowlist entry.
 std::string normalize_tcode(const std::string& code);
 
-/// Tool families that act on whatever transaction is open now (screen, element, key, popup, menu), as opposed to
-/// choosing a new one (gui_transaction_start) or managing sessions.
-bool acts_on_screen(const std::string& family);
+/// Tools that act on whatever transaction is open now (command_table::Trait::ActsOnScreen: the screen, element, key,
+/// popup and menu tools), as opposed to choosing a new one (gui_transaction_start) or managing sessions.
+bool acts_on_screen(const std::string& tool);
 
 /// Keys gui_key_send may use for a token with a T-code allowlist that was NOT created with --allow-navigation:
 /// Enter (0), F4 (4), F8 (8) and the page keys (VKeys 80 Ctrl+PageUp/page top, 81 PageUp, 82 PageDown, 83 Ctrl+PageDown/page bottom; named pageup, pagedown, pagetop, pagebottom or raw numbers). Everything else (F3 back, F12 cancel, Shift+F3 exit,
@@ -109,6 +109,9 @@ struct SessionTarget {
     std::string connection_name;  ///< live connection description / saved connection / SAP Logon entry name
     bool ambiguous = false;       ///< launch: open sessions of the entry name run on different systems
     std::string user;             ///< live SAP user; empty when not known
+
+    /// "SID/CLIENT/USER" (system already holds SID/CLIENT).
+    std::string identity() const { return system + "/" + user; }
 };
 
 /// True when `tool` must be checked against the target (see authorize_session_target) for this principal, so the

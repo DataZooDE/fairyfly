@@ -1,5 +1,7 @@
 #pragma once
 
+#include "include/string_utils.h"
+
 #include <algorithm>
 #include <cctype>
 #include <functional>
@@ -10,22 +12,16 @@
 namespace fairyfly::sap {
 
 inline std::string normalize_sensitive_name(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char c) {
-        return std::isalnum(c) == 0;
-    }), value.end());
+    // ASCII only, independent of the C locale: a non-ASCII byte is dropped, never folded into a letter
+    value = utils::lower_ascii(value);
+    value.erase(std::remove_if(value.begin(), value.end(), [](char c) { return !utils::is_ascii_alnum(c); }), value.end());
     return value;
 }
 
 inline bool contains_sensitive_utf8_name(const std::string& value) {
     if (std::none_of(value.begin(), value.end(), [](unsigned char c) { return c >= 0x80; }))
         return false;
-    std::string folded = value;
-    for (char& c : folded) {
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
-    }
+    const std::string folded = utils::lower_ascii(value);
     for (const auto* marker : {
              "\xE5\xAF\x86\xE7\xA0\x81", // Chinese: 密码
              "\xE3\x83\x91\xE3\x82\xB9\xE3\x83\xAF\xE3\x83\xBC\xE3\x83\x89", // Japanese: パスワード

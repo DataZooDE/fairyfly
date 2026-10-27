@@ -8,13 +8,6 @@ namespace fairyfly {
 namespace commands {
 
 namespace {
-Result error(const std::string& code, const std::string& message) {
-    Result r;
-    r.status = Result::Status::Error;
-    r.error["code"] = code;
-    r.error["message"] = message;
-    return r;
-}
 }  // namespace
 
 CLI::App* UpdateCommand::setup_cli(CLI::App& app) {
@@ -48,7 +41,7 @@ Result UpdateCommand::execute(cli::CommandHandler&) {
         }
         if (apply_cmd_ && *apply_cmd_) {
             auto a = update::apply(FAIRYFLY_VERSION, allow_unsigned_);
-            if (a.decision.verdict == update::Verdict::Refuse) return error(a.decision.code, a.decision.message);
+            if (a.decision.verdict == update::Verdict::Refuse) return Result::fail(a.decision.code, a.decision.message);
             Result r;
             r.status = Result::Status::Success;
             r.data = {{"updated", a.decision.verdict == update::Verdict::Install}, {"message", a.decision.message}};
@@ -61,9 +54,9 @@ Result UpdateCommand::execute(cli::CommandHandler&) {
             return r;
         }
     } catch (const std::exception& e) {
-        return error("UPDATE_FAILED", e.what());
+        return Result::fail("UPDATE_FAILED", e.what());
     }
-    return error("NO_SUBCOMMAND", "No update subcommand specified (check or apply)");
+    return Result::fail("NO_SUBCOMMAND", "No update subcommand specified (check or apply)");
 }
 
 std::unique_ptr<CommandBase> create_update_command() { return std::make_unique<UpdateCommand>(); }

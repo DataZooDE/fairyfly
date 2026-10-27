@@ -1,5 +1,6 @@
 #include "include/cli_handler.h"
-#include "include/com_automation_engine.h"
+#include "include/sap_gui_scripting.h"
+#include "include/com/wrapper.h"
 #include "include/connection_launcher.h"
 #include "include/session_facts.h"
 
@@ -8,9 +9,9 @@ namespace fairyfly::cli {
 audit::SapFacts CommandHandler::audit_facts() const noexcept {
     audit::SapFacts facts;
     try {
-        auto* engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        auto* engine = engine_->scripting();
         if (!engine) return facts;
-        auto session = engine->get_session();
+        auto session = engine->unchecked_session();
         if (!session) return facts;
         if (!engine->current_session_owner_window_allowed()) return facts;
         // The audit record of every call reads these: never wait long for a busy session (2 s), unknown facts are fine.
@@ -35,7 +36,7 @@ audit::SapFacts CommandHandler::audit_facts() const noexcept {
 
 audit::SapFacts CommandHandler::audit_facts_for_connection(std::optional<int> connection) const noexcept {
     try {
-        auto* engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        auto* engine = engine_->scripting();
         if (!engine || !conn_mgr_) return {};
         const auto resolved = conn_mgr_->resolve_connection(connection);
         if (resolved.status != ResultT<Connection>::Status::Success) return {};
@@ -62,7 +63,7 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
                                                                      std::optional<int> connection) const noexcept {
     SessionTargetInfo info;
     try {
-        auto* engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+        auto* engine = engine_->scripting();
         if (!engine || !conn_mgr_) { info.ambiguous = true; return info; }
         if (!logon_name.empty()) {
             info.connection_name = logon_name;
@@ -95,7 +96,7 @@ CommandHandler::SessionTargetInfo CommandHandler::peek_session_target(const std:
         // let a stale record vouch for another connection: not validated = no name (the caller denies, fail closed).
         // The name is then the live connection's description only; when that is empty the name stays empty (the caller
         // denies with CONNECTION_DENIED) and the saved record's description is never used as a fallback.
-        if (!engine->validate_session(resolved.value.session_id, resolved.value.server_session_key)) return info;
+        if (!engine_->validate_session(resolved.value.session_id, resolved.value.server_session_key)) return info;
         info.connection_name = engine->peek_session_connection_description(resolved.value.session_id);
     } catch (...) {
         info.ambiguous = true;  // a launch is denied when the open sessions of the entry could not be inspected

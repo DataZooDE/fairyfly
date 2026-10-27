@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <chrono>
 #include <cstdio>
 #include <functional>
@@ -25,6 +26,7 @@
 #include "include/mcp/tool_catalog.h"
 #include "support/raw_http_client.h"
 
+#include "support/eventually.h"
 using namespace fairyfly::mcp;
 using namespace std::chrono_literals;
 
@@ -46,7 +48,7 @@ public:
         return out;  // deliberately NOT sorted
     }
     bool has_tool(const std::string& name) const override {
-        return name == "gui_element_fill" || name == "gui_session_attach" || name == "gui_session_disconnect" ||
+        return name == "gui_element_fill" || name == "gui_gated" || name == "gui_session_attach" || name == "gui_session_disconnect" ||
                name == "gui_session_login" || name == "gui_session_launch" || ToolProvider::has_tool(name);
     }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override {
@@ -66,7 +68,10 @@ public:
             r.content = json::array({json{{"type", "text"}, {"text", "ERROR TOOL_UNAVAILABLE_READ_ONLY: hidden"}}});
             return r;
         }
-        if (name == "gui_slow") {
+        if (name == "gui_gated") {  // held until the test opens the gate (bounded, so a failed test cannot hang)
+            std::unique_lock<std::mutex> lock(gate_m);
+            gate_cv.wait_for(lock, 10s, [&] { return gate_open; });
+        } else if (name == "gui_slow") {
             const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(args.value("ms", 300));
             while (std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(5ms);
         } else if (name == "gui_wait_cancel") {
@@ -96,8 +101,29 @@ public:
     ProtocolEra last_era = ProtocolEra::Legacy;
     bool last_http = false;
     json last_args, last_request_id, client_info;
-    int calls = 0;
+    std::atomic<int> calls{0};  // read by the test thread while the executor writes it
     std::atomic<bool> saw_cancel{false};
+
+    // gui_gated waits here
+    void close_gate() {
+        std::lock_guard<std::mutex> lock(gate_m);
+        gate_open = false;
+    }
+    void open_gate() {
+        {
+            std::lock_guard<std::mutex> lock(gate_m);
+            gate_open = true;
+        }
+        gate_cv.notify_all();
+    }
+    /// Opens the gate when the test ends, also after a failed REQUIRE (before the futures are destroyed).
+    struct GateOpener {
+        FakeProvider& provider;
+        ~GateOpener() { provider.open_gate(); }
+    };
+    std::mutex gate_m;
+    std::condition_variable gate_cv;
+    bool gate_open = true;
 };
 
 class TokenAuth : public IAuthenticator {
@@ -1374,7 +1400,7 @@ TEST_CASE("Modern requests: standard headers are enforced after auth and before 
         CHECK(code_of(f.endpoint.handle(modern)) == kHeaderMismatch);
     }
     SECTION("legacy: a served body version with a DIFFERENT, unsupported header version is 400 -32020 (not accepted)") {
-        const auto before = f.provider.calls;
+        const int before = f.provider.calls.load();
         auto req = f.post(Fixture::rpc("tools/list", json{{"_meta", json{{"protocolVersion", "2025-06-18"}}}}));
         req.headers["MCP-Protocol-Version"] = "2099-01-01";
         auto res = f.endpoint.handle(req);
@@ -1585,17 +1611,20 @@ TEST_CASE("Executor: soft timeout, SERVER_BUSY and queue cap", "[mcp][http][exec
     }
     SECTION("queue cap is honoured (503 -32000)") {
         Fixture f(5000, 1);
+        f.provider.close_gate();
         auto first = std::async(std::launch::async, [&] {
-            return f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_slow"}, {"arguments", json{{"ms", 400}}}})));
+            return f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_gated"}})));
         });
-        std::this_thread::sleep_for(100ms);  // first is running, queue is empty
+        const FakeProvider::GateOpener opener{f.provider};  // declared after the futures: runs first on unwinding
+        REQUIRE(fairyfly::test::eventually([&] { return f.provider.calls == 1 && f.exec.queued() == 0; }));  // first runs
         auto second = std::async(std::launch::async, [&] {
             return f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}, 2)));
         });
-        std::this_thread::sleep_for(100ms);  // second sits in the queue (cap 1)
+        REQUIRE(fairyfly::test::eventually([&] { return f.exec.queued() == 1; }));  // second sits in the queue (cap 1)
         auto third = f.endpoint.handle(f.post(Fixture::rpc("tools/call", json{{"name", "gui_a_tool"}}, 3)));
         CHECK(third.status == 503);
         CHECK(body_of(third)["error"]["code"] == kServerBusy);
+        f.provider.open_gate();
         REQUIRE(first.wait_for(5s) == std::future_status::ready);
         REQUIRE(second.wait_for(5s) == std::future_status::ready);
         CHECK(second.get().status == 200);
@@ -1680,7 +1709,10 @@ TEST_CASE("SSE: progress, final message, keep-alive", "[mcp][http][sse]") {
     CHECK(all.find("finished") != std::string::npos);
     const auto final_pos = all.rfind("event: message\ndata: {\"id\":1");
     REQUIRE(final_pos != std::string::npos);
-    CHECK(all.find("ok:gui_a_tool") > all.find("started"));  // progress precedes the final message
+    const auto result_pos = all.find("ok:gui_a_tool");
+    REQUIRE(result_pos != std::string::npos);                  // the final message carries the tool's result
+    CHECK(result_pos > final_pos);
+    CHECK(all.find("started") < final_pos);                    // progress precedes the final message
 
     SECTION("--no-sse and missing Accept fall back to plain JSON") {
         HttpEndpointOptions off;
@@ -1734,20 +1766,21 @@ TEST_CASE("SSE: client disconnect sets the call's cancelled flag", "[mcp][http][
 
 TEST_CASE("JSON client disconnect removes a queued tool call", "[mcp][http][cancel]") {
     Fixture f;
-    auto slow = f.post(Fixture::rpc("tools/call", json{{"name", "gui_slow"}, {"arguments", json{{"ms", 500}}}}, 40));
-    auto first = std::async(std::launch::async, [&] { return f.endpoint.handle(slow); });
-    const auto started = std::chrono::steady_clock::now() + 2s;
-    while (f.provider.calls == 0 && std::chrono::steady_clock::now() < started) std::this_thread::sleep_for(5ms);
-    REQUIRE(f.provider.calls == 1);
+    f.provider.close_gate();
+    auto gated = f.post(Fixture::rpc("tools/call", json{{"name", "gui_gated"}}, 40));
+    auto first = std::async(std::launch::async, [&] { return f.endpoint.handle(gated); });
+    const FakeProvider::GateOpener opener{f.provider};
+    REQUIRE(fairyfly::test::eventually([&] { return f.provider.calls == 1; }));
 
     std::atomic<bool> connected{true};
     auto queued = f.post(Fixture::rpc("tools/call", json{{"name", "gui_screen_read"}}, 41));
     queued.connected = [&] { return connected.load(); };
     auto second = std::async(std::launch::async, [&] { return f.endpoint.handle(queued); });
-    std::this_thread::sleep_for(40ms);
+    REQUIRE(fairyfly::test::eventually([&] { return f.exec.queued() == 1; }));  // waiting behind the first call
     connected = false;
     CHECK(second.wait_for(300ms) == std::future_status::ready);
     if (second.wait_for(0ms) == std::future_status::ready) CHECK(second.get().status == 499);
+    f.provider.open_gate();
     first.get();
     CHECK(f.provider.calls == 1);
 }
@@ -2261,7 +2294,8 @@ TEST_CASE("Loopback http.sys: unauthenticated slow bodies cannot exhaust the wor
 
 // Documents a limit, stays [!mayfail]: the per-URL-group HeaderWait (10 s) does NOT apply to a connection that has
 // not delivered a complete header; only the machine-wide http.sys timer (default 120 s) closes it (measured 125 s).
-TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][!mayfail]") {
+// [.][slow]: 16 s per run; run it with `unit_tests "[slow]"`.
+TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the kernel", "[httpsys][loopback][loris][.][slow][!mayfail]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
     BIND_OR_SKIP(server);
@@ -2281,7 +2315,8 @@ TEST_CASE("Loopback http.sys: a headers-only-forever socket is closed by the ker
 
 // A request whose headers are complete (and authenticated) but whose body never arrives: the URL group's
 // EntityBody timer (15 s) is what ends it. Measured, not assumed.
-TEST_CASE("Loopback http.sys: an unfinished body with a valid token is cut by the kernel", "[httpsys][loopback][loris]") {
+// [.][slow]: 22 s per run; run it with `unit_tests "[slow]"`.
+TEST_CASE("Loopback http.sys: an unfinished body with a valid token is cut by the kernel", "[httpsys][loopback][loris][.][slow]") {
     FakeProvider provider;
     McpHttpServer server(dev_config(), provider, std::make_unique<TokenAuth>());
     BIND_OR_SKIP(server);

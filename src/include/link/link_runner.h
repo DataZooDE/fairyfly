@@ -13,12 +13,14 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "include/audit_log.h"
 #include "include/cli_handler.h"
 #include "include/commands/global_options.h"
 #include "include/core.h"
+#include "include/link/desktop_approval.h"
 #include "include/tray/tray.h"
 
 namespace fairyfly::link {
@@ -56,8 +58,57 @@ struct PairIo {
 /// itself (the console aborts the read), not by io.stop.
 Result link_pair(const LinkOptions& options, const PairIo& io = {});
 
-/// Threads that `link pair` or `link run` gave up waiting for after Ctrl+C and that are still running. main()
-/// ends the process with std::_Exit when there are any, so they cannot race static destructors and atexit handlers.
+/// What a link process shares between its commands, its Ctrl+C handlers and the link tray: the stop requests, the
+/// threads it gave up waiting for, and the standing approval ("Allow changes in SAP"). process() is the one the
+/// signal handlers, the tray's Quit and main() use; tests make their own.
+class LinkRuntime {
+public:
+    explicit LinkRuntime(std::shared_ptr<approval::Standing> standing);
+    /// This process's runtime; its standing approval is saved for the user (HKCU tray settings).
+    static LinkRuntime& process();
+
+    std::atomic<bool> stop{false};       ///< run_link returns (Ctrl+C, the tray's Quit)
+    std::atomic<bool> pair_stop{false};  ///< link pair is cancelled (Ctrl+C)
+    const std::shared_ptr<approval::Standing> standing;
+
+    /// Thread-safe: makes a running run_link() return, like Ctrl+C.
+    void request_stop() { stop = true; }
+
+    /// Counts a thread that may outlive the one waiting for it, for as long as the returned guard lives.
+    class BackgroundThread {
+    public:
+        explicit BackgroundThread(std::atomic<int>& count) : count_(&count) { ++*count_; }
+        BackgroundThread(BackgroundThread&& other) noexcept : count_(other.count_) { other.count_ = nullptr; }
+        BackgroundThread(const BackgroundThread&) = delete;
+        BackgroundThread& operator=(const BackgroundThread&) = delete;
+        BackgroundThread& operator=(BackgroundThread&&) = delete;
+        ~BackgroundThread() { if (count_) --*count_; }
+
+    private:
+        std::atomic<int>* count_;
+    };
+    BackgroundThread background_thread() { return BackgroundThread(background_); }
+    /// A thread running `work` that counts as a background thread until `work` and everything it captured are
+    /// destroyed (main() may _Exit as soon as the count is zero). The caller joins or detaches it.
+    template <class Work>
+    std::thread start_thread(Work work) {
+        return std::thread([alive = background_thread(), work = std::move(work)]() mutable {
+            const BackgroundThread counted = std::move(alive);   // declared first: released last
+            {
+                Work owned = std::move(work);   // the captures end with this scope, before the count drops
+                owned();
+            }
+        });
+    }
+    /// Threads that `link pair` or `link run` gave up waiting for after Ctrl+C and that are still running.
+    int background_threads() const { return background_.load(); }
+
+private:
+    std::atomic<int> background_{0};
+};
+
+/// LinkRuntime::process().background_threads(): main() ends the process with std::_Exit when there are any, so they
+/// cannot race static destructors and atexit handlers.
 int background_threads();
 Result link_status(const LinkOptions& options);
 Result link_unpair(const LinkOptions& options);
@@ -80,9 +131,9 @@ int run_link(const LinkOptions& options, const std::function<cli::CommandHandler
              const commands::GlobalOptions& global, audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek);
 /// Thread-safe: makes a running run_link() return, like Ctrl+C (the tray's Quit).
 void request_stop();
-/// "Allow changes in SAP" in the link tray: the standing approval of run_link() in this process (saved for the user).
+/// "Allow changes in SAP" in the link tray: the runtime's standing approval (the process's is saved for the user).
 /// `read_only`: the link runs with --read-only, the switch stays off.
-std::unique_ptr<tray::LinkWriteMode> make_write_mode_control(bool read_only);
+std::unique_ptr<tray::LinkWriteMode> make_write_mode_control(bool read_only, LinkRuntime& runtime = LinkRuntime::process());
 
 /// `link run --tray` (and its --install-autostart/--remove-autostart): relaunches detached from the console, then runs
 /// run_link() on this thread under the link tray. No MCP server, no HTTP. Returns the process exit code.

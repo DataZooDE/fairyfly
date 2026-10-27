@@ -13,6 +13,7 @@
 
 #include "include/core.h"  // fairyfly::Result
 #include "include/audit_log.h"
+#include "include/mcp/constants.h"
 #include "include/mcp/principal.h"
 
 namespace fairyfly::mcp {
@@ -114,7 +115,7 @@ struct ServerOptions {
     std::string version;       ///< server version reported in initialize
     std::string instructions;  ///< initialize.instructions
     /// Newest first; the server echoes the client's version when supported, else its newest.
-    std::vector<std::string> protocol_versions = {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"};
+    std::vector<std::string> protocol_versions = stdio_protocol_versions();
     std::size_t max_queue = 16;      ///< max queued tools/call requests (beyond: kServerBusy)
     int call_timeout_ms = 120000;    ///< soft per-call timeout
 };
@@ -173,6 +174,8 @@ struct ServeOptions {
     bool insecure_http = false;
     /// Exact SID/CLIENT/USER identities allowed through this HTTP endpoint; empty disables owner filtering.
     std::vector<std::string> owner_sap_identities;
+    /// mcp.yaml / FAIRYFLY_MCP_AUDIT_*: below FAIRYFLY_AUDIT* and --no-audit/--audit-required (audit::resolve_config).
+    audit::AuditFileSettings audit_file;
 };
 
 /// How a tool renders its result.

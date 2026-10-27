@@ -596,6 +596,21 @@ TEST_CASE("setup: FAIRYFLY_READ_ONLY refuses apply but not dry run or runbook", 
     CHECK(r.m.elevator.plans_seen.empty());
 }
 
+TEST_CASE("setup: FAIRYFLY_READ_ONLY=Yes is the hard cap for setup too", "[mcp_setup][env]") {
+    // review 2026-10-25: mcp setup matched exact spellings only, so "Yes" would change the machine
+    const fairyfly::config::Environment yes([](const char* n) { return std::string(n) == fairyfly::config::env::kReadOnly ? "Yes" : ""; });
+    const fairyfly::config::Environment none([](const char*) { return std::string(); });
+    CHECK(setup_read_only(false, yes));
+    CHECK(setup_read_only(true, none));
+    CHECK_FALSE(setup_read_only(false, none));
+    Rig r;
+    r.env.read_only = setup_read_only(false, yes);
+    CHECK(r.setup(Rig::self_signed()) == 2);
+    CHECK(r.err.str().find("READ_ONLY") != std::string::npos);
+    CHECK(r.m.http.calls.empty());
+    CHECK(r.m.elevator.plans_seen.empty());
+}
+
 TEST_CASE("setup: UAC declined exits 1 and changes nothing", "[mcp_setup]") {
     Rig r;
     r.m.elevator.decline = true;

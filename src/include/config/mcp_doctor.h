@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "include/auth/token_store.h"
+#include "include/mcp/constants.h"
 #include "include/config/mcp_config.h"
 
 namespace fairyfly::config {
@@ -52,7 +53,7 @@ enum class LockState { Active, Locked, RdpDisconnected, Unknown };
 struct SetupQuery {
     bool tls = false;
     std::string hostname;      ///< name clients use (certificate SAN)
-    int port = 8383;
+    int port = mcp::kDefaultHttpPort;
 };
 
 /// Facts about the http.sys setup; every "known" flag is false when the value could not be read.
@@ -119,7 +120,7 @@ struct DoctorInput {
     ConfigState config;
     std::string transport = "stdio";   ///< effective server.transport
     std::string host = "127.0.0.1";
-    int port = 8383;
+    int port = mcp::kDefaultHttpPort;
     std::string exe_path;              ///< current fairyfly.exe (autostart comparison)
     bool tls = false;                  ///< effective server.tls (https listener)
     std::string hostname;              ///< host name clients use; empty = unknown

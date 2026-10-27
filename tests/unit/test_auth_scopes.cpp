@@ -17,19 +17,14 @@
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/tool_catalog.h"
 
+#include "support/tool_specs.h"
 using namespace fairyfly;
 using namespace fairyfly::auth;
 using namespace fairyfly::mcp;
 
-namespace {
+using fairyfly::test::spec_of;
 
-const ToolSpec& spec_of(const std::string& tool) {
-    static const std::vector<ToolSpec> catalog = all_tool_specs();
-    for (const auto& s : catalog)
-        if (s.def.name == tool) return s;
-    FAIL("unknown tool " + tool);
-    return catalog.front();
-}
+namespace {
 
 Principal token(std::set<std::string> scopes) {
     Principal p;

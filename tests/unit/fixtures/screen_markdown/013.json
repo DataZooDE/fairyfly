@@ -1,0 +1,33 @@
+{
+ "compact": true,
+ "input": {
+  "element_count": 0,
+  "elements": [],
+  "filter_stats": {
+   "filter_applied": true,
+   "filtered_element_count": 0,
+   "total_elements_checked": 4
+  },
+  "hierarchy": {},
+  "tabs_searched": [],
+  "tabs_skipped": [
+   {
+    "reason": "not_expanded",
+    "tab_id": "wnd[0]/usr/tabsTS/tabpONE",
+    "tab_name": "Logon data"
+   },
+   {
+    "reason": "not_expanded",
+    "tab_id": "wnd[0]/usr/tabsTS/tabpTWO",
+    "tab_name": "Address"
+   },
+   {
+    "reason": "not_expanded",
+    "tab_id": "wnd[0]/usr/tabsTS/tabpTHREE",
+    "tab_name": "Roles"
+   }
+  ],
+  "text_filter_note": "0 matches on the visible screen; tabs not expanded: [Logon data, Address, Roles] (use tab=...)"
+ },
+ "output": "# Screen\n\n_0 matches on the visible screen; tabs not expanded: [Logon data, Address, Roles] (use tab=...)_\n\n---\n**Screen Elements:** 0 top-level\n"
+}

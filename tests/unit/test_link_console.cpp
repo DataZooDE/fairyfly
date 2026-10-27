@@ -34,11 +34,15 @@
 #include "link_agent.hpp"
 #include "link_state.hpp"
 #include "qr.hpp"
+#include "support/env_guard.h"
 
+#include "support/temp_dir.h"
 using namespace fairyfly::link;
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::StartsWith;
 using nlohmann::json;
+
+using fairyfly::test::TempDir;
 
 namespace {
 
@@ -120,20 +124,6 @@ std::string decode_screen(const std::string& screen) {
 }
 
 /// A fresh directory under %TEMP%, removed again at the end of the test.
-struct TempDir {
-    std::filesystem::path path;
-    explicit TempDir(const std::string& name)
-        : path(std::filesystem::temp_directory_path() /
-               ("ffy-link-console-" + name + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
-        std::filesystem::create_directories(path);
-    }
-    ~TempDir() {
-        std::error_code ec;
-        std::filesystem::remove_all(path, ec);
-    }
-    std::filesystem::path operator/(const std::string& file) const { return path / file; }
-};
-
 }  // namespace
 
 TEST_CASE("link qr: the decoder of these tests reads libffl's own block rendering", "[link][qr]") {
@@ -372,18 +362,7 @@ TEST_CASE("link pair: https://fairyfly.io is prefilled; --gateway and FAIRYFLY_L
 
 TEST_CASE("link pair: asks for the address with https://fairyfly.io prefilled; a typed address replaces it", "[link][pair]") {
     // the live checks have developers set FAIRYFLY_LINK_GATEWAY: clear it for this test, restore it afterwards
-    struct EnvCleared {
-        std::string saved;
-        bool had = false;
-        EnvCleared() {
-            char* v = nullptr;
-            size_t n = 0;
-            if (_dupenv_s(&v, &n, "FAIRYFLY_LINK_GATEWAY") == 0 && v) { saved = v; had = true; }
-            free(v);
-            _putenv_s("FAIRYFLY_LINK_GATEWAY", "");
-        }
-        ~EnvCleared() { _putenv_s("FAIRYFLY_LINK_GATEWAY", had ? saved.c_str() : ""); }
-    } env_cleared;
+    fairyfly::test::EnvGuard env_cleared("FAIRYFLY_LINK_GATEWAY", "");
     FakePairing gw;
     SharedOut buf;
     std::ostream out(&buf);
@@ -451,19 +430,7 @@ TEST_CASE("gateway url: the link's WebSocket address needs wss://, ws:// only to
 }
 
 namespace {
-/// Sets (or, with "", clears) an environment variable for one test and restores it afterwards.
-struct EnvSet {
-    std::string name, saved;
-    bool had = false;
-    EnvSet(const std::string& n, const std::string& value) : name(n) {
-        char* v = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&v, &len, n.c_str()) == 0 && v) { saved = v; had = true; }
-        free(v);
-        _putenv_s(n.c_str(), value.c_str());
-    }
-    ~EnvSet() { _putenv_s(name.c_str(), had ? saved.c_str() : ""); }
-};
+using EnvSet = fairyfly::test::EnvGuard;
 }  // namespace
 
 TEST_CASE("link pair: a plain-http gateway that is not this computer is refused before anything is sent", "[link][pair][gateway-url]") {
@@ -560,7 +527,7 @@ TEST_CASE("link run lock: the same file through a junction, an 8.3 name or anoth
     // second lock for the same pairing file, so two links could serve one pairing.
     namespace fs = std::filesystem;
     const TempDir root("lock-identity");
-    const fs::path real = root.path / "real";
+    const fs::path real = root.path() / "real";
     const fs::path dir = real / L"Pairing Ärger-Ölweg long directory";
     fs::create_directories(dir);
     const fs::path state = dir / "state.json";
@@ -572,13 +539,13 @@ TEST_CASE("link run lock: the same file through a junction, an 8.3 name or anoth
     std::ofstream(state) << "{}";
     const std::string a = name(state);
     CHECK(a == before);
-    CHECK(a == name(root.path / "real" / L"pAIRING äRGER-öLWEG LONG DIRECTORY" / "STATE.JSON"));   // case, also non-ASCII
-    CHECK(a == name(fs::path(root.path.wstring() + L"\\real\\.\\x\\..\\" + dir.filename().wstring() + L"\\state.json")));
+    CHECK(a == name(root.path() / "real" / L"pAIRING äRGER-öLWEG LONG DIRECTORY" / "STATE.JSON"));   // case, also non-ASCII
+    CHECK(a == name(fs::path(root.path().wstring() + L"\\real\\.\\x\\..\\" + dir.filename().wstring() + L"\\state.json")));
     CHECK(a != name(missing));
     CHECK(a != name(real / "state.json"));
 
     // a junction to the directory holding it
-    const fs::path junction = root.path / "jn";
+    const fs::path junction = root.path() / "jn";
     const std::wstring cmd = L"cmd /c mklink /J \"" + junction.wstring() + L"\" \"" + real.wstring() + L"\" >NUL";
     REQUIRE(_wsystem(cmd.c_str()) == 0);
     REQUIRE(fs::exists(junction / dir.filename() / "state.json"));

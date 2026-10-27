@@ -1,5 +1,6 @@
 #include "include/mcp/http_tray_runner.h"
 
+#include "include/mcp/constants.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -78,7 +79,7 @@ public:
         ServerStatus st;
         st.running = false;
         st.endpoint = http_endpoint_url(options_.tls, options_.host, options_.allowed_hosts,
-                                        options_.port == 0 ? (options_.tls ? 8443 : 8383) : options_.port, "/mcp");
+                                        options_.port == 0 ? default_port(options_.tls) : options_.port, "/mcp");
         st.read_only = read_only_.load();
         if (!last_error_.empty()) st.warnings.push_back(last_error_);
         return st;

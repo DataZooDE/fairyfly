@@ -4,8 +4,6 @@ namespace fairyfly::commands {
 
 class LoginCommand : public CommandBase {
 public:
-    std::string name() const override { return "session login"; }
-    std::string description() const override { return "Log into a launched SAP GUI session"; }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","login"});
@@ -30,19 +28,12 @@ Example: fairyfly session login --connection 3 --credential DEV
 
     Result execute(cli::CommandHandler& handler) override {
         if (!credentials_file_.empty() && from_stdin_) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error = {{"code", "INVALID_ARGUMENT"},
-                            {"message", "Choose at most one of --credentials-file or --credentials-stdin"}};
-            return result;
+            return Result::fail("INVALID_ARGUMENT", "Choose at most one of --credentials-file or --credentials-stdin");
         }
         return handler.handle_login(credentials_file_, connection_id_, from_stdin_, credential_name_, multiple_logon_);
     }
 
-    bool was_invoked() const override { return cmd_ && *cmd_; }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::string credentials_file_;
     std::string credential_name_;
     std::string multiple_logon_ = "fail";

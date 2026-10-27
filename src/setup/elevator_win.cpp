@@ -1,5 +1,7 @@
 // Elevation state (token), user SIDs and the one-shot UAC self-elevation: `<exe> mcp setup --apply-plan F --result-file R`.
 #include <winsock2.h>
+#include "include/config/environment.h"
+#include "include/text/utf8.h"
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <objbase.h>
@@ -14,6 +16,7 @@
 #include "include/auth/crypto.h"
 #include "include/setup/setup_hosts.h"
 #include "win_util.h"
+#include "include/system/unique_handle.h"
 
 namespace fairyfly::setup {
 
@@ -21,21 +24,18 @@ namespace {
 
 using namespace win;
 
-struct TokenHandle {
-    HANDLE h = nullptr;
-    TokenHandle() {
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &h)) h = nullptr;
-    }
-    ~TokenHandle() {
-        if (h) CloseHandle(h);
-    }
-};
+/// This process's token (empty when it cannot be opened).
+system::UniqueHandle process_token() {
+    system::UniqueHandle token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, token.out())) token.reset();
+    return token;
+}
 
 std::string sid_to_string(PSID sid) {
     LPWSTR text = nullptr;
     std::string out;
     if (ConvertSidToStringSidW(sid, &text)) {
-        out = narrow(text);
+        out = text::wide_to_utf8_lossy(text);
         LocalFree(text);
     }
     return out;
@@ -48,67 +48,57 @@ std::string exe_path() {
         if (n == 0) return {};
         if (n < buffer.size()) {
             buffer.resize(n);
-            return narrow(buffer);
+            return text::wide_to_utf8_lossy(buffer);
         }
         buffer.resize(buffer.size() * 2);
     }
 }
 
-std::string local_app_data_dir() {
-    char* value = nullptr;
-    size_t size = 0;
-    std::string out;
-    if (_dupenv_s(&value, &size, "LOCALAPPDATA") == 0 && value) {
-        out = value;
-        free(value);
-    }
-    if (out.empty()) out = std::filesystem::temp_directory_path().string();
-    return out;
-}
+std::string local_app_data_dir() { return text::path_utf8(config::Environment::process().local_app_data()); }
 
 class RealElevator : public Elevator {
 public:
     bool is_elevated() override {
-        TokenHandle token;
-        if (!token.h) return false;
+        const auto token = process_token();
+        if (!token) return false;
         TOKEN_ELEVATION e{};
         DWORD size = 0;
-        return GetTokenInformation(token.h, TokenElevation, &e, sizeof(e), &size) && e.TokenIsElevated != 0;
+        return GetTokenInformation(token.get(), TokenElevation, &e, sizeof(e), &size) && e.TokenIsElevated != 0;
     }
 
     ElevationType elevation_type() override {
-        TokenHandle token;
-        if (!token.h) return ElevationType::Unknown;
+        const auto token = process_token();
+        if (!token) return ElevationType::Unknown;
         TOKEN_ELEVATION_TYPE type{};
         DWORD size = 0;
-        if (!GetTokenInformation(token.h, TokenElevationType, &type, sizeof(type), &size)) return ElevationType::Unknown;
+        if (!GetTokenInformation(token.get(), TokenElevationType, &type, sizeof(type), &size)) return ElevationType::Unknown;
         if (type == TokenElevationTypeFull) return ElevationType::Elevated;
         if (type == TokenElevationTypeLimited) return ElevationType::AdminFiltered;
         return is_elevated() ? ElevationType::Elevated : ElevationType::StandardUser;   // Default: UAC off or plain user
     }
 
     std::string current_user_sid() override {
-        TokenHandle token;
-        if (!token.h) return {};
+        const auto token = process_token();
+        if (!token) return {};
         DWORD size = 0;
-        GetTokenInformation(token.h, TokenUser, nullptr, 0, &size);
+        GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
         std::vector<BYTE> buffer(size);
-        if (!GetTokenInformation(token.h, TokenUser, buffer.data(), size, &size)) return {};
+        if (!GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size)) return {};
         return sid_to_string(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid);
     }
 
     std::string current_user_name() override {
-        TokenHandle token;
-        if (!token.h) return {};
+        const auto token = process_token();
+        if (!token) return {};
         DWORD size = 0;
-        GetTokenInformation(token.h, TokenUser, nullptr, 0, &size);
+        GetTokenInformation(token.get(), TokenUser, nullptr, 0, &size);
         std::vector<BYTE> buffer(size);
-        if (!GetTokenInformation(token.h, TokenUser, buffer.data(), size, &size)) return {};
+        if (!GetTokenInformation(token.get(), TokenUser, buffer.data(), size, &size)) return {};
         return account_of(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid);
     }
 
     std::optional<std::string> resolve_user_sid(const std::string& user) override {
-        const std::wstring name = widen(user);
+        const std::wstring name = text::utf8_to_wide(user);
         DWORD sid_size = 0, domain_size = 0;
         SID_NAME_USE use;
         LookupAccountNameW(nullptr, name.c_str(), nullptr, &sid_size, nullptr, &domain_size, &use);
@@ -153,11 +143,11 @@ public:
         }
         const std::string exe = exe_path();
         std::wstring params = L"mcp setup --apply-plan \"" + plan_file.wstring() + L"\" --result-file \"" + result_file.wstring() +
-                              L"\" --plan-sha256 " + widen(request.plan_sha256) + L" --plan-nonce " + widen(request.nonce) +
+                              L"\" --plan-sha256 " + text::utf8_to_wide(request.plan_sha256) + L" --plan-nonce " + text::utf8_to_wide(request.nonce) +
                               L" --plan-parent-pid " + std::to_wstring(request.parent_pid);
-        if (!request.sid.empty()) params += L" --plan-sid " + widen(request.sid);
+        if (!request.sid.empty()) params += L" --plan-sid " + text::utf8_to_wide(request.sid);
         if (request.force_binding) params += L" --plan-force-binding";
-        const std::wstring wexe = widen(exe);
+        const std::wstring wexe = text::utf8_to_wide(exe);
         const std::wstring wdir = win::to_path(exe).parent_path().wstring();
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         SHELLEXECUTEINFOW info{};
@@ -231,7 +221,7 @@ private:
         if (!LookupAccountSidW(nullptr, sid, name.data(), &name_size, domain.data(), &domain_size, &use)) return sid_to_string(sid);
         name.resize(name_size);
         domain.resize(domain_size);
-        return domain.empty() ? narrow(name) : narrow(domain) + "\\" + narrow(name);
+        return domain.empty() ? text::wide_to_utf8_lossy(name) : text::wide_to_utf8_lossy(domain) + "\\" + text::wide_to_utf8_lossy(name);
     }
 };
 

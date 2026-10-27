@@ -1,25 +1,14 @@
 #include "include/object_tree_diag.h"
+#include "include/config/environment.h"
 
 #include <chrono>
 #include <cstdlib>
-#include <cstring>
 
 namespace fairyfly::diag {
 
-bool diag_enabled(const char* env_value) {
-    return env_value != nullptr && std::strcmp(env_value, "1") == 0;
-}
+bool diag_enabled(const char* env_value) { return env_value != nullptr && config::parse_flag(env_value); }
 
-bool diag_enabled_from_environment() {
-    char* value = nullptr;
-    size_t length = 0;
-    bool enabled = false;
-    if (_dupenv_s(&value, &length, "FAIRYFLY_DIAG") == 0 && value) {
-        enabled = diag_enabled(value);
-        std::free(value);
-    }
-    return enabled;
-}
+bool diag_enabled_from_environment() { return config::Environment::process().flag(config::env::kDiag); }
 
 namespace {
 int count_children(const nlohmann::json& children) {

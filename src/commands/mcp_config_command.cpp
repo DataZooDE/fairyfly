@@ -1,4 +1,6 @@
 #include <chrono>
+#include "include/config/environment.h"
+#include "include/mcp/constants.h"
 #include <iostream>
 
 #include <nlohmann/json.hpp>
@@ -9,7 +11,7 @@
 #include "include/link/link_runner.h"
 #include "include/update/updater.h"
 #include "include/version.h"
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 #include "include/tray/tray_win32.h"
 
 namespace fairyfly {
@@ -23,33 +25,6 @@ namespace {
 CLI::Option* output_option(CLI::App* cmd, std::string& target) {
     return cmd->add_option("--output", target, "Output: text (default) or json")
         ->check(CLI::IsMember({"text", "json", "markdown"}));
-}
-
-/// CLI option names that feed each config key (first match with a count wins).
-struct FlagMap { const char* key; std::vector<const char*> options; };
-const std::vector<FlagMap>& flag_map() {
-    static const std::vector<FlagMap> map = {
-        {"server.host", {"--mcp-host"}},
-        {"server.port", {"--mcp-port", "--port"}},
-        {"server.transport", {"--transport"}},
-        {"server.tls", {"--tls"}},
-        {"server.allow_ip", {"--allow-ip"}},
-        {"server.allow_ip_include_loopback", {"--allow-ip-include-loopback"}},
-        {"server.sse", {"--sse"}},
-        {"server.allowed_hosts", {"--allowed-hosts"}},
-        {"server.cors_origins", {"--cors-origin"}},
-        {"mode.read_only", {"--read-only"}},
-        {"mode.allow_write", {"--allow-write"}},
-        {"limits.max_result_chars", {"--max-result-chars"}},
-        {"limits.max_image_bytes", {"--max-image-bytes"}},
-        {"limits.max_calls_per_minute", {"--max-calls-per-minute"}},
-        {"limits.call_timeout_ms", {"--call-timeout-ms"}},
-        {"tools.families", {"--tools"}},
-        {"default_connection", {"--default-connection"}},
-        {"format", {"--format"}},
-        {"tray.enabled", {"--tray"}},
-    };
-    return map;
 }
 
 std::string join_results(const CLI::Option& option) {
@@ -137,12 +112,6 @@ int cmd_show(McpExtras& x) {
     return 0;
 }
 
-std::string env_or_empty(const char* name) { return process_env()(name); }
-
-bool truthy(const std::string& v) {
-    return v == "1" || v == "true" || v == "TRUE" || v == "yes" || v == "on";
-}
-
 // A startup error of the tray started from the Start menu, the autostart or the link tray would only reach a console
 // that closes at once (or none): it is shown in a message box as well.
 int startup_error(bool tray_mode, const std::string& code, const std::string& message, int exit_code) {
@@ -154,26 +123,11 @@ int startup_error(bool tray_mode, const std::string& code, const std::string& me
 
 int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& options, const LoadedConfig& loaded) {
     (void)layers;
-    const std::string exe = tray::current_exe_path();
-    tray::TrayEntry entry;
-    entry.tray_requested = true;
-    entry.is_child = tray::is_tray_child_process();
-    entry.has_console = tray::process_has_console();
-    entry.exe = exe;
+    tray::TrayStart start = tray::prepare_tray_start(tray::kTrayMutexName);
+    tray::TrayEntry& entry = start.entry;
+    const std::string& exe = entry.exe;
     entry.config_path = x.config_path.empty() && loaded.path.source == Source::Default ? std::string() : loaded.path.path.string();
-    entry.args = tray::current_args();   // the detached child gets exactly the same arguments
-    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
-    const std::string program = tray::tray_start_program(exe, tray::path_exists);
-    if (program != exe) entry.autostart_line = tray::autostart_command(program, entry.config_path);
-
-    auto registry = tray::make_win32_run_key();
-    auto launcher = tray::make_win32_process_launcher();
-    auto guard = tray::make_win32_single_instance();
-    tray::TrayEntryServices services;
-    services.registry = registry.get();
-    services.launcher = launcher.get();
-    services.guard = guard.get();
-    services.print = [](const std::string& line) { std::cout << line << std::endl; };
+    if (start.program != exe) entry.autostart_line = tray::autostart_command(start.program, entry.config_path);
 
     // Autostart install/remove and the relaunch decision. The HTTP requirement is checked first so the
     // user hears about it in the console, not in an invisible child.
@@ -182,19 +136,10 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
                              "The tray needs the HTTP transport (--http, or server.transport: http in the config file)", 2);
     entry.install_autostart = x.install_autostart;
     entry.remove_autostart = x.remove_autostart;
-    const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
-    if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
-        tray::make_win32_tray_host()->message_box("fairyfly MCP", decided.message);   // nobody reads this console
-    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning) {
-        auto other = tray::make_win32_tray_host(tray::TrayKind::Mcp);
-        if (!other->show_running_instance() && tray::startup_error_needs_dialog_here())
-            other->message_box("fairyfly MCP", "The fairyfly MCP tray is already running: its icon is in the notification area.");
-    }
-    if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
-
-    // From here on this process is the tray: no console, logs to file, server on the main thread.
-    if (entry.is_child) tray::detach_console();
-    tray::clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
+    if (auto exit_code = tray::settle_tray_start(start, tray::TrayKind::Mcp, "fairyfly MCP")) return *exit_code;
+    // From here on this process is the tray: logs to file, server on the main thread.
+    auto& launcher = start.launcher;
+    auto& guard = start.guard;
     const std::string log_file = tray::route_logging_to_file();
 
     auto& factory = tray::runner_factory();
@@ -215,9 +160,8 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray_services.launcher = launcher.get();
     auto link_control = link::make_link_control();
     tray_services.link = link_control.get();
-    // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0 turns it off
-    const std::string update_check = env_or_empty("FAIRYFLY_UPDATE_CHECK");
-    if (update_check != "0" && update_check != "off" && update_check != "false")
+    // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0|false|no|off turns it off
+    if (config::Environment::process().enabled(config::env::kUpdateCheck))
         tray_services.latest_update = []() -> std::optional<std::string> {
             auto c = update::check(FAIRYFLY_VERSION);
             return c.available ? std::optional<std::string>(c.latest) : std::nullopt;
@@ -229,7 +173,7 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     paths.config_file = loaded.path.path;
     paths.exe = exe;
     tray::TrayState state;
-    state.hard_read_only = truthy(env_or_empty("FAIRYFLY_READ_ONLY"));
+    state.hard_read_only = config::read_only_cap();
     if (auto v = layers.get_bool("tray.start_minimized_notice")) state.start_notice = *v;
     return tray::run_with_tray(*runner, tray_services, *guard, std::move(paths), std::move(state));
 }
@@ -260,13 +204,11 @@ LoadedConfig load_config(const std::string& flag_path, const EnvLookup& env) {
 
 McpConfig flags_layer(const CLI::App& mcp_app) {
     McpConfig layer;
-    for (const auto& entry : flag_map()) {
-        const KeySpec* spec = find_key(entry.key);
-        if (!spec) continue;
-        for (const char* name : entry.options) {
+    for (const auto& spec : key_specs()) {  // the key table names the options of each key (first given wins)
+        for (const auto& name : spec.cli) {
             const CLI::Option* option = mcp_app.get_option_no_throw(name);
             if (!option || option->count() == 0) continue;
-            if (auto value = parse_value(*spec, join_results(*option))) layer.set(entry.key, std::move(*value));
+            if (auto value = parse_value(spec, join_results(*option))) layer.set(spec.key, std::move(*value));
             break;
         }
     }
@@ -319,7 +261,7 @@ Example: fairyfly mcp client-config --stdio --claude-code
     x.client_config->add_flag("--mcp-remote", x.client.mcp_remote, "mcp-remote command line");
     x.client_config->add_flag("--curl", x.client.curl, "curl smoke test for a Linux host");
     x.client_config->add_flag("--stdio", x.client.stdio, "Local stdio variant (fairyfly mcp)");
-    x.client_config->add_option("--url", x.client.url, "Server URL (default https://<host>:8443/mcp)");
+    x.client_config->add_option("--url", x.client.url, "Server URL (default https://<host>:" + std::to_string(mcp::kDefaultTlsPort) + "/mcp)");
     x.client_config->add_option("--token-env", x.client.token_env, "NAME of the environment variable that holds the token (default FAIRYFLY_TOKEN)");
     x.client_config->add_option("--name", x.client.name, "Server name in the client (default fairyfly)");
     output_option(x.client_config, x.output);
@@ -358,14 +300,16 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
     if (!loaded.parsed.ok()) return startup_error(x.tray, loaded.parsed.first_error_code(), label + " is invalid; run 'fairyfly mcp config validate'", 2);
 
     std::vector<ConfigIssue> env_issues;
-    env_layer(env, &env_issues);
+    const McpConfig env_config = env_layer(env, &env_issues);
     for (const auto& issue : env_issues) {
         if (issue.severity == Severity::Error)
             return startup_error(x.tray, issue.code, issue.message, 2);
         spdlog::warn("{}", format_issue(issue));
     }
-    const McpConfig layers = merged_layers(loaded.parsed.config, flags_layer(*x.mcp_app), env);
+    const McpConfig flags = flags_layer(*x.mcp_app);
+    const McpConfig layers = given(resolve_layers(loaded.parsed.config, env_config, flags));  // the env layer read once
     apply_config(layers, options);
+    options.audit_file = audit_settings(loaded.parsed.config, env_config, flags);  // audit.required from any layer
     if (!x.tray && layers.get_bool("tray.enabled") != true && !x.install_autostart && !x.remove_autostart) return std::nullopt;
     return run_tray(x, layers, options, loaded);
 }

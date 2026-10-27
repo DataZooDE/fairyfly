@@ -5,11 +5,6 @@ namespace commands {
 
 class LaunchCommand : public CommandBase {
 public:
-    std::string name() const override { return "session launch"; }
-
-    std::string description() const override {
-        return "Launch SAP Logon connection";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"session","launch"});
@@ -36,29 +31,16 @@ Example: fairyfly session launch "DEV" --login
 
     Result execute(cli::CommandHandler& handler) override {
         if (!login_ && !credential_name_.empty()) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error = {{"code", "INVALID_ARGUMENT"},
-                            {"message", "--credential requires --login"}};
-            return result;
+            return Result::fail("INVALID_ARGUMENT", "--credential requires --login");
         }
         if (!login_ && !multiple_logon_.empty()) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error = {{"code", "INVALID_ARGUMENT"},
-                            {"message", "--multiple-logon requires --login"}};
-            return result;
+            return Result::fail("INVALID_ARGUMENT", "--multiple-logon requires --login");
         }
         return handler.handle_launch(connection_name_, allow_sapshcut_, login_, credential_name_,
                                      multiple_logon_.empty() ? "fail" : multiple_logon_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::string connection_name_;
     bool allow_sapshcut_ = false;
     bool login_ = false;

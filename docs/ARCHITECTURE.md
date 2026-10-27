@@ -121,7 +121,30 @@ Windows services run in Session 0, which has no access to that desktop. fairyfly
 console program, or with `--tray` a hidden console plus a notification-area icon, optionally started at logon. The
 tray UI runs on its own thread with a message pump and talks to the server only through `IServerControl`; the COM
 executor stays on the main thread. Every operating system effect of the tray (icon, registry, processes, files,
-mutex, dialogs, clipboard) sits behind an interface with fakes in the unit tests. See [MCP_TRAY.md](MCP_TRAY.md).
+mutex, dialogs) sits behind an interface with fakes in the unit tests. See [MCP_TRAY.md](MCP_TRAY.md).
+
+## Threads
+
+One rule holds in every mode: **only the main thread touches SAP GUI** (COM, single-threaded apartment). Every other
+thread parses, waits, talks to the network or draws the tray, and hands work to the main thread through a queue.
+
+| Thread | Mode | Owns | Ends |
+|---|---|---|---|
+| Main | all | COM, the command handler, the call executor loop (`CallExecutor::run`), `link run`'s tool pump | the process |
+| Watchdog | `mcp` | answers a call that passes the timeout with `CALL_TIMEOUT` (the call keeps running in COM) | with the executor |
+| stdio reader | `mcp` (stdio) | reads JSON-RPC lines and queues them | end of input |
+| http.sys receive workers (16) | `mcp --http` | parse, authenticate, queue; never COM | server stop |
+| Lane threads | owner mode | one executor per SAP window, calls into a worker process (which has its own main/COM thread) | lane closed |
+| Session state cleanup | owner mode | periodic sweep of expired leases and sticky state (`std::jthread`) | server stop |
+| Tray UI | `--tray` | hidden window, notify icon, menu, message pump; sees the server only through `IServerControl` or `LinkControl` | `UiThread` destructor: quit + join |
+| Update check | MCP tray | one background check, owns only a shared slot (a late answer after Quit goes nowhere) | detached |
+| Link supervisor | `link run` | pause marker, status file, (re)starts the agent thread | `LinkRuntime::stop` |
+| Link agent | `link run` | the outbound WebSocket (libffl); tool calls go to the main thread's pump | pause, reconnect, stop |
+| Notification activator | `link run` | an STA kept for the toast activator (`CoRegisterClassObject`) | the process |
+| Pairing helpers | `link pair` | a blocking network step that Ctrl+C may abandon; counted by `LinkRuntime::background_thread()` | finishes; `main()` exits with `_Exit` while any are left |
+
+Process-wide flags and counters of the link (stop requests, abandoned threads, the standing approval) live in one
+`LinkRuntime`; the signal handlers use `LinkRuntime::process()`.
 
 ## State and storage
 

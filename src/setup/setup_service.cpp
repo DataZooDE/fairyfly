@@ -1,3 +1,4 @@
+#include "include/string_utils.h"
 #include "include/setup/setup_service.h"
 
 #include <algorithm>
@@ -218,7 +219,7 @@ TeardownDiagnosis diagnose_teardown(Hosts& h, const TeardownOptions& o) {
         d.cer_refusal = "the host name is not valid (" + *e + ")";
     } else {
         d.cer_path = join_path(dir, cer_file_name(d.hostname));
-        if (d.manifest && !d.manifest->cer_path.empty() && lower_ascii(d.manifest->cer_path) != lower_ascii(d.cer_path))
+        if (d.manifest && !d.manifest->cer_path.empty() && utils::lower_ascii(d.manifest->cer_path) != utils::lower_ascii(d.cer_path))
             d.cer_refusal = "the manifest records the export path " + d.manifest->cer_path + " but setup writes " + d.cer_path;
     }
     if (d.cer_refusal.empty()) {
@@ -727,6 +728,138 @@ bool old_protocol(const std::string& p) { return p == "TLS 1.0" || p == "TLS 1.1
 } // namespace
 
 // ---- run_setup ---------------------------------------------------------------------------------------------------
+bool setup_read_only(bool read_only_flag, const config::Environment& env) { return read_only_flag || env.read_only_cap(); }
+
+/// What a run that changes the machine says and asks before it starts (setup and teardown).
+struct Gate {
+    const char* noun;               ///< "setup" | "teardown": the nothing-to-do message
+    std::string label;              ///< the machine in the consent question
+    std::string read_only_message;  ///< READ_ONLY
+    std::string elevation_message;  ///< ELEVATION_REQUIRED, followed by the command line
+    std::string default_command;    ///< when no command line was given
+    bool json = false, dry_run = false, yes = false, non_interactive = false;
+    std::string command_line;
+};
+
+/// Shows the plan (dry run, nothing to do, the plan text) and checks read-only, `before_consent` (setup: a blocked
+/// plan), consent and elevation. An exit code to return, or nullopt: go ahead.
+std::optional<int> present_and_gate(Hosts& h, const Plan& plan, Report& rep, const Gate& g, const RunEnv& env,
+                                    const std::function<std::optional<int>()>& before_consent = {}) {
+    if (g.dry_run) {
+        if (g.json) *env.out << report_to_json(rep).dump(2) << std::endl;
+        else *env.out << render_plan_text(plan, true);
+        return 0;
+    }
+    if (plan.nothing) {
+        rep.nothing = true;
+        if (g.json) *env.out << report_to_json(rep).dump(2) << std::endl;
+        else *env.out << nothing_message(g.noun) << "\n";
+        return 0;
+    }
+    if (!g.json) *env.out << render_plan_text(plan, false);
+    if (env.read_only) return finish_error(env, g.json, {"READ_ONLY", g.read_only_message, 2}, &rep);
+    if (before_consent)
+        if (auto stop = before_consent()) return stop;
+    if (!g.yes) {
+        if (g.non_interactive || !env.stdin_is_tty)
+            return finish_error(env, g.json, {"CONFIRMATION_REQUIRED", "Refusing to change " + g.label + " without confirmation (pass --yes)", 2}, &rep);
+        const bool ok = env.confirm && env.confirm("Change this machine (" + g.label + ")? [y/N] ");
+        if (!ok) return finish_error(env, g.json, {"CONFIRMATION_REQUIRED", "Aborted; nothing was changed", 2}, &rep);
+    }
+    if (plan.needs_elevation && !h.elevator.is_elevated() && g.non_interactive) {
+        const std::string cmd = g.command_line.empty() ? g.default_command : g.command_line;
+        return finish_error(env, g.json, {"ELEVATION_REQUIRED", g.elevation_message + cmd, 2}, &rep);
+    }
+    return std::nullopt;
+}
+
+/// The apply phase's steps: the elevated part's results merged in, then the in-process steps one after the other.
+struct StepRun {
+    std::vector<StepItem> steps;
+    json result;            ///< the elevated part's answer
+    bool any_failed = false;
+    std::string failure;    ///< the first failure, for STEP_FAILED
+
+    void set_status(const std::string& id, const std::string& status, const std::string& detail) {
+        for (auto& s : steps)
+            if (s.id == id) {
+                s.status = status;
+                if (!detail.empty()) s.detail = detail;
+            }
+    }
+    /// The step's planned status passes `planned` (it is still to do).
+    bool pending(const std::string& id, const std::function<bool(const std::string&)>& planned) const {
+        for (const auto& s : steps)
+            if (s.id == id) return planned(s.status);
+        return false;
+    }
+    void fail(const std::string& id, const std::string& detail, const std::string& why) {
+        set_status(id, "failed", detail);
+        any_failed = true;
+        failure = why;
+    }
+};
+
+/// Runs the plan's elevated part and merges its results into `run`. An exit code to return when it could not run.
+std::optional<int> run_elevated(Hosts& h, const Plan& plan, Report& rep, bool as_json, const RunEnv& env, StepRun& run) {
+    run.steps = plan.steps;
+    ErrorInfo err;
+    if (!run_elevated_part(h, plan, &run.result, &err)) {
+        rep.steps = run.steps;
+        return finish_error(env, as_json, err, &rep);
+    }
+    merge_results(run.steps, run.result, &run.any_failed, &run.failure);
+    if (!run.result.value("ok", true) && !run.any_failed) {
+        run.any_failed = true;
+        run.failure = run.result.value("error", json::object()).value("message", "elevated step failed");
+    }
+    return std::nullopt;
+}
+
+/// STEP_FAILED with the steps as they ended.
+int step_failure(const RunEnv& env, bool as_json, Report& rep, const StepRun& run) {
+    rep.error = ErrorInfo{"STEP_FAILED", run.failure, 1};
+    if (!as_json) *env.out << render_result_text(rep);
+    return finish(env, as_json, rep, 1);
+}
+
+/// After apply: the reservation, binding and certificate steps must now be in place, then one unauthenticated
+/// request must be answered 401 by this server (TLS pinned to the bound certificate, whose SAN is checked separately).
+VerifyOut verify_setup(Hosts& h, const Options& o, const Plan& plan, const std::string& thumb) {
+    VerifyOut vo;
+    Options again = o;
+    const Diagnosis after = diagnose(h, again);
+    const Plan check = MakePlan(after, again);
+    std::string missing;
+    for (const auto& s : check.steps)
+        if ((s.id == "urlacl" || s.id == "sslcert" || s.id == "certificate" || s.id == "certificate_export") &&
+            (s.status.rfind("would", 0) == 0 || s.status == "blocked"))
+            missing += (missing.empty() ? "" : ", ") + s.id;
+    if (!missing.empty()) {
+        vo = {"failed", "", 0, false, "after apply these are not in place: " + missing};
+    } else {
+        VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
+        const VerifyResult vr = h.verify.round_trip(req);
+        vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
+        if (plan.tls && vr.status != "skipped") {
+            // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
+            // checked separately, against the SAN of the pinned certificate.
+            try {
+                const CertInfo bound = h.certs.find_by_thumbprint(thumb);
+                vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
+            } catch (const std::exception&) {
+                vo.name_match = false;
+            }
+        }
+        if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
+            vo.status = "failed";
+            vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
+                                              : "the presented certificate is not the bound one";
+        }
+    }
+    return vo;
+}
+
 int run_setup(Hosts& h, Options o, const RunEnv& env) {
     fill_defaults(h, o);
     if (const auto e = validate_options(o)) return finish_error(env, o.json, *e);
@@ -750,69 +883,32 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     if (plan.error) return finish_error(env, o.json, *plan.error);
     Report rep = report_from_plan(plan, o.dry_run);
 
-    if (o.dry_run) {
-        if (o.json) *env.out << report_to_json(rep).dump(2) << std::endl;
-        else *env.out << render_plan_text(plan, true);
-        return 0;
-    }
-    if (plan.nothing) {
-        rep.nothing = true;
-        if (o.json) *env.out << report_to_json(rep).dump(2) << std::endl;
-        else *env.out << nothing_message("setup") << "\n";
-        return 0;
-    }
-    if (!o.json) *env.out << render_plan_text(plan, false);
-    if (env.read_only)
-        return finish_error(env, o.json, {"READ_ONLY", "FAIRYFLY_READ_ONLY is set: refusing to change the machine (dry runs and --print-runbook still work)", 2}, &rep);
-    if (plan.blocked) {
+    Gate gate{"setup", o.hostname,
+              "FAIRYFLY_READ_ONLY is set: refusing to change the machine (dry runs and --print-runbook still work)",
+              "This setup changes machine configuration and needs an elevated process. Run this from an elevated prompt: ",
+              "fairyfly mcp setup ... --yes", o.json, o.dry_run, o.yes, o.non_interactive, o.command_line};
+    const auto blocked = [&]() -> std::optional<int> {
+        if (!plan.blocked) return std::nullopt;
         std::string why;
         for (const auto& s : plan.steps)
             if (s.status == "blocked") why += (why.empty() ? "" : "; ") + s.id + ": " + s.detail;
         return finish_error(env, o.json, {"PLAN_BLOCKED", "Setup cannot proceed: " + why, 1}, &rep);
-    }
-
-    // consent gate
-    if (!o.yes) {
-        if (o.non_interactive || !env.stdin_is_tty)
-            return finish_error(env, o.json, {"CONFIRMATION_REQUIRED", "Refusing to change " + o.hostname + " without confirmation (pass --yes)", 2}, &rep);
-        const bool ok = env.confirm && env.confirm("Change this machine (" + o.hostname + ")? [y/N] ");
-        if (!ok) return finish_error(env, o.json, {"CONFIRMATION_REQUIRED", "Aborted; nothing was changed", 2}, &rep);
-    }
-    // elevation gate
-    if (plan.needs_elevation && !h.elevator.is_elevated() && o.non_interactive) {
-        const std::string cmd = o.command_line.empty() ? "fairyfly mcp setup ... --yes" : o.command_line;
-        return finish_error(env, o.json, {"ELEVATION_REQUIRED", "This setup changes machine configuration and needs an elevated process. Run this from an elevated prompt: " + cmd, 2}, &rep);
-    }
+    };
+    if (auto stop = present_and_gate(h, plan, rep, gate, env, blocked)) return *stop;
 
     // ---- apply ----
-    std::vector<StepItem> steps = plan.steps;
-    bool any_failed = false;
-    std::string failure;
-    ErrorInfo err;
-    json result;
-    if (!run_elevated_part(h, plan, &result, &err)) {
-        rep.steps = steps;
-        return finish_error(env, o.json, err, &rep);
-    }
-    merge_results(steps, result, &any_failed, &failure);
+    StepRun run;
+    if (auto stop = run_elevated(h, plan, rep, o.json, env, run)) return *stop;
+    std::vector<StepItem>& steps = run.steps;
+    bool& any_failed = run.any_failed;
+    const json& result = run.result;
     std::string thumb = result.value("thumbprint", plan.thumbprint);
     if (thumb.empty()) thumb = plan.thumbprint;
-    if (!result.value("ok", true) && !any_failed) {
-        any_failed = true;
-        failure = result.value("error", json::object()).value("message", "elevated step failed");
-    }
-
-    auto set_status = [&](const std::string& id, const std::string& status, const std::string& detail) {
-        for (auto& s : steps)
-            if (s.id == id) {
-                s.status = status;
-                if (!detail.empty()) s.detail = detail;
-            }
+    const auto set_status = [&](const std::string& id, const std::string& status, const std::string& detail) {
+        run.set_status(id, status, detail);
     };
-    auto pending = [&](const std::string& id) {
-        for (const auto& s : steps)
-            if (s.id == id) return s.status.rfind("would", 0) == 0;
-        return false;
+    const auto pending = [&](const std::string& id) {
+        return run.pending(id, [](const std::string& status) { return status.rfind("would", 0) == 0; });
     };
 
     if (result.contains("bound_ipports") && result["bound_ipports"].is_array() && !result["bound_ipports"].empty())
@@ -824,9 +920,7 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
                 const std::string change = h.certs.export_cer(thumb, plan.cer_path, CerFormat::Der);
                 set_status("certificate_export", change, plan.cer_path);
             } catch (const std::exception& e) {
-                set_status("certificate_export", "failed", e.what());
-                any_failed = true;
-                failure = std::string("certificate_export: ") + e.what();
+                run.fail("certificate_export", e.what(), std::string("certificate_export: ") + e.what());
             }
         }
     }
@@ -836,9 +930,7 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
             // record the hash of the bytes actually on disk (teardown compares against it)
             if (const auto written = h.sys.read_file(plan.config_path)) plan.manifest.config_sha256 = auth::sha256_hex(*written);
         } else {
-            set_status("config", "failed", "cannot write " + plan.config_path);
-            any_failed = true;
-            failure = "config: cannot write " + plan.config_path;
+            run.fail("config", "cannot write " + plan.config_path, "config: cannot write " + plan.config_path);
         }
     }
     if (!any_failed && pending("manifest")) {
@@ -858,56 +950,17 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
         m.updated_at = now;
         if (h.sys.write_file(plan.manifest_path, m.to_json().dump(2))) set_status("manifest", "created", plan.manifest_path);
         else {
-            set_status("manifest", "failed", "cannot write " + plan.manifest_path);
-            any_failed = true;
-            failure = "manifest: cannot write " + plan.manifest_path;
+            run.fail("manifest", "cannot write " + plan.manifest_path, "manifest: cannot write " + plan.manifest_path);
         }
         for (auto& s : steps)
             if (s.id == "manifest" && s.status == "created" && plan.step("manifest")->status == "would_update") s.status = "updated";
     }
     finalize_statuses(steps, any_failed);
-    if (any_failed) {
-        rep.steps = steps;
-        rep.error = ErrorInfo{"STEP_FAILED", failure, 1};
-        if (!o.json) *env.out << render_result_text(rep);
-        return finish(env, o.json, rep, 1);
-    }
     rep.steps = steps;
+    if (any_failed) return step_failure(env, o.json, rep, run);
 
     // ---- verify ----
-    VerifyOut vo;
-    {
-        Options again = o;
-        const Diagnosis after = diagnose(h, again);
-        const Plan check = MakePlan(after, again);
-        std::string missing;
-        for (const auto& s : check.steps)
-            if ((s.id == "urlacl" || s.id == "sslcert" || s.id == "certificate" || s.id == "certificate_export") &&
-                (s.status.rfind("would", 0) == 0 || s.status == "blocked"))
-                missing += (missing.empty() ? "" : ", ") + s.id;
-        if (!missing.empty()) {
-            vo = {"failed", "", 0, false, "after apply these are not in place: " + missing};
-        } else {
-            VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
-            const VerifyResult vr = h.verify.round_trip(req);
-            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
-            if (plan.tls && vr.status != "skipped") {
-                // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
-                // checked separately, against the SAN of the pinned certificate.
-                try {
-                    const CertInfo bound = h.certs.find_by_thumbprint(thumb);
-                    vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
-                } catch (const std::exception&) {
-                    vo.name_match = false;
-                }
-            }
-            if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
-                vo.status = "failed";
-                vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
-                                                  : "the presented certificate is not the bound one";
-            }
-        }
-    }
+    const VerifyOut vo = verify_setup(h, o, plan, thumb);
     rep.verify = vo;
     rep.human = plan.human;
     if (plan.tls && vo.status != "skipped" && !vo.name_match)
@@ -934,57 +987,21 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
     Plan plan = MakeTeardownPlan(d, o);
     if (plan.error) return finish_error(env, o.json, *plan.error);
     Report rep = report_from_plan(plan, o.dry_run);
-    if (o.dry_run) {
-        if (o.json) *env.out << report_to_json(rep).dump(2) << std::endl;
-        else *env.out << render_plan_text(plan, true);
-        return 0;
-    }
-    if (plan.nothing) {
-        rep.nothing = true;
-        if (o.json) *env.out << report_to_json(rep).dump(2) << std::endl;
-        else *env.out << nothing_message("teardown") << "\n";
-        return 0;
-    }
-    if (!o.json) *env.out << render_plan_text(plan, false);
-    if (env.read_only)
-        return finish_error(env, o.json, {"READ_ONLY", "FAIRYFLY_READ_ONLY is set: refusing to change the machine (use --dry-run to see the plan)", 2}, &rep);
-    const std::string label = d.hostname.empty() ? "this machine" : d.hostname;
-    if (!o.yes) {
-        if (o.non_interactive || !env.stdin_is_tty)
-            return finish_error(env, o.json, {"CONFIRMATION_REQUIRED", "Refusing to change " + label + " without confirmation (pass --yes)", 2}, &rep);
-        const bool ok = env.confirm && env.confirm("Change this machine (" + label + ")? [y/N] ");
-        if (!ok) return finish_error(env, o.json, {"CONFIRMATION_REQUIRED", "Aborted; nothing was changed", 2}, &rep);
-    }
-    if (plan.needs_elevation && !h.elevator.is_elevated() && o.non_interactive) {
-        const std::string cmd = o.command_line.empty() ? "fairyfly mcp teardown --yes" : o.command_line;
-        return finish_error(env, o.json, {"ELEVATION_REQUIRED", "The teardown needs an elevated process. Run this from an elevated prompt: " + cmd, 2}, &rep);
-    }
+    const Gate gate{"teardown", d.hostname.empty() ? "this machine" : d.hostname,
+                    "FAIRYFLY_READ_ONLY is set: refusing to change the machine (use --dry-run to see the plan)",
+                    "The teardown needs an elevated process. Run this from an elevated prompt: ",
+                    "fairyfly mcp teardown --yes", o.json, o.dry_run, o.yes, o.non_interactive, o.command_line};
+    if (auto stop = present_and_gate(h, plan, rep, gate, env)) return *stop;
 
-    std::vector<StepItem> steps = plan.steps;
-    ErrorInfo err;
-    json result;
-    if (!run_elevated_part(h, plan, &result, &err)) {
-        rep.steps = steps;
-        return finish_error(env, o.json, err, &rep);
-    }
-    bool any_failed = false;
-    std::string failure;
-    merge_results(steps, result, &any_failed, &failure);
-    if (!result.value("ok", true) && !any_failed) {
-        any_failed = true;
-        failure = result.value("error", json::object()).value("message", "elevated step failed");
-    }
-    auto set_status = [&](const std::string& id, const std::string& status, const std::string& detail) {
-        for (auto& s : steps)
-            if (s.id == id) {
-                s.status = status;
-                if (!detail.empty()) s.detail = detail;
-            }
+    StepRun run;
+    if (auto stop = run_elevated(h, plan, rep, o.json, env, run)) return *stop;
+    std::vector<StepItem>& steps = run.steps;
+    bool& any_failed = run.any_failed;
+    const auto set_status = [&](const std::string& id, const std::string& status, const std::string& detail) {
+        run.set_status(id, status, detail);
     };
-    auto pending = [&](const std::string& id) {
-        for (const auto& s : steps)
-            if (s.id == id) return s.status == "would_remove";
-        return false;
+    const auto pending = [&](const std::string& id) {
+        return run.pending(id, [](const std::string& status) { return status == "would_remove"; });
     };
     std::vector<HumanItem> rep_human_extra;
     if (!any_failed && pending("certificate_export") && !cer_file_holds(h, plan.teardown.cer_path, d.manifest ? d.manifest->thumbprint : std::string())) {
@@ -993,37 +1010,21 @@ int run_teardown(Hosts& h, TeardownOptions o, const RunEnv& env) {
         rep_human_extra.push_back({"cer_file_foreign", plan.teardown.cer_path + " does not hold the certificate that setup exported; it was not deleted."});
     } else if (!any_failed && pending("certificate_export")) {
         if (h.sys.remove_file(plan.teardown.cer_path) || !h.sys.file_exists(plan.teardown.cer_path)) set_status("certificate_export", "removed", plan.teardown.cer_path);
-        else {
-            set_status("certificate_export", "failed", "cannot delete " + plan.teardown.cer_path);
-            any_failed = true;
-            failure = "certificate_export: cannot delete the file";
-        }
+        else run.fail("certificate_export", "cannot delete " + plan.teardown.cer_path, "certificate_export: cannot delete the file");
     }
     if (!any_failed && pending("config")) {
         if (h.sys.remove_file(plan.teardown.config_path) || !h.sys.file_exists(plan.teardown.config_path)) set_status("config", "removed", plan.teardown.config_path);
-        else {
-            set_status("config", "failed", "cannot delete " + plan.teardown.config_path);
-            any_failed = true;
-            failure = "config: cannot delete the file";
-        }
+        else run.fail("config", "cannot delete " + plan.teardown.config_path, "config: cannot delete the file");
     }
     if (!any_failed && pending("manifest")) {
         if (h.sys.remove_file(plan.manifest_path) || !h.sys.file_exists(plan.manifest_path)) set_status("manifest", "removed", plan.manifest_path);
-        else {
-            set_status("manifest", "failed", "cannot delete " + plan.manifest_path);
-            any_failed = true;
-            failure = "manifest: cannot delete the file";
-        }
+        else run.fail("manifest", "cannot delete " + plan.manifest_path, "manifest: cannot delete the file");
     }
     finalize_statuses(steps, any_failed);
     rep.steps = steps;
     rep.human = plan.human;
     for (const auto& item : rep_human_extra) rep.human.push_back(item);
-    if (any_failed) {
-        rep.error = ErrorInfo{"STEP_FAILED", failure, 1};
-        if (!o.json) *env.out << render_result_text(rep);
-        return finish(env, o.json, rep, 1);
-    }
+    if (any_failed) return step_failure(env, o.json, rep, run);
     // verify: nothing of ours is left
     const TeardownDiagnosis after = diagnose_teardown(h, o);
     const Plan check = MakeTeardownPlan(after, o);

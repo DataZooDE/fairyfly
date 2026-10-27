@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include/config/environment.h"
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -67,7 +68,7 @@ struct AuditConfig {
     std::filesystem::path file;
 };
 
-using GetEnvFn = std::function<std::string(const char*)>;
+using GetEnvFn = config::EnvLookup;
 
 /// "YYYY-MM.jsonl" for the UTC month of `now`.
 std::string monthly_file_name(std::chrono::system_clock::time_point now);
@@ -75,11 +76,19 @@ std::string monthly_file_name(std::chrono::system_clock::time_point now);
 /// ISO-8601 UTC with milliseconds, e.g. 2026-09-29T12:34:56.789Z.
 std::string utc_timestamp_ms(std::chrono::system_clock::time_point now);
 
-/// Resolve mode and file. File: FAIRYFLY_AUDIT_FILE > %LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl
-/// (temp dir fallback). Mode: FAIRYFLY_AUDIT=0|off -> Disabled, =required -> Required; --no-audit
-/// disables; --audit-required wins over every disable (fail safe).
+/// The audit settings of mcp.yaml (`audit.enabled`, `audit.required`, `audit.file`); unset = not configured.
+struct AuditFileSettings {
+    std::optional<bool> enabled;
+    std::optional<bool> required;
+    std::optional<std::string> file;
+};
+
+/// Resolve mode and file, flag > environment > mcp.yaml > default.
+/// File: FAIRYFLY_AUDIT_FILE > audit.file > %LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl (temp dir fallback).
+/// Mode: audit.enabled/required, then FAIRYFLY_AUDIT (0|false|no|off -> Disabled, required -> Required,
+/// 1|true|yes|on -> Enabled), then --no-audit; --audit-required wins over every disable (fail safe).
 AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cli_required,
-                           std::chrono::system_clock::time_point now);
+                           std::chrono::system_clock::time_point now, const AuditFileSettings& file_settings = {});
 
 /// Pure redaction of an argv (without argv[0]); applies element and array caps.
 std::vector<std::string> redact_argv(const std::vector<std::string>& argv);
@@ -99,6 +108,8 @@ public:
     Mode mode() const { return config_.mode; }
     bool enabled() const { return config_.mode != Mode::Disabled; }
     const std::filesystem::path& file() const { return config_.file; }
+    /// New settings once mcp.yaml is read (before the server starts; not thread-safe against append).
+    void reconfigure(AuditConfig config) { config_ = std::move(config); }
 
     /// Create directory/file if needed; true when appending is possible.
     bool probe() noexcept;

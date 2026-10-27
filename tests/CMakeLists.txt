@@ -7,7 +7,6 @@ find_package(ZXing CONFIG REQUIRED)  # decodes the QR codes link pair draws (tes
 add_executable(unit_tests
     unit/test_main.cpp
     unit/test_com_wrapper.cpp
-    unit/test_config_session.cpp
     unit/test_markdown_table_formatter.cpp
     unit/test_toon_encoder.cpp
     unit/test_connection_launcher.cpp
@@ -37,6 +36,29 @@ add_executable(unit_tests
     unit/test_fill_fields.cpp
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
+    unit/test_environment.cpp
+    unit/test_env_paths.cpp
+    unit/test_core_result.cpp
+    unit/test_string_utils.cpp
+    unit/test_text_utf8.cpp
+    unit/test_command_line.cpp
+    unit/test_constants.cpp
+    unit/test_sensitive_data.cpp
+    unit/test_read_only_guard.cpp
+    unit/test_sap_identity.cpp
+    unit/test_command_handler.cpp
+    unit/test_doctor_checks.cpp
+    unit/test_screen_markdown_golden.cpp
+    unit/test_semantic_classifier.cpp
+    unit/test_session_lease_policy.cpp
+    unit/test_grid_renderer.cpp
+    unit/test_unique_handle.cpp
+    unit/test_http_probe.cpp
+    unit/test_engine_actions.cpp
+    unit/test_login_handler.cpp
+    unit/test_trail_screen_source.cpp
+    unit/test_session_worker_main.cpp
+    unit/test_mcp_config_command.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
@@ -79,8 +101,6 @@ add_executable(unit_tests
     unit/test_selection_input_guard.cpp
     unit/test_round2_usability.cpp
     unit/test_tray_win32_manual.cpp
-    ../src/config.cpp
-    ../src/session.cpp
 )
 
 # Small SAP-free child process used to verify cross-process cache locking.
@@ -105,7 +125,8 @@ add_executable(sap_sta_parallel_probe EXCLUDE_FROM_ALL integration/sap_sta_paral
 target_link_libraries(sap_sta_parallel_probe PRIVATE fairyfly_core)
 
 # Recorded SAP screens (object trees and legacy reads) used by the bulk reader parity tests
-target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures")
+target_compile_definitions(unit_tests PRIVATE FAIRYFLY_UNIT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/unit/fixtures"
+                                              FAIRYFLY_SOURCE_DIR="${PROJECT_SOURCE_DIR}/src")
 
 # Link against fairyfly_core library (all dependencies inherited)
 target_link_libraries(unit_tests PRIVATE

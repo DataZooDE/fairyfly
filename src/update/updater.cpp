@@ -1,4 +1,6 @@
+#include "include/text/utf8.h"
 #include "include/update/updater.h"
+#include "include/config/environment.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -44,7 +46,7 @@ std::string fetch_once(const std::string& start, size_t max_body, int max_redire
         rq.headers = {{"Accept", api ? "application/vnd.github+json" : "application/octet-stream"}, {"Accept-Encoding", "identity"}};
         // optional, for rate limits on shared machines (CI); sent to the API only, never to a download host
         if (api)
-            if (const char* t = std::getenv("FAIRYFLY_GITHUB_TOKEN"); t && *t) rq.headers.push_back({"Authorization", std::string("Bearer ") + t});
+            if (const std::string t = config::Environment::process().get(config::env::kGithubToken); !t.empty()) rq.headers.push_back({"Authorization", "Bearer " + t});
         rq.timeout_ms = 30000;
         rq.max_body = max_body;
         ffy::HttpResponse r;
@@ -159,9 +161,7 @@ Signature authenticode(const fs::path& file) {
                     std::wstring w(n, L'\0');
                     CertNameToStrW(X509_ASN_ENCODING, &cert->pCertInfo->Subject, CERT_X500_NAME_STR, w.data(), n);
                     if (!w.empty() && w.back() == L'\0') w.pop_back();
-                    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-                    s.subject.assign(static_cast<size_t>(len), '\0');
-                    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()), s.subject.data(), len, nullptr, nullptr);
+                    s.subject = text::wide_to_utf8_lossy(w);
                     CertFreeCertificateContext(cert);
                 }
             }

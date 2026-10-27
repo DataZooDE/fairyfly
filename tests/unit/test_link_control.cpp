@@ -9,31 +9,32 @@
 
 #include "include/link/link_control.h"
 
+#include "support/temp_dir.h"
+#include "support/eventually.h"
 namespace fs = std::filesystem;
 using namespace fairyfly::link;
 
+using fairyfly::test::eventually;
+
 namespace {
-fs::path temp_state() {
-    auto d = fs::temp_directory_path() / ("ffy-link-ctl-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(d);
-    return d / "state.json";
-}
 std::string state_of(const fs::path& st) {
     auto s = read_status(st.string());
     return s.is_object() ? s.value("state", "") : "";
 }
-template <class F>
-bool eventually(F f, int ms = 3000) {
-    for (int i = 0; i < ms / 10; i++) {
-        if (f()) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+/// Stops and joins a supervisor thread when the test ends, also when a REQUIRE fails (a joinable thread would terminate).
+struct StopAndJoin {
+    std::atomic<bool>& stop;
+    std::thread& thread;
+    ~StopAndJoin() {
+        stop = true;
+        if (thread.joinable()) thread.join();
     }
-    return f();
-}
+};
 }  // namespace
 
 TEST_CASE("link control: pause marker next to the pairing state", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     CHECK_FALSE(is_paused(st.string()));
     REQUIRE(set_paused(st.string(), true));
     CHECK(is_paused(st.string()));
@@ -43,11 +44,11 @@ TEST_CASE("link control: pause marker next to the pairing state", "[link]") {
     REQUIRE(set_paused(st.string(), false));
     CHECK_FALSE(is_paused(st.string()));
     REQUIRE(set_paused(st.string(), false));  // idempotent
-    fs::remove_all(st.parent_path());
 }
 
 TEST_CASE("link control: the supervisor disconnects while paused and reconnects on resume", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0}, running{0};
     std::atomic<bool> stop{false};
     // stands in for libffl's Agent::run(net_stop): connected until net_stop
@@ -60,6 +61,7 @@ TEST_CASE("link control: the supervisor disconnects while paused and reconnects 
     SupervisorOptions so;
     so.poll = std::chrono::milliseconds(10);
     std::thread sup([&] { supervise(st.string(), agent, stop, so); });
+    const StopAndJoin join_sup{stop, sup};  // also when a REQUIRE below fails
 
     CHECK(eventually([&] { return running == 1; }));
     CHECK(eventually([&] { return state_of(st) == "connected"; }));
@@ -75,41 +77,43 @@ TEST_CASE("link control: the supervisor disconnects while paused and reconnects 
     sup.join();
     CHECK(running == 0);
     CHECK(state_of(st) == "stopped");
-    fs::remove_all(st.parent_path());
 }
 
 TEST_CASE("link control: a link started while paused does not connect", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     REQUIRE(set_paused(st.string(), true));
     std::atomic<int> starts{0};
     std::atomic<bool> stop{false};
     SupervisorOptions so;
     so.poll = std::chrono::milliseconds(10);
     std::thread sup([&] { supervise(st.string(), [&](const std::atomic<bool>&) { starts++; }, stop, so); });
+    const StopAndJoin join_sup{stop, sup};  // also when a REQUIRE below fails
     CHECK(eventually([&] { return state_of(st) == "paused"; }));
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     CHECK(starts == 0);
     stop = true;
     sup.join();
-    fs::remove_all(st.parent_path());
 }
 
 TEST_CASE("link control: an agent that returns by itself is restarted with a back-off", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0};
     std::atomic<bool> stop{false};
     SupervisorOptions so;
     so.poll = std::chrono::milliseconds(5);
     so.restart_delay = std::chrono::milliseconds(20);
     std::thread sup([&] { supervise(st.string(), [&](const std::atomic<bool>&) { starts++; }, stop, so); });
+    const StopAndJoin join_sup{stop, sup};  // also when a REQUIRE below fails
     CHECK(eventually([&] { return starts >= 3; }));
     stop = true;
     sup.join();
-    fs::remove_all(st.parent_path());
 }
 
 TEST_CASE("link control: status of a link that is not running", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     CHECK(read_status(st.string()).is_null());
     write_status(st.string(), "connected");
     auto s = read_status(st.string());
@@ -120,11 +124,11 @@ TEST_CASE("link control: status of a link that is not running", "[link]") {
     CHECK(describe(s, s["updated"].get<int64_t>() + 5) == "connected");
     CHECK(describe(s, s["updated"].get<int64_t>() + 120) == "not running");
     CHECK(describe(nlohmann::json(), 0) == "not running");
-    fs::remove_all(st.parent_path());
 }
 
 TEST_CASE("link control: a reconnect request closes the link and opens it again at once", "[link]") {
-    auto st = temp_state();
+    const fairyfly::test::TempDir dir("link-ctl");
+    const auto st = dir / "state.json";
     std::atomic<int> starts{0}, running{0};
     std::atomic<bool> stop{false}, reconnect{false};
     auto agent = [&](const std::atomic<bool>& net_stop) {
@@ -138,6 +142,7 @@ TEST_CASE("link control: a reconnect request closes the link and opens it again 
     so.restart_delay = std::chrono::seconds(30);   // a reconnect must not wait for the back-off
     so.reconnect = &reconnect;
     std::thread sup([&] { supervise(st.string(), agent, stop, so); });
+    const StopAndJoin join_sup{stop, sup};  // also when a REQUIRE below fails
 
     CHECK(eventually([&] { return running == 1 && starts == 1; }));
     reconnect = true;
@@ -146,5 +151,4 @@ TEST_CASE("link control: a reconnect request closes the link and opens it again 
 
     stop = true;
     sup.join();
-    fs::remove_all(st.parent_path());
 }

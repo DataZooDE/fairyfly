@@ -15,11 +15,16 @@
 #include <vector>
 
 #include "include/audit_log.h"
+#include "support/env_guard.h"
 #include "include/cli_entry.h"
 
+#include "support/temp_dir.h"
 using namespace fairyfly::audit;
+using fairyfly::test::EnvGuard;
 namespace fs = std::filesystem;
 using json = nlohmann::json;
+
+using fairyfly::test::TempDir;
 
 namespace {
 
@@ -37,18 +42,6 @@ Clock::time_point utc(int y, int m, int d, int hh, int mm, int ss, int ms = 0) {
         (((days * 24 + hh) * 60 + mm) * 60 + ss) * 1000LL + ms));
 }
 
-struct TempDir {
-    fs::path path;
-    TempDir() {
-        static std::atomic<int> counter{0};
-        path = fs::temp_directory_path() / ("fairyfly_audit_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "_" +
-                                            std::to_string(counter++));
-        fs::remove_all(path);
-        fs::create_directories(path);
-    }
-    ~TempDir() { std::error_code ec; fs::remove_all(path, ec); }
-};
-
 std::vector<std::string> read_lines(const fs::path& file) {
     std::ifstream in(file, std::ios::binary);
     std::vector<std::string> lines;
@@ -56,17 +49,6 @@ std::vector<std::string> read_lines(const fs::path& file) {
     while (std::getline(in, line)) lines.push_back(line);
     return lines;
 }
-
-struct EnvGuard {
-    std::string name;
-    std::string old;
-    bool had = false;
-    EnvGuard(const std::string& n, const std::string& value) : name(n) {
-        if (const char* v = std::getenv(n.c_str())) { had = true; old = v; }
-        _putenv_s(n.c_str(), value.c_str());
-    }
-    ~EnvGuard() { _putenv_s(name.c_str(), had ? old.c_str() : ""); }
-};
 
 GetEnvFn env_of(std::map<std::string, std::string> vars) {
     return [vars = std::move(vars)](const char* name) {
@@ -223,15 +205,20 @@ TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "OFF"}}), false, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), false, false, now).mode == Mode::Required);
+    // the off spellings of every fairyfly flag (config::parse_off) switch it off too
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "false"}}), false, false, now).mode == Mode::Disabled);
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", " No "}}), false, false, now).mode == Mode::Disabled);
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now).mode == Mode::Enabled);
     REQUIRE(resolve_config(env_of({}), true, false, now).mode == Mode::Disabled);
     REQUIRE(resolve_config(env_of({}), false, true, now).mode == Mode::Required);
     REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "0"}}), false, true, now).mode == Mode::Required);
-    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now).mode == Mode::Disabled);
+    // required is monotonic: once any source asks for it, no disable weakens it (review 2026-10-25)
+    REQUIRE(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now).mode == Mode::Required);
 }
 
 TEST_CASE("AuditSink appends exactly one terminated line per record", "[audit]") {
     TempDir dir;
-    const auto file = dir.path / "nested" / "audit.jsonl";
+    const auto file = dir.path() / "nested" / "audit.jsonl";
     AuditSink sink(AuditConfig{Mode::Enabled, file});
     REQUIRE(sink.probe());
     REQUIRE(sink.append(sample_record()));
@@ -248,7 +235,7 @@ TEST_CASE("AuditSink appends exactly one terminated line per record", "[audit]")
 
 TEST_CASE("AuditSink concurrent appends never interleave", "[audit]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     AuditSink sink(AuditConfig{Mode::Enabled, file});
     constexpr int kThreads = 8;
     constexpr int kPerThread = 25;
@@ -271,7 +258,7 @@ TEST_CASE("AuditSink concurrent appends never interleave", "[audit]") {
 TEST_CASE("AuditSink append to an unwritable path fails quietly", "[audit]") {
     TempDir dir;
     // A directory where the file should be: opening it for append must fail.
-    const auto path = dir.path / "blocked";
+    const auto path = dir.path() / "blocked";
     fs::create_directories(path);
     AuditSink sink(AuditConfig{Mode::Enabled, path});
     bool result = true;
@@ -289,7 +276,7 @@ TEST_CASE("Required mode turns a failed probe into AUDIT_UNAVAILABLE", "[audit]"
 
 TEST_CASE("CLI writes no audit file with --no-audit", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");
     int code = -1;
@@ -302,7 +289,7 @@ TEST_CASE("CLI writes no audit file with --no-audit", "[audit][cli]") {
 
 TEST_CASE("CLI honours FAIRYFLY_AUDIT=0", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "0");
     int code = -1;
@@ -313,7 +300,7 @@ TEST_CASE("CLI honours FAIRYFLY_AUDIT=0", "[audit][cli]") {
 
 TEST_CASE("CLI parse error writes exactly one audit record", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");
     int code = -1;
@@ -333,7 +320,7 @@ TEST_CASE("CLI parse error writes exactly one audit record", "[audit][cli]") {
 
 TEST_CASE("CLI --audit-required fails before running when the file is unwritable", "[audit][cli]") {
     TempDir dir;
-    const auto blocked = dir.path / "blocked";
+    const auto blocked = dir.path() / "blocked";
     fs::create_directories(blocked);
     EnvGuard f("FAIRYFLY_AUDIT_FILE", blocked.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");
@@ -381,4 +368,44 @@ TEST_CASE("AuditRecord with huge MCP fields stays within the record cap", "[audi
     const auto j = json::parse(line);
     REQUIRE(j["tool"].get<std::string>().size() <= 64);
     REQUIRE(j["request_id"].get<std::string>().size() <= 64);
+}
+
+TEST_CASE("resolve_config: mcp.yaml's audit.* sits below FAIRYFLY_AUDIT* and the command-line flags", "[audit]") {
+    // review 2026-10-25: audit.enabled/required/file were validated and documented but never applied
+    const auto now = utc(2026, 9, 29, 12, 0, 0);
+    const auto none = env_of({{"LOCALAPPDATA", "C:/L"}});
+    AuditFileSettings required;
+    required.required = true;
+    AuditFileSettings disabled;
+    disabled.enabled = false;
+    AuditFileSettings file;
+    file.file = "D:/yaml/audit.jsonl";
+
+    CHECK(resolve_config(none, false, false, now, required).mode == Mode::Required);
+    CHECK(resolve_config(none, false, false, now, disabled).mode == Mode::Disabled);
+    AuditFileSettings both = disabled;
+    both.required = true;  // fail safe inside the file too
+    CHECK(resolve_config(none, false, false, now, both).mode == Mode::Required);
+    CHECK(resolve_config(none, false, false, now, file).file == fs::path("D:/yaml/audit.jsonl"));
+    // enabled/disabled and the file: the environment beats the file, the flags beat both
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), false, false, now, disabled).mode == Mode::Enabled);
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT_FILE", "E:/env.jsonl"}}), false, false, now, file).file == fs::path("E:/env.jsonl"));
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "1"}}), true, false, now, {}).mode == Mode::Disabled);
+    // required is monotonic: every source that asks for it wins over every disable or "enabled"
+    for (const char* weaker : {"off", "0", "false", "1", "on", ""}) {
+        CAPTURE(weaker);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), false, false, now, required).mode == Mode::Required);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), true, false, now, required).mode == Mode::Required);
+        CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", weaker}}), true, true, now, disabled).mode == Mode::Required);
+    }
+    CHECK(resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), true, false, now, disabled).mode == Mode::Required);
+    // nothing set: as before
+    CHECK(resolve_config(none, false, false, now, {}).mode == Mode::Enabled);
+}
+
+TEST_CASE("AuditSink::reconfigure switches mode and file", "[audit]") {
+    AuditSink sink(AuditConfig{Mode::Enabled, "a.jsonl"});
+    sink.reconfigure(AuditConfig{Mode::Required, "b.jsonl"});
+    CHECK(sink.mode() == Mode::Required);
+    CHECK(sink.file() == fs::path("b.jsonl"));
 }

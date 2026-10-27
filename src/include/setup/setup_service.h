@@ -3,6 +3,7 @@
 // elevated, otherwise through one elevated child that runs a plan file), verifies with a real round trip and
 // writes the report. Every function is host-injected, so the whole flow runs against the in-memory fakes.
 
+#include "include/config/environment.h"
 #include <functional>
 #include <iosfwd>
 #include <string>
@@ -30,6 +31,8 @@ void fill_defaults(Hosts& hosts, Options& options);   ///< default hostname (low
 /// Full `mcp setup` flow: validate, runbook | diagnose+plan, dry run, nothing-to-do, consent, elevation, apply,
 /// verify. Returns the process exit code (0 done/nothing/dry-run/runbook, 1 failure, 2 misuse/refusal).
 int run_setup(Hosts& hosts, Options options, const RunEnv& env);
+/// RunEnv::read_only for setup and teardown: --read-only, or the FAIRYFLY_READ_ONLY hard cap.
+bool setup_read_only(bool read_only_flag, const config::Environment& env = config::Environment::process());
 /// `mcp teardown`: manifest-driven removal, idempotent.
 int run_teardown(Hosts& hosts, TeardownOptions options, const RunEnv& env);
 

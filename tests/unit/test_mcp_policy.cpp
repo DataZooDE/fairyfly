@@ -140,6 +140,12 @@ TEST_CASE("FAIRYFLY_READ_ONLY is a hard cap in check_call", "[mcp][policy]") {
     REQUIRE_FALSE(check_call(spec_named("gui_session_disconnect", false), json{{"close_session", true}}, write_policy(), on).allowed);
     REQUIRE(check_call(fill_spec(), json::object(), write_policy(), off).allowed);
     REQUIRE(check_call(fill_spec(), json::object(), write_policy(), no_env).allowed);
+    // every spelling of an "on" switch caps a write policy (config::parse_flag)
+    for (const char* v : {"Yes", "ON", "True", " 1 ", "\tyes\n"}) {
+        const EnvFn cap = [v](const char* n) { return std::string(n) == "FAIRYFLY_READ_ONLY" ? std::string(v) : std::string(); };
+        CAPTURE(v);
+        REQUIRE_FALSE(check_call(fill_spec(), json{{"element", "x"}, {"value", "y"}}, write_policy(), cap).allowed);
+    }
 }
 
 TEST_CASE("RateLimiter sliding window", "[mcp][policy]") {

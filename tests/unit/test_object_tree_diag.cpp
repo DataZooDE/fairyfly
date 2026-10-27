@@ -5,12 +5,14 @@ using fairyfly::diag::build_object_tree_diagnostic;
 using fairyfly::diag::count_object_tree_nodes;
 using fairyfly::diag::diag_enabled;
 
-TEST_CASE("diagnostic dumps are only enabled with FAIRYFLY_DIAG=1", "[diag][bulk]") {
+TEST_CASE("diagnostic dumps are enabled by FAIRYFLY_DIAG like every other flag (1/true/yes/on)", "[diag][bulk]") {
     REQUIRE_FALSE(diag_enabled(nullptr));
     REQUIRE_FALSE(diag_enabled(""));
     REQUIRE_FALSE(diag_enabled("0"));
-    REQUIRE_FALSE(diag_enabled("true"));
+    REQUIRE_FALSE(diag_enabled("off"));
     REQUIRE(diag_enabled("1"));
+    REQUIRE(diag_enabled("true"));
+    REQUIRE(diag_enabled("Yes"));
 }
 
 TEST_CASE("object tree node counting follows the children arrays", "[diag][bulk]") {

@@ -7,11 +7,6 @@ namespace commands {
 
 class PressF4Command : public CommandBase {
 public:
-    std::string name() const override { return "element f4"; }
-
-    std::string description() const override {
-        return "Press F4 to open search help dialog for a field";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"element","f4"});
@@ -29,12 +24,7 @@ Example: fairyfly element f4 "wnd[0]/usr/ctxtFIELD" --connection 3
         return handler.handle_press_f4(element_, conn_id_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::string element_;
     std::optional<int> conn_id_;
 };

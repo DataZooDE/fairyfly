@@ -5,6 +5,11 @@
 #include "include/com/utf8.h"
 #include <spdlog/spdlog.h>
 #include <comdef.h>
+#include <climits>
+#include <vector>
+
+#include "include/com/invoke.h"
+#include "include/com/hresult.h"
 
 namespace fairyfly {
 namespace sap {
@@ -13,35 +18,11 @@ namespace sap {
 /// ordinary screen-reading helper, a failed read must not mean zero items.
 int get_collection_count_checked(IDispatch* collection);
 
-/// Get a string property from COM object (free function helper)
-inline std::string get_string_property(IDispatch* obj, const char* prop_name) {
-    if (!obj) throw ComException("Null object");
-
-    try {
-        _bstr_t prop(prop_name);
-        DISPID dispid;
-        // Use get_dispid_via_typeinfo for SAP GUI compatibility
-        HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
-        if (FAILED(hr)) return "";
-
-        _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
-        if (FAILED(hr)) return "";
-
-        return result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
-    } catch (const SapGuiException& e) {
-        spdlog::debug("get_string_property: SapGuiException for {}: {}", prop_name, e.what());
-        return "";
-    } catch (const ComException& e) {
-        spdlog::debug("get_string_property: ComException for {}: {}", prop_name, e.what());
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_string_property: std::exception for {}: {}", prop_name, e.what());
-        return "";
-    }
-}
+/// The items of the collection that `owner`'s member answers (a method or property, by `flags`): Count (VT_I4) and
+/// Item(i) with a VT_I4 index, as SAP expects, at most `limit` of them. Empty when the member, the collection or its
+/// Count is missing; an Item read that fails is skipped. COM exceptions propagate to the caller.
+std::vector<_variant_t> collection_member_items(IDispatch* owner, const wchar_t* member, WORD flags,
+                                                int limit = INT_MAX);
 
 /// Get an integer property from COM object (free function helper)
 inline int get_int_property(IDispatch* obj, const char* prop_name) {
@@ -53,16 +34,14 @@ inline int get_int_property(IDispatch* obj, const char* prop_name) {
         // CRITICAL FIX: Use get_dispid_via_typeinfo for SAP GUI compatibility
         HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
         _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
+        hr = invoke(obj, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|Invoke failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|Invoke failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
@@ -81,113 +60,6 @@ inline int get_int_property(IDispatch* obj, const char* prop_name) {
     }
 }
 
-/// Get a boolean property from COM object (free function helper)
-inline bool get_bool_property(IDispatch* obj, const char* prop_name) {
-    if (!obj) throw ComException("Null object");
-
-    try {
-        _bstr_t prop(prop_name);
-        DISPID dispid;
-        // Use get_dispid_via_typeinfo for SAP GUI compatibility
-        HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
-        if (FAILED(hr)) return false;
-
-        _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
-        if (FAILED(hr)) return false;
-
-        // Verify variant type before accessing boolVal to avoid undefined behavior
-        if (result.vt == VT_BOOL) {
-            return result.boolVal != VARIANT_FALSE;
-        }
-
-        spdlog::debug("get_bool_property|unexpected type|prop={}|vt={}", prop_name, (int)result.vt);
-        return false;
-    } catch (const SapGuiException& e) {
-        spdlog::debug("get_bool_property: SapGuiException for {}: {}", prop_name, e.what());
-        return false;
-    } catch (const ComException& e) {
-        spdlog::debug("get_bool_property: ComException for {}: {}", prop_name, e.what());
-        return false;
-    } catch (const std::exception& e) {
-        spdlog::debug("get_bool_property: std::exception for {}: {}", prop_name, e.what());
-        return false;
-    }
-}
-
-/// Get a dispatch property from COM object (free function helper)
-inline IDispatchPtr get_dispatch_property(IDispatch* obj, const char* prop_name) {
-    if (!obj) throw ComException("Null object");
-
-    try {
-        _bstr_t prop(prop_name);
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
-        if (FAILED(hr)) {
-            spdlog::debug("get_dispatch_property|get_dispid_via_typeinfo failed|prop={}|hr=0x{:08X}", prop_name, hr);
-            return nullptr;
-        }
-
-        _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
-        if (FAILED(hr)) {
-            spdlog::debug("get_dispatch_property|Invoke failed|prop={}|hr=0x{:08X}", prop_name, hr);
-            return nullptr;
-        }
-        if (result.vt != VT_DISPATCH) {
-            spdlog::debug("get_dispatch_property|wrong variant type|prop={}|vt={}|expected=VT_DISPATCH({})",
-                         prop_name, (int)result.vt, (int)VT_DISPATCH);
-            return nullptr;
-        }
-
-        spdlog::debug("get_dispatch_property|success|prop={}", prop_name);
-        return IDispatchPtr(result.pdispVal);
-    } catch (const SapGuiException& e) {
-        spdlog::warn("get_dispatch_property|SapGuiException|prop={}|error={}", prop_name, e.what());
-        return nullptr;
-    } catch (const ComException& e) {
-        spdlog::warn("get_dispatch_property|ComException|prop={}|error={}", prop_name, e.what());
-        return nullptr;
-    } catch (const std::exception& e) {
-        spdlog::warn("get_dispatch_property|std::exception|prop={}|error={}", prop_name, e.what());
-        return nullptr;
-    }
-}
-
-/// Set a string property on COM object (free function helper)
-inline void set_string_property(IDispatch* obj, const char* prop_name, const std::string& value) {
-    if (!obj) throw ComException("Null object");
-
-    try {
-        _bstr_t prop(prop_name);
-        DISPID dispid;
-        // Use get_dispid_via_typeinfo for SAP GUI compatibility
-        HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
-        if (FAILED(hr)) throw ComException(std::string("Property not found: ") + prop_name, hr);
-
-        _variant_t var(value.c_str());
-        DISPID propput_id = DISPID_PROPERTYPUT;
-        DISPPARAMS params = {(VARIANT*)&var, &propput_id, 1, 1};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT,
-                        &params, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) {
-            throw ComException(std::string("Failed to set property: ") + prop_name, hr);
-        }
-    } catch (const ComException&) {
-        throw;
-    } catch (const SapGuiException& e) {
-        throw ComException(std::string("SAP GUI error setting property: ") + e.what(), e.hresult());
-    } catch (const std::runtime_error& e) {
-        throw ComException(std::string("Runtime error setting property: ") + e.what());
-    } catch (const std::exception& e) {
-        throw ComException(std::string("Exception setting property: ") + e.what());
-    }
-}
-
 /// Call a method on COM object with string parameter using an already-resolved DISPID
 /// (avoids the per-call ITypeInfo lookup). Same null-on-failure contract as
 /// call_method_with_string.
@@ -196,12 +68,8 @@ inline IDispatchPtr call_method_with_string_dispid(IDispatch* obj, DISPID dispid
     if (!obj) throw ComException("Null object");
 
     try {
-        HRESULT hr;
-        _variant_t param_var(param.c_str());
-        DISPPARAMS disp_params = {(VARIANT*)&param_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                        &disp_params, &result, nullptr, nullptr);
+        _variant_t result;   // the parameter as UTF-8 (it went through the ANSI code page before)
+        const HRESULT hr = invoke(obj, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(param).c_str())}, &result);
         if (FAILED(hr) || result.vt != VT_DISPATCH) return nullptr;
 
         return IDispatchPtr(result.pdispVal);
@@ -251,6 +119,11 @@ std::string safe_bstr_to_string(const VARIANT& var, const char* context = nullpt
 /// Safely invoke an IDispatch method or property with Win32 SEH protection
 /// Catches access violations (0xC0000005) inside native SAP GUI COM controls
 HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, DISPPARAMS* params, VARIANT* result);
+/// safe_invoke with `args` in reading order (DispArgs).
+inline HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, std::initializer_list<_variant_t> args, VARIANT* result) {
+    DispArgs params(flags, args);
+    return safe_invoke(obj, dispid, flags, params.get(), result);
+}
 
 } // namespace sap
 } // namespace fairyfly

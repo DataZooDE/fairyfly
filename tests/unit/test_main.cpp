@@ -42,13 +42,3 @@ TEST_CASE("Error response structure", "[json]") {
     REQUIRE(response["error"]["suggestions"].size() == 2);
 }
 
-// Placeholder tests - will be expanded when SAP components are implemented
-TEST_CASE("Placeholder for SAP connection tests", "[sap][!mayfail]") {
-    // These will be implemented in Phase 1.2
-    REQUIRE(true);
-}
-
-TEST_CASE("Placeholder for element cache tests", "[automation][!mayfail]") {
-    // These will be implemented in Phase 1.3
-    REQUIRE(true);
-}
