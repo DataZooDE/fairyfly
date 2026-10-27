@@ -39,7 +39,7 @@ try {
     Check $r.Ok "cmake renders the template$(if (-not $r.Ok) { ": $($r.Log)" })"
     $text = if (Test-Path $r.File) { Get-Content $r.File -Raw } else { '' }
     Check ($text -notmatch '@[A-Za-z_][A-Za-z0-9_]*@') 'no @NAME@ placeholder is left'
-    Check ($text -notmatch 'PLACEHOLDER') 'no PLACEHOLDER value when the identity is set'
+    Check ($text -cnotmatch 'PLACEHOLDER') 'no PLACEHOLDER value when the identity is set'
     $xml = $null
     try { if ($text) { $xml = [xml]$text } } catch { Write-Host "  XML error: $($_.Exception.Message)" }
     if ($xml -and -not $xml.DocumentElement) { $xml = $null }   # [xml]'' is an empty document, not a manifest

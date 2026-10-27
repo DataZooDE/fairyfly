@@ -4,7 +4,8 @@
   <build>/msix/AppxManifest.xml (cmake/msix_manifest.cmake; checked by packaging/msix/tests/Test-AppxManifest.ps1).
   The identity (Identity Name, Publisher, PublisherDisplayName) comes from Partner Center, "Product identity", through
   the CMake cache variables FAIRYFLY_MSIX_IDENTITY_NAME, FAIRYFLY_MSIX_PUBLISHER and FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME;
-  until then they hold PLACEHOLDER values. The version is the calendar version as YYYY.MM.(DD*100+N).0.
+  until then CMake fills in clearly marked placeholder values. The version is the calendar version as
+  YYYY.MM.(DD*100+N).0.
   The Assets\ images are not in the repository yet: the MakeAppx step has to provide them (docs/MSIX.md).
 
   - Tray: fairyfly-tray.exe without arguments starts "fairyfly link run" in its tray, as the MSI's Start-menu entry does.
