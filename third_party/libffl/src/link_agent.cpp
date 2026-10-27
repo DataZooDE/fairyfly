@@ -143,6 +143,10 @@ std::pair<std::string, std::string> refusal(const std::string& reason, int answe
     if (reason == approval_reason::kUnattended)  // only while enforced
         return {"APPROVAL_REQUIRED", "Your administrator requires an approval at the desktop for every change, and this desktop runs unattended "
                                      "(nobody is asked there); nothing was changed in SAP."};
+    if (reason == approval_reason::kNotAsked)  // only while enforced: fairyfly runs read-only, nobody could be asked
+        return {"DESKTOP_READ_ONLY", "fairyfly on this desktop runs read-only, so it cannot make changes and nobody was asked; nothing was changed "
+                                     "in SAP. Your administrator requires an approval at the desktop for every change: ask the person at the "
+                                     "desktop to restart fairyfly without --read-only, then try again."};
     if (reason == approval_reason::kStanding || reason == approval_reason::kRemembered)  // only while enforced
         return {"APPROVAL_REQUIRED", "Your administrator requires an approval at the desktop for every change, and this one was not asked; "
                                      "nothing was changed in SAP. Ask the person at the desktop to approve it when fairyfly asks, then try again."};
