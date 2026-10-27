@@ -335,11 +335,7 @@ Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::str
             identity
         );
         if (!attach_owner_identities_.empty()) pending_owner_attach_ = conn;
-        if (connection_changed_hook_) {
-            try { connection_changed_hook_(conn.id); }
-            catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-            catch (...) { spdlog::error("saved connection notification failed"); }
-        }
+        notify_connection_changed(conn.id);
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
@@ -472,11 +468,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         ) : conn_mgr_->create_new_connection(
             session_id, connection_id, description, connection_string, "", checked_server_key);
         if (!attach_owner_identities_.empty()) pending_owner_launch_ = conn;
-        if (connection_changed_hook_) {
-            try { connection_changed_hook_(conn.id); }
-            catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-            catch (...) { spdlog::error("saved connection notification failed"); }
-        }
+        notify_connection_changed(conn.id);
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
@@ -523,11 +515,7 @@ bool CommandHandler::finalize_owner_attach(bool accepted) {
     catch (const std::exception& e) { spdlog::error("owner attach detach failed: {}", e.what()); }
     catch (...) { spdlog::error("owner attach detach failed"); }
     const bool removed = conn_mgr_->delete_connection_if_unchanged(written);
-    if (removed && connection_changed_hook_) {
-        try { connection_changed_hook_(written.id); }
-        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-        catch (...) { spdlog::error("saved connection notification failed"); }
-    }
+    if (removed) notify_connection_changed(written.id);
     return removed;
 }
 
@@ -541,12 +529,144 @@ bool CommandHandler::rollback_owner_launch(int connection_id) {
     catch (const std::exception& e) { spdlog::error("owner launch detach failed: {}", e.what()); }
     catch (...) { spdlog::error("owner launch detach failed"); }
     const bool removed = conn_mgr_->delete_connection_if_unchanged(written);
-    if (removed && connection_changed_hook_) {
-        try { connection_changed_hook_(connection_id); }
-        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-        catch (...) { spdlog::error("saved connection notification failed"); }
-    }
+    if (removed) notify_connection_changed(connection_id);
     return removed;
+}
+
+/// session login under an owner guard: the selected session is still the one saved, unambiguous, and the guard admits
+/// the logon of `credentials` on it. true without a guard.
+bool CommandHandler::owner_login_permitted(const Connection& selected, const LoginCredentials& credentials) {
+    if (!login_target_guard_) return true;
+    const audit::SapFacts live = audit_facts_for_connection(selected.id);
+    const std::string expected_identity = selected.session_id + "|" +
+        selected.server_session_key + "|" + selected.cache_generation;
+    const std::string learned_identity = selected.session_id + "|" +
+        engine_->current_server_session_key() + "|" + selected.cache_generation;
+    const bool identity_matches = live.session_identity == expected_identity ||
+        (selected.server_session_key.empty() &&
+         !engine_->current_server_session_key().empty() &&
+         live.session_identity == learned_identity);
+    const auto target = peek_session_target("", "", selected.id);
+    audit::SapFacts anticipated = live;
+    anticipated.client = credentials.client;
+    anticipated.user = credentials.username;
+    bool allowed = false;
+    try {
+        allowed = live.connection_id == selected.id && identity_matches &&
+            !live.system.empty() &&
+            (live.user.empty() || sap_user_matches(live.user, credentials.username)) &&
+            (live.client.empty() || live.client == credentials.client ||
+             (live.user.empty() && live.client == "000" && live.transaction == "S000")) &&
+            !target.ambiguous &&
+            !target.connection_name.empty() &&
+            login_target_guard_(anticipated, target.connection_name);
+    } catch (...) {}
+    return allowed;
+}
+
+/// The owner refusal of a logon; a password already typed is cleared first (a revocation can arrive after it).
+Result CommandHandler::refuse_owner_login(Result result, bool password_typed) {
+    if (password_typed) {
+        try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
+    }
+    result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
+    return result;
+}
+
+void CommandHandler::notify_connection_changed(int connection_id) {
+    if (!connection_changed_hook_) return;
+    try { connection_changed_hook_(connection_id); }
+    catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
+    catch (...) { spdlog::error("saved connection notification failed"); }
+}
+
+/// session login: answer SAP's multiple-logon dialog (wnd[1]) when it is open, as --multiple-logon says. A value
+/// means the logon ends here with that result; otherwise `info` may carry the annotation for the success.
+std::optional<Result> CommandHandler::answer_multiple_logon_dialog(const sap::ComGuiSessionPtr& session,
+                                                                   const Connection& selected,
+                                                                   const LoginCredentials& credentials,
+                                                                   const std::string& multiple_logon, Result& result,
+                                                                   json& info) {
+    const auto dialog_prefix = selected.session_id + "/wnd[1]/";
+    const auto dialog_element_exists = [&](const std::string& suffix) {
+        return sap::find_element_if_present(session, dialog_prefix + suffix) != nullptr;
+    };
+    const bool multiple_logon_dialog = dialog_element_exists("usr/radMULTI_LOGON_OPT2") ||
+                                       dialog_element_exists("usr/txtMULTI_LOGON_TEXT");
+    if (multiple_logon_dialog) {
+        const auto plan = plan_multiple_logon(multiple_logon, true, read_only_);
+        using Action = MultipleLogonPlan::Action;
+        if (plan.action == Action::Refuse) {
+            result.set_error(plan.error_code.value_or("INVALID_ARGUMENT"), "--multiple-logon end is refused under --read-only");
+            return result;
+        }
+        if (plan.action == Action::Fail) {
+            const auto read_text = [&](const std::string& suffix) {
+                try {
+                    return session->find_element_by_id(dialog_prefix + suffix)->get_text();
+                } catch (const std::exception&) {
+                    return std::string();
+                }
+            };
+            result.status = Result::Status::Error;
+            result.error = make_multiple_logon_fail_error(read_text("usr/txtMULTI_LOGON_TEXT"),
+                                                          read_text("usr/txtMULTI_LOGON_TEXT2"));
+            result.error["transaction"] = session->get_transaction_code();
+            result.error["password_change_detected"] = false;
+            return result;
+        }
+        if (plan.action == Action::Select) {
+            if (!owner_login_permitted(selected, credentials)) return refuse_owner_login(result, true);
+            result = engine_->click_element(ElementId("@active/" + plan.radio_suffix));
+            if (result.status != Result::Status::Success) return result;
+            if (!owner_login_permitted(selected, credentials)) return refuse_owner_login(result, true);
+            result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
+            if (result.status != Result::Status::Success) return result;
+            if (plan.choice == "terminate") {
+                result = {};
+                result.status = Result::Status::Error;
+                result.error = {{"code", "MULTIPLE_LOGON_TERMINATED"},
+                                {"message", "The user is already logged on; this logon was terminated as requested "
+                                            "(--multiple-logon terminate). SAP closed the session."},
+                                {"connection_open", false}};
+                return result;
+            }
+            info = make_multiple_logon_annotation(plan.choice);
+        }
+    }
+    return std::nullopt;
+}
+
+/// session login under an owner guard: after SAP authenticated the user, the session must still be the owner's and
+/// keep its saved identity; a session key learned now is saved. false: `result` holds the OUTCOME_UNKNOWN error.
+bool CommandHandler::confirm_owner_logon(Result& result, const Connection& selected,
+                                         const LoginCredentials& credentials) {
+    const audit::SapFacts authenticated = audit_facts_for_connection(selected.id);
+    if (authenticated.system.empty() || authenticated.client != credentials.client ||
+        !sap_user_matches(authenticated.user, credentials.username) || !owner_login_permitted(selected, credentials)) {
+        result.set_error("OUTCOME_UNKNOWN", "SAP logon may have completed but its owner cannot be verified; inspect or attach before retry");
+        return false;
+    }
+    const std::string key = engine_->current_server_session_key();
+    if (key.empty() || (!selected.server_session_key.empty() &&
+                        selected.server_session_key != key)) {
+        result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session identity changed; attach it again");
+        return false;
+    }
+    if (selected.server_session_key.empty()) {
+        try {
+            const Connection updated = conn_mgr_->set_session_key(selected, key);
+            if (pending_owner_launch_ && pending_owner_launch_->id == selected.id &&
+                pending_owner_launch_->cache_generation == selected.cache_generation)
+                pending_owner_launch_ = updated;
+        }
+        catch (...) {
+            result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session could not be updated");
+            return false;
+        }
+        notify_connection_changed(selected.id);
+    }
+    return true;
 }
 
 Result CommandHandler::handle_login(const std::string& credentials_file,
@@ -600,43 +720,9 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     } scrubber{credentials};
     for (const auto& warning : resolved.value.warnings) spdlog::warn("{}", warning);
 
-    const auto owner_login_allowed = [&]() {
-        if (!login_target_guard_) return true;
-        const audit::SapFacts live = audit_facts_for_connection(selected.value.id);
-        const std::string expected_identity = selected.value.session_id + "|" +
-            selected.value.server_session_key + "|" + selected.value.cache_generation;
-        const std::string learned_identity = selected.value.session_id + "|" +
-            engine_->current_server_session_key() + "|" + selected.value.cache_generation;
-        const bool identity_matches = live.session_identity == expected_identity ||
-            (selected.value.server_session_key.empty() &&
-             !engine_->current_server_session_key().empty() &&
-             live.session_identity == learned_identity);
-        const auto target = peek_session_target("", "", selected.value.id);
-        audit::SapFacts anticipated = live;
-        anticipated.client = credentials.client;
-        anticipated.user = credentials.username;
-        bool allowed = false;
-        try {
-            allowed = live.connection_id == selected.value.id && identity_matches &&
-                !live.system.empty() &&
-                (live.user.empty() || sap_user_matches(live.user, credentials.username)) &&
-                (live.client.empty() || live.client == credentials.client ||
-                 (live.user.empty() && live.client == "000" && live.transaction == "S000")) &&
-                !target.ambiguous &&
-                !target.connection_name.empty() &&
-                login_target_guard_(anticipated, target.connection_name);
-        } catch (...) {}
-        return allowed;
-    };
+    const auto owner_login_allowed = [&] { return owner_login_permitted(selected.value, credentials); };
     bool password_typed = false;
-    const auto deny_owner_login = [&]() {
-        // A revocation can arrive after the password field was filled.
-        if (password_typed) {
-            try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
-        }
-        result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
-        return result;
-    };
+    const auto deny_owner_login = [&] { return refuse_owner_login(result, password_typed); };
     if (login_target_guard_) {
         const audit::SapFacts live = audit_facts_for_connection(selected.value.id);
         if (!live.user.empty() || !owner_login_allowed()) {
@@ -653,12 +739,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     const auto password_path = selected.value.session_id + "/wnd[0]/usr/pwdRSYST-BCODE";
     const auto snapshot = [&]() {
         json screen = {{"transaction", session->get_transaction_code()}, {"elements", json::array()}};
-        try {
-            session->find_element_by_id(password_path);
-            screen["elements"].push_back({{"id", password_path}});
-        } catch (const sap::ComException& error) {
-            if (!sap::is_missing_element_error(error.what())) throw;
-        }
+        if (sap::find_element_if_present(session, password_path)) screen["elements"].push_back({{"id", password_path}});
         return screen;
     };
     if (!is_sap_logon_screen(snapshot())) {
@@ -685,76 +766,16 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
         return result;
     }
-    if (connection_changed_hook_) {
-        try { connection_changed_hook_(selected.value.id); }
-        catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-        catch (...) { spdlog::error("saved connection notification failed"); }
-    }
+    notify_connection_changed(selected.value.id);
 
     // Multiple-logon dialog (user already logged on): handled before the password change check.
-    const auto dialog_prefix = selected.value.session_id + "/wnd[1]/";
-    const auto dialog_element_exists = [&](const std::string& suffix) {
-        try {
-            session->find_element_by_id(dialog_prefix + suffix);
-            return true;
-        } catch (const sap::ComException& error) {
-            if (!sap::is_missing_element_error(error.what())) throw;
-            return false;
-        }
-    };
-    const bool multiple_logon_dialog = dialog_element_exists("usr/radMULTI_LOGON_OPT2") ||
-                                       dialog_element_exists("usr/txtMULTI_LOGON_TEXT");
     json multiple_logon_info;
-    if (multiple_logon_dialog) {
-        const auto plan = plan_multiple_logon(multiple_logon, true, read_only_);
-        using Action = MultipleLogonPlan::Action;
-        if (plan.action == Action::Refuse) {
-            result.set_error(plan.error_code.value_or("INVALID_ARGUMENT"), "--multiple-logon end is refused under --read-only");
-            return result;
-        }
-        if (plan.action == Action::Fail) {
-            const auto read_text = [&](const std::string& suffix) {
-                try {
-                    return session->find_element_by_id(dialog_prefix + suffix)->get_text();
-                } catch (const std::exception&) {
-                    return std::string();
-                }
-            };
-            result.status = Result::Status::Error;
-            result.error = make_multiple_logon_fail_error(read_text("usr/txtMULTI_LOGON_TEXT"),
-                                                          read_text("usr/txtMULTI_LOGON_TEXT2"));
-            result.error["transaction"] = session->get_transaction_code();
-            result.error["password_change_detected"] = false;
-            return result;
-        }
-        if (plan.action == Action::Select) {
-            if (!owner_login_allowed()) return deny_owner_login();
-            result = engine_->click_element(ElementId("@active/" + plan.radio_suffix));
-            if (result.status != Result::Status::Success) return result;
-            if (!owner_login_allowed()) return deny_owner_login();
-            result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
-            if (result.status != Result::Status::Success) return result;
-            if (plan.choice == "terminate") {
-                result = {};
-                result.status = Result::Status::Error;
-                result.error = {{"code", "MULTIPLE_LOGON_TERMINATED"},
-                                {"message", "The user is already logged on; this logon was terminated as requested "
-                                            "(--multiple-logon terminate). SAP closed the session."},
-                                {"connection_open", false}};
-                return result;
-            }
-            multiple_logon_info = make_multiple_logon_annotation(plan.choice);
-        }
-    }
+    if (auto ended = answer_multiple_logon_dialog(session, selected.value, credentials, multiple_logon, result,
+                                                  multiple_logon_info))
+        return *ended;
 
     const auto new_password_path = selected.value.session_id + "/wnd[1]/usr/pwdRSYST-NCODE";
-    bool password_change_required = false;
-    try {
-        session->find_element_by_id(new_password_path);
-        password_change_required = true;
-    } catch (const sap::ComException& error) {
-        if (!sap::is_missing_element_error(error.what())) throw;
-    }
+    const bool password_change_required = sap::find_element_if_present(session, new_password_path) != nullptr;
     if (password_change_required) {
         if (credentials.new_password.empty()) {
             result.set_error("PASSWORD_CHANGE_REQUIRED", "SAP requires a new password; provide New Password in the credential input");
@@ -785,37 +806,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         return result;
     }
 
-    if (login_target_guard_) {
-        const audit::SapFacts authenticated = audit_facts_for_connection(selected.value.id);
-        if (authenticated.system.empty() || authenticated.client != credentials.client ||
-            !sap_user_matches(authenticated.user, credentials.username) || !owner_login_allowed()) {
-            result.set_error("OUTCOME_UNKNOWN", "SAP logon may have completed but its owner cannot be verified; inspect or attach before retry");
-            return result;
-        }
-        const std::string key = engine_->current_server_session_key();
-        if (key.empty() || (!selected.value.server_session_key.empty() &&
-                            selected.value.server_session_key != key)) {
-            result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session identity changed; attach it again");
-            return result;
-        }
-        if (selected.value.server_session_key.empty()) {
-            try {
-                const Connection updated = conn_mgr_->set_session_key(selected.value, key);
-                if (pending_owner_launch_ && pending_owner_launch_->id == selected.value.id &&
-                    pending_owner_launch_->cache_generation == selected.value.cache_generation)
-                    pending_owner_launch_ = updated;
-            }
-            catch (...) {
-                result.set_error("OUTCOME_UNKNOWN", "SAP logon completed but its saved session could not be updated");
-                return result;
-            }
-            if (connection_changed_hook_) {
-                try { connection_changed_hook_(selected.value.id); }
-                catch (const std::exception& e) { spdlog::error("saved connection notification failed: {}", e.what()); }
-                catch (...) { spdlog::error("saved connection notification failed"); }
-            }
-        }
-    }
+    if (login_target_guard_ && !confirm_owner_logon(result, selected.value, credentials)) return result;
 
     result = {};
     result.status = Result::Status::Success;

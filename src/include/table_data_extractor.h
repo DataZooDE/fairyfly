@@ -3,6 +3,7 @@
 #include "com/wrapper.h"
 #include <nlohmann/json.hpp>
 #include <string>
+#include <map>
 #include <vector>
 #include <functional>
 
@@ -82,6 +83,12 @@ struct TreeNode {
     std::vector<TreeNode> children;
 };
 
+/// Nests the nodes of a tree shell by their paths (GetNodePathByKey, levels separated by '\\'): a level-0 node is a
+/// root, any other goes under the node whose path is its parent path. Iterates `by_key` in key order and moves its
+/// nodes, so a node is left out when its parent is missing OR comes later in key order (as before the extraction).
+void nest_tree_nodes_by_path(std::map<std::string, TreeNode>& by_key, const std::map<std::string, std::string>& paths,
+                             std::vector<TreeNode>& roots);
+
 /// Extracted tree data structure
 struct TreeData {
     std::vector<std::string> columns;
@@ -112,6 +119,8 @@ private:
 
     /// Get column names from grid or table
     std::vector<std::string> get_column_names(ComGuiElementPtr element) const;
+
+    void read_shell_tree(const ComGuiElementPtr& tree_element, std::vector<TreeNode>& nodes) const;
 
     /// Recursively traverse tree nodes
     void traverse_tree_nodes(

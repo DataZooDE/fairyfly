@@ -773,5 +773,35 @@ TEST_CASE("tree node texts: an empty node text is recovered from a column, the c
     CHECK(column_name_reads == 1);   // once for the whole tree
     TreeNodeTexts failing([](const std::string&) -> std::string { throw std::runtime_error("COM"); },
                           [] { return std::vector<std::string>{}; }, [](const std::string&, const std::string&) { return std::string(); });
-    CHECK_THROWS(failing.text("N1"));   // the caller marks the node
+    CHECK_THROWS(failing.text("N1"));   // a failing read propagates (the ComGuiTree readers answer "" instead of throwing)
+}
+
+TEST_CASE("tree nodes nest under the node whose path is their parent path", "[screen_reader][tree]") {
+    // review 2026-10-25: traverse_tree_nodes built the hierarchy inline (and asked SAP for every path a second time)
+    auto node = [](const std::string& key, int level) {
+        TreeNode n;
+        n.key = key;
+        n.level = level;
+        return n;
+    };
+    std::map<std::string, TreeNode> by_key{{"A", node("A", 0)}, {"B", node("B", 1)}, {"C", node("C", 2)}, {"D", node("D", 0)},
+                                           {"E", node("E", 1)}};
+    const std::map<std::string, std::string> paths{{"A", "1"}, {"B", "1\\1"}, {"C", "1\\1\\1"}, {"D", "2"}, {"E", "9\\1"}};
+    std::vector<TreeNode> roots;
+    nest_tree_nodes_by_path(by_key, paths, roots);
+    REQUIRE(roots.size() == 2);
+    CHECK(roots[0].key == "A");
+    REQUIRE(roots[0].children.size() == 1);
+    CHECK(roots[0].children[0].key == "B");
+    REQUIRE(roots[0].children[0].children.size() == 1);
+    CHECK(roots[0].children[0].children[0].key == "C");
+    CHECK(roots[1].key == "D");
+    CHECK(roots[1].children.empty());   // E's parent path 9 is no node: E is left out, as before
+
+    // key order, not tree order: a child whose key sorts before its parent's is left out too (inherited limitation)
+    std::map<std::string, TreeNode> child_first{{"A", node("A", 1)}, {"Z", node("Z", 0)}};
+    std::vector<TreeNode> late_parent;
+    nest_tree_nodes_by_path(child_first, {{"A", "1\\1"}, {"Z", "1"}}, late_parent);
+    REQUIRE(late_parent.size() == 1);
+    CHECK(late_parent[0].children.empty());
 }
