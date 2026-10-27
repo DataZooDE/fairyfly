@@ -581,3 +581,30 @@ TEST_CASE("partition_connections splits live and stale entries", "[connection_ma
     REQUIRE(parts.stale[0].id == 1);
     REQUIRE(parts.stale[1].id == 3);
 }
+
+TEST_CASE("A saved connection records the SAP system, client and user it was attached to", "[connection_manager][reattach]") {
+    const fs::path temp_dir = fs::temp_directory_path() /
+        ("fairyfly_test_identity_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(temp_dir));
+    {
+        ConnectionManager manager(temp_dir.string());
+        const auto saved = manager.create_or_update_connection(
+            "/app/con[0]/ses[0]", "/app/con[0]", "Bigfox", "route", "SAP", "key:0", ConnectionIdentity{"BFX", "100", "LEE"});
+        auto loaded = manager.load_connection(saved.id);
+        REQUIRE(loaded.has_value());
+        CHECK(loaded->identity.system == "BFX");
+        CHECK(loaded->identity.client == "100");
+        CHECK(loaded->identity.user == "LEE");
+        // an attach that cannot read the identity (busy session, no user logged on) keeps the recorded one
+        manager.create_or_update_connection("/app/con[0]/ses[0]", "/app/con[0]", "Bigfox", "route", "SAP", "key:0",
+                                            ConnectionIdentity{"BFX", "100", ""});
+        CHECK(manager.load_connection(saved.id)->identity.user == "LEE");
+        // a file written before 2026-10-25 has no identity: it loads with an empty one
+        const json old = {{"id", 7}, {"session_id", "/app/con[1]/ses[0]"}, {"connection_id", "/app/con[1]"}};
+        { std::ofstream(temp_dir / "fairyfly.7.con") << old.dump(); }
+        auto legacy = manager.load_connection(7);
+        REQUIRE(legacy.has_value());
+        CHECK_FALSE(legacy->identity.complete());
+    }
+    fs::remove_all(temp_dir);
+}
