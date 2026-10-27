@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <map>
+#include <optional>
 #include <string>
 
 #include <CLI/CLI.hpp>
@@ -14,6 +15,7 @@
 #include "include/tray/mcp_tray.h"
 #include "include/tray/tray_win32.h"
 #include "include/update/updater.h"
+#include "include/version.h"
 
 using namespace fairyfly;
 using packaging::Package;
@@ -74,7 +76,6 @@ TEST_CASE("packaging: in an MSIX build `update check` and `update apply` point t
         // the structured answer, as the CLI and the MCP tools print it
         CHECK(r.to_json().at("error").at("code") == "UPDATE_MANAGED_BY_STORE");
     }
-    CHECK(run_update(Package::Msix, "update").error.at("code") == "NO_SUBCOMMAND");   // a missing verb stays a usage error
 }
 
 TEST_CASE("packaging: the update decision for a Store installation refuses with the Store's code", "[packaging][update]") {

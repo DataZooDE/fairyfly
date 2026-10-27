@@ -41,8 +41,9 @@ try {
     Check ($text -notmatch '@[A-Za-z_][A-Za-z0-9_]*@') 'no @NAME@ placeholder is left'
     Check ($text -notmatch 'PLACEHOLDER') 'no PLACEHOLDER value when the identity is set'
     $xml = $null
-    try { $xml = [xml]$text } catch { Write-Host "  XML error: $($_.Exception.Message)" }
-    Check ($null -ne $xml) 'the manifest is well-formed XML'
+    try { if ($text) { $xml = [xml]$text } } catch { Write-Host "  XML error: $($_.Exception.Message)" }
+    if ($xml -and -not $xml.DocumentElement) { $xml = $null }   # [xml]'' is an empty document, not a manifest
+    Check ($null -ne $xml -and $xml.DocumentElement.LocalName -eq 'Package') 'the manifest is well-formed XML with a Package root'
 
     if ($xml) {
         $ns = New-Object Xml.XmlNamespaceManager($xml.NameTable)
