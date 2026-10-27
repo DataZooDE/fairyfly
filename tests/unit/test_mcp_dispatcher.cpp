@@ -861,7 +861,7 @@ Result list_sessions(const std::vector<json>& who) {
         s.update(who[i]);
         sessions.push_back(s);
     }
-    return ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", sessions}}})}, {"total_sessions", who.size()}});
+    return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", sessions}}})}, {"total_sessions", who.size()}});
 }
 Result stale_connection(int id, json identity) {
     json stale = {{"id", id}, {"session_id", "/app/con[0]/ses[0]"}};
@@ -883,9 +883,9 @@ TEST_CASE("Dispatcher: auto_attach re-attaches a stale default connection to the
         Result operator()(const Argv& argv) {
             const std::string command = fairyfly::command_table::command_of_argv(argv);
             if (command == "session list") return list_sessions(open);
-            if (command == "session attach") { attached = true; return ok({{"connection_file_id", 1}}); }
-            if (attached && has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
-            if (attached && std::find(argv.begin(), argv.end(), "--connection") == argv.end()) return ok({{"elements", json::array()}});
+            if (command == "session attach") { attached = true; return Result::ok({{"connection_file_id", 1}}); }
+            if (attached && has_pair(argv, "--connection", "1")) return Result::ok({{"elements", json::array()}});
+            if (attached && std::find(argv.begin(), argv.end(), "--connection") == argv.end()) return Result::ok({{"elements", json::array()}});
             return stale_connection(0, recorded);
         }
     };
@@ -915,7 +915,7 @@ TEST_CASE("Dispatcher: auto_attach re-attaches a stale default connection to the
         bool first_attach_done = false;
         f.handler = [&](const Argv& argv) {
             const std::string command = fairyfly::command_table::command_of_argv(argv);
-            if (command == "session attach" && !first_attach_done) { first_attach_done = true; return ok({{"connection_file_id", 0}}); }
+            if (command == "session attach" && !first_attach_done) { first_attach_done = true; return Result::ok({{"connection_file_id", 0}}); }
             return desk(argv);
         };
         auto d = f.make(auto_attach);
@@ -1009,11 +1009,11 @@ TEST_CASE("Dispatcher: auto_attach re-attaches a default from gui_session_attach
             const std::string command = fairyfly::command_table::command_of_argv(argv);
             if (command == "session list") return list_sessions(open);
             if (command == "session attach") {
-                if (argv.back() == "/app/con[0]/ses[0]") return ok({{"connection_file_id", 0}});
+                if (argv.back() == "/app/con[0]/ses[0]") return Result::ok({{"connection_file_id", 0}});
                 attached_again = true;
-                return ok({{"connection_file_id", 1}});
+                return Result::ok({{"connection_file_id", 1}});
             }
-            if (has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
+            if (has_pair(argv, "--connection", "1")) return Result::ok({{"elements", json::array()}});
             return stale_connection(0, kBigfox);
         }
     };
@@ -1126,8 +1126,8 @@ TEST_CASE("Dispatcher: auto_attach re-attaches without a verified logged-on SAP 
         Result operator()(const Argv& argv) {
             const std::string command = fairyfly::command_table::command_of_argv(argv);
             if (command == "session list") return list_sessions({candidate});
-            if (command == "session attach") { attached = true; return ok({{"connection_file_id", 1}}); }
-            if (attached && has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
+            if (command == "session attach") { attached = true; return Result::ok({{"connection_file_id", 1}}); }
+            if (attached && has_pair(argv, "--connection", "1")) return Result::ok({{"elements", json::array()}});
             return stale_connection(0, recorded);
         }
     };
