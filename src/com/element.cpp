@@ -1,3 +1,4 @@
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
 #include "include/com/invoke.h"
 #include "include/string_utils.h"
@@ -422,14 +423,14 @@ void ComGuiElement::press() {
                 select(true);
                 return;
             }
-            trace.mark_error(fmt::format("get_dispid_via_typeinfo failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("get_dispid_via_typeinfo failed: {}", hresult_hex(hr)));
             throw ComException("Press method not found on element", hr);
         }
 
         _variant_t result;
         hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Invoke failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Invoke failed: {}", hresult_hex(hr)));
             throw ComException("Failed to press element", hr);
         }
 
@@ -457,7 +458,7 @@ void ComGuiElement::select(bool selected) {
             DISPID dispid;
             HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
             if (FAILED(hr)) {
-                trace.mark_error(fmt::format("Select method not found: 0x{:08X}", hr));
+                trace.mark_error(fmt::format("Select method not found: {}", hresult_hex(hr)));
                 throw ComException("Select method not found on tab or menu element", hr);
             }
 
@@ -465,7 +466,7 @@ void ComGuiElement::select(bool selected) {
             _variant_t result;
             hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
             if (FAILED(hr)) {
-                trace.mark_error(fmt::format("Failed to call Select(): 0x{:08X}", hr));
+                trace.mark_error(fmt::format("Failed to call Select(): {}", hresult_hex(hr)));
                 throw ComException("Failed to select tab or menu element", hr);
             }
 
@@ -497,13 +498,13 @@ void ComGuiElement::select(bool selected) {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, prop.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Selected property not found: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Selected property not found: {}", hresult_hex(hr)));
             throw ComException("Selected property not found", hr);
         }
 
         hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYPUT, {_variant_t(selected)});   // VT_BOOL
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Failed to set Selected: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Failed to set Selected: {}", hresult_hex(hr)));
             throw ComException("Failed to set selected state", hr);
         }
 
@@ -722,8 +723,8 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
         // SAP ABAP editor lines are one-based
         hr = safe_invoke(dispatch_, line_id, DISPATCH_METHOD, {_variant_t(static_cast<long>(line + 1))}, line_guard.get());
         if (FAILED(hr) || line_result.vt != VT_BSTR)
-            throw ComException(fmt::format("GetLineText failed (hr=0x{:08X}, type={})",
-                                         static_cast<unsigned int>(hr), line_result.vt), hr);
+            throw ComException(fmt::format("GetLineText failed (hr={}, type={})",
+                                         hresult_hex(hr), line_result.vt), hr);
         const std::string value = com::bstr_to_utf8(line_result.bstrVal);
         if (content.text.size() + value.size() + 1 > max_chars) break;
         if (content.lines_read) content.text += '\n';
