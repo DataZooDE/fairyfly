@@ -1,4 +1,5 @@
-#include "include/tray/tray.h"
+#include "include/link/link_state_names.h"
+#include "include/tray/mcp_tray.h"
 #include "include/version.h"
 
 namespace fairyfly::tray {
@@ -15,6 +16,26 @@ MenuItem separator() {
     MenuItem m;
     m.separator = true;
     return m;
+}
+
+std::string fit_tooltip(const std::string& text) {
+    constexpr size_t kMaxUnits = 127;  // NOTIFYICONDATA szTip: 128 wchar_t with the terminator
+    // UTF-16 units of each character: 2 for a 4-byte UTF-8 sequence (outside the BMP), else 1
+    const auto lead = [](unsigned char c) { return (c & 0xC0) != 0x80; };
+    const auto units = [](unsigned char c) { return c >= 0xF0 ? size_t{2} : size_t{1}; };
+    size_t total = 0;
+    for (unsigned char c : text) if (lead(c)) total += units(c);
+    if (total <= kMaxUnits) return text;
+    size_t used = 0, end = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        if (!lead(c)) continue;
+        if (used + units(c) > kMaxUnits - 3) break;  // room for "..."
+        used += units(c);
+        end = i + 1;
+        while (end < text.size() && !lead(static_cast<unsigned char>(text[end]))) ++end;
+    }
+    return text.substr(0, end) + "...";
 }
 
 MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
@@ -89,7 +110,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     } else {
         cloud.children.push_back(item(lv.organisation + " (" + lv.account + "): " + lv.state, TrayAction::None, false));
         if (lv.trail_on) cloud.children.push_back(item(trail_menu_text(lv), TrayAction::None, false));
-        cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == "not running"));
+        cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == link::state::kNotRunning));
         if (lv.paused) cloud.children.push_back(item("Resume", TrayAction::LinkResume));
         else cloud.children.push_back(item("Pause", TrayAction::LinkPause));
         cloud.children.push_back(item("Health check (console)", TrayAction::LinkStatus));
@@ -108,8 +129,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     else tip += "running (" + mode_text(status) +
         (status.parallel_sessions ? ", parallel sessions" : "") + ")";
     if (status.running && !status.warnings.empty()) tip += ", " + std::to_string(status.warnings.size()) + " warning(s)";
-    if (tip.size() > 127) tip.resize(127);
-    model.tooltip = std::move(tip);
+    model.tooltip = fit_tooltip(tip);
     return model;
 }
 

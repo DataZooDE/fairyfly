@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <thread>
 
+#include "include/tray/mcp_tray.h"
 #include "include/tray/tray_win32.h"
 
 using namespace fairyfly::tray;

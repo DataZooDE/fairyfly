@@ -8,13 +8,14 @@
 #include <string>
 
 #include "include/link/desktop_approval.h"
+#include "include/tray/tray_contract.h"
 
 namespace fairyfly::link::approval {
 
 /// The AppUserModelID of fairyfly's notifications: the Start-menu entry's (packaging/fairyfly.wxs) and this process's.
-inline constexpr wchar_t kAppUserModelId[] = L"DataZoo.fairyfly";
+using tray::contract::kAppUserModelId;
 /// The COM class the notification centre starts or calls for an answer (the shortcut's ToastActivatorCLSID).
-inline constexpr wchar_t kToastActivatorClsid[] = L"{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}";
+using tray::contract::kToastActivatorClsid;
 
 /// True while a person can answer here: an interactive window station, the session active and not locked.
 bool desktop_can_ask();
