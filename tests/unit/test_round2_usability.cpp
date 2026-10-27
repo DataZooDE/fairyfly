@@ -1,5 +1,6 @@
 // Round two of the remote user test: pure shaping logic with lambdas as fakes (no SAP, no COM).
 #include <catch2/catch_test_macros.hpp>
+#include "include/command_table.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
@@ -330,7 +331,7 @@ TEST_CASE("screen find Markdown shows the tooltip", "[tooltip][markdown][round2]
                    {"match_limit_reached", false}, {"scan_limit_reached", false},
                    {"elements", json::array({{{"id", "wnd[0]/tbar[1]/btn[8]"}, {"type", "GuiButton"},
                                               {"name", "btn[8]"}, {"text", ""}, {"tooltip", "Display"}}})}};
-    const auto markdown = cli::format_output(result, cli::OutputFormat::Markdown);
+    const auto markdown = cli::format_output(result, cli::OutputFormat::Markdown, false, command_table::Render::ScreenFind);
     CHECK(markdown.find("Tooltip: Display") != std::string::npos);
     const auto as_json = cli::format_output(result, cli::OutputFormat::Json);
     CHECK(as_json.find("\"tooltip\": \"Display\"") != std::string::npos);

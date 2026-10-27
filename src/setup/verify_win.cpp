@@ -14,7 +14,7 @@
 #include "include/mcp/authenticators.h"
 #include "include/mcp/http_server.h"
 #include "include/setup/setup_hosts.h"
-#include "winhttp_client.h"
+#include "include/setup/http_probe.h"
 
 namespace fairyfly::setup {
 
@@ -34,62 +34,13 @@ public:
     }
 };
 
-const char kInitialize[] =
-    R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"fairyfly-setup-verify","version":"1"}}})";
-
-VerifyResult judge(const HttpProbeResponse& r, const VerifyRequest& req) {
-    VerifyResult out;
-    if (!r.ok) {
-        out.status = "failed";
-        out.detail = "request failed: " + r.error;
-        if (r.win_error == ERROR_WINHTTP_NAME_NOT_RESOLVED)
-            out.detail += " (the host name does not resolve here: add a DNS record or hosts entry for " + req.hostname + ")";
-        return out;
-    }
-    out.protocol = r.protocol;
-    out.http_status = r.status;
-    out.thumbprint_match = req.tls ? (!req.expected_thumbprint.empty() && r.cert_thumbprint == req.expected_thumbprint) : true;
-    const bool auth_required = r.status == 401 && r.body.find("AUTH_REQUIRED") != std::string::npos;
-    if (req.tls && !out.thumbprint_match) {
-        out.status = "failed";
-        out.detail = "the server presented a different certificate (" + r.cert_thumbprint + ")";
-    } else if (!auth_required) {
-        out.status = "failed";
-        out.detail = "expected 401 AUTH_REQUIRED for an unauthenticated request, got HTTP " + std::to_string(r.status);
-    } else if (r.www_authenticate.empty()) {
-        out.status = "failed";
-        out.detail = "401 without a WWW-Authenticate header";
-    } else {
-        out.status = "ok";
-    }
-    return out;
-}
-
-HttpProbeResponse do_request(const VerifyRequest& req) {
-    HttpProbeRequest http;
-    http.host = req.tls ? req.hostname : "127.0.0.1";
-    http.port = req.port;
-    http.tls = req.tls;
-    http.method = "POST";
-    http.path = "/mcp";
-    http.headers = {{"Content-Type", "application/json"}, {"Accept", "application/json, text/event-stream"}};
-    http.body = kInitialize;
-    HttpProbeResponse r = winhttp_request(http);
-    if (!r.ok && req.tls && (r.win_error == ERROR_WINHTTP_NAME_NOT_RESOLVED)) {
-        http.connect_host = "127.0.0.1";   // pinned by thumbprint anyway; the Host header keeps the real name
-        const HttpProbeResponse second = winhttp_request(http);
-        if (second.ok) return second;
-    }
-    return r;
-}
-
 class RealVerifyHost : public VerifyHost {
 public:
     VerifyResult round_trip(const VerifyRequest& req) override {
         auto probe = make_real_system_probe();
         if (probe->tcp_listening("127.0.0.1", req.port)) {
             // Something already serves the prefix (tray running): verify against it.
-            VerifyResult r = judge(do_request(req), req);
+            VerifyResult r = judge_verify(verify_round_trip(req, winhttp_request), req);
             if (r.status == "failed") r.detail += " (verified against the already running server)";
             return r;
         }
@@ -117,7 +68,7 @@ public:
         }
         std::thread runner([&] { server.run(); });
         for (int i = 0; i < 40 && !probe->tcp_listening("127.0.0.1", req.port); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        VerifyResult r = judge(do_request(req), req);
+        VerifyResult r = judge_verify(verify_round_trip(req, winhttp_request), req);
         server.request_stop();
         runner.join();
         return r;

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 
 #include "include/audit_log.h"
@@ -7,6 +8,7 @@
 #include "include/fill_fields.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/tool_catalog.h"
+#include "support/tool_specs.h"
 
 // Multi-field fill: `element fill --fields` / gui_element_fill `fields` (+ then_key). Pure parsing, argv, audit and
 // authorization; no SAP.
@@ -17,12 +19,7 @@ using Argv = std::vector<std::string>;
 
 namespace {
 
-const ToolSpec& fill_spec() {
-    static const auto specs = all_tool_specs();
-    for (const auto& s : specs)
-        if (s.def.name == "gui_element_fill") return s;
-    throw std::logic_error("gui_element_fill missing");
-}
+const ToolSpec& fill_spec() { return fairyfly::test::spec_of("gui_element_fill"); }
 
 Argv fill_argv(const json& args) { return fill_spec().build_argv(args, Policy{}); }
 
@@ -141,4 +138,36 @@ TEST_CASE("fill fields: every entry meets the token rules", "[fill][fields][auth
     // a read-only token without the option never fills, also not with fields
     const auto ro = decide(tcode_token(true, false), {{"fields", {{{"element", "wnd[0]/usr/ctxtA"}, {"value", "1"}}}}});
     CHECK_FALSE(ro.allowed);
+}
+
+TEST_CASE("fill: one field is validated by one rule set for the CLI, MCP and the fields list", "[fill]") {
+    // review 2026-10-25: tool_catalog_write, fill_command and parse_fill_fields each checked value/clear/grid by hand
+    std::string why;
+    const auto ok = sap::parse_fill_field(json{{"element", "wnd[0]/usr/txtA"}, {"value", "v"}}, why);
+    REQUIRE(ok);
+    CHECK(ok->element == "wnd[0]/usr/txtA");
+    CHECK(ok->value == "v");
+    const auto cell = sap::parse_fill_field(json{{"element", "g"}, {"value", "X"}, {"row", 2}, {"column", "C"}, {"checkbox", true}}, why);
+    REQUIRE(cell);
+    CHECK(cell->row == 2);
+    CHECK(cell->checkbox);
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}, {"value", "v"}, {"checkbox", true}}, why));
+    CHECK(why == "GridView cells need both 'row' and 'column' (also required with 'checkbox' or 'commit')");
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}}, why));
+    CHECK(why == "provide 'value' or set 'clear' to true");
+    CHECK_FALSE(sap::parse_fill_field(json{{"element", "e"}, {"value", "maybe"}, {"row", 1}, {"column", "C"}, {"checkbox", true}}, why));
+    CHECK(why == "with 'checkbox', 'value' must be X, 1, true (checked) or 0, false (unchecked)");
+    // the list keeps naming the field
+    std::string list_why;
+    CHECK_FALSE(sap::parse_fill_fields(json::array({json{{"element", "e"}}}), list_why));
+    CHECK(list_why == "fields[0]: provide 'value' or set 'clear' to true");
+}
+
+TEST_CASE("fill: a single field keeps its row range; only a fields list caps rows at a million", "[fill]") {
+    // codex 2026-10-25: the shared rules brought the list's 1,000,000 row cap to the single MCP fill
+    const Argv argv = fill_argv(json{{"element", "wnd[0]/usr/cntlGRID/shellcont/shell"}, {"value", "1"}, {"row", 1000001}, {"column", "MENGE"}});
+    CHECK(std::find(argv.begin(), argv.end(), "1000001") != argv.end());
+    std::string why;
+    CHECK_FALSE(sap::parse_fill_fields(json::array({json{{"element", "g"}, {"value", "1"}, {"row", 1000001}, {"column", "C"}}}), why));
+    CHECK(why == "fields[0]: 'row' must be a zero-based integer >= 0");
 }

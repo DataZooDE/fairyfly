@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "include/command_table.h"
 #include "include/formatters/compact_json.h"
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/cli_handler.h"
@@ -152,32 +153,34 @@ fairyfly::Result success_result(json data) {
 }
 }  // namespace
 
+constexpr auto kRead = fairyfly::command_table::Render::ScreenRead;
+
 TEST_CASE("format_output: default JSON unchanged, compact JSON compacted", "[compact]") {
     using fairyfly::cli::OutputFormat;
     json data = make_screen(2, 5);
     data["compact"] = false;
     const auto r = success_result(data);
     // Golden: non-compact output is exactly the untouched result.
-    REQUIRE(fairyfly::cli::format_output(r, OutputFormat::Json) == r.to_json().dump(2));
+    REQUIRE(fairyfly::cli::format_output(r, OutputFormat::Json, false, kRead) == r.to_json().dump(2));
 
     data["compact"] = true;
     const auto rc = success_result(data);
-    const json parsed = json::parse(fairyfly::cli::format_output(rc, OutputFormat::Json));
+    const json parsed = json::parse(fairyfly::cli::format_output(rc, OutputFormat::Json, false, kRead));
     REQUIRE(parsed["data"]["hierarchy_format"] == "ids");
     REQUIRE(parsed["data"]["hierarchy"]["buttons"][0].is_string());
     data["compact"] = false;
-    REQUIRE(fairyfly::cli::format_output(rc, OutputFormat::Toon).size() <
-            fairyfly::cli::format_output(success_result(data), OutputFormat::Toon).size());
+    REQUIRE(fairyfly::cli::format_output(rc, OutputFormat::Toon, false, kRead).size() <
+            fairyfly::cli::format_output(success_result(data), OutputFormat::Toon, false, kRead).size());
 }
 
 TEST_CASE("format_output: Markdown identical for compact flag regardless of JSON compaction", "[compact]") {
     using fairyfly::cli::OutputFormat;
     json data = make_screen(2, 5);
     const auto r = success_result(data);
-    const std::string md = fairyfly::cli::format_output(r, OutputFormat::Markdown);
+    const std::string md = fairyfly::cli::format_output(r, OutputFormat::Markdown, false, kRead);
     // The formatter itself is unaffected by the new code path.
     REQUIRE(md.find("# ") != std::string::npos);
-    REQUIRE(md == fairyfly::cli::format_output(success_result(data), OutputFormat::Markdown));
+    REQUIRE(md == fairyfly::cli::format_output(success_result(data), OutputFormat::Markdown, false, kRead));
     REQUIRE(fairyfly::cli::ScreenMarkdownFormatter::format(data, true) ==
             fairyfly::cli::ScreenMarkdownFormatter::format(data, true));
     // Markdown never sees id-only hierarchy: compacting is JSON/TOON only.

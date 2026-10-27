@@ -16,21 +16,21 @@
 //
 // It links nothing of fairyfly's own; the window class and message names match src/tray/tray_win32.cpp.
 #include <windows.h>
+#include "include/config/environment.h"
+#include "include/tray/tray_contract.h"
+#include "include/text/command_line.h"
 #include <shellapi.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
 namespace {
 
-constexpr const wchar_t* kWindowClass = L"fairyfly_tray_window";
-constexpr const wchar_t* kQuitMessage = L"fairyfly-tray-quit";
-constexpr const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr const wchar_t* kSettingsKey = L"Software\\DataZoo\\fairyfly\\tray";
-constexpr const wchar_t* kRunValues[] = {L"fairyfly-link", L"fairyfly-mcp"};
-// what the link registers for its approval notifications (src/include/link/desktop_approval_win32.h)
-constexpr const wchar_t* kNotificationKeys[] = {L"Software\\Classes\\AppUserModelId\\DataZoo.fairyfly",
-                                                L"Software\\Classes\\CLSID\\{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}"};
+namespace contract = fairyfly::tray::contract;
+
+/// An ASCII name (the contract's Run values, config's environment names) for the wide Win32 calls.
+std::wstring ascii_wide(const char* name) { return std::wstring(name, name + std::strlen(name)); }
 constexpr DWORD kCloseWaitMs = 10000;
 
 std::wstring module_dir() {
@@ -39,29 +39,6 @@ std::wstring module_dir() {
     path.resize(n);
     const auto slash = path.find_last_of(L"\\/");
     return slash == std::wstring::npos ? std::wstring() : path.substr(0, slash);
-}
-
-/// CommandLineToArgvW quoting of one argument.
-std::wstring quote(const std::wstring& arg) {
-    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
-    std::wstring out = L"\"";
-    size_t backslashes = 0;
-    for (wchar_t c : arg) {
-        if (c == L'\\') {
-            ++backslashes;
-        } else if (c == L'"') {
-            out.append(backslashes * 2 + 1, L'\\');
-            out += c;
-            backslashes = 0;
-        } else {
-            out.append(backslashes, L'\\');
-            out += c;
-            backslashes = 0;
-        }
-    }
-    out.append(backslashes * 2, L'\\');
-    out += L'"';
-    return out;
 }
 
 std::vector<std::wstring> arguments() {
@@ -83,11 +60,11 @@ int start(const std::wstring& dir, std::vector<std::wstring> args) {
         error_box(L"fairyfly.exe was not found next to fairyfly-tray.exe:\n" + exe + L"\n\nInstall fairyfly again.");
         return 2;
     }
-    std::wstring command = quote(exe);
-    for (const auto& a : args) command += L" " + quote(a);
+    std::wstring command = fairyfly::text::join_command_line<wchar_t>(exe, args);
     // the tray child (no relaunch, a dialog for startup errors) that this program started (Start with Windows default)
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", L"1");
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", L"1");
+    // this small starter has no fairyfly_core (config::set_process_env); the names are config's
+    for (const char* name : {fairyfly::config::env::kTrayChild, fairyfly::config::env::kTrayLaunched})
+        SetEnvironmentVariableW(ascii_wide(name).c_str(), L"1");
     // the person started this from the Start menu: a tray that is already running may open its menu in front
     AllowSetForegroundWindow(ASFW_ANY);
     STARTUPINFOW si{};
@@ -111,7 +88,7 @@ struct Found {
 BOOL CALLBACK ask_to_quit(HWND hwnd, LPARAM param) {
     auto* found = reinterpret_cast<Found*>(param);
     wchar_t cls[64] = {};
-    if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, kWindowClass) != 0) return TRUE;
+    if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, contract::kWindowClass) != 0) return TRUE;
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, pid)) found->processes.push_back(h);
@@ -122,7 +99,7 @@ BOOL CALLBACK ask_to_quit(HWND hwnd, LPARAM param) {
 /// Every fairyfly tray of this user (link and MCP) quits as from its menu; waits until they have ended.
 void close_trays() {
     Found found;
-    found.quit = RegisterWindowMessageW(kQuitMessage);
+    found.quit = RegisterWindowMessageW(contract::kQuitMessage);
     EnumWindows(&ask_to_quit, reinterpret_cast<LPARAM>(&found));
     const DWORD deadline = GetTickCount() + kCloseWaitMs;
     for (HANDLE h : found.processes) {
@@ -144,12 +121,13 @@ bool contains_ignoring_case(const std::wstring& text, const std::wstring& part) 
 /// Run values that start a fairyfly in `dir` (fairyfly.exe or fairyfly-tray.exe); others belong to another copy.
 void remove_run_values(const std::wstring& dir) {
     HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
-    for (const wchar_t* name : kRunValues) {
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, contract::kRunKey, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+    for (const char* ascii_name : {contract::kLinkRunValue, contract::kMcpRunValue}) {
+        const std::wstring name = ascii_wide(ascii_name);
         wchar_t value[4096] = {};
         DWORD size = sizeof(value) - sizeof(wchar_t), type = 0;
-        if (RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<BYTE*>(value), &size) != ERROR_SUCCESS) continue;
-        if (contains_ignoring_case(value, dir + L"\\")) RegDeleteValueW(key, name);
+        if (RegQueryValueExW(key, name.c_str(), nullptr, &type, reinterpret_cast<BYTE*>(value), &size) != ERROR_SUCCESS) continue;
+        if (contains_ignoring_case(value, dir + L"\\")) RegDeleteValueW(key, name.c_str());
     }
     RegCloseKey(key);
 }
@@ -169,8 +147,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (args.size() == 1 && args[0] == L"--uninstall") {
         close_trays();
         remove_run_values(dir);
-        RegDeleteTreeW(HKEY_CURRENT_USER, kSettingsKey);
-        for (const wchar_t* key : kNotificationKeys) RegDeleteTreeW(HKEY_CURRENT_USER, key);
+        RegDeleteTreeW(HKEY_CURRENT_USER, contract::kSettingsKey);
+        // what the link registers for its approval notifications
+        RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kAppUserModelIdKeyPrefix) + contract::kAppUserModelId).c_str());
+        RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kClsidKeyPrefix) + contract::kToastActivatorClsid).c_str());
         return 0;
     }
     return start(dir, args);

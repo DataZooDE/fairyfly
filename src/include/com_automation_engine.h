@@ -1,6 +1,7 @@
 #pragma once
 
 #include "action_status.h"
+#include "include/sap_gui_scripting.h"
 #include "audit_log.h"
 #include "automation_engine.h"
 #include "com/wrapper.h"
@@ -26,7 +27,7 @@ bool session_present_checked(const ComGuiApplicationPtr& app,
 /// COM-based SAP GUI automation engine
 /// Implements the AutomationEngine interface using Windows COM
 /// for actual SAP GUI interactions
-class ComAutomationEngine : public AutomationEngine {
+class ComAutomationEngine : public AutomationEngine, public SapGuiScripting {
 private:
     ComGuiApplicationPtr app_;
     ComGuiConnectionPtr current_connection_;
@@ -58,15 +59,29 @@ private:
     std::pair<ComGuiConnectionPtr, ComGuiSessionPtr> find_session_by_id(
         const std::string& session_id) const;
     bool owner_window_allowed(const ComGuiSessionPtr& session) const noexcept;
+    /// What SAP GUI's own OpenConnection yielded (launch_connection).
+    struct NativeOpen {
+        bool session_created = false;     ///< a session came up and is bound
+        bool opened = false;              ///< the connection opened
+        bool scripting_disabled = false;  ///< SAP reports backend GUI scripting disabled
+        bool logon_missing = false;       ///< SAP Logon is not running
+        std::string error;
+    };
+    bool launch_by_sapshcut(const std::string& connection_name, json& trace);
+    void no_session_error(Result& result, bool used_sapshcut) const;
+    NativeOpen open_native_connection(const std::string& connection_name, json& trace);
+    std::vector<ConnectionLauncher::ExistingSession> open_sessions_now() const;
 
 public:
     /// Constructor - initializes COM but doesn't connect to SAP
     ComAutomationEngine();
+    /// The engine on a given SAP GUI application object (tests pass a fake one); binds its first session.
+    explicit ComAutomationEngine(ComGuiApplicationPtr app);
 
     ~ComAutomationEngine() override = default;
 
-    void set_owner_window_guard(bool enabled) noexcept { owner_window_guard_ = enabled; }
-    bool current_session_owner_window_allowed() const noexcept {
+    void set_owner_window_guard(bool enabled) noexcept override { owner_window_guard_ = enabled; }
+    bool current_session_owner_window_allowed() const noexcept override {
         return current_session_ && owner_window_allowed(current_session_);
     }
 
@@ -92,20 +107,20 @@ public:
     Result click_element(const ElementId& element) override;
     Result fill_field(const ElementId& element, const std::string& value) override;
     Result fill_grid_cell(const ElementId& element, int row, const std::string& column,
-                          const std::string& value, bool checkbox, bool commit);
-    Result select_grid_row(const ElementId& element, int row, const std::string& column);
-    Result doubleclick_grid_cell(const ElementId& element, int row, const std::string& column);
+                          const std::string& value, bool checkbox, bool commit) override;
+    Result select_grid_row(const ElementId& element, int row, const std::string& column) override;
+    Result doubleclick_grid_cell(const ElementId& element, int row, const std::string& column) override;
     // Window-level actions (implemented in com_automation_engine_actions.cpp)
-    Result send_key(int vkey, const std::string& window = "@active");
-    Result close_popup(int vkey = 12);
-    Result read_menu(const std::string& window = "wnd[0]");
+    Result send_key(int vkey, const std::string& window = "@active") override;
+    Result close_popup(int vkey = 12) override;
+    Result read_menu(const std::string& window = "wnd[0]") override;
     /// read_only: refuse (READ_ONLY_REFUSED) when the RESOLVED menu item's real text is state-changing.
     Result select_menu(const std::string& menu_path, const std::string& window = "wnd[0]",
-                       bool read_only = false);
+                       bool read_only = false) override;
     Result read_field(const ElementId& element) override;
     /// activate_tab: when the element lives on an inactive tab page, select the page (and restore the previous
     /// one afterwards) instead of returning ELEMENT_ON_INACTIVE_TAB.
-    Result read_field(const ElementId& element, bool activate_tab);
+    Result read_field(const ElementId& element, bool activate_tab) override;
     Result press_toolbar_button(const ElementId& toolbar_element, const std::string& button_id) override;
     Result press_f4(const ElementId& element) override;
 
@@ -128,15 +143,17 @@ public:
     ComGuiApplicationPtr get_app() const { return app_; }
     ComGuiConnectionPtr get_connection() const { return current_connection_; }
     ComGuiSessionPtr get_session() const { return current_session_; }
+    ComGuiSessionPtr unchecked_session() const override { return current_session_; }
+    SapGuiScripting* scripting() override { return this; }
 
     /// Read-only lookup of system/client/user/transaction of a NAMED session; never selects, attaches or
     /// changes anything. Empty facts when the session is gone, the server key differs or COM fails.
     audit::SapFacts peek_session_facts(const std::string& session_id,
-                                       const std::string& server_session_key = "") const noexcept;
+                                       const std::string& server_session_key = "") const noexcept override;
     /// Stable live window handle used only to distinguish keyless prelogin windows.
-    std::uintptr_t peek_session_window_handle(const std::string& session_id) const noexcept;
+    std::uintptr_t peek_session_window_handle(const std::string& session_id) const noexcept override;
     /// Description (SAP Logon entry name) of the connection that owns `session_id`; empty when unknown. Read-only.
-    std::string peek_session_connection_description(const std::string& session_id) const noexcept;
+    std::string peek_session_connection_description(const std::string& session_id) const noexcept override;
 
     // Enumerate all connections, sessions, and windows
     nlohmann::json get_application_info() const;
@@ -145,13 +162,13 @@ public:
     WindowId get_active_window_id() const;
 
     /// Cheap snapshot (window, title, transaction, status text) for change detection
-    ScreenSnapshot capture_screen_snapshot() const;
+    ScreenSnapshot capture_screen_snapshot() const override;
     ElementId resolve_element_path(const ElementId& element) const;
 
     /// Detect if a modal dialog is currently active
     /// Returns dialog metadata if modal dialog exists (non-wnd[0]), or empty json if on main window
     /// Dialog metadata includes: window_id, type, title, message, buttons
-    nlohmann::json detect_modal_dialog() const;
+    nlohmann::json detect_modal_dialog() const override;
 
 };
 

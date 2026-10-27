@@ -1,5 +1,6 @@
 #include "include/auth/authenticator.h"
 
+#include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -24,8 +25,8 @@ AuthOutcome deny(int status, const char* code, const std::string& message, const
     return out;
 }
 
-const char* kChallenge = "Bearer realm=\"fairyfly\"";
-const char* kChallengeInvalid = "Bearer realm=\"fairyfly\", error=\"invalid_token\"";
+const char* kChallenge = mcp::kBearerChallenge;
+const char* kChallengeInvalid = mcp::kBearerChallengeInvalidToken;
 
 /// "Bearer <token>" (scheme case-insensitive). nullopt when the header has another shape.
 std::optional<std::string> bearer_token(const std::string& header) {

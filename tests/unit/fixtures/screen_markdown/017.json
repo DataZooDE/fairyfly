@@ -1,0 +1,7 @@
+{
+ "compact": false,
+ "input": {
+  "title": "Ready"
+ },
+ "output": "# Ready\n\n**Screen ID:** ``\n\n_No screen structure available_\n"
+}

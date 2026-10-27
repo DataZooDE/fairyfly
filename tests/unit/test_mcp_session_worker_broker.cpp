@@ -12,6 +12,29 @@
 using namespace fairyfly::mcp;
 
 namespace {
+/// A named event the fixture's first call waits on (--gate-first-call=<name>); opened on destruction too.
+class Gate {
+public:
+    Gate() {
+        static int counter = 0;
+        name_ = R"(Local\fairyfly-broker-test-)" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++counter);
+        event_ = CreateEventA(nullptr, TRUE, FALSE, name_.c_str());
+        REQUIRE(event_ != nullptr);
+    }
+    ~Gate() {
+        open();
+        CloseHandle(event_);
+    }
+    Gate(const Gate&) = delete;
+    Gate& operator=(const Gate&) = delete;
+    void open() { SetEvent(event_); }
+    std::wstring argument() const { return L"--gate-first-call=" + std::wstring(name_.begin(), name_.end()); }
+
+private:
+    std::string name_;
+    HANDLE event_ = nullptr;
+};
+
 std::wstring fixture_path() {
     wchar_t path[MAX_PATH]{};
     REQUIRE(GetModuleFileNameW(nullptr, path, MAX_PATH) > 0);
@@ -136,22 +159,28 @@ TEST_CASE("Broker rechecks policy at session dequeue", "[mcp][worker-broker]") {
 }
 
 TEST_CASE("Different broker sessions run while one child waits", "[mcp][worker-broker]") {
-    SessionWorkerBroker broker(fixture_path(), L"--sleep-first-call", 2, 2, 5000);
+    Gate gate;
+    SessionWorkerBroker broker(fixture_path(), gate.argument(), 2, 2, 5000);
     auto slow = broker.submit(call(1, "one"), allow, allow);
     auto fast = broker.submit(call(2, "two"), allow, allow);
-    CHECK(fast.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
+    // the first session is held at the gate: the other one must finish anyway (a serialising broker cannot)
+    CHECK(fast.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    CHECK(slow.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout);
     CHECK(fast.get()["data"]["id"] == 2);
+    gate.open();
     CHECK(slow.get()["data"]["id"] == 1);
 }
 
 TEST_CASE("One broker session preserves FIFO order", "[mcp][worker-broker]") {
-    SessionWorkerBroker broker(fixture_path(), L"--sleep-first-call", 1, 2, 5000);
+    Gate gate;
+    SessionWorkerBroker broker(fixture_path(), gate.argument(), 1, 2, 5000);
     auto first_call = call(1, "one");
     auto second_call = first_call;
     second_call.id = 2;
     auto first = broker.submit(first_call, allow, allow);
     auto second = broker.submit(second_call, allow, allow);
-    CHECK(second.wait_for(std::chrono::milliseconds(250)) == std::future_status::timeout);
+    CHECK(second.wait_for(std::chrono::milliseconds(250)) == std::future_status::timeout);  // behind the held first call
+    gate.open();
     CHECK(first.get()["data"]["id"] == 1);
     CHECK(second.get()["data"]["id"] == 2);
 }

@@ -28,13 +28,6 @@ using Argv = std::vector<std::string>;
 
 namespace {
 
-Result ok_result(json data = json::object()) {
-    Result r;
-    r.status = Result::Status::Success;
-    r.data = std::move(data);
-    return r;
-}
-
 std::string first_text(const ToolResult& r) { return r.content.at(0).at("text").get<std::string>(); }
 
 const ToolDef* find_def(const std::vector<ToolDef>& defs, const std::string& name) {
@@ -60,7 +53,7 @@ TEST_CASE("describe_for drops references to hidden tools", "[mcp][usability]") {
 
 TEST_CASE("tools/list texts never mention a hidden tool", "[mcp][usability]") {
     Policy read_only;  // read-only by default: gui_element_fill is hidden
-    CommandDispatcher ro([](const Argv&) { return ok_result(); }, read_only);
+    CommandDispatcher ro([](const Argv&) { return Result::ok(json::object()); }, read_only);
     for (const auto& def : ro.list_tools()) {
         INFO(def.name);
         CHECK(def.description.find("gui_element_fill") == std::string::npos);
@@ -69,7 +62,7 @@ TEST_CASE("tools/list texts never mention a hidden tool", "[mcp][usability]") {
     Policy writable;
     writable.read_only = false;
     writable.allow_write = true;
-    CommandDispatcher rw([](const Argv&) { return ok_result(); }, writable);
+    CommandDispatcher rw([](const Argv&) { return Result::ok(json::object()); }, writable);
     const auto defs = rw.list_tools();
     REQUIRE(find_def(defs, "gui_screen_find"));
     REQUIRE(find_def(defs, "gui_element_fill"));
@@ -129,7 +122,7 @@ TEST_CASE("shape_result adapts hints for Markdown screen results", "[mcp][usabil
     Policy policy;
     json elements = json::array();
     elements.push_back({{"id", "wnd[0]/usr/btnX"}, {"type", "GuiButton"}, {"text", "X"}});
-    const Result res = ok_result({{"scanned_count", 1}, {"elements", elements}});
+    const Result res = Result::ok({{"scanned_count", 1}, {"elements", elements}});
     const std::set<std::string> visible = {"gui_element_click"};
     const auto shaped = shape_result(res, spec, policy, "", &visible);
     CHECK(first_text(shaped).find("element fill") == std::string::npos);
@@ -140,7 +133,7 @@ TEST_CASE("A click result with a benign warning is shaped as success with the me
     Policy policy;
     CommandDispatcher dispatcher(
         [](const Argv&) {
-            return ok_result({{"action", "click"},
+            return Result::ok({{"action", "click"},
                               {"status_message", {{"type", "W"}, {"text", "No short dumps match the selection criteria"}}},
                               {"warning", true}});
         },
@@ -506,7 +499,7 @@ TEST_CASE("a lookup that gives up makes a token with an allowlist fail closed", 
     p.tcodes = {"STRUST"};
     Policy policy;
     policy.read_only = false;
-    CommandDispatcher dispatcher([](const Argv&) { return ok_result(); }, policy);
+    CommandDispatcher dispatcher([](const Argv&) { return Result::ok(json::object()); }, policy);
     dispatcher.set_sap_facts_provider([](std::optional<int>) { return std::optional<fairyfly::audit::SapFacts>(); });  // gave up
     CallContext ctx;
     ctx.request_id = 1;
@@ -538,7 +531,7 @@ TEST_CASE("slow steps are reported and timed in the audit record", "[mcp][usabil
     CommandDispatcher dispatcher(
         [](const Argv&) {
             std::this_thread::sleep_for(std::chrono::milliseconds(60));
-            return ok_result();
+            return Result::ok(json::object());
         },
         policy, make_mcp_audit_hook(&sink, nullptr, false));
     dispatcher.set_slow_step_threshold(std::chrono::milliseconds(30));
@@ -601,7 +594,7 @@ TEST_CASE("steps under the threshold are not reported and zero timings are not a
 
     Policy policy;
     std::vector<std::string> steps;
-    CommandDispatcher dispatcher([](const Argv&) { return ok_result(); }, policy);
+    CommandDispatcher dispatcher([](const Argv&) { return Result::ok(json::object()); }, policy);
     dispatcher.set_slow_step_reporter([&](const std::string& step, const std::string&, const std::string&, long long) { steps.push_back(step); });
     CallContext ctx;
     ctx.request_id = 1;

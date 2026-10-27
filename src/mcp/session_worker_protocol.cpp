@@ -1,5 +1,6 @@
 #include "include/mcp/session_worker_protocol.h"
 
+#include "include/command_table.h"
 #include <algorithm>
 #include <charconv>
 #include <istream>
@@ -10,17 +11,6 @@
 
 namespace fairyfly::mcp {
 namespace {
-
-bool is_bound_command(const std::vector<std::string>& argv) {
-    if (argv.size() < 2) return false;
-    static const std::set<std::pair<std::string, std::string>> allowed = {
-        {"screen", "read"}, {"screen", "find"}, {"screen", "capture"},
-        {"menu", "list"}, {"menu", "select"},
-        {"element", "get"}, {"element", "click"}, {"element", "fill"}, {"element", "f4"},
-        {"key", "send"}, {"popup", "close"}, {"transaction", "start"},
-        {"session", "disconnect"}};
-    return allowed.count({argv[0], argv[1]}) != 0;
-}
 
 bool valid_session_identity(const std::string& identity) {
     if (identity.size() > 512 || identity.rfind("/app/con[", 0) != 0 || identity.find("/ses[") == std::string::npos)
@@ -51,7 +41,9 @@ int parse_connection(const std::string& text) {
 
 } // namespace
 
-bool worker_command_allowed(const std::vector<std::string>& argv) { return is_bound_command(argv); }
+bool worker_command_allowed(const std::vector<std::string>& argv) {
+    return argv.size() >= 2 && command_table::path_has({argv[0], argv[1]}, command_table::Trait::WorkerBound);
+}
 
 std::string encode_worker_call(const WorkerCall& call) {
     json request{{"version", 1}, {"id", call.id},
