@@ -1,5 +1,7 @@
 #include "include/mcp/http_sys_mapping.h"
 
+#include "include/text/utf8.h"
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -7,18 +9,6 @@
 namespace fairyfly::mcp::httpsys {
 
 namespace {
-
-std::string lower(std::string_view s) {
-    std::string out(s);
-    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return out;
-}
-
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.remove_prefix(1);
-    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.remove_suffix(1);
-    return s;
-}
 
 void fail(std::string* error, const std::string& message) {
     if (error) *error = message;
@@ -55,11 +45,6 @@ bool valid_host_char(char c) {
 
 } // namespace
 
-bool is_loopback_host(std::string_view host) {
-    const std::string h = lower(host);
-    return h == "127.0.0.1" || h == "localhost" || h == "::1" || h == "[::1]";
-}
-
 std::string make_prefix(std::string_view scheme, std::string_view host_in, int port, std::string_view path,
                         std::string* error) {
     if (scheme != "http" && scheme != "https") {
@@ -78,7 +63,7 @@ std::string make_prefix(std::string_view scheme, std::string_view host_in, int p
         fail(error, "invalid endpoint path '" + std::string(path) + "'");
         return {};
     }
-    std::string host = lower(trim(host_in));
+    std::string host = utils::lower_ascii(utils::trim_view(host_in));
     if (host.empty() || host == "+" || host == "*" || host == "0.0.0.0") {
         host = "+";
     } else if (host == "localhost" || host == "127.0.0.1") {
@@ -99,24 +84,6 @@ std::string make_prefix(std::string_view scheme, std::string_view host_in, int p
     std::string p(path);
     if (p.back() != '/') p += '/';
     return std::string(scheme) + "://" + host + ":" + std::to_string(port) + p;
-}
-
-std::string wide_to_utf8(const wchar_t* text, std::size_t chars) {
-    if (!text || chars == 0) return {};
-    const int needed = ::WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(chars), nullptr, 0, nullptr, nullptr);
-    if (needed <= 0) return {};
-    std::string out(static_cast<std::size_t>(needed), '\0');
-    ::WideCharToMultiByte(CP_UTF8, 0, text, static_cast<int>(chars), out.data(), needed, nullptr, nullptr);
-    return out;
-}
-
-std::wstring utf8_to_wide(std::string_view text) {
-    if (text.empty()) return {};
-    const int needed = ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    if (needed <= 0) return {};
-    std::wstring out(static_cast<std::size_t>(needed), L'\0');
-    ::MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), needed);
-    return out;
 }
 
 std::string verb_to_string(const HTTP_REQUEST& request) {
@@ -156,7 +123,7 @@ std::string request_path(const HTTP_REQUEST& request) {
             chars = i;
             break;
         }
-    std::string path = wide_to_utf8(url.pAbsPath, chars);
+    std::string path = text::wide_to_utf8_lossy(std::wstring_view(url.pAbsPath, url.pAbsPath ? chars : 0));
     if (path.size() > 1 && path.back() == '/') path.pop_back();
     return path;
 }
@@ -233,7 +200,7 @@ bool is_http11(const HTTP_REQUEST& request) {
 
 ContentLength parse_content_length(std::string_view header_value) {
     ContentLength out;
-    const std::string_view v = trim(header_value);
+    const std::string_view v = utils::trim_view(header_value);
     if (header_value.empty()) return out;
     out.present = true;
     if (v.empty()) return out;
@@ -280,11 +247,11 @@ const char* status_text(int status) {
 }
 
 int response_header_id(std::string_view name) {
-    const std::string n = lower(name);
+    const std::string n = utils::lower_ascii(name);
     for (int i = 0; i < 20; ++i)
-        if (n == lower(kGeneralNames[i])) return i;
+        if (n == utils::lower_ascii(kGeneralNames[i])) return i;
     for (int i = 0; i < 10; ++i)
-        if (n == lower(kResponseOnlyNames[i])) return 20 + i;
+        if (n == utils::lower_ascii(kResponseOnlyNames[i])) return 20 + i;
     return -1;
 }
 
@@ -292,7 +259,7 @@ PackedHeaders pack_response_headers(const HttpResponse& response, bool chunked) 
     PackedHeaders out;
     bool has_content_type = false;
     for (const auto& h : response.headers) {
-        const std::string lname = lower(h.first);
+        const std::string lname = utils::lower_ascii(h.first);
         if (lname == "content-type") has_content_type = true;
         if (is_hop_by_hop(lname)) continue;
         const int id = response_header_id(h.first);

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "include/setup/setup_hosts.h"
+#include "include/text/utf8.h"
 #include "win_util.h"
 
 namespace fairyfly::setup {
@@ -59,12 +60,12 @@ SockAddr make_sockaddr(const std::string& ipport) {
 std::string guid_to_string(const GUID& g) {
     wchar_t buffer[64] = {};
     StringFromGUID2(g, buffer, 64);
-    return normalize_app_id(narrow(buffer));
+    return normalize_app_id(text::wide_to_utf8_lossy(buffer));
 }
 
 GUID string_to_guid(const std::string& s) {
     GUID g{};
-    const std::wstring w = widen(s);
+    const std::wstring w = text::utf8_to_wide(s);
     if (CLSIDFromString(w.c_str(), &g) != S_OK) throw HostError("INVALID_ARGUMENT", "malformed AppId " + s);
     return g;
 }
@@ -73,7 +74,7 @@ class RealHttpSysConfig : public HttpSysConfig {
 public:
     std::optional<std::string> query_urlacl(const std::string& prefix) override {
         HttpConfigScope scope;
-        std::wstring wprefix = widen(prefix);
+        std::wstring wprefix = text::utf8_to_wide(prefix);
         HTTP_SERVICE_CONFIG_URLACL_QUERY query{};
         query.QueryDesc = HttpServiceConfigQueryExact;
         query.KeyDesc.pUrlPrefix = wprefix.data();
@@ -87,12 +88,12 @@ public:
         if (r == ERROR_FILE_NOT_FOUND) return std::nullopt;
         if (r != NO_ERROR) throw_win(r, "query urlacl");
         const auto* set = reinterpret_cast<HTTP_SERVICE_CONFIG_URLACL_SET*>(buffer.data());
-        return set->ParamDesc.pStringSecurityDescriptor ? narrow(set->ParamDesc.pStringSecurityDescriptor) : std::string();
+        return set->ParamDesc.pStringSecurityDescriptor ? text::wide_to_utf8_lossy(set->ParamDesc.pStringSecurityDescriptor) : std::string();
     }
 
     void add_urlacl(const std::string& prefix, const std::string& sddl) override {
         HttpConfigScope scope;
-        std::wstring wprefix = widen(prefix), wsddl = widen(sddl);
+        std::wstring wprefix = text::utf8_to_wide(prefix), wsddl = text::utf8_to_wide(sddl);
         HTTP_SERVICE_CONFIG_URLACL_SET set{};
         set.KeyDesc.pUrlPrefix = wprefix.data();
         set.ParamDesc.pStringSecurityDescriptor = wsddl.data();
@@ -104,7 +105,7 @@ public:
         const auto existing = query_urlacl(prefix);
         if (!existing) return false;
         HttpConfigScope scope;
-        std::wstring wprefix = widen(prefix), wsddl = widen(*existing);
+        std::wstring wprefix = text::utf8_to_wide(prefix), wsddl = text::utf8_to_wide(*existing);
         HTTP_SERVICE_CONFIG_URLACL_SET set{};
         set.KeyDesc.pUrlPrefix = wprefix.data();
         set.ParamDesc.pStringSecurityDescriptor = wsddl.data();
@@ -134,7 +135,7 @@ public:
         b.ipport = ipport;
         b.thumbprint = hex_upper(static_cast<const unsigned char*>(set->ParamDesc.pSslHash), set->ParamDesc.SslHashLength);
         b.app_id = guid_to_string(set->ParamDesc.AppId);
-        b.store = set->ParamDesc.pSslCertStoreName ? narrow(set->ParamDesc.pSslCertStoreName) : std::string();
+        b.store = set->ParamDesc.pSslCertStoreName ? text::wide_to_utf8_lossy(set->ParamDesc.pSslCertStoreName) : std::string();
         return b;
     }
 
@@ -144,7 +145,7 @@ public:
         if (query_sslcert(ipport)) remove_sslcert(ipport);   // create-or-replace
         HttpConfigScope scope;
         SockAddr addr = make_sockaddr(ipport);
-        std::wstring store = widen(kCertStore);
+        std::wstring store = text::utf8_to_wide(kCertStore);
         std::vector<unsigned char> hash_copy = hash;
         HTTP_SERVICE_CONFIG_SSL_SET set{};
         set.KeyDesc.pIpPort = addr.get();

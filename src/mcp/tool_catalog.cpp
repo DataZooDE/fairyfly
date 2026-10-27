@@ -776,7 +776,7 @@ std::vector<ToolSpec> all_tool_specs() {
     auto writes = write_tool_specs();
     for (auto& s : writes) specs.push_back(std::move(s));
     for (auto& spec : specs) {
-        if (!lease_capable_tools().count(spec.def.name)) continue;
+        if (!command_table::tool_has(spec.def.name, command_table::Trait::LeaseCapable)) continue;
         spec.def.input_schema["properties"]["lease_id"] = {
             {"type", "string"}, {"minLength", 1},
             {"description", "Owner-mode HTTP: exclusive session lease ID from gui_session_lease."}};

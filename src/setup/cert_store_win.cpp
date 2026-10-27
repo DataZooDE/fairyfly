@@ -10,6 +10,7 @@
 #include <iterator>
 
 #include "include/setup/setup_hosts.h"
+#include "include/text/utf8.h"
 #include "include/setup/setup_model.h"
 #include "include/setup/setup_validators.h"
 #include "include/system/cert_scripts.h"
@@ -56,11 +57,11 @@ CertInfo describe(PCCERT_CONTEXT ctx) {
     DWORD n = CertGetNameStringW(ctx, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, nullptr, 0);
     std::wstring subject(n ? n - 1 : 0, L'\0');
     if (n > 1) CertGetNameStringW(ctx, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, subject.data(), n);
-    c.subject = "CN=" + narrow(subject);
+    c.subject = "CN=" + text::wide_to_utf8_lossy(subject);
     DWORD size = 0;
     if (CertGetCertificateContextProperty(ctx, CERT_FRIENDLY_NAME_PROP_ID, nullptr, &size) && size > 0) {
         std::vector<wchar_t> buffer(size / sizeof(wchar_t) + 1, L'\0');
-        if (CertGetCertificateContextProperty(ctx, CERT_FRIENDLY_NAME_PROP_ID, buffer.data(), &size)) c.friendly_name = narrow(buffer.data());
+        if (CertGetCertificateContextProperty(ctx, CERT_FRIENDLY_NAME_PROP_ID, buffer.data(), &size)) c.friendly_name = text::wide_to_utf8_lossy(buffer.data());
     }
     size = 0;
     c.has_private_key = CertGetCertificateContextProperty(ctx, CERT_KEY_PROV_INFO_PROP_ID, nullptr, &size) && size > 0;
@@ -75,11 +76,11 @@ CertInfo describe(PCCERT_CONTEXT ctx) {
                                 CRYPT_DECODE_ALLOC_FLAG, nullptr, &info, &info_size) && info) {
             for (DWORD i = 0; i < info->cAltEntry; ++i)
                 if (info->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME && info->rgAltEntry[i].pwszDNSName)
-                    san_dns.push_back(narrow(info->rgAltEntry[i].pwszDNSName));
+                    san_dns.push_back(text::wide_to_utf8_lossy(info->rgAltEntry[i].pwszDNSName));
             LocalFree(info);
         }
     }
-    c.dns_names = certificate_names(ext != nullptr, san_dns, narrow(subject));
+    c.dns_names = certificate_names(ext != nullptr, san_dns, text::wide_to_utf8_lossy(subject));
     return c;
 }
 

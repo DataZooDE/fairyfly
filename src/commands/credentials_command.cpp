@@ -60,11 +60,7 @@ Example: fairyfly credentials import-env credentials.txt --connection DEV --dele
             return handler.handle_credentials_import_env(import_path_,
                                                          import_connection_, delete_file_);
         }
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SUBCOMMAND";
-        result.error["message"] = "No credentials subcommand specified (set, list, delete, or import-env)";
-        return result;
+        return Result::fail("NO_SUBCOMMAND", "No credentials subcommand specified (set, list, delete, or import-env)");
     }
 
     std::optional<std::string> get_preferred_output_format() const override {

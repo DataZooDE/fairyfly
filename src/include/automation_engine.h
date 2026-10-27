@@ -14,6 +14,7 @@ namespace sap {
     struct ScreenFindOptions;
     class ComGuiSession;
 }
+class SapGuiScripting;
 
 class AutomationEngine {
 public:
@@ -67,11 +68,7 @@ public:
     /// Diagnostic: raw GuiSession.GetObjectTree dump of `id` (empty: the active window). Engines without COM
     /// access report NOT_SUPPORTED.
     virtual Result dump_object_tree(const std::string& /*id*/, const std::vector<std::string>& /*props*/) {
-        Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "NOT_SUPPORTED";
-        result.error["message"] = "This engine cannot dump the object tree";
-        return result;
+        return Result::fail("NOT_SUPPORTED", "This engine cannot dump the object tree");
     }
     /// Opt in to exhaustive FindById probing for subsequent screen reads/finds.
     virtual void set_probe_all(bool /*probe_all*/) {}
@@ -88,8 +85,12 @@ public:
     virtual bool set_selection_input_policy(const sap::SelectionInputPolicy& /*policy*/) { return false; }
     virtual Result capture_screenshot(const cli::ScreenshotOptions& options) = 0;
     /// The SAP GUI session calls currently run against, without attaching one (the audit trail reads its screen).
-    /// nullptr when nothing is attached or this engine has no COM session.
+    /// Owner-window checked: nullptr when the session's window does not belong to this desktop's owner, when
+    /// nothing is attached or when this engine has no COM session (SapGuiScripting::unchecked_session skips the check).
     virtual std::shared_ptr<sap::ComGuiSession> attached_com_session() const { return nullptr; }
+    /// SAP GUI scripting beyond the basic actions (sap_gui_scripting.h); nullptr for an engine without it.
+    virtual SapGuiScripting* scripting() { return nullptr; }
+    const SapGuiScripting* scripting() const { return const_cast<AutomationEngine*>(this)->scripting(); }
 
     // Enumeration and diagnostics
     virtual nlohmann::json get_application_info() const = 0;

@@ -5,6 +5,11 @@
 #include "include/com/utf8.h"
 #include <spdlog/spdlog.h>
 #include <comdef.h>
+#include <climits>
+#include <vector>
+
+#include "include/com/invoke.h"
+#include "include/com/hresult.h"
 
 namespace fairyfly {
 namespace sap {
@@ -12,6 +17,12 @@ namespace sap {
 /// Read a COM collection count for session-close verification. Unlike the
 /// ordinary screen-reading helper, a failed read must not mean zero items.
 int get_collection_count_checked(IDispatch* collection);
+
+/// The items of the collection that `owner`'s member answers (a method or property, by `flags`): Count (VT_I4) and
+/// Item(i) with a VT_I4 index, as SAP expects, at most `limit` of them. Empty when the member, the collection or its
+/// Count is missing; an Item read that fails is skipped. COM exceptions propagate to the caller.
+std::vector<_variant_t> collection_member_items(IDispatch* owner, const wchar_t* member, WORD flags,
+                                                int limit = INT_MAX);
 
 /// Get an integer property from COM object (free function helper)
 inline int get_int_property(IDispatch* obj, const char* prop_name) {
@@ -23,16 +34,14 @@ inline int get_int_property(IDispatch* obj, const char* prop_name) {
         // CRITICAL FIX: Use get_dispid_via_typeinfo for SAP GUI compatibility
         HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
         _variant_t result;
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                        &params, &result, nullptr, nullptr);
+        hr = invoke(obj, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|Invoke failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|Invoke failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
@@ -59,12 +68,8 @@ inline IDispatchPtr call_method_with_string_dispid(IDispatch* obj, DISPID dispid
     if (!obj) throw ComException("Null object");
 
     try {
-        HRESULT hr;
-        _variant_t param_var(param.c_str());
-        DISPPARAMS disp_params = {(VARIANT*)&param_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = obj->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                        &disp_params, &result, nullptr, nullptr);
+        _variant_t result;   // the parameter as UTF-8 (it went through the ANSI code page before)
+        const HRESULT hr = invoke(obj, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(param).c_str())}, &result);
         if (FAILED(hr) || result.vt != VT_DISPATCH) return nullptr;
 
         return IDispatchPtr(result.pdispVal);
@@ -114,6 +119,11 @@ std::string safe_bstr_to_string(const VARIANT& var, const char* context = nullpt
 /// Safely invoke an IDispatch method or property with Win32 SEH protection
 /// Catches access violations (0xC0000005) inside native SAP GUI COM controls
 HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, DISPPARAMS* params, VARIANT* result);
+/// safe_invoke with `args` in reading order (DispArgs).
+inline HRESULT safe_invoke(IDispatch* obj, DISPID dispid, WORD flags, std::initializer_list<_variant_t> args, VARIANT* result) {
+    DispArgs params(flags, args);
+    return safe_invoke(obj, dispid, flags, params.get(), result);
+}
 
 } // namespace sap
 } // namespace fairyfly

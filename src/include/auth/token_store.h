@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -96,6 +97,8 @@ struct ParsedToken {
     std::string id;
     std::string secret;
 };
+/// Every bearer token starts with this.
+inline constexpr std::string_view kTokenPrefix = "ffy_";
 /// Parses "ffy_<8 hex>_<43 base64url>"; nullopt when malformed.
 std::optional<ParsedToken> parse_token(std::string_view token);
 std::string format_token(const std::string& id, const std::string& secret);

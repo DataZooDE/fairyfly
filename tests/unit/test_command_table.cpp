@@ -341,3 +341,132 @@ TEST_CASE("mcp tools table lists every tool and matches docs/MCP.md", "[command_
     REQUIRE(end != std::string::npos);
     CHECK(text.substr(begin + begin_marker.size(), end - begin - begin_marker.size()) == markdown);
 }
+
+namespace {
+std::set<std::string> tools_with(ct::Trait trait) {
+    std::set<std::string> out;
+    for (const auto& spec : ct::all_commands())
+        if (spec.is_tool() && spec.has(trait)) out.insert(spec.tool_name);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("command table: tool classification has one source", "[command_table][traits]") {
+    // review 2026-10-25: these sets were hand-written lists in seven files (route plan, HTTP endpoint, authorize,
+    // dispatcher batch, lease policy, worker protocol), and two of them already disagreed
+    using S = std::set<std::string>;
+    CHECK(tools_with(ct::Trait::GlobalControl) ==
+          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_session_lease",
+            "gui_session_attach", "gui_session_login", "gui_session_launch"});
+    CHECK(tools_with(ct::Trait::Targetless) ==
+          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch"});
+    CHECK(tools_with(ct::Trait::Listing) == S{"gui_session_list", "gui_connection_list", "gui_credentials_list"});
+    CHECK(tools_with(ct::Trait::SessionSystem) ==
+          S{"gui_session_launch", "gui_session_login", "gui_session_attach", "gui_session_lease"});
+    CHECK(tools_with(ct::Trait::LeaseCapable) ==
+          S{"gui_element_click", "gui_element_fill", "gui_element_f4", "gui_element_get", "gui_key_send", "gui_menu_select",
+            "gui_popup_close", "gui_screen_read", "gui_transaction_start", "gui_session_disconnect"});
+    CHECK(tools_with(ct::Trait::WorkerBound) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close",
+            "gui_transaction_start", "gui_session_disconnect"});
+    // one established session's screen: batch items in owner mode
+    CHECK(tools_with(ct::Trait::ScreenBound) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close",
+            "gui_transaction_start"});
+    // runs inside the transaction open now (T-code allowlists); starting a transaction is checked by its argument
+    CHECK(tools_with(ct::Trait::ActsOnScreen) ==
+          S{"gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_menu_select", "gui_element_get",
+            "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close"});
+    // returns SAP screen content: the result gets the "untrusted data" header
+    CHECK(tools_with(ct::Trait::ScreenData) == S{"gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list"});
+    CHECK(ct::tool_has("gui_screen_read", ct::Trait::WorkerBound));
+    CHECK_FALSE(ct::tool_has("gui_no_such_tool", ct::Trait::WorkerBound));
+    CHECK(ct::path_has({"screen", "read"}, ct::Trait::WorkerBound));
+    CHECK_FALSE(ct::path_has({"credentials", "set"}, ct::Trait::WorkerBound));
+}
+
+TEST_CASE("command table: how a command's result is rendered is part of its row", "[command_table][render]") {
+    // review 2026-10-25: format_output guessed the renderer from the keys of the result
+    CHECK(ct::find_by_path({"screen", "read"})->render == ct::Render::ScreenRead);
+    CHECK(ct::find_by_path({"screen", "find"})->render == ct::Render::ScreenFind);
+    CHECK(ct::find_by_path({"doctor"})->render == ct::Render::Doctor);
+    CHECK(ct::find_by_path({"element", "click"})->render == ct::Render::Generic);
+    CHECK(ct::render_of_tool("gui_screen_read") == ct::Render::ScreenRead);
+    CHECK(ct::render_of_tool("gui_no_such_tool") == ct::Render::Generic);
+}
+
+TEST_CASE("format_output: the renderer comes from the command, not from the keys of the result", "[command_table][render]") {
+    Result doctor_like = Result::ok(nlohmann::json{{"overall_health", "ok"}, {"checks", nlohmann::json::array()}});
+    const std::string generic = cli::format_output(doctor_like, cli::OutputFormat::Markdown);
+    CHECK(generic.find("Environment Diagnostics") == std::string::npos);  // a result of another command
+    CHECK(generic.find("# ") != std::string::npos);
+    const std::string doctor = cli::format_output(doctor_like, cli::OutputFormat::Markdown, false, ct::Render::Doctor);
+    CHECK(doctor.find("Environment Diagnostics: Healthy") != std::string::npos);
+    // an error of `screen read` is rendered as an error
+    const std::string failed = cli::format_output(Result::fail("NO_SESSION", "x"), cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(failed.find("NO_SESSION") != std::string::npos);
+}
+
+TEST_CASE("format_output: a command's renderer applies only to the result shape it renders", "[command_table][render]") {
+    // codex 2026-10-25: `screen read --dump-object-tree` (FAIRYFLY_DIAG) and `screen read --no-children` return
+    // other data than a screen hierarchy; the generic Markdown keeps their fields instead of an empty screen report
+    const Result dump = Result::ok(nlohmann::json{{"object_tree", {{"Id", "/app/con[0]"}}}});
+    const std::string dumped = cli::format_output(dump, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(dumped.find("object_tree") != std::string::npos);
+    const Result shallow = Result::ok(nlohmann::json{{"screen_id", "SAPLSMTR_NAVIGATION/0100"}, {"child_count", 7},
+                                                     {"connection_id", 3}});
+    const std::string flat = cli::format_output(shallow, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead);
+    CHECK(flat.find("child_count") != std::string::npos);
+    CHECK(flat.find("connection_id") != std::string::npos);
+    // a doctor or find result without its fields is shown as it is
+    const Result partial = Result::ok(nlohmann::json{{"note", "probe skipped"}});
+    CHECK(cli::format_output(partial, cli::OutputFormat::Markdown, false, ct::Render::Doctor).find("probe skipped") != std::string::npos);
+    CHECK(cli::format_output(partial, cli::OutputFormat::Markdown, false, ct::Render::ScreenFind).find("probe skipped") != std::string::npos);
+    // the screen report itself is still chosen for a hierarchy
+    const Result screen = Result::ok(nlohmann::json{{"screen_id", "X/1"}, {"hierarchy", nlohmann::json::object()}});
+    CHECK(cli::format_output(screen, cli::OutputFormat::Markdown, false, ct::Render::ScreenRead).find("```json") == std::string::npos);
+}
+
+namespace {
+/// run_mcp with `options` and a handler that must not be needed: the exit code and the refusal's code (stderr JSON).
+std::pair<int, std::string> refused_start(mcp::ServeOptions options) {
+    std::ostringstream err;
+    auto* previous = std::cerr.rdbuf(err.rdbuf());
+    bool handler_requested = false;
+    const int code = mcp::run_mcp(
+        options,
+        [&handler_requested]() -> cli::CommandHandler& {
+            handler_requested = true;
+            throw std::logic_error("must not be called");
+        },
+        commands::GlobalOptions{});
+    std::cerr.rdbuf(previous);
+    CHECK_FALSE(handler_requested);
+    const auto j = nlohmann::json::parse(err.str(), nullptr, false);
+    return {code, j.is_object() && j.contains("error") ? j["error"].value("code", std::string()) : std::string()};
+}
+}  // namespace
+
+TEST_CASE("run_mcp refuses contradictory or invalid start options without asking for a handler", "[command_table][mcp]") {
+    // review 2026-10-25: the refusal codes of run_mcp were untested
+    mcp::ServeOptions both;
+    both.read_only = true;
+    both.allow_write = true;
+    CHECK(refused_start(both) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions loopback_only;
+    loopback_only.transport = "http";
+    loopback_only.allow_ip_include_loopback = true;
+    CHECK(refused_start(loopback_only) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions bad_cidr;
+    bad_cidr.transport = "http";
+    bad_cidr.allow_ip = {"10.0.0.0/33"};
+    CHECK(refused_start(bad_cidr) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+
+    mcp::ServeOptions link;
+    link.transport = "link";   // only `fairyfly link run` starts it, with its loop
+    CHECK(refused_start(link) == std::pair<int, std::string>{2, "INVALID_ARGUMENT"});
+}

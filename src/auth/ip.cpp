@@ -1,5 +1,6 @@
 #include "include/auth/ip.h"
 
+#include "include/string_utils.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
@@ -12,13 +13,6 @@
 namespace fairyfly::auth {
 
 namespace {
-
-std::string trim(const std::string& s) {
-    const auto first = s.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const auto last = s.find_last_not_of(" \t\r\n");
-    return s.substr(first, last - first + 1);
-}
 
 std::optional<IpBytes> parse_plain(const std::string& text) {
     IpBytes out{};
@@ -40,7 +34,7 @@ std::optional<IpBytes> parse_plain(const std::string& text) {
 } // namespace
 
 std::optional<IpBytes> parse_ip(const std::string& raw) {
-    std::string text = trim(raw);
+    std::string text = utils::trim(raw);
     if (text.empty()) return std::nullopt;
     if (text.front() == '[') {
         const auto close = text.find(']');
@@ -56,7 +50,7 @@ std::optional<IpBytes> parse_ip(const std::string& raw) {
 }
 
 std::optional<IpRule> parse_ip_rule(const std::string& raw) {
-    const std::string text = trim(raw);
+    const std::string text = utils::trim(raw);
     if (text.empty()) return std::nullopt;
     const auto slash = text.find('/');
     IpRule rule;

@@ -10,6 +10,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include "include/text/utf8.h"
 
 #include <string>
 #include <utility>
@@ -59,13 +60,13 @@ public:
 
     /// UTF-8 view (converted lazily from UTF-16 when needed).
     const std::string& utf8() const {
-        if (utf8_.empty() && !utf16_.empty()) utf8_ = to_utf8(utf16_);
+        if (utf8_.empty() && !utf16_.empty()) utf8_ = text::wide_to_utf8(utf16_);  // strict: throws std::invalid_argument
         return utf8_;
     }
 
     /// UTF-16 view (converted lazily from UTF-8 when needed).
     const std::wstring& utf16() const {
-        if (utf16_.empty() && !utf8_.empty()) utf16_ = to_utf16(utf8_);
+        if (utf16_.empty() && !utf8_.empty()) utf16_ = text::utf8_to_wide(utf8_);  // strict: throws std::invalid_argument
         return utf16_;
     }
 
@@ -77,21 +78,6 @@ public:
     }
 
 private:
-    static std::string to_utf8(const std::wstring& in) {
-        const int n = WideCharToMultiByte(CP_UTF8, 0, in.data(), static_cast<int>(in.size()), nullptr, 0, nullptr, nullptr);
-        if (n <= 0) return {};
-        std::string out(static_cast<size_t>(n), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, in.data(), static_cast<int>(in.size()), out.data(), n, nullptr, nullptr);
-        return out;
-    }
-    static std::wstring to_utf16(const std::string& in) {
-        const int n = MultiByteToWideChar(CP_UTF8, 0, in.data(), static_cast<int>(in.size()), nullptr, 0);
-        if (n <= 0) return {};
-        std::wstring out(static_cast<size_t>(n), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, in.data(), static_cast<int>(in.size()), out.data(), n);
-        return out;
-    }
-
     mutable std::string utf8_;
     mutable std::wstring utf16_;
 };

@@ -1,5 +1,6 @@
 #include "include/auth/scopes.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
@@ -17,10 +18,7 @@ std::string join(const std::vector<std::string>& parts, const char* sep) {
 
 } // namespace
 
-std::string normalize_scope(std::string scope) {
-    std::transform(scope.begin(), scope.end(), scope.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return scope;
-}
+std::string normalize_scope(std::string scope) { return utils::lower_ascii(scope); }
 
 std::string verb_scope_of_tool(const std::string& tool_name) {
     const auto* spec = command_table::find_by_tool(tool_name);

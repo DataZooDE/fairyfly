@@ -12,6 +12,17 @@ namespace fairyfly {
 using json = nlohmann::json;
 
 // Core result type for all operations
+/// Time since construction in whole milliseconds (an action's Result::duration).
+class Stopwatch {
+public:
+    std::chrono::milliseconds elapsed() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_);
+    }
+
+private:
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
+};
+
 struct Result {
     enum class Status {
         Success,
@@ -39,6 +50,17 @@ struct Result {
         r.error = {{"code", std::move(code)}, {"message", std::move(message)}};
         if (!suggestions.is_null()) r.error["suggestions"] = std::move(suggestions);
         return r;
+    }
+
+    /// Makes this result an error with "code", "message" (and "suggestions"); data, diagnostics, duration and any
+    /// other error fields stay as they are.
+    Result& set_error(std::string code, std::string message, json suggestions = nullptr) {
+        status = Status::Error;
+        if (!error.is_object()) error = json::object();
+        error["code"] = std::move(code);
+        error["message"] = std::move(message);
+        if (!suggestions.is_null()) error["suggestions"] = std::move(suggestions);
+        return *this;
     }
 
     json to_json() const {

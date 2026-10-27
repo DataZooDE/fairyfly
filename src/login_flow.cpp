@@ -1,18 +1,12 @@
 #include "include/login_flow.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
 namespace fairyfly {
 
 namespace {
-std::string trim(std::string value) {
-    const auto first = value.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    const auto last = value.find_last_not_of(" \t\r\n");
-    return value.substr(first, last - first + 1);
-}
-
 bool has_password_field(const nlohmann::json& screen) {
     if (!screen.is_object() || !screen.contains("elements") || !screen["elements"].is_array()) return false;
     for (const auto& element : screen["elements"]) {
@@ -36,12 +30,9 @@ LoginCredentials parse_login_credentials(std::istream& input) {
         }
         const auto colon = line.find(':');
         if (colon == std::string::npos) continue;
-        const std::string key = trim(line.substr(0, colon));
-        const std::string value = trim(line.substr(colon + 1));
-        std::string lower_key = key;
-        std::transform(lower_key.begin(), lower_key.end(), lower_key.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (lower_key == "connection") credentials.connection = value;
+        const std::string key = utils::trim(line.substr(0, colon));
+        const std::string value = utils::trim(line.substr(colon + 1));
+        if (utils::iequals(key, "connection")) credentials.connection = value;
         else if (key == "Username") credentials.username = value;
         else if (key == "Password") credentials.password = value;
         else if (key == "New Password") credentials.new_password = value;
@@ -108,7 +99,7 @@ nlohmann::json make_multiple_logon_fail_error(const std::string& user_text, cons
                      "or --multiple-logon terminate (leave cleanly)."},
             // SAP pads these fields with trailing blanks; the terminal line is optional (it is
             // absent when SAP has no terminal information for the other logon).
-            {"dialog", {{"user", trim(user_text)}, {"terminal", trim(terminal_text)}}}};
+            {"dialog", {{"user", utils::trim(user_text)}, {"terminal", utils::trim(terminal_text)}}}};
 }
 
 nlohmann::json make_multiple_logon_annotation(const std::string& choice) {

@@ -1,10 +1,11 @@
 #include "include/config/environment.h"
+#include "include/text/command_line.h"
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 
 namespace fairyfly::tray {
 
@@ -13,33 +14,10 @@ RunnerFactory& runner_factory() {
     return factory;
 }
 
-// ---- Command-line builders ---------------------------------------------------------------------
-std::string quote_arg(const std::string& arg) {
-    if (!arg.empty() && arg.find_first_of(" \t\n\v\"") == std::string::npos) return arg;
-    std::string out = "\"";
-    size_t backslashes = 0;
-    for (char c : arg) {
-        if (c == '\\') {
-            ++backslashes;
-        } else if (c == '"') {
-            out.append(backslashes * 2 + 1, '\\');
-            out += '"';
-            backslashes = 0;
-        } else {
-            out.append(backslashes, '\\');
-            out += c;
-            backslashes = 0;
-        }
-    }
-    out.append(backslashes * 2, '\\');
-    out += '"';
-    return out;
-}
-
+// ---- Command-line builders (text/command_line.h) -----------------------------------------------
+std::string quote_arg(const std::string& arg) { return text::quote_argument<char>(arg); }
 std::string join_command_line(const std::string& exe, const std::vector<std::string>& args) {
-    std::string out = quote_arg(exe);
-    for (const auto& a : args) out += " " + quote_arg(a);
-    return out;
+    return text::join_command_line<char>(exe, args);
 }
 
 RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string>& args, bool tray_requested,
@@ -48,7 +26,7 @@ RelaunchPlan plan_relaunch(const std::string& exe, const std::vector<std::string
     if (!tray_requested || is_child || !has_console) return plan;
     plan.relaunch = true;
     plan.command_line = join_command_line(exe, args);
-    plan.extra_env.emplace_back(kTrayChildEnv, "1");
+    plan.extra_env.emplace_back(config::env::kTrayChild, "1");
     plan.no_window = true;
     return plan;
 }
@@ -143,17 +121,31 @@ void TrayController::on_tick() {
     }
 }
 
+void TrayActions::open(const std::filesystem::path& path, const std::string& what) const {
+    if ((!opener || !opener->open(path)) && notify) notify("Could not open " + what + ": " + path.string());
+}
+
+void TrayActions::console(const std::vector<std::string>& args) const {
+    if (!launcher) return;
+    LaunchRequest request;
+    request.command_line = console_command_line(exe, args);
+    request.new_console = true;
+    if (!launcher->launch(request) && notify) notify("Could not open a console");
+}
+
+bool TrayActions::start_detached(const std::vector<std::string>& args) const {
+    if (!launcher) return false;
+    LaunchRequest request;
+    request.command_line = join_command_line(exe, args);
+    request.detached = true;
+    return launcher->launch(request).has_value();
+}
+
 void TrayController::on_action(TrayAction action) {
-    auto open = [&](const std::filesystem::path& path, const char* what) {
-        if (!services_.opener || !services_.opener->open(path)) notify(std::string("Could not open ") + what + ": " + path.string());
-    };
-    auto console = [&](const std::vector<std::string>& args) {
-        if (!services_.launcher) return;
-        LaunchRequest request;
-        request.command_line = console_command_line(paths_.exe, args);
-        request.new_console = true;
-        if (!services_.launcher->launch(request)) notify("Could not open a console");
-    };
+    const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
+                              [this](const std::string& text) { notify(text); }};
+    const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };
+    const auto console = [&](const std::vector<std::string>& args) { actions.console(args); };
 
     switch (action) {
     case TrayAction::Start: control_.request_start(); break;
@@ -180,17 +172,9 @@ void TrayController::on_action(TrayAction action) {
     case TrayAction::LinkPair: console({"link", "pair"}); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
     case TrayAction::LinkStatus: console({"link", "status"}); break;
-    case TrayAction::LinkStart: {
-        bool ok = false;
-        if (services_.launcher) {
-            LaunchRequest request;   // the link tray: its own icon and Quit; it reads the pairing state
-            request.command_line = join_command_line(paths_.exe, {"link", "run", "--tray"});
-            request.detached = true;
-            ok = services_.launcher->launch(request).has_value();
-        }
-        if (!ok) notify("Could not start the cloud link");
+    case TrayAction::LinkStart:   // the link tray: its own icon and Quit; it reads the pairing state
+        if (!actions.start_detached({"link", "run", "--tray"})) notify("Could not start the cloud link");
         break;
-    }
     case TrayAction::LinkPause:
     case TrayAction::LinkResume: {
         const bool pause = action == TrayAction::LinkPause;
@@ -215,9 +199,8 @@ void TrayController::on_action(TrayAction action) {
 }
 
 // ---- run_with_tray -------------------------------------------------------------------------------
-namespace detail {
-
-bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui) {
+std::unique_ptr<UiThread> UiThread::start(TrayHost& host, TrayListener& listener) {
+    std::thread ui;
     struct Ready {
         std::mutex m;
         std::condition_variable cv;
@@ -243,13 +226,16 @@ bool start_ui(TrayHost& host, TrayListener& listener, std::thread& ui) {
         std::unique_lock<std::mutex> lock(ready->m);
         ready->cv.wait(lock, [&] { return ready->signalled; });
     }
-    if (ready->ok) return true;
+    if (ready->ok) return std::unique_ptr<UiThread>(new UiThread(host, std::move(ui)));
     host.post_quit();
     ui.join();
-    return false;
+    return nullptr;
 }
 
-} // namespace detail
+UiThread::~UiThread() {
+    host_.post_quit();
+    if (thread_.joinable()) thread_.join();
+}
 
 int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& guard, TrayPaths paths,
                   TrayState state) {
@@ -264,8 +250,8 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
     TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
 
     // UI thread: window + icon + message pump. The main thread below stays the COM/STA server thread.
-    std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) {
+    const auto ui = UiThread::start(*services.host, controller);
+    if (!ui) {
         services.host->message_box("fairyfly MCP", "The fairyfly MCP tray could not create its tray window. Details are in the log: " +
                                                        log_file);
         return 1;
@@ -305,9 +291,7 @@ int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& 
         slot->quit = true;
     }
     slot->cv.notify_all();
-    services.host->post_quit();
-    ui.join();
-    return code;
+    return code;   // ~UiThread: quit and join the UI
 }
 
 // ---- Startup errors ------------------------------------------------------------------------------

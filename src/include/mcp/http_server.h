@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "include/mcp/call_executor.h"
+#include "include/mcp/constants.h"
 #include "include/mcp/http_endpoint.h"
 #include "include/mcp/principal.h"
 #include "include/mcp/types.h"
@@ -36,7 +37,7 @@ private:
 
 struct HttpServerConfig {
     std::string host = "127.0.0.1";
-    int port = 8383;                       ///< fixed port; 0 is an error (http.sys has no ephemeral ports)
+    int port = kDefaultHttpPort;           ///< fixed port; 0 is an error (http.sys has no ephemeral ports)
     HttpEndpointOptions endpoint;
     bool insecure_no_auth = false;         ///< for the posture banner only (the authenticator decides)
     bool read_only = true;                 ///< initial mode
