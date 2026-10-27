@@ -25,6 +25,9 @@ enum class Trait : unsigned {
 constexpr unsigned operator|(Trait a, Trait b) { return static_cast<unsigned>(a) | static_cast<unsigned>(b); }
 constexpr unsigned operator|(unsigned a, Trait b) { return a | static_cast<unsigned>(b); }
 
+/// How the CLI and MCP render a successful result of the command as Markdown (format_output).
+enum class Render { Generic, ScreenRead, ScreenFind, Doctor };
+
 struct CommandSpec {
     std::vector<std::string> path;  ///< e.g. {"element","click"}
     std::string summary;            ///< one-line description (CLI help)
@@ -33,6 +36,7 @@ struct CommandSpec {
     std::string family;             ///< tool family (the noun; "system" for doctor, "batch" for batch)
     bool mcp_only = false;          ///< broker-native MCP tool with no CLI command
     unsigned traits = 0;            ///< Trait bits
+    Render render = Render::Generic;
 
     bool is_tool() const { return !tool_name.empty(); }
     bool has(Trait t) const { return (traits & static_cast<unsigned>(t)) != 0; }
@@ -60,6 +64,9 @@ const CommandSpec* find_by_tool(const std::string& tool_name);
 /// The tool / the CLI command has the trait (false for unknown names).
 bool tool_has(const std::string& tool_name, Trait trait);
 bool path_has(const std::vector<std::string>& path, Trait trait);
+/// The render of the tool / the CLI command (Generic for unknown names).
+Render render_of_tool(const std::string& tool_name);
+Render render_of_path(const std::vector<std::string>& path);
 const GroupSpec* find_group(const std::string& noun);
 /// Unique tool families in table order.
 std::vector<std::string> families();

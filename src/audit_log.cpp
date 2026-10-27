@@ -1,4 +1,5 @@
 #include "include/audit_log.h"
+#include "include/text/utf8.h"
 #include "include/sensitive_data.h"
 #include "include/version.h"
 
@@ -175,9 +176,9 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     if (file_settings.required == true || config::normalized(mode_env) == "required" || cli_required) config.mode = Mode::Required;
 
     if (const std::string file_env = env.get(config::env::kAuditFile); !file_env.empty()) {
-        config.file = std::filesystem::path(file_env);
+        config.file = text::utf8_path(file_env);
     } else if (file_settings.file && !file_settings.file->empty()) {
-        config.file = std::filesystem::path(*file_settings.file);
+        config.file = text::utf8_path(*file_settings.file);
     } else {
         const std::filesystem::path data = env.data_dir();
         config.file = (data.has_parent_path() ? data : std::filesystem::path(".fairyfly")) / "audit" / monthly_file_name(now);

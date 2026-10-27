@@ -1,0 +1,22 @@
+{
+ "compact": false,
+ "input": {
+  "hierarchy": {
+   "other": [
+    {
+     "id": "wnd[0]/usr/editor",
+     "source_lines_read": 200,
+     "source_total_lines": 1187,
+     "source_truncated": true,
+     "subtype": "AbapEditor",
+     "text_content": "FORM SET_SCREEN_0300.\n  lv_name = iv_name.\nENDFORM.",
+     "type": "GuiShell"
+    }
+   ]
+  },
+  "screen_id": "wnd[0]",
+  "title": "ABAP Editor",
+  "transaction": "SE38"
+ },
+ "output": "# ABAP Editor\n\n**Transaction:** `SE38`\n\n**Screen ID:** `wnd[0]`\n\n## ABAP Source\n\n```abap\nFORM SET_SCREEN_0300.\n  lv_name = iv_name.\nENDFORM.\n```\n\n_Showing 200 of 1187 source lines_\n\n### GuiShell (AbapEditor)\n\n```text\nFORM SET_SCREEN_0300.\n  lv_name = iv_name.\nENDFORM.\n```\n\n**Technical ID:** `wnd[0]/usr/editor`\n\n---\n**Screen Elements:** 0 top-level\n"
+}

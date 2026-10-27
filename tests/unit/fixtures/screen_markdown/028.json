@@ -1,0 +1,44 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 3,
+  "elements": [
+   {
+    "children": [
+     "/app/con[0]/ses[0]/wnd[0]/usr/lbl[1,0]",
+     "/app/con[0]/ses[0]/wnd[0]/usr/lbl[1,10]"
+    ],
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr",
+    "type": "GuiUserArea"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 1,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/lbl[1,0]",
+    "text": "PGMID",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 10,
+    "grid_row": 1,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/lbl[1,10]",
+    "text": "R3TR",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "buttons": [],
+   "other": [
+    {
+     "id": "/app/con[0]/ses[0]/wnd[0]/mbar/menu[0]",
+     "text": "Table Entry",
+     "type": "GuiMenu"
+    }
+   ]
+  },
+  "screen_id": "/app/con[0]/ses[0]/wnd[0]",
+  "title": "Data Browser: Table TADIR Select Entries 10",
+  "transaction": "SE16"
+ },
+ "output": "# Data Browser: Table TADIR Select Entries 10\n\n**Transaction:** `SE16`\n\n**Screen ID:** `/app/con[0]/ses[0]/wnd[0]`\n\n## Menu Bar\n\n- **Table Entry**\n\n---\n**Screen Elements:** 3 top-level\n"
+}
