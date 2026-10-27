@@ -1,5 +1,5 @@
 #include "include/link/link_state_names.h"
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 #include "include/version.h"
 
 namespace fairyfly::tray {

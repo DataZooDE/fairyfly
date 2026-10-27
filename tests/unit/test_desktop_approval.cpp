@@ -812,3 +812,64 @@ TEST_CASE("desktop approval: notification answers round-trip", "[link][approval]
     CHECK_FALSE(parse_answer("launch:1:abc"));
     CHECK_FALSE(parse_answer("approve:1:"));
 }
+
+TEST_CASE("link runtime: the tray's write switch acts on the runtime's standing approval", "[link][approval][runtime]") {
+    // review 2026-10-25: the switch always used the process's HKCU-backed approval, so it could not be tested
+    fairyfly::link::LinkRuntime runtime(std::make_shared<fairyfly::link::approval::Standing>());  // in memory
+    auto writes = fairyfly::link::make_write_mode_control(false, runtime);
+    CHECK_FALSE(writes->allowed());
+    CHECK(writes->set_allowed(true));
+    CHECK(writes->allowed());
+    CHECK(runtime.standing->on());
+    CHECK(writes->set_allowed(false));
+    CHECK_FALSE(runtime.standing->on());
+    runtime.standing->set_enforced(true);  // "Always ask at the desktop"
+    CHECK(writes->enforced());
+    CHECK_FALSE(writes->set_allowed(true));
+    // a --read-only link never turns it on, but can turn it off
+    runtime.standing->set_enforced(false);
+    auto locked = fairyfly::link::make_write_mode_control(true, runtime);
+    CHECK_FALSE(locked->set_allowed(true));
+    CHECK_FALSE(runtime.standing->on());
+    CHECK(locked->set_allowed(false));
+}
+
+TEST_CASE("link runtime: stop requests and background threads belong to one runtime", "[link][runtime]") {
+    fairyfly::link::LinkRuntime runtime(std::make_shared<fairyfly::link::approval::Standing>());
+    CHECK_FALSE(runtime.stop);
+    runtime.request_stop();
+    CHECK(runtime.stop);
+    CHECK(runtime.background_threads() == 0);
+    {
+        const auto guard = runtime.background_thread();
+        CHECK(runtime.background_threads() == 1);
+    }
+    CHECK(runtime.background_threads() == 0);
+    // the process runtime is the one Ctrl+C, the tray's Quit and main()'s exit check use
+    CHECK(&fairyfly::link::LinkRuntime::process() == &fairyfly::link::LinkRuntime::process());
+}
+
+namespace {
+// records the runtime's background count when the work's captures are destroyed
+struct CountOnDestroy {
+    fairyfly::link::LinkRuntime* runtime;
+    std::atomic<int>* seen;
+    CountOnDestroy(fairyfly::link::LinkRuntime* r, std::atomic<int>* s) : runtime(r), seen(s) {}
+    CountOnDestroy(CountOnDestroy&& other) noexcept : runtime(other.runtime), seen(other.seen) { other.runtime = nullptr; }
+    CountOnDestroy(const CountOnDestroy&) = delete;
+    ~CountOnDestroy() { if (runtime) *seen = runtime->background_threads(); }
+};
+}  // namespace
+
+TEST_CASE("link runtime: a background thread counts until its work and captures are destroyed", "[link][runtime]") {
+    // codex 2026-10-25: main() ends with _Exit once the count is zero; a capture destroyed after the decrement
+    // (OpenSSL state, a socket) could still race static destruction
+    fairyfly::link::LinkRuntime runtime(std::make_shared<fairyfly::link::approval::Standing>());
+    std::atomic<int> seen{-1};
+    std::atomic<bool> ran{false};
+    std::thread t = runtime.start_thread([probe = CountOnDestroy(&runtime, &seen), &ran] { ran = true; });
+    t.join();
+    CHECK(ran);
+    CHECK(seen == 1);   // still counted while the captures went away
+    CHECK(runtime.background_threads() == 0);
+}

@@ -71,41 +71,25 @@ std::vector<std::string> build_fill_argv(const json& raw_args, const Policy& pol
                                     "for several fields");
     const std::string element_id = element->get<std::string>();
 
+    // the field's own rules are the fields list's (sap::parse_fill_field)
+    json field = json::object();
+    for (const char* key : {"element", "value", "clear", "row", "column", "checkbox", "commit"})
+        if (const json* given = find_arg(args, key)) field[key] = *given;
+    std::string why;
+    const auto parsed = sap::parse_fill_field(field, why);
+    if (!parsed) throw std::invalid_argument(why);
     const json* value = find_arg(args, "value");
-    if (value && !value->is_string()) throw std::invalid_argument("'value' must be a string");
-    const bool clear = bool_arg(args, "clear");
-    if (value && clear) throw std::invalid_argument("Use either 'value' or 'clear', not both");
-    if (!value && !clear) throw std::invalid_argument("Provide 'value' (text to enter) or set 'clear' to true");
-
-    const bool checkbox = bool_arg(args, "checkbox");
-    const bool commit = bool_arg(args, "commit");
-
-    const json* row = find_arg(args, "row");
-    if (row && !(row->is_number_integer() && row->get<long long>() >= 0))
-        throw std::invalid_argument("'row' must be a zero-based integer >= 0");
-    const json* column = find_arg(args, "column");
-    if (column && !column->is_string()) throw std::invalid_argument("'column' must be a string");
-    const bool has_column = column && !column->get<std::string>().empty();
-    if (column && !has_column) throw std::invalid_argument("'column' must not be empty");
-
-    const bool grid = row || has_column || checkbox || commit;
-    if (grid && !(row && has_column))
-        throw std::invalid_argument("GridView cells need both 'row' and 'column' (also required with 'checkbox' or 'commit')");
-
-    if (checkbox && value) {
-        const std::string& v = value->get<std::string>();
-        if (!(v == "X" || v == "x" || v == "1" || v == "true" || v == "True" || v == "0" || v == "false" ||
-              v == "False" || v.empty()))
-            throw std::invalid_argument("With 'checkbox', 'value' must be X, 1, true (checked) or 0, false (unchecked)");
-    }
+    const bool clear = parsed->clear, checkbox = parsed->checkbox, commit = parsed->commit;
+    const std::optional<int> row = parsed->row;
+    const std::string& column = parsed->column;
 
     std::vector<std::string> options;
     if (clear) options.push_back("--clear");
     if (row) {
         options.push_back("--row");
-        options.push_back(std::to_string(row->get<long long>()));
+        options.push_back(std::to_string(*row));
         options.push_back("--column");
-        options.push_back(column->get<std::string>());
+        options.push_back(column);
     }
     if (checkbox) options.push_back("--checkbox");
     if (commit) options.push_back("--commit");

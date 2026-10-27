@@ -1,3 +1,5 @@
+#include "include/com/control_views.h"
+#include "include/shell_kind.h"
 #include "include/element_metadata_extractor.h"
 #include "include/sensitive_data.h"
 #include "include/constants.h"
@@ -19,6 +21,359 @@ bool looks_like_prog_id(const std::string& text) {
 }
 } // namespace
 
+
+namespace {
+
+/// Tree nodes as JSON (text, key, level, expanded, column values, children), at most 50 levels deep.
+json tree_nodes_json(const std::vector<TreeNode>& nodes) {
+    const int MAX_TREE_DEPTH = 50;  // Prevent stack overflow on deeply nested trees
+    std::function<void(const TreeNode&, json&, int)> convert_node;
+    convert_node = [&](const TreeNode& node, json& node_json, int depth) {
+        if (depth > MAX_TREE_DEPTH) {
+            spdlog::warn("Tree node conversion reached max depth {}, stopping", MAX_TREE_DEPTH);
+            return;
+        }
+        node_json["text"] = node.text;
+        node_json["key"] = node.key;
+        node_json["level"] = node.level;
+        node_json["expanded"] = node.expanded;
+        if (!node.column_values.empty()) node_json["column_values"] = node.column_values;
+        if (!node.children.empty()) {
+            json children_array = json::array();
+            for (const auto& child : node.children) {
+                json child_json;
+                convert_node(child, child_json, depth + 1);
+                children_array.push_back(child_json);
+            }
+            node_json["children"] = children_array;
+        }
+    };
+    json nodes_array = json::array();
+    for (const auto& node : nodes) {
+        json node_json;
+        convert_node(node, node_json, 0);  // Start at depth 0
+        nodes_array.push_back(node_json);
+    }
+    return nodes_array;
+}
+
+}  // namespace
+
+/// Grids, table controls and trees: their rows or nodes, read once per element id in this read (the cache).
+void ElementMetadataExtractor::extract_table_or_tree(const ComGuiElementPtr& elem, const std::string& elem_id,
+                                                     const std::string& type, const std::string& text, bool probe_grid,
+                                                     json& metadata) {
+    // Extract table/tree data for specialized controls
+    // Also check if GuiShell contains a tree control based on text (ActiveX ProgID)
+    bool is_tree_control = (type == "GuiTree" ||
+                           (type == "GuiShell" && text.find("TableTreeControl") != std::string::npos) ||
+                           (type == "GuiShell" && text.find("TreeControl") != std::string::npos));
+
+    // Check if GuiShell has SubType=GridView
+    std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
+    bool is_gridview = (type == "GuiGridView" || probe_grid || (type == "GuiShell" && is_grid_shell(subtype)));
+
+    if (is_gridview || type == "GuiTableControl" || is_tree_control) {
+        spdlog::debug("extract: Element {} is gridview={} table={} tree={}", elem_id, is_gridview, type == "GuiTableControl", is_tree_control);
+
+        // Check cache first to avoid duplicate expensive extractions
+        auto cache_it = tree_grid_cache_.find(elem_id);
+        if (cache_it != tree_grid_cache_.end()) {
+            // Reuse cached extraction results
+            if (cache_it->second.contains("table_data")) {
+                metadata["table_data"] = cache_it->second["table_data"];
+            }
+            if (cache_it->second.contains("tree_data")) {
+                metadata["tree_data"] = cache_it->second["tree_data"];
+            }
+            spdlog::debug("Reused cached extraction data for element: {}", elem_id);
+        } else {
+            // Extract and cache the results
+            spdlog::debug("extract: Starting table/tree extraction for {}", elem_id);
+            try {
+                TableExtractionOptions options;
+                options.max_rows = constants::MAX_TABLE_ROWS;
+                options.max_tree_depth = constants::MAX_TREE_DEPTH;
+                options.include_headers = true;
+
+                TableDataExtractor extractor(options);
+                json cached_data;
+
+                if (is_gridview) {
+                    spdlog::debug("extract: Calling extract_grid_data for {}", elem_id);
+                    auto grid_data = extractor.extract_grid_data(elem);
+                    if (!grid_data.rows.empty() || !grid_data.columns.empty()) {
+                        json table_json;
+                        table_json["columns"] = grid_data.columns;
+                        table_json["rows"] = grid_data.rows;
+                        table_json["total_row_count"] = grid_data.total_row_count;
+                        table_json["visible_row_count"] = grid_data.visible_row_count;
+                        redact_sensitive_header_rows(table_json);
+                        metadata["table_data"] = table_json;
+                        cached_data["table_data"] = table_json;
+                        spdlog::debug("Extracted grid data: {} rows × {} columns",
+                                     grid_data.rows.size(), grid_data.columns.size());
+                    }
+                } else if (type == "GuiTableControl") {
+                    auto table_data = extractor.extract_table_data(elem);
+                    if (!table_data.rows.empty() || !table_data.columns.empty() || table_data.total_row_count > 0) {
+                        json table_json;
+                        table_json["columns"] = table_data.columns;
+                        table_json["rows"] = table_data.rows;
+                        table_json["total_row_count"] = table_data.total_row_count;
+                        table_json["visible_row_count"] = table_data.visible_row_count;
+                        redact_sensitive_header_rows(table_json);
+                        metadata["table_data"] = table_json;
+                        cached_data["table_data"] = table_json;
+                        spdlog::debug("Extracted table control data: {} rows × {} columns",
+                                     table_data.rows.size(), table_data.columns.size());
+                    }
+                } else if (is_tree_control && !options_.skip_trees) {
+                    auto tree_data = extractor.extract_tree_data(elem);
+                    if (!tree_data.nodes.empty()) {
+                        json tree_json;
+                        tree_json["columns"] = tree_data.columns;
+
+                        json nodes_array = tree_nodes_json(tree_data.nodes);
+                        tree_json["nodes"] = nodes_array;
+                        metadata["tree_data"] = tree_json;
+                        cached_data["tree_data"] = tree_json;
+                        spdlog::info("Extracted tree data: {} top-level nodes, {} columns",
+                                    tree_data.nodes.size(), tree_data.columns.size());
+                    }
+                }
+
+                // Cache the extraction results
+                if (!cached_data.empty()) {
+                    tree_grid_cache_[elem_id] = cached_data;
+                }
+            } catch (const std::exception& e) {
+                spdlog::warn("Failed to extract table/tree data for {}: {}", type, e.what());
+            }
+        }
+    }
+}
+
+/// The ABAP editor's source (sensitive lines redacted), up to the line limit.
+void ElementMetadataExtractor::read_abap_editor(const ComGuiElementPtr& elem, json& metadata) {
+    try {
+        const auto content = elem->get_abap_editor_content(constants::MAX_REQUESTED_TABLE_ROWS);
+        metadata["source_total_lines"] = content.total_lines;
+        metadata["source_lines_read"] = content.lines_read;
+        metadata["source_truncated"] = content.truncated;
+        if (!content.text.empty()) {
+            metadata["text_content"] = redact_sensitive_abap_source(content.text);
+            spdlog::debug("Extracted AbapEditor text content ({} chars)", content.text.length());
+        } else {
+            metadata["text_content"] = nullptr;  // Empty editor
+            spdlog::debug("AbapEditor is empty");
+        }
+    } catch (const std::exception& e) {
+        spdlog::warn("Failed to extract AbapEditor text: {}", e.what());
+        metadata["text_content"] = nullptr;
+    }
+}
+
+/// A container's child ids (leaf elements and GuiUserArea list none): one enumeration, or by index.
+void ElementMetadataExtractor::list_child_ids(const ComGuiElementPtr& elem, const std::string& type,
+                                              const std::string& container_type, int depth, json& metadata) {
+    // Process children for container elements only
+    // Skip child extraction for leaf elements and GuiUserArea
+    const bool is_container = metadata_lists_children(type, container_type);
+
+    if (depth < constants::MAX_ELEMENT_DEPTH && is_container) {
+        int child_count = elem->get_child_count();
+
+        // Special handling for GuiContainerShell - always try to enumerate children
+        bool force_enumerate = (type == "GuiContainerShell" || type == "GuiCustomControl" ||
+                               type == "GuiSplitterContainer" || type == "GuiContainerCtrl" ||
+                               type == "GuiSplitterShell" || type == "GuiDockShell");
+
+        if (child_count > 0 || force_enumerate) {
+            spdlog::debug("extract_element_metadata: Processing {} children of {} at depth {} (force={})",
+                         child_count, elem->get_id(), depth, force_enumerate);
+            std::vector<std::string> children;
+
+            try {
+                // Use the .item(index) method which works with SAP GUI collections
+                auto children_collection = elem->children();
+
+                // For forced enumeration, try up to MAX_CHILDREN_TO_PROCESS items even if child_count is 0
+                int max_children = force_enumerate ?
+                    (child_count > 0 ? (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS) : constants::MAX_CHILDREN_TO_PROCESS) :
+                    (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS);
+
+                // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of
+                // item(i) (~4-5 round trips per child). Falls back to item(i) below if
+                // the enumerator is unavailable or yielded nothing.
+                int enumerated_children = 0;
+                bool enumerated_ok = false;
+                if (max_children > 0) {
+                    enumerated_ok = children_collection.for_each(
+                        [&](const ComGuiElementPtr& child_ptr) {
+                            if (enumerated_children >= max_children) return false;
+                            ++enumerated_children;
+                            try {
+                                std::string child_id = child_ptr->get_id();
+                                if (!child_id.empty()) {
+                                    children.push_back(child_id);
+                                }
+                            } catch (const std::exception& e) {
+                                if (force_enumerate && child_count == 0) return false;
+                                spdlog::debug("extract_element_metadata: Exception processing child {}: {}",
+                                             enumerated_children - 1, e.what());
+                            }
+                            return true;
+                        });
+                }
+
+                if (!enumerated_ok || enumerated_children == 0) {
+                    // Discard any partial prefix from a failed enumeration so the
+                    // indexed walk neither duplicates nor drops children.
+                    children.clear();
+                    for (int i = 0; i < max_children; ++i) {
+                        try {
+                            ComGuiElementPtr child_ptr = children_collection.item(i);
+                            if (!child_ptr) {
+                                if (force_enumerate && child_count == 0) {
+                                    spdlog::debug("Force enumerate: Reached end at index {}", i);
+                                    break;
+                                }
+                                continue;
+                            }
+
+                            // Directly record child ID (avoiding duplicate recursive extraction
+                            // since all elements are traversed at top-level)
+                            std::string child_id = child_ptr->get_id();
+                            if (!child_id.empty()) {
+                                children.push_back(child_id);
+                            }
+                        } catch (const SapGuiException& e) {
+                            if (force_enumerate && child_count == 0) break;
+                            spdlog::debug("extract_element_metadata: SapGuiException processing child {}: {}", i, e.what());
+                        } catch (const ComException& e) {
+                            if (force_enumerate && child_count == 0) break;
+                            spdlog::debug("extract_element_metadata: ComException processing child {}: {}", i, e.what());
+                        } catch (const std::exception& e) {
+                            if (force_enumerate && child_count == 0) break;
+                            spdlog::debug("extract_element_metadata: Exception processing child {}: {}", i, e.what());
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                spdlog::warn("extract_element_metadata: Failed to get children collection: {}", e.what());
+            }
+
+            if (!children.empty()) {
+                add_child_ids(metadata, children);
+            } else if (child_count > 0) {
+                spdlog::debug("extract_element_metadata: No children extracted for {} (had {} children)",
+                             elem->get_id(), child_count);
+            }
+        }
+    }
+}
+
+/// GuiShell HTMLViewer: the displayed page's text (redacted) instead of the control name.
+void ElementMetadataExtractor::read_html_viewer(const ComGuiElementPtr& elem, json& metadata) {
+    // Text is the browser control name, not the displayed page.
+    metadata.erase("text");
+    const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"));
+    metadata["content_available"] = !page.text.empty();
+    if (!page.text.empty()) {
+        metadata["text"] = redact_sensitive_response_text(page.text);
+        if (page.truncated) metadata["content_truncated"] = true;
+    }
+}
+
+/// GuiShell Toolbar: its buttons (separators left out) as synthetic GuiButton entries `<shell>/btn_<id>` in
+/// toolbar_buttons, a separate field so they are never traversed as COM elements.
+void ElementMetadataExtractor::read_toolbar_buttons(const ComGuiElementPtr& elem, const std::string& elem_id,
+                                                    json& metadata) {
+    const auto toolbar = as_toolbar(*elem);
+    try {
+        int button_count = toolbar.get_button_count();
+        spdlog::debug("GuiShell toolbar has {} buttons", button_count);
+
+        json button_children = json::array();
+        for (int i = 0; i < button_count; ++i) {
+            try {
+                std::string btn_id = toolbar.get_button_id(i);
+                std::string btn_text = toolbar.get_button_text(i);
+                std::string btn_tooltip = toolbar.get_button_tooltip(i);
+                std::string btn_type = toolbar.get_button_type(i);
+                bool btn_enabled = toolbar.get_button_enabled(i);
+
+                // Skip separators
+                if (btn_type == "Separator") continue;
+
+                // Create synthetic button element with full path
+                std::string full_btn_path = elem_id + "/btn_" + btn_id;
+                json btn_metadata;
+                btn_metadata["id"] = full_btn_path;
+                btn_metadata["type"] = "GuiButton";
+                btn_metadata["name"] = btn_id;
+                btn_metadata["text"] = btn_text;
+                btn_metadata["tooltip"] = btn_tooltip;
+                btn_metadata["enabled"] = btn_enabled;
+                btn_metadata["button_type"] = btn_type;
+                btn_metadata["changeable"] = true;
+                btn_metadata["visible"] = true;
+                btn_metadata["capabilities"] = json::array({"clickable"});
+
+                button_children.push_back(btn_metadata);
+            } catch (const std::exception& e) {
+                spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
+            }
+        }
+
+        // Store synthetic buttons in separate field to avoid recursive processing
+        // These are metadata-only constructs, not real COM elements that can be traversed
+        if (!button_children.empty()) {
+            metadata["toolbar_buttons"] = button_children;
+            metadata["button_count"] = button_children.size();
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
+    }
+}
+
+/// A GuiShell subtype without a dedicated reader (ERR-137): grid-like (RowCount and ColumnCount) answers true;
+/// otherwise its HTML/text pattern or accessibility text becomes text_content. Either way content_available, and a
+/// Text that is just the ActiveX ProgID is dropped.
+bool ElementMetadataExtractor::probe_unknown_shell(const ComGuiElementPtr& elem, const std::string& text,
+                                                   json& metadata) {
+    bool probe_grid = false;
+    try {
+        probe_grid = elem->get_property_int(L"RowCount") > 0 &&
+                     elem->get_property_int(L"ColumnCount") > 0;
+    } catch (const std::exception&) {}
+    if (!probe_grid) {
+        std::string content;
+        try {
+            const int handle = elem->get_property_int(L"Handle");
+            const auto page = (!kGateGenericHtmlProbe || handle_hosts_browser(handle))
+                ? read_html_viewer_text(handle, HtmlReadBudget{0, 0})
+                : HtmlViewerText{};
+            content = page.text;
+            if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
+        } catch (const std::exception&) {}
+        for (const wchar_t* prop : {L"AccText", L"AccDescription"}) {
+            if (!content.empty()) break;
+            try { content = elem->get_property_string(prop); }
+            catch (const std::exception&) {}
+        }
+        if (!content.empty()) {
+            metadata["text_content"] = redact_sensitive_response_text(content);
+        }
+        metadata["content_available"] = !content.empty();
+    } else {
+        metadata["content_available"] = true;
+    }
+    // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
+    if (looks_like_prog_id(text)) metadata.erase("text");
+    return probe_grid;
+}
 
 json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
     if (!elem) return nullptr;
@@ -123,346 +478,24 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
         if (type == "GuiShell") {
             const std::string& subtype = facts.subtype;
 
-            if (subtype == "HTMLViewer") {
-                // Text is the browser control name, not the displayed page.
-                metadata.erase("text");
-                const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"));
-                metadata["content_available"] = !page.text.empty();
-                if (!page.text.empty()) {
-                    metadata["text"] = redact_sensitive_response_text(page.text);
-                    if (page.truncated) metadata["content_truncated"] = true;
-                }
-            }
+            if (subtype == "HTMLViewer") read_html_viewer(elem, metadata);
 
             // Special handling for GuiShell Toolbar - enumerate buttons via ButtonCount API
-            if (subtype == "Toolbar") {
-                try {
-                    int button_count = elem->get_button_count();
-                    spdlog::debug("GuiShell toolbar has {} buttons", button_count);
-
-                    json button_children = json::array();
-                    for (int i = 0; i < button_count; ++i) {
-                        try {
-                            std::string btn_id = elem->get_button_id(i);
-                            std::string btn_text = elem->get_button_text(i);
-                            std::string btn_tooltip = elem->get_button_tooltip(i);
-                            std::string btn_type = elem->get_button_type(i);
-                            bool btn_enabled = elem->get_button_enabled(i);
-
-                            // Skip separators
-                            if (btn_type == "Separator") continue;
-
-                            // Create synthetic button element with full path
-                            std::string full_btn_path = elem_id + "/btn_" + btn_id;
-                            json btn_metadata;
-                            btn_metadata["id"] = full_btn_path;
-                            btn_metadata["type"] = "GuiButton";
-                            btn_metadata["name"] = btn_id;
-                            btn_metadata["text"] = btn_text;
-                            btn_metadata["tooltip"] = btn_tooltip;
-                            btn_metadata["enabled"] = btn_enabled;
-                            btn_metadata["button_type"] = btn_type;
-                            btn_metadata["changeable"] = true;
-                            btn_metadata["visible"] = true;
-                            btn_metadata["capabilities"] = json::array({"clickable"});
-
-                            button_children.push_back(btn_metadata);
-                        } catch (const std::exception& e) {
-                            spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
-                        }
-                    }
-
-                    // Store synthetic buttons in separate field to avoid recursive processing
-                    // These are metadata-only constructs, not real COM elements that can be traversed
-                    if (!button_children.empty()) {
-                        metadata["toolbar_buttons"] = button_children;
-                        metadata["button_count"] = button_children.size();
-                    }
-                } catch (const std::exception& e) {
-                    spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
-                }
-            }
+            if (subtype == "Toolbar") read_toolbar_buttons(elem, elem_id, metadata);
         }
 
         // Generic probe for GuiShell subtypes without a dedicated reader (ERR-137):
         // grid-like, HTML/text pattern, then accessibility text.
-        bool probe_grid = false;
-        if (type == "GuiShell") {
-            const std::string shell_subtype = metadata.value("subtype", "");
-            const bool known = shell_subtype == "GridView" || shell_subtype == "Tree" ||
-                               shell_subtype == "TableTreeControl" || shell_subtype == "Toolbar" ||
-                               shell_subtype == "HTMLViewer" || shell_subtype == "AbapEditor" ||
-                               shell_subtype == "TextEdit";
-            if (!known) {
-                try {
-                    probe_grid = elem->get_property_int(L"RowCount") > 0 &&
-                                 elem->get_property_int(L"ColumnCount") > 0;
-                } catch (const std::exception&) {}
-                if (!probe_grid) {
-                    std::string content;
-                    try {
-                        const int handle = elem->get_property_int(L"Handle");
-                        const auto page = (!kGateGenericHtmlProbe || handle_hosts_browser(handle))
-                            ? read_html_viewer_text(handle, HtmlReadBudget{0, 0})
-                            : HtmlViewerText{};
-                        content = page.text;
-                        if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
-                    } catch (const std::exception&) {}
-                    for (const wchar_t* prop : {L"AccText", L"AccDescription"}) {
-                        if (!content.empty()) break;
-                        try { content = elem->get_property_string(prop); }
-                        catch (const std::exception&) {}
-                    }
-                    if (!content.empty()) {
-                        metadata["text_content"] = redact_sensitive_response_text(content);
-                    }
-                    metadata["content_available"] = !content.empty();
-                } else {
-                    metadata["content_available"] = true;
-                }
-                // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
-                if (looks_like_prog_id(text)) metadata.erase("text");
-            }
-        }
+        const bool probe_grid = type == "GuiShell" && !has_dedicated_shell_reader(metadata.value("subtype", "")) &&
+                                probe_unknown_shell(elem, text, metadata);
 
-        // Extract table/tree data for specialized controls
-        // Also check if GuiShell contains a tree control based on text (ActiveX ProgID)
-        bool is_tree_control = (type == "GuiTree" ||
-                               (type == "GuiShell" && text.find("TableTreeControl") != std::string::npos) ||
-                               (type == "GuiShell" && text.find("TreeControl") != std::string::npos));
-
-        // Check if GuiShell has SubType=GridView
-        std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
-        bool is_gridview = (type == "GuiGridView" || probe_grid || (type == "GuiShell" && subtype == "GridView"));
-
-        if (is_gridview || type == "GuiTableControl" || is_tree_control) {
-            spdlog::debug("extract: Element {} is gridview={} table={} tree={}", elem_id, is_gridview, type == "GuiTableControl", is_tree_control);
-
-            // Check cache first to avoid duplicate expensive extractions
-            auto cache_it = tree_grid_cache_.find(elem_id);
-            if (cache_it != tree_grid_cache_.end()) {
-                // Reuse cached extraction results
-                if (cache_it->second.contains("table_data")) {
-                    metadata["table_data"] = cache_it->second["table_data"];
-                }
-                if (cache_it->second.contains("tree_data")) {
-                    metadata["tree_data"] = cache_it->second["tree_data"];
-                }
-                spdlog::debug("Reused cached extraction data for element: {}", elem_id);
-            } else {
-                // Extract and cache the results
-                spdlog::debug("extract: Starting table/tree extraction for {}", elem_id);
-                try {
-                    TableExtractionOptions options;
-                    options.max_rows = constants::MAX_TABLE_ROWS;
-                    options.max_tree_depth = constants::MAX_TREE_DEPTH;
-                    options.include_headers = true;
-
-                    TableDataExtractor extractor(options);
-                    json cached_data;
-
-                    if (is_gridview) {
-                        spdlog::debug("extract: Calling extract_grid_data for {}", elem_id);
-                        auto grid_data = extractor.extract_grid_data(elem);
-                        if (!grid_data.rows.empty() || !grid_data.columns.empty()) {
-                            json table_json;
-                            table_json["columns"] = grid_data.columns;
-                            table_json["rows"] = grid_data.rows;
-                            table_json["total_row_count"] = grid_data.total_row_count;
-                            table_json["visible_row_count"] = grid_data.visible_row_count;
-                            redact_sensitive_header_rows(table_json);
-                            metadata["table_data"] = table_json;
-                            cached_data["table_data"] = table_json;
-                            spdlog::debug("Extracted grid data: {} rows × {} columns",
-                                         grid_data.rows.size(), grid_data.columns.size());
-                        }
-                    } else if (type == "GuiTableControl") {
-                        auto table_data = extractor.extract_table_data(elem);
-                        if (!table_data.rows.empty() || !table_data.columns.empty() || table_data.total_row_count > 0) {
-                            json table_json;
-                            table_json["columns"] = table_data.columns;
-                            table_json["rows"] = table_data.rows;
-                            table_json["total_row_count"] = table_data.total_row_count;
-                            table_json["visible_row_count"] = table_data.visible_row_count;
-                            redact_sensitive_header_rows(table_json);
-                            metadata["table_data"] = table_json;
-                            cached_data["table_data"] = table_json;
-                            spdlog::debug("Extracted table control data: {} rows × {} columns",
-                                         table_data.rows.size(), table_data.columns.size());
-                        }
-                    } else if (is_tree_control && !options_.skip_trees) {
-                        auto tree_data = extractor.extract_tree_data(elem);
-                        if (!tree_data.nodes.empty()) {
-                            json tree_json;
-                            tree_json["columns"] = tree_data.columns;
-
-                            // Convert tree nodes to JSON with depth limit to prevent stack overflow
-                            json nodes_array = json::array();
-                            const int MAX_TREE_DEPTH = 50;  // Prevent stack overflow on deeply nested trees
-                            std::function<void(const TreeNode&, json&, int)> convert_node;
-                            convert_node = [&](const TreeNode& node, json& node_json, int depth) {
-                                if (depth > MAX_TREE_DEPTH) {
-                                    spdlog::warn("Tree node conversion reached max depth {}, stopping", MAX_TREE_DEPTH);
-                                    return;
-                                }
-
-                                node_json["text"] = node.text;
-                                node_json["key"] = node.key;
-                                node_json["level"] = node.level;
-                                node_json["expanded"] = node.expanded;
-                                if (!node.column_values.empty()) {
-                                    node_json["column_values"] = node.column_values;
-                                }
-                                if (!node.children.empty()) {
-                                    json children_array = json::array();
-                                    for (const auto& child : node.children) {
-                                        json child_json;
-                                        convert_node(child, child_json, depth + 1);
-                                        children_array.push_back(child_json);
-                                    }
-                                    node_json["children"] = children_array;
-                                }
-                            };
-
-                            for (const auto& node : tree_data.nodes) {
-                                json node_json;
-                                convert_node(node, node_json, 0);  // Start at depth 0
-                                nodes_array.push_back(node_json);
-                            }
-
-                            tree_json["nodes"] = nodes_array;
-                            metadata["tree_data"] = tree_json;
-                            cached_data["tree_data"] = tree_json;
-                            spdlog::info("Extracted tree data: {} top-level nodes, {} columns",
-                                        tree_data.nodes.size(), tree_data.columns.size());
-                        }
-                    }
-
-                    // Cache the extraction results
-                    if (!cached_data.empty()) {
-                        tree_grid_cache_[elem_id] = cached_data;
-                    }
-                } catch (const std::exception& e) {
-                    spdlog::warn("Failed to extract table/tree data for {}: {}", type, e.what());
-                }
-            }
-        }
+        extract_table_or_tree(elem, elem_id, type, text, probe_grid, metadata);
 
         // Extract text content from GuiShell with AbapEditor subtype (ABAP source code editor)
-        if (type == "GuiShell" && subtype == "AbapEditor") {
-            try {
-                const auto content = elem->get_abap_editor_content(constants::MAX_REQUESTED_TABLE_ROWS);
-                metadata["source_total_lines"] = content.total_lines;
-                metadata["source_lines_read"] = content.lines_read;
-                metadata["source_truncated"] = content.truncated;
-                if (!content.text.empty()) {
-                    metadata["text_content"] = redact_sensitive_abap_source(content.text);
-                    spdlog::debug("Extracted AbapEditor text content ({} chars)", content.text.length());
-                } else {
-                    metadata["text_content"] = nullptr;  // Empty editor
-                    spdlog::debug("AbapEditor is empty");
-                }
-            } catch (const std::exception& e) {
-                spdlog::warn("Failed to extract AbapEditor text: {}", e.what());
-                metadata["text_content"] = nullptr;
-            }
-        }
+        const std::string subtype = (type == "GuiShell") ? metadata.value("subtype", "") : "";
+        if (type == "GuiShell" && subtype == "AbapEditor") read_abap_editor(elem, metadata);
 
-        // Process children for container elements only
-        // Skip child extraction for leaf elements and GuiUserArea
-        const bool is_container = metadata_lists_children(type, container_type);
-
-        if (depth < constants::MAX_ELEMENT_DEPTH && is_container) {
-            int child_count = elem->get_child_count();
-
-            // Special handling for GuiContainerShell - always try to enumerate children
-            bool force_enumerate = (type == "GuiContainerShell" || type == "GuiCustomControl" ||
-                                   type == "GuiSplitterContainer" || type == "GuiContainerCtrl" ||
-                                   type == "GuiSplitterShell" || type == "GuiDockShell");
-
-            if (child_count > 0 || force_enumerate) {
-                spdlog::debug("extract_element_metadata: Processing {} children of {} at depth {} (force={})",
-                             child_count, elem->get_id(), depth, force_enumerate);
-                std::vector<std::string> children;
-
-                try {
-                    // Use the .item(index) method which works with SAP GUI collections
-                    auto children_collection = elem->children();
-
-                    // For forced enumeration, try up to MAX_CHILDREN_TO_PROCESS items even if child_count is 0
-                    int max_children = force_enumerate ?
-                        (child_count > 0 ? (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS) : constants::MAX_CHILDREN_TO_PROCESS) :
-                        (std::min)(child_count, constants::MAX_CHILDREN_TO_PROCESS);
-
-                    // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of
-                    // item(i) (~4-5 round trips per child). Falls back to item(i) below if
-                    // the enumerator is unavailable or yielded nothing.
-                    int enumerated_children = 0;
-                    bool enumerated_ok = false;
-                    if (max_children > 0) {
-                        enumerated_ok = children_collection.for_each(
-                            [&](const ComGuiElementPtr& child_ptr) {
-                                if (enumerated_children >= max_children) return false;
-                                ++enumerated_children;
-                                try {
-                                    std::string child_id = child_ptr->get_id();
-                                    if (!child_id.empty()) {
-                                        children.push_back(child_id);
-                                    }
-                                } catch (const std::exception& e) {
-                                    if (force_enumerate && child_count == 0) return false;
-                                    spdlog::debug("extract_element_metadata: Exception processing child {}: {}",
-                                                 enumerated_children - 1, e.what());
-                                }
-                                return true;
-                            });
-                    }
-
-                    if (!enumerated_ok || enumerated_children == 0) {
-                        // Discard any partial prefix from a failed enumeration so the
-                        // indexed walk neither duplicates nor drops children.
-                        children.clear();
-                        for (int i = 0; i < max_children; ++i) {
-                            try {
-                                ComGuiElementPtr child_ptr = children_collection.item(i);
-                                if (!child_ptr) {
-                                    if (force_enumerate && child_count == 0) {
-                                        spdlog::debug("Force enumerate: Reached end at index {}", i);
-                                        break;
-                                    }
-                                    continue;
-                                }
-
-                                // Directly record child ID (avoiding duplicate recursive extraction
-                                // since all elements are traversed at top-level)
-                                std::string child_id = child_ptr->get_id();
-                                if (!child_id.empty()) {
-                                    children.push_back(child_id);
-                                }
-                            } catch (const SapGuiException& e) {
-                                if (force_enumerate && child_count == 0) break;
-                                spdlog::debug("extract_element_metadata: SapGuiException processing child {}: {}", i, e.what());
-                            } catch (const ComException& e) {
-                                if (force_enumerate && child_count == 0) break;
-                                spdlog::debug("extract_element_metadata: ComException processing child {}: {}", i, e.what());
-                            } catch (const std::exception& e) {
-                                if (force_enumerate && child_count == 0) break;
-                                spdlog::debug("extract_element_metadata: Exception processing child {}: {}", i, e.what());
-                            }
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    spdlog::warn("extract_element_metadata: Failed to get children collection: {}", e.what());
-                }
-
-                if (!children.empty()) {
-                    add_child_ids(metadata, children);
-                } else if (child_count > 0) {
-                    spdlog::debug("extract_element_metadata: No children extracted for {} (had {} children)",
-                                 elem->get_id(), child_count);
-                }
-            }
-        }
+        list_child_ids(elem, type, container_type, depth, metadata);
 
         return metadata;
     } catch (const SapGuiException& e) {

@@ -12,7 +12,7 @@
 #include <mutex>
 #include <thread>
 
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 #include "include/tray/tray_contract.h"
 
 #include <windows.h>
@@ -1516,6 +1516,51 @@ TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][c
     GUID clsid{};
     REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
     CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
+}
+
+TEST_CASE("tray actions: open, console and detached start, shared by both trays", "[tray][actions]") {
+    FakeOpener opener;
+    FakeLauncher launcher;
+    std::vector<std::string> notices;
+    const TrayActions actions{&opener, &launcher, "C:/fairyfly/fairyfly.exe",
+                              [&](const std::string& text) { notices.push_back(text); }};
+    actions.open("C:/logs/link.log", "the log");
+    CHECK(opener.opened.size() == 1);
+    CHECK(notices.empty());
+    opener.ok = false;
+    actions.open("C:/logs/link.log", "the log");
+    REQUIRE(notices.size() == 1);
+    CHECK(notices[0] == "Could not open the log: C:/logs/link.log");
+
+    actions.console({"link", "status"});
+    REQUIRE(launcher.requests.size() == 1);
+    CHECK(launcher.requests[0].new_console);
+    CHECK(launcher.requests[0].command_line == console_command_line("C:/fairyfly/fairyfly.exe", {"link", "status"}));
+
+    CHECK(actions.start_detached({"link", "run", "--tray"}));
+    REQUIRE(launcher.requests.size() == 2);
+    CHECK(launcher.requests[1].detached);
+    CHECK(launcher.requests[1].command_line == join_command_line("C:/fairyfly/fairyfly.exe", {"link", "run", "--tray"}));
+    launcher.pid.reset();
+    CHECK_FALSE(actions.start_detached({"link", "run", "--tray"}));
+    actions.console({"update", "check"});
+    CHECK(notices.back() == "Could not open a console");
+    // without a launcher nothing starts, and a console says nothing (as before)
+    const TrayActions none{nullptr, nullptr, "x.exe", [&](const std::string& text) { notices.push_back(text); }};
+    const auto before = notices.size();
+    none.console({"link", "pair"});
+    CHECK_FALSE(none.start_detached({"mcp"}));
+    none.open("y", "the log");
+    CHECK(notices.size() == before + 1);   // only the failed open
+}
+
+TEST_CASE("tray headers: the shared tray header does not pull in the MCP server", "[tray][contract]") {
+    // review 2026-10-25: tray.h (488 lines) pulled mcp/* into the link; the MCP server's tray is mcp_tray.h
+    std::ifstream in(std::filesystem::path(FAIRYFLY_SOURCE_DIR) / "include" / "tray" / "tray.h", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(text.empty());
+    CHECK(text.find("include/mcp/") == std::string::npos);
+    CHECK(text.find("mcp::") == std::string::npos);
 }
 
 TEST_CASE("link tray: a desktop clock off by minutes is shown with the fix", "[tray][link_tray][clock]") {

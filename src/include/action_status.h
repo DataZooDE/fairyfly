@@ -65,6 +65,9 @@ std::optional<Result> classify_list_label_outcome(bool same_label,
 
 bool is_missing_element_error(const std::string& message);
 
+/// The element at `path`, or null when SAP reports it missing; any other COM failure propagates.
+ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session, const std::string& path);
+
 bool should_activate_positioned_label(const std::string& type,
                                       const std::string& path,
                                       int window_index,

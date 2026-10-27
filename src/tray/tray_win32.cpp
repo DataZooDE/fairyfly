@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <mutex>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
@@ -624,6 +625,43 @@ std::string route_logging_to_file(const std::string& file_name) {
     } catch (const std::exception&) {
     }
     return file.string();
+}
+
+TrayStart prepare_tray_start(const std::string& mutex_name) {
+    TrayStart start;
+    start.entry.tray_requested = true;
+    start.entry.is_child = is_tray_child_process();
+    start.entry.has_console = process_has_console();
+    start.entry.exe = current_exe_path();
+    start.entry.args = current_args();   // the detached child (and the autostart) get the same arguments
+    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
+    start.program = tray_start_program(start.entry.exe, path_exists);
+    start.registry = make_win32_run_key();
+    start.launcher = make_win32_process_launcher();
+    start.guard = make_win32_single_instance(mutex_name);
+    return start;
+}
+
+std::optional<int> settle_tray_start(TrayStart& start, TrayKind kind, const std::string& title) {
+    TrayEntryServices services;
+    services.registry = start.registry.get();
+    services.launcher = start.launcher.get();
+    services.guard = start.guard.get();
+    services.print = [](const std::string& line) { std::cout << line << std::endl; };
+    const TrayEntryResult decided = decide_tray_entry(start.entry, services);
+    if (decided.outcome == TrayEntryOutcome::Failed && startup_error_needs_dialog_here())
+        make_win32_tray_host()->message_box(title, decided.message);   // nobody reads this console
+    if (decided.outcome == TrayEntryOutcome::AlreadyRunning) {
+        auto other = make_win32_tray_host(kind);
+        if (!other->show_running_instance() && startup_error_needs_dialog_here())
+            other->message_box(title, "The " + start.entry.name + " is already running: its icon is in the notification area.");
+    }
+    if (decided.outcome != TrayEntryOutcome::RunHere) return decided.exit_code;
+    // From here on this process is the tray: no console, logs to a file.
+    if (start.entry.is_child) detach_console();
+    start.launched = is_tray_launched_process();
+    clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
+    return std::nullopt;
 }
 
 } // namespace fairyfly::tray
