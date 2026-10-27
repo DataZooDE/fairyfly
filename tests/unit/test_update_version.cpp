@@ -111,7 +111,7 @@ TEST_CASE("update version: the install decision orders same-day releases", "[upd
     Facts f;
     f.expected_sha256 = hash;
     f.actual_sha256 = hash;
-    f.current = Signature{true, "CN=DataZoo GmbH"};
+    f.current = Signature{true, "CN=DataZoo GmbH, O=DataZoo GmbH, L=Berlin, S=Berlin, C=DE"};
     f.downloaded = f.current;
     auto verdict = [&](const std::string& current, const std::string& release) {
         f.current_version = current;
