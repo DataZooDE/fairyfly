@@ -26,7 +26,7 @@ Configuring renders `build-msix/msix/AppxManifest.xml` from
 [cmake/msix_manifest.cmake](../cmake/msix_manifest.cmake). Without the three identity values it uses `PLACEHOLDER`
 values and warns. The code reads the option through `include/packaging.h` (`FAIRYFLY_PACKAGE_MSIX` on `fairyfly_core`).
 
-An `update` call in an MSIX build answers:
+An `update` call in an MSIX build answers (the `suggestions` appear with verbose errors, as for every command):
 
 ~~~json
 {"status": "error", "error": {"code": "UPDATE_MANAGED_BY_STORE",

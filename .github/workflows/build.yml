@@ -256,6 +256,7 @@ jobs:
         $id = $manifest.Package.Identity
         Write-Host "AppxManifest.xml: $($id.Name) $($id.Version) ($($id.Publisher))"
         if ($id.Version -ne (& ./packaging/msix_version.ps1).Trim()) { Write-Error "manifest version $($id.Version) differs from msix_version.ps1"; exit 1 }
+        exit 0   # not the exit code of `update apply` above (the expected refusal)
       shell: pwsh
 
     - name: Upload msix test results
