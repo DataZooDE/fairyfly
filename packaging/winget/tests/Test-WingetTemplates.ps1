@@ -42,6 +42,19 @@ function Get-Block([string]$text, [string]$key) {
     return (($m.Groups[1].Value -split '\r?\n' | ForEach-Object { $_ -replace '^  ', '' }) -join "`n").Trim()
 }
 
+Write-Host '=== parser on CRLF and LF text (git checks the templates out with CRLF on Windows) ==='
+foreach ($eol in "`r`n", "`n") {
+    $name = if ($eol -eq "`n") { 'LF' } else { 'CRLF' }
+    $sample = (@('# header', 'ManifestVersion: 1.12.0  ', "ProductCode: '{X}'", 'Tags:', '- sap', '- cli',
+        'Description: |-', '  line one', '  line two', 'ManifestType: version', '') -join $eol)
+    Check ((Get-Field $sample 'ManifestVersion') -ceq '1.12.0') "$name Get-Field ManifestVersion -> '$(Get-Field $sample 'ManifestVersion')'"
+    Check ((Get-Field $sample 'ProductCode') -ceq '{X}') "$name Get-Field removes quotes"
+    Check ((Get-Field $sample 'ManifestType') -ceq 'version') "$name Get-Field of the last line"
+    $list = Get-List $sample 'Tags'
+    Check (($list -join ',') -ceq 'sap,cli') "$name Get-List Tags -> '$($list -join ',')'"
+    Check ((Get-Block $sample 'Description') -ceq "line one`nline two") "$name Get-Block Description"
+}
+
 $files = [ordered]@{
     'DataZoo.fairyfly.yaml'                = 'version'
     'DataZoo.fairyfly.installer.yaml'      = 'installer'
