@@ -3,6 +3,8 @@
 #include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
+#include "include/com/control_views.h"
+#include "include/com/tree_view.h"
 #include "include/com/wrapper.h"
 #include "include/constants.h"
 #include "include/com/wrapper_helpers.h"
@@ -788,12 +790,12 @@ TEST_CASE("GridView double-click sets the current cell before double-clicking it
     ScopedDispatchCacheReset cache_reset;
     auto* dispatch = new TextFieldDispatch(L"GuiGridView", 14200);
     auto grid = ComGuiElement::create(IDispatchPtr(dispatch, true));
-    grid->doubleclick_grid_cell(3, "MATNR");
+    as_grid(*grid).doubleclick_grid_cell(3, "MATNR");
     REQUIRE(dispatch->set_cell_row == 3);
     REQUIRE(dispatch->set_cell_column == L"MATNR");
     REQUIRE(dispatch->grid_calls == std::vector<std::string>{"SetCurrentCell", "DoubleClickCurrentCell"});
-    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(-1, "MATNR"), ComException);
-    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(0, ""), ComException);
+    REQUIRE_THROWS_AS(as_grid(*grid).doubleclick_grid_cell(-1, "MATNR"), ComException);
+    REQUIRE_THROWS_AS(as_grid(*grid).doubleclick_grid_cell(0, ""), ComException);
 }
 
 TEST_CASE("Window send_vkey passes the numeric key as an integer variant", "[com][window]") {
@@ -1424,8 +1426,8 @@ TEST_CASE("Grid cell reads resolve the COM method once per grid type", "[com][gr
     auto grid = ComGuiElement::create(dispatch);
     dispatch->Release();
     REQUIRE(grid->get_type() == "GuiShell");
-    REQUIRE(grid->get_cell_value(0, "A") == "grid-cell");
-    REQUIRE(grid->get_cell_value(0, "B") == "grid-cell");
+    REQUIRE(as_grid(*grid).get_cell_value(0, "A") == "grid-cell");
+    REQUIRE(as_grid(*grid).get_cell_value(0, "B") == "grid-cell");
     REQUIRE(dispatch->cell_value_lookups == 1);
 }
 
@@ -1435,10 +1437,10 @@ TEST_CASE("Grid toolbar metadata resolves each COM method once", "[com][grid][pe
     auto grid = ComGuiElement::create(dispatch);
     dispatch->Release();
     REQUIRE(grid->get_type() == "GuiShell");
-    REQUIRE(grid->get_grid_toolbar_button_id(0) == "BUTTON");
-    REQUIRE(grid->get_grid_toolbar_button_id(1) == "BUTTON");
-    REQUIRE(grid->get_grid_toolbar_button_tooltip(0) == "Tooltip");
-    REQUIRE(grid->get_grid_toolbar_button_tooltip(1) == "Tooltip");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_id(0) == "BUTTON");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_id(1) == "BUTTON");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_tooltip(0) == "Tooltip");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_tooltip(1) == "Tooltip");
     REQUIRE(dispatch->toolbar_id_lookups == 1);
     REQUIRE(dispatch->toolbar_tooltip_lookups == 1);
 }
@@ -1511,7 +1513,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     auto* dispatch = new TextFieldDispatch(L"GuiShell", 151, L"wnd[0]/usr/tree");
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
-    tree->doubleclick_node("NODE");
+    as_tree(*tree).doubleclick_node("NODE");
     REQUIRE(dispatch->tree_item_doubleclicks == 1);
     REQUIRE(dispatch->tree_node_doubleclicks == 0);
 
@@ -1519,7 +1521,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     simple_dispatch->tree_node_has_text = true;
     auto simple_tree = ComGuiElement::create(simple_dispatch);
     simple_dispatch->Release();
-    simple_tree->doubleclick_node("SIMPLE");
+    as_tree(*simple_tree).doubleclick_node("SIMPLE");
     REQUIRE(simple_dispatch->tree_node_doubleclicks == 1);
     REQUIRE(simple_dispatch->tree_item_doubleclicks == 0);
 }
@@ -1530,7 +1532,7 @@ TEST_CASE("Selecting a tree node clears an earlier selection", "[com][tree][acti
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
 
-    tree->select_node("target-node");
+    as_tree(*tree).select_node("target-node");
 
     REQUIRE(dispatch->tree_selection_calls == std::vector<std::string>{"UnselectAll", "SelectNode"});
     REQUIRE(dispatch->selected_tree_nodes == std::vector<std::wstring>{L"target-node"});

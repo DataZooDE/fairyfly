@@ -1,3 +1,5 @@
+#include "include/com/control_views.h"
+#include "include/com/tree_view.h"
 #include "include/shell_kind.h"
 #include "include/link/trail_screen_source.h"
 
@@ -65,14 +67,14 @@ void read_columns(Field& f, const ComGuiElementPtr& e, const std::string& subtyp
     if (f.type != "GuiShell" || !e) return;
     if (sap::is_grid_shell(subtype)) {
         try {
-            f.columns = e->get_column_order();
+            f.columns = as_grid(*e).get_column_order();
         } catch (const std::exception&) {
             f.columns.clear();
         }
         if (f.columns.empty()) f.opaque = true;
     } else if (subtype == "Tree") {
         try {
-            f.columns = e->get_tree_column_names();
+            f.columns = as_tree(*e).get_tree_column_names();
         } catch (const std::exception&) {
         }
     }
@@ -146,7 +148,7 @@ public:
             if (!session) return std::nullopt;
             auto e = session->find_element_by_id(element_id);
             if (!e) return std::nullopt;
-            if (row) return e->get_cell_value(*row, column);
+            if (row) return as_grid(*e).get_cell_value(*row, column);
             const std::string type = e->get_type();
             if (type == "GuiPasswordField") return std::string();  // never read
             if (type == "GuiCheckBox" || type == "GuiRadioButton") {
