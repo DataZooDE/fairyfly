@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/shell_kind.h"
 #include "include/element_metadata_extractor.h"
 #include "include/sensitive_data.h"
@@ -273,6 +274,107 @@ void ElementMetadataExtractor::list_child_ids(const ComGuiElementPtr& elem, cons
     }
 }
 
+/// GuiShell HTMLViewer: the displayed page's text (redacted) instead of the control name.
+void ElementMetadataExtractor::read_html_viewer(const ComGuiElementPtr& elem, json& metadata) {
+    // Text is the browser control name, not the displayed page.
+    metadata.erase("text");
+    const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"));
+    metadata["content_available"] = !page.text.empty();
+    if (!page.text.empty()) {
+        metadata["text"] = redact_sensitive_response_text(page.text);
+        if (page.truncated) metadata["content_truncated"] = true;
+    }
+}
+
+/// GuiShell Toolbar: its buttons (separators left out) as synthetic GuiButton entries `<shell>/btn_<id>` in
+/// toolbar_buttons, a separate field so they are never traversed as COM elements.
+void ElementMetadataExtractor::read_toolbar_buttons(const ComGuiElementPtr& elem, const std::string& elem_id,
+                                                    json& metadata) {
+    const auto toolbar = as_toolbar(*elem);
+    try {
+        int button_count = toolbar.get_button_count();
+        spdlog::debug("GuiShell toolbar has {} buttons", button_count);
+
+        json button_children = json::array();
+        for (int i = 0; i < button_count; ++i) {
+            try {
+                std::string btn_id = toolbar.get_button_id(i);
+                std::string btn_text = toolbar.get_button_text(i);
+                std::string btn_tooltip = toolbar.get_button_tooltip(i);
+                std::string btn_type = toolbar.get_button_type(i);
+                bool btn_enabled = toolbar.get_button_enabled(i);
+
+                // Skip separators
+                if (btn_type == "Separator") continue;
+
+                // Create synthetic button element with full path
+                std::string full_btn_path = elem_id + "/btn_" + btn_id;
+                json btn_metadata;
+                btn_metadata["id"] = full_btn_path;
+                btn_metadata["type"] = "GuiButton";
+                btn_metadata["name"] = btn_id;
+                btn_metadata["text"] = btn_text;
+                btn_metadata["tooltip"] = btn_tooltip;
+                btn_metadata["enabled"] = btn_enabled;
+                btn_metadata["button_type"] = btn_type;
+                btn_metadata["changeable"] = true;
+                btn_metadata["visible"] = true;
+                btn_metadata["capabilities"] = json::array({"clickable"});
+
+                button_children.push_back(btn_metadata);
+            } catch (const std::exception& e) {
+                spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
+            }
+        }
+
+        // Store synthetic buttons in separate field to avoid recursive processing
+        // These are metadata-only constructs, not real COM elements that can be traversed
+        if (!button_children.empty()) {
+            metadata["toolbar_buttons"] = button_children;
+            metadata["button_count"] = button_children.size();
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
+    }
+}
+
+/// A GuiShell subtype without a dedicated reader (ERR-137): grid-like (RowCount and ColumnCount) answers true;
+/// otherwise its HTML/text pattern or accessibility text becomes text_content. Either way content_available, and a
+/// Text that is just the ActiveX ProgID is dropped.
+bool ElementMetadataExtractor::probe_unknown_shell(const ComGuiElementPtr& elem, const std::string& text,
+                                                   json& metadata) {
+    bool probe_grid = false;
+    try {
+        probe_grid = elem->get_property_int(L"RowCount") > 0 &&
+                     elem->get_property_int(L"ColumnCount") > 0;
+    } catch (const std::exception&) {}
+    if (!probe_grid) {
+        std::string content;
+        try {
+            const int handle = elem->get_property_int(L"Handle");
+            const auto page = (!kGateGenericHtmlProbe || handle_hosts_browser(handle))
+                ? read_html_viewer_text(handle, HtmlReadBudget{0, 0})
+                : HtmlViewerText{};
+            content = page.text;
+            if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
+        } catch (const std::exception&) {}
+        for (const wchar_t* prop : {L"AccText", L"AccDescription"}) {
+            if (!content.empty()) break;
+            try { content = elem->get_property_string(prop); }
+            catch (const std::exception&) {}
+        }
+        if (!content.empty()) {
+            metadata["text_content"] = redact_sensitive_response_text(content);
+        }
+        metadata["content_available"] = !content.empty();
+    } else {
+        metadata["content_available"] = true;
+    }
+    // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
+    if (looks_like_prog_id(text)) metadata.erase("text");
+    return probe_grid;
+}
+
 json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
     if (!elem) return nullptr;
 
@@ -376,104 +478,16 @@ json ElementMetadataExtractor::extract(ComGuiElementPtr elem, int depth) {
         if (type == "GuiShell") {
             const std::string& subtype = facts.subtype;
 
-            if (subtype == "HTMLViewer") {
-                // Text is the browser control name, not the displayed page.
-                metadata.erase("text");
-                const auto page = read_html_viewer_text(elem->get_property_int(L"Handle"));
-                metadata["content_available"] = !page.text.empty();
-                if (!page.text.empty()) {
-                    metadata["text"] = redact_sensitive_response_text(page.text);
-                    if (page.truncated) metadata["content_truncated"] = true;
-                }
-            }
+            if (subtype == "HTMLViewer") read_html_viewer(elem, metadata);
 
             // Special handling for GuiShell Toolbar - enumerate buttons via ButtonCount API
-            if (subtype == "Toolbar") {
-                try {
-                    int button_count = elem->get_button_count();
-                    spdlog::debug("GuiShell toolbar has {} buttons", button_count);
-
-                    json button_children = json::array();
-                    for (int i = 0; i < button_count; ++i) {
-                        try {
-                            std::string btn_id = elem->get_button_id(i);
-                            std::string btn_text = elem->get_button_text(i);
-                            std::string btn_tooltip = elem->get_button_tooltip(i);
-                            std::string btn_type = elem->get_button_type(i);
-                            bool btn_enabled = elem->get_button_enabled(i);
-
-                            // Skip separators
-                            if (btn_type == "Separator") continue;
-
-                            // Create synthetic button element with full path
-                            std::string full_btn_path = elem_id + "/btn_" + btn_id;
-                            json btn_metadata;
-                            btn_metadata["id"] = full_btn_path;
-                            btn_metadata["type"] = "GuiButton";
-                            btn_metadata["name"] = btn_id;
-                            btn_metadata["text"] = btn_text;
-                            btn_metadata["tooltip"] = btn_tooltip;
-                            btn_metadata["enabled"] = btn_enabled;
-                            btn_metadata["button_type"] = btn_type;
-                            btn_metadata["changeable"] = true;
-                            btn_metadata["visible"] = true;
-                            btn_metadata["capabilities"] = json::array({"clickable"});
-
-                            button_children.push_back(btn_metadata);
-                        } catch (const std::exception& e) {
-                            spdlog::warn("Failed to extract button {} from GuiShell toolbar: {}", i, e.what());
-                        }
-                    }
-
-                    // Store synthetic buttons in separate field to avoid recursive processing
-                    // These are metadata-only constructs, not real COM elements that can be traversed
-                    if (!button_children.empty()) {
-                        metadata["toolbar_buttons"] = button_children;
-                        metadata["button_count"] = button_children.size();
-                    }
-                } catch (const std::exception& e) {
-                    spdlog::debug("GuiShell toolbar button enumeration failed: {}", e.what());
-                }
-            }
+            if (subtype == "Toolbar") read_toolbar_buttons(elem, elem_id, metadata);
         }
 
         // Generic probe for GuiShell subtypes without a dedicated reader (ERR-137):
         // grid-like, HTML/text pattern, then accessibility text.
-        bool probe_grid = false;
-        if (type == "GuiShell") {
-            const std::string shell_subtype = metadata.value("subtype", "");
-            const bool known = has_dedicated_shell_reader(shell_subtype);
-            if (!known) {
-                try {
-                    probe_grid = elem->get_property_int(L"RowCount") > 0 &&
-                                 elem->get_property_int(L"ColumnCount") > 0;
-                } catch (const std::exception&) {}
-                if (!probe_grid) {
-                    std::string content;
-                    try {
-                        const int handle = elem->get_property_int(L"Handle");
-                        const auto page = (!kGateGenericHtmlProbe || handle_hosts_browser(handle))
-                            ? read_html_viewer_text(handle, HtmlReadBudget{0, 0})
-                            : HtmlViewerText{};
-                        content = page.text;
-                        if (!content.empty() && page.truncated) metadata["content_truncated"] = true;
-                    } catch (const std::exception&) {}
-                    for (const wchar_t* prop : {L"AccText", L"AccDescription"}) {
-                        if (!content.empty()) break;
-                        try { content = elem->get_property_string(prop); }
-                        catch (const std::exception&) {}
-                    }
-                    if (!content.empty()) {
-                        metadata["text_content"] = redact_sensitive_response_text(content);
-                    }
-                    metadata["content_available"] = !content.empty();
-                } else {
-                    metadata["content_available"] = true;
-                }
-                // The Text of a shell is usually its ActiveX ProgID (SAP.HTMLControl.1).
-                if (looks_like_prog_id(text)) metadata.erase("text");
-            }
-        }
+        const bool probe_grid = type == "GuiShell" && !has_dedicated_shell_reader(metadata.value("subtype", "")) &&
+                                probe_unknown_shell(elem, text, metadata);
 
         extract_table_or_tree(elem, elem_id, type, text, probe_grid, metadata);
 

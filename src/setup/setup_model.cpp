@@ -814,38 +814,10 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
 }
 
 // ---- MakeTeardownPlan -----------------------------------------------------------------------------------
-Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
-    Plan p;
-    p.operation = "teardown";
-    p.hostname = d.hostname;
-    p.port = d.port;
-    p.elevation = d.elevation;
-    p.manifest_path = d.manifest_path;
-    p.cer_path = d.cer_path;
-    const bool have_manifest = d.manifest.has_value();
-    p.tls = !have_manifest || d.manifest->mode == "tls";
-    p.url = have_manifest ? endpoint_url(p.tls, d.manifest->hostname, d.manifest->port) : std::string();
-    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
-    p.diagnosis.push_back({"setup_manifest", have_manifest ? "ok" : "missing",
-                           have_manifest ? "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) : "no manifest at " + d.manifest_path});
+namespace {
 
-    const bool anything_found = !d.urlacls.empty() || !d.ssl_ours.empty() || d.firewall_exists;
-    if (!have_manifest && !d.explicit_target) {
-        if (anything_found) {
-            p.error = ErrorInfo{"MANIFEST_MISSING", "No setup manifest at " + d.manifest_path + ", but fairyfly reservations exist. Pass --hostname and --port to remove them.", 2};
-            return p;
-        }
-        p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
-        p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
-        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
-        p.steps.push_back(make_step("certificate", "Certificate", "unchanged", "nothing recorded"));
-        p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
-        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "no manifest"));
-        p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
-        p.nothing = true;
-        return p;
-    }
-
+/// MakeTeardownPlan: sslcert.
+void teardown_sslcert(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     // sslcert
     for (const auto& ip : d.ssl_ours) {
         p.teardown.ipports.push_back(ip);
@@ -861,6 +833,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
     }
+}
+
+/// MakeTeardownPlan: urlacl.
+void teardown_urlacl(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // urlacl: only a reservation that setup created and that still has the SDDL setup recorded
     {
         std::vector<std::string> foreign;
@@ -893,6 +870,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
             p.human.push_back({"urlacl_foreign", text});
         }
     }
+}
+
+/// MakeTeardownPlan: firewall.
+void teardown_firewall(Plan& p, const TeardownDiagnosis& d, const TeardownOptions& o) {
+    const bool have_manifest = d.manifest.has_value();
     // firewall: only the rule whose unique internal Name the manifest records (never by display name)
     if (o.keep_firewall) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--keep-firewall"));
@@ -910,6 +892,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "setup did not create one"));
     }
+}
+
+/// MakeTeardownPlan: certificate.
+void teardown_certificate(Plan& p, const TeardownDiagnosis& d, const TeardownOptions& o) {
+    const bool have_manifest = d.manifest.has_value();
     // certificate
     if (o.keep_cert) {
         p.steps.push_back(make_step("certificate", "Certificate", "skipped", "--keep-cert"));
@@ -926,6 +913,10 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.teardown.cert_thumbprint = d.cert.thumbprint;
         p.steps.push_back(make_step("certificate", "Remove self-signed certificate and its key", "would_remove", d.cert.thumbprint, true));
     }
+}
+
+/// MakeTeardownPlan: certificate_export.
+void teardown_certificate_export(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     // certificate_export: only the file at the path derived from the validated host name, holding the recorded certificate
     if (!d.cer_refusal.empty()) {
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "skipped", d.cer_refusal + "; not deleted"));
@@ -939,6 +930,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
     }
+}
+
+/// MakeTeardownPlan: config.
+void teardown_config(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // config: only a file setup created and nobody has edited since
     if (!have_manifest || !d.manifest->config_created) {
         p.steps.push_back(make_step("config", "mcp.yaml", "skipped", "not created by setup; left untouched"));
@@ -951,10 +947,18 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.steps.push_back(make_step("config", "mcp.yaml", "skipped", d.config_path + " was modified after setup; left in place"));
         p.human.push_back({"config_modified", "Review " + d.config_path + " and delete it yourself if you no longer need it: it was changed after 'mcp setup' created it."});
     }
+}
+
+/// MakeTeardownPlan: manifest.
+void teardown_manifest(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // manifest
     if (have_manifest) p.steps.push_back(make_step("manifest", "Delete " + d.manifest_path, "would_remove", "setup manifest"));
     else p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
+}
 
+/// MakeTeardownPlan: the summary flags and what is left for a human.
+void teardown_summary(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     bool nothing = true;
     for (const auto& s : p.steps)
         if (changes(s.status)) {
@@ -966,6 +970,50 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.human.push_back({"config_tls", "Edit " + d.config_path + ": it still says 'tls: true' (and server.host: '+'); the server will not start until you set tls: false or run setup again."});
     if (d.cer_exists || !p.teardown.cert_thumbprint.empty())
         p.human.push_back({"untrust_certificate", "Remove the trusted fairyfly certificate from every client that imported it."});
+}
+
+}  // namespace
+
+Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
+    Plan p;
+    p.operation = "teardown";
+    p.hostname = d.hostname;
+    p.port = d.port;
+    p.elevation = d.elevation;
+    p.manifest_path = d.manifest_path;
+    p.cer_path = d.cer_path;
+    const bool have_manifest = d.manifest.has_value();
+    p.tls = !have_manifest || d.manifest->mode == "tls";
+    p.url = have_manifest ? endpoint_url(p.tls, d.manifest->hostname, d.manifest->port) : std::string();
+    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
+    p.diagnosis.push_back({"setup_manifest", have_manifest ? "ok" : "missing",
+                           have_manifest ? "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) : "no manifest at " + d.manifest_path});
+
+    const bool anything_found = !d.urlacls.empty() || !d.ssl_ours.empty() || d.firewall_exists;
+    if (!have_manifest && !d.explicit_target) {
+        if (anything_found) {
+            p.error = ErrorInfo{"MANIFEST_MISSING", "No setup manifest at " + d.manifest_path + ", but fairyfly reservations exist. Pass --hostname and --port to remove them.", 2};
+            return p;
+        }
+        p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
+        p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
+        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
+        p.steps.push_back(make_step("certificate", "Certificate", "unchanged", "nothing recorded"));
+        p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
+        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "no manifest"));
+        p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
+        p.nothing = true;
+        return p;
+    }
+
+    teardown_sslcert(p, d, o);
+    teardown_urlacl(p, d, o);
+    teardown_firewall(p, d, o);
+    teardown_certificate(p, d, o);
+    teardown_certificate_export(p, d, o);
+    teardown_config(p, d, o);
+    teardown_manifest(p, d, o);
+    teardown_summary(p, d, o);
     return p;
 }
 
