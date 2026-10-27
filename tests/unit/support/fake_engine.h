@@ -64,6 +64,9 @@ public:
     FakeScripting* scripting_fake = nullptr;
     SapGuiScripting* scripting() override { return scripting_fake; }
 
+    /// What get_application_info answers (the SAP GUI connections and sessions the doctor reports).
+    nlohmann::json application_info = nlohmann::json::object();
+
     // ---- what the handler asked ----
     std::vector<std::string> calls;  ///< "fill_field wnd[0]/usr/txtA=x", "select_session /app/con[0]/ses[0]", ...
     int count(const std::string& prefix) const {
@@ -104,7 +107,7 @@ public:
     Result read_screen_with_tabs(bool, int, const std::string&) override { return record("read_screen_with_tabs"); }
     Result find_screen(const sap::ScreenFindOptions&) override { return record("find_screen"); }
     Result capture_screenshot(const cli::ScreenshotOptions&) override { return record("capture_screenshot"); }
-    nlohmann::json get_application_info() const override { return json::object(); }
+    nlohmann::json get_application_info() const override { return application_info; }
     WindowId get_active_window_id() const override { return WindowId(active_window); }
     ElementId resolve_element_path(const ElementId& e) const override { return e; }
 

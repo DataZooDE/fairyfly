@@ -55,10 +55,11 @@ public:
                 last_error_ = "server exited with code " + std::to_string(exit_code);
                 want_run_ = false;
             } else if (!restart) {
-                want_run_ = false;
+                want_run_ = start_after_stop_;  // a Start that arrived while this run was shutting down
             } else {
                 last_error_.clear();
             }
+            start_after_stop_ = false;
         }
         return exit_code;
     }
@@ -94,12 +95,15 @@ public:
     void request_stop() override {
         std::lock_guard<std::mutex> guard(mutex_);
         want_run_ = false;
+        start_after_stop_ = false;
         if (inner_) inner_->request_stop();
     }
 
     void request_start() override {
         std::lock_guard<std::mutex> guard(mutex_);
-        if (inner_) return;  // already running
+        if (inner_ && want_run_) return;  // already running
+        // stopped, or a Stop is still shutting the server down: run (again) once it has returned
+        if (inner_) start_after_stop_ = true;
         want_run_ = true;
         cv_.notify_all();
     }
@@ -123,6 +127,7 @@ private:
     std::condition_variable cv_;
     IServerControl* inner_ = nullptr;
     bool want_run_ = true;
+    bool start_after_stop_ = false;  // Start after a Stop whose server run has not returned yet
     bool quit_ = false;
     std::string last_error_;
     std::atomic<bool> read_only_{true};

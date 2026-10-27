@@ -2,6 +2,16 @@
 
 ## 2026.10.27 (2026-10-27)
 
+### MCP tray: a Start right after Stop is no longer lost; the doctor unit test no longer touches SAP GUI
+
+- `mcp --tray --http`: a tray Start that arrived while the stopped server was still shutting down was dropped
+  (the runner still held the inner control and took it for "already running"), so the server stayed stopped. The
+  runner now remembers that Start and runs again once the server has returned.
+- The unit test of `doctor` used the real automation engine and enumerated the SAP GUI of the machine over COM; with
+  SAP Logon open, depending on what earlier tests in a random order left in COM, that call could block the whole run.
+  It now uses the fake engine (whose `application_info` is now scripted) and also checks the reported sessions.
+  Found by running the full suite in random order; 6 seeds that hung or failed before now pass.
+
 ### Audit: string request ids without JSON quotes
 
 - A tool call's `request_id` was written as JSON, so a string id came out quoted (`"\"e5dd9093.…\""`). Found live on
