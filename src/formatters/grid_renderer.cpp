@@ -1,4 +1,5 @@
 #include "include/formatters/grid_renderer.h"
+#include "include/string_utils.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
@@ -13,31 +14,25 @@
 namespace fairyfly {
 namespace cli {
 
-std::string GridRenderer::render_status_section(const std::vector<GridCell>& cells) {
-    std::ostringstream oss;
+namespace {
 
-    if (cells.empty()) {
-        return "";
-    }
+using RowCells = std::map<int, std::vector<GridCell>>;
 
-    // Build map of rows to cells
-    std::map<int, std::vector<GridCell>> rows_map;
-    for (const auto& cell : cells) {
-        rows_map[cell.row].push_back(cell);
-    }
+/// The cells by row, each row ordered by column.
+RowCells cells_by_row(const std::vector<GridCell>& cells) {
+    RowCells rows;
+    for (const auto& cell : cells) rows[cell.row].push_back(cell);
+    for (auto& [row, row_cells] : rows)
+        std::sort(row_cells.begin(), row_cells.end(), [](const GridCell& a, const GridCell& b) { return a.col < b.col; });
+    return rows;
+}
 
-    // Sort cells in each row by column
-    for (auto& [row, row_cells] : rows_map) {
-        std::sort(row_cells.begin(), row_cells.end(),
-                  [](const GridCell& a, const GridCell& b) { return a.col < b.col; });
-    }
-
-    // Identify actual label rows. Report prose may contain a colon in the
-    // middle of a line, but a status property label ends with one.
+/// The label rows of a status grid. Report prose may contain a colon in the middle of a line, but a status property
+/// label ends with one; one-column classic lists often have headings followed by prose, so a status grid has at
+/// least two aligned labels in the same row.
+std::vector<int> status_label_rows(const RowCells& rows) {
     std::vector<int> label_rows;
-    std::map<int, int> label_to_value_row;  // Maps label row to value row
-
-    for (const auto& [row, row_cells] : rows_map) {
+    for (const auto& [row, row_cells] : rows) {
         std::set<int> label_columns;
         for (const auto& cell : row_cells) {
             const auto end = cell.text.find_last_not_of(" \t\r\n");
@@ -52,87 +47,100 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
         }
     }
 
-    // Find corresponding value rows (row with most matching column positions)
-    for (int label_row : label_rows) {
-        const auto& label_cells = rows_map[label_row];
+    return label_rows;
+}
 
-        // Build set of label columns
-        std::set<int> label_cols;
-        for (const auto& cell : label_cells) {
-            label_cols.insert(cell.col);
+/// The value row of a label row: the row with the most cells in the label columns (rows that are blank there are
+/// separators); on a tie a row below the label row, and of those the closest. -1 without one.
+int value_row_for(const RowCells& rows, int label_row) {
+    const auto& label_cells = rows.at(label_row);
+    // Build set of label columns
+    std::set<int> label_cols;
+    for (const auto& cell : label_cells) {
+        label_cols.insert(cell.col);
+    }
+
+    // Find row with best column overlap, prioritizing closest row below label row
+    int best_value_row = -1;
+    int best_match_count = 0;
+    int best_distance = INT_MAX;
+
+    for (const auto& [row, row_cells] : rows) {
+        // Skip label row itself
+        if (row == label_row) {
+            continue;
         }
 
-        // Find row with best column overlap, prioritizing closest row below label row
-        int best_value_row = -1;
-        int best_match_count = 0;
-        int best_distance = INT_MAX;
-
-        for (const auto& [row, row_cells] : rows_map) {
-            // Skip label row itself
-            if (row == label_row) {
-                continue;
-            }
-
-            // Skip rows that only contain whitespace in the label columns (separator rows)
-            bool has_content_in_label_cols = false;
-            for (const auto& cell : row_cells) {
-                // Only check cells in label columns
-                if (label_cols.count(cell.col)) {
-                    // Trim and check if there's actual content
-                    std::string trimmed = cell.text;
-                    trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-                    trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-                    if (!trimmed.empty()) {
-                        has_content_in_label_cols = true;
-                        break;
-                    }
+        // Skip rows that only contain whitespace in the label columns (separator rows)
+        bool has_content_in_label_cols = false;
+        for (const auto& cell : row_cells) {
+            // Only check cells in label columns
+            if (label_cols.count(cell.col)) {
+                if (!utils::trim(cell.text).empty()) {
+                    has_content_in_label_cols = true;
+                    break;
                 }
             }
-            if (!has_content_in_label_cols) {
-                continue;  // Skip separator/empty rows
-            }
+        }
+        if (!has_content_in_label_cols) {
+            continue;  // Skip separator/empty rows
+        }
 
-            // Count matching columns
-            int match_count = 0;
-            for (const auto& cell : row_cells) {
-                if (label_cols.count(cell.col)) {
-                    match_count++;
-                }
+        // Count matching columns
+        int match_count = 0;
+        for (const auto& cell : row_cells) {
+            if (label_cols.count(cell.col)) {
+                match_count++;
             }
+        }
 
-            // Prefer rows below the label row and closer to it
-            // Selection criteria (in order of priority):
-            // 1. More matching columns is better
-            // 2. If same match count, prefer rows below (row > label_row)
-            // 3. If same match count and both below, prefer closer row
-            if (match_count > best_match_count) {
-                // Strictly better match count
-                best_match_count = match_count;
+        // Prefer rows below the label row and closer to it
+        // Selection criteria (in order of priority):
+        // 1. More matching columns is better
+        // 2. If same match count, prefer rows below (row > label_row)
+        // 3. If same match count and both below, prefer closer row
+        if (match_count > best_match_count) {
+            // Strictly better match count
+            best_match_count = match_count;
+            best_value_row = row;
+            best_distance = std::abs(row - label_row);
+        } else if (match_count == best_match_count && match_count > 0) {
+            // Same match count - apply tiebreaker
+            bool new_is_below = (row > label_row);
+            bool best_is_below = (best_value_row > label_row);
+
+            if (new_is_below && !best_is_below) {
+                // New row is below, old is above/same - prefer new
                 best_value_row = row;
                 best_distance = std::abs(row - label_row);
-            } else if (match_count == best_match_count && match_count > 0) {
-                // Same match count - apply tiebreaker
-                bool new_is_below = (row > label_row);
-                bool best_is_below = (best_value_row > label_row);
-
-                if (new_is_below && !best_is_below) {
-                    // New row is below, old is above/same - prefer new
+            } else if (new_is_below && best_is_below) {
+                // Both below - prefer closer one
+                int new_distance = row - label_row;
+                if (new_distance < best_distance) {
                     best_value_row = row;
-                    best_distance = std::abs(row - label_row);
-                } else if (new_is_below && best_is_below) {
-                    // Both below - prefer closer one
-                    int new_distance = row - label_row;
-                    if (new_distance < best_distance) {
-                        best_value_row = row;
-                        best_distance = new_distance;
-                    }
+                    best_distance = new_distance;
                 }
             }
         }
+    }
+    return best_value_row;
+}
 
-        if (best_value_row != -1) {
-            label_to_value_row[label_row] = best_value_row;
-        }
+}  // namespace
+
+std::string GridRenderer::render_status_section(const std::vector<GridCell>& cells) {
+    std::ostringstream oss;
+
+    if (cells.empty()) {
+        return "";
+    }
+
+    RowCells rows = cells_by_row(cells);
+    const std::vector<int> label_rows = status_label_rows(rows);
+    std::map<int, int> label_to_value_row;  // Maps label row to value row
+    for (int label_row : label_rows) {
+        const int value_row = value_row_for(rows, label_row);
+        if (value_row != -1) label_to_value_row[label_row] = value_row;
     }
 
     if (label_to_value_row.empty()) return "";
@@ -149,8 +157,8 @@ std::string GridRenderer::render_status_section(const std::vector<GridCell>& cel
         }
 
         int value_row = label_to_value_row[label_row];
-        const auto& label_cells = rows_map[label_row];
-        const auto& value_cells = rows_map[value_row];
+        const auto& label_cells = rows[label_row];
+        const auto& value_cells = rows[value_row];
 
         // Match cells by column position
         for (const auto& label_cell : label_cells) {

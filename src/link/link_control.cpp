@@ -1,3 +1,4 @@
+#include "include/link/link_state_names.h"
 #include "include/link/link_control.h"
 
 #include <cctype>
@@ -75,10 +76,10 @@ json read_status(const std::string& state_path) {
 }
 
 std::string describe(const json& status, std::int64_t now_unix) {
-    if (!status.is_object() || !status.contains("state") || !status.contains("updated")) return "not running";
+    if (!status.is_object() || !status.contains("state") || !status.contains("updated")) return state::kNotRunning;
     const std::string s = status["state"].get<std::string>();
-    if (s == "stopped") return "not running";
-    if (now_unix - status["updated"].get<std::int64_t>() > kStatusStaleSeconds) return "not running";
+    if (s == state::kStopped) return state::kNotRunning;
+    if (now_unix - status["updated"].get<std::int64_t>() > kStatusStaleSeconds) return state::kNotRunning;
     return s;
 }
 
@@ -111,7 +112,7 @@ void supervise(const std::string& state_path, const std::function<void(const std
     while (!stop) {
         if (is_paused(state_path)) {
             halt();
-            set("paused");
+            set(state::kPaused);
         } else {
             if (cur && cur->ended) {  // the agent gave up by itself (e.g. revoked or a fatal error): back off, retry
                 halt();
@@ -129,12 +130,12 @@ void supervise(const std::string& state_path, const std::function<void(const std
                     r->ended = true;
                 });
             }
-            set("connected");
+            set(state::kConnected);
         }
         std::this_thread::sleep_for(o.poll);
     }
     halt();
-    write_status(state_path, "stopped");
+    write_status(state_path, state::kStopped);
 }
 
 bool in_default_state_dir(const std::string& state_path, const std::string& default_dir) {

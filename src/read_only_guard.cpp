@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/read_only_guard.h"
 #include "include/string_utils.h"
 #include "include/com/wrapper.h"
@@ -156,7 +157,7 @@ std::string read_only_doubleclick_rule(const std::string& element_type, const st
 std::string read_only_toolbar_button_rule(const ComGuiElement& shell, const std::string& button_id,
                                           const std::string& element_id, std::string& text,
                                           std::string& tooltip) {
-    if (!shell.find_toolbar_button_labels(button_id, text, tooltip)) {
+    if (!as_toolbar(shell).find_toolbar_button_labels(button_id, text, tooltip)) {
         spdlog::debug("Read-only guard could not read toolbar button '{}'; falling back to id rules",
                       element_id);
         text.clear();
