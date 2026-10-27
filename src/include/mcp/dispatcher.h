@@ -221,6 +221,14 @@ private:
                                                  const std::function<bool()>& owner_unchanged);
     ToolResult shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
                           const CallContext& ctx, const CallState& state, bool tcode_left);
+    bool owner_launch_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                     const Principal& principal, const json& args, const CallContext& ctx,
+                                     std::optional<audit::SapFacts>& checked_launch_facts);
+    bool owner_login_target_allowed(const audit::SapFacts& facts, const std::string& connection_name, const std::string& name,
+                                    const Principal& principal, const json& args, const CallContext& ctx,
+                                    const std::optional<audit::SapFacts>& login_pre_facts,
+                                    const std::optional<audit::SapFacts>& checked_launch_facts,
+                                    std::optional<audit::SapFacts>& anticipated_login);
     std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                          const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)

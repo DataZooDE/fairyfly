@@ -1625,6 +1625,90 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
     return shaped;
 }
 
+/// The launch guard of an owner-mode gui_session_launch: the new window's system (and client/user once known) must
+/// be one of the endpoint's owner identities allowed for the token, the entry and the window's connection names in the
+/// token's connections, the token still valid; the checked facts are kept for verify_owner_launch_outcome.
+bool CommandDispatcher::owner_launch_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                                    const Principal& principal, const json& args, const CallContext& ctx,
+                                                    std::optional<audit::SapFacts>& checked_launch_facts) {
+    if (facts.system.empty() || connection_name.empty() || (ctx.cancelled && ctx.cancelled())) return false;
+    bool authorized = false;
+    try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+    if (!authorized) return false;
+    const std::string requested = args.at("name").get<std::string>();
+    const auto name_allowed = [&](const std::string& name) {
+        return std::any_of(principal.connections.begin(), principal.connections.end(),
+            [&](const std::string& pattern) { return auth::glob_match(pattern, name); });
+    };
+    if (!name_allowed(requested) || !name_allowed(connection_name)) return false;
+    std::string allowed_system_client;
+    for (const std::string& owner : policy_.owner_sap_identities) {
+        if (!owner_identity_allowed(policy_, principal, owner)) continue;
+        const auto first = owner.find('/');
+        const auto second = first == std::string::npos ? first : owner.find('/', first + 1);
+        if (first == std::string::npos || second == std::string::npos) continue;
+        const std::string system = owner.substr(0, first);
+        const std::string client = owner.substr(first + 1, second - first - 1);
+        const std::string user = owner.substr(second + 1);
+        const bool sap_logon_screen = facts.user.empty() && facts.client == "000" &&
+                                      facts.transaction == "S000";
+        if (facts.system != system || (!facts.client.empty() && facts.client != client && !sap_logon_screen) ||
+            (!facts.user.empty() && facts.user != user) ||
+            (facts.user.empty() && !facts.client.empty() && facts.client != client && !sap_logon_screen)) continue;
+        const std::string candidate = system + "/" + client;
+        if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, candidate)) continue;
+        allowed_system_client = candidate;
+        break;
+    }
+    if (allowed_system_client.empty() || (!facts.user.empty() && facts.client.empty())) return false;
+    auth::SessionTarget target;
+    target.system = allowed_system_client;
+    target.user = facts.user;
+    target.connection_name = connection_name;
+    if (!auth::authorize_session_target(principal, "gui_session_launch", args, target).allowed) return false;
+    checked_launch_facts = facts;
+    return true;
+
+}
+
+/// The login guard of an owner-mode gui_session_login (or launch with login): the session must be the reserved
+/// pre-logon one (or the checked launch's system), the credentials' identity an allowed owner and target for the
+/// token, the token still valid; the anticipated facts are kept for verify_owner_login_outcome.
+bool CommandDispatcher::owner_login_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                                   const std::string& name, const Principal& principal, const json& args,
+                                                   const CallContext& ctx,
+                                                   const std::optional<audit::SapFacts>& login_pre_facts,
+                                                   const std::optional<audit::SapFacts>& checked_launch_facts,
+                                                   std::optional<audit::SapFacts>& anticipated_login) {
+    if (facts.client.empty() || facts.user.empty() || !facts.connection_id)
+        return false;
+    if (name == "gui_session_login" && (!login_pre_facts ||
+        facts.connection_id != login_pre_facts->connection_id ||
+        !login_identity_transition_allowed(login_pre_facts->session_identity, facts.session_identity) ||
+        facts.system != login_pre_facts->system))
+        return false;
+    if (name == "gui_session_login" && policy_.owner_sap_identities.size() > 1 &&
+        !routing_state_->owns_prelogin(principal.id, *login_pre_facts->connection_id,
+                                       login_pre_facts->session_identity)) return false;
+    if (name == "gui_session_launch" && (!checked_launch_facts ||
+        facts.system != checked_launch_facts->system)) return false;
+    if (ctx.cancelled && ctx.cancelled()) return false;
+    bool authorized = false;
+    try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+    if (!authorized) return false;
+    const std::string owner = sap_identity(facts);
+    if (!owner_identity_allowed(policy_, principal, owner)) return false;
+    auth::SessionTarget target;
+    target.system = facts.system + "/" + facts.client;
+    target.user = facts.user;
+    target.connection_name = connection_name;
+    if (!auth::authorize_session_target(principal, "gui_session_login", args, target).allowed)
+        return false;
+    anticipated_login = facts;
+    return true;
+
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1817,43 +1901,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     std::optional<audit::SapFacts> checked_launch_facts;
     const LaunchTargetGuard owner_launch_guard = [this, &principal, &args, &ctx, &checked_launch_facts]
         (const audit::SapFacts& facts, const std::string& connection_name) {
-        if (facts.system.empty() || connection_name.empty() || (ctx.cancelled && ctx.cancelled())) return false;
-        bool authorized = false;
-        try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!authorized) return false;
-        const std::string requested = args.at("name").get<std::string>();
-        const auto name_allowed = [&](const std::string& name) {
-            return std::any_of(principal.connections.begin(), principal.connections.end(),
-                [&](const std::string& pattern) { return auth::glob_match(pattern, name); });
-        };
-        if (!name_allowed(requested) || !name_allowed(connection_name)) return false;
-        std::string allowed_system_client;
-        for (const std::string& owner : policy_.owner_sap_identities) {
-            if (!owner_identity_allowed(policy_, principal, owner)) continue;
-            const auto first = owner.find('/');
-            const auto second = first == std::string::npos ? first : owner.find('/', first + 1);
-            if (first == std::string::npos || second == std::string::npos) continue;
-            const std::string system = owner.substr(0, first);
-            const std::string client = owner.substr(first + 1, second - first - 1);
-            const std::string user = owner.substr(second + 1);
-            const bool sap_logon_screen = facts.user.empty() && facts.client == "000" &&
-                                          facts.transaction == "S000";
-            if (facts.system != system || (!facts.client.empty() && facts.client != client && !sap_logon_screen) ||
-                (!facts.user.empty() && facts.user != user) ||
-                (facts.user.empty() && !facts.client.empty() && facts.client != client && !sap_logon_screen)) continue;
-            const std::string candidate = system + "/" + client;
-            if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, candidate)) continue;
-            allowed_system_client = candidate;
-            break;
-        }
-        if (allowed_system_client.empty() || (!facts.user.empty() && facts.client.empty())) return false;
-        auth::SessionTarget target;
-        target.system = allowed_system_client;
-        target.user = facts.user;
-        target.connection_name = connection_name;
-        if (!auth::authorize_session_target(principal, "gui_session_launch", args, target).allowed) return false;
-        checked_launch_facts = facts;
-        return true;
+        return owner_launch_target_allowed(facts, connection_name, principal, args, ctx, checked_launch_facts);
     };
     GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
         owner_mode(ctx) && name == "gui_session_launch"
@@ -1868,32 +1916,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
                                 &checked_launch_facts, &anticipated_login]
                 (const audit::SapFacts& facts, const std::string& connection_name) {
-                if (facts.client.empty() || facts.user.empty() || !facts.connection_id)
-                    return false;
-                if (name == "gui_session_login" && (!login_pre_facts ||
-                    facts.connection_id != login_pre_facts->connection_id ||
-                    !login_identity_transition_allowed(login_pre_facts->session_identity, facts.session_identity) ||
-                    facts.system != login_pre_facts->system))
-                    return false;
-                if (name == "gui_session_login" && policy_.owner_sap_identities.size() > 1 &&
-                    !routing_state_->owns_prelogin(principal.id, *login_pre_facts->connection_id,
-                                                   login_pre_facts->session_identity)) return false;
-                if (name == "gui_session_launch" && (!checked_launch_facts ||
-                    facts.system != checked_launch_facts->system)) return false;
-                if (ctx.cancelled && ctx.cancelled()) return false;
-                bool authorized = false;
-                try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-                if (!authorized) return false;
-                const std::string owner = sap_identity(facts);
-                if (!owner_identity_allowed(policy_, principal, owner)) return false;
-                auth::SessionTarget target;
-                target.system = facts.system + "/" + facts.client;
-                target.user = facts.user;
-                target.connection_name = connection_name;
-                if (!auth::authorize_session_target(principal, "gui_session_login", args, target).allowed)
-                    return false;
-                anticipated_login = facts;
-                return true;
+                return owner_login_target_allowed(facts, connection_name, name, principal, args, ctx, login_pre_facts,
+                                                  checked_launch_facts, anticipated_login);
             }) : LoginTargetGuard{});
     if (owner_mode(ctx) && name == "gui_session_login" &&
         (!login_pre_facts || !login_target_guard_override_))
