@@ -185,6 +185,75 @@ private:
     std::optional<CallRefusal> prepare_owner_batch(const json& args, const CallContext& ctx, json& items, int& connection,
                                                    std::string& lease_id, bool& needs_lease,
                                                    std::optional<audit::SapFacts>& facts);
+    std::optional<int> reattach_only_session_for(const ToolSpec& spec, const std::string& name, const Principal& principal,
+                                                 const std::string& recorded, const std::string& stale_id,
+                                                 std::string& reattach_note, bool& reattach_refused);
+    std::optional<PolicyDecision> session_target_refusal(const std::string& name, const json& call_args,
+                                                         const CallContext& ctx, const Principal& principal,
+                                                         std::optional<int> connection, bool prelogin_close);
+    std::optional<CallRefusal> admit_owner_identity(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
+                                                    McpCallRecord& record);
+    void track_initial_screen(const std::string& name, const std::string& policy_state_key, std::optional<int> connection,
+                              const std::optional<std::string>& current_tcode, auth::SelectionInputContext& input_context);
+    std::optional<CallRefusal> authorization_refusal(const ToolSpec& spec, const std::string& name, const json& args,
+                                                     const CallContext& ctx, const Principal& principal,
+                                                     const std::optional<std::string>& current_system,
+                                                     const std::optional<std::string>& current_tcode,
+                                                     auth::SelectionInputContext& input_context,
+                                                     const std::string& policy_state_key,
+                                                     const std::string& policy_fallback_key);
+    Result invoke_on_worker(const std::vector<std::string>& selected_argv, const std::string& name, const json& args,
+                            const CallContext& ctx, const Principal& principal, std::optional<int> connection,
+                            const audit::SapFacts& owner_pre_facts, const std::string& expected_screen_guard,
+                            bool selection_input, const auth::InitialScreen& selection_initial);
+    void retire_disconnected_session(const Result& result, const json& args, const audit::SapFacts& owner_pre_facts);
+    bool owner_session_unchanged(const audit::SapFacts& owner_pre_facts, McpCallRecord& record);
+    struct CallState;   // dispatcher.cpp
+    bool acquire_probe_gate(CallState& state, const CallContext& ctx);
+    std::optional<ToolResult> admit_live_session(const std::string& name, McpCallRecord& record, const CallContext& ctx,
+                                                 CallState& state, const RefuseCall& refuse);
+    std::optional<CallRefusal> verify_owner_attach_outcome(const Result& result, const std::string& name, const json& args,
+                                                           const Principal& principal, McpCallRecord& record);
+    std::optional<CallRefusal> enforce_image_cap(Result& result, const std::string& name, const json& args,
+                                                 const ToolSpec& spec, const Policy& effective, const Principal& principal,
+                                                 McpCallRecord& record,
+                                                 const std::function<Result(const std::vector<std::string>&)>& invoke_selected,
+                                                 const std::function<bool()>& owner_unchanged);
+    ToolResult shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
+                          const CallContext& ctx, const CallState& state, bool tcode_left);
+    bool owner_launch_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                     const Principal& principal, const json& args, const CallContext& ctx,
+                                     std::optional<audit::SapFacts>& checked_launch_facts);
+    bool owner_login_target_allowed(const audit::SapFacts& facts, const std::string& connection_name, const std::string& name,
+                                    const Principal& principal, const json& args, const CallContext& ctx,
+                                    const std::optional<audit::SapFacts>& login_pre_facts,
+                                    const std::optional<audit::SapFacts>& checked_launch_facts,
+                                    std::optional<audit::SapFacts>& anticipated_login);
+    struct LeaseWriteScope;   // dispatcher.cpp
+    std::optional<ToolResult> resolve_attach_session(const ToolSpec& spec, json& args, std::string& code,
+                                                     const Principal& principal,
+                                                     const std::function<std::optional<PolicyDecision>(const json&)>& check_target,
+                                                     const RefuseCall& refuse);
+    std::optional<CallRefusal> begin_owner_lease(const json& args, const CallContext& ctx, const Principal& principal,
+                                                 const std::optional<audit::SapFacts>& owner_pre_facts,
+                                                 const McpCallRecord& record, LeaseWriteScope& lease_scope);
+    std::optional<CallRefusal> check_screen_guard(const json& args, const CallContext& ctx,
+                                                  const std::optional<audit::SapFacts>& owner_pre_facts,
+                                                  std::string& expected_screen_guard);
+    void retry_after_reattach(Result& result, const ToolSpec& spec, const json& args, const Policy& effective,
+                              const std::vector<std::string>& argv, McpCallRecord& record,
+                              const std::function<std::optional<int>(const std::string&, const std::string&)>& reattach,
+                              const std::function<Result(const std::vector<std::string>&)>& invoke_selected);
+    struct InvocationRun;   // dispatcher.cpp
+    ToolResult run_invocation(const std::string& name, McpCallRecord& record, std::string& code, const CallContext& ctx,
+                              CallState& state, const RefuseCall& refuse, const std::vector<std::string>& argv,
+                              const Policy& effective, const InvocationRun& run);
+    ToolResult invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code, const CallContext& ctx,
+                                 CallState& state, const RefuseCall& refuse, const std::vector<std::string>& argv,
+                                 const Policy& effective, const std::string& expected_screen_guard,
+                                 const std::function<std::optional<PolicyDecision>(const json&)>& check_target);
+    std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
+                                         const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,
