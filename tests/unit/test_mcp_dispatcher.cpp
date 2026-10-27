@@ -858,6 +858,353 @@ TEST_CASE("Dispatcher: auto_attach attaches to the only open session when nothin
     }
 }
 
+namespace {
+// SAP GUI after SAP Logon or the link tray restarted: the saved default connection names a session that is gone
+// (INVALID_CONNECTION from CommandHandler::resolve_and_validate_connection, with the record's SAP identity).
+Result list_sessions(const std::vector<json>& who) {
+    json sessions = json::array();
+    for (std::size_t i = 0; i < who.size(); ++i) {
+        json s = {{"id", "/app/con[1]/ses[" + std::to_string(i) + "]"}, {"active_window_title", "SAP Easy Access"}};
+        s.update(who[i]);
+        sessions.push_back(s);
+    }
+    return ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", sessions}}})}, {"total_sessions", who.size()}});
+}
+Result stale_connection(int id, json identity) {
+    json stale = {{"id", id}, {"session_id", "/app/con[0]/ses[0]"}};
+    stale.update(identity);
+    return err("INVALID_CONNECTION", "Connection " + std::to_string(id) + " session no longer exists",
+               {{"session_id", "/app/con[0]/ses[0]"}, {"stale_connection", stale}});
+}
+const json kBigfox = {{"system", "BFX"}, {"client", "100"}, {"user", "LEE"}};
+}  // namespace
+
+TEST_CASE("Dispatcher: auto_attach re-attaches a stale default connection to the only open session of the same SAP user", "[mcp][dispatcher][auto_attach][reattach]") {
+    Policy auto_attach;
+    auto_attach.auto_attach = true;
+    // the fake fairyfly: connection 0 is stale until the attach saves connection 1 for the new session
+    struct Desk {
+        std::vector<json> open;
+        json recorded = kBigfox;
+        bool attached = false;
+        Result operator()(const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session list") return list_sessions(open);
+            if (command == "session attach") { attached = true; return ok({{"connection_file_id", 1}}); }
+            if (attached && has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
+            if (attached && std::find(argv.begin(), argv.end(), "--connection") == argv.end()) return ok({{"elements", json::array()}});
+            return stale_connection(0, recorded);
+        }
+    };
+
+    {   // the only open session is the same system, client and user: re-attached, the call runs, the result says so
+        Fixture f;
+        Desk desk{{kBigfox}};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE_FALSE(r.is_error);
+        REQUIRE(f.calls.size() == 4);
+        CHECK(f.calls[1] == Argv{"session", "list"});
+        CHECK(f.calls[2] == Argv{"session", "attach", "--session-id", "/app/con[1]/ses[0]"});
+        CHECK(has_pair(f.calls[3], "--connection", "1"));
+        CHECK(d.sticky_connection() == 1);
+        std::string all;
+        for (const auto& c : r.content) if (c.value("type", "") == "text") all += c["text"].get<std::string>();
+        CHECK(all.find("re-attached to the only open SAP session") != std::string::npos);
+        REQUIRE(f.records.size() == 1);   // one audited call: the read
+        CHECK(f.records[0].status == "success");
+        CHECK(f.records[0].connection == 1);
+    }
+    {   // the sticky default (an earlier auto-attach) went stale: the new id replaces it in the call
+        Fixture f;
+        Desk desk{{kBigfox}};
+        bool first_attach_done = false;
+        f.handler = [&](const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session attach" && !first_attach_done) { first_attach_done = true; return ok({{"connection_file_id", 0}}); }
+            return desk(argv);
+        };
+        auto d = f.make(auto_attach);
+        REQUIRE_FALSE(d.call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+        REQUIRE(d.sticky_connection() == 0);
+        f.calls.clear();
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE_FALSE(r.is_error);
+        REQUIRE(f.calls.size() == 4);
+        CHECK(has_pair(f.calls[0], "--connection", "0"));
+        CHECK(has_pair(f.calls[3], "--connection", "1"));
+        CHECK(d.sticky_connection() == 1);
+    }
+    {   // an old record without the SAP identity: re-attached when exactly one session is open (a warning is logged)
+        Fixture f;
+        Desk desk{{kBigfox}, json::object()};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(auto_attach);
+        CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_with_id()).is_error);
+        CHECK(desk.attached);
+    }
+    // another system, client or user, or no user logged on: never re-attached, the call is refused as before
+    for (const json& other : {json{{"system", "QAS"}, {"client", "100"}, {"user", "LEE"}},
+                              json{{"system", "BFX"}, {"client", "200"}, {"user", "LEE"}},
+                              json{{"system", "BFX"}, {"client", "100"}, {"user", "SAM"}},
+                              json{{"system", "BFX"}, {"client", "100"}, {"user", ""}},
+                              json{{"system", nullptr}, {"client", nullptr}, {"user", nullptr}}}) {
+        INFO(other.dump());
+        Fixture f;
+        Desk desk{{other}};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK_FALSE(desk.attached);
+        REQUIRE(f.records.size() == 1);
+        CHECK(f.records[0].error_code == "INVALID_CONNECTION");
+    }
+    // no session or several sessions open: unchanged INVALID_CONNECTION, nothing attached
+    for (std::size_t n : {std::size_t(0), std::size_t(2)}) {
+        INFO(n);
+        Fixture f;
+        Desk desk{std::vector<json>(n, kBigfox)};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK(text_of(r).find("hint: the attached SAP session was closed") != std::string::npos);
+        CHECK_FALSE(desk.attached);
+    }
+    {   // an explicit connection that is stale is never replaced: the caller named that system
+        Fixture f;
+        Desk desk{{kBigfox}};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(auto_attach);
+        auto r = d.call_tool("gui_screen_read", json{{"connection", 0}}, ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK(f.calls.size() == 1);
+    }
+    {   // the HTTP endpoint (no auto_attach) keeps refusing
+        Fixture f;
+        Desk desk{{kBigfox}};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make();
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK(f.calls.size() == 1);
+    }
+}
+
+TEST_CASE("Dispatcher: auto_attach re-attaches a default from gui_session_attach whose session closed (SESSION_TARGET_CHANGED)", "[mcp][dispatcher][auto_attach][reattach]") {
+    // how users hit it: the assistant calls gui_session_attach once and relies on the default; SAP Logon restarts
+    Policy auto_attach;
+    auto_attach.auto_attach = true;
+    using fairyfly::audit::SapFacts;
+    auto facts_of = [](const json& who, int id, const std::string& identity) {
+        SapFacts f{who.value("system", ""), who.value("client", ""), who.value("user", ""), "SMEN"};
+        f.connection_id = id;
+        f.session_identity = identity;
+        return f;
+    };
+    struct Desk {
+        std::vector<json> open;         // the sessions open after the restart
+        bool attached_again = false;
+        std::map<int, SapFacts> live;   // what the facts lookup finds per saved connection
+        Result operator()(const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session list") return list_sessions(open);
+            if (command == "session attach") {
+                if (argv.back() == "/app/con[0]/ses[0]") return ok({{"connection_file_id", 0}});
+                attached_again = true;
+                return ok({{"connection_file_id", 1}});
+            }
+            if (has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
+            return stale_connection(0, kBigfox);
+        }
+    };
+    // attach explicitly (connection 0, Bigfox/100/LEE), then SAP Logon restarts: connection 0's session is gone
+    auto start = [&](Fixture& f, Desk& desk, CommandDispatcher* d) {
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        desk.live[0] = facts_of(kBigfox, 0, "/app/con[0]/ses[0]|k0|g0");
+        d->set_sap_facts_provider([&desk](std::optional<int> c) -> std::optional<SapFacts> {
+            const auto it = desk.live.find(c.value_or(-1));
+            return it == desk.live.end() ? std::optional<SapFacts>(SapFacts{}) : std::optional<SapFacts>(it->second);
+        });
+        REQUIRE_FALSE(d->call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+        REQUIRE(d->sticky_connection() == 0);
+        desk.live.erase(0);
+        f.calls.clear();
+        f.records.clear();
+    };
+
+    {   // one open session of the same system, client and user: re-attached inside this call, the call runs
+        Fixture f;
+        Desk desk{{kBigfox}};
+        auto dispatcher = f.make(auto_attach);
+        auto* d = &dispatcher;
+        start(f, desk, d);
+        desk.live[1] = facts_of(kBigfox, 1, "/app/con[1]/ses[0]|k1|g1");
+        auto r = d->call_tool("gui_screen_read", json::object(), ctx_with_id());
+        INFO(text_of(r));
+        REQUIRE_FALSE(r.is_error);
+        REQUIRE(f.calls.size() == 3);
+        CHECK(f.calls[0] == Argv{"session", "list"});
+        CHECK(f.calls[1] == Argv{"session", "attach", "--session-id", "/app/con[1]/ses[0]"});
+        CHECK(has_pair(f.calls[2], "--connection", "1"));
+        CHECK(d->sticky_connection() == 1);
+        std::string all;
+        for (const auto& c : r.content) if (c.value("type", "") == "text") all += c["text"].get<std::string>();
+        CHECK(all.find("re-attached to the only open SAP session") != std::string::npos);
+        REQUIRE(f.records.size() == 1);
+        CHECK(f.records[0].status == "success");
+        // the new default is bound to its session: a later call runs without another re-attach
+        f.calls.clear();
+        CHECK_FALSE(d->call_tool("gui_screen_read", json::object(), ctx_with_id()).is_error);
+        CHECK(f.calls.size() == 1);
+    }
+    // another system, client or user (or unknown): SESSION_TARGET_CHANGED as before, nothing attached
+    for (const json& other : {json{{"system", "QAS"}, {"client", "100"}, {"user", "LEE"}},
+                              json{{"system", "BFX"}, {"client", "100"}, {"user", "SAM"}},
+                              json{{"system", nullptr}, {"client", nullptr}, {"user", nullptr}}}) {
+        INFO(other.dump());
+        Fixture f;
+        Desk desk{{other}};
+        auto dispatcher = f.make(auto_attach);
+        auto* d = &dispatcher;
+        start(f, desk, d);
+        auto r = d->call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).find("SESSION_TARGET_CHANGED") != std::string::npos);
+        CHECK_FALSE(desk.attached_again);
+        CHECK(d->sticky_connection() == 0);
+    }
+    // no or several open sessions: SESSION_TARGET_CHANGED, nothing attached
+    for (std::size_t n : {std::size_t(0), std::size_t(2)}) {
+        INFO(n);
+        Fixture f;
+        Desk desk{std::vector<json>(n, kBigfox)};
+        auto dispatcher = f.make(auto_attach);
+        auto* d = &dispatcher;
+        start(f, desk, d);
+        auto r = d->call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).find("SESSION_TARGET_CHANGED") != std::string::npos);
+        CHECK_FALSE(desk.attached_again);
+    }
+    {   // the saved connection now names ANOTHER live session (a different window, same user): refused, no re-attach
+        Fixture f;
+        Desk desk{{kBigfox}};
+        auto dispatcher = f.make(auto_attach);
+        auto* d = &dispatcher;
+        start(f, desk, d);
+        desk.live[0] = facts_of(kBigfox, 0, "/app/con[0]/ses[0]|k9|g9");
+        auto r = d->call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).find("SESSION_TARGET_CHANGED") != std::string::npos);
+        CHECK(f.calls.empty());
+    }
+    {   // the caller names the connection on this call: never replaced
+        Fixture f;
+        Desk desk{{kBigfox}};
+        auto dispatcher = f.make(auto_attach);
+        auto* d = &dispatcher;
+        start(f, desk, d);
+        auto r = d->call_tool("gui_screen_read", json{{"connection", 0}}, ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK(f.calls.size() == 1);
+        CHECK_FALSE(desk.attached_again);
+    }
+}
+
+TEST_CASE("Dispatcher: auto_attach re-attaches without a verified logged-on SAP user only for read-only tools", "[mcp][dispatcher][auto_attach][reattach]") {
+    // live 2026-10-25: after a tray restart a connection file of the previous version (no system/client/user) was
+    // re-attached to the only open session, which sat on the SAP logon screen (A4H/000/, nobody logged on)
+    Policy writable;
+    writable.auto_attach = true;
+    writable.read_only = false;
+    writable.allow_write = true;
+    struct Desk {
+        json candidate;   // the only open session after the restart
+        json recorded;    // what the stale connection file records
+        bool attached = false;
+        Result operator()(const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session list") return list_sessions({candidate});
+            if (command == "session attach") { attached = true; return ok({{"connection_file_id", 1}}); }
+            if (attached && has_pair(argv, "--connection", "1")) return ok({{"elements", json::array()}});
+            return stale_connection(0, recorded);
+        }
+    };
+    const json legacy = json::object();
+    const json logon_screen = {{"system", "BFX"}, {"client", "100"}, {"user", ""}};
+    const json write_args = {{"element", "wnd[0]/usr/btnX"}};
+    auto all_text = [](const ToolResult& r) {
+        std::string all;
+        for (const auto& c : r.content) if (c.value("type", "") == "text") all += c["text"].get<std::string>();
+        return all;
+    };
+    struct Case { const char* what; json recorded; json candidate; };
+    for (const Case& c : {Case{"legacy file, logged-on candidate", legacy, kBigfox},
+                          Case{"legacy file, candidate on the logon screen", legacy, logon_screen},
+                          Case{"same system and client, candidate not logged on", logon_screen, logon_screen}}) {
+        INFO(c.what);
+        {   // a change: refused, nothing attached, the hint says to attach again
+            Fixture f;
+            Desk desk{c.candidate, c.recorded};
+            f.handler = [&](const Argv& argv) { return desk(argv); };
+            auto d = f.make(writable);
+            for (const char* tool : {"gui_element_click", "gui_key_send"}) {
+                INFO(tool);
+                const json args = std::string(tool) == "gui_key_send" ? json{{"key", "f3"}} : write_args;
+                auto r = d.call_tool(tool, args, ctx_with_id());
+                REQUIRE(r.is_error);
+                CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+                CHECK(text_of(r).find("attach the SAP session again (gui_session_attach) and retry") != std::string::npos);
+                CHECK_FALSE(desk.attached);
+            }
+            CHECK_FALSE(d.sticky_connection() == 1);
+        }
+        {   // a read: re-attached, the result says so and that changes need an explicit attach
+            Fixture f;
+            Desk desk{c.candidate, c.recorded};
+            f.handler = [&](const Argv& argv) { return desk(argv); };
+            auto d = f.make(writable);
+            auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+            INFO(text_of(r));
+            REQUIRE_FALSE(r.is_error);
+            CHECK(desk.attached);
+            CHECK(d.sticky_connection() == 1);
+            const std::string all = all_text(r);
+            CHECK(all.find("re-attached to the only open SAP session") != std::string::npos);
+            CHECK(all.find("read-only") != std::string::npos);
+        }
+    }
+    {   // a recorded partial identity of another system: not re-attached, not even for a read
+        Fixture f;
+        Desk desk{json{{"system", "QAS"}, {"client", "100"}, {"user", ""}}, logon_screen};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(writable);
+        auto r = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+        REQUIRE(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_CONNECTION", 0) == 0);
+        CHECK_FALSE(desk.attached);
+    }
+    {   // the recorded system, client and user, logged on: a change is re-attached too
+        Fixture f;
+        Desk desk{kBigfox, kBigfox};
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(writable);
+        auto r = d.call_tool("gui_element_click", write_args, ctx_with_id());
+        INFO(text_of(r));
+        REQUIRE_FALSE(r.is_error);
+        CHECK(desk.attached);
+        CHECK(all_text(r).find("re-attached to the only open SAP session") != std::string::npos);
+    }
+}
+
 TEST_CASE("Dispatcher: without auto_attach NO_CONNECTIONS gets an assistant hint instead of console commands", "[mcp][dispatcher][auto_attach]") {
     Fixture f;
     f.handler = [](const Argv&) {
