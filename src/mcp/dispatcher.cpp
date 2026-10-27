@@ -310,7 +310,10 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
     record.remote_addr = ctx.principal.remote_addr;
     record.transport = transport_label(ctx.http);
     record.era = ctx.http ? (ctx.era == ProtocolEra::Stateless ? "stateless" : "legacy") : "";
-    record.request_id = ctx.request_id.is_null() ? std::string() : dump_compact(ctx.request_id);
+    // a string id as it is (the gateway's ids are matched with its cloud audit), a number as its digits
+    record.request_id = ctx.request_id.is_null()     ? std::string()
+                        : ctx.request_id.is_string() ? ctx.request_id.get<std::string>()
+                                                     : dump_compact(ctx.request_id);
     if (record.request_id.size() > 64) record.request_id.resize(64);
 
     std::string code;
