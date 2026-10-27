@@ -10,7 +10,8 @@ name: winget per-user install
 # scheme 26.10.DD[.N]) -> base -> same-day -> next-day -> a rebuilt next-day MSI with exactly one product registered
 # each time, and each replaced MSI (and, for a base YYYY.MM.DD.N, a YYYY.MM.DD MSI) must be refused as a downgrade
 # (MSI version (YYYY-2000).MM.(DD*100+N), packaging/msi_version.ps1). packaging/winget/tests/Test-WingetUserInstall.ps1 holds the checks,
-# packaging/tests/Test-VersionScripts.ps1 those of the version scripts.
+# packaging/tests/Test-VersionScripts.ps1 those of the version scripts, packaging/winget/tests/Test-WingetTemplates.ps1 the
+# templates against the rules of microsoft/winget-pkgs.
 
 on:
   pull_request:
@@ -157,6 +158,11 @@ jobs:
     - name: Version scripts (msi_version.ps1, set_version.ps1, New-WingetManifest.ps1 version check)
       if: ${{ !cancelled() }}
       run: ./packaging/tests/Test-VersionScripts.ps1
+      shell: pwsh
+
+    - name: winget manifest templates against the winget-pkgs rules (schema 1.12.0, required fields, limits)
+      if: ${{ !cancelled() }}
+      run: ./packaging/winget/tests/Test-WingetTemplates.ps1
       shell: pwsh
 
     # the version-script checks failing must not hide the install checks: one run shows both
