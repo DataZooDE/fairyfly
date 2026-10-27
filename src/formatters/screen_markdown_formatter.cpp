@@ -1,3 +1,5 @@
+#include "include/shell_kind.h"
+#include "include/string_utils.h"
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
@@ -118,164 +120,176 @@ void render_header(std::ostringstream& oss, const json& data, bool compact) {
 }
 
 /// Grid-based monitoring screens (SMICM, ...): rendered as status pairs and rotated tables; true when it was one.
+namespace {
+
+/// A GuiLabel of report output at its grid position.
+struct LabelInfo {
+    std::string text;
+    int row;
+    int col;
+};
+
+/// The status-pair and rotated-table sections of a grid-based monitoring screen (SMICM, ...).
+void render_grid_sections(std::ostringstream& oss, const json& elements) {
+    // Parse grid labels into cells
+    auto grid_cells = GridAnalyzer::parse_grid_labels(elements);
+    spdlog::debug("Parsed {} grid cells", grid_cells.size());
+
+    // Deduplicate cells by ID (some elements may appear in multiple places in the tree)
+    auto deduped_cells = GridAnalyzer::deduplicate_cells(grid_cells);
+    spdlog::debug("Deduplicated {} cells", deduped_cells.size());
+
+    // Identify sections (status pairs and rotated tables)
+    auto sections = GridAnalyzer::identify_grid_sections(deduped_cells);
+    spdlog::debug("Identified {} grid sections", sections.size());
+
+    // Render each section
+    for (const auto& section : sections) {
+        if (section.type == GridSection::StatusPairs) {
+            oss << GridRenderer::render_status_section(section.cells);
+        } else if (section.type == GridSection::RotatedTable) {
+            oss << GridRenderer::render_rotated_table(section.cells);
+        }
+    }
+}
+
+/// The screen's buttons as a list (label, disabled, id).
+void render_button_list(std::ostringstream& oss, const json& hierarchy) {
+    oss << "## Buttons\n\n";
+    for (const auto& elem : hierarchy["buttons"]) {
+        if (!elem.is_object()) continue;
+        std::string label = elem.value("text", "");
+        if (label.empty()) {
+            label = elem.value("name", "Button");
+        }
+        std::string id = elem.value("id", "");
+        bool enabled = elem.value("enabled", true);
+
+        oss << "- **" << escape_markdown(label) << "**";
+        if (!enabled) {
+            oss << " _(disabled)_";
+        }
+        oss << " — `" << id << "`\n";
+    }
+    oss << "\n";
+}
+
+/// The non-empty GuiLabel texts under the hierarchy's other and form_fields groups, with their grid positions
+/// (report logs are individual labels).
+std::vector<LabelInfo> collect_report_labels(const json& hierarchy) {
+    std::vector<LabelInfo> labels;
+    std::function<void(const json&, int)> collect_labels = [&](const json& elem, int depth) {
+        if (depth > MAX_RECURSION_DEPTH || !elem.is_object()) {
+            return;
+        }
+
+        std::string type = elem.value("type", "");
+
+        // Collect text from GuiLabel elements with grid positions
+        if (type == "GuiLabel") {
+            std::string text = elem.value("text", "");
+            // Skip whitespace-only labels
+            const std::string trimmed = utils::trim(text);
+
+            if (!trimmed.empty()) {
+                LabelInfo info;
+                info.text = trimmed;
+                info.row = elem.value("grid_row", -1);
+                info.col = elem.value("grid_col", -1);
+                labels.push_back(info);
+            }
+        }
+
+        // Recurse into children
+        if (elem.contains("children") && elem["children"].is_array() && !elem["children"].empty()) {
+            for (const auto& child : elem["children"]) {
+                if (child.is_object()) {
+                    collect_labels(child, depth + 1);
+                }
+            }
+        }
+    };
+
+    // Collect all labels
+    for (const char* group : {"other", "form_fields"}) {
+        if (!hierarchy.contains(group) || !hierarchy[group].is_array()) continue;
+        for (const auto& elem : hierarchy[group]) {
+            if (elem.is_object()) collect_labels(elem, 0);
+        }
+    }
+    return labels;
+}
+
+/// The report labels row by row in a code block: blank rows kept (at most 20), a single indented label indented
+/// (at most 80 columns), labels of one row joined by a space.
+void render_report_output(std::ostringstream& oss, const std::vector<LabelInfo>& labels) {
+    std::map<int, std::vector<LabelInfo>> rows;
+    for (const auto& label : labels) {
+        if (label.row >= 0) {
+            rows[label.row].push_back(label);
+        }
+    }
+
+    // Sort each row by column
+    for (auto& [row, row_labels] : rows) {
+        std::sort(row_labels.begin(), row_labels.end(),
+                 [](const LabelInfo& a, const LabelInfo& b) { return a.col < b.col; });
+    }
+
+    // Render row by row
+    oss << "## Report Output\n\n";
+    oss << "```\n";
+    int previous_row = -1;
+    for (const auto& [row, row_labels] : rows) {
+        if (previous_row >= 0 && row > previous_row + 1) {
+            // Preserve report step separators without letting a bad
+            // screen coordinate create an unbounded Markdown body.
+            oss << std::string(static_cast<size_t>(
+                std::min(row - previous_row - 1, 20)), '\n');
+        }
+        // Combine labels in the same row
+        std::string line;
+        if (row_labels.size() == 1 && row_labels[0].col > 0) {
+            line.append(static_cast<size_t>(std::min(row_labels[0].col, 80)), ' ');
+        }
+        for (size_t i = 0; i < row_labels.size(); ++i) {
+            if (i > 0) line += " ";
+            line += row_labels[i].text;
+        }
+        if (!line.empty()) {
+            oss << line << "\n";
+        }
+        previous_row = row;
+    }
+    oss << "```\n\n";
+}
+
+}  // namespace
+
 bool render_grid_layout(std::ostringstream& oss, const json& data, const json& hierarchy) {
     // GRID LAYOUT DETECTION AND RENDERING
     // Check if this is a grid-based monitoring screen (SMICM, etc.)
-    if (data.contains("elements") && GridAnalyzer::detect_grid_layout(data["elements"])) {
-        spdlog::debug("Grid layout detected, using grid renderer");
+    if (!data.contains("elements") || !GridAnalyzer::detect_grid_layout(data["elements"])) return false;
+    spdlog::debug("Grid layout detected, using grid renderer");
+    render_grid_sections(oss, data["elements"]);
 
-        // Parse grid labels into cells
-        auto grid_cells = GridAnalyzer::parse_grid_labels(data["elements"]);
-        spdlog::debug("Parsed {} grid cells", grid_cells.size());
+    // monitoring screens still have menus
+    if (render_top_level_menus(oss, hierarchy)) oss << "\n";
+    if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) render_button_list(oss, hierarchy);
 
-        // Deduplicate cells by ID (some elements may appear in multiple places in the tree)
-        auto deduped_cells = GridAnalyzer::deduplicate_cells(grid_cells);
-        spdlog::debug("Deduplicated {} cells", deduped_cells.size());
-
-        // Identify sections (status pairs and rotated tables)
-        auto sections = GridAnalyzer::identify_grid_sections(deduped_cells);
-        spdlog::debug("Identified {} grid sections", sections.size());
-
-        // Render each section
-        for (const auto& section : sections) {
-            if (section.type == GridSection::StatusPairs) {
-                oss << GridRenderer::render_status_section(section.cells);
-            } else if (section.type == GridSection::RotatedTable) {
-                oss << GridRenderer::render_rotated_table(section.cells);
-            }
-        }
-
-        // monitoring screens still have menus
-        if (render_top_level_menus(oss, hierarchy)) oss << "\n";
-
-        // Add buttons if present
-        if (hierarchy.contains("buttons") && !hierarchy["buttons"].empty()) {
-            oss << "## Buttons\n\n";
-            for (const auto& elem : hierarchy["buttons"]) {
-                if (!elem.is_object()) continue;
-                std::string label = elem.value("text", "");
-                if (label.empty()) {
-                    label = elem.value("name", "Button");
-                }
-                std::string id = elem.value("id", "");
-                bool enabled = elem.value("enabled", true);
-
-                oss << "- **" << escape_markdown(label) << "**";
-                if (!enabled) {
-                    oss << " _(disabled)_";
-                }
-                oss << " — `" << id << "`\n";
-            }
-            oss << "\n";
-        }
-
-        // IMPORTANT: Also render non-grid elements for report content
-        // Report logs use individual GuiLabel elements with grid positions
-        // Collect labels by row and format them together
-        if ((hierarchy.contains("other") && !hierarchy["other"].empty()) ||
-            (hierarchy.contains("form_fields") && !hierarchy["form_fields"].empty())) {
-            struct LabelInfo {
-                std::string text;
-                int row;
-                int col;
-            };
-            std::vector<LabelInfo> labels;
-
-            std::function<void(const json&, int)> collect_labels = [&](const json& elem, int depth) {
-                if (depth > MAX_RECURSION_DEPTH || !elem.is_object()) {
-                    return;
-                }
-
-                std::string type = elem.value("type", "");
-
-                // Collect text from GuiLabel elements with grid positions
-                if (type == "GuiLabel") {
-                    std::string text = elem.value("text", "");
-                    // Skip whitespace-only labels
-                    std::string trimmed = text;
-                    trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-                    trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-
-                    if (!trimmed.empty()) {
-                        LabelInfo info;
-                        info.text = trimmed;
-                        info.row = elem.value("grid_row", -1);
-                        info.col = elem.value("grid_col", -1);
-                        labels.push_back(info);
-                    }
-                }
-
-                // Recurse into children
-                if (elem.contains("children") && elem["children"].is_array() && !elem["children"].empty()) {
-                    for (const auto& child : elem["children"]) {
-                        if (child.is_object()) {
-                            collect_labels(child, depth + 1);
-                        }
-                    }
-                }
-            };
-
-            // Collect all labels
-            for (const char* group : {"other", "form_fields"}) {
-                if (!hierarchy.contains(group) || !hierarchy[group].is_array()) continue;
-                for (const auto& elem : hierarchy[group]) {
-                    if (elem.is_object()) collect_labels(elem, 0);
-                }
-            }
-
-            // Group labels by row and format them
-            if (!labels.empty()) {
-                std::map<int, std::vector<LabelInfo>> rows;
-                for (const auto& label : labels) {
-                    if (label.row >= 0) {
-                        rows[label.row].push_back(label);
-                    }
-                }
-
-                // Sort each row by column
-                for (auto& [row, row_labels] : rows) {
-                    std::sort(row_labels.begin(), row_labels.end(),
-                             [](const LabelInfo& a, const LabelInfo& b) { return a.col < b.col; });
-                }
-
-                // Render row by row
-                oss << "## Report Output\n\n";
-                oss << "```\n";
-                int previous_row = -1;
-                for (const auto& [row, row_labels] : rows) {
-                    if (previous_row >= 0 && row > previous_row + 1) {
-                        // Preserve report step separators without letting a bad
-                        // screen coordinate create an unbounded Markdown body.
-                        oss << std::string(static_cast<size_t>(
-                            std::min(row - previous_row - 1, 20)), '\n');
-                    }
-                    // Combine labels in the same row
-                    std::string line;
-                    if (row_labels.size() == 1 && row_labels[0].col > 0) {
-                        line.append(static_cast<size_t>(std::min(row_labels[0].col, 80)), ' ');
-                    }
-                    for (size_t i = 0; i < row_labels.size(); ++i) {
-                        if (i > 0) line += " ";
-                        line += row_labels[i].text;
-                    }
-                    if (!line.empty()) {
-                        oss << line << "\n";
-                    }
-                    previous_row = row;
-                }
-                oss << "```\n\n";
-            }
-        }
-
-        // Summary stats
-        int total_elements = data.value("element_count", 0);
-        oss << "---\n";
-        oss << "**Screen Elements:** " << total_elements << " top-level\n";
-
-        return true;
+    // Also render non-grid elements for report content: report logs use individual GuiLabel elements with grid
+    // positions, collected by row and formatted together
+    if ((hierarchy.contains("other") && !hierarchy["other"].empty()) ||
+        (hierarchy.contains("form_fields") && !hierarchy["form_fields"].empty())) {
+        const auto labels = collect_report_labels(hierarchy);
+        if (!labels.empty()) render_report_output(oss, labels);
     }
 
-    return false;
+    // Summary stats
+    int total_elements = data.value("element_count", 0);
+    oss << "---\n";
+    oss << "**Screen Elements:** " << total_elements << " top-level\n";
+    return true;
 }
 
 /// The top-level menus of the menu bar.
@@ -371,11 +385,7 @@ void render_status(std::ostringstream& oss, [[maybe_unused]] const json& data, [
             if (type == "GuiStatusPane" && id.find("/sbar/pane[") != std::string::npos) {
                 std::string text = elem.value("text", "");
                 // Only include panes with non-empty, non-whitespace text
-                std::string trimmed = text;
-                trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-                trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-
-                if (!trimmed.empty()) {
+                if (!utils::trim(text).empty()) {
                     status_panes.push_back(elem);
                 }
             }
@@ -637,7 +647,7 @@ void render_tables(std::ostringstream& oss, [[maybe_unused]] const json& data, [
 
             // Use TableFormatter for GuiGridView, GuiTableControl, or GuiShell with GridView subtype
             if (table_formatter.can_format(type) ||
-                (type == "GuiShell" && subtype == "GridView") ||
+                (type == "GuiShell" && sap::is_grid_shell(subtype)) ||
                 elem.contains("table_data")) {
                 // Use new formatter with table_data support
                 table_formatter.format_to_markdown(elem, oss);
@@ -721,7 +731,7 @@ void render_other(std::ostringstream& oss, [[maybe_unused]] const json& data, [[
             // Check if this element is truly semantic (has meaningful content)
             bool is_truly_semantic = (subtype == "TextEdit" || subtype == "HTMLViewer") ||
                                     (subtype == "Tree" || elem.contains("tree_data")) ||
-                                    (subtype == "GridView" || elem.contains("table_data")) ||
+                                    (sap::is_grid_shell(subtype) || elem.contains("table_data")) ||
                                     (type == "GuiShell" && (elem.value("content_available", false) ||
                                                             (!subtype.empty() && subtype != "N/A")));
 

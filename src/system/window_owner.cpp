@@ -1,4 +1,5 @@
 #include "include/system/window_owner.h"
+#include "include/system/unique_handle.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -8,10 +9,7 @@
 namespace fairyfly::system {
 namespace {
 
-struct ScopedHandle {
-    HANDLE value = nullptr;
-    ~ScopedHandle() { if (value) CloseHandle(value); }
-};
+using system::UniqueHandle;
 
 std::vector<unsigned char> token_information(HANDLE token, TOKEN_INFORMATION_CLASS kind) {
     DWORD size = 0;
@@ -27,13 +25,13 @@ bool same_logon(HANDLE target_process, std::uint32_t target_pid) {
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &own_session) ||
         !ProcessIdToSessionId(target_pid, &target_session) || own_session != target_session)
         return false;
-    ScopedHandle own_token, target_token;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &own_token.value) ||
-        !OpenProcessToken(target_process, TOKEN_QUERY, &target_token.value)) return false;
-    const auto own_user = token_information(own_token.value, TokenUser);
-    const auto target_user = token_information(target_token.value, TokenUser);
-    const auto own_stats = token_information(own_token.value, TokenStatistics);
-    const auto target_stats = token_information(target_token.value, TokenStatistics);
+    UniqueHandle own_token, target_token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, own_token.out()) ||
+        !OpenProcessToken(target_process, TOKEN_QUERY, target_token.out())) return false;
+    const auto own_user = token_information(own_token.get(), TokenUser);
+    const auto target_user = token_information(target_token.get(), TokenUser);
+    const auto own_stats = token_information(own_token.get(), TokenStatistics);
+    const auto target_stats = token_information(target_token.get(), TokenStatistics);
     if (own_user.size() < sizeof(TOKEN_USER) || target_user.size() < sizeof(TOKEN_USER) ||
         own_stats.size() < sizeof(TOKEN_STATISTICS) || target_stats.size() < sizeof(TOKEN_STATISTICS)) return false;
     const auto* own = reinterpret_cast<const TOKEN_USER*>(own_user.data());
@@ -50,9 +48,9 @@ bool same_logon(HANDLE target_process, std::uint32_t target_pid) {
 bool process_owned_by_current_logon(std::uint32_t process_id) noexcept {
     try {
         if (!process_id) return false;
-        ScopedHandle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id)};
-        if (!process.value) return false;
-        return same_logon(process.value, process_id);
+        const UniqueHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id));
+        if (!process) return false;
+        return same_logon(process.get(), process_id);
     } catch (...) { return false; }
 }
 
@@ -63,9 +61,9 @@ bool window_owned_by_current_logon(std::uintptr_t native_handle) noexcept {
         if (!IsWindow(window)) return false;
         DWORD process_id = 0;
         if (!GetWindowThreadProcessId(window, &process_id) || !process_id) return false;
-        ScopedHandle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id)};
-        if (!process.value) return false;
-        if (!same_logon(process.value, process_id)) return false;
+        const UniqueHandle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id));
+        if (!process) return false;
+        if (!same_logon(process.get(), process_id)) return false;
         DWORD after = 0;
         return IsWindow(window) && GetWindowThreadProcessId(window, &after) && after == process_id;
     } catch (...) { return false; }

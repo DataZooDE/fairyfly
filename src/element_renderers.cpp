@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/element_renderers.h"
 #include "include/element_renderer_registry.h"
 #include "include/semantic_classifier.h"
@@ -695,7 +696,7 @@ void register_all_renderers() {
         if (subtype == "Tree" || metadata.contains("tree_data")) {
             return TreeRenderer::to_json(metadata);
         }
-        if (subtype == "GridView" || (subtype != "Toolbar" && metadata.contains("table_data"))) {
+        if (is_grid_shell(subtype) || (subtype != "Toolbar" && metadata.contains("table_data"))) {
             return TableRenderer::to_json(metadata);
         }
         if (subtype == "Toolbar") {
@@ -736,7 +737,7 @@ void register_all_renderers() {
         if (subtype == "Tree" || metadata.contains("tree_data")) {
             return TreeRenderer::to_markdown(metadata, level);
         }
-        if (subtype == "GridView" || (subtype != "Toolbar" && metadata.contains("table_data"))) {
+        if (is_grid_shell(subtype) || (subtype != "Toolbar" && metadata.contains("table_data"))) {
             return TableRenderer::to_markdown(metadata, level);
         }
         if (subtype == "Toolbar") {

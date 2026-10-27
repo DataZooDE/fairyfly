@@ -1,5 +1,6 @@
 // Windows UI of the desktop approval (see the header): the toast, its COM activator for the notification centre, the
 // approval window and the check for a locked or non-interactive session.
+#include "include/com/hresult.h"
 #include "include/link/desktop_approval_win32.h"
 
 #include <windows.h>
@@ -149,7 +150,7 @@ private:
             HRESULT hr = E_FAIL;
             if (auto factory = Microsoft::WRL::Make<ActivatorFactory>())
                 hr = CoRegisterClassObject(activator_clsid(), factory.Get(), CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
-            if (FAILED(hr)) spdlog::warn("approval: the notification centre cannot answer (CoRegisterClassObject 0x{:08X})", unsigned(hr));
+            if (FAILED(hr)) spdlog::warn("approval: the notification centre cannot answer (CoRegisterClassObject {})", hresult_hex(hr));
             p.set_value(true);  // the toast's own Activated event still answers while it is on screen
             // keeps the apartment (and the activator) for the life of the process
             HANDLE never = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -320,7 +321,7 @@ public:
         if (!ToastService::get().ready()) return false;
         Apartment apartment;
         auto failed = [&](const char* step, HRESULT hr) {
-            spdlog::warn("approval {}: no notification ({} 0x{:08X}); the approval window opens", r.id, step, unsigned(hr));
+            spdlog::warn("approval {}: no notification ({} {}); the approval window opens", r.id, step, hresult_hex(hr));
             return false;
         };
         ComPtr<wn::IToastNotificationManagerStatics> manager;
@@ -458,7 +459,7 @@ public:
         if (big) DestroyIcon(big);
         if (st.icon_small) DestroyIcon(st.icon_small);
         if (FAILED(hr)) {
-            spdlog::error("approval {}: denied, the approval window failed (0x{:08X})", r.id, unsigned(hr));
+            spdlog::error("approval {}: denied, the approval window failed ({})", r.id, hresult_hex(hr));
             return Answer::Deny;
         }
         if (st.stopped) return Answer::None;
