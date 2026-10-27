@@ -208,6 +208,12 @@ private:
                             bool selection_input, const auth::InitialScreen& selection_initial);
     void retire_disconnected_session(const Result& result, const json& args, const audit::SapFacts& owner_pre_facts);
     bool owner_session_unchanged(const audit::SapFacts& owner_pre_facts, McpCallRecord& record);
+    struct CallState;   // dispatcher.cpp
+    bool acquire_probe_gate(CallState& state, const CallContext& ctx);
+    std::optional<ToolResult> admit_live_session(const std::string& name, McpCallRecord& record, const CallContext& ctx,
+                                                 CallState& state, const RefuseCall& refuse);
+    std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
+                                         const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,
