@@ -1,6 +1,7 @@
 // CommandHandler entry points for key send, popup close and menu list/select.
 #include "include/cli_handler.h"
-#include "include/com_automation_engine.h"
+#include "include/sap_gui_scripting.h"
+#include "include/com/wrapper.h"
 #include "include/action_argument_checks.h"
 #include "include/read_only_guard.h"
 #include <fmt/format.h>
@@ -30,12 +31,12 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
     if (conn_result.status != ResultT<Connection>::Status::Success) {
         return result_from_error(conn_result);
     }
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_engine = engine_->scripting();
     if (!com_engine) return engine_mismatch("key send");
     if (read_only_ && *vkey == 0) {
         // The target window decides: Enter on a popup may confirm a Save/Delete dialog.
         const std::string target = (window.empty() || window == "@active")
-            ? com_engine->get_active_window_id().id : window;
+            ? engine_->get_active_window_id().id : window;
         const auto rule = sap::read_only_vkey_rule(0, WindowId(target).get_index());
         if (!rule.empty()) return sap::make_read_only_refusal("vkey:" + key, "Key", key, "", rule);
     }
@@ -70,7 +71,7 @@ Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
     if (conn_result.status != ResultT<Connection>::Status::Success) {
         return result_from_error(conn_result);
     }
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_engine = engine_->scripting();
     if (!com_engine) return engine_mismatch("popup close");
 
     Result result = com_engine->close_popup(vkey);
@@ -101,7 +102,7 @@ Result CommandHandler::handle_screen_menu(const std::string& select_path, const 
     if (conn_result.status != ResultT<Connection>::Status::Success) {
         return result_from_error(conn_result);
     }
-    auto* com_engine = dynamic_cast<sap::ComAutomationEngine*>(engine_.get());
+    auto* com_engine = engine_->scripting();
     if (!com_engine) return engine_mismatch("menu");
 
     // Enumeration never selects; selection only happens for an explicit --select path.

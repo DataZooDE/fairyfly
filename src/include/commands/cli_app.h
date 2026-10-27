@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <string>
+#include <vector>
 
 #include "include/commands/global_options.h"
 
@@ -20,6 +21,8 @@ void build_command_tree(CLI::App& app);
 
 /// Space-joined names of the parsed subcommand chain after app.parse(): "element click",
 /// "mcp tools", "doctor" ("" when no command was parsed). Used as the audit `command`.
+/// The parsed subcommand chain, e.g. {"element", "click"}.
+std::vector<std::string> invoked_command_words(const CLI::App& app);
 std::string invoked_command_path(const CLI::App& app);
 
 } // namespace commands
