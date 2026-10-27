@@ -1,4 +1,5 @@
 #include "include/audit_log.h"
+#include "include/string_utils.h"
 #include "include/text/utf8.h"
 #include "include/sensitive_data.h"
 #include "include/version.h"
@@ -169,18 +170,26 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     // enabled/disabled: mcp.yaml, then FAIRYFLY_AUDIT, then --no-audit
     const std::string mode_env = env.get(config::env::kAudit);
     if (file_settings.enabled == false) config.mode = Mode::Disabled;
-    if (config::parse_off(mode_env)) config.mode = Mode::Disabled;
+    // exactly the documented words (any case, no padding): turning the trail off must not happen by accident, so the
+    // shared flag parser's wider "off" words (false, no) do not apply here
+    const std::string mode = utils::lower_ascii(mode_env);
+    if (mode == "0" || mode == "off") config.mode = Mode::Disabled;
     else if (config::parse_flag(mode_env)) config.mode = Mode::Enabled;
     if (cli_no_audit) config.mode = Mode::Disabled;
     // required is monotonic (fail safe): any source that asks for it wins over every disable
-    if (file_settings.required == true || config::normalized(mode_env) == "required" || cli_required) config.mode = Mode::Required;
+    if (file_settings.required == true || mode == "required" || cli_required) config.mode = Mode::Required;
 
     if (const std::string file_env = env.get(config::env::kAuditFile); !file_env.empty()) {
         config.file = text::utf8_path(file_env);
     } else if (file_settings.file && !file_settings.file->empty()) {
         config.file = text::utf8_path(*file_settings.file);
     } else {
-        const std::filesystem::path data = env.data_dir();
+        std::filesystem::path data = env.data_dir();
+#ifndef _WIN32
+        // POSIX: the XDG data directory, as before the shared environment
+        if (const std::string home = env.get(config::env::kHome); !home.empty())
+            data = text::utf8_path(home) / ".local" / "share" / "fairyfly";
+#endif
         config.file = (data.has_parent_path() ? data : std::filesystem::path(".fairyfly")) / "audit" / monthly_file_name(now);
     }
     return config;

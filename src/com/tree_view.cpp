@@ -265,9 +265,12 @@ void ComGuiTree::select_node_context_item(const std::string& node_key,
     if (!dispatch_) throw ComException("Null tree element");
     if (item_text.empty()) throw ComException("Context-menu item text is empty");
 
-    // UTF-8 key and item text (they went through the ANSI code page before)
-    element_.call(L"NodeContextMenu", {bstr_arg(node_key)}, "Tree context-menu method not found", "Tree context-menu action failed");
-    element_.call(L"SelectContextMenuItemByText", {bstr_arg(item_text)}, "Tree context-menu method not found",
+    // UTF-8 key and item text (they went through the ANSI code page before), both converted before the menu opens:
+    // a text that is not UTF-8 must not leave an open context menu behind
+    const _variant_t key = bstr_arg(node_key);
+    const _variant_t item = bstr_arg(item_text);
+    element_.call(L"NodeContextMenu", {key}, "Tree context-menu method not found", "Tree context-menu action failed");
+    element_.call(L"SelectContextMenuItemByText", {item}, "Tree context-menu method not found",
          "Tree context-menu action failed");
 }
 

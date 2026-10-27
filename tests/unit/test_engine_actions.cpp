@@ -291,3 +291,17 @@ TEST_CASE("hresult_hex prints an HRESULT unsigned, as Windows documents it", "[c
     CHECK(fairyfly::hresult_hex(E_FAIL) == "0x80004005");
     CHECK(fairyfly::hresult_hex(S_OK) == "0x00000000");
 }
+
+TEST_CASE("tree context menu: an item text that is not UTF-8 is refused before the menu opens", "[com][tree]") {
+    // final review 2026-10-27: the item text was converted only after NodeContextMenu had opened the menu
+    ScopedDispatchCacheReset cache_reset;
+    auto* control = new FakeNode();
+    control->strings[L"Type"] = L"GuiShell";
+    control->methods = {L"NodeContextMenu", L"SelectContextMenuItemByText"};
+    ComGuiElement element(IDispatchPtr(control, false));
+    CHECK_THROWS(as_tree(element).select_node_context_item("N1", std::string("\xC3\x28", 2)));   // invalid UTF-8
+    CHECK(control->calls.empty());   // nothing was opened in SAP
+    as_tree(element).select_node_context_item("N1", "\xC3\x96" "ffnen");   // "Öffnen" in UTF-8
+    REQUIRE(control->calls.size() == 2);
+    CHECK(control->calls[1].second == L"Öffnen");
+}
