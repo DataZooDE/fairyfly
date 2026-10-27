@@ -37,6 +37,62 @@
   winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
   `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
 
+### Fixed
+
+- COM errors and logs print an HRESULT as Windows documents it (`0x80020009`), not as a signed number
+  (`0x-7FFDFFF7`); for example "SendVKey invoke failed", "OpenConnection failed: hr=..." and the screenshot errors.
+
+### No hand-written function over 150 lines (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` (794 lines with the re-attach from 2026.10.25.2) is the admission
+  (`admit_call`, `admit_live_session` over a `CallState`), then `execute_call` (100 lines), `invoke_and_finish` (93)
+  and `run_invocation` (127) nested along their scopes, plus named checks for the lease, the screen guard, the
+  owner attach/launch/login and the image cap. `run_mcp` (HTTP: `serve_http`), `HttpEndpoint::dispatch`,
+  `ComAutomationEngine::launch_connection` and `run_setup` are split as well; the only longer functions left are the
+  tool catalog and the element registries (tables).
+- A timing test of the object tree parser compares against a plain JSON parse in the same run (it failed on a busy
+  machine).
+
+### Shorter functions, shared tree and tab steps (2026-10-25 code review)
+
+- The two tree readers share the item texts, the data columns and the nesting by path, which no longer asks SAP
+  for every node's path a second time. `read_tab` and `read_with_tabs` share their tab steps.
+- The response redaction has one classify loop instead of ten copies, with its 13 patterns unchanged. The
+  screenshot capture makes one `HardCopy` call, and the error of a failed capture keeps what it had already
+  recorded.
+- `handle_login`, `handle_click`, `run_mcp`, `run_mcp_doctor`, `run_batch`, the dispatcher's owner checks, the
+  HTTP route admission, `ComGuiApplication::create`, `run_link`, `MakeTeardownPlan` and the Markdown and grid
+  renderers are split into named parts.
+- New tests: the logon under an owner guard through the real handler, the collection walks through their callers,
+  the screenshot paths through a fake window, and the doctor's check order and setup query.
+
+### Typed views and shorter functions (2026-10-25 code review)
+
+- `ComGuiElement` keeps its general methods (59 -> 34); trees, grids and toolbars are typed views
+  (`as_tree`, `as_grid`, `as_toolbar`). One `TreeNodeTexts` recovers an empty node text from its columns for the
+  screen reader, the table extractor and `element get --list-nodes`.
+- `HttpEndpoint::dispatch`, `run_link`, `read_tab`, `launch_connection`, `MakePlan`, the dispatcher's
+  `execute_call` and `traverse_element_tree` are split into named parts; `Stopwatch` measures the actions.
+- An `mcp` command no longer leaves the tray's runner factory registered after it returns (it referred to
+  `run_cli`'s locals). New tests: the config commands, `run_mcp`'s start refusals, the session worker's admission
+  and flags, the audit trail's screen source, the engine's launch, fill, click and transaction.
+
+### Tests and seams (2026-10-25 code review)
+
+- The setup probes take their HTTP transport (tested without WinHTTP), and `ComAutomationEngine` its SAP GUI
+  application object: its fill, click, transaction and read actions are tested against a scripted SAP GUI.
+- One validation path for a fill field (CLI, MCP, fields list); the CLI keeps its error order.
+- `traverse_element_tree` and `ElementMetadataExtractor::extract` are split into named stages.
+- The rare unit-test failure was a wall-clock bound under load; sleep-ordered tests wait for an event instead;
+  the environment guard tests run in 0.16 s instead of 20 s.
+
+### Setup and process handles (2026-10-25 code review)
+
+- `mcp setup` and `mcp teardown` share their gates (dry run, nothing to do, read-only, consent, elevation) and their
+  step bookkeeping; messages and exit codes are unchanged.
+- Win32 handles are owned by one `UniqueHandle`: the PowerShell runner no longer leaks its pipes when a step in
+  between fails, and three local handle types are gone.
+
 ### One way to call SAP GUI's COM objects (2026-10-25 code review)
 
 - `SapGuiObject`'s six setter/invoker bodies are one `invoke_checked()`, and about 60 hand-built `DISPPARAMS` went

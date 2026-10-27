@@ -1,3 +1,4 @@
+#include "include/shell_kind.h"
 #include "include/formatters/table_formatter.h"
 #include <spdlog/spdlog.h>
 
@@ -68,7 +69,7 @@ void TableFormatter::format_to_markdown(const json& element_json, std::ostringst
 
     // Add usage examples
     if (type == "GuiGridView" ||
-        (type == "GuiShell" && element_json.value("subtype", "") == "GridView")) {
+        (type == "GuiShell" && sap::is_grid_shell(element_json.value("subtype", "")))) {
         oss << "**Usage Examples:**\n";
         oss << "```bash\n";
         oss << "# Select a row\n";

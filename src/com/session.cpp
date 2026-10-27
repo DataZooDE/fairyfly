@@ -1,3 +1,4 @@
+#include "include/com/hresult.h"
 #include "include/com/wrapper.h"
 #include "include/com/invoke.h"
 #include "include/com/utf8.h"
@@ -146,7 +147,7 @@ std::optional<std::string> ComGuiSession::get_object_tree(const std::string& id,
         if (hr == DISP_E_MEMBERNOTFOUND || hr == DISP_E_UNKNOWNNAME) {
             set_object_tree_support(ObjectTreeSupport::Missing);
         }
-        spdlog::warn("GuiSession.GetObjectTree failed hr=0x{:08X} after {} ms", static_cast<unsigned>(hr), elapsed_ms);
+        spdlog::warn("GuiSession.GetObjectTree failed hr={} after {} ms", hresult_hex(hr), elapsed_ms);
         if (hr == RPC_E_SERVERFAULT) return fail(ObjectTreeFailure::ServerFault);
         return fail(ObjectTreeFailure::Failed);
     }
@@ -172,14 +173,14 @@ void ComGuiSession::start_transaction(const std::string& tcode) {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("StartTransaction method not found: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("StartTransaction method not found: {}", hresult_hex(hr)));
             throw ComException("StartTransaction method not found", hr);
         }
 
         _variant_t result;   // the T-code as UTF-8 (it went through the ANSI code page before)
         hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(com::utf8_to_wide(tcode).c_str())}, &result);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("StartTransaction invoke failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("StartTransaction invoke failed: {}", hresult_hex(hr)));
             throw ComException("Failed to start transaction", hr);
         }
 

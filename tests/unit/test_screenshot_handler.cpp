@@ -3,7 +3,10 @@
 #include "include/cli_handler.h"
 #include "include/com/wrapper.h"
 #include <filesystem>
+#include <cstring>
 #include <fstream>
+
+#include "support/fake_dispatch.h"
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
@@ -150,3 +153,102 @@ TEST_CASE("ScreenshotHandler - base64 output honours --file", "[screenshot][hand
     }
 }
 
+
+namespace {
+
+/// A session whose active window answers HardCopy / HardCopyToMemory (a 4x2 RGB PNG).
+struct ScreenshotScene {
+    fairyfly::test::ScopedDispatchCacheReset cache_reset;
+    fairyfly::test::FakeNode* session = new fairyfly::test::FakeNode();
+    fairyfly::test::FakeNode* window = new fairyfly::test::FakeNode();
+    IDispatchPtr session_holder{session, false}, window_holder{window, false};
+    ScreenshotScene() {
+        session->strings[L"Type"] = L"GuiSession";
+        window->strings[L"Type"] = L"GuiMainWindow";
+        window->strings[L"Text"] = L"SAP Easy Access";
+        session->dispatches[L"ActiveWindow"] = window;
+        window->methods = {L"HardCopy", L"HardCopyToMemory"};
+        static const unsigned char png[] = {
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+            0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02, 0x00, 0x00, 0x00, 0xF0, 0xCA, 0xEA, 0x34, 0x00, 0x00, 0x00,
+            0x10, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x38, 0x91, 0x62, 0x04, 0x47, 0x0C, 0xC8, 0x1C, 0x00, 0x92,
+            0xFA, 0x0A, 0xF1, 0x4B, 0x4E, 0x88, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60,
+            0x82};
+        SAFEARRAY* bytes = SafeArrayCreateVector(VT_UI1, 0, sizeof(png));
+        void* data = nullptr;
+        SafeArrayAccessData(bytes, &data);
+        std::memcpy(data, png, sizeof(png));
+        SafeArrayUnaccessData(bytes);
+        _variant_t answer;
+        answer.vt = VT_ARRAY | VT_UI1;
+        answer.parray = bytes;
+        window->method_values[L"HardCopyToMemory"] = answer;
+    }
+    ScreenshotHandler handler() { return ScreenshotHandler(ComGuiSession::create(IDispatchPtr(session, true))); }
+};
+
+}  // namespace
+
+TEST_CASE("ScreenshotHandler - a file without processing is written by SAP GUI itself (HardCopy)", "[screenshot][handler]") {
+    // Codex on #90: the extracted capture paths through a fake window
+    ScreenshotScene scene;
+    const auto path = std::filesystem::absolute(std::filesystem::temp_directory_path() / "fairyfly_hardcopy_test.png");
+    cli::ScreenshotOptions opts;
+    opts.output_file = path.string();
+
+    SECTION("the file SAP GUI wrote is the result") {
+        { std::ofstream(path, std::ios::binary) << "png"; }   // what SAP GUI would have written
+        const Result r = scene.handler().capture(opts);
+        INFO(r.to_json().dump());
+        REQUIRE(r.status == Result::Status::Success);
+        CHECK(r.data["filepath"] == path.string());
+        REQUIRE(scene.window->calls.size() == 1);
+        CHECK(scene.window->calls[0].first == L"HardCopy");
+        CHECK(scene.window->calls[0].second == path.wstring() + L",2");   // the absolute path, IMAGE_TYPE_PNG
+    }
+    SECTION("no file from SAP GUI is SCREENSHOT_NOT_CREATED") {
+        std::filesystem::remove(path);
+        const Result r = scene.handler().capture(opts);
+        CHECK(r.error["code"] == "SCREENSHOT_NOT_CREATED");
+    }
+    SECTION("a failing HardCopy is reported with its HRESULT") {
+        scene.window->failing_calls = {L"HardCopy(" + path.wstring() + L",2)"};
+        const Result r = scene.handler().capture(opts);
+        INFO(r.to_json().dump());
+        CHECK(r.error["code"] == "EXCEPTION");
+        CHECK(r.error["message"].get<std::string>().rfind("HardCopy failed: 0x80020009", 0) == 0);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ScreenshotHandler - a crop always takes the processing path (HardCopyToMemory, native pixels)", "[screenshot][handler]") {
+    ScreenshotScene scene;
+    cli::ScreenshotOptions opts;
+    opts.output_file = (std::filesystem::temp_directory_path() / "fairyfly_crop_test.png").string();
+    opts.format = "base64";
+    opts.crop_x = 1;
+    opts.crop_y = 0;
+    opts.crop_width = 2;
+    opts.crop_height = 2;
+    const Result r = scene.handler().capture(opts);
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Success);
+    REQUIRE(scene.window->calls.size() == 1);
+    CHECK(scene.window->calls[0] == std::pair<std::wstring, std::wstring>{L"HardCopyToMemory", L"2"});
+    CHECK(r.data["native_size"] == json{{"width", 4}, {"height", 2}});
+    CHECK(r.data["output_size"] == json{{"width", 2}, {"height", 2}});
+    std::filesystem::remove(opts.output_file);
+}
+
+TEST_CASE("ScreenshotHandler - a crop completely outside the native screenshot is refused, not a blank image", "[screenshot][handler]") {
+    ScreenshotScene scene;
+    cli::ScreenshotOptions opts;
+    opts.format = "base64";
+    opts.crop_x = 4;   // the native width is 4
+    opts.crop_y = 0;
+    opts.crop_width = 5;
+    opts.crop_height = 2;
+    const Result r = scene.handler().capture(opts);
+    CHECK(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "INVALID_ARGUMENT");
+}

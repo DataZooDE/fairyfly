@@ -7,7 +7,7 @@
 #include <wincrypt.h>
 #include <winhttp.h>
 
-#include "winhttp_client.h"
+#include "include/setup/http_probe.h"
 #include "include/text/utf8.h"
 #include "win_util.h"
 
@@ -77,8 +77,7 @@ HttpProbeResponse winhttp_request(const HttpProbeRequest& req) {
     DWORD no_redirect = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     WinHttpSetOption(request.h, WINHTTP_OPTION_REDIRECT_POLICY, &no_redirect, sizeof(no_redirect));
     std::wstring headers;
-    if (connect_host != req.host) headers += L"Host: " + text::utf8_to_wide(req.host + ":" + std::to_string(req.port)) + L"\r\n";
-    for (const auto& [k, v] : req.headers) headers += text::utf8_to_wide(k + ": " + v) + L"\r\n";
+    for (const auto& [k, v] : probe_headers(req)) headers += text::utf8_to_wide(k + ": " + v) + L"\r\n";
     const DWORD body_size = static_cast<DWORD>(req.body.size());
     const BOOL sent = WinHttpSendRequest(request.h, headers.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : headers.c_str(),
                                          headers.empty() ? 0 : static_cast<DWORD>(-1L), body_size ? const_cast<char*>(req.body.data()) : WINHTTP_NO_REQUEST_DATA,
