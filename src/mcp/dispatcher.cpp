@@ -691,7 +691,9 @@ struct SelectionScope {
     }
 };
 
-struct LeaseWriteScope {
+}  // namespace
+
+struct CommandDispatcher::LeaseWriteScope {
     std::shared_ptr<SessionLeases> leases;
     std::string session, token, id;
     bool active = false;
@@ -699,6 +701,8 @@ struct LeaseWriteScope {
         if (active) leases->end_write(session, token, id, SessionLeases::Clock::now());
     }
 };
+
+namespace {
 
 struct OwnerSessionScope {
     const CommandDispatcher::OwnerSessionOverride& hook;
@@ -1288,29 +1292,187 @@ bool CommandDispatcher::owner_session_unchanged(const audit::SapFacts& owner_pre
     return current && current->connection_id == record.connection && same_session(*current);
 }
 
-ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
-                                           std::string& code, const CallContext& ctx) {
-    auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
-        if (owner_mode(ctx) &&
-            (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
-             c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
-             c == "SESSION_TARGET_CHANGED")) {
-            record.error_code = c;  // the audit sink may distinguish boundary probes; the caller may not
-            code = "OWNER_SESSION_UNAVAILABLE";
-            return error_result(code, "the requested SAP session is unavailable");
-        }
-        code = c;
-        return error_result(c, message, hint);
+namespace {
+/// The hint when a closed default connection was not re-attached for a change.
+constexpr const char* kReattachAgainHint =
+    "the saved SAP connection had closed and the open SAP session is not verified as the same logged-on SAP user: "
+    "attach the SAP session again (gui_session_attach) and retry";
+}  // namespace
+
+/// What crosses from a call's admission to its execution: the tool and its arguments, how the connection was chosen,
+/// the re-attach outcome, the policy keys, the owner and login facts, and what must stay held for the whole call (the
+/// probe gate, the login lane).
+struct CommandDispatcher::CallState {
+    const ToolSpec* spec = nullptr;
+    json args;
+    bool accepts_connection = false;
+    bool implicit_sticky = false;
+    std::optional<SessionRoutingState::StickyTarget> sticky_target;
+    bool selection_input = false;
+    std::string reattach_note;  ///< said in the result when a default connection was re-attached
+    bool reattach_refused = false;
+    std::unique_lock<std::shared_timed_mutex> control_probe_lock;
+    std::string policy_state_key;
+    std::string policy_fallback_key;
+    std::optional<audit::SapFacts> owner_pre_facts;
+    std::optional<audit::SapFacts> login_pre_facts;
+    std::optional<audit::SapFacts> prelogin_close_facts;
+    std::shared_ptr<void> login_lane_reservation;
+    auth::InitialScreen selection_initial;  ///< the recorded initial screen an authorized selection-input fill may write on
+};
+
+/// execute_call steps 1-2b: the tool, its connection, the admission, the live session (re-attaching a closed default
+/// on stdio and link), the owner and login checks and the token's authorization. A value: the call is refused.
+/// The process-wide gate of SAP admission probes, held in `state` for the rest of the call; false after 5 s or when the
+/// call is cancelled while waiting.
+bool CommandDispatcher::acquire_probe_gate(CallState& state, const CallContext& ctx) {
+    if (!control_probe_gate_)
+        return false;
+    state.control_probe_lock = std::unique_lock<std::shared_timed_mutex>(*control_probe_gate_, std::defer_lock);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!state.control_probe_lock.try_lock_for(std::chrono::milliseconds(50))) {
+        if ((ctx.cancelled && ctx.cancelled()) || std::chrono::steady_clock::now() >= deadline)
+            return false;
+    }
+    return true;
+}
+
+/// execute_call step 2b: the live facts of the call's session (a closed default re-attaches on stdio and link), the
+/// owner checks (logon reservation, pre-logon close, owner identity), the selection-input screen and the token's
+/// authorization against the live system and transaction. A value: the call is refused.
+std::optional<ToolResult> CommandDispatcher::admit_live_session(const std::string& name, McpCallRecord& record,
+                                                                const CallContext& ctx, CallState& state,
+                                                                const RefuseCall& refuse) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
     };
+    const ToolSpec* spec = state.spec;
+    const json& args = state.args;
+    const auto& sticky_target = state.sticky_target;
+    const bool selection_input = state.selection_input;
+    const Principal& principal = ctx.principal;
+    std::string& policy_state_key = state.policy_state_key;
+    std::string& policy_fallback_key = state.policy_fallback_key;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& login_pre_facts = state.login_pre_facts;
+    auto& prelogin_close_facts = state.prelogin_close_facts;
+    auto& login_lane_reservation = state.login_lane_reservation;
+    auth::InitialScreen& selection_initial = state.selection_initial;
+    bool& reattach_refused = state.reattach_refused;
+    const std::string reattach_again_hint = kReattachAgainHint;
+    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
+        return reattach_only_session_for(*spec, name, principal, recorded, stale_id, state.reattach_note, reattach_refused);
+    };
+    const auto acquire_control_probe_gate = [&] { return acquire_probe_gate(state, ctx); };
+    std::optional<std::string> current_system, current_tcode;
+    auth::SelectionInputContext input_context;
+    std::optional<audit::SapFacts> live_facts;
+    const bool owner_needs_facts = owner_mode(ctx) &&
+                                   name != "gui_session_list" && name != "gui_connection_list" &&
+                                   name != "gui_doctor" &&
+                                   name != "gui_session_attach" &&
+                                   name != "gui_session_launch";
+    // the live facts of the connection this call acts on; false: they refer to another saved connection
+    const auto apply_live_facts = [&]() -> bool {
+        record.sap = *live_facts;
+        if (record.connection && live_facts->connection_id && *record.connection != *live_facts->connection_id)
+            return false;
+        if (!live_facts->system.empty()) current_system = live_facts->system + "/" + live_facts->client;
+        if (!live_facts->transaction.empty()) current_tcode = live_facts->transaction;
+        input_context.program = live_facts->program;
+        input_context.screen_number = live_facts->screen_number;
+        input_context.session_identity = live_facts->session_identity;
+        // The connection this call acts on: explicit/sticky/default, else the id the facts lookup resolved
+        // (automatic single-connection resolution). Two different answers = unknown.
+        if (!record.connection)
+            input_context.connection = live_facts->connection_id;
+        policy_state_key = session_policy_key(principal, live_facts->session_identity,
+                                              live_facts->connection_id ? live_facts->connection_id : record.connection);
+        policy_fallback_key = session_policy_key(principal, "",
+                                                 live_facts->connection_id ? live_facts->connection_id : record.connection);
+        return true;
+    };
+    if ((!principal.sap_systems.empty() || !principal.tcodes.empty() || owner_needs_facts ||
+         (sticky_target && !sticky_target->session_identity.empty())) && facts_provider_) {
+        const auto started = std::chrono::steady_clock::now();
+        try { live_facts = facts_provider_(record.connection); } catch (...) {}
+        note_step("facts_pre", name, principal.name, started, record.facts_pre_ms);
+        if (live_facts && live_facts->any() && !apply_live_facts())
+            return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
+    }
+    if (sticky_target && !sticky_target->session_identity.empty() &&
+        (!live_facts || live_facts->connection_id != sticky_target->connection ||
+         live_facts->session_identity != sticky_target->session_identity)) {
+        // The default's session is GONE (SAP Logon restarted: no live facts for it), not replaced by another live
+        // session: like 5c, the only open session of the same recorded system, client and user takes its place,
+        // inside this call. A connection that now names another live session stays SESSION_TARGET_CHANGED.
+        const bool target_gone = !live_facts || !live_facts->any();
+        std::optional<int> reattached;
+        if (policy_.auto_attach && !ctx.http && policy_.owner_sap_identities.empty() && target_gone &&
+            !sticky_target->sap_identity.empty() && name.rfind("gui_session_", 0) != 0)
+            reattached = reattach_only_session(sticky_target->sap_identity, std::to_string(sticky_target->connection));
+        if (!reattached)
+            return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session",
+                        reattach_refused ? reattach_again_hint : "");
+        record.connection = reattached;
+        record.sap = {};
+        policy_state_key = policy_fallback_key = session_policy_key(principal, "", record.connection);
+        live_facts.reset();
+        try { live_facts = facts_provider_(record.connection); } catch (...) {}
+        if (live_facts && live_facts->any() && !apply_live_facts())
+            return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
+    }
+    if (owner_mode(ctx) && name == "gui_session_login") {
+        if (auto refusal = reserve_owner_login(principal, live_facts, record, ctx, login_pre_facts,
+                                               login_lane_reservation, acquire_control_probe_gate))
+            return fail(refusal->code, refusal->message);
+    } else if (ctx.http && policy_.owner_sap_identities.size() > 1 &&
+        name == "gui_session_disconnect" && args.is_object() && args.contains("close_session") &&
+        args["close_session"].is_boolean() && args["close_session"].get<bool>() &&
+        record.connection && routing_state_->has_prelogin_claim(principal.id, *record.connection)) {
+        if (auto refusal = admit_prelogin_close(principal, live_facts, record, current_system))
+            return fail(refusal->code, refusal->message);
+        prelogin_close_facts = live_facts;
+    } else if (owner_mode(ctx) && name != "gui_session_attach" &&
+        name != "gui_session_list" && name != "gui_connection_list" &&
+        name != "gui_doctor" && name != "gui_session_launch") {
+        if (auto refusal = admit_owner_identity(principal, live_facts, record))
+            return fail(refusal->code, refusal->message);
+        owner_pre_facts = live_facts;
+    }
+    if (principal.allow_selection_input)
+        track_initial_screen(name, policy_state_key, record.connection, current_tcode, input_context);
+    if (auto refusal = authorization_refusal(*spec, name, args, ctx, principal, current_system, current_tcode, input_context,
+                                             policy_state_key, policy_fallback_key))
+        return fail(refusal->code, refusal->message, refusal->hint);
+    if (selection_input && input_context.initial) selection_initial = *input_context.initial;
+    return std::nullopt;
+}
+
+std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
+                                                        const CallContext& ctx, CallState& state, const RefuseCall& refuse) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
+    const ToolSpec*& spec = state.spec;
+    json& args = state.args;
+    bool& accepts_connection = state.accepts_connection;
+    bool& implicit_sticky = state.implicit_sticky;
+    auto& sticky_target = state.sticky_target;
+    bool& selection_input = state.selection_input;
+    std::string& reattach_note = state.reattach_note;
+    bool& reattach_refused = state.reattach_refused;
+    std::string& policy_state_key = state.policy_state_key;
+    std::string& policy_fallback_key = state.policy_fallback_key;
 
     // 1. spec
-    const ToolSpec* spec = find_spec(name);
+    spec = find_spec(name);
     if (!spec) return fail("TOOL_NOT_FOUND", "unknown tool '" + name + "'", "use tools/list to see the available tools");
-    json args = raw_args.is_null() ? json::object() : raw_args;
-    const bool accepts_connection = spec->def.input_schema.is_object() &&
+    args = raw_args.is_null() ? json::object() : raw_args;
+    accepts_connection = spec->def.input_schema.is_object() &&
         spec->def.input_schema.value("properties", json::object()).contains("connection");
-    const bool implicit_sticky = accepts_connection && !args.contains("connection") && !policy_.default_connection;
-    const auto sticky_target = implicit_sticky ? routing_state_->sticky_target(principal_key(ctx.principal))
+    implicit_sticky = accepts_connection && !args.contains("connection") && !policy_.default_connection;
+    sticky_target = implicit_sticky ? routing_state_->sticky_target(principal_key(ctx.principal))
                                                : std::nullopt;
     if (args.is_object() && args.contains("connection")) record.connection = int_from_json(args["connection"]);
     else record.connection = accepts_connection
@@ -1320,7 +1482,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 2. policy
     // gui_element_fill of a principal with allow_selection_input is decided by auth::authorize_call (INPUT_* rules) instead of
     // the blanket read-only refusal; every other tool keeps check_call.
-    const bool selection_input = auth::selection_input_path(ctx.principal, name, policy_);
+    selection_input = auth::selection_input_path(ctx.principal, name, policy_);
     if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
         return fail(refused->code, refused->message, refused->hint);
     const Principal& principal = ctx.principal;
@@ -1329,26 +1491,11 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // return its connection id; nullopt: nothing attached. Without that verified, logged-on identity (`recorded` empty:
     // a file of an older version; "SYS/CLIENT/": only the system and client must match; or nobody logged on in the
     // session) only a read-only tool re-attaches: a change is refused and `reattach_refused` says so.
-    std::string reattach_note;  // said in the result when a default connection was re-attached
-    bool reattach_refused = false;
-    const std::string reattach_again_hint =
-        "the saved SAP connection had closed and the open SAP session is not verified as the same logged-on SAP user: "
-        "attach the SAP session again (gui_session_attach) and retry";
+    const std::string reattach_again_hint = kReattachAgainHint;
     const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
         return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
     };
-    std::unique_lock<std::shared_timed_mutex> control_probe_lock;
-    const auto acquire_control_probe_gate = [&]() {
-        if (!control_probe_gate_)
-            return false;
-        control_probe_lock = std::unique_lock<std::shared_timed_mutex>(*control_probe_gate_, std::defer_lock);
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (!control_probe_lock.try_lock_for(std::chrono::milliseconds(50))) {
-            if ((ctx.cancelled && ctx.cancelled()) || std::chrono::steady_clock::now() >= deadline)
-                return false;
-        }
-        return true;
-    };
+    const auto acquire_control_probe_gate = [&] { return acquire_probe_gate(state, ctx); };
     // Launch changes the GUI application. Login only needs the global probe gate
     // after its own window lane is free; holding it while queued would stall all
     // unrelated windows' admission probes.
@@ -1361,341 +1508,351 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     if (ctx.http && policy_.owner_sap_identities.size() > 1 && name == "gui_session_launch" &&
         !routing_state_->prelogin_capacity_available(principal.id))
         return fail("OWNER_SESSION_UNAVAILABLE", "the endpoint has too many unfinished SAP logon windows");
-    std::string policy_state_key = session_policy_key(principal, "", record.connection);
-    std::string policy_fallback_key = policy_state_key;
-    std::optional<audit::SapFacts> owner_pre_facts;
-    std::optional<audit::SapFacts> login_pre_facts;
-    std::optional<audit::SapFacts> prelogin_close_facts;
-    std::shared_ptr<void> login_lane_reservation;
-    auth::InitialScreen selection_initial;  // the recorded initial screen an authorized selection-input fill may write on
-    {
-        std::optional<std::string> current_system, current_tcode;
-        auth::SelectionInputContext input_context;
-        std::optional<audit::SapFacts> live_facts;
-        const bool owner_needs_facts = owner_mode(ctx) &&
-                                       name != "gui_session_list" && name != "gui_connection_list" &&
-                                       name != "gui_doctor" &&
-                                       name != "gui_session_attach" &&
-                                       name != "gui_session_launch";
-        // the live facts of the connection this call acts on; false: they refer to another saved connection
-        const auto apply_live_facts = [&]() -> bool {
-            record.sap = *live_facts;
-            if (record.connection && live_facts->connection_id && *record.connection != *live_facts->connection_id)
-                return false;
-            if (!live_facts->system.empty()) current_system = live_facts->system + "/" + live_facts->client;
-            if (!live_facts->transaction.empty()) current_tcode = live_facts->transaction;
-            input_context.program = live_facts->program;
-            input_context.screen_number = live_facts->screen_number;
-            input_context.session_identity = live_facts->session_identity;
-            // The connection this call acts on: explicit/sticky/default, else the id the facts lookup resolved
-            // (automatic single-connection resolution). Two different answers = unknown.
-            if (!record.connection)
-                input_context.connection = live_facts->connection_id;
-            policy_state_key = session_policy_key(principal, live_facts->session_identity,
-                                                  live_facts->connection_id ? live_facts->connection_id : record.connection);
-            policy_fallback_key = session_policy_key(principal, "",
-                                                     live_facts->connection_id ? live_facts->connection_id : record.connection);
-            return true;
-        };
-        if ((!principal.sap_systems.empty() || !principal.tcodes.empty() || owner_needs_facts ||
-             (sticky_target && !sticky_target->session_identity.empty())) && facts_provider_) {
-            const auto started = std::chrono::steady_clock::now();
-            try { live_facts = facts_provider_(record.connection); } catch (...) {}
-            note_step("facts_pre", name, principal.name, started, record.facts_pre_ms);
-            if (live_facts && live_facts->any() && !apply_live_facts())
-                return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
-        }
-        if (sticky_target && !sticky_target->session_identity.empty() &&
-            (!live_facts || live_facts->connection_id != sticky_target->connection ||
-             live_facts->session_identity != sticky_target->session_identity)) {
-            // The default's session is GONE (SAP Logon restarted: no live facts for it), not replaced by another live
-            // session: like 5c, the only open session of the same recorded system, client and user takes its place,
-            // inside this call. A connection that now names another live session stays SESSION_TARGET_CHANGED.
-            const bool target_gone = !live_facts || !live_facts->any();
-            std::optional<int> reattached;
-            if (policy_.auto_attach && !ctx.http && policy_.owner_sap_identities.empty() && target_gone &&
-                !sticky_target->sap_identity.empty() && name.rfind("gui_session_", 0) != 0)
-                reattached = reattach_only_session(sticky_target->sap_identity, std::to_string(sticky_target->connection));
-            if (!reattached)
-                return fail("SESSION_TARGET_CHANGED", "the saved default connection now identifies another SAP session",
-                            reattach_refused ? reattach_again_hint : "");
-            record.connection = reattached;
-            record.sap = {};
-            policy_state_key = policy_fallback_key = session_policy_key(principal, "", record.connection);
-            live_facts.reset();
-            try { live_facts = facts_provider_(record.connection); } catch (...) {}
-            if (live_facts && live_facts->any() && !apply_live_facts())
-                return fail("SESSION_TARGET_UNKNOWN", "live SAP facts refer to another saved connection");
-        }
-        if (owner_mode(ctx) && name == "gui_session_login") {
-            if (auto refusal = reserve_owner_login(principal, live_facts, record, ctx, login_pre_facts,
-                                                   login_lane_reservation, acquire_control_probe_gate))
-                return fail(refusal->code, refusal->message);
-        } else if (ctx.http && policy_.owner_sap_identities.size() > 1 &&
-            name == "gui_session_disconnect" && args.is_object() && args.contains("close_session") &&
-            args["close_session"].is_boolean() && args["close_session"].get<bool>() &&
-            record.connection && routing_state_->has_prelogin_claim(principal.id, *record.connection)) {
-            if (auto refusal = admit_prelogin_close(principal, live_facts, record, current_system))
-                return fail(refusal->code, refusal->message);
-            prelogin_close_facts = live_facts;
-        } else if (owner_mode(ctx) && name != "gui_session_attach" &&
-            name != "gui_session_list" && name != "gui_connection_list" &&
-            name != "gui_doctor" && name != "gui_session_launch") {
-            if (auto refusal = admit_owner_identity(principal, live_facts, record))
-                return fail(refusal->code, refusal->message);
-            owner_pre_facts = live_facts;
-        }
-        if (principal.allow_selection_input)
-            track_initial_screen(name, policy_state_key, record.connection, current_tcode, input_context);
-        if (auto refusal = authorization_refusal(*spec, name, args, ctx, principal, current_system, current_tcode, input_context,
-                                                 policy_state_key, policy_fallback_key))
-            return fail(refusal->code, refusal->message, refusal->hint);
-        if (selection_input && input_context.initial) selection_initial = *input_context.initial;
-    }
+    policy_state_key = session_policy_key(principal, "", record.connection);
+    policy_fallback_key = policy_state_key;
+    if (auto refused = admit_live_session(name, record, ctx, state, refuse)) return refused;
 
-    // 2c. session/connection targets (session_target_refusal)
-    const auto check_target = [&](const json& call_args) {
-        return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
+    return std::nullopt;
+}
+
+/// After a successful owner-mode gui_session_attach: the attached session must be the requested one, of an allowed
+/// owner identity and available to the token; the saved connection is committed then, rolled back otherwise.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::verify_owner_attach_outcome(
+    const Result& result, const std::string& name, const json& args, const Principal& principal, McpCallRecord& record) {
+    const auto attach_fail = [&](const char* code, const char* message) -> CallRefusal {
+        bool rolled_back = false;
+        try { rolled_back = attach_finalize_override_(false); } catch (...) {}
+        if (!rolled_back)
+            return CallRefusal{"OUTCOME_UNKNOWN", "the saved connection could not be rolled back after attach verification failed"};
+        return CallRefusal{code, message};
     };
-    const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
-    if (!attach_needs_resolution)
-        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    const auto id = result.data.is_object() && result.data.contains("connection_file_id")
+                        ? int_from_json(result.data["connection_file_id"]) : std::nullopt;
+    const std::string requested = args.contains("session_id") && args["session_id"].is_string()
+                                      ? args["session_id"].get<std::string>() : std::string();
+    if (!id || requested.empty() || !result.data.contains("session_id") ||
+        !result.data["session_id"].is_string() || result.data["session_id"].get<std::string>() != requested ||
+        !facts_provider_)
+        return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
+    std::optional<audit::SapFacts> attached;
+    try { attached = facts_provider_(*id); } catch (...) {}
+    if (!attached || attached->system.empty() || attached->client.empty() || attached->user.empty() ||
+        attached->connection_id != id || attached->session_identity.rfind(requested + "|", 0) != 0)
+        return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
+    const std::string identity = sap_identity(*attached);
+    if (!owner_identity_allowed(policy_, principal, identity))
+        return attach_fail("OWNER_IDENTITY_DENIED", "the attached session's SAP identity is not allowed for this endpoint");
+    auth::SessionTarget current_target;
+    current_target.ambiguous = true;
+    try { current_target = target_resolver_(TargetQuery{"", "", *id}); } catch (...) {}
+    if (current_target.ambiguous || current_target.system != attached->system + "/" + attached->client ||
+        current_target.user != attached->user ||
+        !auth::authorize_session_target(principal, name, args, current_target).allowed)
+        return attach_fail("OWNER_SESSION_UNAVAILABLE", "the attached session is unavailable to this token");
+    record.sap = *attached;
+    bool committed = false;
+    try { committed = attach_finalize_override_(true); } catch (...) {}
+    if (!committed)
+        return CallRefusal{"OUTCOME_UNKNOWN", "the saved connection could not be committed after attach verification"};
+    return std::nullopt;
+}
 
-    // Broker-native lease control runs only after the same scope, owner, SAP-system and
-    // saved-connection checks as ordinary calls. Its secret never enters CLI argv or audit.
-    if (name == "gui_session_lease") return run_session_lease(*spec, args, principal, record, owner_pre_facts, ctx, fail);
+/// gui_screen_capture over the image cap: one retry at half scale (still the same owner session afterwards), then
+/// IMAGE_TOO_LARGE with a smaller scale to try.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::enforce_image_cap(
+    Result& result, const std::string& name, const json& args, const ToolSpec& spec, const Policy& effective,
+    const Principal& principal, McpCallRecord& record,
+    const std::function<Result(const std::vector<std::string>&)>& invoke_selected,
+    const std::function<bool()>& owner_unchanged) {
+    double current = 1.0;
+    if (args.contains("scale") && args["scale"].is_number()) current = args["scale"].get<double>();
+    const double halved = current / 2;
+    if (halved >= 0.01) {
+        json retry_args = args;
+        retry_args["scale"] = halved;
+        try {
+            auto retry_argv = spec.build_argv(retry_args, effective);
+            record.argv = retry_argv;
+            const auto retry_started = std::chrono::steady_clock::now();
+            result = invoke_selected(retry_argv);
+            note_step("invoke", name, principal.name, retry_started, record.invoke_ms);
+            if (!owner_unchanged())
+                return CallRefusal{"OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld"};
+        } catch (const std::exception&) {}
+    }
+    if (result.status == Result::Status::Success && image_payload_bytes(result) > policy_.max_image_bytes)
+        return CallRefusal{"IMAGE_TOO_LARGE",
+                           "screenshot is " + std::to_string(image_payload_bytes(result)) + " bytes, above the " +
+                               std::to_string(policy_.max_image_bytes) + " byte limit",
+                           "pass a smaller `scale` (e.g. " + scale_text(std::max(halved / 2, 0.05)) +
+                               ") or crop with x, y, width, height"};
+    return std::nullopt;
+}
 
-    // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
-    // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
-    // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
-    ReadOnlyScope read_only_scope(read_only_override_,
-                      selection_input || (principal.read_only && !policy_.read_only),
-                      selection_input ? false : true, policy_.read_only);
-
-    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
-    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
-    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
-    // would be unchecked, so the call is refused.
-    SelectionScope selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
-    if (selection_input && !selection_input_override_)
-        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
-
-    // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
-    Policy effective = policy_;
-    if (record.connection) effective.default_connection = record.connection;
-    else if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
-
-    // gui_session_attach without session_id: resolve through `list`.
-    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
-        Result listed = invoke({"session", "list"});
-        // A token limited to named connections only ever sees (and can only be offered) its own sessions.
-        if (!auth::filter_listing_for_connections(principal, "gui_session_list", listed))
-            return fail("RESULT_FILTER_FAILED", "the session list could not be limited to the connections of token '" +
-                                                 principal.name + "'");
-        if (listed.status != Result::Status::Success) {
-            code = result_error_code(listed);
-            return shape_result(listed, *spec, policy_, "", nullptr);
-        }
-        const json sessions = open_sessions(listed);
-        if (sessions.empty())
-            return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
-        if (sessions.size() > 1)
-            return fail("MULTIPLE_SESSIONS",
-                        std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
-                        "Sessions: " + dump_compact(sessions));
-        args["session_id"] = sessions[0]["session_id"];
-        // The session is known now: the token's system/connection allowlists apply to it like to an explicit id.
-        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+/// execute_call steps 6-8: hints, the untrusted-data header, the shaped result with the re-attach note, the screen
+/// guard, the T-code warning and the sticky default connection; `code` is the result's error code.
+ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
+                                         const CallContext& ctx, const CallState& state, bool tcode_left) {
+    const Principal& principal = ctx.principal;
+    const std::string reattach_again_hint = kReattachAgainHint;
+    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
+    if (state.reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;
+    if (name == "gui_element_fill" && result.status == Result::Status::Success && !state.args.contains("fields") &&
+        result.data.is_object())
+        hint_single_fills(result);
+    ToolSpec shaped_spec = *state.spec;
+    if (state.spec->output == ToolOutput::Markdown) {
+        std::string format = policy_.default_format;
+        if (state.args.contains("format") && state.args["format"].is_string()) format = state.args["format"].get<std::string>();
+        if (format == "json") shaped_spec.output = ToolOutput::Json;
+    }
+    std::optional<int> connection = record.connection;
+    const std::string header =
+        command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
+    const std::set<std::string> visible_now = visible_tool_names(&principal);
+    ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
+    if (!state.reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", state.reattach_note}});
+    if (owner_mode(ctx) && name == "gui_screen_read" &&
+        result.status == Result::Status::Success && state.owner_pre_facts && facts_provider_)
+        attach_screen_guard(shaped, record, *state.owner_pre_facts);
+    if (result.status != Result::Status::Success) code = result_error_code(result);
+    else if (result.data.is_object() && result.data.contains("connection_id")) {
+        if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;
     }
 
-    // 4. build argv
-    std::vector<std::string> argv;
-    try {
-        argv = spec->build_argv(args, effective);
-    } catch (const std::invalid_argument& e) {
-        return fail("INVALID_ARGUMENT", e.what());
-    } catch (const std::exception& e) {
-        return fail("INVALID_ARGUMENT", std::string("invalid arguments: ") + e.what());
-    }
-    record.argv = argv;
-    record.command = command_of(argv);
-    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
-        if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
+    if (tcode_left) mark_tcode_left(shaped);
 
-    LeaseWriteScope lease_scope;
-    if (owner_mode(ctx) && !prelogin_close_facts &&
-        lease_required_for_call(name, args)) {
-        if (!owner_pre_facts || principal.id.empty() || !session_leases_)
-            return fail("LEASE_UNAVAILABLE", "the session lease cannot be verified");
-        if (!args.is_object() || !args.contains("lease_id") || !args["lease_id"].is_string())
-            return fail("LEASE_REQUIRED", "acquire a session lease and pass its lease_id");
-        const std::string id = args["lease_id"].get<std::string>();
-        if (ctx.batch_lease) {
-            const auto& held = *ctx.batch_lease;
-            if (held.session_identity != owner_pre_facts->session_identity || held.token_id != principal.id ||
-                held.lease_id != id || !record.connection || held.connection != *record.connection)
-                return fail("LEASE_REQUIRED", "the batch lease does not match this SAP session");
-        } else {
-            lease_scope.leases = session_leases_;
-            lease_scope.session = owner_pre_facts->session_identity;
-            lease_scope.token = principal.id;
-            lease_scope.id = id;
-            lease_scope.active = session_leases_->begin_write(lease_scope.session, lease_scope.token, lease_scope.id,
-                                                             SessionLeases::Clock::now());
-            if (!lease_scope.active) return fail("LEASE_REQUIRED", "the session lease is missing or expired");
-        }
-    }
+    // 8. sticky default connection
+    if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
+        result.data.is_object() && result.data.contains("connection_file_id"))
+        remember_sticky_connection(shaped, result, record, ctx);
+    return shaped;
+}
 
-    std::string expected_screen_guard;
-    if (args.is_object() && args.contains("expected_screen_guard")) {
-        if (!owner_mode(ctx) || !owner_pre_facts)
-            return fail("INVALID_ARGUMENT", "a screen guard requires an owner-routed SAP session");
-        expected_screen_guard = args["expected_screen_guard"].get<std::string>();
-        if (expected_screen_guard.size() != 64)
-            return fail("INVALID_ARGUMENT", "expected_screen_guard must be a 64-character digest");
-        if (screen_guard_for(*owner_pre_facts) != expected_screen_guard)
-            return fail("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
-    }
-
-    if ((owner_pre_facts || prelogin_close_facts) && !owner_session_override_)
-        return fail("OWNER_IDENTITY_UNKNOWN", "the server cannot bind this call to its checked SAP session");
-    if (prelogin_close_facts) {
-        bool current = false;
-        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!current || !routing_state_->owns_prelogin(principal.id, *prelogin_close_facts->connection_id,
-                                                        prelogin_close_facts->session_identity))
-            return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
-    }
-    OwnerSessionScope owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
-
-    // 5. invoke
-    if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
-    const auto invoke_started = std::chrono::steady_clock::now();
-    const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
-    const bool worker_bound = worker_mode && worker_command_allowed(argv);
-    if (worker_mode && !worker_bound)
-        return fail("WORKER_UNSUPPORTED", "the session command is not supported by the private worker");
-    if (worker_bound && !record.connection)
-        return fail("OWNER_SESSION_UNAVAILABLE", "the checked SAP session has no saved connection");
-    const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
-        if (!worker_bound) return invoke(selected_argv);
-        return invoke_on_worker(selected_argv, name, args, ctx, principal, record.connection, *owner_pre_facts,
-                                expected_screen_guard, selection_input, selection_initial);
+/// The launch guard of an owner-mode gui_session_launch: the new window's system (and client/user once known) must
+/// be one of the endpoint's owner identities allowed for the token, the entry and the window's connection names in the
+/// token's connections, the token still valid; the checked facts are kept for verify_owner_launch_outcome.
+bool CommandDispatcher::owner_launch_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                                    const Principal& principal, const json& args, const CallContext& ctx,
+                                                    std::optional<audit::SapFacts>& checked_launch_facts) {
+    if (facts.system.empty() || connection_name.empty() || (ctx.cancelled && ctx.cancelled())) return false;
+    bool authorized = false;
+    try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+    if (!authorized) return false;
+    const std::string requested = args.at("name").get<std::string>();
+    const auto name_allowed = [&](const std::string& name) {
+        return std::any_of(principal.connections.begin(), principal.connections.end(),
+            [&](const std::string& pattern) { return auth::glob_match(pattern, name); });
     };
-    if (owner_mode(ctx) &&
-        (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
-        if (ctx.cancelled && ctx.cancelled())
-            return fail("CANCELLED", "session control was cancelled before selecting the SAP session");
-        bool current = false;
-        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!current)
-            return fail("TOKEN_CHANGED", "authorization changed before selecting the SAP session");
-        if (name == "gui_session_attach")
-            if (auto refused = check_target(args))
-                return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    if (!name_allowed(requested) || !name_allowed(connection_name)) return false;
+    std::string allowed_system_client;
+    for (const std::string& owner : policy_.owner_sap_identities) {
+        if (!owner_identity_allowed(policy_, principal, owner)) continue;
+        const auto first = owner.find('/');
+        const auto second = first == std::string::npos ? first : owner.find('/', first + 1);
+        if (first == std::string::npos || second == std::string::npos) continue;
+        const std::string system = owner.substr(0, first);
+        const std::string client = owner.substr(first + 1, second - first - 1);
+        const std::string user = owner.substr(second + 1);
+        const bool sap_logon_screen = facts.user.empty() && facts.client == "000" &&
+                                      facts.transaction == "S000";
+        if (facts.system != system || (!facts.client.empty() && facts.client != client && !sap_logon_screen) ||
+            (!facts.user.empty() && facts.user != user) ||
+            (facts.user.empty() && !facts.client.empty() && facts.client != client && !sap_logon_screen)) continue;
+        const std::string candidate = system + "/" + client;
+        if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, candidate)) continue;
+        allowed_system_client = candidate;
+        break;
     }
-    GuardScope<AttachTargetGuardOverride, AttachTargetGuard> attach_guard_scope(attach_target_guard_override_,
-        owner_mode(ctx) && name == "gui_session_attach"
-            ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
-                if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
-                auth::SessionTarget target;
-                target.system = facts.system + "/" + facts.client;
-                target.user = facts.user;
-                target.connection_name = connection_name;
-                return auth::authorize_session_target(principal, "gui_session_attach", args, target).allowed;
-            }) : AttachTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_attach" &&
-        (!attach_target_guard_override_ || !attach_finalize_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the attach target cannot be checked before changing the saved connection");
-    std::optional<audit::SapFacts> checked_launch_facts;
-    const LaunchTargetGuard owner_launch_guard = [this, &principal, &args, &ctx, &checked_launch_facts]
-        (const audit::SapFacts& facts, const std::string& connection_name) {
-        if (facts.system.empty() || connection_name.empty() || (ctx.cancelled && ctx.cancelled())) return false;
-        bool authorized = false;
-        try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!authorized) return false;
-        const std::string requested = args.at("name").get<std::string>();
-        const auto name_allowed = [&](const std::string& name) {
-            return std::any_of(principal.connections.begin(), principal.connections.end(),
-                [&](const std::string& pattern) { return auth::glob_match(pattern, name); });
-        };
-        if (!name_allowed(requested) || !name_allowed(connection_name)) return false;
-        std::string allowed_system_client;
-        for (const std::string& owner : policy_.owner_sap_identities) {
-            if (!owner_identity_allowed(policy_, principal, owner)) continue;
-            const auto first = owner.find('/');
-            const auto second = first == std::string::npos ? first : owner.find('/', first + 1);
-            if (first == std::string::npos || second == std::string::npos) continue;
-            const std::string system = owner.substr(0, first);
-            const std::string client = owner.substr(first + 1, second - first - 1);
-            const std::string user = owner.substr(second + 1);
-            const bool sap_logon_screen = facts.user.empty() && facts.client == "000" &&
-                                          facts.transaction == "S000";
-            if (facts.system != system || (!facts.client.empty() && facts.client != client && !sap_logon_screen) ||
-                (!facts.user.empty() && facts.user != user) ||
-                (facts.user.empty() && !facts.client.empty() && facts.client != client && !sap_logon_screen)) continue;
-            const std::string candidate = system + "/" + client;
-            if (!principal.sap_systems.empty() && !auth::system_allowed(principal.sap_systems, candidate)) continue;
-            allowed_system_client = candidate;
-            break;
-        }
-        if (allowed_system_client.empty() || (!facts.user.empty() && facts.client.empty())) return false;
-        auth::SessionTarget target;
-        target.system = allowed_system_client;
-        target.user = facts.user;
-        target.connection_name = connection_name;
-        if (!auth::authorize_session_target(principal, "gui_session_launch", args, target).allowed) return false;
-        checked_launch_facts = facts;
-        return true;
+    if (allowed_system_client.empty() || (!facts.user.empty() && facts.client.empty())) return false;
+    auth::SessionTarget target;
+    target.system = allowed_system_client;
+    target.user = facts.user;
+    target.connection_name = connection_name;
+    if (!auth::authorize_session_target(principal, "gui_session_launch", args, target).allowed) return false;
+    checked_launch_facts = facts;
+    return true;
+
+}
+
+/// The login guard of an owner-mode gui_session_login (or launch with login): the session must be the reserved
+/// pre-logon one (or the checked launch's system), the credentials' identity an allowed owner and target for the
+/// token, the token still valid; the anticipated facts are kept for verify_owner_login_outcome.
+bool CommandDispatcher::owner_login_target_allowed(const audit::SapFacts& facts, const std::string& connection_name,
+                                                   const std::string& name, const Principal& principal, const json& args,
+                                                   const CallContext& ctx,
+                                                   const std::optional<audit::SapFacts>& login_pre_facts,
+                                                   const std::optional<audit::SapFacts>& checked_launch_facts,
+                                                   std::optional<audit::SapFacts>& anticipated_login) {
+    if (facts.client.empty() || facts.user.empty() || !facts.connection_id)
+        return false;
+    if (name == "gui_session_login" && (!login_pre_facts ||
+        facts.connection_id != login_pre_facts->connection_id ||
+        !login_identity_transition_allowed(login_pre_facts->session_identity, facts.session_identity) ||
+        facts.system != login_pre_facts->system))
+        return false;
+    if (name == "gui_session_login" && policy_.owner_sap_identities.size() > 1 &&
+        !routing_state_->owns_prelogin(principal.id, *login_pre_facts->connection_id,
+                                       login_pre_facts->session_identity)) return false;
+    if (name == "gui_session_launch" && (!checked_launch_facts ||
+        facts.system != checked_launch_facts->system)) return false;
+    if (ctx.cancelled && ctx.cancelled()) return false;
+    bool authorized = false;
+    try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+    if (!authorized) return false;
+    const std::string owner = sap_identity(facts);
+    if (!owner_identity_allowed(policy_, principal, owner)) return false;
+    auth::SessionTarget target;
+    target.system = facts.system + "/" + facts.client;
+    target.user = facts.user;
+    target.connection_name = connection_name;
+    if (!auth::authorize_session_target(principal, "gui_session_login", args, target).allowed)
+        return false;
+    anticipated_login = facts;
+    return true;
+
+}
+
+/// gui_session_attach without session_id: the only open SAP GUI session (as the token may see it) becomes the call's
+/// session_id, checked against the token like an explicit one. A value: the call answers here (the list's own error,
+/// no session, several sessions, or a refused target).
+std::optional<ToolResult> CommandDispatcher::resolve_attach_session(
+    const ToolSpec& spec, json& args, std::string& code, const Principal& principal,
+    const std::function<std::optional<PolicyDecision>(const json&)>& check_target, const RefuseCall& refuse) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
     };
-    GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
-        owner_mode(ctx) && name == "gui_session_launch"
-            ? owner_launch_guard : LaunchTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_launch" &&
-        (!launch_target_guard_override_ || !launch_rollback_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
-    std::optional<audit::SapFacts> anticipated_login;
-    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
-        owner_mode(ctx) &&
-            (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
-            ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
-                                &checked_launch_facts, &anticipated_login]
-                (const audit::SapFacts& facts, const std::string& connection_name) {
-                if (facts.client.empty() || facts.user.empty() || !facts.connection_id)
-                    return false;
-                if (name == "gui_session_login" && (!login_pre_facts ||
-                    facts.connection_id != login_pre_facts->connection_id ||
-                    !login_identity_transition_allowed(login_pre_facts->session_identity, facts.session_identity) ||
-                    facts.system != login_pre_facts->system))
-                    return false;
-                if (name == "gui_session_login" && policy_.owner_sap_identities.size() > 1 &&
-                    !routing_state_->owns_prelogin(principal.id, *login_pre_facts->connection_id,
-                                                   login_pre_facts->session_identity)) return false;
-                if (name == "gui_session_launch" && (!checked_launch_facts ||
-                    facts.system != checked_launch_facts->system)) return false;
-                if (ctx.cancelled && ctx.cancelled()) return false;
-                bool authorized = false;
-                try { authorized = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-                if (!authorized) return false;
-                const std::string owner = sap_identity(facts);
-                if (!owner_identity_allowed(policy_, principal, owner)) return false;
-                auth::SessionTarget target;
-                target.system = facts.system + "/" + facts.client;
-                target.user = facts.user;
-                target.connection_name = connection_name;
-                if (!auth::authorize_session_target(principal, "gui_session_login", args, target).allowed)
-                    return false;
-                anticipated_login = facts;
-                return true;
-            }) : LoginTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_login" &&
-        (!login_pre_facts || !login_target_guard_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
-    if (owner_mode(ctx) && name == "gui_session_launch" &&
-        args.is_object() && args.value("login", false) && !login_target_guard_override_)
-        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP login cannot be verified");
-    if (policy_.audit_required && mcp_audit_failed())
-        return fail("AUDIT_UNAVAILABLE", "the required audit trail failed before the action");
+    Result listed = invoke({"session", "list"});
+    // A token limited to named connections only ever sees (and can only be offered) its own sessions.
+    if (!auth::filter_listing_for_connections(principal, "gui_session_list", listed))
+        return fail("RESULT_FILTER_FAILED", "the session list could not be limited to the connections of token '" +
+                                             principal.name + "'");
+    if (listed.status != Result::Status::Success) {
+        code = result_error_code(listed);
+        return shape_result(listed, spec, policy_, "", nullptr);
+    }
+    const json sessions = open_sessions(listed);
+    if (sessions.empty())
+        return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
+    if (sessions.size() > 1)
+        return fail("MULTIPLE_SESSIONS",
+                    std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
+                    "Sessions: " + dump_compact(sessions));
+    args["session_id"] = sessions[0]["session_id"];
+    // The session is known now: the token's system/connection allowlists apply to it like to an explicit id.
+    if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    return std::nullopt;
+}
+
+/// An owner-mode call that changes SAP needs the session's lease: inside a batch the batch's pinned lease must be this
+/// one, otherwise the write is begun here and ended by `lease_scope` when the call returns.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::begin_owner_lease(
+    const json& args, const CallContext& ctx, const Principal& principal,
+    const std::optional<audit::SapFacts>& owner_pre_facts, const McpCallRecord& record, LeaseWriteScope& lease_scope) {
+    if (!owner_pre_facts || principal.id.empty() || !session_leases_)
+        return CallRefusal{"LEASE_UNAVAILABLE", "the session lease cannot be verified"};
+    if (!args.is_object() || !args.contains("lease_id") || !args["lease_id"].is_string())
+        return CallRefusal{"LEASE_REQUIRED", "acquire a session lease and pass its lease_id"};
+    const std::string id = args["lease_id"].get<std::string>();
+    if (ctx.batch_lease) {
+        const auto& held = *ctx.batch_lease;
+        if (held.session_identity != owner_pre_facts->session_identity || held.token_id != principal.id ||
+            held.lease_id != id || !record.connection || held.connection != *record.connection)
+            return CallRefusal{"LEASE_REQUIRED", "the batch lease does not match this SAP session"};
+    } else {
+        lease_scope.leases = session_leases_;
+        lease_scope.session = owner_pre_facts->session_identity;
+        lease_scope.token = principal.id;
+        lease_scope.id = id;
+        lease_scope.active = session_leases_->begin_write(lease_scope.session, lease_scope.token, lease_scope.id,
+                                                         SessionLeases::Clock::now());
+        if (!lease_scope.active) return CallRefusal{"LEASE_REQUIRED", "the session lease is missing or expired"};
+    }
+    return std::nullopt;
+}
+
+/// The client's expected_screen_guard (owner-routed sessions only): a 64-character digest that must still match the
+/// session and dynpro checked before the call.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::check_screen_guard(
+    const json& args, const CallContext& ctx, const std::optional<audit::SapFacts>& owner_pre_facts,
+    std::string& expected_screen_guard) {
+    if (!owner_mode(ctx) || !owner_pre_facts)
+        return CallRefusal{"INVALID_ARGUMENT", "a screen guard requires an owner-routed SAP session"};
+    expected_screen_guard = args["expected_screen_guard"].get<std::string>();
+    if (expected_screen_guard.size() != 64)
+        return CallRefusal{"INVALID_ARGUMENT", "expected_screen_guard must be a 64-character digest"};
+    if (screen_guard_for(*owner_pre_facts) != expected_screen_guard)
+        return CallRefusal{"SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read"};
+    return std::nullopt;
+}
+
+/// 5c: the call failed with INVALID_CONNECTION because the implicit default names a closed session; when the only open
+/// session of the stale record's SAP identity is re-attached, the call runs again on it (the same argv with the new
+/// default connection).
+void CommandDispatcher::retry_after_reattach(
+    Result& result, const ToolSpec& spec, const json& args, const Policy& effective, const std::vector<std::string>& argv,
+    McpCallRecord& record, const std::function<std::optional<int>(const std::string&, const std::string&)>& reattach,
+    const std::function<Result(const std::vector<std::string>&)>& invoke_selected) {
+    const json stale = result.error.is_object() && result.error.contains("stale_connection")
+                           ? result.error["stale_connection"] : json::object();
+    const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
+    if (const auto id = reattach(recorded_sap_identity(stale), stale_id)) {
+        record.connection = id;
+        Policy reattached_policy = effective;
+        reattached_policy.default_connection = id;
+        std::vector<std::string> reattached_argv;
+        try { reattached_argv = spec.build_argv(args, reattached_policy); }
+        catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
+        record.argv = reattached_argv;
+        result = invoke_selected(reattached_argv);
+    }
+}
+
+/// execute_call from step 5 on: the invocation (owner listings, the worker or the handler, auto-attach and the 5c
+/// retry) with the attach/launch/login guards installed, the post-call checks, the image cap and the shaping. Runs
+/// inside execute_call, so its read-only, selection, lease and owner-session scopes cover all of it.
+/// What run_invocation takes from invoke_and_finish: when the call started, whether it goes to a private worker and
+/// how it is invoked, and the guards' findings (references: the guards fill them in during the call).
+struct CommandDispatcher::InvocationRun {
+    std::chrono::steady_clock::time_point invoke_started;
+    bool worker_bound;
+    std::function<Result(const std::vector<std::string>&)> invoke_selected;   ///< a copy: its captures are references
+    const std::optional<audit::SapFacts>& checked_launch_facts;
+    const LaunchTargetGuard& owner_launch_guard;
+    const std::optional<audit::SapFacts>& anticipated_login;
+};
+
+/// invoke_and_finish's invocation and everything after it, with the guards of invoke_and_finish installed: the owner
+/// listings or the call (auto-attach, 5c retry), the disconnect cleanup, the owner checks after the call, the listing
+/// filter, the T-code recheck, the image cap and the shaping.
+ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRecord& record, std::string& code,
+                                             const CallContext& ctx, CallState& state, const RefuseCall& refuse,
+                                             const std::vector<std::string>& argv, const Policy& effective,
+                                             const InvocationRun& run) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
+    const ToolSpec* spec = state.spec;
+    json& args = state.args;
+    const bool accepts_connection = state.accepts_connection;
+    const bool implicit_sticky = state.implicit_sticky;
+    const Principal& principal = ctx.principal;
+    std::string& reattach_note = state.reattach_note;
+    bool& reattach_refused = state.reattach_refused;
+    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
+        return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
+    };
+    const std::string& policy_state_key = state.policy_state_key;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& login_pre_facts = state.login_pre_facts;
+    auto& prelogin_close_facts = state.prelogin_close_facts;
+    const auto invoke_started = run.invoke_started;
+    const bool worker_bound = run.worker_bound;
+    const auto& invoke_selected = run.invoke_selected;
+    const auto& checked_launch_facts = run.checked_launch_facts;
+    const auto& owner_launch_guard = run.owner_launch_guard;
+    const auto& anticipated_login = run.anticipated_login;
+
     const bool owner_connection_list = owner_mode(ctx) &&
                                        (name == "gui_connection_list" || name == "gui_doctor");
     const bool owner_session_list = owner_mode(ctx) &&
@@ -1723,19 +1880,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (policy_.auto_attach && !ctx.http && !worker_bound && implicit_sticky && reattach_note.empty() &&
             name.rfind("gui_session_", 0) != 0 && result.status != Result::Status::Success &&
             result_error_code(result) == "INVALID_CONNECTION") {
-            const json stale = result.error.is_object() && result.error.contains("stale_connection")
-                                   ? result.error["stale_connection"] : json::object();
-            const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
-            if (const auto id = reattach_only_session(recorded_sap_identity(stale), stale_id)) {
-                record.connection = id;
-                Policy reattached_policy = effective;
-                reattached_policy.default_connection = id;
-                std::vector<std::string> reattached_argv;
-                try { reattached_argv = spec->build_argv(args, reattached_policy); }
-                catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
-                record.argv = reattached_argv;
-                result = invoke_selected(reattached_argv);
-            }
+            retry_after_reattach(result, *spec, args, effective, argv, record, reattach_only_session, invoke_selected);
         }
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
     }
@@ -1782,43 +1927,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         try { (void)attach_finalize_override_(false); } catch (...) {}
     }
     if (owner_mode(ctx) && name == "gui_session_attach" &&
-        result.status == Result::Status::Success) {
-        const auto attach_fail = [&](const char* code, const char* message) {
-            bool rolled_back = false;
-            try { rolled_back = attach_finalize_override_(false); } catch (...) {}
-            if (!rolled_back)
-                return fail("OUTCOME_UNKNOWN", "the saved connection could not be rolled back after attach verification failed");
-            return fail(code, message);
-        };
-        const auto id = result.data.is_object() && result.data.contains("connection_file_id")
-                            ? int_from_json(result.data["connection_file_id"]) : std::nullopt;
-        const std::string requested = args.contains("session_id") && args["session_id"].is_string()
-                                          ? args["session_id"].get<std::string>() : std::string();
-        if (!id || requested.empty() || !result.data.contains("session_id") ||
-            !result.data["session_id"].is_string() || result.data["session_id"].get<std::string>() != requested ||
-            !facts_provider_)
-            return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
-        std::optional<audit::SapFacts> attached;
-        try { attached = facts_provider_(*id); } catch (...) {}
-        if (!attached || attached->system.empty() || attached->client.empty() || attached->user.empty() ||
-            attached->connection_id != id || attached->session_identity.rfind(requested + "|", 0) != 0)
-            return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
-        const std::string identity = sap_identity(*attached);
-        if (!owner_identity_allowed(policy_, principal, identity))
-            return attach_fail("OWNER_IDENTITY_DENIED", "the attached session's SAP identity is not allowed for this endpoint");
-        auth::SessionTarget current_target;
-        current_target.ambiguous = true;
-        try { current_target = target_resolver_(TargetQuery{"", "", *id}); } catch (...) {}
-        if (current_target.ambiguous || current_target.system != attached->system + "/" + attached->client ||
-            current_target.user != attached->user ||
-            !auth::authorize_session_target(principal, name, args, current_target).allowed)
-            return attach_fail("OWNER_SESSION_UNAVAILABLE", "the attached session is unavailable to this token");
-        record.sap = *attached;
-        bool committed = false;
-        try { committed = attach_finalize_override_(true); } catch (...) {}
-        if (!committed)
-            return fail("OUTCOME_UNKNOWN", "the saved connection could not be committed after attach verification");
-    }
+        result.status == Result::Status::Success)
+        if (auto refused = verify_owner_attach_outcome(result, name, args, principal, record))
+            return fail(refused->code, refused->message, refused->hint);
 
     // 5a. tokens limited to named connections only see those in the three listings: filter the structured result
     // before anything is shaped, rendered or audited; an unexpected shape is an error, never unfiltered data.
@@ -1834,64 +1945,201 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // gui_screen_capture: enforce the image cap with one retry at half scale.
     if (spec->output == ToolOutput::Image && result.status == Result::Status::Success &&
-        image_payload_bytes(result) > policy_.max_image_bytes) {
-        double current = 1.0;
-        if (args.contains("scale") && args["scale"].is_number()) current = args["scale"].get<double>();
-        const double halved = current / 2;
-        if (halved >= 0.01) {
-            json retry_args = args;
-            retry_args["scale"] = halved;
-            try {
-                auto retry_argv = spec->build_argv(retry_args, effective);
-                record.argv = retry_argv;
-                const auto retry_started = std::chrono::steady_clock::now();
-                result = invoke_selected(retry_argv);
-                note_step("invoke", name, principal.name, retry_started, record.invoke_ms);
-                if (!owner_unchanged())
-                    return fail("OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld");
-            } catch (const std::exception&) {}
+        image_payload_bytes(result) > policy_.max_image_bytes)
+        if (auto refused = enforce_image_cap(result, name, args, *spec, effective, principal, record, invoke_selected,
+                                             owner_unchanged))
+            return fail(refused->code, refused->message, refused->hint);
+
+    return shape_call(name, result, record, code, ctx, state, tcode_left);
+}
+
+ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code,
+                                                const CallContext& ctx, CallState& state, const RefuseCall& refuse,
+                                                const std::vector<std::string>& argv, const Policy& effective,
+                                                const std::string& expected_screen_guard,
+                                                const std::function<std::optional<PolicyDecision>(const json&)>& check_target) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
+    json& args = state.args;
+    const bool selection_input = state.selection_input;
+    const Principal& principal = ctx.principal;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& login_pre_facts = state.login_pre_facts;
+    const auth::InitialScreen& selection_initial = state.selection_initial;
+
+    // 5. invoke
+    if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
+    const auto invoke_started = std::chrono::steady_clock::now();
+    const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
+    const bool worker_bound = worker_mode && worker_command_allowed(argv);
+    if (worker_mode && !worker_bound)
+        return fail("WORKER_UNSUPPORTED", "the session command is not supported by the private worker");
+    if (worker_bound && !record.connection)
+        return fail("OWNER_SESSION_UNAVAILABLE", "the checked SAP session has no saved connection");
+    const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
+        if (!worker_bound) return invoke(selected_argv);
+        return invoke_on_worker(selected_argv, name, args, ctx, principal, record.connection, *owner_pre_facts,
+                                expected_screen_guard, selection_input, selection_initial);
+    };
+    if (owner_mode(ctx) &&
+        (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
+        if (ctx.cancelled && ctx.cancelled())
+            return fail("CANCELLED", "session control was cancelled before selecting the SAP session");
+        bool current = false;
+        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+        if (!current)
+            return fail("TOKEN_CHANGED", "authorization changed before selecting the SAP session");
+        if (name == "gui_session_attach")
+            if (auto refused = check_target(args))
+                return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    }
+    GuardScope<AttachTargetGuardOverride, AttachTargetGuard> attach_guard_scope(attach_target_guard_override_,
+        owner_mode(ctx) && name == "gui_session_attach"
+            ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
+                if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
+                auth::SessionTarget target;
+                target.system = facts.system + "/" + facts.client;
+                target.user = facts.user;
+                target.connection_name = connection_name;
+                return auth::authorize_session_target(principal, "gui_session_attach", args, target).allowed;
+            }) : AttachTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_attach" &&
+        (!attach_target_guard_override_ || !attach_finalize_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the attach target cannot be checked before changing the saved connection");
+    std::optional<audit::SapFacts> checked_launch_facts;
+    const LaunchTargetGuard owner_launch_guard = [this, &principal, &args, &ctx, &checked_launch_facts]
+        (const audit::SapFacts& facts, const std::string& connection_name) {
+        return owner_launch_target_allowed(facts, connection_name, principal, args, ctx, checked_launch_facts);
+    };
+    GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
+        owner_mode(ctx) && name == "gui_session_launch"
+            ? owner_launch_guard : LaunchTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
+        (!launch_target_guard_override_ || !launch_rollback_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
+    std::optional<audit::SapFacts> anticipated_login;
+    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
+        owner_mode(ctx) &&
+            (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
+            ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
+                                &checked_launch_facts, &anticipated_login]
+                (const audit::SapFacts& facts, const std::string& connection_name) {
+                return owner_login_target_allowed(facts, connection_name, name, principal, args, ctx, login_pre_facts,
+                                                  checked_launch_facts, anticipated_login);
+            }) : LoginTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_login" &&
+        (!login_pre_facts || !login_target_guard_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
+        args.is_object() && args.value("login", false) && !login_target_guard_override_)
+        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP login cannot be verified");
+    if (policy_.audit_required && mcp_audit_failed())
+        return fail("AUDIT_UNAVAILABLE", "the required audit trail failed before the action");
+    const InvocationRun run{invoke_started, worker_bound, invoke_selected, checked_launch_facts, owner_launch_guard,
+                            anticipated_login};
+    return run_invocation(name, record, code, ctx, state, refuse, argv, effective, run);
+}
+
+ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
+                                           std::string& code, const CallContext& ctx) {
+    auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        if (owner_mode(ctx) &&
+            (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
+             c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
+             c == "SESSION_TARGET_CHANGED")) {
+            record.error_code = c;  // the audit sink may distinguish boundary probes; the caller may not
+            code = "OWNER_SESSION_UNAVAILABLE";
+            return error_result(code, "the requested SAP session is unavailable");
         }
-        if (result.status == Result::Status::Success && image_payload_bytes(result) > policy_.max_image_bytes)
-            return fail("IMAGE_TOO_LARGE",
-                        "screenshot is " + std::to_string(image_payload_bytes(result)) + " bytes, above the " +
-                            std::to_string(policy_.max_image_bytes) + " byte limit",
-                        "pass a smaller `scale` (e.g. " + scale_text(std::max(halved / 2, 0.05)) +
-                            ") or crop with x, y, width, height");
-    }
+        code = c;
+        return error_result(c, message, hint);
+    };
 
-    // 6. shape
-    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
-    if (reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;
-    if (name == "gui_element_fill" && result.status == Result::Status::Success && !args.contains("fields") &&
-        result.data.is_object())
-        hint_single_fills(result);
-    ToolSpec shaped_spec = *spec;
-    if (spec->output == ToolOutput::Markdown) {
-        std::string format = policy_.default_format;
-        if (args.contains("format") && args["format"].is_string()) format = args["format"].get<std::string>();
-        if (format == "json") shaped_spec.output = ToolOutput::Json;
-    }
-    std::optional<int> connection = record.connection;
-    const std::string header =
-        command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
-    const std::set<std::string> visible_now = visible_tool_names(&principal);
-    ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
-    if (!reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", reattach_note}});
-    if (owner_mode(ctx) && name == "gui_screen_read" &&
-        result.status == Result::Status::Success && owner_pre_facts && facts_provider_)
-        attach_screen_guard(shaped, record, *owner_pre_facts);
-    if (result.status != Result::Status::Success) code = result_error_code(result);
-    else if (result.data.is_object() && result.data.contains("connection_id")) {
-        if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;
-    }
+    CallState state;
+    if (auto refused = admit_call(name, raw_args, record, ctx, state, fail)) return *refused;
+    const ToolSpec* spec = state.spec;
+    json& args = state.args;
+    const bool selection_input = state.selection_input;
+    const Principal& principal = ctx.principal;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& prelogin_close_facts = state.prelogin_close_facts;
+    const auth::InitialScreen& selection_initial = state.selection_initial;
 
-    if (tcode_left) mark_tcode_left(shaped);
+    // 2c. session/connection targets (session_target_refusal)
+    const auto check_target = [&](const json& call_args) {
+        return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
+    };
+    const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
+    if (!attach_needs_resolution)
+        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
 
-    // 8. sticky default connection
-    if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
-        result.data.is_object() && result.data.contains("connection_file_id"))
-        remember_sticky_connection(shaped, result, record, ctx);
-    return shaped;
+    // Broker-native lease control runs only after the same scope, owner, SAP-system and
+    // saved-connection checks as ordinary calls. Its secret never enters CLI argv or audit.
+    if (name == "gui_session_lease") return run_session_lease(*spec, args, principal, record, owner_pre_facts, ctx, fail);
+
+    // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
+    // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
+    // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
+    ReadOnlyScope read_only_scope(read_only_override_,
+                      selection_input || (principal.read_only && !policy_.read_only),
+                      selection_input ? false : true, policy_.read_only);
+
+    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
+    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
+    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
+    // would be unchecked, so the call is refused.
+    SelectionScope selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
+    if (selection_input && !selection_input_override_)
+        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
+
+    // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
+    Policy effective = policy_;
+    if (record.connection) effective.default_connection = record.connection;
+    else if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
+
+    // gui_session_attach without session_id: resolve through `list`.
+    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))
+        if (auto answered = resolve_attach_session(*spec, args, code, principal, check_target, fail))
+            return *answered;
+
+    // 4. build argv
+    std::vector<std::string> argv;
+    try {
+        argv = spec->build_argv(args, effective);
+    } catch (const std::invalid_argument& e) {
+        return fail("INVALID_ARGUMENT", e.what());
+    } catch (const std::exception& e) {
+        return fail("INVALID_ARGUMENT", std::string("invalid arguments: ") + e.what());
+    }
+    record.argv = argv;
+    record.command = command_of(argv);
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
+        if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
+
+    LeaseWriteScope lease_scope;
+    if (owner_mode(ctx) && !prelogin_close_facts &&
+        lease_required_for_call(name, args))
+        if (auto refused = begin_owner_lease(args, ctx, principal, owner_pre_facts, record, lease_scope))
+            return fail(refused->code, refused->message, refused->hint);
+
+    std::string expected_screen_guard;
+    if (args.is_object() && args.contains("expected_screen_guard"))
+        if (auto refused = check_screen_guard(args, ctx, owner_pre_facts, expected_screen_guard))
+            return fail(refused->code, refused->message, refused->hint);
+
+    if ((owner_pre_facts || prelogin_close_facts) && !owner_session_override_)
+        return fail("OWNER_IDENTITY_UNKNOWN", "the server cannot bind this call to its checked SAP session");
+    if (prelogin_close_facts) {
+        bool current = false;
+        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+        if (!current || !routing_state_->owns_prelogin(principal.id, *prelogin_close_facts->connection_id,
+                                                        prelogin_close_facts->session_identity))
+            return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+    }
+    OwnerSessionScope owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
+
+    return invoke_and_finish(name, record, code, ctx, state, fail, argv, effective, expected_screen_guard, check_target);
 }
 
 /// gui_batch in owner mode: every item a screen-bound call on the batch's one explicit saved connection (set into
