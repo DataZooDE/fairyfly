@@ -1511,6 +1511,120 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     return std::nullopt;
 }
 
+/// After a successful owner-mode gui_session_attach: the attached session must be the requested one, of an allowed
+/// owner identity and available to the token; the saved connection is committed then, rolled back otherwise.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::verify_owner_attach_outcome(
+    const Result& result, const std::string& name, const json& args, const Principal& principal, McpCallRecord& record) {
+    const auto attach_fail = [&](const char* code, const char* message) -> CallRefusal {
+        bool rolled_back = false;
+        try { rolled_back = attach_finalize_override_(false); } catch (...) {}
+        if (!rolled_back)
+            return CallRefusal{"OUTCOME_UNKNOWN", "the saved connection could not be rolled back after attach verification failed"};
+        return CallRefusal{code, message};
+    };
+    const auto id = result.data.is_object() && result.data.contains("connection_file_id")
+                        ? int_from_json(result.data["connection_file_id"]) : std::nullopt;
+    const std::string requested = args.contains("session_id") && args["session_id"].is_string()
+                                      ? args["session_id"].get<std::string>() : std::string();
+    if (!id || requested.empty() || !result.data.contains("session_id") ||
+        !result.data["session_id"].is_string() || result.data["session_id"].get<std::string>() != requested ||
+        !facts_provider_)
+        return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
+    std::optional<audit::SapFacts> attached;
+    try { attached = facts_provider_(*id); } catch (...) {}
+    if (!attached || attached->system.empty() || attached->client.empty() || attached->user.empty() ||
+        attached->connection_id != id || attached->session_identity.rfind(requested + "|", 0) != 0)
+        return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
+    const std::string identity = sap_identity(*attached);
+    if (!owner_identity_allowed(policy_, principal, identity))
+        return attach_fail("OWNER_IDENTITY_DENIED", "the attached session's SAP identity is not allowed for this endpoint");
+    auth::SessionTarget current_target;
+    current_target.ambiguous = true;
+    try { current_target = target_resolver_(TargetQuery{"", "", *id}); } catch (...) {}
+    if (current_target.ambiguous || current_target.system != attached->system + "/" + attached->client ||
+        current_target.user != attached->user ||
+        !auth::authorize_session_target(principal, name, args, current_target).allowed)
+        return attach_fail("OWNER_SESSION_UNAVAILABLE", "the attached session is unavailable to this token");
+    record.sap = *attached;
+    bool committed = false;
+    try { committed = attach_finalize_override_(true); } catch (...) {}
+    if (!committed)
+        return CallRefusal{"OUTCOME_UNKNOWN", "the saved connection could not be committed after attach verification"};
+    return std::nullopt;
+}
+
+/// gui_screen_capture over the image cap: one retry at half scale (still the same owner session afterwards), then
+/// IMAGE_TOO_LARGE with a smaller scale to try.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::enforce_image_cap(
+    Result& result, const std::string& name, const json& args, const ToolSpec& spec, const Policy& effective,
+    const Principal& principal, McpCallRecord& record,
+    const std::function<Result(const std::vector<std::string>&)>& invoke_selected,
+    const std::function<bool()>& owner_unchanged) {
+    double current = 1.0;
+    if (args.contains("scale") && args["scale"].is_number()) current = args["scale"].get<double>();
+    const double halved = current / 2;
+    if (halved >= 0.01) {
+        json retry_args = args;
+        retry_args["scale"] = halved;
+        try {
+            auto retry_argv = spec.build_argv(retry_args, effective);
+            record.argv = retry_argv;
+            const auto retry_started = std::chrono::steady_clock::now();
+            result = invoke_selected(retry_argv);
+            note_step("invoke", name, principal.name, retry_started, record.invoke_ms);
+            if (!owner_unchanged())
+                return CallRefusal{"OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld"};
+        } catch (const std::exception&) {}
+    }
+    if (result.status == Result::Status::Success && image_payload_bytes(result) > policy_.max_image_bytes)
+        return CallRefusal{"IMAGE_TOO_LARGE",
+                           "screenshot is " + std::to_string(image_payload_bytes(result)) + " bytes, above the " +
+                               std::to_string(policy_.max_image_bytes) + " byte limit",
+                           "pass a smaller `scale` (e.g. " + scale_text(std::max(halved / 2, 0.05)) +
+                               ") or crop with x, y, width, height"};
+    return std::nullopt;
+}
+
+/// execute_call steps 6-8: hints, the untrusted-data header, the shaped result with the re-attach note, the screen
+/// guard, the T-code warning and the sticky default connection; `code` is the result's error code.
+ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
+                                         const CallContext& ctx, const CallState& state, bool tcode_left) {
+    const Principal& principal = ctx.principal;
+    const std::string reattach_again_hint = kReattachAgainHint;
+    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
+    if (state.reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;
+    if (name == "gui_element_fill" && result.status == Result::Status::Success && !state.args.contains("fields") &&
+        result.data.is_object())
+        hint_single_fills(result);
+    ToolSpec shaped_spec = *state.spec;
+    if (state.spec->output == ToolOutput::Markdown) {
+        std::string format = policy_.default_format;
+        if (state.args.contains("format") && state.args["format"].is_string()) format = state.args["format"].get<std::string>();
+        if (format == "json") shaped_spec.output = ToolOutput::Json;
+    }
+    std::optional<int> connection = record.connection;
+    const std::string header =
+        command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
+    const std::set<std::string> visible_now = visible_tool_names(&principal);
+    ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
+    if (!state.reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", state.reattach_note}});
+    if (owner_mode(ctx) && name == "gui_screen_read" &&
+        result.status == Result::Status::Success && state.owner_pre_facts && facts_provider_)
+        attach_screen_guard(shaped, record, *state.owner_pre_facts);
+    if (result.status != Result::Status::Success) code = result_error_code(result);
+    else if (result.data.is_object() && result.data.contains("connection_id")) {
+        if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;
+    }
+
+    if (tcode_left) mark_tcode_left(shaped);
+
+    // 8. sticky default connection
+    if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
+        result.data.is_object() && result.data.contains("connection_file_id"))
+        remember_sticky_connection(shaped, result, record, ctx);
+    return shaped;
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1875,43 +1989,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         try { (void)attach_finalize_override_(false); } catch (...) {}
     }
     if (owner_mode(ctx) && name == "gui_session_attach" &&
-        result.status == Result::Status::Success) {
-        const auto attach_fail = [&](const char* code, const char* message) {
-            bool rolled_back = false;
-            try { rolled_back = attach_finalize_override_(false); } catch (...) {}
-            if (!rolled_back)
-                return fail("OUTCOME_UNKNOWN", "the saved connection could not be rolled back after attach verification failed");
-            return fail(code, message);
-        };
-        const auto id = result.data.is_object() && result.data.contains("connection_file_id")
-                            ? int_from_json(result.data["connection_file_id"]) : std::nullopt;
-        const std::string requested = args.contains("session_id") && args["session_id"].is_string()
-                                          ? args["session_id"].get<std::string>() : std::string();
-        if (!id || requested.empty() || !result.data.contains("session_id") ||
-            !result.data["session_id"].is_string() || result.data["session_id"].get<std::string>() != requested ||
-            !facts_provider_)
-            return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
-        std::optional<audit::SapFacts> attached;
-        try { attached = facts_provider_(*id); } catch (...) {}
-        if (!attached || attached->system.empty() || attached->client.empty() || attached->user.empty() ||
-            attached->connection_id != id || attached->session_identity.rfind(requested + "|", 0) != 0)
-            return attach_fail("OWNER_IDENTITY_UNKNOWN", "the attached session's SAP identity could not be verified");
-        const std::string identity = sap_identity(*attached);
-        if (!owner_identity_allowed(policy_, principal, identity))
-            return attach_fail("OWNER_IDENTITY_DENIED", "the attached session's SAP identity is not allowed for this endpoint");
-        auth::SessionTarget current_target;
-        current_target.ambiguous = true;
-        try { current_target = target_resolver_(TargetQuery{"", "", *id}); } catch (...) {}
-        if (current_target.ambiguous || current_target.system != attached->system + "/" + attached->client ||
-            current_target.user != attached->user ||
-            !auth::authorize_session_target(principal, name, args, current_target).allowed)
-            return attach_fail("OWNER_SESSION_UNAVAILABLE", "the attached session is unavailable to this token");
-        record.sap = *attached;
-        bool committed = false;
-        try { committed = attach_finalize_override_(true); } catch (...) {}
-        if (!committed)
-            return fail("OUTCOME_UNKNOWN", "the saved connection could not be committed after attach verification");
-    }
+        result.status == Result::Status::Success)
+        if (auto refused = verify_owner_attach_outcome(result, name, args, principal, record))
+            return fail(refused->code, refused->message, refused->hint);
 
     // 5a. tokens limited to named connections only see those in the three listings: filter the structured result
     // before anything is shaped, rendered or audited; an unexpected shape is an error, never unfiltered data.
@@ -1927,64 +2007,12 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     // gui_screen_capture: enforce the image cap with one retry at half scale.
     if (spec->output == ToolOutput::Image && result.status == Result::Status::Success &&
-        image_payload_bytes(result) > policy_.max_image_bytes) {
-        double current = 1.0;
-        if (args.contains("scale") && args["scale"].is_number()) current = args["scale"].get<double>();
-        const double halved = current / 2;
-        if (halved >= 0.01) {
-            json retry_args = args;
-            retry_args["scale"] = halved;
-            try {
-                auto retry_argv = spec->build_argv(retry_args, effective);
-                record.argv = retry_argv;
-                const auto retry_started = std::chrono::steady_clock::now();
-                result = invoke_selected(retry_argv);
-                note_step("invoke", name, principal.name, retry_started, record.invoke_ms);
-                if (!owner_unchanged())
-                    return fail("OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld");
-            } catch (const std::exception&) {}
-        }
-        if (result.status == Result::Status::Success && image_payload_bytes(result) > policy_.max_image_bytes)
-            return fail("IMAGE_TOO_LARGE",
-                        "screenshot is " + std::to_string(image_payload_bytes(result)) + " bytes, above the " +
-                            std::to_string(policy_.max_image_bytes) + " byte limit",
-                        "pass a smaller `scale` (e.g. " + scale_text(std::max(halved / 2, 0.05)) +
-                            ") or crop with x, y, width, height");
-    }
+        image_payload_bytes(result) > policy_.max_image_bytes)
+        if (auto refused = enforce_image_cap(result, name, args, *spec, effective, principal, record, invoke_selected,
+                                             owner_unchanged))
+            return fail(refused->code, refused->message, refused->hint);
 
-    // 6. shape
-    if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
-    if (reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;
-    if (name == "gui_element_fill" && result.status == Result::Status::Success && !args.contains("fields") &&
-        result.data.is_object())
-        hint_single_fills(result);
-    ToolSpec shaped_spec = *spec;
-    if (spec->output == ToolOutput::Markdown) {
-        std::string format = policy_.default_format;
-        if (args.contains("format") && args["format"].is_string()) format = args["format"].get<std::string>();
-        if (format == "json") shaped_spec.output = ToolOutput::Json;
-    }
-    std::optional<int> connection = record.connection;
-    const std::string header =
-        command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
-    const std::set<std::string> visible_now = visible_tool_names(&principal);
-    ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
-    if (!reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", reattach_note}});
-    if (owner_mode(ctx) && name == "gui_screen_read" &&
-        result.status == Result::Status::Success && owner_pre_facts && facts_provider_)
-        attach_screen_guard(shaped, record, *owner_pre_facts);
-    if (result.status != Result::Status::Success) code = result_error_code(result);
-    else if (result.data.is_object() && result.data.contains("connection_id")) {
-        if (auto id = int_from_json(result.data["connection_id"])) record.connection = id;
-    }
-
-    if (tcode_left) mark_tcode_left(shaped);
-
-    // 8. sticky default connection
-    if (result.status == Result::Status::Success && (name == "gui_session_attach" || name == "gui_session_launch") &&
-        result.data.is_object() && result.data.contains("connection_file_id"))
-        remember_sticky_connection(shaped, result, record, ctx);
-    return shaped;
+    return shape_call(name, result, record, code, ctx, state, tcode_left);
 }
 
 /// gui_batch in owner mode: every item a screen-bound call on the batch's one explicit saved connection (set into

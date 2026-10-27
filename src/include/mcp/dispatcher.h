@@ -212,6 +212,15 @@ private:
     bool acquire_probe_gate(CallState& state, const CallContext& ctx);
     std::optional<ToolResult> admit_live_session(const std::string& name, McpCallRecord& record, const CallContext& ctx,
                                                  CallState& state, const RefuseCall& refuse);
+    std::optional<CallRefusal> verify_owner_attach_outcome(const Result& result, const std::string& name, const json& args,
+                                                           const Principal& principal, McpCallRecord& record);
+    std::optional<CallRefusal> enforce_image_cap(Result& result, const std::string& name, const json& args,
+                                                 const ToolSpec& spec, const Policy& effective, const Principal& principal,
+                                                 McpCallRecord& record,
+                                                 const std::function<Result(const std::vector<std::string>&)>& invoke_selected,
+                                                 const std::function<bool()>& owner_unchanged);
+    ToolResult shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
+                          const CallContext& ctx, const CallState& state, bool tcode_left);
     std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                          const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
