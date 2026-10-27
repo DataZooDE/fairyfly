@@ -78,6 +78,20 @@ TEST_CASE("packaging: in an MSIX build `update check` and `update apply` point t
     }
 }
 
+TEST_CASE("packaging: the update help of an MSIX build names the Store and keeps its examples", "[packaging][update]") {
+    for (Package package : {Package::Msi, Package::Msix}) {
+        CLI::App app;
+        commands::UpdateCommand command(package);
+        command.setup_cli(app);
+        for (const char* verb : {"check", "apply"}) {
+            INFO(packaging::name(package) << " update " << verb);
+            const std::string footer = app.get_subcommand("update")->get_subcommand(verb)->get_footer();
+            CHECK(footer.find(std::string("Example: fairyfly update ") + verb) != std::string::npos);   // agent help needs it
+            CHECK((footer.find("Microsoft Store") != std::string::npos) == (package == Package::Msix));
+        }
+    }
+}
+
 TEST_CASE("packaging: the update decision for a Store installation refuses with the Store's code", "[packaging][update]") {
     const auto d = update::store_managed();
     CHECK(d.verdict == update::Verdict::Refuse);
