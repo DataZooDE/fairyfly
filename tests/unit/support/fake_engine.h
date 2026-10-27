@@ -17,12 +17,19 @@ public:
     std::vector<std::string> calls;
     Result next = Result::ok(json::object());
 
-    std::shared_ptr<sap::ComGuiSession> unchecked_session() const override { return nullptr; }
+    std::shared_ptr<sap::ComGuiSession> session;   ///< what unchecked_session answers (null: no COM session)
+    std::string connection_description;           ///< what peek_session_connection_description answers
+    std::shared_ptr<sap::ComGuiSession> unchecked_session() const override { return session; }
     void set_owner_window_guard(bool) noexcept override {}
     bool current_session_owner_window_allowed() const noexcept override { return true; }
-    audit::SapFacts peek_session_facts(const std::string&, const std::string&) const noexcept override { return {}; }
+    audit::SapFacts facts;              ///< what peek_session_facts answers (the live session's SAP facts)
+    mutable int facts_reads = 0;        ///< how often SAP was asked for them
+    audit::SapFacts peek_session_facts(const std::string&, const std::string&) const noexcept override {
+        ++facts_reads;
+        return facts;
+    }
     std::uintptr_t peek_session_window_handle(const std::string&) const noexcept override { return 0; }
-    std::string peek_session_connection_description(const std::string&) const noexcept override { return {}; }
+    std::string peek_session_connection_description(const std::string&) const noexcept override { return connection_description; }
     sap::ScreenSnapshot capture_screen_snapshot() const override { return {}; }
     nlohmann::json detect_modal_dialog() const override { return json::object(); }
     Result read_field(const ElementId& e, bool activate_tab) override {
@@ -69,6 +76,8 @@ public:
     std::map<std::string, bool> live_sessions;  ///< session id -> alive (select_session / validate_session)
     Result next = Result::ok(json::object());   ///< result of every action
     std::string active_window = "wnd[0]";
+    std::string server_key;                                  ///< what current_server_session_key answers
+    std::function<void(const std::string& call)> on_call;   ///< runs after each action is recorded, before it answers
 
     Result attach_by_click(int) override { return record("attach_by_click"); }
     Result attach_by_session_id(const std::string& id) override { return record("attach_by_session_id " + id); }
@@ -82,7 +91,7 @@ public:
         calls.push_back("select_session " + id);
         return alive(id);
     }
-    std::string current_server_session_key() const override { return {}; }
+    std::string current_server_session_key() const override { return server_key; }
     Result execute_transaction(const std::string& tcode) override { return record("execute_transaction " + tcode); }
     Result click_element(const ElementId& e) override { return record("click_element " + e.path); }
     Result fill_field(const ElementId& e, const std::string& value) override { return record("fill_field " + e.path + "=" + value); }
@@ -105,7 +114,8 @@ private:
         return i != live_sessions.end() && i->second;
     }
     Result record(std::string call) {
-        calls.push_back(std::move(call));
+        calls.push_back(call);
+        if (on_call) on_call(call);
         return next;
     }
 };

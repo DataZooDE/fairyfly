@@ -26,6 +26,15 @@ bool is_missing_element_error(const std::string& message) {
     return message.rfind("Element not found: ", 0) == 0;
 }
 
+ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session, const std::string& path) {
+    try {
+        return session->find_element_by_id(path);
+    } catch (const ComException& error) {
+        if (!is_missing_element_error(error.what())) throw;
+        return nullptr;
+    }
+}
+
 bool should_activate_positioned_label(const std::string& type,
                                       const std::string& path,
                                       int window_index,
