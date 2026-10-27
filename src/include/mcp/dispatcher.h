@@ -191,6 +191,17 @@ private:
     std::optional<PolicyDecision> session_target_refusal(const std::string& name, const json& call_args,
                                                          const CallContext& ctx, const Principal& principal,
                                                          std::optional<int> connection, bool prelogin_close);
+    std::optional<CallRefusal> admit_owner_identity(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
+                                                    McpCallRecord& record);
+    void track_initial_screen(const std::string& name, const std::string& policy_state_key, std::optional<int> connection,
+                              const std::optional<std::string>& current_tcode, auth::SelectionInputContext& input_context);
+    std::optional<CallRefusal> authorization_refusal(const ToolSpec& spec, const std::string& name, const json& args,
+                                                     const CallContext& ctx, const Principal& principal,
+                                                     const std::optional<std::string>& current_system,
+                                                     const std::optional<std::string>& current_tcode,
+                                                     auth::SelectionInputContext& input_context,
+                                                     const std::string& policy_state_key,
+                                                     const std::string& policy_fallback_key);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,

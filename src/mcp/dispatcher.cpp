@@ -1149,6 +1149,64 @@ std::optional<PolicyDecision> CommandDispatcher::session_target_refusal(const st
 
 }
 
+/// Owner mode, a call on an established session: its live SAP identity must be complete, on the call's saved
+/// connection and allowed for the endpoint; an implicit connection becomes the one checked here.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::admit_owner_identity(
+    const Principal& principal, const std::optional<audit::SapFacts>& live_facts, McpCallRecord& record) {
+    const bool known = live_facts && !live_facts->system.empty() && !live_facts->client.empty() &&
+                       !live_facts->user.empty() && !live_facts->session_identity.empty() &&
+                       (!record.connection || (live_facts->connection_id && *record.connection == *live_facts->connection_id));
+    if (!known) return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified"};
+    const std::string identity = sap_identity(*live_facts);
+    const bool allowed = owner_identity_allowed(policy_, principal, identity);
+    if (!allowed) return CallRefusal{"OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint"};
+    // Implicit resolution must use the same saved connection that was checked above.
+    if (!record.connection) record.connection = live_facts->connection_id;
+    return std::nullopt;
+}
+
+/// Selection input: the recorded initial screen of this session, ended for good when the call observes another (or
+/// an unknown) screen; coming back to it later needs a new gui_transaction_start.
+void CommandDispatcher::track_initial_screen(const std::string& name, const std::string& policy_state_key,
+                                             std::optional<int> connection, const std::optional<std::string>& current_tcode,
+                                             auth::SelectionInputContext& input_context) {
+    input_context.initial = initial_screen(policy_state_key);
+    if (connection) input_context.connection = connection;
+    if (input_context.initial && facts_provider_ && name != "gui_transaction_start" &&
+        (!current_tcode || auth::normalize_tcode(*current_tcode) != input_context.initial->transaction ||
+         input_context.program != input_context.initial->program ||
+         input_context.screen_number != input_context.initial->screen_number)) {
+        set_initial_screen(policy_state_key, std::nullopt);
+        input_context.initial.reset();
+    }
+}
+
+/// The token's authorization of this call against the live system and transaction (gui_doctor in owner mode with
+/// the connection list cleared: its output is filtered by the original token), then the T-code lock: a token that
+/// ended its previous call outside its T-code allowlist stays locked out of screen-acting tools until
+/// gui_transaction_start succeeds with an allowed code (nothing navigates back automatically). call_tool runs only on
+/// the executor (main) thread, one call at a time, so this check -> invoke -> set_tcode_blocked cannot interleave.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::authorization_refusal(
+    const ToolSpec& spec, const std::string& name, const json& args, const CallContext& ctx, const Principal& principal,
+    const std::optional<std::string>& current_system, const std::optional<std::string>& current_tcode,
+    auth::SelectionInputContext& input_context, const std::string& policy_state_key,
+    const std::string& policy_fallback_key) {
+    Principal scoped_doctor_principal = principal;
+    if (owner_mode(ctx) && name == "gui_doctor")
+        scoped_doctor_principal.connections.clear(); // output is filtered by the original token below
+    const PolicyDecision authz = auth::authorize_call(scoped_doctor_principal, spec, spec.family, args, policy_, current_system,
+                                                      current_tcode, [this](const std::string& n) { return find_spec(n); },
+                                                      &input_context);
+    if (!authz.allowed)
+        return CallRefusal{authz.code.empty() ? "REFUSED" : authz.code, authz.message,
+                           authz.code == "READ_ONLY" ? read_only_hint(policy_, principal.read_only) : std::string()};
+    if (!principal.tcodes.empty() && auth::acts_on_screen(spec.def.name) &&
+        (tcode_blocked(policy_state_key) || tcode_blocked(policy_fallback_key)))
+        return CallRefusal{"TCODE_DENIED", "an earlier call of token '" + principal.name + "' left its allowed transactions; screen "
+                                           "tools stay blocked until gui_transaction_start opens an allowed transaction"};
+    return std::nullopt;
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1302,48 +1360,16 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         } else if (owner_mode(ctx) && name != "gui_session_attach" &&
             name != "gui_session_list" && name != "gui_connection_list" &&
             name != "gui_doctor" && name != "gui_session_launch") {
-            const bool known = live_facts && !live_facts->system.empty() && !live_facts->client.empty() &&
-                               !live_facts->user.empty() && !live_facts->session_identity.empty() &&
-                               (!record.connection || (live_facts->connection_id && *record.connection == *live_facts->connection_id));
-            if (!known) return fail("OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified");
-            const std::string identity = sap_identity(*live_facts);
-            const bool allowed = owner_identity_allowed(policy_, principal, identity);
-            if (!allowed) return fail("OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint");
-            // Implicit resolution must use the same saved connection that was checked above.
-            if (!record.connection) record.connection = live_facts->connection_id;
+            if (auto refusal = admit_owner_identity(principal, live_facts, record))
+                return fail(refusal->code, refusal->message);
             owner_pre_facts = live_facts;
         }
-        if (principal.allow_selection_input) {
-            input_context.initial = initial_screen(policy_state_key);
-            if (record.connection) input_context.connection = record.connection;
-            // Any call that observes another (or an unknown) screen than the recorded one ends the typing window for good:
-            // coming back to the initial screen later needs a new gui_transaction_start.
-            if (input_context.initial && facts_provider_ && name != "gui_transaction_start" &&
-                (!current_tcode || auth::normalize_tcode(*current_tcode) != input_context.initial->transaction ||
-                 input_context.program != input_context.initial->program ||
-                 input_context.screen_number != input_context.initial->screen_number)) {
-                set_initial_screen(policy_state_key, std::nullopt);
-                input_context.initial.reset();
-            }
-        }
-        Principal scoped_doctor_principal = principal;
-        if (owner_mode(ctx) && name == "gui_doctor")
-            scoped_doctor_principal.connections.clear(); // output is filtered by the original token below
-        const PolicyDecision authz = auth::authorize_call(scoped_doctor_principal, *spec, spec->family, args, policy_, current_system,
-                                                          current_tcode, [this](const std::string& n) { return find_spec(n); },
-                                                          &input_context);
-        if (!authz.allowed)
-            return fail(authz.code.empty() ? "REFUSED" : authz.code, authz.message,
-                        authz.code == "READ_ONLY" ? read_only_hint(policy_, principal.read_only) : std::string());
+        if (principal.allow_selection_input)
+            track_initial_screen(name, policy_state_key, record.connection, current_tcode, input_context);
+        if (auto refusal = authorization_refusal(*spec, name, args, ctx, principal, current_system, current_tcode, input_context,
+                                                 policy_state_key, policy_fallback_key))
+            return fail(refusal->code, refusal->message, refusal->hint);
         if (selection_input && input_context.initial) selection_initial = *input_context.initial;
-        // Atomicity: call_tool runs only on the executor (main) thread, one call at a time (ToolProvider contract, CallExecutor
-        // FIFO), so this check -> invoke -> set_tcode_blocked sequence cannot interleave with another call of the same token.
-        // A token that ended its previous call outside its T-code allowlist stays locked out of screen-acting tools
-        // until gui_transaction_start succeeds with an allowed code (nothing navigates back automatically).
-        if (!principal.tcodes.empty() && auth::acts_on_screen(spec->def.name) &&
-            (tcode_blocked(policy_state_key) || tcode_blocked(policy_fallback_key)))
-            return fail("TCODE_DENIED", "an earlier call of token '" + principal.name + "' left its allowed transactions; screen "
-                                        "tools stay blocked until gui_transaction_start opens an allowed transaction");
     }
 
     // 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch,
