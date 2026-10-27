@@ -4,6 +4,7 @@
 // the whole test binary, so FakeNode DISPIDs agree across test files.
 #include <windows.h>
 #include <oaidl.h>
+#include <comdef.h>
 
 #include <chrono>
 #include <functional>
@@ -103,6 +104,9 @@ public:
     int new_enum_calls = 0;
     int item_calls = 0;
     long count_override = -1;
+    VARTYPE count_type = VT_I4;              ///< VT_I4 or VT_I2: how Count answers
+    std::vector<VARTYPE> item_index_types;   ///< the VARTYPE of each Item(i) index
+    std::vector<_variant_t> values;          ///< when not empty, Item(i) answers a copy of values[i] instead of items[i]
     // Scripted Busy: while busy_true_reads > 0 each Busy read returns true and decrements it,
     // then false. -1 leaves Busy to the bools map. StartTransaction records its call time.
     int busy_true_reads = -1;
@@ -125,6 +129,9 @@ public:
     // answers its `dispatches` entry (AddRef'd) when there is one; names in put_fails answer DISP_E_EXCEPTION.
     std::set<std::wstring> methods;
     std::vector<std::pair<std::wstring, std::wstring>> calls;
+    std::map<std::wstring, std::wstring> method_answers;   ///< "Name(arg,arg)" -> the BSTR a generic method answers
+    std::set<std::wstring> failing_calls;                  ///< "Name(arg,arg)" answers DISP_E_EXCEPTION (still recorded)
+    std::map<std::wstring, _variant_t> method_values;      ///< a generic method's answer by name (any VARIANT, copied)
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -237,12 +244,20 @@ public:
                 else return DISP_E_TYPEMISMATCH;
             }
             calls.emplace_back(name, text);
+            if (failing_calls.count(name + L"(" + text + L")")) return DISP_E_EXCEPTION;
             auto returned = dispatches.find(name);
             if (result && returned != dispatches.end() && returned->second) {
                 VariantInit(result);
                 result->vt = VT_DISPATCH;
                 result->pdispVal = returned->second;
                 returned->second->AddRef();
+            } else if (auto value = method_values.find(name); result && value != method_values.end()) {
+                VariantInit(result);
+                return VariantCopy(result, &value->second);
+            } else if (auto answer = method_answers.find(name + L"(" + text + L")"); result && answer != method_answers.end()) {
+                VariantInit(result);
+                result->vt = VT_BSTR;
+                result->bstrVal = SysAllocString(answer->second.c_str());
             }
             return S_OK;
         }
@@ -270,10 +285,13 @@ public:
         if (!result) return DISP_E_MEMBERNOTFOUND;
         if (name == L"Item" && (flags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET))) {
             ++item_calls;
+            if (params && params->cArgs == 1) item_index_types.push_back(params->rgvarg[0].vt);
+            const size_t size = values.empty() ? items.size() : values.size();
             if (!params || params->cArgs != 1 || params->rgvarg[0].lVal < 0 ||
-                static_cast<size_t>(params->rgvarg[0].lVal) >= items.size())
+                static_cast<size_t>(params->rgvarg[0].lVal) >= size)
                 return DISP_E_BADINDEX;
             VariantInit(result);
+            if (!values.empty()) return VariantCopy(result, &values[params->rgvarg[0].lVal]);
             result->vt = VT_DISPATCH;
             result->pdispVal = items[params->rgvarg[0].lVal];
             result->pdispVal->AddRef();
@@ -283,8 +301,11 @@ public:
         ++reads[name];
         VariantInit(result);
         if (name == L"Count") {
-            result->vt = VT_I4;
-            result->lVal = count_override >= 0 ? count_override : static_cast<long>(items.size());
+            const long count = count_override >= 0 ? count_override
+                                                   : static_cast<long>(values.empty() ? items.size() : values.size());
+            result->vt = count_type;
+            if (count_type == VT_I2) result->iVal = static_cast<SHORT>(count);
+            else result->lVal = count;
             return S_OK;
         }
         if (name == L"Busy" && busy_true_reads >= 0) {
