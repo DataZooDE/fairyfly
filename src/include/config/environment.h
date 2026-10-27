@@ -72,6 +72,9 @@ private:
 
 /// Environment::process().lookup(): for APIs that take an EnvLookup.
 EnvLookup process_env();
+/// Sets (UTF-8) or removes a variable of this process; children started afterwards inherit it. The one writer.
+void set_process_env(const char* name, const std::string& value);
+void unset_process_env(const char* name);
 /// Environment::process().read_only_cap().
 inline bool read_only_cap() { return Environment::process().read_only_cap(); }
 

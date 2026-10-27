@@ -1,0 +1,57 @@
+{
+ "compact": true,
+ "input": {
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[0,1]",
+    "text": "ICM Status",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 20,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[20,1]",
+    "text": "Running",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[0,2]",
+    "text": "Threads",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 20,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[20,2]",
+    "text": "10",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "buttons": [
+    {
+     "id": "wnd[0]/tbar[1]/btn[8]",
+     "name": "btn[8]",
+     "text": "Refresh",
+     "type": "GuiButton"
+    }
+   ],
+   "other": [
+    {
+     "id": "wnd[0]/mbar/menu[0]",
+     "name": "menu[0]",
+     "text": "Goto",
+     "type": "GuiMenu"
+    }
+   ]
+  },
+  "screen_id": "wnd[0]",
+  "title": "ICM Monitor",
+  "transaction": "SMICM"
+ },
+ "output": "# ICM Monitor\n\n**Transaction:** `SMICM`\n\n## Menu Bar\n\n- **Goto**\n\n## Buttons\n\n- **Refresh** — `wnd[0]/tbar[1]/btn[8]`\n\n---\n**Screen Elements:** 0 top-level\n"
+}

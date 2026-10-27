@@ -204,7 +204,8 @@ namespace {
         return OutputFormat::Json;
     };
     auto print_result = [&]() {
-        std::string text = format_output(command_result, requested_output_format(), global_opts.verbose_errors);
+        std::string text = format_output(command_result, requested_output_format(), global_opts.verbose_errors,
+                                         command_table::render_of_path(invoked_command_words(app)));
         if (batch_mode) {
             // Keep the batch protocol strictly one JSON object per line.
             try { text = json::parse(text).dump(); } catch (const std::exception&) {}
@@ -247,11 +248,15 @@ namespace {
             std::function<CommandHandler*()> peek = [] {
                 return g_audit.peek_handler ? const_cast<CommandHandler*>(g_audit.peek_handler()) : nullptr;
             };
-            // `mcp --tray`: the tray owns the process; it runs the HTTP server through this factory.
+            // `mcp --tray`: the tray owns the process; it runs the HTTP server through this factory. It refers to this
+            // function's locals, so it is unregistered again when the command returns.
             tray::runner_factory() = [&get_handler, &global_opts, peek](const mcp::ServeOptions& tray_options) {
                 g_skip_invocation_audit = true;
                 return mcp::make_http_tray_runner(tray_options, get_handler, global_opts, g_audit.sink, peek);
             };
+            struct UnregisterRunnerFactory {
+                ~UnregisterRunnerFactory() { tray::runner_factory() = nullptr; }
+            } unregister_runner_factory;
             if (const auto handled = run_mcp_extras(mcp_command->extras(), serve_options, get_handler, global_opts))
                 return *handled;
             g_skip_invocation_audit = true;

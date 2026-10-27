@@ -1,0 +1,57 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 3,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[0,2]",
+    "text": "FFLY REPORT OUTPUT 260927",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 3,
+    "id": "wnd[0]/usr/lbl[0,3]",
+    "text": "Diagnostic status: 17 rows",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 5,
+    "id": "wnd[0]/usr/lbl[0,5]",
+    "text": "Completed without changing application data",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "form_fields": [
+    {
+     "grid_col": 0,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[0,2]",
+     "text": "FFLY REPORT OUTPUT 260927",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 3,
+     "id": "wnd[0]/usr/lbl[0,3]",
+     "text": "Diagnostic status: 17 rows",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 5,
+     "id": "wnd[0]/usr/lbl[0,5]",
+     "text": "Completed without changing application data",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "Disposable classic list verification",
+  "transaction": "SE38"
+ },
+ "output": "# Disposable classic list verification\n\n**Transaction:** `SE38`\n\n**Screen ID:** ``\n\n## Report Output\n\n```\nFFLY REPORT OUTPUT 260927\nDiagnostic status: 17 rows\n\nCompleted without changing application data\n```\n\n---\n**Screen Elements:** 3 top-level\n"
+}

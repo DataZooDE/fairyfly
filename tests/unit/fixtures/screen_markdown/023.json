@@ -1,0 +1,66 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 1,
+  "elements": [
+   {
+    "id": "wnd[0]/usr/grid",
+    "subtype": "GridView",
+    "table_data": {
+     "columns": [
+      "USER",
+      "STATUS"
+     ],
+     "rows": [
+      [
+       "ALICE",
+       "Locked"
+      ],
+      [
+       "CAROL",
+       "locked"
+      ]
+     ],
+     "rows_matched": 2,
+     "rows_total": 3,
+     "total_row_count": 3
+    },
+    "type": "GuiShell"
+   }
+  ],
+  "filter_stats": {
+   "filter_applied": true,
+   "filtered_element_count": 1,
+   "total_elements_checked": 1
+  },
+  "hierarchy": {
+   "tables": [
+    {
+     "id": "wnd[0]/usr/grid",
+     "subtype": "GridView",
+     "table_data": {
+      "columns": [
+       "USER",
+       "STATUS"
+      ],
+      "rows": [
+       [
+        "ALICE",
+        "Locked"
+       ],
+       [
+        "CAROL",
+        "locked"
+       ]
+      ],
+      "rows_matched": 2,
+      "rows_total": 3,
+      "total_row_count": 3
+     },
+     "type": "GuiShell"
+    }
+   ]
+  }
+ },
+ "output": "# Screen\n\n**Screen ID:** ``\n\n## Tables and Grids\n\n### Table\n\n| Property | Value |\n|----------|-------|\n| **Technical ID** | `wnd[0]/usr/grid` |\n| **Type** | GuiShell |\n| **Total Rows** | 3 |\n| **Rows Matched** | 2 of 3 |\n\n| USER  | STATUS |\n|-------|--------|\n| ALICE | Locked |\n| CAROL | locked |\n\n_Showing 2 of 3 rows_\n\n**Usage Examples:**\n```bash\n# Select a row\nfairyfly element click 'wnd[0]/usr/grid' --row 0 --column 'COLUMN_NAME'\n\n# Set cell value\nfairyfly element fill 'wnd[0]/usr/grid' 'value' --row 0 --column 'COLUMN_NAME'\n```\n\n---\n**Screen Elements:** 1 top-level\n"
+}

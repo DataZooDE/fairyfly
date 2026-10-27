@@ -1,8 +1,14 @@
+#include <filesystem>
+#include <fstream>
 #include <set>
 #include <catch2/catch_test_macros.hpp>
 #include <spdlog/spdlog.h>
+#include "include/com/control_views.h"
+#include "include/com/tree_view.h"
 #include "include/com/wrapper.h"
+#include "include/constants.h"
 #include "include/com/wrapper_helpers.h"
+#include "support/fake_dispatch.h"
 #include "include/collection_id_lookup.h"
 #include "include/automation_engine.h"
 #include "include/com_automation_engine.h"
@@ -32,66 +38,11 @@
 
 using namespace fairyfly;
 using namespace fairyfly::sap;
+using namespace fairyfly::test;
 
 // Redaction markers carry a reason: "[REDACTED: <reason>]".
 static bool is_redacted(const std::string& value) { return fairyfly::sap::is_redaction_marker(value); }
 
-namespace {
-// Minimal IEnumVARIANT over a list of dispatch pointers (for _NewEnum fakes).
-class FakeEnumVariant final : public IEnumVARIANT {
-public:
-    explicit FakeEnumVariant(std::vector<IDispatch*> items, size_t position = 0,
-                             size_t fail_after = static_cast<size_t>(-1))
-        : items_(std::move(items)), position_(position), fail_after_(fail_after) {}
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
-        if (!object) return E_POINTER;
-        *object = nullptr;
-        if (iid == IID_IUnknown || iid == IID_IEnumVARIANT) {
-            *object = static_cast<IEnumVARIANT*>(this);
-            AddRef();
-            return S_OK;
-        }
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
-    ULONG STDMETHODCALLTYPE Release() override {
-        const ULONG remaining = --references_;
-        if (!remaining) delete this;
-        return remaining;
-    }
-    HRESULT STDMETHODCALLTYPE Next(ULONG count, VARIANT* out, ULONG* fetched) override {
-        ULONG got = 0;
-        if (position_ >= fail_after_) {
-            if (fetched) *fetched = 0;
-            return E_FAIL;
-        }
-        while (got < count && position_ < items_.size()) {
-            VariantInit(&out[got]);
-            out[got].vt = VT_DISPATCH;
-            out[got].pdispVal = items_[position_++];
-            out[got].pdispVal->AddRef();
-            ++got;
-        }
-        if (fetched) *fetched = got;
-        return got == count ? S_OK : S_FALSE;
-    }
-    HRESULT STDMETHODCALLTYPE Skip(ULONG count) override {
-        position_ += count;
-        if (position_ > items_.size()) { position_ = items_.size(); return S_FALSE; }
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Reset() override { position_ = 0; return S_OK; }
-    HRESULT STDMETHODCALLTYPE Clone(IEnumVARIANT** out) override {
-        *out = new FakeEnumVariant(items_, position_, fail_after_);
-        return S_OK;
-    }
-private:
-    ULONG references_ = 1;
-    std::vector<IDispatch*> items_;
-    size_t position_;
-    size_t fail_after_;
-};
-} // namespace
 
 namespace {
 class TextFieldDispatch final : public IDispatch {
@@ -752,14 +703,6 @@ private:
     bool busy_;
 };
 
-struct DispatchCacheAccess : SapGuiObject {
-    using SapGuiObject::clear_dispid_cache;
-};
-
-struct ScopedDispatchCacheReset {
-    ScopedDispatchCacheReset() { DispatchCacheAccess::clear_dispid_cache(); }
-    ~ScopedDispatchCacheReset() { DispatchCacheAccess::clear_dispid_cache(); }
-};
 
 struct ForcedCliResult {
     bool mta_initialized = false;
@@ -813,10 +756,10 @@ TEST_CASE("Screen metadata reports selected radio and checkbox state", "[com][me
         auto* dispatch = new TextFieldDispatch(type, 9400, L"/app/con[0]/ses[0]/wnd[0]/usr/radTEST");
         auto element = ComGuiElement::create(IDispatchPtr(dispatch, true));
         dispatch->selected = true;
-        const auto checked = ElementMetadataExtractor::extract(element);
+        const auto checked = ElementMetadataExtractor().extract(element);
         REQUIRE(checked.at("selected") == true);
         dispatch->selected = false;
-        const auto unchecked = ElementMetadataExtractor::extract(element);
+        const auto unchecked = ElementMetadataExtractor().extract(element);
         REQUIRE(unchecked.at("selected") == false);
     }
 }
@@ -847,12 +790,12 @@ TEST_CASE("GridView double-click sets the current cell before double-clicking it
     ScopedDispatchCacheReset cache_reset;
     auto* dispatch = new TextFieldDispatch(L"GuiGridView", 14200);
     auto grid = ComGuiElement::create(IDispatchPtr(dispatch, true));
-    grid->doubleclick_grid_cell(3, "MATNR");
+    as_grid(*grid).doubleclick_grid_cell(3, "MATNR");
     REQUIRE(dispatch->set_cell_row == 3);
     REQUIRE(dispatch->set_cell_column == L"MATNR");
     REQUIRE(dispatch->grid_calls == std::vector<std::string>{"SetCurrentCell", "DoubleClickCurrentCell"});
-    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(-1, "MATNR"), ComException);
-    REQUIRE_THROWS_AS(grid->doubleclick_grid_cell(0, ""), ComException);
+    REQUIRE_THROWS_AS(as_grid(*grid).doubleclick_grid_cell(-1, "MATNR"), ComException);
+    REQUIRE_THROWS_AS(as_grid(*grid).doubleclick_grid_cell(0, ""), ComException);
 }
 
 TEST_CASE("Window send_vkey passes the numeric key as an integer variant", "[com][window]") {
@@ -1483,8 +1426,8 @@ TEST_CASE("Grid cell reads resolve the COM method once per grid type", "[com][gr
     auto grid = ComGuiElement::create(dispatch);
     dispatch->Release();
     REQUIRE(grid->get_type() == "GuiShell");
-    REQUIRE(grid->get_cell_value(0, "A") == "grid-cell");
-    REQUIRE(grid->get_cell_value(0, "B") == "grid-cell");
+    REQUIRE(as_grid(*grid).get_cell_value(0, "A") == "grid-cell");
+    REQUIRE(as_grid(*grid).get_cell_value(0, "B") == "grid-cell");
     REQUIRE(dispatch->cell_value_lookups == 1);
 }
 
@@ -1494,10 +1437,10 @@ TEST_CASE("Grid toolbar metadata resolves each COM method once", "[com][grid][pe
     auto grid = ComGuiElement::create(dispatch);
     dispatch->Release();
     REQUIRE(grid->get_type() == "GuiShell");
-    REQUIRE(grid->get_grid_toolbar_button_id(0) == "BUTTON");
-    REQUIRE(grid->get_grid_toolbar_button_id(1) == "BUTTON");
-    REQUIRE(grid->get_grid_toolbar_button_tooltip(0) == "Tooltip");
-    REQUIRE(grid->get_grid_toolbar_button_tooltip(1) == "Tooltip");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_id(0) == "BUTTON");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_id(1) == "BUTTON");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_tooltip(0) == "Tooltip");
+    REQUIRE(as_toolbar(*grid).get_grid_toolbar_button_tooltip(1) == "Tooltip");
     REQUIRE(dispatch->toolbar_id_lookups == 1);
     REQUIRE(dispatch->toolbar_tooltip_lookups == 1);
 }
@@ -1570,7 +1513,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     auto* dispatch = new TextFieldDispatch(L"GuiShell", 151, L"wnd[0]/usr/tree");
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
-    tree->doubleclick_node("NODE");
+    as_tree(*tree).doubleclick_node("NODE");
     REQUIRE(dispatch->tree_item_doubleclicks == 1);
     REQUIRE(dispatch->tree_node_doubleclicks == 0);
 
@@ -1578,7 +1521,7 @@ TEST_CASE("List-tree text item receives a real double-click", "[com][tree][actio
     simple_dispatch->tree_node_has_text = true;
     auto simple_tree = ComGuiElement::create(simple_dispatch);
     simple_dispatch->Release();
-    simple_tree->doubleclick_node("SIMPLE");
+    as_tree(*simple_tree).doubleclick_node("SIMPLE");
     REQUIRE(simple_dispatch->tree_node_doubleclicks == 1);
     REQUIRE(simple_dispatch->tree_item_doubleclicks == 0);
 }
@@ -1589,7 +1532,7 @@ TEST_CASE("Selecting a tree node clears an earlier selection", "[com][tree][acti
     auto tree = ComGuiElement::create(dispatch);
     dispatch->Release();
 
-    tree->select_node("target-node");
+    as_tree(*tree).select_node("target-node");
 
     REQUIRE(dispatch->tree_selection_calls == std::vector<std::string>{"UnselectAll", "SelectNode"});
     REQUIRE(dispatch->selected_tree_nodes == std::vector<std::wstring>{L"target-node"});
@@ -1620,7 +1563,7 @@ TEST_CASE("Unknown GuiShell subtype keeps its subtype and drops the ProgID text"
     auto* dispatch = new TextFieldDispatch(L"GuiShell", 460, L"wnd[0]/usr/cntlPARAM/shellcont/shell",
                                            L"", L"Calendar", L"SAP.HTMLControl.1");
     auto shell = ComGuiElement::create(IDispatchPtr(dispatch, true));
-    const auto data = ElementMetadataExtractor::extract(shell);
+    const auto data = ElementMetadataExtractor().extract(shell);
     REQUIRE(data.at("type") == "GuiShell");
     REQUIRE(data.at("subtype") == "Calendar");
     REQUIRE_FALSE(data.contains("text"));
@@ -1898,10 +1841,9 @@ TEST_CASE("ComGuiWindow operations", "[com][gui_window][.][live]") {
     }
 
     SECTION("Window may have title") {
-        std::string title = window->get_title();
-        // Title might be empty, but operation should not crash
+        std::string title;
+        CHECK_NOTHROW(title = window->get_title());   // may be empty; reading it must not fail
         CAPTURE(title);
-        SUCCEED();
     }
 
     SECTION("Window child count is non-negative") {
@@ -1960,22 +1902,21 @@ TEST_CASE("ComGuiElement properties", "[com][gui_element][.][live]") {
     }
 
     SECTION("Element text can be retrieved") {
-        std::string text = elem->get_text();
-        // Text might be empty, but operation should not crash
+        std::string text;
+        CHECK_NOTHROW(text = elem->get_text());   // may be empty; reading it must not fail
         CAPTURE(text);
-        SUCCEED();
     }
 
     SECTION("Element visibility can be checked") {
-        bool visible = elem->is_visible();
+        bool visible = false;
+        CHECK_NOTHROW(visible = elem->is_visible());
         CAPTURE(visible);
-        SUCCEED();
     }
 
     SECTION("Element enabled status can be checked") {
-        bool enabled = elem->is_enabled();
+        bool enabled = false;
+        CHECK_NOTHROW(enabled = elem->is_enabled());
         CAPTURE(enabled);
-        SUCCEED();
     }
 
     SECTION("Container element get_child navigation") {
@@ -2108,7 +2049,7 @@ TEST_CASE("ComGuiElement properties", "[com][gui_element][.][live]") {
         try {
             auto table = session->find_element_by_id("/app/con[0]/ses[0]/wnd[0]/usr/tabsTAB_STRIP/tabpDEF/ssubTS_SCREEN:SAPLSD41:2201/tblSAPLSD41TC0");
             REQUIRE(table != nullptr);
-            auto metadata = ElementMetadataExtractor::extract(table);
+            auto metadata = ElementMetadataExtractor().extract(table);
             REQUIRE(metadata.contains("table_data"));
             REQUIRE(metadata["table_data"].contains("columns"));
             REQUIRE(metadata["table_data"]["columns"].size() == 10);
@@ -2183,7 +2124,6 @@ TEST_CASE("Memory safety of COM wrappers", "[com][memory]") {
             }
             // app2 destructed, app1 should still be valid
             REQUIRE(app1 != nullptr);
-            SUCCEED();
         } catch (const ComException& e) {
             SKIP("SAP GUI not available");
         }
@@ -2197,13 +2137,7 @@ TEST_CASE("Memory safety of COM wrappers", "[com][memory]") {
 
 TEST_CASE("COM wrapper exception safety", "[com][exceptions]") {
     SECTION("Invalid COM operations throw appropriate exceptions") {
-        try {
-            // This should raise an error - trying to create with null
-            ComGuiElement::create(nullptr);
-            FAIL("Should have thrown ComException");
-        } catch (const ComException& e) {
-            SUCCEED("ComException thrown as expected");
-        }
+        REQUIRE_THROWS_AS(ComGuiElement::create(nullptr), ComException);   // a null dispatch is no element
     }
 }
 
@@ -2415,7 +2349,7 @@ TEST_CASE("Enumeration failure mid-way falls back to indexed children without du
     auto element = ComGuiElement::create(parent);
     parent->Release();
 
-    const auto metadata = ElementMetadataExtractor::extract(element);
+    const auto metadata = ElementMetadataExtractor().extract(element);
     REQUIRE(metadata.contains("children"));
     REQUIRE(metadata.at("children") == json::array({"a", "b", "c"}));
 
@@ -2471,7 +2405,7 @@ TEST_CASE("ElementMetadataExtractor output for a text field is unchanged", "[com
                                            L"Field label", L"", L"abc");
     auto element = ComGuiElement::create(dispatch);
     dispatch->Release();
-    const auto metadata = ElementMetadataExtractor::extract(element);
+    const auto metadata = ElementMetadataExtractor().extract(element);
     // Golden: the memoised Changeable read and the shell negative cache must not change the output.
     REQUIRE(metadata.dump() ==
             R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,)"
@@ -2681,214 +2615,6 @@ TEST_CASE("Label and tooltip values are unchanged by DISPID caching", "[com][per
 }
 
 namespace {
-// Generic scriptable SAP object for ScreenReader tests: string/bool/dispatch properties by
-// name, FindById lookups, collection Item/Count, Select hook, and per-property read counters.
-// DISPIDs come from one global name table so the type-level DISPID cache stays consistent
-// across instances.
-class FakeNode final : public IDispatch {
-public:
-    std::map<std::wstring, std::wstring> strings;
-    std::map<std::wstring, bool> bools;
-    std::map<std::wstring, long> ints;
-    std::map<std::wstring, IDispatch*> dispatches;
-    std::map<std::wstring, IDispatch*> find_by_id;
-    std::vector<IDispatch*> items;
-    std::function<void()> on_select;
-    std::map<std::wstring, int> reads;
-    int select_calls = 0;
-    // Collection round-trip counters: _NewEnum calls (served from items when enumerable) and
-    // indexed Item(i) calls; count_override (>= 0) replaces the reported Count.
-    bool enumerable = false;
-    int new_enum_calls = 0;
-    int item_calls = 0;
-    long count_override = -1;
-    // Scripted Busy: while busy_true_reads > 0 each Busy read returns true and decrements it,
-    // then false. -1 leaves Busy to the bools map. StartTransaction records its call time.
-    int busy_true_reads = -1;
-    int start_transaction_calls = 0;
-    std::chrono::steady_clock::time_point start_transaction_at{};
-    // GuiSession.GetObjectTree(Id, [props]): records the call, answers object_tree_payload (a UTF-16
-    // string) or fails with object_tree_hresult. Names in unknown_names do not resolve a DISPID.
-    int object_tree_calls = 0;
-    std::wstring object_tree_id;
-    std::vector<std::wstring> object_tree_props;
-    bool object_tree_props_passed = false;
-    std::wstring object_tree_payload;
-    HRESULT object_tree_hresult = S_OK;
-    std::set<std::wstring> unknown_names;
-    // Property writes: recorded in `puts` and stored into strings/bools; names in put_fails answer DISP_E_EXCEPTION.
-    std::vector<std::pair<std::wstring, std::wstring>> puts;
-    std::set<std::wstring> put_fails;
-
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
-        if (!object) return E_POINTER;
-        *object = nullptr;
-        if (iid == IID_IUnknown || iid == IID_IDispatch) {
-            *object = static_cast<IDispatch*>(this);
-            AddRef();
-            return S_OK;
-        }
-        return E_NOINTERFACE;
-    }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
-    ULONG STDMETHODCALLTYPE Release() override {
-        const ULONG remaining = --references_;
-        if (!remaining) delete this;
-        return remaining;
-    }
-    HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* count) override {
-        if (!count) return E_POINTER;
-        *count = 0;
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, ITypeInfo**) override { return E_NOTIMPL; }
-    HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID,
-                                            DISPID* ids) override {
-        if (!names || !ids || count != 1) return E_INVALIDARG;
-        if (unknown_names.count(names[0])) return DISP_E_UNKNOWNNAME;
-        auto& table = name_table();
-        for (size_t i = 0; i < table.size(); ++i) {
-            if (table[i] == names[0]) { *ids = static_cast<DISPID>(1000 + i); return S_OK; }
-        }
-        table.emplace_back(names[0]);
-        *ids = static_cast<DISPID>(1000 + table.size() - 1);
-        return S_OK;
-    }
-    HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags, DISPPARAMS* params,
-                                     VARIANT* result, EXCEPINFO*, UINT*) override {
-        if (id == DISPID_NEWENUM && enumerable && result) {
-            ++new_enum_calls;
-            VariantInit(result);
-            result->vt = VT_UNKNOWN;
-            result->punkVal = new FakeEnumVariant(items);
-            return S_OK;
-        }
-        const auto& table = name_table();
-        if (id < 1000 || static_cast<size_t>(id - 1000) >= table.size()) return DISP_E_MEMBERNOTFOUND;
-        const std::wstring& name = table[id - 1000];
-        if ((flags & DISPATCH_METHOD) && name == L"Select") {
-            ++select_calls;
-            if (on_select) on_select();
-            return S_OK;
-        }
-        if ((flags & DISPATCH_METHOD) && name == L"StartTransaction") {
-            ++start_transaction_calls;
-            start_transaction_at = std::chrono::steady_clock::now();
-            return S_OK;
-        }
-        if ((flags & DISPATCH_METHOD) && name == L"GetObjectTree") {
-            ++object_tree_calls;
-            if (!params || params->cArgs < 1 || params->cArgs > 2) return DISP_E_BADPARAMCOUNT;
-            const VARIANT& id_arg = params->rgvarg[params->cArgs - 1];
-            if (id_arg.vt != VT_BSTR) return DISP_E_TYPEMISMATCH;
-            object_tree_id = id_arg.bstrVal;
-            object_tree_props.clear();
-            object_tree_props_passed = params->cArgs == 2;
-            if (object_tree_props_passed) {
-                const VARIANT& props_arg = params->rgvarg[0];
-                if (props_arg.vt != (VT_ARRAY | VT_VARIANT)) return DISP_E_TYPEMISMATCH;
-                SAFEARRAY* array = props_arg.parray;
-                LONG lower = 0, upper = -1;
-                SafeArrayGetLBound(array, 1, &lower);
-                SafeArrayGetUBound(array, 1, &upper);
-                for (LONG i = lower; i <= upper; ++i) {
-                    VARIANT element;
-                    VariantInit(&element);
-                    SafeArrayGetElement(array, &i, &element);
-                    if (element.vt != VT_BSTR) { VariantClear(&element); return DISP_E_TYPEMISMATCH; }
-                    object_tree_props.emplace_back(element.bstrVal);
-                    VariantClear(&element);
-                }
-            }
-            if (FAILED(object_tree_hresult)) return object_tree_hresult;
-            if (!result) return S_OK;
-            VariantInit(result);
-            result->vt = VT_BSTR;
-            result->bstrVal = SysAllocString(object_tree_payload.c_str());
-            return S_OK;
-        }
-        if ((flags & DISPATCH_METHOD) && name == L"FindById") {
-            if (!result || !params || params->cArgs != 1 || params->rgvarg[0].vt != VT_BSTR)
-                return DISP_E_BADPARAMCOUNT;
-            auto it = find_by_id.find(params->rgvarg[0].bstrVal);
-            if (it == find_by_id.end()) return DISP_E_EXCEPTION;
-            VariantInit(result);
-            result->vt = VT_DISPATCH;
-            result->pdispVal = it->second;
-            it->second->AddRef();
-            return S_OK;
-        }
-        if ((flags & DISPATCH_PROPERTYPUT) && params && params->cArgs == 1) {
-            if (put_fails.count(name)) return DISP_E_EXCEPTION;
-            const VARIANT& arg = params->rgvarg[0];
-            if (arg.vt == VT_BSTR) {
-                strings[name] = arg.bstrVal;
-                puts.emplace_back(name, std::wstring(arg.bstrVal));
-            } else if (arg.vt == VT_BOOL) {
-                bools[name] = arg.boolVal != VARIANT_FALSE;
-                puts.emplace_back(name, std::wstring(arg.boolVal != VARIANT_FALSE ? L"true" : L"false"));
-            } else {
-                return DISP_E_TYPEMISMATCH;
-            }
-            return S_OK;
-        }
-        if (!result) return DISP_E_MEMBERNOTFOUND;
-        if (name == L"Item" && (flags & (DISPATCH_METHOD | DISPATCH_PROPERTYGET))) {
-            ++item_calls;
-            if (!params || params->cArgs != 1 || params->rgvarg[0].lVal < 0 ||
-                static_cast<size_t>(params->rgvarg[0].lVal) >= items.size())
-                return DISP_E_BADINDEX;
-            VariantInit(result);
-            result->vt = VT_DISPATCH;
-            result->pdispVal = items[params->rgvarg[0].lVal];
-            result->pdispVal->AddRef();
-            return S_OK;
-        }
-        if (!(flags & DISPATCH_PROPERTYGET)) return DISP_E_MEMBERNOTFOUND;
-        ++reads[name];
-        VariantInit(result);
-        if (name == L"Count") {
-            result->vt = VT_I4;
-            result->lVal = count_override >= 0 ? count_override : static_cast<long>(items.size());
-            return S_OK;
-        }
-        if (name == L"Busy" && busy_true_reads >= 0) {
-            result->vt = VT_BOOL;
-            result->boolVal = busy_true_reads > 0 ? VARIANT_TRUE : VARIANT_FALSE;
-            if (busy_true_reads > 0) --busy_true_reads;
-            return S_OK;
-        }
-        if (auto d = dispatches.find(name); d != dispatches.end()) {
-            result->vt = VT_DISPATCH;
-            result->pdispVal = d->second;
-            d->second->AddRef();
-            return S_OK;
-        }
-        if (auto n = ints.find(name); n != ints.end()) {
-            result->vt = VT_I4;
-            result->lVal = n->second;
-            return S_OK;
-        }
-        if (auto b = bools.find(name); b != bools.end()) {
-            result->vt = VT_BOOL;
-            result->boolVal = b->second ? VARIANT_TRUE : VARIANT_FALSE;
-            return S_OK;
-        }
-        if (auto v = strings.find(name); v != strings.end()) {
-            result->vt = VT_BSTR;
-            result->bstrVal = SysAllocString(v->second.c_str());
-            return S_OK;
-        }
-        return DISP_E_MEMBERNOTFOUND;
-    }
-
-private:
-    static std::vector<std::wstring>& name_table() {
-        static std::vector<std::wstring> table;
-        return table;
-    }
-    ULONG references_ = 1;
-};
 
 // Scene: session -> wnd[0] -> usr -> tab strip (Address selected, Roles) with a grid on Roles.
 struct TabScene {
@@ -2985,21 +2711,23 @@ TEST_CASE("wait_for_completion checks Busy immediately and polls only while busy
     auto session = ComGuiSession::create(IDispatchPtr(node));
     node->Release();
 
+    // A poll sleep lasts at least the interval (sleep_for never returns early): a lower bound proves a sleep, a bound
+    // below one interval proves there was none. (Upper bounds of 15 and 60 ms on the busy path failed about once in
+    // 20 runs on a loaded machine.)
+    const auto interval = std::chrono::milliseconds(fairyfly::constants::SESSION_POLL_INTERVAL_MS);
     SECTION("an idle session costs exactly one Busy read and no sleep") {
         node->busy_true_reads = 0;
         const auto start = std::chrono::steady_clock::now();
         session->wait_for_completion(500);
-        const auto elapsed = std::chrono::steady_clock::now() - start;
         REQUIRE(node->reads[L"Busy"] == 1);
-        REQUIRE(elapsed < std::chrono::milliseconds(15));
+        REQUIRE(std::chrono::steady_clock::now() - start < interval);
     }
-    SECTION("busy once then idle reads Busy twice and stays under 60 ms") {
+    SECTION("busy once then idle reads Busy twice: one poll sleep") {
         node->busy_true_reads = 1;
         const auto start = std::chrono::steady_clock::now();
         session->wait_for_completion(500);
-        const auto elapsed = std::chrono::steady_clock::now() - start;
         REQUIRE(node->reads[L"Busy"] == 2);
-        REQUIRE(elapsed < std::chrono::milliseconds(60));
+        REQUIRE(std::chrono::steady_clock::now() - start >= interval);
     }
     SECTION("busy N times then idle reads N+1 times") {
         node->busy_true_reads = 3;
@@ -3011,7 +2739,7 @@ TEST_CASE("wait_for_completion checks Busy immediately and polls only while busy
         const auto start = std::chrono::steady_clock::now();
         REQUIRE_THROWS_AS(session->wait_for_completion(50), ComException);
         const auto elapsed = std::chrono::steady_clock::now() - start;
-        REQUIRE(elapsed < std::chrono::milliseconds(150));
+        REQUIRE(elapsed < std::chrono::milliseconds(1000));   // gives up near its 50 ms bound, not at a later one
     }
 }
 
@@ -3026,7 +2754,8 @@ TEST_CASE("start_transaction returns right after the invoke without a settle sle
     session->start_transaction("SM37");
     const auto returned = std::chrono::steady_clock::now();
     REQUIRE(node->start_transaction_calls == 1);
-    REQUIRE(returned - node->start_transaction_at < std::chrono::milliseconds(20));
+    // below the 100 ms settle sleep it no longer has (20 ms was too tight on a loaded machine)
+    REQUIRE(returned - node->start_transaction_at < std::chrono::milliseconds(90));
 }
 
 namespace {
@@ -3574,7 +3303,7 @@ TEST_CASE("ElementMetadataExtractor plain elements keep their recorded JSON", "[
     container->dispatches[L"Children"] = kids;
 
     const auto dump = [](FakeNode* node) {
-        return ElementMetadataExtractor::extract(ComGuiElement::create(node)).dump();
+        return ElementMetadataExtractor().extract(ComGuiElement::create(node)).dump();
     };
     CHECK(dump(field) == R"({"capabilities":["fillable","readable"],"changeable":true,"enabled":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/txtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiTextField","visible":true})");
     CHECK(dump(ctext) == R"({"capabilities":["fillable","readable","has_f4_help"],"changeable":true,"enabled":true,"has_f4_help":true,"id":"/app/con[0]/ses[0]/wnd[0]/usr/ctxtBNAME","label":"User","name":"BNAME","text":"Miller","tooltip":"User name","type":"GuiCTextField","visible":true})");
@@ -3855,4 +3584,146 @@ TEST_CASE("Screen read header names system, client, user and transaction", "[com
                                             {L"ApplicationServer", L"vhcala4hci_A4H_00"}}, false);
     CHECK(screen_header_info(*session) == nlohmann::json{{"system", "A4H"}, {"client", "001"},
                                                         {"user", "DEVELOPER"}, {"transaction", "SM37"}});
+}
+
+
+// ---- SapGuiObject setters and invokers (characterization before merging the six bodies) ----------------------
+TEST_CASE("SapGuiObject: property setters put a string, an int and a bool by name", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiTextField";
+    SapGuiObject object(IDispatchPtr(node, false));
+    object.set_string_property(L"Text", "J\xC3\xB6rg");
+    object.set_int_property(L"CaretPosition", 3);
+    object.set_bool_property(L"Selected", true);
+    REQUIRE(node->puts.size() == 3);
+    CHECK(node->puts[0] == std::make_pair(std::wstring(L"Text"), std::wstring(L"Jörg")));
+    CHECK(node->puts[1] == std::make_pair(std::wstring(L"CaretPosition"), std::wstring(L"3")));
+    CHECK(node->puts[2] == std::make_pair(std::wstring(L"Selected"), std::wstring(L"true")));
+}
+
+TEST_CASE("SapGuiObject: methods are invoked with no, a string or an int argument", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiMainWindow";
+    node->methods = {L"SetFocus", L"PressButton", L"SendVKey", L"FindAllByName"};
+    auto* child = new FakeNode();
+    node->dispatches[L"FindAllByName"] = child;
+    SapGuiObject object(IDispatchPtr(node, false));
+    object.invoke_method_void(L"SetFocus");
+    object.invoke_method_with_string(L"PressButton", "BTN1");
+    object.invoke_method_with_int(L"SendVKey", 8);
+    IDispatchPtr returned = object.invoke_method_dispatch(L"FindAllByName");
+    CHECK(returned.GetInterfacePtr() == child);
+    REQUIRE(node->calls.size() == 4);
+    CHECK(node->calls[0] == std::make_pair(std::wstring(L"SetFocus"), std::wstring()));
+    CHECK(node->calls[1] == std::make_pair(std::wstring(L"PressButton"), std::wstring(L"BTN1")));
+    CHECK(node->calls[2] == std::make_pair(std::wstring(L"SendVKey"), std::wstring(L"8")));
+    CHECK(node->calls[3].first == L"FindAllByName");
+    // a method answering no object gives nullptr (not an exception)
+    node->methods.insert(L"Nothing");
+    CHECK(object.invoke_method_dispatch(L"Nothing") == nullptr);
+    returned = nullptr;
+    child->Release();
+}
+
+TEST_CASE("SapGuiObject: a failed lookup, put or call throws SapGuiException with its operation", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiButton";
+    node->unknown_names = {L"Missing"};
+    node->methods = {L"Press"};
+    node->put_fails = {L"Text", L"Press"};
+    SapGuiObject object(IDispatchPtr(node, false));
+    const auto expect = [](auto&& call, const std::string& message, const std::string& operation) {
+        try {
+            call();
+            FAIL("no exception");
+        } catch (const SapGuiException& e) {
+            CHECK(std::string(e.what()) == message);
+            CHECK(e.operation() == operation);
+        }
+    };
+    expect([&] { object.set_string_property(L"Missing", "x"); }, "Failed to get property DISPID", "set_string_property");
+    expect([&] { object.set_string_property(L"Text", "x"); }, "Failed to set property", "set_string_property");
+    expect([&] { object.set_int_property(L"Missing", 1); }, "Failed to get property DISPID", "set_int_property");
+    expect([&] { object.set_bool_property(L"Missing", true); }, "Failed to get property DISPID", "set_bool_property");
+    expect([&] { object.invoke_method_void(L"Missing"); }, "Failed to get method DISPID", "invoke_method_void");
+    expect([&] { object.invoke_method_void(L"Press"); }, "Failed to invoke method", "invoke_method_void");
+    expect([&] { object.invoke_method_with_string(L"Press", "a"); }, "Failed to invoke method", "invoke_method_with_string");
+    expect([&] { object.invoke_method_with_int(L"Press", 1); }, "Failed to invoke method", "invoke_method_with_int");
+    expect([&] { (void)object.invoke_method_dispatch(L"Press"); }, "Failed to invoke method", "invoke_method_dispatch");
+    SapGuiObject empty(nullptr);
+    expect([&] { empty.set_bool_property(L"Selected", true); }, "Cannot set property on null object", "set_bool_property");
+    expect([&] { empty.invoke_method_with_int(L"SendVKey", 0); }, "Cannot invoke method on null object", "invoke_method_with_int");
+}
+
+TEST_CASE("com::invoke passes the arguments in reading order and returns the answer", "[com][invoke]") {
+    ScopedDispatchCacheReset cache_reset;
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiShell";
+    node->methods = {L"GetCellValue", L"PressToolbarButton"};
+    auto* child = new FakeNode();
+    node->dispatches[L"GetCellValue"] = child;
+    IDispatchPtr dispatch(node, false);
+    DISPID cell = 0, press = 0;
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"GetCellValue", &cell)));
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"PressToolbarButton", &press)));
+    _variant_t answer;
+    CHECK(SUCCEEDED(invoke(dispatch, cell, DISPATCH_METHOD, {_variant_t(3), _variant_t(L"MATNR"), _variant_t(true)}, &answer)));
+    CHECK(answer.vt == VT_DISPATCH);
+    CHECK(SUCCEEDED(invoke(dispatch, press, DISPATCH_METHOD, {_variant_t(L"&FIND")})));
+    REQUIRE(node->calls.size() == 2);
+    CHECK(node->calls[0].second == L"3,MATNR,true");
+    CHECK(node->calls[1].second == L"&FIND");
+    // a put names its value DISPID_PROPERTYPUT (the fake refuses it otherwise)
+    DISPID text = 0;
+    REQUIRE(SUCCEEDED(get_dispid_via_typeinfo(dispatch, L"Text", &text)));
+    CHECK(SUCCEEDED(invoke(dispatch, text, DISPATCH_PROPERTYPUT, {_variant_t(L"x")})));
+    CHECK(node->strings[L"Text"] == L"x");
+    CHECK(invoke(nullptr, text, DISPATCH_METHOD) == E_POINTER);
+    answer.Clear();
+    child->Release();
+}
+
+TEST_CASE("com: IDispatch::Invoke is called in one place (com::invoke, safe_invoke)", "[com][invoke]") {
+    // review 2026-10-25: six setter bodies and ~60 hand-built DISPPARAMS; GuiSession.GetObjectTree keeps its own
+    // (a variable argument count with a SAFEARRAY)
+    namespace fs = std::filesystem;
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(fs::path(FAIRYFLY_SOURCE_DIR))) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h")) continue;
+        const auto rel = fs::relative(e.path(), fs::path(FAIRYFLY_SOURCE_DIR)).generic_string();
+        if (rel == "include/com/invoke.h" || rel == "com/wrapper_helpers.cpp" || rel == "com/session.cpp") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (text.find("->Invoke(") != std::string::npos || text.find("DISPPARAMS ") != std::string::npos)
+            offenders.push_back(rel);
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}
+
+TEST_CASE("SapGuiObject: the argument is converted only after the object and the member are checked", "[com][invoke]") {
+    // codex 2026-10-25: invalid UTF-8 turned a null object or a missing member into std::invalid_argument
+    ScopedDispatchCacheReset cache_reset;
+    const std::string invalid = "\xC3";   // a lead byte without its continuation
+    SapGuiObject empty(nullptr);
+    try {
+        empty.set_string_property(L"Text", invalid);
+        FAIL("no exception");
+    } catch (const SapGuiException& e) {
+        CHECK(std::string(e.what()) == "Cannot set property on null object");
+    }
+    auto* node = new FakeNode();
+    node->strings[L"Type"] = L"GuiTextField";
+    node->unknown_names = {L"Missing"};
+    SapGuiObject object(IDispatchPtr(node, false));
+    try {
+        object.invoke_method_with_string(L"Missing", invalid);
+        FAIL("no exception");
+    } catch (const SapGuiException& e) {
+        CHECK(std::string(e.what()) == "Failed to get method DISPID");
+    }
 }

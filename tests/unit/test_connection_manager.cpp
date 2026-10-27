@@ -494,18 +494,10 @@ TEST_CASE("Stale connection with distinct session key is not reused for same pat
 }
 
 
-namespace {
-fs::path make_prune_test_dir(const char* tag) {
-    fs::path dir = fs::temp_directory_path() /
-        (std::string("fairyfly_test_") + tag + "_" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(dir));
-    return dir;
-}
-}  // namespace
 
 TEST_CASE("Prune removes other same-path entries and keeps other paths", "[connection_manager][prune]") {
-    const fs::path dir = make_prune_test_dir("prune_same_path");
+    const fairyfly::test::TempDir temp("prune_same_path");   // removed also when a check fails
+    const fs::path& dir = temp.path();
     ConnectionManager manager(dir.string());
     const auto other_key = manager.create_or_update_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
@@ -524,12 +516,11 @@ TEST_CASE("Prune removes other same-path entries and keeps other paths", "[conne
     REQUIRE(manager.load_connection(keep.id).has_value());
     REQUIRE(manager.load_connection(elsewhere.id).has_value());
     REQUIRE(manager.prune_other_entries_for_path(keep) == 0);
-
-    fs::remove_all(dir);
 }
 
 TEST_CASE("Prune never deletes an entry holding the current live key", "[connection_manager][prune]") {
-    const fs::path dir = make_prune_test_dir("prune_live_key_race");
+    const fairyfly::test::TempDir temp("prune_live_key_race");   // removed also when a check fails
+    const fs::path& dir = temp.path();
     ConnectionManager manager(dir.string());
     const auto stale = manager.create_or_update_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
@@ -544,12 +535,11 @@ TEST_CASE("Prune never deletes an entry holding the current live key", "[connect
     REQUIRE_FALSE(manager.load_connection(stale.id).has_value());
     REQUIRE(manager.load_connection(raced.id).has_value());
     REQUIRE(manager.load_connection(keep.id).has_value());
-
-    fs::remove_all(dir);
 }
 
 TEST_CASE("Conditional delete skips an entry that was replaced concurrently", "[connection_manager][prune]") {
-    const fs::path dir = make_prune_test_dir("prune_replaced");
+    const fairyfly::test::TempDir temp("prune_replaced");   // removed also when a check fails
+    const fs::path& dir = temp.path();
     ConnectionManager manager(dir.string());
     const auto stale = manager.create_or_update_connection(
         "/app/con[0]/ses[0]", "/app/con[0]", "System", "route", "SAP", "old:0");
@@ -564,8 +554,6 @@ TEST_CASE("Conditional delete skips an entry that was replaced concurrently", "[
     REQUIRE_FALSE(manager.delete_connection_if_unchanged(stale));
     REQUIRE(manager.load_connection(stale.id).has_value());
     REQUIRE(manager.load_connection(keep.id).has_value());
-
-    fs::remove_all(dir);
 }
 
 TEST_CASE("partition_connections splits live and stale entries", "[connection_manager][prune]") {

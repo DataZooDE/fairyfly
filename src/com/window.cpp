@@ -1,4 +1,6 @@
+#include "include/com/hresult.h"
 #include "include/com/wrapper.h"
+#include "include/com/invoke.h"
 #include "include/com/wrapper_helpers.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
@@ -67,16 +69,13 @@ void ComGuiWindow::send_vkey(int vkey) {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            throw ComException(fmt::format("SendVKey method not found: 0x{:08X}", hr), hr);
+            throw ComException(fmt::format("SendVKey method not found: {}", hresult_hex(hr)), hr);
         }
 
-        _variant_t vkey_var(vkey);
-        DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {_variant_t(vkey)}, &result);
         if (FAILED(hr)) {
-            throw ComException(fmt::format("SendVKey invoke failed: 0x{:08X}", hr), hr);
+            throw ComException(fmt::format("SendVKey invoke failed: {}", hresult_hex(hr)), hr);
         }
 
         spdlog::debug("Sent virtual key {} to window", vkey);
@@ -97,15 +96,13 @@ void ComGuiWindow::close() {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            throw ComException(fmt::format("Close method not found: 0x{:08X}", hr), hr);
+            throw ComException(fmt::format("Close method not found: {}", hresult_hex(hr)), hr);
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                             &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
         if (FAILED(hr)) {
-            throw ComException(fmt::format("Close invoke failed: 0x{:08X}", hr), hr);
+            throw ComException(fmt::format("Close invoke failed: {}", hresult_hex(hr)), hr);
         }
         spdlog::debug("Closed window via Close method");
     } catch (const _com_error& e) {

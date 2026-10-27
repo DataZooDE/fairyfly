@@ -1,0 +1,42 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 2,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 0,
+    "id": "wnd[0]/usr/lbl[0,0]",
+    "text": "Wide Report",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 95,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[95,1]",
+    "text": "Indented at col 95",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "grid_col": 0,
+     "grid_row": 0,
+     "id": "wnd[0]/usr/lbl[0,0]",
+     "text": "Wide Report",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 95,
+     "grid_row": 1,
+     "id": "wnd[0]/usr/lbl[95,1]",
+     "text": "Indented at col 95",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "Wide Report"
+ },
+ "output": "# Wide Report\n\n**Screen ID:** ``\n\n## Report Output\n\n```\nWide Report\n                                                                                Indented at col 95\n```\n\n---\n**Screen Elements:** 2 top-level\n"
+}
