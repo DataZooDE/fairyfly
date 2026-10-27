@@ -10,7 +10,7 @@
 #>
 param(
     [string]$Version = '5.0.2',
-    [string]$ExpectedSha512 = 'Z+fu1deTcaV+TRCo4+6HrJ48Sdnj+yeQjjMStTI3GW7NxFEPaknYCdxrf0qEvgdXrjYdjLnkZKCsNSqTTOo2OA=='
+    [string]$ExpectedSha512 = 'z+fu1deTcaV+TRCo4+6HrJ48Sdnj+yeQjjMStTI3GW7NxFEPaknYCdxrf0qEvgdXrjYdjLnkZKCsNSqTTOo2OA=='
 )
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path ([IO.Path]::GetTempPath()) "wix-$Version-$PID"
