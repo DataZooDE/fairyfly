@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.27 (2026-10-27)
 
 ### Releases: code signing with Microsoft Artifact Signing (ready, off until configured)
 
