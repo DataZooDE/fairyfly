@@ -25,6 +25,7 @@ Visual Studio is a multi-configuration generator: select Release or Debug with -
 - src/formatters/ renders JSON-adjacent data as Markdown or TOON.
 - src/connection_manager.cpp handles persisted connection state.
 - tests/unit/ uses Catch2.
+- src/include/packaging.h reads the CMake option FAIRYFLY_PACKAGE (msi default, msix = Microsoft Store: no self-update, no Run values, packaging/msix/AppxManifest.xml.in); see docs/MSIX.md.
 
 Use the existing COM wrappers and RAII helpers for new automation work. Preserve structured errors and output formats when changing a command. New live SAP workflows belong in tests/integration/ and should document their required screen and transaction.
 

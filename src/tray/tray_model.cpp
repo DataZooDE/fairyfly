@@ -118,7 +118,7 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
     }
     model.items.push_back(std::move(cloud));
     model.items.push_back(version_item());
-    model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
+    if (state.self_update) model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
 
     model.items.push_back(item("Quit", TrayAction::Quit));

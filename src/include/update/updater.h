@@ -41,6 +41,7 @@ struct ApplyResult {
     std::string installed_path, previous_path;
 };
 /// Downloads, verifies and, when the decision is Install, swaps the executable. Never changes anything on Refuse.
+/// In an MSIX build it refuses at once with store_managed(), before any download.
 ApplyResult apply(const std::string& current_version, bool allow_unsigned, const std::string& api_url = kLatestReleaseUrl);
 
 }  // namespace fairyfly::update

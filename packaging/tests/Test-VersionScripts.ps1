@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Checks the version handling of the packaging scripts (CI: .github/workflows/winget.yml; any pwsh 7, no install):
-  packaging/msi_version.ps1 (calendar version -> MSI ProductVersion), packaging/set_version.ps1 (on a copy of the
+  packaging/msi_version.ps1 (calendar version -> MSI ProductVersion), packaging/msix_version.ps1 and
+  cmake/msix_manifest.cmake (-> MSIX package version), packaging/set_version.ps1 (on a copy of the
   version files) and the version check of packaging/winget/New-WingetManifest.ps1.
 .DESCRIPTION
   Versions are YYYY.MM.DD or YYYY.MM.DD.N (N = 1..99) for a further release on the same day. Windows Installer
@@ -67,6 +68,46 @@ $fromHeader = $Matches[1]
 $r = Try-Run { & $msiVersion }
 $expected = (Try-Run { & $msiVersion -Version $fromHeader }).Out
 Check ($r.Out -ne '' -and $r.Out -eq $expected) "msi_version without -Version reads version.h ($fromHeader -> $($r.Out))"
+
+Write-Host "`n=== msix_version.ps1 and cmake/msix_manifest.cmake (MSIX package version) ==="
+# YYYY.MM.(DD*100+N).0: four fields, the Store wants the fourth 0; the same N slot as the MSI
+$msixVersion = Join-Path $packaging 'msix_version.ps1'
+$msixCmake = Join-Path $packaging '..\cmake\msix_manifest.cmake'
+function Invoke-MsixCMake([string]$v) {
+    $out = & cmake "-DVERSION=$v" -P $msixCmake 2>&1 | Out-String
+    $m = [regex]::Match($out, 'msix version (\S+)')
+    [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Version = $(if ($m.Success) { $m.Groups[1].Value } else { '' }); Out = $out.Trim() }
+}
+$goodMsix = [ordered]@{
+    '2026.10.24'    = '2026.10.2400.0'
+    'v2026.10.24'   = '2026.10.2400.0'
+    '2026.10.05'    = '2026.10.500.0'
+    '2026.9.30'     = '2026.9.3000.0'
+    '2026.10.24.1'  = '2026.10.2401.0'
+    '2026.10.31.99' = '2026.10.3199.0'
+    '2255.12.31'    = '2255.12.3100.0'
+}
+foreach ($k in $goodMsix.Keys) {
+    $r = Try-Run { & $msixVersion -Version $k }
+    Check ($r.Out -eq $goodMsix[$k]) "msix_version $k -> '$($r.Out)' (expected $($goodMsix[$k]))$(if ($r.Error) { " error: $($r.Error)" })"
+    if (-not $k.StartsWith('v')) {   # CMake takes the plain version only (project VERSION)
+        $c = Invoke-MsixCMake $k
+        Check ($c.Ok -and $c.Version -eq $goodMsix[$k]) "cmake fairyfly_msix_version $k -> '$($c.Version)' (expected $($goodMsix[$k]))"
+    }
+}
+foreach ($bad in '2026.10.24.0', '2026.10.24.100', '2026.02.30', '2026.10', 'V2026.10.24', '1999.12.31') {
+    $r = Try-Run { & $msixVersion -Version $bad }
+    Check ($r.Error -ne '' -and $r.Out -eq '') "msix_version refuses '$bad' ($($r.Error))"
+}
+# the package version must rise with every release, the same-day ones included (the Store refuses a lower one)
+$prev = $null
+foreach ($v in '2026.10.24', '2026.10.24.1', '2026.10.24.99', '2026.10.25', '2026.10.31.99', '2026.11.01', '2027.01.01') {
+    $cur = [version](Try-Run { & $msixVersion -Version $v }).Out
+    if ($prev) { Check ($cur -gt $prev.Msix) "MSIX $cur ($v) is above $($prev.Msix) ($($prev.V))" }
+    $prev = [pscustomobject]@{ V = $v; Msix = $cur }
+}
+$r = Try-Run { & $msixVersion }
+Check ($r.Out -ne '' -and $r.Out -eq (Try-Run { & $msixVersion -Version $fromHeader }).Out) "msix_version without -Version reads version.h ($fromHeader -> $($r.Out))"
 
 Write-Host "`n=== set_version.ps1 (on a copy) ==="
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ffy-setversion-" + [guid]::NewGuid())

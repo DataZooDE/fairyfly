@@ -1,6 +1,7 @@
 #include "include/text/utf8.h"
 #include "include/update/updater.h"
 #include "include/config/environment.h"
+#include "include/packaging.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -189,6 +190,10 @@ fs::path current_exe() {
 
 ApplyResult apply(const std::string& current_version, bool allow_unsigned, const std::string& api_url) {
     ApplyResult out;
+    if (!packaging::self_updates(packaging::kPackage)) {   // MSIX: the package folder is read-only, the Store updates it
+        out.decision = store_managed();
+        return out;
+    }
     auto c = check(current_version, api_url);
     Facts f;
     f.current_version = current_version;

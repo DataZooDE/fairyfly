@@ -323,6 +323,39 @@ target_compile_definitions(fairyfly_core PUBLIC
     "FAIRYFLY_UPDATE_SIGNER_ORGANIZATION=\"${FAIRYFLY_UPDATE_SIGNER_ORGANIZATION}\""
     "FAIRYFLY_UPDATE_SIGNER_COUNTRY=\"${FAIRYFLY_UPDATE_SIGNER_COUNTRY}\"")
 
+# How the build is installed (include/packaging.h, docs/MSIX.md): msi = the per-user MSI (packaging/fairyfly.wxs), which
+# updates itself from the GitHub releases and starts the trays through HKCU Run values; msix = a Microsoft Store package:
+# read-only, updated by the Store, the link tray started at logon by the StartupTask of packaging/msix/AppxManifest.xml.in.
+set(FAIRYFLY_PACKAGE "msi" CACHE STRING "Installer this build is for: msi (default) or msix (Microsoft Store)")
+set_property(CACHE FAIRYFLY_PACKAGE PROPERTY STRINGS msi msix)
+if(NOT FAIRYFLY_PACKAGE MATCHES "^(msi|msix)$")
+    message(FATAL_ERROR "FAIRYFLY_PACKAGE is \"${FAIRYFLY_PACKAGE}\": msi or msix")
+endif()
+if(FAIRYFLY_PACKAGE STREQUAL "msix")
+    target_compile_definitions(fairyfly_core PUBLIC FAIRYFLY_PACKAGE_MSIX=1)
+    # The package manifest, rendered into the build tree for MakeAppx. The identity comes from Partner Center
+    # (Product identity): until it is set the placeholders below are used and configuring warns.
+    set(FAIRYFLY_MSIX_IDENTITY_NAME "DataZoo.fairyfly.PLACEHOLDER" CACHE STRING
+        "MSIX Identity Name (Partner Center: Package/Identity/Name)")
+    set(FAIRYFLY_MSIX_PUBLISHER "CN=PLACEHOLDER-PARTNER-CENTER-PUBLISHER" CACHE STRING
+        "MSIX Identity Publisher (Partner Center: Package/Identity/Publisher, CN=...)")
+    set(FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME "PLACEHOLDER Partner Center PublisherDisplayName" CACHE STRING
+        "MSIX PublisherDisplayName (Partner Center: Package/Properties/PublisherDisplayName)")
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/msix_manifest.cmake)
+    fairyfly_msix_version(FAIRYFLY_MSIX_VERSION "${PROJECT_VERSION}")
+    fairyfly_render_msix_manifest("${CMAKE_CURRENT_SOURCE_DIR}/packaging/msix/AppxManifest.xml.in"
+        "${CMAKE_BINARY_DIR}/msix/AppxManifest.xml" "${FAIRYFLY_MSIX_VERSION}" "${FAIRYFLY_MSIX_IDENTITY_NAME}"
+        "${FAIRYFLY_MSIX_PUBLISHER}" "${FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME}")
+    if(FAIRYFLY_MSIX_IDENTITY_NAME MATCHES "PLACEHOLDER" OR FAIRYFLY_MSIX_PUBLISHER MATCHES "PLACEHOLDER"
+       OR FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME MATCHES "PLACEHOLDER")
+        message(WARNING "msix/AppxManifest.xml has PLACEHOLDER identity values: set FAIRYFLY_MSIX_IDENTITY_NAME, "
+                        "FAIRYFLY_MSIX_PUBLISHER and FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME from Partner Center before packaging")
+    endif()
+    message(STATUS "fairyfly package: msix ${FAIRYFLY_MSIX_VERSION} (no self-update, StartupTask autostart)")
+else()
+    target_compile_definitions(fairyfly_core PUBLIC FAIRYFLY_PACKAGE_MSIX=0)
+endif()
+
 # Link library dependencies
 target_link_libraries(fairyfly_core PUBLIC
     ffl

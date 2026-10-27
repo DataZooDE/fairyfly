@@ -212,4 +212,11 @@ Decision decide(const Facts& f) {
     return d;
 }
 
+Decision store_managed() {
+    return {Verdict::Refuse, "UPDATE_MANAGED_BY_STORE",
+            "this fairyfly was installed from the Microsoft Store, which updates it; fairyfly does not replace a Store "
+            "installation itself",
+            {}};
+}
+
 }  // namespace fairyfly::update
