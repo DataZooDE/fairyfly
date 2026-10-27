@@ -157,6 +157,14 @@ std::pair<std::string, std::string> refusal(const std::string& reason, int answe
 }
 }  // namespace
 
+void Agent::report_clock_skew(int64_t offset_s) {
+    if (clock_skew_.exchange(offset_s) == offset_s) return;
+    if (offset_s == 0) spdlog::info("desktop clock agrees with the gateway again");
+    if (cfg_.on_clock_skew) {
+        try { cfg_.on_clock_skew(offset_s); } catch (const std::exception& e) { spdlog::warn("on_clock_skew failed: {}", e.what()); }
+    }
+}
+
 static proto::Frame fail(const std::string& id, const std::string& code, const std::string& msg) {
     proto::Frame f;
     f.t = proto::TRes; f.id = id; f.error = proto::Error{code, msg};
@@ -171,12 +179,21 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
         return o;
     };
     assertion::Claims c;
+    // Every rejection is logged with its reason (never the token) and named to the caller: a bare "rejected" left the
+    // person guessing (live 2026-10-27: the desktop clock was 346 s behind).
     try {
         c = ver_.verify(req.assertion, st_.device_id, req.id);
+    } catch (const assertion::ClockSkew& e) {
+        spdlog::warn("assertion rejected ({}): {}", req.id, e.what());
+        report_clock_skew(e.offset_s);
+        return fail(req.id, "ASSERTION_CLOCK_SKEW", assertion::clock_skew_message(e.offset_s));
     } catch (const Error& e) {
         spdlog::warn("assertion rejected ({}): {}", req.id, e.what());
-        return fail(req.id, "ASSERTION_REJECTED", "the desktop rejected the gateway's authorization");
+        std::string why = e.what();
+        if (why.rfind("assertion: ", 0) == 0) why = why.substr(11);
+        return fail(req.id, "ASSERTION_REJECTED", "the desktop rejected the gateway's authorization (" + why + ")");
     }
+    report_clock_skew(0);
     const json& rpc = req.rpc;
     std::string tool;
     json args = json::object();

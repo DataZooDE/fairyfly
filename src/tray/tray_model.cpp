@@ -117,8 +117,10 @@ std::string trail_menu_text(const LinkView& link) {
 }
 
 std::string clock_skew_text(const LinkView& link) {
-    (void)link;
-    return {};
+    if (link.clock_skew_s == 0) return {};
+    const auto d = link.clock_skew_s < 0 ? -link.clock_skew_s : link.clock_skew_s;
+    return "Windows clock is " + std::to_string(d) + " s " + (link.clock_skew_s < 0 ? "ahead of" : "behind") +
+           " the fairyfly cloud: calls are refused. Settings > Time & language > Date & time > Sync now";
 }
 
 std::string trail_balloon_text(const LinkView& link) {

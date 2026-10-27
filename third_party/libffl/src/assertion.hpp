@@ -12,6 +12,24 @@
 namespace ffy::assertion {
 
 inline constexpr int64_t kMaxLifetimeSec = 120;
+// Clock tolerance between gateway and desktop. The gateway mints iat = now, exp = iat + 60 s, so a desktop clock up to
+// 90 s behind (iat in the future) or ahead (exp past) is accepted. Kept short on purpose: on a synced desktop only the
+// exp leeway lengthens how long an assertion works in real time (65 s -> 90 s after issue); larger drifts get a
+// clear ASSERTION_CLOCK_SKEW with the measured offset instead of a wider window.
+inline constexpr int64_t kFutureLeewaySec = 90;
+inline constexpr int64_t kExpiryLeewaySec = 30;
+// jti replay cache: an entry must outlive the last moment its assertion could still be accepted
+inline constexpr int64_t kSeenKeepSec = 300;
+static_assert(kSeenKeepSec > kExpiryLeewaySec, "the replay cache must cover the expiry leeway");
+
+// The assertion is genuine (signature, issuer, tenant, audience, request) but the desktop's clock disagrees with the
+// gateway's by more than the tolerance. offset_s = gateway time - desktop time: > 0 the desktop is behind.
+struct ClockSkew : Error {
+    ClockSkew(int64_t offset, const std::string& what) : Error(what), offset_s(offset) {}
+    int64_t offset_s;
+};
+// What the caller and the person at the desktop read: the offset and how to fix it. Never contains token data.
+std::string clock_skew_message(int64_t offset_s);
 
 struct Claims {
     std::string iss, aud, sub, jti, req, client, tenant;

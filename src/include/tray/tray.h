@@ -476,6 +476,7 @@ private:
     LinkTrayServices services_;
     TrayPaths paths_;
     LinkView link_;
+    std::int64_t last_clock_skew_ = 0;   ///< the clock skew seen on the previous tick
     std::string last_state_;   ///< the state seen on the previous tick, for the change notices
     bool last_trail_ = false;  ///< the audit trail as seen on the previous tick
     std::atomic<bool> quit_requested_{false};
