@@ -3,6 +3,7 @@
 #include "include/screen_reader.h"
 #include "include/table_data_extractor.h"
 #include "include/com/wrapper.h"
+#include "include/com/tree_view.h"
 #include "include/sensitive_data.h"
 #include "include/element_renderers.h"
 #include "include/formatters/screen_markdown_formatter.h"
@@ -756,4 +757,51 @@ TEST_CASE("id_probe_candidates with probe_all restores the exhaustive legacy set
     collector.add_id(id + "/ssubSCR_PRESEL");
     REQUIRE_FALSE(contains(id_probe_candidates("GuiBox", id, 3, collector, true),
                            id + "/ssubSCR_PRESEL"));
+}
+
+TEST_CASE("tree node texts: an empty node text is recovered from a column, the column names are read once", "[screen_reader][tree]") {
+    // review 2026-10-25: the screen reader, the table extractor and the handler each repeated this
+    int column_name_reads = 0;
+    TreeNodeTexts texts(
+        [](const std::string& key) { return key == "N1" ? std::string("Folder") : std::string(); },
+        [&] { ++column_name_reads; return std::vector<std::string>{"COL1", "COL2"}; },
+        [](const std::string& key, const std::string& column) { return column == "COL2" ? key + "-user" : std::string(); });
+    CHECK(texts.text("N1") == "Folder");
+    CHECK(column_name_reads == 0);   // not needed while the node has its own text
+    CHECK(texts.text("N2") == "N2-user");
+    CHECK(texts.text("N3") == "N3-user");
+    CHECK(column_name_reads == 1);   // once for the whole tree
+    TreeNodeTexts failing([](const std::string&) -> std::string { throw std::runtime_error("COM"); },
+                          [] { return std::vector<std::string>{}; }, [](const std::string&, const std::string&) { return std::string(); });
+    CHECK_THROWS(failing.text("N1"));   // a failing read propagates (the ComGuiTree readers answer "" instead of throwing)
+}
+
+TEST_CASE("tree nodes nest under the node whose path is their parent path", "[screen_reader][tree]") {
+    // review 2026-10-25: traverse_tree_nodes built the hierarchy inline (and asked SAP for every path a second time)
+    auto node = [](const std::string& key, int level) {
+        TreeNode n;
+        n.key = key;
+        n.level = level;
+        return n;
+    };
+    std::map<std::string, TreeNode> by_key{{"A", node("A", 0)}, {"B", node("B", 1)}, {"C", node("C", 2)}, {"D", node("D", 0)},
+                                           {"E", node("E", 1)}};
+    const std::map<std::string, std::string> paths{{"A", "1"}, {"B", "1\\1"}, {"C", "1\\1\\1"}, {"D", "2"}, {"E", "9\\1"}};
+    std::vector<TreeNode> roots;
+    nest_tree_nodes_by_path(by_key, paths, roots);
+    REQUIRE(roots.size() == 2);
+    CHECK(roots[0].key == "A");
+    REQUIRE(roots[0].children.size() == 1);
+    CHECK(roots[0].children[0].key == "B");
+    REQUIRE(roots[0].children[0].children.size() == 1);
+    CHECK(roots[0].children[0].children[0].key == "C");
+    CHECK(roots[1].key == "D");
+    CHECK(roots[1].children.empty());   // E's parent path 9 is no node: E is left out, as before
+
+    // key order, not tree order: a child whose key sorts before its parent's is left out too (inherited limitation)
+    std::map<std::string, TreeNode> child_first{{"A", node("A", 1)}, {"Z", node("Z", 0)}};
+    std::vector<TreeNode> late_parent;
+    nest_tree_nodes_by_path(child_first, {{"A", "1\\1"}, {"Z", "1"}}, late_parent);
+    REQUIRE(late_parent.size() == 1);
+    CHECK(late_parent[0].children.empty());
 }
