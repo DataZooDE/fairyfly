@@ -6,6 +6,7 @@
 #include <fstream>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 
@@ -108,20 +109,21 @@ TEST_CASE("update: the install decision", "[update]") {
     upper.actual_sha256 = "4F0A5E2C8B1D6F7A9E3C2B1A0D9F8E7C6B5A4F3E2D1C0B9A8F7E6D5C4B3A2F1E";
     CHECK(decide(upper).verdict == Verdict::Install);  // hex case does not matter
 
-    // a signed installation only takes a valid signature by the same signer
+    // a signed installation only takes a valid signature by the pinned publisher
     auto bad_sig = f;
     bad_sig.downloaded = Signature{false, "CN=DataZoo GmbH, O=DataZoo GmbH, C=DE"};
     CHECK(decide(bad_sig).code == "UPDATE_SIGNATURE_INVALID");
     auto other_signer = f;
     other_signer.downloaded = Signature{true, "CN=Someone Else"};
-    CHECK(decide(other_signer).code == "UPDATE_SIGNER_CHANGED");
+    CHECK(decide(other_signer).code == "UPDATE_SIGNER_UNEXPECTED");
     auto unsigned_new = f;
     unsigned_new.downloaded = unsigned_build;
     CHECK(decide(unsigned_new).code == "UPDATE_SIGNATURE_INVALID");
     unsigned_new.allow_unsigned = true;  // never weakens a signed installation
     CHECK(decide(unsigned_new).code == "UPDATE_SIGNATURE_INVALID");
 
-    // an unsigned (self-built) installation: a signed release is fine; an unsigned one only when asked
+    // an unsigned (self-built or 2026.10.x) installation: a release signed by the publisher is fine; an unsigned one
+    // only when asked
     auto dev = f;
     dev.current = unsigned_build;
     CHECK(decide(dev).verdict == Verdict::Install);
@@ -134,6 +136,161 @@ TEST_CASE("update: the install decision", "[update]") {
     garbage.release_version = "soon";
     CHECK(decide(garbage).verdict == Verdict::Refuse);
 }
+
+// The signer pin (docs/SIGNING.md "Updates"): the publisher is the organisation O (and country C) of the leaf
+// certificate, compared normalised, never the full subject, so an address change in a re-validated certificate does
+// not lock installations out. Every row of the behaviour matrix is one SECTION.
+TEST_CASE("update: the publisher pin, current signer x candidate signer", "[update][update-signer]") {
+    const Signature unsigned_build{false, ""};
+    const Signature datazoo{true, "CN=DataZoo GmbH, O=DataZoo GmbH, L=Berlin, S=Berlin, C=DE"};
+    const Signature datazoo_moved{true, "CN=DataZoo GmbH, O=DataZoo GmbH, OU=Engineering, STREET=Neue Str. 1, L=Hamburg, S=Hamburg, PostalCode=20095, C=DE"};
+    const Signature someone_else{true, "CN=Evil Corp, O=Evil Corp, L=Berlin, C=DE"};
+    const Signature datazoo_us{true, "CN=DataZoo GmbH, O=DataZoo GmbH, L=Dover, S=Delaware, C=US"};  // same name, other country
+    const Signature datazoo_in_ou{true, "CN=DataZoo GmbH, OU=DataZoo GmbH, O=Somebody, C=DE"};       // the name, but not as O
+    const Signature no_org{true, "CN=DataZoo GmbH"};
+    const Signature expired_no_timestamp{false, "CN=DataZoo GmbH, O=DataZoo GmbH, L=Berlin, S=Berlin, C=DE"};
+    Facts f;
+    f.current_version = "2026.10.25";
+    f.release_version = "2026.11.02";
+    f.expected_sha256 = kHash;
+    f.actual_sha256 = kHash;
+
+    SECTION("unsigned -> unsigned: only with --allow-unsigned, and then with a warning") {
+        f.current = unsigned_build;
+        f.downloaded = unsigned_build;
+        CHECK(decide(f).code == "UPDATE_UNSIGNED");
+        f.allow_unsigned = true;
+        const auto d = decide(f);
+        CHECK(d.verdict == Verdict::Install);
+        CHECK(d.message.find("unsigned") != std::string::npos);
+    }
+    SECTION("unsigned -> signed by DataZoo GmbH: the upgrade path to signed releases") {
+        f.current = unsigned_build;
+        f.downloaded = datazoo;
+        CHECK(decide(f).verdict == Verdict::Install);
+    }
+    SECTION("unsigned -> signed by someone else: refused, also with --allow-unsigned") {
+        f.current = unsigned_build;
+        for (const auto& s : {someone_else, datazoo_us, datazoo_in_ou, no_org}) {
+            f.downloaded = s;
+            INFO(s.subject);
+            f.allow_unsigned = false;
+            CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+            f.allow_unsigned = true;
+            CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+        }
+    }
+    SECTION("signed by DataZoo GmbH -> unsigned: refused (no downgrade of trust), also with --allow-unsigned") {
+        f.current = datazoo;
+        f.downloaded = unsigned_build;
+        CHECK(decide(f).code == "UPDATE_SIGNATURE_INVALID");
+        f.allow_unsigned = true;
+        CHECK(decide(f).code == "UPDATE_SIGNATURE_INVALID");
+    }
+    SECTION("signed by DataZoo GmbH -> signed by someone else: refused") {
+        f.current = datazoo;
+        f.downloaded = someone_else;
+        CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+        f.downloaded = datazoo_us;
+        CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+    }
+    SECTION("signed by DataZoo GmbH -> DataZoo GmbH with another address and OU: allowed") {
+        f.current = datazoo;
+        f.downloaded = datazoo_moved;
+        CHECK(decide(f).verdict == Verdict::Install);
+        f.current = datazoo_moved;
+        f.downloaded = datazoo;
+        CHECK(decide(f).verdict == Verdict::Install);
+    }
+    SECTION("the organisation is compared normalised: case, spacing, quoting, attribute order") {
+        f.current = datazoo;
+        for (const char* subject : {"CN=x, O=datazoo gmbh, C=de", "C=DE, O=\"DataZoo  GmbH\", CN=DataZoo GmbH", "O=  DataZoo GmbH , C=DE",
+                                    "CN=DataZoo GmbH + O=DataZoo GmbH, C=DE"}) {
+            f.downloaded = Signature{true, subject};
+            INFO(subject);
+            CHECK(decide(f).verdict == Verdict::Install);
+        }
+        // a quoted value is one value: a comma inside it does not start an O attribute
+        f.downloaded = Signature{true, "CN=\"Evil, O=DataZoo GmbH\", O=Evil, C=DE"};
+        CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+        // two organisations are ambiguous
+        f.downloaded = Signature{true, "O=DataZoo GmbH, O=Evil, C=DE"};
+        CHECK(decide(f).code == "UPDATE_SIGNER_UNEXPECTED");
+    }
+    SECTION("an invalid or expired signature without a time stamp: refused, never treated as unsigned") {
+        for (const auto& cur : {unsigned_build, datazoo}) {
+            f.current = cur;
+            f.downloaded = expired_no_timestamp;
+            f.allow_unsigned = true;
+            CHECK(decide(f).code == "UPDATE_SIGNATURE_INVALID");
+        }
+    }
+    SECTION("an installation whose own signature no longer verifies (revoked, offline) is still a signed one") {
+        f.current = expired_no_timestamp;
+        f.downloaded = unsigned_build;
+        f.allow_unsigned = true;
+        CHECK(decide(f).code == "UPDATE_SIGNATURE_INVALID");
+        f.downloaded = datazoo;
+        CHECK(decide(f).verdict == Verdict::Install);
+    }
+    SECTION("SHA256SUMS stays mandatory whatever the signature") {
+        for (const auto& cur : {unsigned_build, datazoo}) {
+            for (const auto& dl : {unsigned_build, datazoo}) {
+                f.current = cur;
+                f.downloaded = dl;
+                f.allow_unsigned = true;
+                f.actual_sha256 = std::string(64, '0');
+                CHECK(decide(f).code == "UPDATE_CHECKSUM_MISMATCH");
+                f.actual_sha256 = kHash;
+                f.expected_sha256.clear();
+                CHECK(decide(f).code == "UPDATE_CHECKSUM_MISSING");
+                f.expected_sha256 = kHash;
+            }
+        }
+    }
+}
+
+TEST_CASE("update: subject attributes and the publisher pin helpers", "[update][update-signer]") {
+    const std::string s = "CN=DataZoo GmbH, O=\"Data, \"\"Zoo\"\" GmbH\", OU=Dev + L=Berlin; C=DE";
+    CHECK(subject_values(s, "O") == std::vector<std::string>{"Data, \"Zoo\" GmbH"});
+    CHECK(subject_values(s, "o") == std::vector<std::string>{"Data, \"Zoo\" GmbH"});
+    CHECK(subject_values(s, "L") == std::vector<std::string>{"Berlin"});
+    CHECK(subject_values(s, "C") == std::vector<std::string>{"DE"});
+    CHECK(subject_values(s, "S").empty());
+    CHECK(subject_values("", "O").empty());
+    CHECK(subject_values("garbage", "O").empty());
+    CHECK(normalize_name("  DataZoo \t  GmbH ") == "datazoo gmbh");
+    CHECK(std::string(kExpectedSignerOrganization) == "DataZoo GmbH");  // the default of the CMake option
+    CHECK(std::string(kExpectedSignerCountry) == "DE");
+    CHECK(signer_matches(Signature{true, "O=DataZoo GmbH, C=DE"}));
+    CHECK_FALSE(signer_matches(Signature{false, "O=DataZoo GmbH, C=DE"}));  // only a valid signature
+    CHECK(signer_matches(Signature{true, "O=Fork Ltd, C=GB"}, "Fork Ltd", "GB"));
+    CHECK(signer_matches(Signature{true, "O=Fork Ltd"}, "Fork Ltd", ""));  // no country pinned
+    CHECK_FALSE(signer_matches(Signature{true, "O=DataZoo GmbH, C=DE"}, "", ""));  // an empty pin matches nothing
+    CHECK(is_signed(Signature{false, "", true}));
+    CHECK(is_signed(Signature{false, "CN=x"}));
+    CHECK_FALSE(is_signed(Signature{}));
+}
+
+#ifdef _WIN32
+// The CryptoAPI part for real: an unsigned file (this test executable) and, when present, a file Microsoft signs with
+// an embedded signature (vswhere.exe ships with every Visual Studio installation and on the GitHub runners).
+TEST_CASE("update: authenticode() reads a real signature and a real absence of one", "[update][update-signer]") {
+    const auto none = authenticode(current_exe());
+    CHECK_FALSE(none.valid);
+    CHECK_FALSE(is_signed(none));
+    const std::filesystem::path vswhere = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+    if (!std::filesystem::exists(vswhere)) SKIP("no vswhere.exe on this machine");
+    const auto ms = authenticode(vswhere);
+    INFO(ms.subject);
+    CHECK(is_signed(ms));
+    CHECK(subject_values(ms.subject, "O") == std::vector<std::string>{"Microsoft Corporation"});
+    if (ms.valid) {  // revocation needs the network; without it the signature is present but not valid
+        CHECK(signer_matches(ms, "Microsoft Corporation", "US"));
+        CHECK_FALSE(signer_matches(ms));  // not the pinned publisher
+    }
+}
+#endif
 
 namespace {
 const std::string kExe = "https://github.com/DataZooDE/fairyfly/releases/download/v2026.10.05/fairyfly.exe";

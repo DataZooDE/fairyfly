@@ -184,8 +184,9 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 ## What runs where
 
 - Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
-  itself (with several open, the assistant is told to pick one or to ask you). See "Automatic attach" in
-  [MCP.md](MCP.md).
+  itself (with several open, the assistant is told to pick one or to ask you). After SAP Logon or the tray restarted,
+  a closed default connection is re-attached the same way, only to a session of the same SAP system, client and user,
+  inside the call you already approved. See "Automatic attach" in [MCP.md](MCP.md).
 - Which tools the AI assistant sees is decided by the gateway: your organisation's policy for the user can offer fewer
   tools than this desktop serves (for example only reading tools, without `gui_transaction_start`). Navigation and
   `gui_session_attach` then have to be granted there; the desktop's read-only mode only hides `gui_element_fill`.
@@ -263,8 +264,9 @@ pairing), pairing, the DPAPI state and the link agent:
   CI builds it, installs it on the runner, starts the tray through the shortcut's target, checks the result and
   uninstalls it again (the tray must be closed and the Run value gone).
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
-  when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the same signer as the
-  installed one. An unsigned self-built installation accepts an unsigned release only with `--allow-unsigned`.
+  when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the pinned publisher `O=DataZoo GmbH, C=DE`.
+  A signed installation never takes an unsigned release; an unsigned installation accepts an unsigned release only
+  with `--allow-unsigned` ([SIGNING.md](SIGNING.md#updates)).
 - The tray announces a newer release once (`FAIRYFLY_UPDATE_CHECK=0` turns that off).
 
 ## Live test
