@@ -296,7 +296,7 @@ ToolResult shape_result(const Result& result, const ToolSpec& spec, const Policy
     std::string body;
     if (spec.output == ToolOutput::Markdown) {
         try {
-            body = sanitize_utf8(cli::format_output(result, cli::OutputFormat::Markdown));
+            body = sanitize_utf8(cli::format_output(result, cli::OutputFormat::Markdown, false, command_table::render_of_tool(spec.def.name)));
         } catch (const std::exception&) {
             body.clear();
         }
@@ -313,7 +313,7 @@ ToolResult shape_result(const Result& result, const ToolSpec& spec, const Policy
         if (spec.output == ToolOutput::Json && doc.contains("data") && doc["data"].is_object() &&
             doc["data"].value("compact", false) == true && doc["data"].contains("screen_id")) {
             try {
-                doc = json::parse(cli::format_output(result, cli::OutputFormat::Json));
+                doc = json::parse(cli::format_output(result, cli::OutputFormat::Json, false, command_table::render_of_tool(spec.def.name)));
             } catch (const std::exception&) {}
         }
         body = truncate_json(doc, body_budget);

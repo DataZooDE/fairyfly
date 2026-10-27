@@ -1,0 +1,26 @@
+{
+ "compact": false,
+ "input": {
+  "elements": [
+   {
+    "content_available": false,
+    "id": "wnd[0]/usr/cntlPARAM/shellcont/shell",
+    "subtype": "Calendar",
+    "type": "GuiShell"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "content_available": false,
+     "id": "wnd[0]/usr/cntlPARAM/shellcont/shell",
+     "subtype": "Calendar",
+     "type": "GuiShell"
+    }
+   ]
+  },
+  "title": "Profile",
+  "transaction": "RZ11"
+ },
+ "output": "# Profile\n\n**Transaction:** `RZ11`\n\n**Screen ID:** ``\n\n### GuiShell (Calendar) - content unavailable\n\n**Technical ID:** `wnd[0]/usr/cntlPARAM/shellcont/shell`\n\n---\n**Screen Elements:** 0 top-level\n"
+}

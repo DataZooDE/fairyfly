@@ -217,118 +217,44 @@ public:
     /// Returns SubType string (e.g., "GridView", "Tree", "Toolbar") or empty string if not a GuiShell
     std::string get_subtype() const;
 
-    /// Get all node keys from a tree control (GuiShell with SubType="Tree")
-    /// Returns empty vector if element is not a tree or operation fails
-    std::vector<std::string> get_all_node_keys() const;
-    std::vector<std::string> get_tree_column_names() const;
 
-    /// Get node text by key from a tree control
-    /// Returns empty string if node not found or operation fails
-    std::string get_node_text_by_key(const std::string& key) const;
 
-    /// Get node path by key (e.g., "1\2\3" for hierarchical position)
-    /// Returns empty string if node not found or operation fails
-    std::string get_node_path_by_key(const std::string& key) const;
 
-    /// Get column names from ColumnOrder collection
-    /// Returns empty vector if no columns available
-    std::vector<std::string> get_column_order() const;
 
     // ============================================================================
     // GuiShell Toolbar Button Methods (for GuiShell with SubType="Toolbar")
     // ============================================================================
 
-    /// Get number of toolbar buttons in GuiShell Toolbar
-    /// Returns 0 if not a toolbar or property not available
-    int get_button_count() const;
 
-    /// Get button ID at specified position (0-based)
-    /// Returns empty string if position invalid or method fails
-    std::string get_button_id(int position) const;
+    /// Calls `method` with `args` in reading order; ComException(unavailable) when it is missing, ComException(failed)
+    /// when the call fails.
+    void call(const wchar_t* method, std::initializer_list<_variant_t> args, const char* unavailable, const char* failed);
 
-    /// Get button text at specified position
-    /// Returns empty string if position invalid or method fails
-    std::string get_button_text(int position) const;
 
-    /// Get button tooltip at specified position
-    /// Returns empty string if position invalid or method fails
-    std::string get_button_tooltip(int position) const;
 
-    /// Get button type at specified position
-    /// Returns type string: "Button", "ButtonAndMenu", "Menu", "Separator", "Group", "CheckBox"
-    /// Returns empty string if position invalid or method fails
-    std::string get_button_type(int position) const;
 
-    /// Get button enabled state at specified position
-    /// Returns false if position invalid or method fails
-    bool get_button_enabled(int position) const;
 
-    /// Look up a toolbar button (GuiShell toolbar, then GridView toolbar) by its ID and return its
-    /// text and tooltip. Returns false when the button cannot be found or the lookup fails.
-    bool find_toolbar_button_labels(const std::string& button_id, std::string& text,
-                                    std::string& tooltip) const;
 
-    /// Press a toolbar button by ID (for GuiShell Toolbar elements)
-    /// @param button_id Button identifier (e.g., "TECH", "PERF")
-    /// Throws ComException if not a toolbar or button not found
-    void press_button(const std::string& button_id);
 
     /// Press F4 to open search help/value help (for GuiCTextField elements)
     /// Equivalent to clicking the search button or pressing F4 key
     /// Throws ComException if element doesn't support F4 help
     void press_f4();
 
-    /// Get cell value from GridView
-    /// @param row Row index (0-based)
-    /// @param column_name Column identifier from ColumnOrder
-    /// @return Cell value as string, empty if not available
-    std::string get_cell_value(int row, const std::string& column_name) const;
 
-    /// Select a GridView row and activate its cell (zero-based row, technical column ID).
-    void select_grid_row(int row, const std::string& column_name);
 
-    /// Double-click a GridView cell (SetCurrentCell then DoubleClickCurrentCell).
-    void doubleclick_grid_cell(int row, const std::string& column_name);
 
-    /// GridView built-in toolbar metadata (separate from GuiShell Toolbar buttons).
-    int get_grid_toolbar_button_count() const;
-    std::string get_grid_toolbar_button_id(int position) const;
-    std::string get_grid_toolbar_button_tooltip(int position) const;
 
-    /// Modify a GridView cell and optionally notify the backend after a batch.
-    void modify_grid_cell(int row, const std::string& column_name,
-                          const std::string& value, bool checkbox, bool commit);
 
-    /// Get item text from tree node by column name
-    /// Returns empty string if not found or operation fails
-    std::string get_item_text(const std::string& node_key, const std::string& column_name) const;
 
     // ============================================================================
     // GuiShell Tree Navigation Methods (for GuiShell with SubType="Tree")
     // ============================================================================
 
-    /// Select a tree node without expanding it
-    /// @param node_key Node identifier (from GetAllNodeKeys)
-    /// Throws ComException if element is not a tree or node not found
-    void select_node(const std::string& node_key);
 
-    /// Expand a collapsed tree node
-    /// @param node_key Node identifier (from GetAllNodeKeys)
-    /// Throws ComException if element is not a tree or node not found
-    void expand_node(const std::string& node_key);
 
-    /// Collapse an expanded tree node
-    /// @param node_key Node identifier (from GetAllNodeKeys)
-    /// Throws ComException if element is not a tree or node not found
-    void collapse_node(const std::string& node_key);
 
-    /// Double-click a tree node (default action: expand/collapse or drill-in)
-    /// @param node_key Node identifier (from GetAllNodeKeys)
-    /// Throws ComException if element is not a tree or node not found
-    void doubleclick_node(const std::string& node_key);
 
-    /// Open a tree node's context menu and select an item by its visible text.
-    void select_node_context_item(const std::string& node_key, const std::string& item_text);
 
     /// Get raw COM object (for advanced use) - deprecated, use get_dispatch()
     IDispatch* get_com_object() const { return dispatch_; }

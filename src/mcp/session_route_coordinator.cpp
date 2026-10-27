@@ -1,5 +1,6 @@
 #include "include/mcp/session_route_coordinator.h"
 
+#include "include/sap_identity.h"
 #include <algorithm>
 #include <future>
 #include <utility>
@@ -157,7 +158,7 @@ HttpEndpoint::SessionRoute SessionRouteCoordinator::route_impl(const Principal& 
         !complete_identity(sap.session_identity) || sap.system.empty() || sap.client.empty() || sap.user.empty() ||
         (!plan.sticky_identity.empty() && plan.sticky_identity != sap.session_identity))
         return denied("OWNER_SESSION_UNAVAILABLE");
-    const std::string owner = sap.system + "/" + sap.client + "/" + sap.user;
+    const std::string owner = sap_identity(sap);
     if (!owner_identity_allowed(policy_, principal, owner))
         return denied("OWNER_SESSION_UNAVAILABLE");
     const std::string system = sap.system + "/" + sap.client;

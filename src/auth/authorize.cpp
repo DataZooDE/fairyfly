@@ -1,6 +1,7 @@
 #include "include/auth/authorize.h"
 
 #include "include/command_table.h"
+#include "include/sap_identity.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -363,10 +364,7 @@ mcp::PolicyDecision authorize_session_target(const mcp::Principal& principal, co
         // guards check the resulting identity before returning a usable saved connection.
         const bool prelogin = (tool == "gui_session_launch" || tool == "gui_session_login") && target.user.empty();
         if (!prelogin) {
-            const std::string identity = target.system + "/" + target.user;
-            if (target.system.empty() || target.user.empty() ||
-                std::find(principal.sap_identities.begin(), principal.sap_identities.end(), identity) ==
-                    principal.sap_identities.end())
+            if (target.system.empty() || target.user.empty() || !identity_listed(principal.sap_identities, target.identity()))
                 return refuse("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
         }
     }

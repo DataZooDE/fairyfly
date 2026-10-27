@@ -6,6 +6,7 @@
 
 #include "include/mcp/types.h"
 
+#include "include/sap_identity.h"
 #include "include/command_table.h"
 namespace fairyfly::mcp {
 
@@ -13,11 +14,9 @@ namespace fairyfly::mcp {
 /// tokens remain usable on a one-identity endpoint; a multi-identity endpoint requires an
 /// explicit token grant so an older token cannot suddenly see another SAP user.
 inline bool owner_identity_allowed(const Policy& policy, const Principal& principal, const std::string& identity) {
-    if (std::find(policy.owner_sap_identities.begin(), policy.owner_sap_identities.end(), identity) ==
-        policy.owner_sap_identities.end()) return false;
+    if (!identity_listed(policy.owner_sap_identities, identity)) return false;
     if (principal.sap_identities.empty()) return policy.owner_sap_identities.size() == 1;
-    return std::find(principal.sap_identities.begin(), principal.sap_identities.end(), identity) !=
-        principal.sap_identities.end();
+    return identity_listed(principal.sap_identities, identity);
 }
 
 inline bool owner_token_bound(const Policy& policy, const Principal& principal) {

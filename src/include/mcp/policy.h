@@ -25,18 +25,6 @@ PolicyDecision check_call(const ToolSpec& spec, const json& args, const Policy& 
 /// Whether tools/list shows the tool (write tools are hidden in read-only mode).
 bool tool_visible(const ToolSpec& spec, const Policy& policy);
 
-/// Sliding-window limiter, `per_minute` calls per 60 s (<= 0 = unlimited). Thread-safe.
-class RateLimiter {
-public:
-    explicit RateLimiter(int per_minute) : per_minute_(per_minute) {}
-    /// Records and permits the call, or returns false (nothing recorded) when the budget is used up.
-    bool allow(std::chrono::steady_clock::time_point now);
-private:
-    int per_minute_;
-    std::mutex mutex_;
-    std::deque<std::chrono::steady_clock::time_point> calls_;
-};
-
 /// One sliding-window budget per principal name (remote MCP tokens). `per_minute` <= 0 = unlimited.
 /// Thread-safe. Idle principals are dropped lazily.
 class KeyedRateLimiter {
@@ -45,6 +33,18 @@ public:
 private:
     std::mutex mutex_;
     std::map<std::string, std::deque<std::chrono::steady_clock::time_point>> calls_;
+};
+
+/// Sliding-window limiter, `per_minute` calls per 60 s (<= 0 = unlimited): one budget of a KeyedRateLimiter.
+class RateLimiter {
+public:
+    explicit RateLimiter(int per_minute) : per_minute_(per_minute) {}
+    /// Records and permits the call, or returns false (nothing recorded) when the budget is used up. Thread-safe.
+    bool allow(std::chrono::steady_clock::time_point now) { return budget_.allow({}, per_minute_, now); }
+
+private:
+    int per_minute_;
+    KeyedRateLimiter budget_;
 };
 
 } // namespace fairyfly::mcp

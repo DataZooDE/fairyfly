@@ -1,0 +1,26 @@
+{
+ "compact": false,
+ "input": {
+  "elements": [
+   {
+    "content_available": true,
+    "id": "wnd[0]/usr/shell",
+    "subtype": "Calendar",
+    "text_content": "Value 42",
+    "type": "GuiShell"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "content_available": true,
+     "id": "wnd[0]/usr/shell",
+     "subtype": "Calendar",
+     "text_content": "Value 42",
+     "type": "GuiShell"
+    }
+   ]
+  }
+ },
+ "output": "# Screen\n\n**Screen ID:** ``\n\n### GuiShell (Calendar)\n\n```text\nValue 42\n```\n\n**Technical ID:** `wnd[0]/usr/shell`\n\n---\n**Screen Elements:** 0 top-level\n"
+}
