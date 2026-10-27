@@ -15,6 +15,8 @@
 #include <string_view>
 
 #include <spdlog/common.h>
+#include <spdlog/logger.h>
+#include <vector>
 
 #include "qr.hpp"  // libffl: ffy::qr::Matrix
 
@@ -122,6 +124,11 @@ private:
     bool ever_connected_ = false, up_ = false, stopping_ = false;
     std::string last_down_;
 };
+
+/// The default logger during `link run` over `sinks` (the tray's link.log, or stderr, plus the status sink): libffl's
+/// messages at info and above whatever --log-level says. Every message reaches link.log at once: the tray process runs
+/// for days, and a buffered warning (an assertion rejected for clock skew, 2026-10-27) never showed up in the log.
+std::shared_ptr<spdlog::logger> make_link_logger(std::vector<spdlog::sink_ptr> sinks, spdlog::level::level_enum user_level);
 
 /// spdlog sink for the default logger during `link run`: hands every message to a LinkStatusPrinter.
 spdlog::sink_ptr make_status_sink(std::shared_ptr<LinkStatusPrinter> printer);
