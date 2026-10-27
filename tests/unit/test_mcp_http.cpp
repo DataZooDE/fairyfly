@@ -1709,7 +1709,10 @@ TEST_CASE("SSE: progress, final message, keep-alive", "[mcp][http][sse]") {
     CHECK(all.find("finished") != std::string::npos);
     const auto final_pos = all.rfind("event: message\ndata: {\"id\":1");
     REQUIRE(final_pos != std::string::npos);
-    CHECK(all.find("ok:gui_a_tool") > all.find("started"));  // progress precedes the final message
+    const auto result_pos = all.find("ok:gui_a_tool");
+    REQUIRE(result_pos != std::string::npos);                  // the final message carries the tool's result
+    CHECK(result_pos > final_pos);
+    CHECK(all.find("started") < final_pos);                    // progress precedes the final message
 
     SECTION("--no-sse and missing Accept fall back to plain JSON") {
         HttpEndpointOptions off;

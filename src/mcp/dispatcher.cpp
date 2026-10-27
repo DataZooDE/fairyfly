@@ -1372,9 +1372,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (selection_input && input_context.initial) selection_initial = *input_context.initial;
     }
 
-    // 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch,
-    // log on, attach, disconnect (or act through an explicit `connection`). The target is resolved read-only, without
-    // contacting SAP; when it cannot be determined the call is refused (fail closed).
+    // 2c. session/connection targets (session_target_refusal)
     const auto check_target = [&](const json& call_args) {
         return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
     };
