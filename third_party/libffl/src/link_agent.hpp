@@ -108,6 +108,9 @@ struct AgentConfig {
     // `fairyfly link` noun) does either; unmodified fairyfly over loopback HTTP never sees CallInfo.
     bool local_enforces_tcodes = false;  // applies CallInfo::tcodes with fairyfly's --tcode rules (kCapTcodes)
     bool local_honours_cancel = false;   // stops at CallInfo::cancelled() (kCapCancel)
+    // The desktop clock's offset to the gateway (s, > 0 = behind) when an assertion was refused for clock skew, and 0
+    // once an assertion verifies again; called only on a change. For the tray: the person must fix the clock.
+    std::function<void(int64_t offset_s)> on_clock_skew;
 };
 
 class Agent {
@@ -156,6 +159,10 @@ private:
     std::map<std::string, int64_t> approved_until_;  // a yes covers further changes of that assistant + account until then
     std::map<std::string, std::shared_ptr<std::atomic<bool>>> inflight_;
     std::atomic<int> active_{0};
+    std::atomic<int64_t> clock_skew_{0};  // last value reported to cfg_.on_clock_skew
+    std::atomic<int> expired_in_a_row_{0};  // consecutive expired assertions: from kExpiredAsSkew on, likely the clock
+    void report_clock_skew(int64_t offset_s);
+    static constexpr int kExpiredAsSkew = 3;
     proto::TrailPolicy trail_;  // guarded by mu_
     std::atomic<bool> enforced_{false};  // LinkPolicy::approval_enforced, as last pushed
     std::mutex policy_mu_;               // orders set_link_policy calls and what the Approver is told
