@@ -11,6 +11,17 @@ std::string sign(Signer& s, const Claims& c) {
     return jws::encode(hdr, cl, [&](const std::string& in) { return s.sign(in); });
 }
 
+std::string clock_skew_message(int64_t offset_s) {
+    const int64_t d = offset_s < 0 ? -offset_s : offset_s;
+    return "the desktop's clock is " + std::to_string(d) + " s " + (offset_s < 0 ? "ahead of" : "behind") +
+           " the gateway's; sync the Windows clock (Settings > Time & language > Date & time > Sync now) and try again";
+}
+
+std::string expired_message(int64_t late_s) {
+    return "the request reached the desktop too late (" + std::to_string(late_s) +
+           " s after its authorization expired); try again, and if this repeats, check the PC's clock";
+}
+
 Verifier::Verifier(std::string issuer, std::string tenant, const std::vector<Jwk>& keys) : issuer_(std::move(issuer)), tenant_(std::move(tenant)) {
     if (tenant_.empty()) throw Error("assertion: no tenant in device state (re-enrol)");
     for (auto& k : keys) {
@@ -44,12 +55,19 @@ Claims Verifier::verify(const std::string& token, const std::string& device_id, 
     if (c.tenant != tenant_) throw Error("assertion: wrong tenant");
     if (c.aud != device_id) throw Error("assertion: wrong audience");
     if (c.req != request_id) throw Error("assertion: request id mismatch");
-    if (c.exp <= now - 5) throw Error("assertion: expired");
-    if (c.iat > now + 30) throw Error("assertion: issued in the future");
     if (c.exp - c.iat > kMaxLifetimeSec) throw Error("assertion: lifetime too long");
+    // the gateway minted iat with its own clock just now: iat - now is how far this desktop's clock is behind
+    const int64_t offset = c.iat - now;
+    auto skew = [&](const char* what) {
+        return ClockSkew(offset, std::string("assertion: ") + what + ": desktop clock " + std::to_string(offset < 0 ? -offset : offset) + " s " +
+                                     (offset < 0 ? "ahead of" : "behind") + " the gateway (tolerance " + std::to_string(kFutureLeewaySec) + " s)");
+    };
+    if (c.iat > now + kFutureLeewaySec) throw skew("issued in the future");
+    if (c.exp <= now - kExpiryLeewaySec)
+        throw Expired(now - c.exp, offset, "assertion: expired " + std::to_string(now - c.exp) + " s ago (slack " + std::to_string(kExpiryLeewaySec) + " s)");
     if (c.jti.empty()) throw Error("assertion: missing jti");
     std::lock_guard<std::mutex> lk(mu_);
-    for (auto it = seen_.begin(); it != seen_.end();) it = it->second < now - 300 ? seen_.erase(it) : std::next(it);
+    for (auto it = seen_.begin(); it != seen_.end();) it = it->second < now - kSeenKeepSec ? seen_.erase(it) : std::next(it);
     if (!seen_.emplace(c.jti, c.exp).second) throw Error("assertion: replay");
     return c;
 }
