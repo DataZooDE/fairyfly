@@ -212,6 +212,15 @@ TEST_CASE("Dispatcher: audit record fields", "[mcp][dispatcher]") {
     CHECK(rec.duration_ms >= 0);
     CHECK_FALSE(rec.read_only);
 
+    // a string id (the gateway's, e.g. "e5dd9093.512c...") is recorded as it is, without JSON quotes, so the local
+    // record matches the cloud audit
+    CallContext string_id;
+    string_id.request_id = "e5dd9093.512c";
+    d.call_tool("gui_screen_find", json{{"name_contains", "x"}}, string_id);
+    REQUIRE(f.records.size() == 2);
+    CHECK(f.records[1].request_id == "e5dd9093.512c");
+    f.records.pop_back();
+
     // client string is capped
     d.set_client_info(json{{"name", std::string(300, 'a')}, {"version", "1"}});
     d.call_tool("gui_doctor", json::object(), ctx_with_id());

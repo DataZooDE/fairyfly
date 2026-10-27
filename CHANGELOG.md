@@ -2,6 +2,12 @@
 
 ## 2026.10.27 (2026-10-27)
 
+### Audit: string request ids without JSON quotes
+
+- A tool call's `request_id` was written as JSON, so a string id came out quoted (`"\"e5dd9093.…\""`). Found live on
+  a cloud link call: the gateway's ids are strings, and the local record could not be matched with the gateway's
+  audit as [docs/LINK.md](docs/LINK.md) says. String ids are now recorded as they are, numbers as their digits.
+
 ### Microsoft Store (MSIX): build option and manifest template (preparation)
 
 - CMake option `FAIRYFLY_PACKAGE=msi|msix` (default `msi`, unchanged). An `msix` build does not update itself:
