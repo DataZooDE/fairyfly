@@ -1,0 +1,9 @@
+{
+ "compact": false,
+ "input": {
+  "hierarchy": {},
+  "title": "Job Overview",
+  "transaction": "SM37"
+ },
+ "output": "# Job Overview\n\n**Transaction:** `SM37`\n\n**Screen ID:** ``\n\n---\n**Screen Elements:** 0 top-level\n"
+}

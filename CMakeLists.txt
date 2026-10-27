@@ -149,6 +149,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/com/wrapper.cpp
     src/com/wrapper_helpers.cpp
     src/com/element.cpp
+    src/com/tree_view.cpp
+    src/com/control_views.cpp
     src/com/window.cpp
     src/com/session.cpp
     src/com/connection.cpp
@@ -156,6 +158,10 @@ set(FAIRYFLY_LIB_SOURCES
     src/com_automation_engine.cpp
     src/trace.cpp
     src/cli_handler.cpp
+    src/cli_handler_doctor.cpp
+    src/doctor_checks.cpp
+    src/screen_filter.cpp
+    src/output_format.cpp
     src/connection_manager.cpp
     src/sap_gui_base.cpp
     src/element_type_registry.cpp
@@ -251,6 +257,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/setup/elevator_win.cpp
     src/setup/system_probe_win.cpp
     src/setup/winhttp_client.cpp
+    src/setup/http_probe.cpp
     src/setup/verify_win.cpp
     src/setup/setup_doctor.cpp
     src/auth/crypto.cpp

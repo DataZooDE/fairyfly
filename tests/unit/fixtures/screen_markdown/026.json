@@ -1,0 +1,24 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 0,
+  "elements": [],
+  "filter_stats": {
+   "filter_applied": true,
+   "filtered_element_count": 0,
+   "total_elements_checked": 1
+  },
+  "hierarchy": {},
+  "suppressed": {
+   "by": "fields",
+   "grid_ids": [
+    "wnd[0]/usr/cntlGRID/shellcont/shell"
+   ],
+   "grids": 1,
+   "note": "1 grid(s) not included with only=fields; use only=tables or no filter",
+   "tree_ids": [],
+   "trees": 0
+  }
+ },
+ "output": "# Screen\n\n**Screen ID:** ``\n\n_1 grid(s) not included with only=fields; use only=tables or no filter_\n\n---\n**Screen Elements:** 0 top-level\n"
+}

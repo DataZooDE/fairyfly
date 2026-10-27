@@ -1,0 +1,217 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 8,
+  "elements": [
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/cmbP_DTMODE",
+    "label": "Time Restriction Mode",
+    "name": "P_DTMODE",
+    "text": "Selection options",
+    "tooltip": "Mode",
+    "type": "GuiComboBox",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-LOW",
+    "label": "Date",
+    "name": "S_DATUM-LOW",
+    "text": "29.09.2026",
+    "tooltip": "System Date",
+    "type": "GuiCTextField",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "has_f4_help": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-HIGH",
+    "label": "Date",
+    "name": "S_DATUM-HIGH",
+    "range_part": "to",
+    "text": "",
+    "tooltip": "System Date",
+    "type": "GuiCTextField",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-LOW",
+    "label": "Time",
+    "name": "S_UZEIT-LOW",
+    "text": "00:00:00",
+    "tooltip": "System Time",
+    "type": "GuiCTextField",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "fillable",
+     "readable"
+    ],
+    "changeable": true,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-HIGH",
+    "label": "Time",
+    "name": "S_UZEIT-HIGH",
+    "range_part": "to",
+    "text": "00:00:00",
+    "tooltip": "System Time",
+    "type": "GuiCTextField",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_S_ORPHAN_%_APP_%-TEXT",
+    "name": "%_S_ORPHAN_%_APP_%-TEXT",
+    "text": "Orphan caption            ",
+    "type": "GuiTextField",
+    "visible": false
+   },
+   {
+    "capabilities": [
+     "readable"
+    ],
+    "changeable": false,
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTOD_NUM",
+    "name": "TOD_NUM",
+    "text": "6       Runtime Errors        ",
+    "type": "GuiTextField",
+    "visible": false
+   },
+   {
+    "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_DATUM_%_APP_%-VALU_PUSH",
+    "name": "%_S_DATUM_%_APP_%-VALU_PUSH",
+    "text": "",
+    "type": "GuiButton"
+   }
+  ],
+  "hierarchy": {
+   "form_fields": [
+    {
+     "capabilities": [
+      "fillable",
+      "readable"
+     ],
+     "changeable": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/cmbP_DTMODE",
+     "label": "Time Restriction Mode",
+     "name": "P_DTMODE",
+     "text": "Selection options",
+     "tooltip": "Mode",
+     "type": "GuiComboBox",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "fillable",
+      "readable"
+     ],
+     "changeable": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-LOW",
+     "label": "Date",
+     "name": "S_DATUM-LOW",
+     "text": "29.09.2026",
+     "tooltip": "System Date",
+     "type": "GuiCTextField",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "fillable",
+      "readable"
+     ],
+     "changeable": true,
+     "has_f4_help": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-HIGH",
+     "label": "Date",
+     "name": "S_DATUM-HIGH",
+     "range_part": "to",
+     "text": "",
+     "tooltip": "System Date",
+     "type": "GuiCTextField",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "fillable",
+      "readable"
+     ],
+     "changeable": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-LOW",
+     "label": "Time",
+     "name": "S_UZEIT-LOW",
+     "text": "00:00:00",
+     "tooltip": "System Time",
+     "type": "GuiCTextField",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "fillable",
+      "readable"
+     ],
+     "changeable": true,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-HIGH",
+     "label": "Time",
+     "name": "S_UZEIT-HIGH",
+     "range_part": "to",
+     "text": "00:00:00",
+     "tooltip": "System Time",
+     "type": "GuiCTextField",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "readable"
+     ],
+     "changeable": false,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/txt%_S_ORPHAN_%_APP_%-TEXT",
+     "name": "%_S_ORPHAN_%_APP_%-TEXT",
+     "text": "Orphan caption            ",
+     "type": "GuiTextField",
+     "visible": false
+    },
+    {
+     "capabilities": [
+      "readable"
+     ],
+     "changeable": false,
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/txtTOD_NUM",
+     "name": "TOD_NUM",
+     "text": "6       Runtime Errors        ",
+     "type": "GuiTextField",
+     "visible": false
+    },
+    {
+     "id": "/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_DATUM_%_APP_%-VALU_PUSH",
+     "name": "%_S_DATUM_%_APP_%-VALU_PUSH",
+     "text": "",
+     "type": "GuiButton"
+    }
+   ]
+  },
+  "title": "ABAP Runtime Errors",
+  "transaction": "ST22"
+ },
+ "output": "# ABAP Runtime Errors\n\n**Transaction:** `ST22`\n\n**Screen ID:** ``\n\n## Form Fields\n\n| Field                                | Value             | State     | Technical ID                                           |\n|:-------------------------------------|:------------------|:----------|:-------------------------------------------------------|\n| **Time Restriction Mode<br>Mode**        | Selection options | Editable  | `/app/con[0]/ses[0]/wnd[0]/usr/cmbP_DTMODE`               |\n| **Date<br>System Date**                  | 29.09.2026        | Editable  | `/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-LOW`           |\n| **Date (to) (F4 Search)<br>System Date** | (empty)           | Editable  | `/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_DATUM-HIGH`          |\n| **Time<br>System Time**                  | 00:00:00          | Editable  | `/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-LOW`           |\n| **Time (to)<br>System Time**             | 00:00:00          | Editable  | `/app/con[0]/ses[0]/wnd[0]/usr/ctxtS_UZEIT-HIGH`          |\n| **%_S_ORPHAN_%_APP_%-TEXT**                   | Orphan caption    | Read-only | `/app/con[0]/ses[0]/wnd[0]/usr/txt%_S_ORPHAN_%_APP_%-TEXT`    |\n| **TOD_NUM**                               | 6 Runtime Errors  | Read-only | `/app/con[0]/ses[0]/wnd[0]/usr/txtTOD_NUM`                |\n| **[Button: %_S_DATUM_%_APP_%-VALU_PUSH]**      | -                 | Enabled   | `/app/con[0]/ses[0]/wnd[0]/usr/btn%_S_DATUM_%_APP_%-VALU_PUSH` |\n\n---\n**Screen Elements:** 8 top-level\n"
+}
