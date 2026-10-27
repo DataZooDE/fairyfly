@@ -195,3 +195,13 @@ Authenticode-signed when a signing certificate is configured for the repository;
 product name is `fairyfly` and the product version is the calendar version of the release (for example
 `2026.09.30`), the same in the file's version information, in `fairyfly --version` and in the release tag. The
 signing setup is described in [SIGNING.md](SIGNING.md).
+
+`fairyfly update apply` checks the same things before it replaces `fairyfly.exe`: the download must match
+`SHA256SUMS` (always, also with `--allow-unsigned`) and carry a valid Authenticode signature whose leaf certificate
+names the pinned publisher, `O=DataZoo GmbH` and `C=DE`. `SHA256SUMS` comes from the same GitHub release as the
+executable, so it only detects a broken download; the publisher pin is what stops an executable signed by anybody
+else (a stolen or cheaply bought certificate together with a leaked release token). A signed installation never
+takes an unsigned release, and a signature that does not verify is refused, not treated as unsigned. Releases up to
+2026.10.x are unsigned: such an installation takes the first release signed by DataZoo GmbH by itself, and an unsigned
+release only with `--allow-unsigned` (it then warns that nothing proves who built it). The rules and the reasoning
+are in [SIGNING.md](SIGNING.md#updates).
