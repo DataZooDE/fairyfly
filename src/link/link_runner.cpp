@@ -462,6 +462,8 @@ public:
             v.trail_retention_days = p.retention_days;
             v.trail_blur = p.blur;
         }
+        if (v.state != "not running" && status.contains("clock_skew_s") && status["clock_skew_s"].is_number_integer())
+            v.clock_skew_s = status["clock_skew_s"].get<std::int64_t>();
         return v;
     }
     bool set_paused(bool paused) override {
@@ -532,9 +534,7 @@ void route_link_logging(bool tray, const std::shared_ptr<LinkStatusPrinter>& pri
     auto status = make_status_sink(printer);
     status->set_level(spdlog::level::info);
     sinks.push_back(status);
-    auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
-    logger->set_level(std::min(user_level, spdlog::level::info));
-    spdlog::set_default_logger(logger);
+    spdlog::set_default_logger(make_link_logger(std::move(sinks), user_level));
 }
 
 }  // namespace
@@ -667,6 +667,12 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     auto trail_changed = std::make_shared<std::atomic<bool>>(false);
     auto recorder = make_trail_recorder(o.tray, tools, peek, trail_changed);
     cfg.recorder = recorder;
+    // calls refused for clock skew: the tray shows the offset and how to sync until a call is accepted again
+    auto clock_skew = std::make_shared<std::atomic<std::int64_t>>(0);
+    cfg.on_clock_skew = [clock_skew, trail_changed](std::int64_t offset_s) {
+        *clock_skew = offset_s;
+        *trail_changed = true;   // rewrite the status file now, not at the next heartbeat
+    };
     auto net = std::make_shared<Net>(st, cfg);
     net->state_path = sp;
     // the tray's Quit may come before this point (request_stop): only a console run starts from a clean flag
@@ -678,7 +684,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
     SupervisorOptions supervision;
     supervision.status_changed = trail_changed.get();
-    supervision.status_extra = [recorder] { return json{{"trail", recorder->current_policy().to_json()}}; };
+    supervision.status_extra = [recorder, clock_skew] {
+        return json{{"trail", recorder->current_policy().to_json()}, {"clock_skew_s", clock_skew->load()}};
+    };
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {
             if (state == link::state::kPaused) printer->paused();
