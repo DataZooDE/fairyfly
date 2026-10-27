@@ -33,8 +33,9 @@ struct ApprovalPrompt {
 
 // The answer and why. The link agent reports `reason` to the gateway (res.approval, the audit record's "approval") and
 // refuses with APPROVAL_DENIED / APPROVAL_EXPIRED / APPROVAL_LOCKED (APPROVAL_REQUIRED: a yes that did not ask while
-// approval is enforced). Only `approved` decides; reasons it does not know are read as "approved" (approved true) or
-// "denied" (approved false), "expired_in_queue" as "expired".
+// approval is enforced; DESKTOP_READ_ONLY: not_asked while enforced). Only `approved` decides; reasons it does not know
+// are read as "approved" (approved true) or "denied" (approved false), "expired_in_queue" as "expired". A yes keeps
+// remembered, standing, unattended and not_asked.
 namespace approval_reason {
 inline constexpr const char* kApproved = "approved";      // the person said yes
 inline constexpr const char* kRemembered = "remembered";  // an earlier yes covers it ("don't ask again", the agent's window)
@@ -44,6 +45,10 @@ inline constexpr const char* kStanding = "standing";
 // Yes without a person: an Approver that always says yes (fixed_approver(true), ffy-link --approve yes). Never a
 // person's answer, so refused like standing while ApprovalPrompt::enforced.
 inline constexpr const char* kUnattended = "unattended";
+// Yes without a question because this desktop cannot change anything: fairyfly runs --read-only, shows no question
+// and leaves no write permit, so its read-only guard refuses the change (review of fairyfly #39). Never a person's yes:
+// it opens no window, and while ApprovalPrompt::enforced the agent refuses it with DESKTOP_READ_ONLY (nothing runs).
+inline constexpr const char* kNotAsked = "not_asked";
 inline constexpr const char* kDenied = "denied";          // the person said no (or closed the question)
 inline constexpr const char* kExpired = "expired";        // nobody answered within answer_s (also: waited too long in the queue)
 inline constexpr const char* kLocked = "locked";          // the screen is locked, or nobody is signed in to answer
