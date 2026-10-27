@@ -49,6 +49,45 @@ That licence is **not OSI-approved**, so the free **SignPath Foundation** progra
 The signing step was written from the documentation of the Azure signing action and could not be run before the Azure
 account exists: the exact input names may need small corrections.
 
+## Updates
+
+`fairyfly update apply` (src/update/update_model.cpp, `decide()`) accepts a release only when its `fairyfly.exe`
+matches `SHA256SUMS` and its signature passes these rules:
+
+| This installation | The release | Result |
+|---|---|---|
+| unsigned (self-built, or a release up to 2026.10.x) | unsigned | refused (`UPDATE_UNSIGNED`); with `--allow-unsigned` installed, with a warning |
+| unsigned | signed by `O=DataZoo GmbH, C=DE` | installed: the path to signed releases |
+| unsigned | signed by anybody else | refused (`UPDATE_SIGNER_UNEXPECTED`), also with `--allow-unsigned` |
+| signed | unsigned | refused (`UPDATE_SIGNATURE_INVALID`), also with `--allow-unsigned` |
+| signed | signed by anybody else | refused (`UPDATE_SIGNER_UNEXPECTED`) |
+| signed | signed by `O=DataZoo GmbH, C=DE` with another address, OU or CN | installed |
+| any | a signature that does not verify (expired without a time stamp, revoked, tampered) | refused (`UPDATE_SIGNATURE_INVALID`), never treated as unsigned |
+| any | does not match `SHA256SUMS`, or no hash for `fairyfly.exe` | refused (`UPDATE_CHECKSUM_MISMATCH`, `UPDATE_CHECKSUM_MISSING`) |
+
+- **What is pinned.** The organisation `O=` and the country `C=` of the signer's leaf certificate, each compared
+  normalised (trimmed, inner white space collapsed, case-insensitive); the subject must hold exactly one of each.
+  Not the whole subject: Artifact Signing issues a new leaf certificate every day, and a new identity validation
+  (for example after a move) changes `L=`, `S=`, street or postal code, which must not lock signed installations out.
+  The certificate itself is checked by `WinVerifyTrust` (chain to a root Windows trusts, time stamp, revocation of
+  the whole chain).
+- **What is not pinned.** The issuing CA or root. Microsoft rotates the Artifact Signing intermediates (EOC CA 01/02,
+  then 03/04), so an intermediate pin would break updates; the publicly trusted chain plus the validated
+  organisation name is the trust. The durable identity EKU (`1.3.6.1.4.1.311.97.*`) is a possible later addition.
+- **Forks.** The pin is a compile-time constant, set with the CMake options `FAIRYFLY_UPDATE_SIGNER_ORGANIZATION`
+  (default `DataZoo GmbH`, must not be empty) and `FAIRYFLY_UPDATE_SIGNER_COUNTRY` (default `DE`; empty: the
+  country is not checked), e.g. `-DFAIRYFLY_UPDATE_SIGNER_ORGANIZATION="Example Ltd" -DFAIRYFLY_UPDATE_SIGNER_COUNTRY=GB`.
+  Note that the update channel (`DataZooDE/fairyfly` releases) is fixed in `update_model.h` as well.
+- **Unsigned releases until the first signed one.** The releases up to 2026.10.x are unsigned. Those installations
+  keep taking unsigned releases with `--allow-unsigned` (with a warning that only `SHA256SUMS` was checked) and take
+  the first signed release without it. Installations older than this rule accept a release signed by any publicly
+  trusted publisher; the pinned code reaches them with the next update.
+- **Changing the publisher** (a new legal name, or the SSL.com fallback with another `O=`): ship a release, signed by
+  the old publisher, whose pin is the new one; installations that skip it are refused with `UPDATE_SIGNER_UNEXPECTED`
+  and need a manual install of the MSI.
+- **The MSI.** `fairyfly update apply` replaces only `fairyfly.exe`. The MSI (`fairyfly.msi`) is installed by winget or
+  `msiexec`, which check its signature themselves.
+
 ## Local test with a self-signed certificate (this machine only)
 
 ```powershell

@@ -19,12 +19,13 @@ Example: fairyfly update check
 )HELP");
     apply_cmd_ = add_leaf(app, {"update", "apply"});
     apply_cmd_->footer(R"HELP(Usage notes:
-Downloads the latest release, checks it against SHA256SUMS and its Authenticode signature (a signed
-installation only accepts the same signer) and replaces this fairyfly.exe; the previous one stays
-as fairyfly.exe.old until the next update. Restart running fairyfly processes (tray, link) afterwards.
+Downloads the latest release, checks it against SHA256SUMS and its Authenticode signature (it must
+be signed by the publisher this build pins, by default O=DataZoo GmbH, C=DE; a signed installation
+never takes an unsigned release) and replaces this fairyfly.exe; the previous one stays as fairyfly.exe.old until the next
+update. Restart running fairyfly processes (tray, link) afterwards.
 Example: fairyfly update apply
 )HELP");
-    apply_cmd_->add_flag("--allow-unsigned", allow_unsigned_, "Accept an unsigned release on an unsigned (self-built) installation");
+    apply_cmd_->add_flag("--allow-unsigned", allow_unsigned_, "Accept an unsigned release on an unsigned installation (self-built or a release from before signing)");
     return cmd_;
 }
 
@@ -44,6 +45,7 @@ Result UpdateCommand::execute(cli::CommandHandler&) {
             Result r;
             r.status = Result::Status::Success;
             r.data = {{"updated", a.decision.verdict == update::Verdict::Install}, {"message", a.decision.message}};
+            if (!a.decision.warning.empty()) r.data["warning"] = a.decision.warning;
             if (!a.installed_path.empty()) {
                 r.data["installed"] = a.installed_path;
                 r.data["previous"] = a.previous_path;
