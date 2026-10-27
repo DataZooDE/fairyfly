@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Releases: code signing with Microsoft Artifact Signing (ready, off until configured)
+
+- `release.yml` signs with `azure/artifact-signing-action` v2.0.0 (pinned to its commit) after an OIDC `azure/login`:
+  no client secret, the Entra federated credential is bound to the environment `release-signing`. It signs every exe
+  of the build (`fairyfly.exe`, `fairyfly-tray.exe`), builds the MSI around the signed exes and signs the MSI, all
+  with RFC 3161 time stamps. The winget manifests and `SHA256SUMS` are made from the signed files, and the release job
+  checks that what it publishes is what was verified.
+- Signing is switched on by the repository **variable** `AZURE_SIGNING_ACCOUNT` (with `AZURE_SIGNING_PROFILE`,
+  `_ENDPOINT`, `_CLIENT_ID`, `_TENANT_ID`, `_SUBSCRIPTION_ID`; a partial set fails the release), no longer by the secret
+  `AZURE_SIGNING_CLIENT_SECRET`. Without it the release is unsigned as before; `REQUIRE_SIGNING=true` makes that an
+  error. The one-time Azure and GitHub setup is in [docs/SIGNING.md](docs/SIGNING.md).
+- New `packaging/sign/Test-Signature.ps1` checks every signed file and fails the release unless the embedded
+  signature is valid and trusted (`Get-AuthenticodeSignature`, `signtool verify /pa`), time-stamped, and made by the
+  updater's pin (exactly one `O=DataZoo GmbH` and one `C=DE`, read from `CMakeLists.txt`). Before, only the exes were
+  checked, with `signtool verify /pa` alone (any trusted signer, no time stamp needed), and the MSI not at all. Its
+  tests (`signing.yml`, no secrets) refuse an unsigned file, a self-signed certificate, a missing time stamp and a
+  wrong `O=`/`C=`, and accept a valid signature; the workflow also runs actionlint.
+
 ### winget: manifests on schema 1.12.0, with PrivacyUrl and the copyright years
 
 - The manifests of `DataZoo.fairyfly` (packaging/winget/templates) use manifest schema 1.12.0, the version

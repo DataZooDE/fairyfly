@@ -1,11 +1,16 @@
 name: Release fairyfly
 
-# Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, optionally signs it with Azure Artifact
-# Signing (see docs/SIGNING.md) and publishes it with the per-user MSI, the winget manifests of DataZoo.fairyfly
+# Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, signs it with Microsoft Artifact Signing when
+# that is configured (docs/SIGNING.md) and publishes it with the per-user MSI, the winget manifests of DataZoo.fairyfly
 # (packaging/winget/) and SHA256SUMS.
 # Tag format: vYYYY.MM.DD, or vYYYY.MM.DD.N (N >= 1) for a further release on the same day, e.g. v2026.10.24.1
-# (calendar version = ProductVersion of fairyfly.exe = `fairyfly --version`). Without the Azure signing secrets
-# the release is published unsigned.
+# (calendar version = ProductVersion of fairyfly.exe = `fairyfly --version`).
+# Signing is configured when the repository variable AZURE_SIGNING_ACCOUNT is set (all AZURE_SIGNING_* variables are
+# then required; no secret: OIDC through the environment `release-signing`). The sign job then signs every exe, builds
+# the MSI around the signed exes, signs the MSI (RFC 3161 time stamps) and checks each file with
+# packaging/sign/Test-Signature.ps1 (valid, trusted chain, time stamp, signer = the updater pin O=DataZoo GmbH, C=DE).
+# SHA256SUMS and the winget manifests hash the signed files. Without AZURE_SIGNING_ACCOUNT the release is unsigned,
+# unless REQUIRE_SIGNING is 'true', which fails it.
 
 on:
   push:
@@ -30,9 +35,33 @@ jobs:
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       signing: ${{ steps.cfg.outputs.signing }}
-    env:
-      AZURE_SIGNING_CLIENT_SECRET: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
     steps:
+    - name: Signing configured?
+      # from repository variables (OIDC needs no secret); a partial configuration fails instead of shipping unsigned
+      id: cfg
+      env:
+        AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        AZURE_SIGNING_CLIENT_ID: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+        AZURE_SIGNING_TENANT_ID: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+        AZURE_SIGNING_SUBSCRIPTION_ID: ${{ vars.AZURE_SIGNING_SUBSCRIPTION_ID }}
+        REQUIRE_SIGNING: ${{ vars.REQUIRE_SIGNING }}
+      run: |
+        if ($env:AZURE_SIGNING_ACCOUNT) {
+          $missing = @('AZURE_SIGNING_PROFILE', 'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_CLIENT_ID', 'AZURE_SIGNING_TENANT_ID', 'AZURE_SIGNING_SUBSCRIPTION_ID') |
+            Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing) { Write-Error "AZURE_SIGNING_ACCOUNT is set, but these repository variables are empty: $($missing -join ', ') (docs/SIGNING.md)"; exit 1 }
+          Write-Host "signing with Artifact Signing account $env:AZURE_SIGNING_ACCOUNT, profile $env:AZURE_SIGNING_PROFILE"
+          "signing=true" >> $env:GITHUB_OUTPUT
+        } elseif ($env:REQUIRE_SIGNING -eq 'true') {
+          Write-Error "REQUIRE_SIGNING is 'true' but AZURE_SIGNING_ACCOUNT is empty: refusing an unsigned release"; exit 1
+        } else {
+          Write-Host "::notice::signing is not configured (AZURE_SIGNING_ACCOUNT is empty): this release is unsigned"
+          "signing=false" >> $env:GITHUB_OUTPUT
+        }
+      shell: pwsh
+
     - name: Checkout the tagged source
       uses: actions/checkout@v4
       with:
@@ -90,47 +119,113 @@ jobs:
         retention-days: 30
         if-no-files-found: error
 
-    - name: Signing configured?
-      id: cfg
-      run: |
-        if ($env:AZURE_SIGNING_CLIENT_SECRET) { "signing=true" >> $env:GITHUB_OUTPUT } else { "signing=false" >> $env:GITHUB_OUTPUT }
-      shell: pwsh
-
   sign:
+    # Signs fairyfly.exe and fairyfly-tray.exe (every exe of the build), builds the MSI around them and signs it, in
+    # one job so that the environment `release-signing` (deployment rule: tags v*) is entered once per release.
     needs: build
     if: needs.build.outputs.signing == 'true'
     timeout-minutes: 30
     runs-on: windows-2022
+    environment: release-signing
+    permissions:
+      contents: read
+      id-token: write   # OIDC token for azure/login; Entra federated credential repo:DataZooDE/fairyfly:environment:release-signing
+    outputs:
+      exe-sha256: ${{ steps.hashes.outputs.exe }}
+      msi-sha256: ${{ steps.hashes.outputs.msi }}
     steps:
+    - name: Checkout the tagged source (packaging/, CMakeLists.txt for the signer pin)
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.RELEASE_TAG }}
+
     - name: Download the unsigned build
       uses: actions/download-artifact@v4
       with:
         name: fairyfly-unsigned
-        path: unsigned
+        path: exe
 
-    - name: Sign fairyfly.exe with Azure Artifact Signing
-      # Inputs follow the azure/trusted-signing-action documentation (the service was renamed to Artifact Signing);
-      # check them against the current action when the Azure account exists.
-      uses: azure/trusted-signing-action@v0
+    - name: Azure login (OIDC, no secret)
+      uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906  # v3.1.0
       with:
-        azure-tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
-        azure-client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
-        azure-client-secret: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
+        client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+        tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+        subscription-id: ${{ vars.AZURE_SIGNING_SUBSCRIPTION_ID }}
+
+    - name: Sign fairyfly.exe and fairyfly-tray.exe (Artifact Signing)
+      uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+      with:
         endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-        trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
         certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files-folder: unsigned
+        # every exe the build produced, so a new shipped exe cannot stay unsigned
+        files-folder: ${{ github.workspace }}\exe
         files-folder-filter: exe
         file-digest: SHA256
         timestamp-rfc3161: http://timestamp.acs.microsoft.com
         timestamp-digest: SHA256
+        description: fairyfly
+        description-url: https://github.com/DataZooDE/fairyfly
+        # only the azure/login session
+        exclude-environment-credential: true
+        exclude-workload-identity-credential: true
+        exclude-managed-identity-credential: true
+        exclude-shared-token-cache-credential: true
+        exclude-visual-studio-credential: true
+        exclude-visual-studio-code-credential: true
+        exclude-azure-cli-credential: false
+        exclude-azure-powershell-credential: true
+        exclude-azure-developer-cli-credential: true
+        exclude-interactive-browser-credential: true
 
-    - name: Verify the signature
+    - name: Verify the exe signatures (valid, trusted, time-stamped, signer = updater pin)
       run: |
-        $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName | Select-Object -Last 1).FullName
-        & $signtool verify /pa /v unsigned\fairyfly.exe
-        if ($LASTEXITCODE -ne 0) { exit 1 }
-        & $signtool verify /pa /v unsigned\fairyfly-tray.exe
+        $exes = @(Get-ChildItem exe -Filter *.exe | ForEach-Object FullName)
+        if ($exes.Count -lt 2) { Write-Error "expected fairyfly.exe and fairyfly-tray.exe, found: $exes"; exit 1 }
+        ./packaging/sign/Test-Signature.ps1 -Path $exes
+      shell: pwsh
+
+    - name: Build the MSI around the signed exes
+      run: |
+        dotnet tool install --global wix --version 5.0.2
+        $msiVersion = (& ./packaging/msi_version.ps1 -Version "${{ env.RELEASE_TAG }}").Trim()
+        New-Item -ItemType Directory -Force msi | Out-Null
+        wix build packaging/fairyfly.wxs -arch x64 -d ExePath=exe/fairyfly.exe -d TrayExePath=exe/fairyfly-tray.exe -d MsiVersion=$msiVersion -o msi/fairyfly.msi
+        if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
+      shell: pwsh
+
+    - name: Sign the MSI (Artifact Signing)
+      uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82  # v2.0.0
+      with:
+        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+        signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+        files: ${{ github.workspace }}\msi\fairyfly.msi
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+        description: fairyfly installer
+        description-url: https://github.com/DataZooDE/fairyfly
+        exclude-environment-credential: true
+        exclude-workload-identity-credential: true
+        exclude-managed-identity-credential: true
+        exclude-shared-token-cache-credential: true
+        exclude-visual-studio-credential: true
+        exclude-visual-studio-code-credential: true
+        exclude-azure-cli-credential: false
+        exclude-azure-powershell-credential: true
+        exclude-azure-developer-cli-credential: true
+        exclude-interactive-browser-credential: true
+
+    - name: Verify the MSI signature
+      run: ./packaging/sign/Test-Signature.ps1 -Path msi/fairyfly.msi
+      shell: pwsh
+
+    - name: Hashes of the verified files (the release job checks SHA256SUMS against them)
+      id: hashes
+      run: |
+        "exe=$((Get-FileHash exe/fairyfly.exe -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+        "msi=$((Get-FileHash msi/fairyfly.msi -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       shell: pwsh
 
     - name: Upload the signed fairyfly.exe and fairyfly-tray.exe
@@ -138,12 +233,20 @@ jobs:
       with:
         name: fairyfly-signed
         path: |
-          unsigned/fairyfly.exe
-          unsigned/fairyfly-tray.exe
+          exe/fairyfly.exe
+          exe/fairyfly-tray.exe
+        if-no-files-found: error
+
+    - name: Upload the signed MSI
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-signed-msi
+        path: msi/fairyfly.msi
         if-no-files-found: error
 
   package:
-    # per-user MSI around the exe that is released (signed when signing is configured); docs/LINK.md, packaging/
+    # the per-user MSI (docs/LINK.md, packaging/): the signed one from the sign job, or built here around the unsigned
+    # exes; then the winget manifests from the MSI that is released
     needs: [ build, sign ]
     if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
     timeout-minutes: 30
@@ -154,13 +257,22 @@ jobs:
       with:
         ref: ${{ env.RELEASE_TAG }}
 
-    - name: Download the released fairyfly.exe
+    - name: Download the signed MSI
+      if: needs.sign.result == 'success'
       uses: actions/download-artifact@v4
       with:
-        name: ${{ needs.sign.result == 'success' && 'fairyfly-signed' || 'fairyfly-unsigned' }}
+        name: fairyfly-signed-msi
+        path: msi
+
+    - name: Download the unsigned fairyfly.exe and fairyfly-tray.exe
+      if: needs.sign.result != 'success'
+      uses: actions/download-artifact@v4
+      with:
+        name: fairyfly-unsigned
         path: exe
 
-    - name: Build the MSI
+    - name: Build the MSI (unsigned release)
+      if: needs.sign.result != 'success'
       run: |
         dotnet tool install --global wix --version 5.0.2
         $msiVersion = (& ./packaging/msi_version.ps1 -Version "${{ env.RELEASE_TAG }}").Trim()
@@ -168,22 +280,6 @@ jobs:
         wix build packaging/fairyfly.wxs -arch x64 -d ExePath=exe/fairyfly.exe -d TrayExePath=exe/fairyfly-tray.exe -d MsiVersion=$msiVersion -o msi/fairyfly.msi
         if ($LASTEXITCODE -ne 0) { Write-Error "wix build failed"; exit 1 }
       shell: pwsh
-
-    - name: Sign the MSI with Azure Artifact Signing
-      if: needs.build.outputs.signing == 'true'
-      uses: azure/trusted-signing-action@v0
-      with:
-        azure-tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
-        azure-client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
-        azure-client-secret: ${{ secrets.AZURE_SIGNING_CLIENT_SECRET }}
-        endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-        trusted-signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-        certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-        files-folder: msi
-        files-folder-filter: msi
-        file-digest: SHA256
-        timestamp-rfc3161: http://timestamp.acs.microsoft.com
-        timestamp-digest: SHA256
 
     - name: Upload the MSI
       uses: actions/upload-artifact@v4
@@ -193,7 +289,7 @@ jobs:
         if-no-files-found: error
 
     - name: Render the winget manifests for the released MSI
-      # after signing: InstallerSha256 must be the hash of the published fairyfly.msi
+      # from the released MSI (the signed one when signing is configured): InstallerSha256 = hash of the published fairyfly.msi
       run: |
         ./packaging/winget/New-WingetManifest.ps1 -Version "${{ env.RELEASE_TAG }}" -MsiPath msi/fairyfly.msi -OutDir winget
         Get-ChildItem winget | ForEach-Object { Write-Host "--- $($_.Name)"; Get-Content $_.FullName }
@@ -241,6 +337,17 @@ jobs:
         name: fairyfly-winget
         path: dist
 
+    - name: The released files are the verified signed ones
+      if: needs.sign.result == 'success'
+      env:
+        EXE_SHA256: ${{ needs.sign.outputs.exe-sha256 }}
+        MSI_SHA256: ${{ needs.sign.outputs.msi-sha256 }}
+      run: |
+        cd dist
+        echo "$EXE_SHA256  fairyfly.exe" | sha256sum -c -
+        echo "$MSI_SHA256  fairyfly.msi" | sha256sum -c -
+        grep -qi "InstallerSha256: *$MSI_SHA256" DataZoo.fairyfly.installer.yaml || { echo "the winget manifest does not hash the signed MSI"; exit 1; }
+
     - name: Checksums and release
       env:
         GH_TOKEN: ${{ github.token }}
@@ -249,7 +356,7 @@ jobs:
         cd dist
         sha256sum fairyfly.exe fairyfly.msi DataZoo.fairyfly*.yaml > SHA256SUMS
         cat SHA256SUMS
-        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed (Azure Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
+        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed by DataZoo GmbH (Microsoft Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
         NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable), fairyfly.msi (per-user installer, no admin rights) and the winget manifests DataZoo.fairyfly*.yaml (put the three files in one folder, then: winget install --manifest <folder>). ${SIGNNOTE} See the README (Install, Code signing policy)."
         gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi DataZoo.fairyfly.yaml DataZoo.fairyfly.installer.yaml DataZoo.fairyfly.locale.en-US.yaml SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
 

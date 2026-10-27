@@ -11,12 +11,14 @@ on:
     branches: [ main ]
     paths:
       - 'packaging/sign/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/release.yml'
       - '.github/workflows/signing.yml'
   push:
     branches: [ main ]
     paths:
       - 'packaging/sign/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/release.yml'
       - '.github/workflows/signing.yml'
   workflow_dispatch:

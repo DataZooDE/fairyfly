@@ -61,6 +61,10 @@ try {
     Check ($ok -eq '') "O= and C= are compared normalised like the updater (src/update signer_matches) (got: '$ok')"
     Expect-Refused 'pwsh.exe against O=DataZoo GmbH' 'expected O=DataZoo GmbH' -Path $pwshExe
     Expect-Refused 'pwsh.exe against C=DE' 'expected .*C=DE' -Path $pwshExe -Organization 'Microsoft Corporation' -Country 'DE'
+    try { & $checker -Path $pwshExe | Out-Host; $err = '' } catch { $err = $_.Exception.Message }
+    Check ($err -match 'expected O=DataZoo GmbH, C=DE') "without -Expected* the updater pin of CMakeLists.txt is the default (got: '$err')"
+    $ok = Invoke-Check -Path $pwshExe -Organization 'Microsoft Corporation' -Country ''
+    Check ($ok -eq '') "-ExpectedCountry '' does not check the country (got: '$ok')"
 
     if ($env:CI -eq 'true' -or $TrustTestRoot) {
         Write-Host '=== a trusted test root (LocalMachine\Root, removed afterwards) ==='
@@ -89,6 +93,8 @@ try {
         $good = New-TrustedSigned 'CN=DataZoo GmbH, O=DataZoo GmbH, L=Stuttgart, C=DE' 'trusted-good' -Timestamp
         $ok = Invoke-Check -Path $good
         Check ($ok -eq '') "a trusted, time-stamped O=DataZoo GmbH, C=DE signature passes, whatever L= says (got: '$ok')"
+        try { & $checker -Path $good | Out-Host; $ok = '' } catch { $ok = $_.Exception.Message }
+        Check ($ok -eq '') "without -Expected* the pin of CMakeLists.txt (DataZoo GmbH, DE) is used and the file passes (got: '$ok')"
         $ok = Invoke-Check -Path @($good, $pwshExe) -Organization 'DataZoo GmbH'
         Check ($ok -match 'expected O=DataZoo GmbH' -and $ok -notmatch 'trusted-good') "with several files only the bad one is reported (got: '$ok')"
     } else {
