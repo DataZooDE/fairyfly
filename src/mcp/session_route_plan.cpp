@@ -1,5 +1,6 @@
 #include "include/mcp/session_route_plan.h"
 
+#include "include/command_table.h"
 #include <algorithm>
 
 namespace fairyfly::mcp {
@@ -9,13 +10,6 @@ SessionRoutePlan refused(const char* code) {
     SessionRoutePlan plan;
     plan.error_code = code;
     return plan;
-}
-
-bool global_control(const std::string& tool) {
-    return tool == "gui_session_list" || tool == "gui_connection_list" ||
-           tool == "gui_credentials_list" || tool == "gui_doctor" ||
-           tool == "gui_session_lease" || tool == "gui_session_attach" ||
-           tool == "gui_session_login" || tool == "gui_session_launch";
 }
 
 } // namespace
@@ -48,7 +42,7 @@ SessionRoutePlan plan_session_route(const Principal& principal, const std::strin
         plan.kind = SessionRoutePlan::Kind::GlobalControl;
         return plan;
     }
-    if (global_control(tool)) {
+    if (command_table::tool_has(tool, command_table::Trait::GlobalControl)) {
         SessionRoutePlan plan;
         plan.kind = SessionRoutePlan::Kind::GlobalControl;
         return plan;

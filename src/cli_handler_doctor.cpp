@@ -1,0 +1,43 @@
+// CommandHandler::handle_doctor: the preflight checks of `fairyfly doctor` (probes and judges in doctor_checks.h).
+#include "include/cli_handler.h"
+#include "include/doctor_checks.h"
+
+#include <spdlog/spdlog.h>
+
+namespace fairyfly {
+namespace cli {
+
+Result CommandHandler::handle_doctor()
+{
+    spdlog::info("Running preflight environment and scripting diagnostics");
+    std::vector<doctor::Check> checks;
+#ifdef _WIN32
+    std::string station, desktop;
+    doctor::probe_desktop(station, desktop);
+    checks.push_back(doctor::judge_desktop(station, desktop));
+    checks.push_back(doctor::judge_processes(doctor::probe_processes()));
+    checks.push_back(doctor::judge_client_security(doctor::probe_client_security()));
+#else
+    checks.push_back({"desktop_context", "info", "Non-Windows environment, desktop check skipped"});
+    checks.push_back({"sapgui_processes", "info", "Non-Windows environment, process check skipped"});
+    checks.push_back({"client_registry", "info", "Non-Windows environment, registry check skipped"});
+#endif
+    checks.push_back(doctor::judge_engine(engine_ != nullptr));
+    if (engine_) {
+        try {
+            checks.push_back(doctor::judge_sessions(engine_->get_application_info()));
+        } catch (const std::exception& e) {
+            checks.push_back(doctor::judge_sessions_error(e.what()));
+        }
+    }
+
+    json listed = json::array();
+    for (const auto& c : checks) listed.push_back(doctor::to_json(c));
+    Result result = Result::ok(json::object());
+    result.data["overall_health"] = doctor::overall_health(checks);
+    result.data["checks"] = std::move(listed);
+    return result;
+}
+
+}  // namespace cli
+}  // namespace fairyfly

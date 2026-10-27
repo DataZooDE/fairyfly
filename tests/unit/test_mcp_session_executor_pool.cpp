@@ -7,6 +7,7 @@
 
 #include "include/mcp/session_executor_pool.h"
 
+#include "support/eventually.h"
 using namespace fairyfly::mcp;
 using namespace std::chrono_literals;
 
@@ -179,10 +180,13 @@ TEST_CASE("Session executor pool reuses capacity from an idle prior identity", "
     ExecJob job;
     job.run = [](CallState&) { return json::object(); };
     REQUIRE(pool.submit_future("guessed-connection", job).get().is_object());
-    // The result can become ready just before the executor marks itself idle.
-    std::this_thread::sleep_for(20ms);
+    // The result can become ready just before the executor marks itself idle: retry until it is.
     SubmitResult status = SubmitResult::QueueFull;
-    auto legitimate = pool.submit_future("owner-session", job, &status);
+    std::future<json> legitimate;
+    REQUIRE(fairyfly::test::eventually([&] {
+        legitimate = pool.submit_future("owner-session", job, &status);
+        return status == SubmitResult::Queued;
+    }));
     CHECK(status == SubmitResult::Queued);
     REQUIRE(legitimate.valid());
     CHECK(legitimate.get().is_object());

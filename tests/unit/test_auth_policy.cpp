@@ -23,6 +23,7 @@
 #include "include/mcp/session_leases.h"
 #include "include/mcp/tool_catalog.h"
 
+#include "support/tool_specs.h"
 using namespace fairyfly;
 using namespace fairyfly::mcp;
 using fairyfly::auth::authorize_call;
@@ -30,22 +31,9 @@ using fairyfly::auth::glob_match;
 using fairyfly::auth::normalize_tcode;
 using Argv = std::vector<std::string>;
 
+using fairyfly::test::spec_of;
+
 namespace {
-
-Result ok_result() {
-    Result r;
-    r.status = Result::Status::Success;
-    r.data = json::object();
-    return r;
-}
-
-const ToolSpec& spec_of(const std::string& tool) {
-    static const std::vector<ToolSpec> catalog = all_tool_specs();
-    for (const auto& s : catalog)
-        if (s.def.name == tool) return s;
-    FAIL("unknown tool " + tool);
-    return catalog.front();
-}
 
 Principal token(const std::string& name, std::set<std::string> scopes) {
     Principal p;
@@ -282,7 +270,7 @@ struct Fixture {
     std::vector<bool> attach_finalizations;
     std::optional<audit::SapFacts> facts;
     std::function<std::optional<audit::SapFacts>(std::optional<int>)> facts_for;  // per-connection facts (wins over `facts`)
-    std::function<Result(const Argv&)> handler = [](const Argv&) { return ok_result(); };
+    std::function<Result(const Argv&)> handler = [](const Argv&) { return Result::ok(json::object()); };
 
     std::unique_ptr<CommandDispatcher> make(Policy policy = Policy{}) {
         auto d = std::make_unique<CommandDispatcher>([this](const Argv& argv) { calls.push_back(argv); return handler(argv); },
@@ -685,7 +673,7 @@ TEST_CASE("audit: principal, remote_addr, transport and era reach the JSONL; no 
     const std::string secret = "SECRETSECRETSECRETSECRETSECRETSECRETSECRET0";
     Fixture f;
     Policy policy = write_mode();
-    CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return ok_result(); }, policy,
+    CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return Result::ok(json::object()); }, policy,
                         make_mcp_audit_hook(&sink, nullptr, false));
     Principal p = token("ci-bot", {"screen", "element"});
     p.id = "issued-token-123";
@@ -946,7 +934,7 @@ TEST_CASE("dispatcher: session tools enforce the SAP-system allowlist through th
 TEST_CASE("dispatcher: attach without session_id checks the session it resolves to", "[auth][dispatch][target]") {
     Fixture f;
     f.handler = [](const Argv& argv) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv.size() >= 2 && argv[0] == "session" && argv[1] == "list")
             r.data = {{"connections", json::array({{{"description", "PRD"},
                                                     {"sessions", json::array({{{"id", "/app/con[1]/ses[0]"}}})}}})}};
@@ -967,7 +955,7 @@ TEST_CASE("dispatcher: attach without session_id checks the session it resolves 
 TEST_CASE("dispatcher: connections allowlist binds session and connection-targeting tools by name", "[auth][dispatch][target]") {
     Fixture f;
     f.handler = [](const Argv& argv) {  // the listings return well-formed (empty) data: they are filtered for this token
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv[0] == "connection") r.data = {{"connections", json::array()}, {"count", 0}};
         else if (argv[0] == "session" && argv.size() > 1 && argv[1] == "list") r.data = {{"connections", json::array()}};
         return r;
@@ -1002,7 +990,7 @@ TEST_CASE("dispatcher: connections allowlist binds session and connection-target
 TEST_CASE("dispatcher: connection list cleanup is refused for tokens limited to named connections", "[auth][dispatch][cleanup]") {
     Fixture f;
     f.handler = [](const Argv&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = {{"connections", json::array()}, {"count", 0}};
         return r;
     };
@@ -1109,7 +1097,7 @@ Principal listing_token() {
 
 TEST_CASE("authorize: session list is filtered to the token's connections with recomputed totals", "[auth][filter]") {
     Principal p = listing_token();
-    Result r = ok_result();
+    Result r = Result::ok(json::object());
     r.data = session_list_data();
     REQUIRE(auth::filter_listing_for_connections(p, "gui_session_list", r));
     REQUIRE(r.data["connections"].size() == 2);
@@ -1127,7 +1115,7 @@ TEST_CASE("authorize: session list is filtered to the token's connections with r
     // nothing allowed: empty lists, zero totals
     Principal none = listing_token();
     none.connections = {"NOPE"};
-    Result empty = ok_result();
+    Result empty = Result::ok(json::object());
     empty.data = session_list_data();
     REQUIRE(auth::filter_listing_for_connections(none, "gui_session_list", empty));
     CHECK(empty.data["connections"].empty());
@@ -1137,14 +1125,14 @@ TEST_CASE("authorize: session list is filtered to the token's connections with r
 
 TEST_CASE("authorize: connection and credentials lists are filtered by name with recomputed counts", "[auth][filter]") {
     Principal p = listing_token();
-    Result c = ok_result();
+    Result c = Result::ok(json::object());
     c.data = connection_list_data();
     REQUIRE(auth::filter_listing_for_connections(p, "gui_connection_list", c));
     REQUIRE(c.data["connections"].size() == 2);  // DEV1, dev-2 (case-insensitive glob); the unnamed row is dropped
     CHECK(c.data["count"] == 2);
     CHECK(c.data.dump().find("SECRETPRD") == std::string::npos);
 
-    Result k = ok_result();
+    Result k = Result::ok(json::object());
     k.data = credentials_list_data();
     REQUIRE(auth::filter_listing_for_connections(p, "gui_credentials_list", k));
     REQUIRE(k.data["credentials"].size() == 2);
@@ -1154,7 +1142,7 @@ TEST_CASE("authorize: connection and credentials lists are filtered by name with
 
     // unrestricted tokens and other tools are untouched
     Principal open = token("open", {"session"});
-    Result untouched = ok_result();
+    Result untouched = Result::ok(json::object());
     untouched.data = credentials_list_data();
     CHECK(auth::filter_listing_for_connections(open, "gui_credentials_list", untouched));
     CHECK(untouched.data == credentials_list_data());
@@ -1167,7 +1155,7 @@ TEST_CASE("authorize: a listing of unexpected shape is never returned unfiltered
         for (const json& bad : {json::array(), json("text"), json::object(), json{{"connections", "x"}, {"credentials", "x"}},
                                 json{{"connections", json::array({"not-an-object"})}, {"credentials", json::array({5})}},
                                 json{{"connections", json::array()}, {"credentials", json::array()}, {"extra", "SECRETPRD"}}}) {
-            Result r = ok_result();
+            Result r = Result::ok(json::object());
             r.data = bad;
             INFO(tool << " " << bad.dump());
             CHECK_FALSE(auth::filter_listing_for_connections(p, tool, r));
@@ -1188,7 +1176,7 @@ TEST_CASE("authorize: a listing of unexpected shape is never returned unfiltered
 TEST_CASE("dispatcher: the three listings only show the token's connections (no leak in text or structure)", "[auth][dispatch][filter]") {
     Fixture f;
     f.handler = [](const Argv& argv) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv[0] == "session" && argv[1] == "list") r.data = session_list_data();
         else if (argv[0] == "connection" && argv[1] == "list") r.data = connection_list_data();
         else if (argv[0] == "credentials" && argv[1] == "list") r.data = credentials_list_data();
@@ -1224,7 +1212,7 @@ TEST_CASE("dispatcher: the three listings only show the token's connections (no 
 TEST_CASE("dispatcher: an unfilterable listing is an error, and errors do not name other connections", "[auth][dispatch][filter]") {
     Fixture f;
     f.handler = [](const Argv& argv) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv[0] == "credentials") r.data = {{"credentials", "SECRETPRD"}, {"count", 1}};      // wrong shape
         else if (argv[0] == "connection") {
             r.status = Result::Status::Error;
@@ -1254,7 +1242,7 @@ TEST_CASE("dispatcher: an unfilterable listing is an error, and errors do not na
 TEST_CASE("dispatcher: attach without session_id neither offers nor lists other connections' sessions", "[auth][dispatch][filter]") {
     Fixture f;
     f.handler = [](const Argv& argv) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv.size() >= 2 && argv[0] == "session" && argv[1] == "list") r.data = session_list_data();
         return r;
     };
@@ -1286,7 +1274,7 @@ bool argv_has_connection(const Argv& argv) {
 TEST_CASE("dispatcher: the sticky connection belongs to one principal", "[auth][dispatch][sticky]") {
     Fixture f;
     f.handler = [](const Argv& argv) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         if (argv.size() >= 3 && argv[0] == "session" && argv[1] == "attach") {
             // the attach result names the connection file; encode it from the session id (con[N] -> N)
             const std::string& sid = argv.back();
@@ -1532,7 +1520,7 @@ TEST_CASE("dispatcher: leaving the allowlist during a call is flagged and blocks
     f.handler = [&](const Argv& argv) {
         if (!argv.empty() && argv[0] == "element" && argv.size() > 1 && argv[1] == "click")
             f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
-        return ok_result();
+        return Result::ok(json::object());
     };
     auto r = d.call_tool("gui_element_click", {{"element", "wnd[0]/usr/btnGo"}}, ctx_for(p));
     CHECK_FALSE(r.is_error);  // the tool result itself stays as is
@@ -1572,7 +1560,7 @@ TEST_CASE("dispatcher: leaving the allowlist during a call is flagged and blocks
     CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
 
     // an allowed gui_transaction_start that ends in an allowed transaction unblocks
-    f.handler = [](const Argv&) { return ok_result(); };
+    f.handler = [](const Argv&) { return Result::ok(json::object()); };
     CHECK_FALSE(d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p)).is_error);
     CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
 }
@@ -1586,7 +1574,7 @@ TEST_CASE("dispatcher: an allowed start that still ends outside the allowlist ke
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "key") f.facts = audit::SapFacts{"A4H", "001", "U", "S000"};
-        return ok_result();
+        return Result::ok(json::object());
     };
     auto r = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p));
     CHECK(text_of(r).find("tcode_left_allowlist") != std::string::npos);
@@ -1594,7 +1582,7 @@ TEST_CASE("dispatcher: an allowed start that still ends outside the allowlist ke
     r = d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p));
     CHECK(r.structured);
     CHECK(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
-    f.handler = [](const Argv&) { return ok_result(); };
+    f.handler = [](const Argv&) { return Result::ok(json::object()); };
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
     CHECK_FALSE(d.call_tool("gui_transaction_start", {{"code", "VA03"}}, ctx_for(p)).is_error);
     CHECK_FALSE(d.call_tool("gui_screen_read", json::object(), ctx_for(p)).is_error);
@@ -1610,7 +1598,7 @@ TEST_CASE("dispatcher: T-code denial survives provider replacement", "[auth][dis
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "key") f.facts->transaction = "S000";
-        return ok_result();
+        return Result::ok(json::object());
     };
     REQUIRE_FALSE(before->call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(p)).is_error);
     f.facts->transaction = "VA03";
@@ -1650,7 +1638,7 @@ TEST_CASE("dispatcher: batch items are re-checked one by one", "[auth][dispatch]
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "element" && argv[1] == "click") f.facts = audit::SapFacts{"A4H", "001", "U", "SE38"};
-        return ok_result();
+        return Result::ok(json::object());
     };
     const auto r = d.call_tool("gui_batch",
                                {{"items", json::array({{{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnGo"}}}},
@@ -1679,7 +1667,7 @@ TEST_CASE("dispatcher: per-principal state is keyed by token id, not by name", "
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "key") f.facts = audit::SapFacts{"A4H", "001", "U", "S000"};
-        return ok_result();
+        return Result::ok(json::object());
     };
     CHECK(text_of(d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_for(a))).find("tcode_left_allowlist") != std::string::npos);
     f.facts = audit::SapFacts{"A4H", "001", "U", "VA03"};
@@ -1709,7 +1697,7 @@ TEST_CASE("dispatcher: leaving a T-code allowlist blocks only the affected SAP s
     };
     f.handler = [&](const Argv& argv) {
         if (argv.size() >= 2 && argv[0] == "key" && argv[1] == "send") transactions[1] = "SE38";
-        return ok_result();
+        return Result::ok(json::object());
     };
 
     CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
@@ -1753,7 +1741,7 @@ TEST_CASE("dispatcher: mismatched post-call facts cannot block a different SAP s
         facts.session_identity = "session-" + std::to_string(reported);
         return facts;
     };
-    f.handler = [&](const Argv&) { after_key = true; return ok_result(); };
+    f.handler = [&](const Argv&) { after_key = true; return Result::ok(json::object()); };
     CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
     CHECK_FALSE(d->call_tool("gui_screen_read", {{"connection", 2}}, ctx_for(p)).is_error);
 }
@@ -1771,7 +1759,7 @@ TEST_CASE("dispatcher: T-code block survives a missing session identity", "[auth
         facts.session_identity = identity_missing ? "" : "session-one|key|generation";
         return facts;
     };
-    f.handler = [&](const Argv&) { transaction = "SE38"; return ok_result(); };
+    f.handler = [&](const Argv&) { transaction = "SE38"; return Result::ok(json::object()); };
     CHECK_FALSE(d->call_tool("gui_key_send", {{"key", "enter"}, {"connection", 1}}, ctx_for(p)).is_error);
     transaction = "VA03";
     identity_missing = true;
@@ -1822,7 +1810,7 @@ TEST_CASE("dispatcher sends an authorized bound call to its session worker", "[a
     std::optional<WorkerCall> received;
     d->set_session_invoker([&](const WorkerCall& call) {
         received = call;
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_id", 7}};
         return result;
     });
@@ -1866,7 +1854,7 @@ TEST_CASE("required audit failure before worker send does not claim the SAP acti
         CHECK_FALSE(append_serve_event(&sink, "probe", true));
         gate();
         worker_action = true;
-        return ok_result();
+        return Result::ok(json::object());
     });
     const auto result = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx_for(p));
     CHECK(result.is_error);
@@ -1890,7 +1878,7 @@ TEST_CASE("dispatcher reauthenticates immediately before each worker action", "[
     f.facts->connection_id = 7;
     f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
     int worker_calls = 0;
-    d->set_session_invoker([&](const WorkerCall&) { ++worker_calls; return ok_result(); });
+    d->set_session_invoker([&](const WorkerCall&) { ++worker_calls; return Result::ok(json::object()); });
     auto ctx = ctx_for(p);
     ctx.reauthorize = [] { return false; };
     const auto revoked = d->call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
@@ -1919,7 +1907,7 @@ TEST_CASE("dispatcher screenshot retry stays in its bound worker", "[auth][dispa
     std::vector<WorkerCall> worker_calls;
     d->set_session_invoker([&](const WorkerCall& call) {
         worker_calls.push_back(call);
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"screenshot", "data:image/png;base64," + std::string(4000, 'A')}};
         return result;
     });
@@ -1941,14 +1929,14 @@ TEST_CASE("worker mode refuses an unrecognized session command without local fal
     spec.build_argv = [](const json&, const Policy&) {
         return Argv{"screen", "unknown", "--connection", "7"};
     };
-    CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return ok_result(); },
+    CommandDispatcher d([&](const Argv& argv) { f.calls.push_back(argv); return Result::ok(json::object()); },
                         policy, nullptr, {spec});
     f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
     f.facts->connection_id = 7;
     f.facts->session_identity = "/app/con[0]/ses[0]|server-key|generation";
     d.set_sap_facts_provider([&](std::optional<int>) { return f.facts; });
     d.set_owner_session_override([](const std::string&, const std::string&) {});
-    d.set_session_invoker([](const WorkerCall&) { return ok_result(); });
+    d.set_session_invoker([](const WorkerCall&) { return Result::ok(json::object()); });
     Principal p = token("reader", {"screen"});
     const auto result = d.call_tool("gui_screen_unknown", {{"connection", 7}}, ctx_for(p));
     CHECK(result.is_error);
@@ -2015,7 +2003,7 @@ TEST_CASE("dispatcher: owner recheck withholds a result from a changed session",
     };
     f.handler = [&](const Argv&) {
         changed = true;
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"secret", "PRIVATE SCREEN"}};
         return result;
     };
@@ -2041,7 +2029,7 @@ TEST_CASE("dispatcher: owner recheck covers screenshot retry", "[auth][dispatch]
     };
     f.handler = [&](const Argv&) {
         ++captures;
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"screenshot", "data:image/png;base64," + std::string(captures == 1 ? 400 : 40, 'A')},
                        {"format", "base64"}};
         return result;
@@ -2102,7 +2090,7 @@ TEST_CASE("dispatcher: attaching a session checks the requested SAP user", "[aut
     f.facts->connection_id = 1;
     f.facts->session_identity = "session-one|key|generation";
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 1}, {"session_id", "session-one"}};
         return result;
     };
@@ -2168,7 +2156,7 @@ TEST_CASE("attach checks token limits again before writing a changed live target
             return denied;
         }
         cache_written = true;
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 1}, {"session_id", "session-one"}};
         return result;
     };
@@ -2206,7 +2194,7 @@ TEST_CASE("owner session listing withholds results after cancellation or verific
     auto d = f.make(policy);
     Principal p = token("agent", {"session"});
     f.handler = [](const Argv&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = session_list_data();
         return r;
     };
@@ -2250,7 +2238,7 @@ TEST_CASE("owner session listing withholds results after cancellation or verific
     probes = 0;
     f.handler = [](const Argv&) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = session_list_data();
         return r;
     };
@@ -2267,14 +2255,14 @@ TEST_CASE("owner discovery uses verified worker targets without tray COM enumera
     auto d = f.make(policy);
     Principal p = token("agent", {"session"});
     int tray_calls = 0;
-    f.handler = [&](const Argv&) { ++tray_calls; return ok_result(); };
+    f.handler = [&](const Argv&) { ++tray_calls; return Result::ok(json::object()); };
     int tray_probes = 0;
     d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
         ++tray_probes;
         return auth::SessionTarget{};
     });
     d->set_owner_session_listing_provider([](std::chrono::milliseconds, const std::function<bool()>&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = session_list_data();
         r.data["connections"][0]["sessions"][0]["verified_target"] =
             {{"system", "A4H/001"}, {"user", "OWNER"}, {"connection_name", "DEV1"}};
@@ -2300,7 +2288,7 @@ TEST_CASE("owner connection listing exposes only verified live owner rows", "[au
     p.sap_systems = {"A4H/001"};
     p.connections = {"Allowed*"};
     f.handler = [](const Argv&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = {{"connections", json::array({
             {{"id", 1}, {"session_id", "session-one"}, {"server_session_key", "key-one"},
              {"cache_generation", "gen-one"}, {"description", "SAVED_SECRET"}, {"file", "SECRET_FILE"}, {"valid", false}},
@@ -2357,7 +2345,7 @@ TEST_CASE("owner connection listing exposes only verified live owner rows", "[au
     CHECK(cleanup.is_error);
     CHECK(f.calls.size() == 2);
     f.handler = [](const Argv&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = {{"connections", json::array()}, {"count", 0}};
         return r;
     };
@@ -2366,7 +2354,7 @@ TEST_CASE("owner connection listing exposes only verified live owner rows", "[au
     CHECK(text_of(empty).find("No allowed SAP connection is ready") != std::string::npos);
     CHECK(text_of(empty).find("\"overall_health\":\"warning\"") != std::string::npos);
     f.handler = [](const Argv&) {
-        Result r = ok_result();
+        Result r = Result::ok(json::object());
         r.data = {{"connections", "FOREIGN_SECRET"}, {"count", 1}};
         return r;
     };
@@ -2435,7 +2423,7 @@ TEST_CASE("owner launch verifies a new prelogin window before exposing its saved
         f.facts = audit::SapFacts{"A4H", "000", "", "S000"};
         f.facts->connection_id = 7;
         f.facts->session_identity = "session-seven||generation";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
         return result;
     };
@@ -2474,7 +2462,7 @@ TEST_CASE("multi-user launch does not inherit an existing logon entry's SAP user
         f.facts = pre;
         f.facts->connection_id = 7;
         f.facts->session_identity = "session-seven|key|generation";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
         return result;
     };
@@ -2519,7 +2507,7 @@ TEST_CASE("owner launch with login checks credential identity before SAP submiss
         f.facts = credential;
         f.facts->connection_id = 7;
         f.facts->session_identity = "session-seven|key|generation";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
         return result;
     };
@@ -2554,7 +2542,7 @@ TEST_CASE("owner launch rolls back its saved generation when postcheck fails", "
         f.facts = audit::SapFacts{"PRD", "100", "OTHER", ""};
         f.facts->connection_id = 7;
         f.facts->session_identity = "session-seven|key|generation";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
         return result;
     };
@@ -2680,7 +2668,7 @@ TEST_CASE("owner login checks the credential identity before touching SAP", "[au
         f.facts->client = "001";
         f.facts->user = "OWNER";
         f.facts->session_identity = "session-one|newkey|newgeneration";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_id", 1}, {"session_id", "session-one"}};
         return result;
     };
@@ -2752,7 +2740,7 @@ TEST_CASE("owner login reports an unknown outcome when post-login facts cannot b
                 f.facts->user = "OTHER";
                 f.facts->session_identity = "session-one|newkey|newgeneration";
             }
-            Result result = ok_result();
+            Result result = Result::ok(json::object());
             result.data = {{"connection_id", 1}, {"session_id", "session-one"}};
             return result;
         };
@@ -2779,7 +2767,7 @@ TEST_CASE("dispatcher: attach result is withheld if the selected SAP user change
         return target;
     });
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 2}, {"session_id", "session-two"}, {"user", "OTHER"}};
         return result;
     };
@@ -2805,7 +2793,7 @@ TEST_CASE("dispatcher: session discovery shows only sessions of the configured S
     auto d = f.make(policy);
     Principal p = token("agent", {"session"});
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connections", json::array({{{"id", "/app/con[0]"}, {"description", "DEV"},
                       {"connection_string", "secret.example"},
                       {"sessions", json::array({{{"id", "allowed"}, {"active_window_title", "Allowed"}},
@@ -2837,7 +2825,7 @@ TEST_CASE("dispatcher: owner session discovery also honors the token SAP system"
     p.sap_systems = {"A4H/001"};
     p.sap_identities = {"A4H/001/OWNER"};
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connections", json::array({
             {{"id", "con-a"}, {"description", "A4H"}, {"sessions", json::array({{{"id", "allowed"}, {"active_window_title", "Allowed"}}})}},
             {{"id", "con-q"}, {"description", "QAS"}, {"sessions", json::array({{{"id", "hidden"}, {"active_window_title", "SECRET"}}})}}
@@ -2865,7 +2853,7 @@ TEST_CASE("dispatcher: two SAP users on one tray are separated by token identity
     policy.owner_sap_identities = {"A4H/001/ALICE", "A4H/001/BOB"};
     auto d = f.make(policy);
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connections", json::array({{{"description", "Bigfox"},
             {"sessions", json::array({{{"id", "alice-window"}}, {{"id", "bob-window"}}})}}})},
             {"total_connections", 1}, {"total_sessions", 2}};
@@ -2957,7 +2945,7 @@ TEST_CASE("multi-user prelogin window is bound to its launching token", "[auth][
             f.facts->client = "001";
             f.facts->user = "ALICE";
             f.facts->session_identity = "session-seven|key|new-generation";
-            return ok_result();
+            return Result::ok(json::object());
         }
         audit::SapFacts pre{"A4H", "000", "", "S000"};
         REQUIRE(f.launch_guard);
@@ -2965,7 +2953,7 @@ TEST_CASE("multi-user prelogin window is bound to its launching token", "[auth][
         f.facts = pre;
         f.facts->connection_id = 7;
         f.facts->session_identity = "session-seven||generation";
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connection_file_id", 7}, {"session_id", "session-seven"}};
         return result;
     };
@@ -3045,7 +3033,7 @@ TEST_CASE("only the launching token can close its exact prelogin window", "[auth
     f.handler = [&](const Argv&) {
         REQUIRE_FALSE(f.owner_guard_events.empty());
         CHECK(f.owner_guard_events.back().first == pre.session_identity);
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"file_deleted", true}};
         return result;
     };
@@ -3088,7 +3076,7 @@ TEST_CASE("dispatcher: owner session discovery does not forward stale window met
     auto d = f.make(policy);
     Principal p = token("agent", {"session"});
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connections", json::array({{
             {"id", "stale-connection"}, {"description", "stale-name"},
             {"sessions", json::array({{{"id", "reused-id"}, {"active_window_title", "PRIVATE PRIOR WINDOW"}}})}
@@ -3119,7 +3107,7 @@ TEST_CASE("dispatcher: owner discovery groups windows of one GUI connection", "[
     auto d = f.make(policy);
     Principal p = token("agent", {"session"});
     f.handler = [](const Argv&) {
-        Result result = ok_result();
+        Result result = Result::ok(json::object());
         result.data = {{"connections", json::array({{{"id", "con-one"}, {"description", "DEV"},
             {"sessions", json::array({{{"id", "session-one"}}, {{"id", "session-two"}}})}}})},
             {"total_connections", 1}, {"total_sessions", 2}};
@@ -3261,7 +3249,7 @@ TEST_CASE("dispatcher: T-code block survives a saved connection generation chang
     agent.allow_navigation = true;
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "key") f.facts->transaction = "SE38";
-        return ok_result();
+        return Result::ok(json::object());
     };
     d->set_session_leases(std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; }));
     // Seed through the call itself so both the identity and numeric fallback block are set.
@@ -3291,7 +3279,7 @@ TEST_CASE("dispatcher: screen read with a changing dynpro does not issue a guard
     f.facts->screen_number = "0100";
     f.handler = [&](const Argv&) {
         f.facts->screen_number = "0200";
-        return ok_result();
+        return Result::ok(json::object());
     };
     auto d = f.make(policy);
     Principal agent = token("agent", {"screen"});
@@ -3354,7 +3342,7 @@ TEST_CASE("dispatcher: stale disconnect preserves replacement connection policy"
     const std::string replacement_key = std::string("token-B\x1f") + "connection:1";
     state->set_tcode_blocked(replacement_key, true);
     f.handler = [](const Argv&) {
-        auto result = ok_result();
+        auto result = Result::ok(json::object());
         result.data["file_deleted"] = false; // saved ID was replaced while disconnect ran
         result.data["session_closed"] = false;
         return result;
@@ -3371,7 +3359,7 @@ TEST_CASE("worker mode dispatches disconnect through its bound session lane", "[
     auto leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), [] { return "lease-A"; });
     d->set_session_leases(leases);
     std::optional<WorkerCall> sent;
-    d->set_session_invoker([&](const WorkerCall& call) { sent = call; return ok_result(); });
+    d->set_session_invoker([&](const WorkerCall& call) { sent = call; return Result::ok(json::object()); });
     f.facts = audit::SapFacts{"A4H", "001", "OWNER", "VA03"};
     f.facts->connection_id = 1;
     f.facts->session_identity = "ses-1|key|generation";
@@ -3442,7 +3430,7 @@ TEST_CASE("dispatcher: owner batch pins its lease between items", "[auth][dispat
     p.id = "token-A";
     int invoked = 0;
     bool released_between_items = true;
-    CommandDispatcher d([&](const Argv&) { ++invoked; return ok_result(); }, policy,
+    CommandDispatcher d([&](const Argv&) { ++invoked; return Result::ok(json::object()); }, policy,
         [&](const McpCallRecord& record) {
             if (record.tool == "gui_element_click" && invoked == 1)
                 released_between_items = leases->release("ses-1|key|generation", p.id, "lease-A");

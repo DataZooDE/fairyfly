@@ -1,0 +1,112 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 7,
+  "elements": [
+   {
+    "grid_col": 0,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[0,2]",
+    "text": "Delete drafts...",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 3,
+    "id": "wnd[0]/usr/lbl[0,3]",
+    "text": "   ",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 3,
+    "id": "wnd[0]/usr/lbl[3,3]",
+    "text": "Deleted 0 drafts",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 3,
+    "grid_row": 4,
+    "id": "wnd[0]/usr/lbl[3,4]",
+    "text": "done",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 5,
+    "id": "wnd[0]/usr/lbl[0,5]",
+    "text": " ",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 6,
+    "id": "wnd[0]/usr/lbl[0,6]",
+    "text": " ",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 0,
+    "grid_row": 7,
+    "id": "wnd[0]/usr/lbl[0,7]",
+    "text": "Generate EPM data...",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "grid_col": 0,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[0,2]",
+     "text": "Delete drafts...",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 3,
+     "id": "wnd[0]/usr/lbl[0,3]",
+     "text": "   ",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 3,
+     "id": "wnd[0]/usr/lbl[3,3]",
+     "text": "Deleted 0 drafts",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 3,
+     "grid_row": 4,
+     "id": "wnd[0]/usr/lbl[3,4]",
+     "text": "done",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 5,
+     "id": "wnd[0]/usr/lbl[0,5]",
+     "text": " ",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 6,
+     "id": "wnd[0]/usr/lbl[0,6]",
+     "text": " ",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 0,
+     "grid_row": 7,
+     "id": "wnd[0]/usr/lbl[0,7]",
+     "text": "Generate EPM data...",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "EPM list shape"
+ },
+ "output": "# EPM list shape\n\n**Screen ID:** ``\n\n## Report Output\n\n```\nDelete drafts...\n   Deleted 0 drafts\n   done\n\n\nGenerate EPM data...\n```\n\n---\n**Screen Elements:** 7 top-level\n"
+}
