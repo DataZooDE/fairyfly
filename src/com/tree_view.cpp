@@ -1,4 +1,5 @@
 // ComGuiTree: the tree methods of a GuiTree / tree shell (moved out of ComGuiElement).
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
 #include "include/com/invoke.h"
 #include "include/string_utils.h"
@@ -125,8 +126,8 @@ std::string ComGuiTree::get_item_text(const std::string& node_key, const std::st
             std::string context = fmt::format("get_item_text key='{}' col='{}'", node_key, column_name);
             text = safe_bstr_to_string(result_var, context.c_str());
         } else {
-            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr=0x{:08X}",
-                         node_key, column_name, hr);
+            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr={}",
+                         node_key, column_name, hresult_hex(hr));
         }
 
         // Cleanup happens automatically via VariantGuard RAII
