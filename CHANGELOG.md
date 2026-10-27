@@ -42,6 +42,17 @@
 - COM errors and logs print an HRESULT as Windows documents it (`0x80020009`), not as a signed number
   (`0x-7FFDFFF7`); for example "SendVKey invoke failed", "OpenConnection failed: hr=..." and the screenshot errors.
 
+### No hand-written function over 150 lines (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` (794 lines with the re-attach from 2026.10.25.2) is the admission
+  (`admit_call`, `admit_live_session` over a `CallState`), then `execute_call` (100 lines), `invoke_and_finish` (93)
+  and `run_invocation` (127) nested along their scopes, plus named checks for the lease, the screen guard, the
+  owner attach/launch/login and the image cap. `run_mcp` (HTTP: `serve_http`), `HttpEndpoint::dispatch`,
+  `ComAutomationEngine::launch_connection` and `run_setup` are split as well; the only longer functions left are the
+  tool catalog and the element registries (tables).
+- A timing test of the object tree parser compares against a plain JSON parse in the same run (it failed on a busy
+  machine).
+
 ### Shorter functions, shared tree and tab steps (2026-10-25 code review)
 
 - The two tree readers share the item texts, the data columns and the nesting by path, which no longer asks SAP
