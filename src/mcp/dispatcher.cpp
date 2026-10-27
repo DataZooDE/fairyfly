@@ -1032,6 +1032,123 @@ void CommandDispatcher::remember_sticky_connection(ToolResult& shaped, const Res
     }
 }
 
+/// stdio and link (auto_attach): the default connection's session is gone. Attach to the only open SAP GUI session
+/// when its system/client/user is `recorded` ("SYS/CLIENT/USER"), make it the default bound to that session and
+/// return its connection id; nullopt: nothing attached. Without that verified, logged-on identity (`recorded` empty: a
+/// file of an older version; "SYS/CLIENT/": only the system and client must match; or nobody logged on in the
+/// session) only a read-only tool re-attaches: a change is refused and `reattach_refused` says so. `reattach_note`
+/// is what the result says when a default connection was re-attached.
+std::optional<int> CommandDispatcher::reattach_only_session_for(const ToolSpec& spec, const std::string& name,
+                                                                const Principal& principal, const std::string& recorded,
+                                                                const std::string& stale_id, std::string& reattach_note,
+                                                                bool& reattach_refused) {
+    const Result listed = invoke({"session", "list"});
+    const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
+    if (sessions.size() != 1) {
+        spdlog::info("{}: saved connection {} is stale and {} SAP GUI sessions are open; not re-attached",
+                     name, stale_id, sessions.size());
+        return std::nullopt;
+    }
+    const std::string session_id = sessions[0].value("session_id", "");
+    const json candidate = listed_session(listed, session_id);
+    const std::string live = sap_identity_of(candidate);
+    const bool recorded_user = !recorded.empty() && recorded.back() != '/';
+    if (recorded_user ? live != recorded : (!recorded.empty() && live.rfind(recorded, 0) != 0)) {
+        spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
+                     name, stale_id, recorded, session_id, live);
+        return std::nullopt;
+    }
+    const bool verified = recorded_user && !identity_field(candidate, "user").empty();
+    if (!verified && !reads_only(spec)) {
+        spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} ({}) is not verified as the "
+                     "same logged-on SAP user: not re-attached for a change", name, stale_id,
+                     recorded.empty() ? "no SAP system/client/user recorded" : recorded, session_id, live);
+        reattach_refused = true;
+        return std::nullopt;
+    }
+    if (!verified)
+        spdlog::warn("{}: saved connection {} ({}) is stale; re-attaching the only open SAP session {} ({}) "
+                     "for a read only", name, stale_id, recorded.empty() ? "no SAP system/client/user recorded" : recorded,
+                     session_id, live);
+    const Result attached = invoke({"session", "attach", "--session-id", session_id});
+    std::optional<int> id;
+    if (attached.status == Result::Status::Success && attached.data.is_object() &&
+        attached.data.contains("connection_file_id"))
+        id = int_from_json(attached.data["connection_file_id"]);
+    if (!id) {
+        spdlog::warn("{}: re-attaching to SAP session {} failed", name, session_id);
+        return std::nullopt;
+    }
+    std::string session_identity, sap_identity;
+    if (facts_provider_) {
+        try {
+            const auto facts = facts_provider_(*id);
+            if (facts && facts->connection_id == *id) {
+                session_identity = facts->session_identity;
+                if (!facts->system.empty() && !facts->client.empty() && !facts->user.empty())
+                    sap_identity = facts->system + "/" + facts->client + "/" + facts->user;
+            }
+        } catch (...) {}
+    }
+    set_sticky_connection(principal_key(principal), *id, session_identity, sap_identity);
+    spdlog::info("{}: saved connection {} was stale; re-attached to the only open SAP session {} ({}), now connection {}",
+                 name, stale_id, session_id, live, *id);
+    reattach_note = "note: the saved SAP connection " + stale_id + " had closed; re-attached to the only open SAP session (" +
+                    live + "), now connection " + std::to_string(*id) + ".";
+    if (!verified)
+        reattach_note += " It is not verified as the same logged-on SAP user, so it was re-attached for this read-only "
+                         "call only; before changing anything, attach the SAP session again (gui_session_attach).";
+    return id;
+
+}
+
+/// 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch, log
+/// on, attach, disconnect (or act through an explicit `connection`). The target is resolved read-only, without
+/// contacting SAP; when it cannot be determined the call is refused (fail closed). nullopt: allowed.
+std::optional<PolicyDecision> CommandDispatcher::session_target_refusal(const std::string& name, const json& call_args,
+                                                                        const CallContext& ctx, const Principal& principal,
+                                                                        std::optional<int> connection, bool prelogin_close) {
+    if (prelogin_close) return std::nullopt; // exact live claim and name were checked above
+    const bool owner_target = owner_mode(ctx) && name == "gui_session_attach";
+    if (owner_mode(ctx) && name == "gui_session_login")
+        return std::nullopt; // the handler checks the stored credential and live connection before typing
+    if (!owner_target && !auth::needs_session_target(principal, name, call_args)) return std::nullopt;
+    TargetQuery query;
+    if (name == "gui_session_launch") {
+        if (call_args.is_object() && call_args.contains("name") && call_args["name"].is_string())
+            query.logon_name = call_args["name"].get<std::string>();
+    } else if (name == "gui_session_attach") {
+        if (call_args.is_object() && call_args.contains("session_id") && call_args["session_id"].is_string())
+            query.session_id = call_args["session_id"].get<std::string>();
+    } else {
+        query.connection = connection;
+    }
+    auth::SessionTarget target;
+    target.ambiguous = true;  // no resolver / resolver failure: a launch cannot be checked against open sessions -> denied
+    if (target_resolver_) {
+        try { target = target_resolver_(query); } catch (...) { target = {}; target.ambiguous = true; }
+    }
+    if (owner_target) {
+        if (target.system.empty() || target.user.empty() || target.ambiguous ||
+            target.system.find('/') == std::string::npos)
+            return PolicyDecision{false, "OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified"};
+        const std::string identity = target.identity();
+        if (!owner_identity_allowed(policy_, principal, identity))
+            return PolicyDecision{false, "OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint"};
+    }
+    if (owner_mode(ctx) && name == "gui_session_launch") {
+        // A SAP Logon entry can already have windows authenticated as other users.
+        // Its live system/client may help constrain launch, but that user's identity
+        // says nothing about the new window. The launch/login guards check the new
+        // window and its authenticated SAP user before exposing its saved ID.
+        target.user.clear();
+    }
+    auto decision = auth::authorize_session_target(principal, name, call_args, target);
+    if (decision.allowed) return std::nullopt;
+    return decision;
+
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1078,64 +1195,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     const std::string reattach_again_hint =
         "the saved SAP connection had closed and the open SAP session is not verified as the same logged-on SAP user: "
         "attach the SAP session again (gui_session_attach) and retry";
-    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) -> std::optional<int> {
-        const Result listed = invoke({"session", "list"});
-        const json sessions = listed.status == Result::Status::Success ? open_sessions(listed) : json::array();
-        if (sessions.size() != 1) {
-            spdlog::info("{}: saved connection {} is stale and {} SAP GUI sessions are open; not re-attached",
-                         name, stale_id, sessions.size());
-            return std::nullopt;
-        }
-        const std::string session_id = sessions[0].value("session_id", "");
-        const json candidate = listed_session(listed, session_id);
-        const std::string live = sap_identity_of(candidate);
-        const bool recorded_user = !recorded.empty() && recorded.back() != '/';
-        if (recorded_user ? live != recorded : (!recorded.empty() && live.rfind(recorded, 0) != 0)) {
-            spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} is {}: not re-attached",
-                         name, stale_id, recorded, session_id, live);
-            return std::nullopt;
-        }
-        const bool verified = recorded_user && !identity_field(candidate, "user").empty();
-        if (!verified && !reads_only(*spec)) {
-            spdlog::warn("{}: saved connection {} ({}) is stale; the only open SAP session {} ({}) is not verified as the "
-                         "same logged-on SAP user: not re-attached for a change", name, stale_id,
-                         recorded.empty() ? "no SAP system/client/user recorded" : recorded, session_id, live);
-            reattach_refused = true;
-            return std::nullopt;
-        }
-        if (!verified)
-            spdlog::warn("{}: saved connection {} ({}) is stale; re-attaching the only open SAP session {} ({}) "
-                         "for a read only", name, stale_id, recorded.empty() ? "no SAP system/client/user recorded" : recorded,
-                         session_id, live);
-        const Result attached = invoke({"session", "attach", "--session-id", session_id});
-        std::optional<int> id;
-        if (attached.status == Result::Status::Success && attached.data.is_object() &&
-            attached.data.contains("connection_file_id"))
-            id = int_from_json(attached.data["connection_file_id"]);
-        if (!id) {
-            spdlog::warn("{}: re-attaching to SAP session {} failed", name, session_id);
-            return std::nullopt;
-        }
-        std::string session_identity, sap_identity;
-        if (facts_provider_) {
-            try {
-                const auto facts = facts_provider_(*id);
-                if (facts && facts->connection_id == *id) {
-                    session_identity = facts->session_identity;
-                    if (!facts->system.empty() && !facts->client.empty() && !facts->user.empty())
-                        sap_identity = facts->system + "/" + facts->client + "/" + facts->user;
-                }
-            } catch (...) {}
-        }
-        set_sticky_connection(principal_key(principal), *id, session_identity, sap_identity);
-        spdlog::info("{}: saved connection {} was stale; re-attached to the only open SAP session {} ({}), now connection {}",
-                     name, stale_id, session_id, live, *id);
-        reattach_note = "note: the saved SAP connection " + stale_id + " had closed; re-attached to the only open SAP session (" +
-                        live + "), now connection " + std::to_string(*id) + ".";
-        if (!verified)
-            reattach_note += " It is not verified as the same logged-on SAP user, so it was re-attached for this read-only "
-                             "call only; before changing anything, attach the SAP session again (gui_session_attach).";
-        return id;
+    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
+        return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
     };
     std::unique_lock<std::shared_timed_mutex> control_probe_lock;
     const auto acquire_control_probe_gate = [&]() {
@@ -1288,45 +1349,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // 2c. session/connection targets: the SAP-system and saved-connection allowlists also bind the calls that launch,
     // log on, attach, disconnect (or act through an explicit `connection`). The target is resolved read-only, without
     // contacting SAP; when it cannot be determined the call is refused (fail closed).
-    const auto check_target = [&](const json& call_args) -> std::optional<PolicyDecision> {
-        if (prelogin_close_facts) return std::nullopt; // exact live claim and name were checked above
-        const bool owner_target = owner_mode(ctx) && name == "gui_session_attach";
-        if (owner_mode(ctx) && name == "gui_session_login")
-            return std::nullopt; // the handler checks the stored credential and live connection before typing
-        if (!owner_target && !auth::needs_session_target(principal, name, call_args)) return std::nullopt;
-        TargetQuery query;
-        if (name == "gui_session_launch") {
-            if (call_args.is_object() && call_args.contains("name") && call_args["name"].is_string())
-                query.logon_name = call_args["name"].get<std::string>();
-        } else if (name == "gui_session_attach") {
-            if (call_args.is_object() && call_args.contains("session_id") && call_args["session_id"].is_string())
-                query.session_id = call_args["session_id"].get<std::string>();
-        } else {
-            query.connection = record.connection;
-        }
-        auth::SessionTarget target;
-        target.ambiguous = true;  // no resolver / resolver failure: a launch cannot be checked against open sessions -> denied
-        if (target_resolver_) {
-            try { target = target_resolver_(query); } catch (...) { target = {}; target.ambiguous = true; }
-        }
-        if (owner_target) {
-            if (target.system.empty() || target.user.empty() || target.ambiguous ||
-                target.system.find('/') == std::string::npos)
-                return PolicyDecision{false, "OWNER_IDENTITY_UNKNOWN", "the target session's SAP identity could not be verified"};
-            const std::string identity = target.identity();
-            if (!owner_identity_allowed(policy_, principal, identity))
-                return PolicyDecision{false, "OWNER_IDENTITY_DENIED", "the target session's SAP identity is not allowed for this endpoint"};
-        }
-        if (owner_mode(ctx) && name == "gui_session_launch") {
-            // A SAP Logon entry can already have windows authenticated as other users.
-            // Its live system/client may help constrain launch, but that user's identity
-            // says nothing about the new window. The launch/login guards check the new
-            // window and its authenticated SAP user before exposing its saved ID.
-            target.user.clear();
-        }
-        auto decision = auth::authorize_session_target(principal, name, call_args, target);
-        if (decision.allowed) return std::nullopt;
-        return decision;
+    const auto check_target = [&](const json& call_args) {
+        return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
     };
     const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
     if (!attach_needs_resolution)

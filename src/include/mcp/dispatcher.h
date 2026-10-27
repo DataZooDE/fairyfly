@@ -185,6 +185,12 @@ private:
     std::optional<CallRefusal> prepare_owner_batch(const json& args, const CallContext& ctx, json& items, int& connection,
                                                    std::string& lease_id, bool& needs_lease,
                                                    std::optional<audit::SapFacts>& facts);
+    std::optional<int> reattach_only_session_for(const ToolSpec& spec, const std::string& name, const Principal& principal,
+                                                 const std::string& recorded, const std::string& stale_id,
+                                                 std::string& reattach_note, bool& reattach_refused);
+    std::optional<PolicyDecision> session_target_refusal(const std::string& name, const json& call_args,
+                                                         const CallContext& ctx, const Principal& principal,
+                                                         std::optional<int> connection, bool prelogin_close);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
     std::optional<CallRefusal> reserve_owner_login(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                    McpCallRecord& record, const CallContext& ctx,
