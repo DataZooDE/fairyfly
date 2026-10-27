@@ -25,18 +25,21 @@ function Check([bool]$cond, [string]$msg) {
 }
 # top-level scalar "Key: value" of a template (quotes removed); $null when absent
 function Get-Field([string]$text, [string]$key) {
+    $text = $text -replace "`r`n", "`n"   # CRLF checkouts (git on Windows) parse like LF
     $m = [regex]::Match($text, "(?m)^$([regex]::Escape($key)):[ \t]*(.*?)[ \t]*$")
     if (-not $m.Success) { return $null }
     return $m.Groups[1].Value.Trim("'", '"')
 }
 # top-level list "Key:\n- a\n- b"
 function Get-List([string]$text, [string]$key) {
+    $text = $text -replace "`r`n", "`n"   # CRLF checkouts (git on Windows) parse like LF
     $m = [regex]::Match($text, "(?m)^$([regex]::Escape($key)):[ \t]*\r?\n((?:- .*\r?\n?)+)")
     if (-not $m.Success) { return @() }
     return @($m.Groups[1].Value -split '\r?\n' | Where-Object { $_ } | ForEach-Object { $_.Substring(2).Trim() })
 }
 # block scalar "Key: |-" followed by indented lines
 function Get-Block([string]$text, [string]$key) {
+    $text = $text -replace "`r`n", "`n"   # CRLF checkouts (git on Windows) parse like LF
     $m = [regex]::Match($text, "(?m)^$([regex]::Escape($key)):[ \t]*\|-?[ \t]*\r?\n((?:[ \t]+.*\r?\n?)+)")
     if (-not $m.Success) { return $null }
     return (($m.Groups[1].Value -split '\r?\n' | ForEach-Object { $_ -replace '^  ', '' }) -join "`n").Trim()
@@ -66,7 +69,7 @@ foreach ($name in $files.Keys) {
     $path = Join-Path $templates $name
     Check (Test-Path $path) "$name exists"
     if (-not (Test-Path $path)) { continue }
-    $t = Get-Content $path -Raw
+    $t = (Get-Content $path -Raw) -replace "`r`n", "`n"
     $text[$name] = $t
     $type = $files[$name]
     $first = ($t -split '\r?\n')[0]
