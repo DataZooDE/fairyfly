@@ -120,23 +120,96 @@ std::optional<std::string> expected_sha256(const std::string& sums, const std::s
     return std::nullopt;
 }
 
+bool is_signed(const Signature& s) { return s.valid || s.present || !s.subject.empty(); }
+
+std::vector<std::string> subject_values(const std::string& subject, const std::string& key) {
+    std::vector<std::string> out;
+    const std::string want = lower(key);
+    auto trim = [](std::string v) {
+        const auto b = v.find_first_not_of(" \t"), e = v.find_last_not_of(" \t");
+        return b == std::string::npos ? std::string() : v.substr(b, e - b + 1);
+    };
+    size_t i = 0;
+    const size_t n = subject.size();
+    while (i < n) {
+        // one attribute: key=value up to an unquoted separator
+        const size_t eq = subject.find('=', i);
+        if (eq == std::string::npos) break;
+        const std::string k = lower(trim(subject.substr(i, eq - i)));
+        size_t j = eq + 1;
+        while (j < n && (subject[j] == ' ' || subject[j] == '\t')) j++;
+        std::string value;
+        if (j < n && subject[j] == '"') {
+            for (j++; j < n; j++) {
+                if (subject[j] == '"') {
+                    if (j + 1 < n && subject[j + 1] == '"') { value += '"'; j++; continue; }
+                    j++;
+                    break;
+                }
+                value += subject[j];
+            }
+            while (j < n && subject[j] != ',' && subject[j] != ';' && subject[j] != '+') j++;  // junk after the quote
+        } else {
+            const size_t start = j;
+            while (j < n && subject[j] != ',' && subject[j] != ';' && subject[j] != '+') j++;
+            value = trim(subject.substr(start, j - start));
+        }
+        if (k == want) out.push_back(value);
+        i = j < n ? j + 1 : n;
+    }
+    return out;
+}
+
+std::string normalize_name(const std::string& name) {
+    std::string out;
+    bool blank = false;
+    for (unsigned char c : name) {
+        if (std::isspace(c)) { blank = !out.empty(); continue; }
+        if (blank) out += ' ';
+        blank = false;
+        out += static_cast<char>(std::tolower(c));
+    }
+    return out;
+}
+
+bool signer_matches(const Signature& s, const std::string& organization, const std::string& country) {
+    if (!s.valid || normalize_name(organization).empty()) return false;
+    const auto o = subject_values(s.subject, "O");
+    if (o.size() != 1 || normalize_name(o[0]) != normalize_name(organization)) return false;
+    if (normalize_name(country).empty()) return true;
+    const auto c = subject_values(s.subject, "C");
+    return c.size() == 1 && normalize_name(c[0]) == normalize_name(country);
+}
+
 Decision decide(const Facts& f) {
-    auto refuse = [](std::string code, std::string msg) { return Decision{Verdict::Refuse, std::move(code), std::move(msg)}; };
+    auto refuse = [](std::string code, std::string msg) { return Decision{Verdict::Refuse, std::move(code), std::move(msg), {}}; };
     auto cur = parse_version(f.current_version), rel = parse_version(f.release_version);
     if (!cur || !rel) return refuse("UPDATE_BAD_VERSION", "cannot compare '" + f.current_version + "' with '" + f.release_version + "'");
-    if (compare(*rel, *cur) <= 0) return {Verdict::UpToDate, "", "fairyfly " + f.current_version + " is up to date"};
+    if (compare(*rel, *cur) <= 0) return {Verdict::UpToDate, "", "fairyfly " + f.current_version + " is up to date", {}};
     if (!is_hex64(f.expected_sha256)) return refuse("UPDATE_CHECKSUM_MISSING", "SHA256SUMS has no hash for fairyfly.exe");
     if (utils::lower_ascii(f.actual_sha256) != utils::lower_ascii(f.expected_sha256))
         return refuse("UPDATE_CHECKSUM_MISMATCH", "the download does not match SHA256SUMS; nothing was changed");
-    if (f.current.valid) {
-        if (!f.downloaded.valid) return refuse("UPDATE_SIGNATURE_INVALID", "the new fairyfly.exe has no valid signature; nothing was changed");
-        if (f.downloaded.subject != f.current.subject)
-            return refuse("UPDATE_SIGNER_CHANGED", "the new fairyfly.exe is signed by '" + f.downloaded.subject + "', this one by '" +
-                                                       f.current.subject + "'; nothing was changed");
-    } else if (!f.downloaded.valid && !f.allow_unsigned) {
-        return refuse("UPDATE_UNSIGNED", "the release is not signed; install it by hand or pass --allow-unsigned");
+    std::string expected = std::string("O=") + kExpectedSignerOrganization;
+    if (*kExpectedSignerCountry) expected += std::string(", C=") + kExpectedSignerCountry;
+    if (is_signed(f.downloaded)) {
+        // a signature that does not verify is never "unsigned": --allow-unsigned does not accept it
+        if (!f.downloaded.valid)
+            return refuse("UPDATE_SIGNATURE_INVALID", "the new fairyfly.exe has a signature that does not verify (" +
+                                                          (f.downloaded.subject.empty() ? std::string("no signer") : f.downloaded.subject) +
+                                                          "); nothing was changed");
+        if (!signer_matches(f.downloaded))
+            return refuse("UPDATE_SIGNER_UNEXPECTED", "the new fairyfly.exe is signed by '" + f.downloaded.subject + "', expected " + expected +
+                                                          "; nothing was changed");
+        return {Verdict::Install, "", "install fairyfly " + f.release_version + " (signed by " + expected + ")", {}};
     }
-    return {Verdict::Install, "", "install fairyfly " + f.release_version};
+    // an unsigned release: never on a signed installation (no downgrade of trust), else only when asked
+    if (is_signed(f.current))
+        return refuse("UPDATE_SIGNATURE_INVALID", "the new fairyfly.exe is not signed and this installation is; nothing was changed");
+    if (!f.allow_unsigned) return refuse("UPDATE_UNSIGNED", "the release is not signed; install it by hand or pass --allow-unsigned");
+    Decision d{Verdict::Install, "", "install fairyfly " + f.release_version + " (unsigned, accepted with --allow-unsigned)", {}};
+    d.warning = "the release is unsigned: only SHA256SUMS from the same GitHub release was checked, which does not prove who built it; "
+                "signed releases (" + expected + ") are taken without --allow-unsigned";
+    return d;
 }
 
 }  // namespace fairyfly::update
