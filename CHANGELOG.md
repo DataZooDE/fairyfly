@@ -2,6 +2,14 @@
 
 ## 2026.10.27 (2026-10-27)
 
+### Link audit trail: a closed "Change Password" menu entry no longer drops the screenshot
+
+- Live on SU01 → Logon data, the closed menu entry `wnd[0]/mbar/menu[0]/menu[8]` ("Change Password") counted as a
+  password field without a position, so every screenshot of that screen was dropped. SAP answers the geometry of a
+  closed menu entry with -1 everywhere; that answer (`Field::not_drawn`, set only when all four reads succeed) now
+  excuses menus alone. A menu entry with a position is blurred like any field (SAP can fill a caption from a program
+  field), and one whose geometry could not be read still drops the shot.
+
 ### Releases: code signing with Microsoft Artifact Signing (ready, off until configured)
 
 - `release.yml` signs with `azure/artifact-signing-action` v2.0.0 (pinned to its commit) after an OIDC `azure/login`:
