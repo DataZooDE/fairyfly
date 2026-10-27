@@ -152,7 +152,7 @@ ComGuiApplicationPtr create_embedded_application(HRESULT& hr) {
             DISPID test_dispid = -1;
             HRESULT test_hr = get_dispid_via_typeinfo(sap_gui, L"OpenConnection", &test_dispid);
             if (SUCCEEDED(test_hr)) {
-                return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui), 2);
+                return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui, false), 2);  // adopts CoCreateInstance's reference
             }
 
             sap_gui->Release();

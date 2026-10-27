@@ -67,6 +67,8 @@ private:
         bool logon_missing = false;       ///< SAP Logon is not running
         std::string error;
     };
+    bool launch_by_sapshcut(const std::string& connection_name, json& trace);
+    void no_session_error(Result& result, bool used_sapshcut) const;
     NativeOpen open_native_connection(const std::string& connection_name, json& trace);
     std::vector<ConnectionLauncher::ExistingSession> open_sessions_now() const;
 
