@@ -579,6 +579,89 @@ std::optional<HttpResponse> HttpEndpoint::protocol_refusal(const HttpRequest& re
     return std::nullopt;
 }
 
+namespace {
+
+/// A plain JSON answer: waits for the job (polling the client connection and the server's stop), 499 when the client
+/// went away and 503 when the server stops first; the job is cancelled in both cases.
+HttpResponse wait_for_answer(const HttpRequest& request, const json& id, Waiter& waiter, std::chrono::milliseconds poll,
+                             const std::function<void()>& cancel, const std::function<bool()>& stopping) {
+    std::unique_lock<std::mutex> lock(waiter.m);
+    while (!waiter.done) {
+        waiter.cv.wait_for(lock, poll);
+        if (!waiter.done && request.connected && !request.connected()) {
+            lock.unlock();
+            cancel();
+            return json_response(499, make_error(id, kServerBusy, "client disconnected"));
+        }
+        if (!waiter.done && stopping()) break;
+    }
+    if (!waiter.done || waiter.final_message.is_null()) {
+        lock.unlock();
+        cancel();
+        return json_response(503, make_error(id, kServerBusy, "server shutting down", json{{"retry", true}}));
+    }
+    return json_response(200, waiter.final_message);
+}
+
+/// An SSE answer (HTTP 200): the job's progress frames as they come, keep-alive comments while it runs, then its final
+/// message, or a JSON-RPC kServerBusy error when the job ended without one. A client that goes away or a server that
+/// stops before the job is done cancels it and ends the stream without a final message.
+HttpResponse sse_answer(std::shared_ptr<Waiter> waiter, std::shared_ptr<CallState> state, std::function<void()> cancel,
+                        std::function<bool()> stopping, std::chrono::milliseconds poll, int keepalive_ms) {
+    HttpResponse r;
+    r.status = 200;
+    r.set_header("Content-Type", "text/event-stream");
+    r.set_header("Cache-Control", "no-cache");
+    r.set_header("X-Accel-Buffering", "no");
+    r.set_header("Connection", "keep-alive");
+    r.stream = [waiter, state, cancel, stopping, poll, keepalive_ms](SseSink& sink) {
+        auto last_write = std::chrono::steady_clock::now();
+        auto emit = [&](const std::string& frame) {
+            if (!sink.write(frame)) return false;
+            last_write = std::chrono::steady_clock::now();
+            return true;
+        };
+        while (true) {
+            std::vector<std::string> frames;
+            json final_message;
+            bool done = false;
+            {
+                std::unique_lock<std::mutex> lock(waiter->m);
+                if (waiter->frames.empty() && !waiter->done) waiter->cv.wait_for(lock, poll);
+                while (!waiter->frames.empty()) {
+                    frames.push_back(std::move(waiter->frames.front()));
+                    waiter->frames.pop_front();
+                }
+                done = waiter->done;
+                final_message = waiter->final_message;
+            }
+            for (const auto& f : frames)
+                if (!emit(f)) {
+                    cancel();
+                    return;
+                }
+            if (done) {
+                if (final_message.is_null())
+                    final_message = make_error(state->id, kServerBusy, "server shutting down", json{{"retry", true}});
+                emit(format_sse_event("message", dump(final_message)));
+                return;
+            }
+            if (!sink.connected() || stopping()) {
+                cancel();
+                return;
+            }
+            if (keepalive_ms > 0 && std::chrono::steady_clock::now() - last_write >= std::chrono::milliseconds(keepalive_ms))
+                if (!emit(format_sse_comment("keep-alive"))) {
+                    cancel();
+                    return;
+                }
+        }
+    };
+    return r;
+}
+
+}  // namespace
+
 /// A tools/call on a routed endpoint: the token is authenticated again, then the router assigns the SAP session; a
 /// call that is neither routed nor global control is refused (SESSION_ROUTE_REQUIRED). Sets the re-authenticated
 /// `admission_principal` and the `route`.
@@ -837,82 +920,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const auto route_stopping = [this, routed] {
         return executor_.stopping() || (routed && session_pool_->stopping());
     };
-    auto shutting_down = [&] {
-        HttpResponse r = json_response(503, make_error(message.id, kServerBusy, "server shutting down", json{{"retry", true}}));
-        return r;
-    };
-
-    if (!sse) {
-        std::unique_lock<std::mutex> lock(waiter->m);
-        while (!waiter->done) {
-            waiter->cv.wait_for(lock, poll);
-            if (!waiter->done && request.connected && !request.connected()) {
-                lock.unlock();
-                route_cancel();
-                return json_response(499, make_error(message.id, kServerBusy, "client disconnected"));
-            }
-            if (!waiter->done && route_stopping()) break;
-        }
-        if (!waiter->done || waiter->final_message.is_null()) {
-            lock.unlock();
-            route_cancel();
-            return shutting_down();
-        }
-        return json_response(200, waiter->final_message);
-    }
-
-    // ---- SSE ----------------------------------------------------------------------------------
-    HttpResponse r;
-    r.status = 200;
-    r.set_header("Content-Type", "text/event-stream");
-    r.set_header("Cache-Control", "no-cache");
-    r.set_header("X-Accel-Buffering", "no");
-    r.set_header("Connection", "keep-alive");
-    const int keepalive_ms = options_.keepalive_ms;
-    r.stream = [waiter, state, route_cancel, route_stopping, poll, keepalive_ms](SseSink& sink) {
-        auto last_write = std::chrono::steady_clock::now();
-        auto emit = [&](const std::string& frame) {
-            if (!sink.write(frame)) return false;
-            last_write = std::chrono::steady_clock::now();
-            return true;
-        };
-        while (true) {
-            std::vector<std::string> frames;
-            json final_message;
-            bool done = false;
-            {
-                std::unique_lock<std::mutex> lock(waiter->m);
-                if (waiter->frames.empty() && !waiter->done) waiter->cv.wait_for(lock, poll);
-                while (!waiter->frames.empty()) {
-                    frames.push_back(std::move(waiter->frames.front()));
-                    waiter->frames.pop_front();
-                }
-                done = waiter->done;
-                final_message = waiter->final_message;
-            }
-            for (const auto& f : frames)
-                if (!emit(f)) {
-                    route_cancel();
-                    return;
-                }
-            if (done) {
-                if (final_message.is_null())
-                    final_message = make_error(state->id, kServerBusy, "server shutting down", json{{"retry", true}});
-                emit(format_sse_event("message", dump(final_message)));
-                return;
-            }
-            if (!sink.connected() || route_stopping()) {
-                route_cancel();
-                return;
-            }
-            if (keepalive_ms > 0 && std::chrono::steady_clock::now() - last_write >= std::chrono::milliseconds(keepalive_ms))
-                if (!emit(format_sse_comment("keep-alive"))) {
-                    route_cancel();
-                    return;
-                }
-        }
-    };
-    return r;
+    if (!sse) return wait_for_answer(request, message.id, *waiter, poll, route_cancel, route_stopping);
+    return sse_answer(waiter, state, route_cancel, route_stopping, poll, options_.keepalive_ms);
 }
 
 } // namespace fairyfly::mcp
