@@ -1,8 +1,12 @@
 #include "include/auth/ip.h"
+#include "include/text/utf8.h"
+#include "include/auth/token_store.h"
+#include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include "include/config/mcp_config.h"
 
 #include <algorithm>
+#include <type_traits>
 #include <array>
 #include <cctype>
 #include <cerrno>
@@ -41,6 +45,31 @@ KeySpec make(const char* key, ValueType type, std::optional<Value> def, const ch
     return spec;
 }
 
+/// A ServeOptions member as the setter of a key: bool, string, string list, integer or optional integer.
+template <class T>
+std::function<void(mcp::ServeOptions&, const Value&)> setter(T mcp::ServeOptions::*field) {
+    return [field](mcp::ServeOptions& o, const Value& v) {
+        if constexpr (std::is_same_v<T, bool> || std::is_same_v<T, std::string> || std::is_same_v<T, Vec>)
+            o.*field = std::get<T>(v);
+        else if constexpr (std::is_same_v<T, std::optional<int>>)
+            o.*field = static_cast<int>(std::get<long long>(v));
+        else
+            o.*field = static_cast<T>(std::get<long long>(v));
+    };
+}
+
+/// The key's CLI options and ServeOptions member.
+template <class T>
+KeySpec with(KeySpec spec, std::vector<std::string> cli, T mcp::ServeOptions::*field) {
+    spec.cli = std::move(cli);
+    spec.apply = setter(field);
+    return spec;
+}
+KeySpec with(KeySpec spec, std::vector<std::string> cli, std::nullptr_t) {
+    spec.cli = std::move(cli);
+    return spec;
+}
+
 std::vector<KeySpec> build_specs() {
     std::vector<KeySpec> s;
     auto add = [&](KeySpec spec) { s.push_back(std::move(spec)); };
@@ -48,52 +77,52 @@ std::vector<KeySpec> build_specs() {
     KeySpec k = make("default_connection", ValueType::Int, std::nullopt,
                      "Connection index used when a tool call omits 'connection' (unset = none)");
     k.min = 0; k.max = 1000000;
-    add(k);
+    add(with(k, {"--default-connection"}, &mcp::ServeOptions::default_connection));
     k = make("format", ValueType::String, Value{std::string("markdown")}, "Text format of tool results: markdown or json");
     k.allowed = {"markdown", "json"};
-    add(k);
+    add(with(k, {"--format"}, &mcp::ServeOptions::format));
 
     k = make("server.host", ValueType::String, Value{std::string("127.0.0.1")},
              "URL prefix host: 127.0.0.1 (default, loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
-    add(k);
-    k = make("server.port", ValueType::Int, Value{8383LL}, "Listen port of the HTTP transport");
+    add(with(k, {"--mcp-host"}, &mcp::ServeOptions::host));
+    k = make("server.port", ValueType::Int, Value{static_cast<long long>(mcp::kDefaultHttpPort)}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
-    add(k);
+    add(with(k, {"--mcp-port", "--port"}, &mcp::ServeOptions::port));
     k = make("server.transport", ValueType::String, Value{std::string("stdio")}, "stdio (default) or http");
     k.allowed = {"stdio", "http"};
-    add(k);
-    add(make("server.tls", ValueType::Bool, Value{false},
-             "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"));
-    add(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
-             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback exempt by default"));
-    add(make("server.allow_ip_include_loopback", ValueType::Bool, Value{false},
-             "Require loopback clients to match a nonempty server.allow_ip list too"));
-    add(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"));
-    add(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
-             "Extra accepted Host header values (loopback names are always accepted)"));
-    add(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"));
-    add(make("owner.sap_identities", ValueType::StringList, Value{Vec{}},
-             "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint (empty = legacy unrestricted mode)"));
+    add(with(k, {"--transport"}, &mcp::ServeOptions::transport));
+    add(with(make("server.tls", ValueType::Bool, Value{false},
+             "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"), {"--tls"}, &mcp::ServeOptions::tls));
+    add(with(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
+             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback exempt by default"), {"--allow-ip"}, &mcp::ServeOptions::allow_ip));
+    add(with(make("server.allow_ip_include_loopback", ValueType::Bool, Value{false},
+             "Require loopback clients to match a nonempty server.allow_ip list too"), {"--allow-ip-include-loopback"}, &mcp::ServeOptions::allow_ip_include_loopback));
+    add(with(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"), {"--sse"}, &mcp::ServeOptions::sse));
+    add(with(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
+             "Extra accepted Host header values (loopback names are always accepted)"), {"--allowed-hosts"}, &mcp::ServeOptions::allowed_hosts));
+    add(with(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"), {"--cors-origin"}, &mcp::ServeOptions::cors_origins));
+    add(with(make("owner.sap_identities", ValueType::StringList, Value{Vec{}},
+             "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint (empty = legacy unrestricted mode)"), {}, &mcp::ServeOptions::owner_sap_identities));
 
-    add(make("mode.read_only", ValueType::Bool, Value{false}, "Force the read-only guard (the guard is also the default without allow_write)"));
-    add(make("mode.allow_write", ValueType::Bool, Value{false}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"));
+    add(with(make("mode.read_only", ValueType::Bool, Value{false}, "Force the read-only guard (the guard is also the default without allow_write)"), {"--read-only"}, &mcp::ServeOptions::read_only));
+    add(with(make("mode.allow_write", ValueType::Bool, Value{false}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"), {"--allow-write"}, &mcp::ServeOptions::allow_write));
 
     k = make("limits.max_result_chars", ValueType::Int, Value{60000LL}, "Truncate text results beyond this many characters");
     k.min = 100; k.max = 100000000;
-    add(k);
+    add(with(k, {"--max-result-chars"}, &mcp::ServeOptions::max_result_chars));
     k = make("limits.max_image_bytes", ValueType::Int, Value{2097152LL}, "Refuse screenshots larger than this many bytes");
     k.min = 1024; k.max = 1073741824LL;
-    add(k);
+    add(with(k, {"--max-image-bytes"}, &mcp::ServeOptions::max_image_bytes));
     k = make("limits.max_calls_per_minute", ValueType::Int, Value{120LL}, "Rate limit for tool calls");
     k.min = 1; k.max = 1000000;
-    add(k);
+    add(with(k, {"--max-calls-per-minute"}, &mcp::ServeOptions::max_calls_per_minute));
     k = make("limits.call_timeout_ms", ValueType::Int, Value{120000LL}, "Soft timeout per tool call in milliseconds");
     k.min = 1000; k.max = 3600000;
-    add(k);
+    add(with(k, {"--call-timeout-ms"}, &mcp::ServeOptions::call_timeout_ms));
 
-    add(make("tools.families", ValueType::StringList, Value{Vec{}}, "Only expose these tool families (empty = all)"));
+    add(with(make("tools.families", ValueType::StringList, Value{Vec{}}, "Only expose these tool families (empty = all)"), {"--tools"}, &mcp::ServeOptions::families));
 
-    add(make("tray.enabled", ValueType::Bool, Value{false}, "Run with the system tray icon (same as --tray)"));
+    add(with(make("tray.enabled", ValueType::Bool, Value{false}, "Run with the system tray icon (same as --tray)"), {"--tray"}, nullptr));
     add(make("tray.start_minimized_notice", ValueType::Bool, Value{true}, "Show a balloon when the tray starts"));
     add(make("tray.autostart", ValueType::Bool, Value{false}, "Documentation of intent only; use 'mcp --tray --install-autostart' to register"));
 
@@ -155,7 +184,7 @@ bool looks_secret_key(const std::string& key) {
 bool looks_secret_value(const std::string& value) {
     const std::string l = utils::lower_ascii(utils::trim(value));
     if (l.rfind("bearer ", 0) == 0 || l.rfind("-----begin", 0) == 0) return true;
-    static const std::regex token(R"(ffy_[A-Za-z0-9]+_[A-Za-z0-9_\-]{8,})");
+    static const std::regex token(std::string(auth::kTokenPrefix) + R"([A-Za-z0-9]+_[A-Za-z0-9_\-]{8,})");
     return std::regex_search(value, token);
 }
 
@@ -467,7 +496,10 @@ McpConfig env_layer(const EnvLookup& env, std::vector<ConfigIssue>* issues) {
 }
 
 Effective resolve(const McpConfig& yaml, const McpConfig& flags, const EnvLookup& env, std::vector<ConfigIssue>* env_issues) {
-    const McpConfig envs = env_layer(env, env_issues);
+    return resolve_layers(yaml, env_layer(env, env_issues), flags);
+}
+
+Effective resolve_layers(const McpConfig& yaml, const McpConfig& envs, const McpConfig& flags) {
     Effective out;
     for (const auto& spec : key_specs()) {
         EffectiveValue ev;
@@ -481,12 +513,15 @@ Effective resolve(const McpConfig& yaml, const McpConfig& flags, const EnvLookup
     return out;
 }
 
-McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const EnvLookup& env) {
-    McpConfig out = yaml;
-    const McpConfig envs = env_layer(env);
-    for (const auto& kv : envs.values) out.values[kv.first] = kv.second;
-    for (const auto& kv : flags.values) out.values[kv.first] = kv.second;
+McpConfig given(const Effective& effective) {
+    McpConfig out;
+    for (const auto& [key, ev] : effective)
+        if (ev.set && ev.source != Source::Default) out.set(key, ev.value);
     return out;
+}
+
+McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const EnvLookup& env) {
+    return given(resolve(yaml, flags, env));
 }
 
 audit::AuditFileSettings audit_settings(const McpConfig& c) {
@@ -498,37 +533,19 @@ audit::AuditFileSettings audit_settings(const McpConfig& c) {
 }
 
 audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags) {
-    audit::AuditFileSettings s;
-    for (const McpConfig* layer : {&yaml, &env, &flags}) {  // lowest first: a higher layer overrides
-        const auto one = audit_settings(*layer);
-        if (one.enabled) s.enabled = one.enabled;
-        if (one.file) s.file = one.file;
-        if (one.required == true) s.required = true;
-    }
+    audit::AuditFileSettings s = audit_settings(given(resolve_layers(yaml, env, flags)));
+    // required is monotonic: a higher layer cannot switch off what a lower one asks for
+    for (const McpConfig* layer : {&yaml, &env, &flags})
+        if (layer->get_bool("audit.required") == true) s.required = true;
     return s;
 }
 
 void apply_config(const McpConfig& c, mcp::ServeOptions& o) {
     o.audit_file = audit_settings(c);
-    if (auto v = c.get_bool("mode.read_only")) o.read_only = *v;
-    if (auto v = c.get_bool("mode.allow_write")) o.allow_write = *v;
-    if (auto v = c.get_int("default_connection")) o.default_connection = static_cast<int>(*v);
-    if (auto v = c.get_string("format")) o.format = *v;
-    if (auto v = c.get_int("limits.max_result_chars")) o.max_result_chars = static_cast<std::size_t>(*v);
-    if (auto v = c.get_int("limits.max_image_bytes")) o.max_image_bytes = static_cast<std::size_t>(*v);
-    if (auto v = c.get_int("limits.max_calls_per_minute")) o.max_calls_per_minute = static_cast<int>(*v);
-    if (auto v = c.get_int("limits.call_timeout_ms")) o.call_timeout_ms = static_cast<int>(*v);
-    if (auto v = c.get_list("tools.families")) o.families = *v;
-    if (auto v = c.get_string("server.transport")) o.transport = *v;
-    if (auto v = c.get_int("server.port")) o.port = static_cast<int>(*v);
-    if (auto v = c.get_string("server.host")) o.host = *v;
-    if (auto v = c.get_bool("server.sse")) o.sse = *v;
-    if (auto v = c.get_bool("server.tls")) o.tls = *v;
-    if (auto v = c.get_list("server.allow_ip")) o.allow_ip = *v;
-    if (auto v = c.get_bool("server.allow_ip_include_loopback")) o.allow_ip_include_loopback = *v;
-    if (auto v = c.get_list("server.allowed_hosts")) o.allowed_hosts = *v;
-    if (auto v = c.get_list("server.cors_origins")) o.cors_origins = *v;
-    if (auto v = c.get_list("owner.sap_identities")) o.owner_sap_identities = *v;
+    for (const auto& spec : key_specs()) {
+        const auto value = c.values.find(spec.key);
+        if (spec.apply && value != c.values.end()) spec.apply(o, value->second);
+    }
     // insecure_no_auth and insecure_http are deliberately NOT config keys: authentication can only be switched off
     // with --insecure-no-auth and plain HTTP on a non-loopback host allowed with --insecure-http, on the command
     // line, never from a file or the environment.
@@ -542,7 +559,7 @@ ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& en
     }
     const std::string from_env = env ? utils::trim(env(env::kMcpConfig)) : std::string();
     if (!from_env.empty()) {
-        out.path = from_env; out.source = Source::Env; out.explicit_request = true;
+        out.path = text::utf8_path(from_env); out.source = Source::Env; out.explicit_request = true;
         return out;
     }
     out.path = Environment(env).data_dir() / "mcp.yaml";

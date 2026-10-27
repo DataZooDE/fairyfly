@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "com/wrapper.h"
+#include "screen_snapshot.h"
 #include <optional>
 #include <string>
 
@@ -54,14 +55,6 @@ struct TransactionRequest {
 /// "/nex" are rejected because they change or close sessions.
 TransactionRequest normalize_transaction_request(const std::string& input);
 
-struct ScreenSnapshot {
-    std::string window_id;
-    std::string title;
-    std::string transaction;
-    std::string statusbar_text;
-};
-
-bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after);
 
 std::optional<Result> classify_list_label_outcome(bool same_label,
                                                   bool same_window,
@@ -71,6 +64,9 @@ std::optional<Result> classify_list_label_outcome(bool same_label,
                                                   const std::string& element);
 
 bool is_missing_element_error(const std::string& message);
+
+/// The element at `path`, or null when SAP reports it missing; any other COM failure propagates.
+ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session, const std::string& path);
 
 bool should_activate_positioned_label(const std::string& type,
                                       const std::string& path,

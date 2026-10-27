@@ -1,3 +1,7 @@
+#include "include/com/hresult.h"
+#include "include/com/control_views.h"
+#include "include/com/tree_view.h"
+#include "include/shell_kind.h"
 #include "include/object_tree.h"
 #include "include/string_utils.h"
 #include "include/config/environment.h"
@@ -189,7 +193,7 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
             std::string subtype = elem.value("subtype", "");
             if (subtype == "Toolbar") {
                 grouped["toolbar"].push_back(elem);
-            } else if (subtype == "GridView" ||
+            } else if (is_grid_shell(subtype) ||
                        (elem.contains("table_data") && !elem["table_data"].is_null())) {
                 grouped["tables"].push_back(elem);
             } else {
@@ -230,7 +234,7 @@ void ScreenReader::flatten_and_group_elements(const json& elements, json& groupe
             grouped["form_fields"].push_back(elem);
         } else if (container == "table" || container == "grid" ||
                    type == "GuiTableControl" || type == "GuiGridView" ||
-                   (type == "GuiShell" && elem.value("subtype", "") == "GridView") ||
+                   (type == "GuiShell" && is_grid_shell(elem.value("subtype", ""))) ||
                    (elem.contains("table_data") && !elem["table_data"].is_null())) {
             grouped["tables"].push_back(elem);
         } else if (container == "tabs" || type == "GuiTabStrip" || type == "GuiTab") {
@@ -304,6 +308,48 @@ json ScreenReader::group_elements_by_container(const json& elements) {
     return grouped;
 }
 
+/// One node of a tree read: key, text (recovered from a column when empty), path and, for a column tree, its column
+/// values; a text or path that cannot be read is "[extraction_failed]".
+json ScreenReader::tree_node_json(ComGuiElement& tree, const std::string& elem_id, const std::string& key,
+                                  const std::vector<std::string>& columns, TreeNodeTexts& node_texts) {
+    json node;
+    node["key"] = key;
+
+    // Extract node text with individual error handling
+    try {
+        spdlog::debug("  -> Getting node text for key '{}'", key);
+        node["text"] = node_texts.text(key);
+        spdlog::debug("  -> Got node text for key '{}'", key);
+    } catch (const std::exception& e) {
+        node["text"] = "[extraction_failed]";
+        spdlog::warn("Failed to extract text for node key '{}' in tree {}: {}", key, elem_id, e.what());
+    }
+
+    // Extract node path with individual error handling
+    try {
+        spdlog::debug("  -> Getting node path for key '{}'", key);
+        node["path"] = as_tree(tree).get_node_path_by_key(key);
+        spdlog::debug("  -> Got node path: '{}'", node["path"].get<std::string>());
+    } catch (const std::exception& e) {
+        node["path"] = "[extraction_failed]";
+        spdlog::warn("Failed to extract path for node key '{}' in tree {}: {}", key, elem_id, e.what());
+    }
+
+    // Extract column values using GetItemText
+    if (!columns.empty()) {
+        spdlog::debug("  -> Extracting {} columns for key '{}'", columns.size(), key);
+        node["available_columns"] = columns;
+
+        const Stopwatch col_timer;
+        node["column_values"] = as_tree(tree).item_texts(key, columns, /*skip_hierarchy=*/true);
+        const auto col_ms = col_timer.elapsed().count();
+        if (col_ms > 500) {
+            spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);
+        }
+    }
+    return node;
+}
+
 json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const std::string& elem_id) {
     json tree_element;
     tree_element["id"] = elem_id;
@@ -325,7 +371,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         spdlog::debug("Extracting tree data from {} using tree API...", elem_id);
 
         // Get all node keys (safe API, no Children traversal)
-        auto node_keys = element->get_all_node_keys();
+        auto node_keys = as_tree(*element).get_all_node_keys();
         if (node_keys.empty()) {
             spdlog::warn("Tree {} extraction returned 0 nodes - tree may be empty or API call failed", elem_id);
             tree_element["extraction_warning"] = "No nodes returned by GetAllNodeKeys() - tree may be empty";
@@ -344,7 +390,7 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         // Get column names for extracting column data
         std::vector<std::string> columns;
         try {
-            columns = element->get_column_order();
+            columns = as_grid(*element).get_column_order();
             spdlog::debug("Tree {} has {} columns", elem_id, columns.size());
         } catch (const std::exception& e) {
             spdlog::debug("Could not get column order for {}: {}", elem_id, e.what());
@@ -353,86 +399,18 @@ json ScreenReader::extract_tree_data_immediately(ComGuiElementPtr element, const
         // Extract each node with robust per-property error handling
         json nodes_array = json::array();
         int failed_nodes = 0;
-        std::vector<std::string> tree_column_names;
-        bool tree_column_names_loaded = false;
+        TreeNodeTexts node_texts(*element);
 
         for (size_t i = 0; i < node_keys.size(); ++i) {
             const auto& key = node_keys[i];
             try {
                 spdlog::debug("Extracting node {}/{}: key='{}'", i+1, node_keys.size(), key);
-                auto node_start = std::chrono::high_resolution_clock::now();
+                const Stopwatch node_timer;
 
-                json node;
-                node["key"] = key;
-
-                // Extract node text with individual error handling
-                try {
-                    spdlog::debug("  -> Getting node text for key '{}'", key);
-                    std::string node_text = element->get_node_text_by_key(key);
-                    if (node_text.empty() && !tree_column_names_loaded) {
-                        tree_column_names = element->get_tree_column_names();
-                        tree_column_names_loaded = true;
-                    }
-                    node["text"] = recover_tree_node_text(
-                        node_text, tree_column_names,
-                        [&](const std::string& name) { return element->get_item_text(key, name); });
-                    spdlog::debug("  -> Got node text for key '{}'", key);
-                } catch (const std::exception& e) {
-                    node["text"] = "[extraction_failed]";
-                    spdlog::warn("Failed to extract text for node key '{}' in tree {}: {}", key, elem_id, e.what());
-                }
-
-                // Extract node path with individual error handling
-                try {
-                    spdlog::debug("  -> Getting node path for key '{}'", key);
-                    node["path"] = element->get_node_path_by_key(key);
-                    spdlog::debug("  -> Got node path: '{}'", node["path"].get<std::string>());
-                } catch (const std::exception& e) {
-                    node["path"] = "[extraction_failed]";
-                    spdlog::warn("Failed to extract path for node key '{}' in tree {}: {}", key, elem_id, e.what());
-                }
-
-                // Extract column values using GetItemText
-                if (!columns.empty()) {
-                    spdlog::debug("  -> Extracting {} columns for key '{}'", columns.size(), key);
-                    node["available_columns"] = columns;
-
-                    json column_values = json::array();
-                    auto col_start = std::chrono::high_resolution_clock::now();
-
-                    for (const json& col_name_json : columns) {
-                        try {
-                            std::string col_name_str = col_name_json.is_string() ? col_name_json.get<std::string>() : "";
-                            if (col_name_str.empty() || col_name_str == "HierarchyHeader") {
-                                // Skip hierarchy column (already have text/path)
-                                column_values.push_back("");
-                                continue;
-                            }
-
-                            std::string col_value = element->get_item_text(key, col_name_str);
-                            column_values.push_back(col_value);
-
-                        } catch (const std::exception& e) {
-                            spdlog::debug("  -> Failed to get column '{}' for key '{}': {}",
-                                        col_name_json.is_string() ? col_name_json.get<std::string>() : "?", key, e.what());
-                            column_values.push_back("");  // Empty value on failure
-                        }
-                    }
-
-                    node["column_values"] = column_values;
-
-                    auto col_duration = std::chrono::high_resolution_clock::now() - col_start;
-                    auto col_ms = std::chrono::duration_cast<std::chrono::milliseconds>(col_duration).count();
-                    if (col_ms > 500) {
-                        spdlog::warn("  -> Column extraction for key '{}' took {}ms", key, col_ms);
-                    }
-                }
-
-                nodes_array.push_back(node);
+                nodes_array.push_back(tree_node_json(*element, elem_id, key, columns, node_texts));
 
                 // Log if this node took unusually long
-                auto node_duration = std::chrono::high_resolution_clock::now() - node_start;
-                auto node_ms = std::chrono::duration_cast<std::chrono::milliseconds>(node_duration).count();
+                const auto node_ms = node_timer.elapsed().count();
                 if (node_ms > 1000) {
                     spdlog::warn("Node '{}' extraction took {}ms", key, node_ms);
                 }
@@ -531,15 +509,15 @@ json ScreenReader::extract_grid_data_immediately(ComGuiElementPtr element, const
 
         if (type == "GuiShell" || type == "GuiGridView") {
             json buttons = json::array();
-            const int count = std::min(element->get_grid_toolbar_button_count(), 100);
+            const int count = std::min(as_toolbar(*element).get_grid_toolbar_button_count(), 100);
             for (int i = 0; i < count; ++i) {
-                const std::string button_id = element->get_grid_toolbar_button_id(i);
+                const std::string button_id = as_toolbar(*element).get_grid_toolbar_button_id(i);
                 if (button_id.empty()) continue; // Separator or menu gap.
                 buttons.push_back({
                     {"id", elem_id + "/btn_" + button_id},
                     {"type", "GuiButton"},
                     {"name", button_id},
-                    {"tooltip", element->get_grid_toolbar_button_tooltip(i)},
+                    {"tooltip", as_toolbar(*element).get_grid_toolbar_button_tooltip(i)},
                     {"capabilities", json::array({"clickable"})}
                 });
             }
@@ -843,6 +821,272 @@ ElementProbeSource ScreenReader::element_probe_source() const {
     };
 }
 
+namespace {
+
+/// Types that are never walked as containers. GuiMenu is one so top-level menus are captured, but the 100+ nested
+/// submenus are skipped.
+bool is_known_leaf(const std::string& type) {
+    return type == "GuiButton" || type == "GuiTextField" || type == "GuiCTextField" || type == "GuiPasswordField" ||
+           type == "GuiRadioButton" || type == "GuiCheckBox" || type == "GuiLabel" || type == "GuiStatusbar" || type == "GuiMenu";
+}
+
+/// Types walked as containers even when they report no children (subscreens, toolbars, tab strips, group boxes, ...).
+bool is_container_type(const std::string& type) {
+    static const char* const kContainers[] = {"GuiContainerShell", "GuiSplitterShell", "GuiSimpleContainer", "GuiScrollContainer", "GuiUserArea", "GuiCustomControl", "GuiToolbar", "GuiToolbarControl", "GuiTitlebar", "GuiTabStrip", "GuiTab", "GuiSubScreen", "GuiBox"};
+    return std::any_of(std::begin(kContainers), std::end(kContainers), [&](const char* t) { return type == t; });
+}
+
+}  // namespace
+
+/// Shells and grids are not walked: their ids are collected for phase 2 (fresh COM pointers), a metadata shell is
+/// added as it is. True when the element was handled here.
+bool ScreenReader::collect_shell_or_grid(const ComGuiElementPtr& element, const std::string& type, const std::string& elem_id,
+                                         ScreenElementCollector& collector, int depth, bool skip_trees) {
+    // Check GuiShell controls - distinguish between GridView and Tree controls
+    if (type == "GuiShell") {
+        std::string subtype = "";
+        try {
+            subtype = element->get_string_property(L"SubType");
+        } catch (...) {
+            // Some GuiShell instances might not expose SubType
+        }
+
+        const auto extraction_kind = classify_shell_extraction(subtype);
+        if (extraction_kind == ShellExtractionKind::Grid) {
+            spdlog::debug("Found GuiShell GridView {} at depth {} - collecting ID for Phase 2 grid extraction", elem_id, depth);
+            collector.add_grid_id(elem_id);
+            return true;
+        }
+
+        if (extraction_kind == ShellExtractionKind::Metadata) {
+            collector.add(element);
+            return true;
+        }
+
+        if (skip_trees) {
+            // When --skip-trees is enabled, completely skip GuiShell elements
+            spdlog::debug("{}[depth={}] Skipping GuiShell element {} (--skip-trees enabled)",
+                         std::string(depth * 2, ' '), depth, elem_id);
+            return true;
+        } else {
+            // PHASE 1: Collect tree ID for later extraction with fresh COM pointer
+            // Don't extract now - the traversal pointer may become stale
+            // Will extract in Phase 2 after traversal completes using session->find_element_by_id()
+            spdlog::debug("Found GuiShell {} (subtype='{}') at depth {} - collecting ID for Phase 2 extraction", elem_id, subtype, depth);
+            collector.add_tree_id(elem_id);
+
+            // Don't traverse children or store COM pointer - will extract later
+            return true;
+        }
+    }
+
+    // Check for GuiGridView / GuiTableControl - collect for Phase 2 extraction
+    if (type == "GuiGridView" || type == "GuiTableControl") {
+        spdlog::debug("Found grid {} (type={}) at depth {} - collecting ID for Phase 2 extraction",
+                     elem_id, type, depth);
+        collector.add_grid_id(elem_id);
+        // Don't traverse children - grids are leaf elements with no meaningful child structure
+        return true;
+    }
+    return false;
+}
+
+/// GuiUserArea: tabular grid cells (/lbl[col,row]) become one grid, other children are walked as usual. False: stop
+/// here (searching, or no --probe-all: a user area has no /shell or /shellcont children to probe for).
+bool ScreenReader::walk_user_area(const ComGuiElementPtr& element, const std::string& elem_id, int child_count,
+                                  ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search) {
+    spdlog::debug("{}Enumerating GuiUserArea children for {}", std::string(depth * 2, ' '), elem_id);
+    try {
+        auto children_collection = element->children();
+        int total_items = std::max(child_count, 500);
+        struct CellInfo {
+            ComGuiElementPtr ptr;
+            int col;
+            int row;
+            std::string text;
+        };
+        std::vector<CellInfo> grid_cells;
+
+        // Handles one child; returns false to stop the walk (first error, like before).
+        auto handle_child = [&](const ComGuiElementPtr& child_ptr) -> bool {
+            try {
+                std::string child_id = child_ptr->get_id();
+
+                if (search) {
+                    traverse_element_tree(child_ptr, collector, depth + 1,
+                                          skip_trees, search);
+                    return true;
+                }
+
+                // Check if child is a grid cell label: /lbl[col,row]
+                size_t bracket_pos = child_id.find("/lbl[");
+                if (bracket_pos != std::string::npos) {
+                    size_t comma_pos = child_id.find(",", bracket_pos);
+                    size_t close_bracket = child_id.find("]", comma_pos);
+                    if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
+                        try {
+                            int col = std::stoi(child_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5));
+                            int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
+                            std::string text = read_positioned_label_text(child_ptr, child_id);
+                            grid_cells.push_back({child_ptr, col, row, text});
+                            return true; // Captured as grid cell, do not recurse or add to collector
+                        } catch (...) {}
+                    }
+                }
+
+                // Non-label child: traverse recursively (e.g. buttons, subscreens, input fields)
+                traverse_element_tree(child_ptr, collector, depth + 1, skip_trees, search);
+                return true;
+            } catch (const std::exception&) {
+                return false; // Stop on first error
+            }
+        };
+
+        // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of item(i)
+        // (~4-5 round trips per child). Same order, same limit, same stop conditions.
+        int enumerated = 0;
+        bool enumerated_ok = children_collection.for_each(
+            [&](const ComGuiElementPtr& child_ptr) {
+                if (enumerated >= total_items) return false;
+                if (search && search->stopped) return false;
+                ++enumerated;
+                return handle_child(child_ptr);
+            });
+        if (search && search->stopped) return false;
+
+        if (!enumerated_ok || enumerated == 0) {
+            for (int i = 0; i < total_items; ++i) {
+                if (search && search->stopped) return false;
+                try {
+                    ComGuiElementPtr child_ptr = children_collection.item(i);
+                    if (!child_ptr) {
+                        break; // Stop at first null
+                    }
+                    if (!handle_child(child_ptr)) break;
+                } catch (const std::exception&) {
+                    break; // Stop on first error
+                }
+            }
+        }
+
+        // Evaluate whether collected grid cells form a tabular grid
+        if (!grid_cells.empty()) {
+            std::vector<std::tuple<int, int, std::string>> cell_tuples;
+            cell_tuples.reserve(grid_cells.size());
+            for (const auto& cell : grid_cells)
+                cell_tuples.emplace_back(cell.col, cell.row, cell.text);
+
+            const bool is_table = is_tabular_userarea(cell_tuples);
+
+            if (is_table) {
+                spdlog::info("GuiUserArea {} contains tabular grid ({} cells) - registering for table extraction",
+                             elem_id, grid_cells.size());
+                collector.add_grid_id(elem_id);
+                collector.set_grid_cells(elem_id, cell_tuples);
+            } else {
+                // Not a tabular grid: traverse each cell as a normal form label
+                for (const auto& cell : grid_cells) {
+                    traverse_element_tree(cell.ptr, collector, depth + 1, skip_trees);
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        spdlog::debug("{}GuiUserArea children enumeration failed: {}", std::string(depth * 2, ' '), e.what());
+    }
+
+    // --probe-all keeps going into the exhaustive FindById probing below.
+    if (search && !probe_all_ && !probe_all_from_environment()) return false;
+
+    // GuiUserArea does not contain /shell or /shellcont container children
+    if (!probe_all_ && !probe_all_from_environment()) return false;
+    return true;
+}
+
+/// The Children collection (one enumeration), or by index when that yields nothing. Errors on single children are
+/// skipped: the ID probing afterwards may still reach them.
+void ScreenReader::walk_children(const ComGuiElementPtr& element, int child_count, ScreenElementCollector& collector, int depth,
+                                 bool skip_trees, ScreenSearchContext* search) {
+    // Try Children collection first, but track if it actually works
+    try {
+        if (child_count > 0) {
+            // Fast path: one enumeration for all children (get_child(i) re-enumerates per index).
+            int visited = 0;
+            bool enumerated_ok = false;
+            try {
+                enumerated_ok = element->children().for_each(
+                    [&](const ComGuiElementPtr& child) {
+                        if (visited >= child_count) return false;
+                        if (search && search->stopped) return false;
+                        ++visited;
+                        try {
+                            traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                        } catch (const std::exception&) {
+                            // Child access failed, will fall back to ID-based
+                        }
+                        return true;
+                    });
+            } catch (const std::exception&) {
+                // Children collection not available
+            }
+            if (search && search->stopped) return;
+
+            if (!enumerated_ok || visited == 0) {
+                for (int i = 0; i < child_count; ++i) {
+                    if (search && search->stopped) return;
+                    try {
+                        auto child = element->get_child(i);
+                        if (child) {
+                            traverse_element_tree(child, collector, depth + 1, skip_trees, search);
+                        }
+                    } catch (const SapGuiException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const ComException&) {
+                        // Child access failed, will fall back to ID-based
+                    } catch (const std::exception&) {
+                        // Child access failed, will fall back to ID-based
+                    }
+                }
+            }
+            // Don't return here - continue with ID-based discovery
+            // SAP GUI can have elements accessible via FindById but not Children collection
+        }
+    } catch (const std::exception&) {
+        // Children collection not available
+    }
+}
+
+/// The safety net for controls FindById reaches but Children does not list (see id_probe_candidates).
+void ScreenReader::probe_children_by_id(const std::string& type, const std::string& elem_id, int child_count,
+                                        ScreenElementCollector& collector, int depth, bool skip_trees, ScreenSearchContext* search) {
+    // ID-based discovery is only a safety net for controls that FindById can reach but
+    // Children does not list. Which paths are worth a FindById round trip depends on the
+    // control type and on whether Children yielded anything (see id_probe_candidates).
+    const auto probes = id_probe_candidates(type, elem_id, child_count, collector,
+                                            probe_all_ || probe_all_from_environment());
+    if (!probes.empty()) {
+        spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
+                      std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
+    }
+    std::string missed_index_family;
+    for (const auto& probe_id : probes) {
+        if (search && search->stopped) return;
+        const auto bracket = probe_id.find('[');
+        const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
+        // Indexed families (/shell[N], /shellcont[N], /sub[N], /cntl[N]) end at the first miss.
+        if (!family.empty() && family == missed_index_family) continue;
+        try {
+            auto probed = session_->find_element_by_id(probe_id);
+            if (probed) {
+                spdlog::debug("Found probed child: {}", probe_id);
+                traverse_element_tree(probed, collector, depth + 1, skip_trees, search);
+            }
+        } catch (const std::exception& e) {
+            spdlog::trace("No probed child {}: {}", probe_id, e.what());
+            if (!family.empty()) missed_index_family = family;
+        }
+    }
+}
+
 void ScreenReader::traverse_element_tree(
     ComGuiElementPtr element,
     ScreenElementCollector& collector,
@@ -887,52 +1131,7 @@ void ScreenReader::traverse_element_tree(
         if (search->stopped) return;
     }
 
-    // Check GuiShell controls - distinguish between GridView and Tree controls
-    if (type == "GuiShell") {
-        std::string subtype = "";
-        try {
-            subtype = element->get_string_property(L"SubType");
-        } catch (...) {
-            // Some GuiShell instances might not expose SubType
-        }
-
-        const auto extraction_kind = classify_shell_extraction(subtype);
-        if (extraction_kind == ShellExtractionKind::Grid) {
-            spdlog::debug("Found GuiShell GridView {} at depth {} - collecting ID for Phase 2 grid extraction", elem_id, depth);
-            collector.add_grid_id(elem_id);
-            return;
-        }
-
-        if (extraction_kind == ShellExtractionKind::Metadata) {
-            collector.add(element);
-            return;
-        }
-
-        if (skip_trees) {
-            // When --skip-trees is enabled, completely skip GuiShell elements
-            spdlog::debug("{}[depth={}] Skipping GuiShell element {} (--skip-trees enabled)",
-                         std::string(depth * 2, ' '), depth, elem_id);
-            return;
-        } else {
-            // PHASE 1: Collect tree ID for later extraction with fresh COM pointer
-            // Don't extract now - the traversal pointer may become stale
-            // Will extract in Phase 2 after traversal completes using session->find_element_by_id()
-            spdlog::debug("Found GuiShell {} (subtype='{}') at depth {} - collecting ID for Phase 2 extraction", elem_id, subtype, depth);
-            collector.add_tree_id(elem_id);
-
-            // Don't traverse children or store COM pointer - will extract later
-            return;
-        }
-    }
-
-    // Check for GuiGridView / GuiTableControl - collect for Phase 2 extraction
-    if (type == "GuiGridView" || type == "GuiTableControl") {
-        spdlog::debug("Found grid {} (type={}) at depth {} - collecting ID for Phase 2 extraction",
-                     elem_id, type, depth);
-        collector.add_grid_id(elem_id);
-        // Don't traverse children - grids are leaf elements with no meaningful child structure
-        return;
-    }
+    if (collect_shell_or_grid(element, type, elem_id, collector, depth, skip_trees)) return;
 
     try {
         // CRITICAL: Do NOT add the element to collector if it might cause problems later
@@ -951,13 +1150,7 @@ void ScreenReader::traverse_element_tree(
 
         // Known leaf types that should never be traversed as containers
         // GuiMenu is treated as a leaf so top-level menus are captured, but 100+ deep nested submenus are skipped
-        bool is_known_leaf = (type == "GuiButton" || type == "GuiTextField" || type == "GuiCTextField" ||
-                              type == "GuiPasswordField" || type == "GuiRadioButton" || type == "GuiCheckBox" ||
-                              type == "GuiLabel" || type == "GuiStatusbar" || type == "GuiMenu");
-
-        if (is_known_leaf) {
-            return;
-        }
+        if (is_known_leaf(type)) return;
 
         // Introspect child count directly from element
         int child_count = 0;
@@ -967,212 +1160,15 @@ void ScreenReader::traverse_element_tree(
             child_count = 0;
         }
 
-        // Container types that have nested structure or report child_count > 0
-        bool is_container = (child_count > 0 ||
-                           type == "GuiContainerShell" ||
-                           type == "GuiSplitterShell" ||
-                           type == "GuiSimpleContainer" ||   // Subscreen containers (SE16 selection screens)
-                           type == "GuiScrollContainer" ||   // Scrollable subscreen containers
-                           type == "GuiUserArea" ||
-                           type == "GuiCustomControl" ||
-                           type == "GuiToolbar" ||           // Toolbar contains buttons
-                           type == "GuiToolbarControl" ||    // Toolbar control
-                           type == "GuiTitlebar" ||          // Title bar may contain buttons
-                           type == "GuiTabStrip" ||          // Tab strip contains tabs
-                           type == "GuiTab" ||               // Tab contains controls
-                           type == "GuiSubScreen" ||         // Subscreen contains controls
-                           type == "GuiBox");                // Group box contains controls
+        if (child_count <= 0 && !is_container_type(type)) return;  // a leaf: no children to walk
 
-        if (!is_container) {
-            return;  // Leaf element, no children to traverse
-        }
+        if (type == "GuiUserArea" && !walk_user_area(element, elem_id, child_count, collector, depth, skip_trees, search))
+            return;
 
-        // Special handling for GuiUserArea: separate tabular grid cells (/lbl[col,row]) from form controls
-        // to avoid polluting the element collector with hundreds of individual cell labels.
-        if (type == "GuiUserArea") {
-            spdlog::debug("{}Enumerating GuiUserArea children for {}", std::string(depth * 2, ' '), elem_id);
-            try {
-                auto children_collection = element->children();
-                int total_items = std::max(child_count, 500);
-                struct CellInfo {
-                    ComGuiElementPtr ptr;
-                    int col;
-                    int row;
-                    std::string text;
-                };
-                std::vector<CellInfo> grid_cells;
-
-                // Handles one child; returns false to stop the walk (first error, like before).
-                auto handle_child = [&](const ComGuiElementPtr& child_ptr) -> bool {
-                    try {
-                        std::string child_id = child_ptr->get_id();
-
-                        if (search) {
-                            traverse_element_tree(child_ptr, collector, depth + 1,
-                                                  skip_trees, search);
-                            return true;
-                        }
-
-                        // Check if child is a grid cell label: /lbl[col,row]
-                        size_t bracket_pos = child_id.find("/lbl[");
-                        if (bracket_pos != std::string::npos) {
-                            size_t comma_pos = child_id.find(",", bracket_pos);
-                            size_t close_bracket = child_id.find("]", comma_pos);
-                            if (comma_pos != std::string::npos && close_bracket != std::string::npos) {
-                                try {
-                                    int col = std::stoi(child_id.substr(bracket_pos + 5, comma_pos - bracket_pos - 5));
-                                    int row = std::stoi(child_id.substr(comma_pos + 1, close_bracket - comma_pos - 1));
-                                    std::string text = read_positioned_label_text(child_ptr, child_id);
-                                    grid_cells.push_back({child_ptr, col, row, text});
-                                    return true; // Captured as grid cell, do not recurse or add to collector
-                                } catch (...) {}
-                            }
-                        }
-
-                        // Non-label child: traverse recursively (e.g. buttons, subscreens, input fields)
-                        traverse_element_tree(child_ptr, collector, depth + 1, skip_trees, search);
-                        return true;
-                    } catch (const std::exception&) {
-                        return false; // Stop on first error
-                    }
-                };
-
-                // Fast path: one IEnumVARIANT walk (1 COM call per child) instead of item(i)
-                // (~4-5 round trips per child). Same order, same limit, same stop conditions.
-                int enumerated = 0;
-                bool enumerated_ok = children_collection.for_each(
-                    [&](const ComGuiElementPtr& child_ptr) {
-                        if (enumerated >= total_items) return false;
-                        if (search && search->stopped) return false;
-                        ++enumerated;
-                        return handle_child(child_ptr);
-                    });
-                if (search && search->stopped) return;
-
-                if (!enumerated_ok || enumerated == 0) {
-                    for (int i = 0; i < total_items; ++i) {
-                        if (search && search->stopped) return;
-                        try {
-                            ComGuiElementPtr child_ptr = children_collection.item(i);
-                            if (!child_ptr) {
-                                break; // Stop at first null
-                            }
-                            if (!handle_child(child_ptr)) break;
-                        } catch (const std::exception&) {
-                            break; // Stop on first error
-                        }
-                    }
-                }
-
-                // Evaluate whether collected grid cells form a tabular grid
-                if (!grid_cells.empty()) {
-                    std::vector<std::tuple<int, int, std::string>> cell_tuples;
-                    cell_tuples.reserve(grid_cells.size());
-                    for (const auto& cell : grid_cells)
-                        cell_tuples.emplace_back(cell.col, cell.row, cell.text);
-
-                    const bool is_table = is_tabular_userarea(cell_tuples);
-
-                    if (is_table) {
-                        spdlog::info("GuiUserArea {} contains tabular grid ({} cells) - registering for table extraction",
-                                     elem_id, grid_cells.size());
-                        collector.add_grid_id(elem_id);
-                        collector.set_grid_cells(elem_id, cell_tuples);
-                    } else {
-                        // Not a tabular grid: traverse each cell as a normal form label
-                        for (const auto& cell : grid_cells) {
-                            traverse_element_tree(cell.ptr, collector, depth + 1, skip_trees);
-                        }
-                    }
-                }
-            } catch (const std::exception& e) {
-                spdlog::debug("{}GuiUserArea children enumeration failed: {}", std::string(depth * 2, ' '), e.what());
-            }
-
-            // --probe-all keeps going into the exhaustive FindById probing below.
-            if (search && !probe_all_ && !probe_all_from_environment()) return;
-
-            // GuiUserArea does not contain /shell or /shellcont container children
-            if (!probe_all_ && !probe_all_from_environment()) return;
-        }
-
-        // Try Children collection first, but track if it actually works
-        try {
-            if (child_count > 0) {
-                // Fast path: one enumeration for all children (get_child(i) re-enumerates per index).
-                int visited = 0;
-                bool enumerated_ok = false;
-                try {
-                    enumerated_ok = element->children().for_each(
-                        [&](const ComGuiElementPtr& child) {
-                            if (visited >= child_count) return false;
-                            if (search && search->stopped) return false;
-                            ++visited;
-                            try {
-                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
-                            } catch (const std::exception&) {
-                                // Child access failed, will fall back to ID-based
-                            }
-                            return true;
-                        });
-                } catch (const std::exception&) {
-                    // Children collection not available
-                }
-                if (search && search->stopped) return;
-
-                if (!enumerated_ok || visited == 0) {
-                    for (int i = 0; i < child_count; ++i) {
-                        if (search && search->stopped) return;
-                        try {
-                            auto child = element->get_child(i);
-                            if (child) {
-                                traverse_element_tree(child, collector, depth + 1, skip_trees, search);
-                            }
-                        } catch (const SapGuiException&) {
-                            // Child access failed, will fall back to ID-based
-                        } catch (const ComException&) {
-                            // Child access failed, will fall back to ID-based
-                        } catch (const std::exception&) {
-                            // Child access failed, will fall back to ID-based
-                        }
-                    }
-                }
-                // Don't return here - continue with ID-based discovery
-                // SAP GUI can have elements accessible via FindById but not Children collection
-            }
-        } catch (const std::exception&) {
-            // Children collection not available
-        }
-
+        walk_children(element, child_count, collector, depth, skip_trees, search);
         if (search && search->stopped) return;
 
-        // ID-based discovery is only a safety net for controls that FindById can reach but
-        // Children does not list. Which paths are worth a FindById round trip depends on the
-        // control type and on whether Children yielded anything (see id_probe_candidates).
-        const auto probes = id_probe_candidates(type, elem_id, child_count, collector,
-                                                probe_all_ || probe_all_from_environment());
-        if (!probes.empty()) {
-            spdlog::debug("{}[depth={}] Probing {} candidate id(s) for {} ({})",
-                          std::string(depth * 2, ' '), depth, probes.size(), elem_id, type);
-        }
-        std::string missed_index_family;
-        for (const auto& probe_id : probes) {
-            if (search && search->stopped) return;
-            const auto bracket = probe_id.find('[');
-            const std::string family = bracket == std::string::npos ? std::string() : probe_id.substr(0, bracket);
-            // Indexed families (/shell[N], /shellcont[N], /sub[N], /cntl[N]) end at the first miss.
-            if (!family.empty() && family == missed_index_family) continue;
-            try {
-                auto probed = session_->find_element_by_id(probe_id);
-                if (probed) {
-                    spdlog::debug("Found probed child: {}", probe_id);
-                    traverse_element_tree(probed, collector, depth + 1, skip_trees, search);
-                }
-            } catch (const std::exception& e) {
-                spdlog::trace("No probed child {}: {}", probe_id, e.what());
-                if (!family.empty()) missed_index_family = family;
-            }
-        }
+        probe_children_by_id(type, elem_id, child_count, collector, depth, skip_trees, search);
     } catch (const SapGuiException& e) {
         spdlog::debug("traverse_element_tree: SapGuiException: {}", e.what());
         // Skip elements that throw exceptions during processing
@@ -1223,8 +1219,8 @@ void ScreenReader::extract_collected_trees_and_grids(ScreenElementCollector& col
                            tree_data.value("node_count", 0), tree_id);
 
             } catch (const ComException& e) {
-                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: 0x{:08X})",
-                             tree_id, e.what(), e.hresult());
+                spdlog::error("Failed to extract tree {} in Phase 2: COM error: {} (HRESULT: {})",
+                             tree_id, e.what(), hresult_hex(e.hresult()));
                 spdlog::error("Possible causes: stale COM pointer, connection lost, or SAP GUI reorganized connections");
                 // Continue with other trees even if one fails
             } catch (const std::exception& e) {
@@ -1284,8 +1280,8 @@ void ScreenReader::extract_collected_trees_and_grids(ScreenElementCollector& col
                 spdlog::debug("Successfully extracted {} rows from grid {}", row_count, grid_id);
 
             } catch (const ComException& e) {
-                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: 0x{:08X})",
-                             grid_id, e.what(), e.hresult());
+                spdlog::error("Failed to extract grid {} in Phase 2B: COM error: {} (HRESULT: {})",
+                             grid_id, e.what(), hresult_hex(e.hresult()));
             } catch (const std::exception& e) {
                 spdlog::error("Failed to extract grid {} in Phase 2B: {}", grid_id, e.what());
             }
@@ -1494,7 +1490,7 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
                 spdlog::debug("read: Extracting metadata for element {}/{}: {} (type: {})",
                              elem_index + 1, element_ids.size(), elem_id, debug_type);
 
-                json elem_data = ElementMetadataExtractor::extract(elem);
+                json elem_data = metadata_.extract(elem);
                 if (!elem_data.is_null()) {
                     elements.push_back(elem_data);
                 }
@@ -1528,32 +1524,24 @@ json ScreenReader::extract_metadata_for_collector(const ScreenElementCollector& 
 }
 
 Result ScreenReader::find(const ScreenFindOptions& query) {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     if (query.limit < 1 || query.limit > 100) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "INVALID_FIND_LIMIT";
-        result.error["message"] = "Find limit must be between 1 and 100";
+        result.set_error("INVALID_FIND_LIMIT", "Find limit must be between 1 and 100");
         return result;
     }
     if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty()) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EMPTY_FIND_QUERY";
-        result.error["message"] = "Specify --id-contains, --name-contains, or --type";
+        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, or --type");
         return result;
     }
     if (!session_) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "NO_SESSION";
-        result.error["message"] = "No active SAP session";
+        result.set_error("NO_SESSION", "No active SAP session");
         return result;
     }
     try {
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
         ScreenSearchContext search{query};
@@ -1570,16 +1558,11 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.data["match_limit_reached"] = search.match_limit_reached;
         result.data["scan_limit_reached"] = search.scan_limit_reached;
         result.data["hierarchy"] = group_elements_by_container(search.matches);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -1708,29 +1691,23 @@ bool ScreenReader::read_elements_bulk(const std::string& root_id, bool is_window
 }
 
 Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
         if (max_rows < 1 || max_rows > constants::MAX_REQUESTED_TABLE_ROWS) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_MAX_ROWS";
-            result.error["message"] = "Requested row limit must be between 1 and 200";
+            result.set_error("INVALID_MAX_ROWS", "Requested row limit must be between 1 and 200");
             return result;
         }
         max_rows_ = max_rows;
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
 
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
 
@@ -1746,9 +1723,9 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
         bool used_bulk = false;
 
         if (include_structure) {
-            // Clear extraction cache at start of each screen read
-            ElementMetadataExtractor::clear_cache();
-            ElementMetadataExtractor::set_skip_trees(skip_trees);
+            // a fresh extractor (options and cache) for this screen read
+            metadata_ = ElementMetadataExtractor({skip_trees});
+            if (skip_trees) spdlog::info("Tree extraction disabled (--skip-trees)");
 
             json elements;
             if (mode != TreeReaderMode::Legacy) {
@@ -1761,7 +1738,7 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
                     return bulk_unavailable_error(bulk_reason);
                 if (!used_bulk) {
                     // Fresh state for the legacy read (a failed bulk attempt may have run phase 2).
-                    ElementMetadataExtractor::clear_cache();
+                    metadata_.clear_cache();
                 }
             }
 
@@ -1806,20 +1783,15 @@ Result ScreenReader::read(bool include_structure, bool skip_trees, int max_rows)
             result.diagnostics["screen_reader"] = std::move(info);
         }
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read screen with {} elements (duration: {}ms)",
                      result.data.value("element_count", 0), result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         spdlog::error("Screen read failed: {}", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
 
     return result;
@@ -1973,11 +1945,6 @@ std::string tab_strip_id(const std::string& tab_id) {
     return slash == std::string::npos ? std::string() : tab_id.substr(0, slash);
 }
 
-struct LocatedTabStrip {
-    std::string id;
-    std::vector<json> tabs;  // {id, type, text, strip_id}
-};
-
 void collect_tab_strip(const ComGuiElementPtr& strip, std::vector<LocatedTabStrip>& out) {
     LocatedTabStrip info;
     info.id = strip->get_id();
@@ -2004,31 +1971,186 @@ const char* tab_read_failure_reason(TabReadStatus status) {
     }
 }
 
+namespace {
+/// The tabs of all located strips, in order.
+std::vector<json> tabs_of(const std::vector<LocatedTabStrip>& strips) {
+    std::vector<json> tabs;
+    for (const auto& strip : strips) tabs.insert(tabs.end(), strip.tabs.begin(), strip.tabs.end());
+    return tabs;
+}
+}  // namespace
+
+/// The tab strips of a window, found cheaply: the children of usr, one more level into subscreen containers.
+std::vector<LocatedTabStrip> ScreenReader::locate_tab_strips(const std::string& window_id) {
+    std::vector<LocatedTabStrip> strips;
+    // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
+    try {
+        auto usr = session_->find_element_by_id(window_id + "/usr");
+        const int kMaxScanned = 200;
+        auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
+            auto children = container->children();
+            for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
+                const std::string type = child->get_type();
+                if (type == "GuiTabStrip") {
+                    collect_tab_strip(child, strips);
+                } else if (descend && (type == "GuiSimpleContainer" ||
+                                       type == "GuiScrollContainer" || type == "GuiSubScreen")) {
+                    self(self, child, false);
+                }
+            }
+        };
+        if (usr) scan(scan, usr, true);
+    } catch (const std::exception& e) {
+        spdlog::debug("read_tab: cheap tab strip lookup failed: {}", e.what());
+    }
+    return strips;
+}
+
+/// Nested or unusual layouts: the tab strips the discovery path finds (filtered by type) join `strips`.
+void ScreenReader::add_tab_strips_by_search(const ComGuiWindowPtr& window, bool skip_trees, std::vector<LocatedTabStrip>& strips) {
+    ScreenFindOptions query;
+    query.type = "GuiTabStrip";
+    query.limit = 100;
+    ScreenSearchContext search{query};
+    ScreenElementCollector probe_collector;
+    discover_elements(window, probe_collector, skip_trees, &search);
+    for (const auto& match : search.matches) {
+        try {
+            auto strip = session_->find_element_by_id(match.value("id", ""));
+            if (strip) collect_tab_strip(strip, strips);
+        } catch (const std::exception&) {}
+    }
+}
+
+namespace {
+
+/// TAB_LOAD_FAILED when no requested tab could be read: the first failure's tab and reason, and all failures.
+Result tab_load_failed(Result& result, const std::string& message, const json& tabs_failed) {
+    const auto& first = tabs_failed.at(0);
+    result.set_error("TAB_LOAD_FAILED", message);
+    result.error["tab_id"] = first.value("tab_id", "");
+    result.error["reason"] = first.value("reason", "error");
+    result.error["tabs_failed"] = tabs_failed;
+    return result;
+}
+
+}  // namespace
+
+/// The id of the strip's selected tab ("" when the strip or its SelectedTab cannot be read).
+std::string ScreenReader::selected_tab_of(const std::string& strip_id) const {
+    auto strip = session_->find_element_by_id(strip_id);
+    if (!strip) return std::string();
+    auto selected_dispatch = strip->get_dispatch_property(L"SelectedTab");
+    if (!selected_dispatch) return std::string();
+    return ComGuiElement::create(selected_dispatch)->get_id();
+}
+
+/// Reads one tab of a tab read: selects it unless it is already its strip's page (`current_selected` follows), reads
+/// its subtree into `tab_elements_list` and appends it to `tabs_content` (index `index`); a tab that cannot be read
+/// goes to `tabs_failed` with its reason. false then.
+bool ScreenReader::expand_tab(const json& tab, size_t index, const std::string& strip_id, bool skip_trees,
+                              std::map<std::string, std::string>& current_selected, json& tabs_content,
+                              json& tabs_failed, json& tab_elements_list) {
+    const std::string tab_id = tab.value("id", "");
+    const std::string tab_name = tab.value("text", "Unnamed Tab");
+    try {
+        // Skip select() (and its server round trip) when the tab is already the strip's current page; otherwise
+        // select, wait, and re-fetch inside read_tab_content so the subtree is read through a fresh COM pointer.
+        const bool needs_select = plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
+        if (needs_select) current_selected[strip_id] = tab_id;
+
+        // `elements` is the tab's own subtree (plus grids/trees inside it), not the whole window user area per tab.
+        const TabReadStatus tab_status = read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
+        if (tab_status != TabReadStatus::Ok) {
+            spdlog::warn("Tab {} could not be read: {}", tab_name, tab_read_failure_reason(tab_status));
+            tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
+                                   {"reason", tab_read_failure_reason(tab_status)}});
+            return false;
+        }
+        json tab_data;
+        tab_data["tab_id"] = tab_id;
+        tab_data["tab_name"] = tab_name;
+        tab_data["tab_type"] = "GuiTab";
+        tab_data["tab_index"] = index;
+        tab_data["elements"] = tab_elements_list;
+        tab_data["hierarchy"] = group_elements_by_container(tab_elements_list);
+        tab_data["element_count"] = tab_elements_list.size();
+        spdlog::info("Captured tab {} with {} elements", tab_name, tab_elements_list.size());
+        tabs_content.push_back(std::move(tab_data));
+        return true;
+    } catch (const std::exception& e) {
+        spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
+        tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name}, {"reason", "error"}});
+        return false;
+    }
+}
+
+/// Puts back every strip whose page a tab read changed (a screen read is observational). false when that failed.
+bool ScreenReader::restore_tab_selection(const TabSelectionSnapshot& original,
+                                         std::map<std::string, std::string>& current_selected) {
+    TabSelectionSnapshot to_restore;
+    for (const auto& original_id : original.selected_ids)
+        if (current_selected[tab_strip_id(original_id)] != original_id)
+            to_restore.selected_ids.push_back(original_id);
+    return to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); });
+}
+
+/// The tabs of a screen read's hierarchy: its GuiTab entries and the children of its GuiTabStrip entries (with their
+/// text), each id once.
+std::vector<json> ScreenReader::tabs_in_hierarchy(const json& screen_data) const {
+    std::vector<json> tab_elements;
+    std::unordered_set<std::string> seen_tab_ids;
+    if (screen_data.contains("hierarchy") && screen_data["hierarchy"].contains("tabs")) {
+        for (const auto& tab_entry : screen_data["hierarchy"]["tabs"]) {
+            std::string type = tab_entry.value("type", "");
+            if (type == "GuiTab") {
+                std::string tab_id = tab_entry.value("id", "");
+                if (!tab_id.empty() && seen_tab_ids.insert(tab_id).second) {
+                    tab_elements.push_back(tab_entry);
+                }
+            } else if (type == "GuiTabStrip" && tab_entry.contains("children") && tab_entry["children"].is_array()) {
+                for (const auto& child_id_val : tab_entry["children"]) {
+                    if (child_id_val.is_string()) {
+                        std::string child_id = child_id_val.get<std::string>();
+                        if (!child_id.empty() && seen_tab_ids.insert(child_id).second) {
+                            json child_tab;
+                            child_tab["id"] = child_id;
+                            child_tab["type"] = "GuiTab";
+                            try {
+                                auto child_elem = session_->find_element_by_id(child_id);
+                                if (child_elem) {
+                                    child_tab["text"] = child_elem->get_text();
+                                }
+                            } catch (...) {}
+                            tab_elements.push_back(child_tab);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return tab_elements;
+}
+
 Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int max_rows) {
     TraceGuard trace("ScreenReader::read_tab");
-    const auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
         if (max_rows < 1 || max_rows > constants::MAX_REQUESTED_TABLE_ROWS) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "INVALID_MAX_ROWS";
-            result.error["message"] = "Requested row limit must be between 1 and 200";
+            result.set_error("INVALID_MAX_ROWS", "Requested row limit must be between 1 and 200");
             return result;
         }
         max_rows_ = max_rows;
         tab_bulk_ = TabBulkStats();
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
         auto window = session_->get_active_window();
         if (!window) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_WINDOW";
-            result.error["message"] = "No active window found";
+            result.set_error("NO_WINDOW", "No active window found");
             return result;
         }
 
@@ -2041,62 +2163,22 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         attach_status_bar(result, read_action_status(session_, window_id));
         result.data["child_count"] = window->get_child_count();
 
-        ElementMetadataExtractor::clear_cache();
-        ElementMetadataExtractor::set_skip_trees(skip_trees);
+        metadata_ = ElementMetadataExtractor({skip_trees});
+        if (skip_trees) spdlog::info("Tree extraction disabled (--skip-trees)");
 
-        // Cheap strip lookup: wnd/usr children, one more level into subscreen containers.
-        std::vector<LocatedTabStrip> strips;
-        try {
-            auto usr = session_->find_element_by_id(window_id + "/usr");
-            const int kMaxScanned = 200;
-            auto scan = [&](auto&& self, const ComGuiElementPtr& container, bool descend) -> void {
-                auto children = container->children();
-                for (const auto& child : enumerate_collection(children, std::min(children.count(), kMaxScanned))) {
-                    const std::string type = child->get_type();
-                    if (type == "GuiTabStrip") {
-                        collect_tab_strip(child, strips);
-                    } else if (descend && (type == "GuiSimpleContainer" ||
-                                           type == "GuiScrollContainer" || type == "GuiSubScreen")) {
-                        self(self, child, false);
-                    }
-                }
-            };
-            if (usr) scan(scan, usr, true);
-        } catch (const std::exception& e) {
-            spdlog::debug("read_tab: cheap tab strip lookup failed: {}", e.what());
-        }
+        std::vector<LocatedTabStrip> strips = locate_tab_strips(window_id);
+        std::vector<json> matched = select_tabs(tabs_of(strips), only_tab);
 
-        auto all_tabs = [&]() {
-            std::vector<json> tabs;
-            for (const auto& strip : strips) tabs.insert(tabs.end(), strip.tabs.begin(), strip.tabs.end());
-            return tabs;
-        };
-        std::vector<json> matched = select_tabs(all_tabs(), only_tab);
-
-        if (matched.empty()) {
-            // Fallback: nested or unusual layouts. Reuse the discovery path with a type filter.
-            ScreenFindOptions query;
-            query.type = "GuiTabStrip";
-            query.limit = 100;
-            ScreenSearchContext search{query};
-            ScreenElementCollector probe_collector;
-            discover_elements(window, probe_collector, skip_trees, &search);
-            for (const auto& match : search.matches) {
-                try {
-                    auto strip = session_->find_element_by_id(match.value("id", ""));
-                    if (strip) collect_tab_strip(strip, strips);
-                } catch (const std::exception&) {}
-            }
-            matched = select_tabs(all_tabs(), only_tab);
+        if (matched.empty()) {   // nested or unusual layouts: the discovery path, filtered by type
+            add_tab_strips_by_search(window, skip_trees, strips);
+            matched = select_tabs(tabs_of(strips), only_tab);
         }
 
         if (matched.empty()) {
             json available = json::array();
-            for (const auto& tab : all_tabs()) available.push_back(tab.value("id", ""));
+            for (const auto& tab : tabs_of(strips)) available.push_back(tab.value("id", ""));
             result.data = json::object();
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_NOT_FOUND";
-            result.error["message"] = "No tab matches '" + only_tab + "'";
+            result.set_error("TAB_NOT_FOUND", "No tab matches '" + only_tab + "'");
             result.error["tab_id"] = only_tab;
             result.error["reason"] = "not_found";
             result.error["available_tabs"] = available;
@@ -2113,17 +2195,10 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         }
         json owner_json = json::array();
         for (const auto& id : owner_strips) owner_json.push_back({{"id", id}, {"type", "GuiTabStrip"}});
-        const auto selected_tabs = TabSelectionSnapshot::capture(owner_json, [&](const std::string& strip_id) {
-            auto strip = session_->find_element_by_id(strip_id);
-            if (!strip) return std::string();
-            auto selected_dispatch = strip->get_dispatch_property(L"SelectedTab");
-            if (!selected_dispatch) return std::string();
-            return ComGuiElement::create(selected_dispatch)->get_id();
-        });
+        const auto selected_tabs = TabSelectionSnapshot::capture(
+            owner_json, [&](const std::string& strip_id) { return selected_tab_of(strip_id); });
         if (selected_tabs.selected_ids.size() != owner_strips.size()) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_SELECTION_UNAVAILABLE";
-            result.error["message"] = "Cannot expand tabs without knowing which tab to restore";
+            result.set_error("TAB_SELECTION_UNAVAILABLE", "Cannot expand tabs without knowing which tab to restore");
             return result;
         }
         std::map<std::string, std::string> current_selected;
@@ -2145,54 +2220,18 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         json tabs_content = json::array();
         json tabs_failed = json::array();
         for (size_t i = 0; i < matched.size(); ++i) {
-            const auto& tab = matched[i];
-            const std::string tab_id = tab.value("id", "");
-            const std::string tab_name = tab.value("text", "Unnamed Tab");
-            const std::string strip_id = tab.value("strip_id", "");
-            try {
-                const bool needs_select =
-                    plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
-                if (needs_select) current_selected[strip_id] = tab_id;
-
-                json tab_elements_list;
-                const TabReadStatus tab_status =
-                    read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
-                if (tab_status != TabReadStatus::Ok) {
-                    spdlog::warn("Tab {} could not be read: {}", tab_name,
-                                 tab_read_failure_reason(tab_status));
-                    tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
-                                           {"reason", tab_read_failure_reason(tab_status)}});
-                    continue;
-                }
-                json tab_data;
-                tab_data["tab_id"] = tab_id;
-                tab_data["tab_name"] = tab_name;
-                tab_data["tab_type"] = "GuiTab";
-                tab_data["tab_index"] = i;
-                tab_data["elements"] = tab_elements_list;
-                tab_data["hierarchy"] = group_elements_by_container(tab_elements_list);
-                tab_data["element_count"] = tab_elements_list.size();
-                tabs_content.push_back(std::move(tab_data));
-
-                std::set<std::string> present;
-                for (const auto& e : elements) present.insert(e.value("id", ""));
-                for (const auto& e : tab_elements_list)
-                    if (!e.contains("id") || present.insert(e.value("id", "")).second) elements.push_back(e);
-            } catch (const std::exception& e) {
-                spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
-                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
-                                       {"reason", "error"}});
-            }
+            json tab_elements_list;
+            if (!expand_tab(matched[i], i, matched[i].value("strip_id", ""), skip_trees, current_selected, tabs_content,
+                            tabs_failed, tab_elements_list))
+                continue;
+            std::set<std::string> present;
+            for (const auto& e : elements) present.insert(e.value("id", ""));
+            for (const auto& e : tab_elements_list)
+                if (!e.contains("id") || present.insert(e.value("id", "")).second) elements.push_back(e);
         }
 
-        TabSelectionSnapshot to_restore;
-        for (const auto& original_id : selected_tabs.selected_ids)
-            if (current_selected[tab_strip_id(original_id)] != original_id)
-                to_restore.selected_ids.push_back(original_id);
-        if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_RESTORE_FAILED";
-            result.error["message"] = "Screen read could not restore the original tab";
+        if (!restore_tab_selection(selected_tabs, current_selected)) {
+            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
             return result;
         }
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
@@ -2200,14 +2239,8 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
             result.data = json::object();
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_LOAD_FAILED";
-            result.error["message"] = "Tab '" + first.value("tab_id", "") + "' could not be read: " +
-                                      first.value("reason", "error");
-            result.error["tab_id"] = first.value("tab_id", "");
-            result.error["reason"] = first.value("reason", "error");
-            result.error["tabs_failed"] = tabs_failed;
-            return result;
+            return tab_load_failed(result, "Tab '" + first.value("tab_id", "") + "' could not be read: " +
+                                               first.value("reason", "error"), tabs_failed);
         }
 
         redact_sensitive_report_labels(elements);
@@ -2229,17 +2262,12 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["expanded_tab_count"] = tabs_content.size();
         if (!tabs_failed.empty()) result.data["tabs_failed"] = tabs_failed;
         attach_tab_diagnostics(result, effective_tree_reader_mode());
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
     }
     return result;
 }
@@ -2324,14 +2352,12 @@ TabReadStatus ScreenReader::read_tab_content(const std::string& tab_id, bool nee
 
 Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::string& only_tab) {
     TraceGuard trace("ScreenReader::read_with_tabs");
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
         if (!session_) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "NO_SESSION";
-            result.error["message"] = "No active SAP session";
+            result.set_error("NO_SESSION", "No active SAP session");
             return result;
         }
 
@@ -2349,52 +2375,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         json tabs_content = json::array();
 
         // Find all GuiTab elements in the hierarchy (or under GuiTabStrip)
-        std::vector<json> tab_elements;
-        std::unordered_set<std::string> seen_tab_ids;
-        if (screen_data.contains("hierarchy") && screen_data["hierarchy"].contains("tabs")) {
-            for (const auto& tab_entry : screen_data["hierarchy"]["tabs"]) {
-                std::string type = tab_entry.value("type", "");
-                if (type == "GuiTab") {
-                    std::string tab_id = tab_entry.value("id", "");
-                    if (!tab_id.empty() && seen_tab_ids.insert(tab_id).second) {
-                        tab_elements.push_back(tab_entry);
-                    }
-                } else if (type == "GuiTabStrip" && tab_entry.contains("children") && tab_entry["children"].is_array()) {
-                    for (const auto& child_id_val : tab_entry["children"]) {
-                        if (child_id_val.is_string()) {
-                            std::string child_id = child_id_val.get<std::string>();
-                            if (!child_id.empty() && seen_tab_ids.insert(child_id).second) {
-                                json child_tab;
-                                child_tab["id"] = child_id;
-                                child_tab["type"] = "GuiTab";
-                                try {
-                                    auto child_elem = session_->find_element_by_id(child_id);
-                                    if (child_elem) {
-                                        child_tab["text"] = child_elem->get_text();
-                                    }
-                                } catch (...) {}
-                                tab_elements.push_back(child_tab);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!only_tab.empty()) {
-            json available = json::array();
-            for (const auto& tab : tab_elements) available.push_back(tab.value("id", ""));
-            tab_elements = select_tabs(tab_elements, only_tab);
-            if (tab_elements.empty()) {
-                result.status = Result::Status::Error;
-                result.error["code"] = "TAB_NOT_FOUND";
-                result.error["message"] = "No tab matches '" + only_tab + "'";
-                result.error["tab_id"] = only_tab;
-                result.error["reason"] = "not_found";
-                result.error["available_tabs"] = available;
-                return result;
-            }
-        }
+        std::vector<json> tab_elements = tabs_in_hierarchy(screen_data);
 
         if (tab_elements.empty()) {
             spdlog::info("No tabs found in screen, returning normal screen read");
@@ -2409,13 +2390,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         for (const auto& tab : screen_data["hierarchy"]["tabs"])
             if (tab.value("type", "") == "GuiTabStrip") ++strip_count;
         const auto selected_tabs = TabSelectionSnapshot::capture(
-            screen_data["hierarchy"]["tabs"], [&](const std::string& strip_id) {
-                auto strip = session_->find_element_by_id(strip_id);
-                if (!strip) return std::string();
-                auto selected_dispatch = strip->get_dispatch_property(L"SelectedTab");
-                if (!selected_dispatch) return std::string();
-                return ComGuiElement::create(selected_dispatch)->get_id();
-            });
+            screen_data["hierarchy"]["tabs"], [&](const std::string& strip_id) { return selected_tab_of(strip_id); });
         if (strip_count == 0 || selected_tabs.selected_ids.size() != strip_count) {
             initial_result.status = Result::Status::Error;
             initial_result.error["code"] = "TAB_SELECTION_UNAVAILABLE";
@@ -2432,85 +2407,22 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         // For each tab, select it and capture content
         json tabs_failed = json::array();
         for (size_t i = 0; i < tab_elements.size(); ++i) {
-            const auto& tab = tab_elements[i];
-            std::string tab_id = tab.value("id", "");
-            std::string tab_name = tab.value("text", "Unnamed Tab");
-
-            try {
-                spdlog::debug("Selecting tab {}/{}: {} [{}]", i + 1, tab_elements.size(), tab_name, tab_id);
-
-                // Skip select() (and its server round trip) when the tab is already the
-                // strip's current page; otherwise select, wait, and re-fetch inside
-                // read_tab_content so the subtree is read through a fresh COM pointer.
-                const std::string strip_id = tab_strip_id(tab_id);
-                const bool needs_select =
-                    plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
-                if (needs_select) current_selected[strip_id] = tab_id;
-
-                // NOTE: `elements` is the tab's own subtree (plus grids/trees inside it). It no
-                // longer repeats the whole window user area (tab headers, base fields) per tab.
-                json tab_elements_list;
-                const TabReadStatus tab_status =
-                    read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
-                if (tab_status != TabReadStatus::Ok) {
-                    spdlog::warn("Tab {} could not be read: {}", tab_name,
-                                 tab_read_failure_reason(tab_status));
-                    tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
-                                           {"reason", tab_read_failure_reason(tab_status)}});
-                    continue;
-                }
-
-                // Store tab data
-                json tab_data;
-                tab_data["tab_id"] = tab_id;
-                tab_data["tab_name"] = tab_name;
-                tab_data["tab_type"] = tab["type"];
-                tab_data["tab_index"] = i;
-                tab_data["elements"] = tab_elements_list;
-                tab_data["hierarchy"] = group_elements_by_container(tab_elements_list);
-                tab_data["element_count"] = tab_elements_list.size();
-
-                tabs_content.push_back(tab_data);
-
-                int elem_count = tab_data["element_count"].get<int>();
-                spdlog::info("Captured tab {} with {} elements", tab_name, elem_count);
-
-            } catch (const ComException& e) {
-                spdlog::warn("Failed to expand tab {}: {}", tab_name, e.what());
-                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
-                                       {"reason", "error"}});
-                continue;
-            } catch (const std::exception& e) {
-                spdlog::warn("Exception expanding tab {}: {}", tab_name, e.what());
-                tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
-                                       {"reason", "error"}});
-                continue;
-            }
+            json tab_elements_list;
+            (void)expand_tab(tab_elements[i], i, tab_strip_id(tab_elements[i].value("id", "")), skip_trees,
+                             current_selected, tabs_content, tabs_failed, tab_elements_list);
         }
 
         // Only strips whose page actually changed need to be put back.
-        TabSelectionSnapshot to_restore;
-        for (const auto& original_id : selected_tabs.selected_ids)
-            if (current_selected[tab_strip_id(original_id)] != original_id)
-                to_restore.selected_ids.push_back(original_id);
-        if (!to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); })) {
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_RESTORE_FAILED";
-            result.error["message"] = "Screen read could not restore the original tab";
+        if (!restore_tab_selection(selected_tabs, current_selected)) {
+            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
             return result;
         }
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
             const auto& first = tabs_failed.at(0);
-            result.status = Result::Status::Error;
-            result.error["code"] = "TAB_LOAD_FAILED";
-            result.error["message"] = "No tab could be read (first failure: " +
-                                      first.value("tab_id", "") + ", " + first.value("reason", "error") + ")";
-            result.error["tab_id"] = first.value("tab_id", "");
-            result.error["reason"] = first.value("reason", "error");
-            result.error["tabs_failed"] = tabs_failed;
-            return result;
+            return tab_load_failed(result, "No tab could be read (first failure: " + first.value("tab_id", "") + ", " +
+                                               first.value("reason", "error") + ")", tabs_failed);
         }
 
         // Add tabs content to result
@@ -2524,21 +2436,16 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         result.diagnostics = initial_result.diagnostics;
         attach_tab_diagnostics(result, effective_tree_reader_mode());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
 
         spdlog::info("Read screen with {} tabs expanded (duration: {}ms)",
                     tabs_content.size(), result.duration.count());
 
     } catch (const ComException& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "COM_ERROR";
-        result.error["message"] = e.what();
+        result.set_error("COM_ERROR", e.what());
         spdlog::error("Screen read with tabs failed: {}", e.what());
     } catch (const std::exception& e) {
-        result.status = Result::Status::Error;
-        result.error["code"] = "EXCEPTION";
-        result.error["message"] = e.what();
+        result.set_error("EXCEPTION", e.what());
         spdlog::error("Exception in read_with_tabs: {}", e.what());
     }
 

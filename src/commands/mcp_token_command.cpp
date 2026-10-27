@@ -99,10 +99,7 @@ Example: fairyfly mcp token rotate reader
             auth::TokenStore store(auth::make_credential_manager_backend(auth::kTokenTargetPrefix));
             return auth::run_token_action(args_, store);
         } catch (const std::exception& e) {
-            Result r;
-            r.status = Result::Status::Error;
-            r.error = {{"code", "TOKEN_STORE_ERROR"}, {"message", e.what()}};
-            return r;
+            return Result::fail("TOKEN_STORE_ERROR", e.what());
         }
     }
 

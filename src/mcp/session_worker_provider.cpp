@@ -9,33 +9,27 @@
 
 namespace fairyfly::mcp {
 namespace {
-Result error_result(const std::string& code, const std::string& message) {
-    Result result;
-    result.status = Result::Status::Error;
-    result.error = {{"code", code}, {"message", message}};
-    return result;
-}
 }
 
 Result result_from_worker_json(const json& reply) {
     if (!reply.is_object() || !reply.contains("status") || !reply["status"].is_string())
-        return error_result("OUTCOME_UNKNOWN", "invalid session worker result");
+        return Result::fail("OUTCOME_UNKNOWN", "invalid session worker result");
     Result result;
     const std::string status = reply["status"].get<std::string>();
     if (status == "success") {
         if (!reply.contains("data"))
-            return error_result("OUTCOME_UNKNOWN", "incomplete session worker result");
+            return Result::fail("OUTCOME_UNKNOWN", "incomplete session worker result");
         result.status = Result::Status::Success;
         result.data = reply["data"];
     } else if (status == "error") {
         if (!reply.contains("error") || !reply["error"].is_object() ||
             !reply["error"].contains("code") || !reply["error"]["code"].is_string() ||
             !reply["error"].contains("message") || !reply["error"]["message"].is_string())
-            return error_result("OUTCOME_UNKNOWN", "incomplete session worker error");
+            return Result::fail("OUTCOME_UNKNOWN", "incomplete session worker error");
         result.status = Result::Status::Error;
         result.error = reply["error"];
     } else {
-        return error_result("OUTCOME_UNKNOWN", "unknown session worker result status");
+        return Result::fail("OUTCOME_UNKNOWN", "unknown session worker result status");
     }
     if (reply.contains("diagnostics")) result.diagnostics = reply["diagnostics"];
     if (reply.contains("metadata") && reply["metadata"].is_object() &&
@@ -61,7 +55,7 @@ std::shared_ptr<CommandDispatcher> make_session_worker_provider(SessionWorkerPro
         return facts;
     };
     auto unavailable = [](const std::vector<std::string>&) -> Result {
-        return error_result("WORKER_UNSUPPORTED", "the command requires a session worker");
+        return Result::fail("WORKER_UNSUPPORTED", "the command requires a session worker");
     };
     AuditHook audit = [sink = std::move(config.audit), on_disconnect = std::move(config.on_disconnect)]
         (const McpCallRecord& record) {
@@ -103,10 +97,10 @@ std::shared_ptr<CommandDispatcher> make_session_worker_provider(SessionWorkerPro
     dispatcher->set_session_invoker_with_gate([invoke = std::move(invoke), connection, identity]
         (const WorkerCall& call, const std::function<void()>& before_send) {
         if (call.connection != connection || call.session_identity != identity)
-            return error_result("OWNER_SESSION_UNAVAILABLE", "session worker target changed");
+            return Result::fail("OWNER_SESSION_UNAVAILABLE", "session worker target changed");
         try { return result_from_worker_json(invoke(call, before_send)); }
-        catch (const WorkerTransportError& e) { return error_result(e.code(), e.what()); }
-        catch (...) { return error_result("OUTCOME_UNKNOWN", "session worker outcome is unknown"); }
+        catch (const WorkerTransportError& e) { return Result::fail(e.code(), e.what()); }
+        catch (...) { return Result::fail("OUTCOME_UNKNOWN", "session worker outcome is unknown"); }
     });
     return dispatcher;
 }

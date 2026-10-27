@@ -1,0 +1,9 @@
+{
+ "compact": false,
+ "input": {
+  "elements": [],
+  "screen_id": "wnd[0]",
+  "title": "X"
+ },
+ "output": "# X\n\n**Screen ID:** `wnd[0]`\n\n_No screen structure available_\n"
+}

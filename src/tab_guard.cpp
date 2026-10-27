@@ -79,10 +79,8 @@ std::optional<Result> classify_element_on_inactive_tab(const std::string& elemen
     const std::string tab_arg = last_slash == std::string::npos ? page.page_id : page.page_id.substr(last_slash + 1);
 
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "ELEMENT_ON_INACTIVE_TAB";
-    result.error["message"] = "Element " + element_id + " is on the tab '" + name +
-                              "', which is not the selected tab of its tab strip";
+    result.set_error("ELEMENT_ON_INACTIVE_TAB", "Element " + element_id + " is on the tab '" + name +
+                              "', which is not the selected tab of its tab strip");
     result.error["element"] = element_id;
     result.error["tab_id"] = page.page_id;
     result.error["tab_text"] = state.text;

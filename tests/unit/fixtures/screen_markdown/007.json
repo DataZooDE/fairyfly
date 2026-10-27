@@ -1,0 +1,13 @@
+{
+ "compact": false,
+ "input": {
+  "hierarchy": {},
+  "status_bar": {
+   "message_type": "S",
+   "text": "Job log displayed"
+  },
+  "title": "Job Overview",
+  "transaction": "SM37"
+ },
+ "output": "# Job Overview\n\n**Transaction:** `SM37`\n\n**Screen ID:** ``\n\n**Status [S]:** Job log displayed\n\n---\n**Screen Elements:** 0 top-level\n"
+}

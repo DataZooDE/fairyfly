@@ -18,10 +18,13 @@
 #include "support/env_guard.h"
 #include "include/cli_entry.h"
 
+#include "support/temp_dir.h"
 using namespace fairyfly::audit;
 using fairyfly::test::EnvGuard;
 namespace fs = std::filesystem;
 using json = nlohmann::json;
+
+using fairyfly::test::TempDir;
 
 namespace {
 
@@ -38,18 +41,6 @@ Clock::time_point utc(int y, int m, int d, int hh, int mm, int ss, int ms = 0) {
     return Clock::time_point(std::chrono::milliseconds(
         (((days * 24 + hh) * 60 + mm) * 60 + ss) * 1000LL + ms));
 }
-
-struct TempDir {
-    fs::path path;
-    TempDir() {
-        static std::atomic<int> counter{0};
-        path = fs::temp_directory_path() / ("fairyfly_audit_test_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "_" +
-                                            std::to_string(counter++));
-        fs::remove_all(path);
-        fs::create_directories(path);
-    }
-    ~TempDir() { std::error_code ec; fs::remove_all(path, ec); }
-};
 
 std::vector<std::string> read_lines(const fs::path& file) {
     std::ifstream in(file, std::ios::binary);
@@ -227,7 +218,7 @@ TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
 
 TEST_CASE("AuditSink appends exactly one terminated line per record", "[audit]") {
     TempDir dir;
-    const auto file = dir.path / "nested" / "audit.jsonl";
+    const auto file = dir.path() / "nested" / "audit.jsonl";
     AuditSink sink(AuditConfig{Mode::Enabled, file});
     REQUIRE(sink.probe());
     REQUIRE(sink.append(sample_record()));
@@ -244,7 +235,7 @@ TEST_CASE("AuditSink appends exactly one terminated line per record", "[audit]")
 
 TEST_CASE("AuditSink concurrent appends never interleave", "[audit]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     AuditSink sink(AuditConfig{Mode::Enabled, file});
     constexpr int kThreads = 8;
     constexpr int kPerThread = 25;
@@ -267,7 +258,7 @@ TEST_CASE("AuditSink concurrent appends never interleave", "[audit]") {
 TEST_CASE("AuditSink append to an unwritable path fails quietly", "[audit]") {
     TempDir dir;
     // A directory where the file should be: opening it for append must fail.
-    const auto path = dir.path / "blocked";
+    const auto path = dir.path() / "blocked";
     fs::create_directories(path);
     AuditSink sink(AuditConfig{Mode::Enabled, path});
     bool result = true;
@@ -285,7 +276,7 @@ TEST_CASE("Required mode turns a failed probe into AUDIT_UNAVAILABLE", "[audit]"
 
 TEST_CASE("CLI writes no audit file with --no-audit", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");
     int code = -1;
@@ -298,7 +289,7 @@ TEST_CASE("CLI writes no audit file with --no-audit", "[audit][cli]") {
 
 TEST_CASE("CLI honours FAIRYFLY_AUDIT=0", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "0");
     int code = -1;
@@ -309,7 +300,7 @@ TEST_CASE("CLI honours FAIRYFLY_AUDIT=0", "[audit][cli]") {
 
 TEST_CASE("CLI parse error writes exactly one audit record", "[audit][cli]") {
     TempDir dir;
-    const auto file = dir.path / "audit.jsonl";
+    const auto file = dir.path() / "audit.jsonl";
     EnvGuard f("FAIRYFLY_AUDIT_FILE", file.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");
     int code = -1;
@@ -329,7 +320,7 @@ TEST_CASE("CLI parse error writes exactly one audit record", "[audit][cli]") {
 
 TEST_CASE("CLI --audit-required fails before running when the file is unwritable", "[audit][cli]") {
     TempDir dir;
-    const auto blocked = dir.path / "blocked";
+    const auto blocked = dir.path() / "blocked";
     fs::create_directories(blocked);
     EnvGuard f("FAIRYFLY_AUDIT_FILE", blocked.string());
     EnvGuard a("FAIRYFLY_AUDIT", "");

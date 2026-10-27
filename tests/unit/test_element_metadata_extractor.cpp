@@ -7,39 +7,24 @@ using json = nlohmann::json;
 using namespace fairyfly;
 using namespace fairyfly::sap;
 
-TEST_CASE("ElementMetadataExtractor - Cache management", "[metadata][extractor]") {
-    SECTION("Clear cache works") {
-        ElementMetadataExtractor::clear_cache();
-        
-        // Verify cache is cleared (cannot directly access private member, but clear should work)
-        ElementMetadataExtractor::clear_cache();  // Second call should not fail
-        REQUIRE(true);  // If we got here, clear_cache didn't throw
-    }
-}
-
+// Real extraction is covered with FakeNode in test_com_wrapper.cpp ("[metadata][golden]").
 TEST_CASE("ElementMetadataExtractor - Extract with null element", "[metadata][extractor]") {
     SECTION("Returns null for null element") {
-        json result = ElementMetadataExtractor::extract(nullptr);
+        json result = ElementMetadataExtractor().extract(nullptr);
         REQUIRE(result.is_null());
     }
 }
 
-TEST_CASE("ElementMetadataExtractor - Extract handles exceptions", "[metadata][extractor]") {
-    // This test verifies that extract() gracefully handles exceptions
-    // Since we can't easily mock ComGuiElement, we test with null
-    // and verify the error handling paths work
-    
-    SECTION("Returns null on exception") {
-        // Passing null element should return null (not throw)
-        json result = ElementMetadataExtractor::extract(nullptr, 0);
-        REQUIRE(result.is_null());
-    }
-}
 
-TEST_CASE("SapGuiObject - DISPID cache management", "[com][cache]") {
-    SECTION("Clear DISPID cache executes safely") {
-        SapGuiObject::clear_dispid_cache();
-        REQUIRE(true);
-    }
-}
 
+TEST_CASE("ElementMetadataExtractor - options and cache belong to one extractor (one screen read)", "[metadata][extractor]") {
+    // review 2026-10-25: the cache and skip_trees were process-wide statics every reader had to reset by hand
+    ElementMetadataExtractor::Options skip;
+    skip.skip_trees = true;
+    const ElementMetadataExtractor a(skip);
+    const ElementMetadataExtractor b;
+    CHECK(a.options().skip_trees);
+    CHECK_FALSE(b.options().skip_trees);  // a's options do not leak into b
+    CHECK(a.cached_entries() == 0);
+    CHECK(b.cached_entries() == 0);
+}

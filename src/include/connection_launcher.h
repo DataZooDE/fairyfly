@@ -34,8 +34,6 @@ public:
     static std::wstring sapshcut_command_line(const std::wstring& executable_path,
                                               const std::string& connection_name);
 
-    /// Quote one argument for the Windows command-line parsing rules.
-    static std::wstring quote_windows_argument(const std::wstring& value);
 
     /// Match a SAP Logon entry to a GUI connection description.
     static bool matches_connection_name(const std::string& requested,

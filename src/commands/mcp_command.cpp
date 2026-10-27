@@ -1,5 +1,6 @@
 #include "include/commands/mcp_command.h"
 
+#include "include/mcp/constants.h"
 #include <memory>
 
 #include "include/command_table.h"
@@ -38,7 +39,7 @@ Examples:
     cmd_->add_flag("--http", http_flag_,
                    "Serve MCP over HTTP or HTTPS (http.sys) instead of stdio");
     cmd_->add_option("--mcp-host", options_.host, "HTTP bind address (default 127.0.0.1)");
-    cmd_->add_option("--mcp-port,--port", options_.port, "HTTP port (default 8383)");
+    cmd_->add_option("--mcp-port,--port", options_.port, "HTTP port (default " + std::to_string(mcp::kDefaultHttpPort) + ")");
     cmd_->add_flag("--tls,!--no-tls", options_.tls,
                    "HTTP only: serve HTTPS; http.sys terminates TLS with the certificate bound by 'fairyfly mcp setup'");
     cmd_->add_option("--allow-ip", options_.allow_ip,
@@ -80,11 +81,7 @@ Result McpCommand::execute(cli::CommandHandler& handler) {
     (void)handler;
     // cli_entry.cpp calls mcp::run_mcp() for this command; reaching here means the registry
     // was executed directly, which is not a supported entry point.
-    Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "MCP_UNAVAILABLE";
-    result.error["message"] = "MCP server is not available through this entry point";
-    return result;
+    return Result::fail("MCP_UNAVAILABLE", "MCP server is not available through this entry point");
 }
 
 mcp::ServeOptions McpCommand::options() const {

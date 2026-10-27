@@ -1,0 +1,37 @@
+{
+ "compact": false,
+ "input": {
+  "hierarchy": {
+   "inputs": [
+    {
+     "changeable": true,
+     "id": "wnd[0]/usr/ctxtSUID_ST_BNAME-BNAME",
+     "name": "SUID_ST_BNAME-BNAME",
+     "text": "JR",
+     "type": "GuiCTextField"
+    }
+   ],
+   "other": [
+    {
+     "id": "wnd[0]/sbar/pane[0]",
+     "text": "User JR saved",
+     "type": "GuiStatusPane"
+    },
+    {
+     "id": "wnd[0]/sbar/pane[1]",
+     "text": "   ",
+     "type": "GuiStatusPane"
+    },
+    {
+     "id": "wnd[0]/sbar/pane[2]",
+     "text": "SU01",
+     "type": "GuiStatusPane"
+    }
+   ]
+  },
+  "screen_id": "wnd[0]",
+  "title": "Change User",
+  "transaction": "SU01"
+ },
+ "output": "# Change User\n\n**Transaction:** `SU01`\n\n**Screen ID:** `wnd[0]`\n\n## ⚠️ Status Messages\n\n**User JR saved**\n\n_SU01_  \n\n---\n**Screen Elements:** 0 top-level\n"
+}

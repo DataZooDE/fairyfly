@@ -28,11 +28,7 @@ Example: fairyfly session login --connection 3 --credential DEV
 
     Result execute(cli::CommandHandler& handler) override {
         if (!credentials_file_.empty() && from_stdin_) {
-            Result result;
-            result.status = Result::Status::Error;
-            result.error = {{"code", "INVALID_ARGUMENT"},
-                            {"message", "Choose at most one of --credentials-file or --credentials-stdin"}};
-            return result;
+            return Result::fail("INVALID_ARGUMENT", "Choose at most one of --credentials-file or --credentials-stdin");
         }
         return handler.handle_login(credentials_file_, connection_id_, from_stdin_, credential_name_, multiple_logon_);
     }

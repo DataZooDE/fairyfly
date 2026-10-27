@@ -265,18 +265,18 @@ std::optional<TokenMeta> TokenMeta::from_json(const json& input) {
 
 // ---- format helpers --------------------------------------------------------------------------
 std::optional<ParsedToken> parse_token(std::string_view token) {
-    if (token.size() != 4 + kIdChars + 1 + kSecretChars) return std::nullopt;
-    if (token.substr(0, 4) != "ffy_") return std::nullopt;
-    const auto id = token.substr(4, kIdChars);
-    if (token[4 + kIdChars] != '_') return std::nullopt;
-    const auto secret = token.substr(4 + kIdChars + 1);
+    if (token.size() != kTokenPrefix.size() + kIdChars + 1 + kSecretChars) return std::nullopt;
+    if (!token.starts_with(kTokenPrefix)) return std::nullopt;
+    const auto id = token.substr(kTokenPrefix.size(), kIdChars);
+    if (token[kTokenPrefix.size() + kIdChars] != '_') return std::nullopt;
+    const auto secret = token.substr(kTokenPrefix.size() + kIdChars + 1);
     if (!is_hex(id) || !is_b64url(secret)) return std::nullopt;
     return ParsedToken{std::string(id), std::string(secret)};
 }
 
-std::string format_token(const std::string& id, const std::string& secret) { return "ffy_" + id + "_" + secret; }
+std::string format_token(const std::string& id, const std::string& secret) { return std::string(kTokenPrefix) + id + "_" + secret; }
 
-std::string token_display_id(const TokenMeta& meta) { return "ffy_" + meta.id + "_..."; }
+std::string token_display_id(const TokenMeta& meta) { return std::string(kTokenPrefix) + meta.id + "_..."; }
 
 std::string format_iso_utc(TimePoint t) {
     const auto secs = std::chrono::floor<std::chrono::seconds>(t).time_since_epoch().count();

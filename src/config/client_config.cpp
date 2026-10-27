@@ -1,5 +1,6 @@
 #include "include/config/client_config.h"
 
+#include "include/auth/token_store.h"
 #include <algorithm>
 #include <cctype>
 #include <regex>
@@ -11,7 +12,7 @@ namespace {
 using ordered = nlohmann::ordered_json;
 
 bool looks_like_token(const std::string& s) {
-    static const std::regex token(R"(ffy_[A-Za-z0-9]+_)");
+    static const std::regex token(std::string(auth::kTokenPrefix) + "[A-Za-z0-9]+_");
     return std::regex_search(s, token);
 }
 

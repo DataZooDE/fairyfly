@@ -3,6 +3,7 @@
 // tagged [.] in tests/unit/test_tray_win32_manual.cpp exercise them on a desktop.
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,6 @@ std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name = kTrayMutexName);
-std::unique_ptr<Clipboard> make_win32_clipboard();
 
 /// Full path of the running fairyfly.exe.
 std::string current_exe_path();
@@ -41,5 +41,22 @@ void clear_tray_child_marker();
 void detach_console();
 /// Routes spdlog to <logs>\<file_name> with size rotation (3 files x 5 MB) and returns the file path.
 std::string route_logging_to_file(const std::string& file_name = "mcp.log");
+
+/// The start of either tray (`mcp --tray`, `link run --tray`) with the Win32 services: what the tray entry decides on
+/// and what the tray keeps using afterwards (the Run key, the launcher, the instance guard).
+struct TrayStart {
+    TrayEntry entry;                ///< tray_requested, is_child, has_console, exe and args set; the caller adds the rest
+    std::string program;            ///< what the Run value starts: fairyfly-tray.exe when installed, else fairyfly.exe
+    std::unique_ptr<RegistryRunKey> registry;
+    std::unique_ptr<ProcessLauncher> launcher;
+    std::unique_ptr<SingleInstance> guard;
+    bool launched = false;          ///< after settle_tray_start: the Start menu, the autostart or the installer started it
+};
+TrayStart prepare_tray_start(const std::string& mutex_name);
+
+/// decide_tray_entry with the Win32 services, a message box where nobody reads the console, and a running tray asked
+/// to show itself. nullopt: this process is the tray now (console detached, child marker cleared, `launched` read
+/// before that); otherwise the exit code to return.
+std::optional<int> settle_tray_start(TrayStart& start, TrayKind kind, const std::string& title);
 
 } // namespace fairyfly::tray

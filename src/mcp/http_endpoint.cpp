@@ -1,5 +1,7 @@
 #include "include/mcp/http_endpoint.h"
 
+#include "include/command_table.h"
+#include "include/mcp/constants.h"
 #include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
@@ -30,10 +32,6 @@ HttpResponse json_response(int status, const json& message) {
     return r;
 }
 
-/// Non-RPC failure: {"error_code","message"} (auth, routing, limits).
-HttpResponse plain_error(int status, const std::string& code, const std::string& message) {
-    return json_response(status, json{{"error_code", code}, {"message", message}});
-}
 
 HttpResponse empty_response(int status) {
     HttpResponse r;
@@ -217,6 +215,12 @@ std::string progress_frame(const json& token, double progress, std::optional<dou
 
 } // namespace
 
+HttpResponse http_json_error(int status, std::string_view code, std::string_view message) {
+    HttpResponse r = json_response(status, json{{"error_code", std::string(code)}, {"message", std::string(message)}});
+    r.set_header("Cache-Control", "no-store");
+    return r;
+}
+
 // ---- small public helpers ---------------------------------------------------------------------
 
 bool CaseInsensitiveLess::operator()(const std::string& a, const std::string& b) const {
@@ -305,7 +309,7 @@ std::string format_sse_event(std::string_view event, std::string_view data, std:
 std::string format_sse_comment(std::string_view text) { return ": " + std::string(text) + "\n\n"; }
 
 const std::vector<std::string>& HttpEndpoint::supported_versions() {
-    static const std::vector<std::string> versions = {kStatelessVersion, "2025-11-25", "2025-06-18"};
+    static const std::vector<std::string> versions = http_protocol_versions();
     return versions;
 }
 
@@ -370,23 +374,23 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         (options_.allow_ip_include_loopback || !auth::ip_is_loopback(request.peer_addr)) &&
         !auth::ip_allowed(request.peer_addr, options_.allow_ip)) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "ADDRESS_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "ADDRESS_NOT_ALLOWED",
                                            "this address is not allowed to use this server"));
     }
     // DNS-rebinding defence: it applies to every path and method.
     if (!host_allowed(request.header("Host"))) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "HOST_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "HOST_NOT_ALLOWED",
                                            "Host header not allowed; add it with --allowed-hosts"));
     }
     const std::string origin = request.header("Origin");
     if (!origin.empty() && !origin_allowed(origin)) {
         ++calls_denied_;
-        return finish(request, plain_error(403, "ORIGIN_NOT_ALLOWED",
+        return finish(request, http_json_error(403, "ORIGIN_NOT_ALLOWED",
                                            "Origin not allowed; add it with --cors-origin"));
     }
     if (request.path != options_.path)
-        return finish(request, plain_error(404, "NOT_FOUND", "not found; the MCP endpoint is POST " + options_.path));
+        return finish(request, http_json_error(404, "NOT_FOUND", "not found; the MCP endpoint is POST " + options_.path));
 
     if (request.method == "OPTIONS" && !origin.empty()) {  // CORS preflight of an allowed origin
         HttpResponse r = empty_response(204);
@@ -397,14 +401,14 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         return finish(request, std::move(r));
     }
     if (request.method != "POST") {
-        HttpResponse r = plain_error(405, "METHOD_NOT_ALLOWED", "only POST " + options_.path + " is supported");
+        HttpResponse r = http_json_error(405, "METHOD_NOT_ALLOWED", "only POST " + options_.path + " is supported");
         r.set_header("Allow", "POST");
         return finish(request, std::move(r));
     }
     std::string content_type = utils::lower_ascii(utils::trim(request.header("Content-Type")));
     content_type = utils::trim(content_type.substr(0, content_type.find(';')));
     if (content_type != "application/json")
-        return finish(request, plain_error(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json"));
+        return finish(request, http_json_error(415, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json"));
 
     const std::string length = utils::trim(request.header("Content-Length"));
     bool too_big = request.body.size() > options_.max_body_bytes;
@@ -414,9 +418,23 @@ std::optional<HttpResponse> HttpEndpoint::precheck(const HttpRequest& request) c
         } catch (...) { too_big = true; }
     }
     if (too_big)
-        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+        return finish(request, http_json_error(413, "PAYLOAD_TOO_LARGE",
                                            "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return std::nullopt;
+}
+
+AuthOutcome HttpEndpoint::reauthenticate(const AuthRequest& auth) {
+    AuthOutcome outcome;  // no authenticator: not ok (the caller refuses)
+    try {
+        if (authenticator_) {
+            authenticator_->invalidate_cache();  // a revoked or changed token must not pass from the cache
+            outcome = authenticator_->authenticate(auth);
+        }
+    } catch (...) {
+        outcome.ok = false;
+        outcome.error_code = "AUTH_UNAVAILABLE";
+    }
+    return outcome;
 }
 
 HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) {
@@ -446,11 +464,11 @@ HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) 
     if (!outcome.ok) {
         ++calls_denied_;
         const int status = outcome.http_status >= 400 ? outcome.http_status : 401;
-        HttpResponse r = plain_error(status, outcome.error_code.empty() ? "AUTH_REQUIRED" : outcome.error_code,
+        HttpResponse r = http_json_error(status, outcome.error_code.empty() ? "AUTH_REQUIRED" : outcome.error_code,
                                      outcome.message.empty() ? "authentication required" : outcome.message);
         if (status == 401)
             r.set_header("WWW-Authenticate",
-                         outcome.www_authenticate.empty() ? "Bearer realm=\"fairyfly\"" : outcome.www_authenticate);
+                         outcome.www_authenticate.empty() ? std::string(kBearerChallenge) : outcome.www_authenticate);
         else if (!outcome.www_authenticate.empty())
             r.set_header("WWW-Authenticate", outcome.www_authenticate);
         out.rejection = finish(request, std::move(r));
@@ -463,7 +481,7 @@ HttpEndpoint::PreAuth HttpEndpoint::preauthenticate(const HttpRequest& request) 
 
 HttpResponse HttpEndpoint::handle_authenticated(const HttpRequest& request, const Principal& principal) {
     if (request.body.size() > options_.max_body_bytes)
-        return finish(request, plain_error(413, "PAYLOAD_TOO_LARGE",
+        return finish(request, http_json_error(413, "PAYLOAD_TOO_LARGE",
                                            "request body exceeds " + std::to_string(options_.max_body_bytes) + " bytes"));
     return finish(request, dispatch(request, principal));
 }
@@ -474,20 +492,11 @@ HttpResponse HttpEndpoint::handle(const HttpRequest& request) {
     return handle_authenticated(request, pre.principal);
 }
 
-HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
-    json parse_error;
-    Message message = parse_message(request.body, parse_error);
-    switch (message.kind) {
-    case Message::Kind::Invalid:
-        return json_response(400, parse_error.is_null() ? make_error(nullptr, kInvalidRequest, "Invalid request")
-                                                        : parse_error);
-    case Message::Kind::Response:
-    case Message::Kind::Notification:
-        return empty_response(202);
-    case Message::Kind::Request:
-        break;
-    }
-
+/// The request's protocol before anything else: _meta spellings that disagree, the era (2026-07-28 stateless or
+/// legacy), MCP-Protocol-Version against the body, an unsupported version, and the Mcp-Method / Mcp-Name headers.
+/// The answer for a refused request, or nullopt with `out` filled.
+std::optional<HttpResponse> HttpEndpoint::protocol_refusal(const HttpRequest& request, const Message& message,
+                                                           RequestProtocol& out) const {
     const std::string& method = message.method;
     const json& params = message.params;
 
@@ -565,6 +574,236 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
         if (auto refused = check_method_name_headers(false)) return std::move(*refused);
     }
 
+    out.modern = modern;
+    out.version = version;
+    return std::nullopt;
+}
+
+namespace {
+
+/// A plain JSON answer: waits for the job (polling the client connection and the server's stop), 499 when the client
+/// went away and 503 when the server stops first; the job is cancelled in both cases.
+HttpResponse wait_for_answer(const HttpRequest& request, const json& id, Waiter& waiter, std::chrono::milliseconds poll,
+                             const std::function<void()>& cancel, const std::function<bool()>& stopping) {
+    std::unique_lock<std::mutex> lock(waiter.m);
+    while (!waiter.done) {
+        waiter.cv.wait_for(lock, poll);
+        if (!waiter.done && request.connected && !request.connected()) {
+            lock.unlock();
+            cancel();
+            return json_response(499, make_error(id, kServerBusy, "client disconnected"));
+        }
+        if (!waiter.done && stopping()) break;
+    }
+    if (!waiter.done || waiter.final_message.is_null()) {
+        lock.unlock();
+        cancel();
+        return json_response(503, make_error(id, kServerBusy, "server shutting down", json{{"retry", true}}));
+    }
+    return json_response(200, waiter.final_message);
+}
+
+/// An SSE answer (HTTP 200): the job's progress frames as they come, keep-alive comments while it runs, then its final
+/// message, or a JSON-RPC kServerBusy error when the job ended without one. A client that goes away or a server that
+/// stops before the job is done cancels it and ends the stream without a final message.
+HttpResponse sse_answer(std::shared_ptr<Waiter> waiter, std::shared_ptr<CallState> state, std::function<void()> cancel,
+                        std::function<bool()> stopping, std::chrono::milliseconds poll, int keepalive_ms) {
+    HttpResponse r;
+    r.status = 200;
+    r.set_header("Content-Type", "text/event-stream");
+    r.set_header("Cache-Control", "no-cache");
+    r.set_header("X-Accel-Buffering", "no");
+    r.set_header("Connection", "keep-alive");
+    r.stream = [waiter, state, cancel, stopping, poll, keepalive_ms](SseSink& sink) {
+        auto last_write = std::chrono::steady_clock::now();
+        auto emit = [&](const std::string& frame) {
+            if (!sink.write(frame)) return false;
+            last_write = std::chrono::steady_clock::now();
+            return true;
+        };
+        while (true) {
+            std::vector<std::string> frames;
+            json final_message;
+            bool done = false;
+            {
+                std::unique_lock<std::mutex> lock(waiter->m);
+                if (waiter->frames.empty() && !waiter->done) waiter->cv.wait_for(lock, poll);
+                while (!waiter->frames.empty()) {
+                    frames.push_back(std::move(waiter->frames.front()));
+                    waiter->frames.pop_front();
+                }
+                done = waiter->done;
+                final_message = waiter->final_message;
+            }
+            for (const auto& f : frames)
+                if (!emit(f)) {
+                    cancel();
+                    return;
+                }
+            if (done) {
+                if (final_message.is_null())
+                    final_message = make_error(state->id, kServerBusy, "server shutting down", json{{"retry", true}});
+                emit(format_sse_event("message", dump(final_message)));
+                return;
+            }
+            if (!sink.connected() || stopping()) {
+                cancel();
+                return;
+            }
+            if (keepalive_ms > 0 && std::chrono::steady_clock::now() - last_write >= std::chrono::milliseconds(keepalive_ms))
+                if (!emit(format_sse_comment("keep-alive"))) {
+                    cancel();
+                    return;
+                }
+        }
+    };
+    return r;
+}
+
+}  // namespace
+
+/// A tools/call on a routed endpoint: the token is authenticated again, then the router assigns the SAP session; a
+/// call that is neither routed nor global control is refused (SESSION_ROUTE_REQUIRED). Sets the re-authenticated
+/// `admission_principal` and the `route`.
+std::optional<HttpEndpoint::RouteRefusal> HttpEndpoint::admit_session_route(const json& params, const Principal& principal,
+                                                                            const AuthRequest& execution_auth,
+                                                                            Principal& admission_principal,
+                                                                            SessionRoute& session_route) {
+    AuthOutcome refreshed = reauthenticate(execution_auth);
+    if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
+        const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+        return RouteRefusal{"authorization changed before route admission", code};
+    }
+    admission_principal = std::move(refreshed.principal);
+    const std::string tool = params["name"].get<std::string>();
+    try {
+        session_route = session_router_(admission_principal, tool,
+                                        params.value("arguments", json::object()));
+    } catch (...) {
+        session_route.handled = true;
+        session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
+        session_route.error_message = "the SAP session could not be routed";
+    }
+    const bool global_control =
+        session_route.global_control || command_table::tool_has(tool, command_table::Trait::GlobalControl);
+    if (!session_route.error_code.empty() ||
+        (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
+        (!session_route.handled && !global_control)) {
+        const std::string code = session_route.error_code.empty() ? "SESSION_ROUTE_UNAVAILABLE" : session_route.error_code;
+        const std::string effective_code = !session_route.handled && !global_control && session_route.error_code.empty()
+                                               ? "SESSION_ROUTE_REQUIRED" : code;
+        const std::string reason = session_route.error_message.empty() ? "the SAP session could not be routed"
+                                                                : session_route.error_message;
+        return RouteRefusal{reason, effective_code};
+    }
+    return std::nullopt;
+}
+
+/// What an executor job of tools/list or tools/call needs: the request, who sent it, how to answer, its route.
+struct HttpEndpoint::ToolJob {
+    Pending pending;
+    Principal principal;
+    AuthRequest execution_auth;
+    ProtocolEra era;
+    bool stateless;
+    json server_info;
+    json client_info;
+    json progress_token;
+    bool want_progress;
+    std::shared_ptr<ToolProvider> route_provider;
+    std::string route_identity;
+    std::string route_lane_key;
+    bool routed;
+    std::shared_ptr<Waiter> waiter;
+};
+
+/// The job on the main thread (or the session's lane): the token and the route are checked again at dequeue, then
+/// tools/list or tools/call runs with progress frames when the client asked for them.
+json HttpEndpoint::run_tool_job(const ToolJob& job, CallState& state) {
+    AuthOutcome refreshed = reauthenticate(job.execution_auth);
+    if (!refreshed.ok || !same_security_principal(refreshed.principal, job.principal)) {
+        const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
+        json denied = make_error(job.pending.id, kInvalidParams, "authorization changed before execution",
+                                 json{{"code", reason}});
+        return job.stateless ? decorate_stateless(std::move(denied), job.pending.method, job.server_info) : denied;
+    }
+    const Principal& current_principal = refreshed.principal;
+    if (job.routed) {
+        bool valid_route = false;
+        try {
+            const SessionRoute current = session_recheck_router_(current_principal,
+                job.pending.params.at("name").get<std::string>(),
+                job.pending.params.value("arguments", json::object()));
+            valid_route = current.handled && current.error_code.empty() &&
+                          current.identity == job.route_identity &&
+                          (current.lane_key.empty() ? current.identity : current.lane_key) == job.route_lane_key &&
+                          current.provider.get() == job.route_provider.get();
+        } catch (...) {
+            valid_route = false;
+        }
+        if (!valid_route) {
+            json denied = make_error(job.pending.id, kInvalidParams, "SAP session routing changed before execution",
+                                     json{{"code", "SESSION_ROUTE_CHANGED"}});
+            return job.stateless ? decorate_stateless(std::move(denied), job.pending.method, job.server_info) : denied;
+        }
+    }
+    ToolProvider& selected_provider = job.route_provider ? *job.route_provider : provider_;
+    json out;
+    if (job.pending.method == "tools/list") {
+        out = tools_list_message(selected_provider, job.pending, true, &current_principal);
+    } else {
+        try {
+            selected_provider.set_client_info(job.client_info.is_object() ? job.client_info : json::object());
+        } catch (const std::exception& e) {
+            spdlog::warn("set_client_info failed: {}", e.what());
+        }
+        CallContext ctx;
+        ctx.principal = current_principal;
+        ctx.era = job.era;
+        ctx.http = true;
+        ctx.cancelled = [&state] { return state.cancelled.load(); };
+        ctx.reauthorize = [this, execution_auth = job.execution_auth, bound = current_principal]() {
+            const AuthOutcome latest = reauthenticate(execution_auth);
+            return latest.ok && same_security_principal(latest.principal, bound);
+        };
+        auto last = std::make_shared<double>(0.0);
+        if (job.want_progress) {
+            job.waiter->push_frame(progress_frame(job.progress_token, 0.0, std::nullopt, "started"));
+            ctx.report_progress = [waiter = job.waiter, progress_token = job.progress_token,
+                                   last](double progress, std::optional<double> total, const std::string& text) {
+                if (progress <= *last) return;
+                *last = progress;
+                waiter->push_frame(progress_frame(progress_token, progress, total, text));
+            };
+        }
+        out = call_tool_message(selected_provider, job.pending, std::move(ctx));
+        if (job.want_progress) job.waiter->push_frame(progress_frame(job.progress_token, *last + 1.0, std::nullopt, "finished"));
+    }
+    return job.stateless ? decorate_stateless(std::move(out), job.pending.method, job.server_info) : out;
+}
+
+HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
+    json parse_error;
+    Message message = parse_message(request.body, parse_error);
+    switch (message.kind) {
+    case Message::Kind::Invalid:
+        return json_response(400, parse_error.is_null() ? make_error(nullptr, kInvalidRequest, "Invalid request")
+                                                        : parse_error);
+    case Message::Kind::Response:
+    case Message::Kind::Notification:
+        return empty_response(202);
+    case Message::Kind::Request:
+        break;
+    }
+
+    const std::string& method = message.method;
+    const json& params = message.params;
+
+    RequestProtocol protocol;
+    if (auto refused = protocol_refusal(request, message, protocol)) return std::move(*refused);
+    const bool modern = protocol.modern;
+    const std::string& version = protocol.version;
+
     // ---- protocol era ------------------------------------------------------------------------------
     ProtocolEra era = ProtocolEra::Legacy;
     if (method == "initialize") {
@@ -626,46 +865,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     Principal admission_principal = principal;
     if (is_call && session_pool_ && session_router_ && params.is_object() &&
         params.contains("name") && params["name"].is_string()) {
-        AuthOutcome refreshed;
-        try {
-            if (authenticator_) {
-                authenticator_->invalidate_cache();
-                refreshed = authenticator_->authenticate(execution_auth);
-            }
-        } catch (...) {
-            refreshed.ok = false;
-            refreshed.error_code = "AUTH_UNAVAILABLE";
-        }
-        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
-            const std::string code = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
-            return reply(make_error(message.id, kInvalidParams, "authorization changed before route admission",
-                                    json{{"code", code}}));
-        }
-        admission_principal = std::move(refreshed.principal);
-        const std::string tool = params["name"].get<std::string>();
-        try {
-            session_route = session_router_(admission_principal, tool,
-                                            params.value("arguments", json::object()));
-        } catch (...) {
-            session_route.handled = true;
-            session_route.error_code = "SESSION_ROUTE_UNAVAILABLE";
-            session_route.error_message = "the SAP session could not be routed";
-        }
-        const bool global_control = session_route.global_control ||
-                                    tool == "gui_session_list" || tool == "gui_connection_list" ||
-                                    tool == "gui_credentials_list" || tool == "gui_doctor" ||
-                                    tool == "gui_session_lease" || tool == "gui_session_attach" ||
-                                    tool == "gui_session_login" || tool == "gui_session_launch";
-        if (!session_route.error_code.empty() ||
-            (session_route.handled && (session_route.identity.empty() || !session_route.provider)) ||
-            (!session_route.handled && !global_control)) {
-            const std::string code = session_route.error_code.empty() ? "SESSION_ROUTE_UNAVAILABLE" : session_route.error_code;
-            const std::string effective_code = !session_route.handled && !global_control && session_route.error_code.empty()
-                                                   ? "SESSION_ROUTE_REQUIRED" : code;
-            const std::string reason = session_route.error_message.empty() ? "the SAP session could not be routed"
-                                                                    : session_route.error_message;
-            return reply(make_error(message.id, kInvalidParams, reason, json{{"code", effective_code}}));
-        }
+        if (auto refused = admit_session_route(params, principal, execution_auth, admission_principal, session_route))
+            return reply(make_error(message.id, kInvalidParams, refused->message, json{{"code", refused->code}}));
     }
     const bool routed = session_route.handled;
     const std::string route_identity = session_route.identity;
@@ -687,84 +888,10 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
     Pending pending{message.id, method, params};
     const bool want_progress = sse && !progress_token.is_null();
-    job.run = [this, pending, principal = admission_principal, execution_auth, era, stateless, server_info, client_info, progress_token, want_progress,
-               route_provider, route_identity, route_lane_key, routed,
-               waiter](CallState& state) -> json {
-        AuthOutcome refreshed;
-        try {
-            if (authenticator_) {
-                authenticator_->invalidate_cache();
-                refreshed = authenticator_->authenticate(execution_auth);
-            }
-        } catch (...) {
-            refreshed.ok = false;
-            refreshed.error_code = "AUTH_UNAVAILABLE";
-        }
-        if (!refreshed.ok || !same_security_principal(refreshed.principal, principal)) {
-            const std::string reason = refreshed.error_code.empty() ? "TOKEN_CHANGED" : refreshed.error_code;
-            json denied = make_error(pending.id, kInvalidParams, "authorization changed before execution",
-                                     json{{"code", reason}});
-            return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
-        }
-        const Principal& current_principal = refreshed.principal;
-        if (routed) {
-            bool valid_route = false;
-            try {
-                const SessionRoute current = session_recheck_router_(current_principal,
-                    pending.params.at("name").get<std::string>(),
-                    pending.params.value("arguments", json::object()));
-                valid_route = current.handled && current.error_code.empty() &&
-                              current.identity == route_identity &&
-                              (current.lane_key.empty() ? current.identity : current.lane_key) == route_lane_key &&
-                              current.provider.get() == route_provider.get();
-            } catch (...) {
-                valid_route = false;
-            }
-            if (!valid_route) {
-                json denied = make_error(pending.id, kInvalidParams, "SAP session routing changed before execution",
-                                         json{{"code", "SESSION_ROUTE_CHANGED"}});
-                return stateless ? decorate_stateless(std::move(denied), pending.method, server_info) : denied;
-            }
-        }
-        ToolProvider& selected_provider = route_provider ? *route_provider : provider_;
-        json out;
-        if (pending.method == "tools/list") {
-            out = tools_list_message(selected_provider, pending, true, &current_principal);
-        } else {
-            try {
-                selected_provider.set_client_info(client_info.is_object() ? client_info : json::object());
-            } catch (const std::exception& e) {
-                spdlog::warn("set_client_info failed: {}", e.what());
-            }
-            CallContext ctx;
-            ctx.principal = current_principal;
-            ctx.era = era;
-            ctx.http = true;
-            ctx.cancelled = [&state] { return state.cancelled.load(); };
-            ctx.reauthorize = [this, execution_auth, bound = current_principal]() {
-                if (!authenticator_) return false;
-                try {
-                    authenticator_->invalidate_cache();
-                    const AuthOutcome latest = authenticator_->authenticate(execution_auth);
-                    return latest.ok && same_security_principal(latest.principal, bound);
-                } catch (...) {
-                    return false;
-                }
-            };
-            auto last = std::make_shared<double>(0.0);
-            if (want_progress) {
-                waiter->push_frame(progress_frame(progress_token, 0.0, std::nullopt, "started"));
-                ctx.report_progress = [waiter, progress_token, last](double progress, std::optional<double> total,
-                                                                      const std::string& text) {
-                    if (progress <= *last) return;
-                    *last = progress;
-                    waiter->push_frame(progress_frame(progress_token, progress, total, text));
-                };
-            }
-            out = call_tool_message(selected_provider, pending, std::move(ctx));
-            if (want_progress) waiter->push_frame(progress_frame(progress_token, *last + 1.0, std::nullopt, "finished"));
-        }
-        return stateless ? decorate_stateless(std::move(out), pending.method, server_info) : out;
+    job.run = [this, tool_job = ToolJob{pending, admission_principal, execution_auth, era, stateless, server_info,
+                                         client_info, progress_token, want_progress, route_provider, route_identity,
+                                         route_lane_key, routed, waiter}](CallState& state) -> json {
+        return run_tool_job(tool_job, state);
     };
 
     std::shared_ptr<CallState> state;
@@ -793,82 +920,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const auto route_stopping = [this, routed] {
         return executor_.stopping() || (routed && session_pool_->stopping());
     };
-    auto shutting_down = [&] {
-        HttpResponse r = json_response(503, make_error(message.id, kServerBusy, "server shutting down", json{{"retry", true}}));
-        return r;
-    };
-
-    if (!sse) {
-        std::unique_lock<std::mutex> lock(waiter->m);
-        while (!waiter->done) {
-            waiter->cv.wait_for(lock, poll);
-            if (!waiter->done && request.connected && !request.connected()) {
-                lock.unlock();
-                route_cancel();
-                return json_response(499, make_error(message.id, kServerBusy, "client disconnected"));
-            }
-            if (!waiter->done && route_stopping()) break;
-        }
-        if (!waiter->done || waiter->final_message.is_null()) {
-            lock.unlock();
-            route_cancel();
-            return shutting_down();
-        }
-        return json_response(200, waiter->final_message);
-    }
-
-    // ---- SSE ----------------------------------------------------------------------------------
-    HttpResponse r;
-    r.status = 200;
-    r.set_header("Content-Type", "text/event-stream");
-    r.set_header("Cache-Control", "no-cache");
-    r.set_header("X-Accel-Buffering", "no");
-    r.set_header("Connection", "keep-alive");
-    const int keepalive_ms = options_.keepalive_ms;
-    r.stream = [waiter, state, route_cancel, route_stopping, poll, keepalive_ms](SseSink& sink) {
-        auto last_write = std::chrono::steady_clock::now();
-        auto emit = [&](const std::string& frame) {
-            if (!sink.write(frame)) return false;
-            last_write = std::chrono::steady_clock::now();
-            return true;
-        };
-        while (true) {
-            std::vector<std::string> frames;
-            json final_message;
-            bool done = false;
-            {
-                std::unique_lock<std::mutex> lock(waiter->m);
-                if (waiter->frames.empty() && !waiter->done) waiter->cv.wait_for(lock, poll);
-                while (!waiter->frames.empty()) {
-                    frames.push_back(std::move(waiter->frames.front()));
-                    waiter->frames.pop_front();
-                }
-                done = waiter->done;
-                final_message = waiter->final_message;
-            }
-            for (const auto& f : frames)
-                if (!emit(f)) {
-                    route_cancel();
-                    return;
-                }
-            if (done) {
-                if (final_message.is_null())
-                    final_message = make_error(state->id, kServerBusy, "server shutting down", json{{"retry", true}});
-                emit(format_sse_event("message", dump(final_message)));
-                return;
-            }
-            if (!sink.connected() || route_stopping()) {
-                route_cancel();
-                return;
-            }
-            if (keepalive_ms > 0 && std::chrono::steady_clock::now() - last_write >= std::chrono::milliseconds(keepalive_ms))
-                if (!emit(format_sse_comment("keep-alive"))) {
-                    route_cancel();
-                    return;
-                }
-        }
-    };
-    return r;
+    if (!sse) return wait_for_answer(request, message.id, *waiter, poll, route_cancel, route_stopping);
+    return sse_answer(waiter, state, route_cancel, route_stopping, poll, options_.keepalive_ms);
 }
 
 } // namespace fairyfly::mcp

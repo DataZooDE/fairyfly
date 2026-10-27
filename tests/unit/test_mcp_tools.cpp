@@ -10,8 +10,11 @@
 #include "include/mcp/tool_catalog.h"
 #include "include/mcp/types.h"
 
+#include "support/tool_specs.h"
 using namespace fairyfly::mcp;
 using Argv = std::vector<std::string>;
+
+using fairyfly::test::spec_of;
 
 namespace {
 
@@ -20,13 +23,6 @@ struct Sample {
     json args;
     Argv expected;
 };
-
-const ToolSpec& spec_of(const std::vector<ToolSpec>& specs, const std::string& name) {
-    for (const auto& s : specs)
-        if (s.def.name == name) return s;
-    FAIL("tool not in catalog: " << name);
-    return specs.front();
-}
 
 const std::vector<Sample>& samples() {
     static const std::vector<Sample> table = {

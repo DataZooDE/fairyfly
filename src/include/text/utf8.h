@@ -6,6 +6,7 @@
 //    is based on: those stay strict.
 #include <windows.h>
 
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -77,6 +78,18 @@ inline std::string wide_to_utf8_lossy(std::wstring_view value) noexcept {
 /// Lossy, for a C wide string (COM member names in log lines); nullptr gives "".
 inline std::string wide_to_utf8_lossy(const wchar_t* value) noexcept {
     return value ? wide_to_utf8_lossy(std::wstring_view(value)) : std::string();
+}
+
+/// A path from UTF-8 text (an environment value, a config entry). std::filesystem::path(std::string) would read
+/// the bytes in the ANSI code page on Windows.
+inline std::filesystem::path utf8_path(std::string_view utf8) {
+    return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
+}
+
+/// A path as UTF-8 text (path::string() is the ANSI code page on Windows).
+inline std::string path_utf8(const std::filesystem::path& path) {
+    const std::u8string text = path.u8string();
+    return std::string(text.begin(), text.end());
 }
 
 }  // namespace fairyfly::text

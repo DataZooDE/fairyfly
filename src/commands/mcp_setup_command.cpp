@@ -1,5 +1,6 @@
 #include <iostream>
 #include "include/config/environment.h"
+#include "include/mcp/constants.h"
 #include <memory>
 
 #include <CLI/CLI.hpp>
@@ -112,7 +113,7 @@ Example: fairyfly mcp setup --hostname host.example --self-signed --dry-run
     s.setup->fallthrough();
     Options& o = s.options;
     s.setup->add_option("--hostname", o.hostname, "Host name clients use (default: this machine's lower-cased DNS name)");
-    s.setup->add_option("--port", o.port, "HTTPS port (default 8443; 8383 with --no-tls)")->check(CLI::Range(1, 65535));
+    s.setup->add_option("--port", o.port, "HTTPS port (default " + std::to_string(mcp::kDefaultTlsPort) + "; " + std::to_string(mcp::kDefaultHttpPort) + " with --no-tls)")->check(CLI::Range(1, 65535));
     s.setup->add_flag("--self-signed", o.self_signed, "Create (or reuse) a self-signed certificate 'fairyfly-mcp <host>' in LocalMachine\\My");
     s.setup->add_option("--cert-thumbprint", o.thumbprint, "Use the certificate with this SHA-1 thumbprint from LocalMachine\\My");
     s.setup->add_flag("--no-tls", o.no_tls, "Development: plain HTTP on 127.0.0.1 only (URL reservation, no certificate)");

@@ -118,16 +118,21 @@ examples are attached to those same commands; hidden internal diagnostics are om
 )HELP");
 }
 
-std::string invoked_command_path(const CLI::App& app) {
-    std::string path;
+std::vector<std::string> invoked_command_words(const CLI::App& app) {
+    std::vector<std::string> words;
     const CLI::App* current = &app;
     while (true) {
         const auto parsed = current->get_subcommands();
         if (parsed.empty()) break;
         current = parsed.front();
-        if (!path.empty()) path += ' ';
-        path += current->get_name();
+        words.push_back(current->get_name());
     }
+    return words;
+}
+
+std::string invoked_command_path(const CLI::App& app) {
+    std::string path;
+    for (const auto& word : invoked_command_words(app)) path += (path.empty() ? "" : " ") + word;
     return path;
 }
 

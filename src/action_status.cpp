@@ -17,15 +17,22 @@ std::optional<Result> classify_list_label_outcome(bool same_label,
         before.text != after.text || before.type != after.type)
         return std::nullopt;
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "ACTION_OUTCOME_UNVERIFIED";
-    result.error["message"] = "List label activation left the screen and status unchanged";
+    result.set_error("ACTION_OUTCOME_UNVERIFIED", "List label activation left the screen and status unchanged");
     result.error["element"] = element;
     return result;
 }
 
 bool is_missing_element_error(const std::string& message) {
     return message.rfind("Element not found: ", 0) == 0;
+}
+
+ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session, const std::string& path) {
+    try {
+        return session->find_element_by_id(path);
+    } catch (const ComException& error) {
+        if (!is_missing_element_error(error.what())) throw;
+        return nullptr;
+    }
 }
 
 bool should_activate_positioned_label(const std::string& type,
@@ -46,9 +53,7 @@ std::optional<Result> classify_transaction_modal(const std::string& window_id,
     if (!utils::iequals(message, "cannot start transaction " + tcode)) return std::nullopt;
 
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "TRANSACTION_FAILED";
-    result.error["message"] = message;
+    result.set_error("TRANSACTION_FAILED", message);
     result.error["tcode"] = tcode;
     return result;
 }
@@ -58,10 +63,8 @@ std::optional<Result> classify_f4_outcome(bool dialog_opened,
                                          const std::string& element) {
     if (dialog_opened) return std::nullopt;
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "F4_DIALOG_NOT_OPENED";
-    result.error["message"] = status.text.empty()
-        ? "F4 search help did not open a dialog" : status.text;
+    result.set_error("F4_DIALOG_NOT_OPENED", status.text.empty()
+        ? "F4 search help did not open a dialog" : status.text);
     result.error["element"] = element;
     result.error["f4_dialog_opened"] = false;
     if (!status.type.empty()) result.error["message_type"] = status.type;
@@ -73,9 +76,7 @@ std::optional<Result> classify_f4_target_window(const std::string& active_window
     if (WindowId(active_window).get_index() == WindowId(element).get_index())
         return std::nullopt;
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = "WINDOW_MISMATCH";
-    result.error["message"] = "F4 field is not in the active window";
+    result.set_error("WINDOW_MISMATCH", "F4 field is not in the active window");
     result.error["element"] = element;
     result.error["active_window"] = active_window;
     return result;
@@ -284,9 +285,7 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
     // the intended submission did not complete yet: that is not a success. Every other W stays a success with warning:true.
     if (after.type == "W" && submitting_action && !rejection_text && warning_needs_confirmation(after.text)) {
         Result result;
-        result.status = Result::Status::Error;
-        result.error["code"] = "ACTION_OUTCOME_UNVERIFIED";
-        result.error["message"] = after.text;
+        result.set_error("ACTION_OUTCOME_UNVERIFIED", after.text);
         result.error["message_type"] = after.type;
         result.error["element"] = element;
         result.error["needs_confirmation"] = true;
@@ -303,10 +302,8 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
     if (repeated && !submitting_action) return std::nullopt;
 
     Result result;
-    result.status = Result::Status::Error;
-    result.error["code"] = repeated ? "ACTION_OUTCOME_UNVERIFIED" :
-                            after.type == "A" ? "ACTION_ABORTED" : "ACTION_FAILED";
-    result.error["message"] = after.text;
+    result.set_error(repeated ? "ACTION_OUTCOME_UNVERIFIED" :
+                            after.type == "A" ? "ACTION_ABORTED" : "ACTION_FAILED", after.text);
     result.error["message_type"] = after.type;
     result.error["element"] = element;
     if (repeated) result.error["reason"] = "The same rejection was present before and after the action";

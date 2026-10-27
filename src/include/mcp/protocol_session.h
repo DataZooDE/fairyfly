@@ -8,12 +8,12 @@
 
 #include "include/mcp/types.h"
 
+#include "include/mcp/constants.h"
 namespace fairyfly::mcp {
 
 // ---- protocol constants -------------------------------------------------------------------------
 inline constexpr int kHeaderMismatch = -32020;      ///< Mcp-Method / Mcp-Name header disagrees with the body
 inline constexpr int kUnsupportedVersion = -32022;  ///< protocol version not supported (data.supported lists ours)
-inline constexpr const char* kStatelessVersion = "2026-07-28";
 
 /// One request/notification handed to a session.
 struct Pending {

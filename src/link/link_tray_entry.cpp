@@ -22,18 +22,13 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
             tray::make_win32_tray_host()->message_box("fairyfly link", refused->error.value("message", std::string("the pairing state was refused")));
         return 2;
     }
-    const std::string exe = tray::current_exe_path();
-    tray::TrayEntry entry;
-    entry.tray_requested = true;
-    entry.is_child = tray::is_tray_child_process();
-    entry.has_console = tray::process_has_console();
+    tray::TrayStart start = tray::prepare_tray_start(tray::kLinkTrayMutexName);
+    tray::TrayEntry& entry = start.entry;
+    const std::string& exe = entry.exe;
+    const std::string& program = start.program;
     entry.install_autostart = o.install_autostart;
     entry.remove_autostart = o.remove_autostart;
-    entry.exe = exe;
-    entry.args = tray::current_args();   // the detached child (and the autostart) get the same options
     entry.autostart_name = tray::kLinkAutostartValueName;
-    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
-    const std::string program = tray::tray_start_program(exe, tray::path_exists);
     entry.autostart_line = tray::link_autostart_command(program, entry.args);
     entry.name = "fairyfly link tray";
 
@@ -41,28 +36,12 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     // Start-menu entry runs this command, so refusing here would end in a console that closes at once.
     auto link_control = make_link_control(o.state_path);
 
-    auto registry = tray::make_win32_run_key();
-    auto launcher = tray::make_win32_process_launcher();
-    auto guard = tray::make_win32_single_instance(tray::kLinkTrayMutexName);
-    tray::TrayEntryServices services;
-    services.registry = registry.get();
-    services.launcher = launcher.get();
-    services.guard = guard.get();
-    services.print = [](const std::string& line) { std::cout << line << std::endl; };
-    const tray::TrayEntryResult decided = tray::decide_tray_entry(entry, services);
-    if (decided.outcome == tray::TrayEntryOutcome::Failed && tray::startup_error_needs_dialog_here())
-        tray::make_win32_tray_host()->message_box("fairyfly link", decided.message);   // nobody reads this console
-    if (decided.outcome == tray::TrayEntryOutcome::AlreadyRunning) {
-        auto other = tray::make_win32_tray_host(tray::TrayKind::Link);
-        if (!other->show_running_instance() && tray::startup_error_needs_dialog_here())
-            other->message_box("fairyfly link", "The fairyfly link tray is already running: its icon is in the notification area.");
-    }
-    if (decided.outcome != tray::TrayEntryOutcome::RunHere) return decided.exit_code;
-
-    // From here on this process is the link tray: no console, logs to link.log, the link on the main thread.
-    if (entry.is_child) tray::detach_console();
-    const bool launched = tray::is_tray_launched_process();   // the Start menu, the autostart or the installer
-    tray::clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
+    if (auto exit_code = tray::settle_tray_start(start, tray::TrayKind::Link, "fairyfly link")) return *exit_code;
+    // From here on this process is the link tray: logs to link.log, the link on the main thread.
+    const bool launched = start.launched;   // the Start menu, the autostart or the installer
+    auto& registry = start.registry;
+    auto& launcher = start.launcher;
+    auto& guard = start.guard;
     const std::string log_file = tray::route_logging_to_file("link.log");
 
     // "Start with Windows": on after the first start from the Start menu, the menu switches it
