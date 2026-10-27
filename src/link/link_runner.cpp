@@ -528,9 +528,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
         auto status = make_status_sink(printer);
         status->set_level(spdlog::level::info);
         sinks.push_back(status);
-        auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
-        logger->set_level(std::min(user_level, spdlog::level::info));
-        spdlog::set_default_logger(logger);
+        spdlog::set_default_logger(make_link_logger(std::move(sinks), user_level));
     }
 
     // Everything the network thread uses lives here: when it does not end in time after Ctrl+C (a connect in

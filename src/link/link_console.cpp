@@ -380,6 +380,12 @@ private:
 
 spdlog::sink_ptr make_status_sink(std::shared_ptr<LinkStatusPrinter> printer) { return std::make_shared<StatusSink>(std::move(printer)); }
 
+std::shared_ptr<spdlog::logger> make_link_logger(std::vector<spdlog::sink_ptr> sinks, spdlog::level::level_enum user_level) {
+    auto logger = std::make_shared<spdlog::logger>("fairyfly_link", sinks.begin(), sinks.end());
+    logger->set_level(std::min(user_level, spdlog::level::info));
+    return logger;
+}
+
 std::string url_host(const std::string& url) {
     auto start = url.find("://");
     start = start == std::string::npos ? 0 : start + 3;

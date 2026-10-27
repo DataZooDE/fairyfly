@@ -23,9 +23,11 @@
 
 #include <httplib.h>
 #include <ZXing/ReadBarcode.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
 #include "include/link/link_console.h"
+#include "include/link/link_control.h"
 #include "include/link/link_runner.h"
 #include "include/tray/tray_win32.h"
 #include "crypto.hpp"
@@ -757,4 +759,46 @@ TEST_CASE("link run: libffl's agent against a fake gateway prints connected, los
     CHECK(lines[0] == "connected to 127.0.0.1 as jr@data-zoo.de in 'data zoo' \xE2\x80\x93 Ctrl+C stops");
     CHECK_THAT(lines[1], StartsWith("connection to 127.0.0.1 lost"));
     CHECK(lines[2] == "reconnected to 127.0.0.1");
+}
+
+// Live 2026-10-27: calls were refused for clock skew and libffl logged a warning, but link.log had no entry of the
+// whole day: `link run` replaced the tray's logger (flush_on warn) by one that never flushed.
+TEST_CASE("link run logger: libffl's warnings and calls reach link.log at once, not at exit", "[link][run][log]") {
+    const TempDir dir("logger-flush");
+    const auto file = dir / "link.log";
+    {
+        auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(file.string());
+        auto logger = make_link_logger({sink}, spdlog::level::info);
+        logger->warn("assertion rejected (inst.1): assertion: issued in the future: desktop clock 346 s behind the gateway (tolerance 90 s)");
+        logger->info("served: tool=gui_session_list user=jr@data-zoo.de client=claude");
+        std::ifstream in(file);   // the logger is still alive: nothing flushed it at exit yet
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK_THAT(text, ContainsSubstring("346 s behind"));
+        CHECK_THAT(text, ContainsSubstring("served: tool=gui_session_list"));
+        logger->debug("not shown at info");
+    }
+}
+
+TEST_CASE("link control: the running link's clock skew reaches the tray", "[link][run][clock]") {
+    const TempDir dir("clock-skew");
+    ffy::link::State st;
+    st.link_url = "wss://fairyfly.io/link";
+    st.device_id = "dev-1";
+    st.tenant = "t-1";
+    st.tenant_name = "data zoo";
+    st.email = "jr@data-zoo.de";
+    st.issuer = "https://fairyfly.io";
+    st.key = ffy::ec_generate();
+    st.gateway_keys.push_back(ffy::jwk_from_ec(ffy::ec_generate()));
+    const std::string path = (dir / "state.json").string();
+    ffy::link::save_state(st, path);
+    auto control = make_link_control(path);
+    write_status(path, "connected", json{{"clock_skew_s", 346}});
+    auto v = control->view();
+    CHECK(v.state == "connected");
+    CHECK(v.clock_skew_s == 346);
+    write_status(path, "connected", json{{"clock_skew_s", 0}});
+    CHECK(control->view().clock_skew_s == 0);
+    write_status(path, "stopped", json{{"clock_skew_s", 346}});   // a link that is not running says nothing about now
+    CHECK(control->view().clock_skew_s == 0);
 }

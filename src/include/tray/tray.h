@@ -74,7 +74,13 @@ struct LinkView {
     std::string trail_mode = "every";    ///< every | changes
     int trail_retention_days = 90;
     bool trail_blur = true;
+    /// The desktop clock's offset to the gateway in seconds (> 0: behind) while the link refuses calls for clock skew
+    /// (the running link's status file); 0 when the clock is fine.
+    std::int64_t clock_skew_s = 0;
 };
+
+/// The menu line, tooltip part and balloon while the desktop clock is off (clock_skew_s != 0); empty otherwise.
+std::string clock_skew_text(const LinkView& link);
 
 /// The persistent menu entry while the audit trail is on; empty while it is off.
 std::string trail_menu_text(const LinkView& link);

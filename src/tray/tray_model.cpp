@@ -116,6 +116,11 @@ std::string trail_menu_text(const LinkView& link) {
     return s;
 }
 
+std::string clock_skew_text(const LinkView& link) {
+    (void)link;
+    return {};
+}
+
 std::string trail_balloon_text(const LinkView& link) {
     if (!link.trail_on) return "Audit trail off: the steps assistants take on this desktop are no longer recorded";
     return "Audit trail on: your administrator records the steps AI assistants take on this desktop, with screenshots" +
