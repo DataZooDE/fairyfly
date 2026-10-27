@@ -1,3 +1,4 @@
+#include "include/com/control_views.h"
 #include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/element_errors.h"
@@ -54,16 +55,6 @@ namespace fairyfly {
 namespace sap {
 
 using utils::TraceGuard;
-
-static ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session,
-                                                const std::string& path) {
-    try {
-        return session->find_element_by_id(path);
-    } catch (const ComException& error) {
-        if (!is_missing_element_error(error.what())) throw;
-        return nullptr;
-    }
-}
 
 /// State of a tab page for the inactive-tab check: whether it exists, its caption and whether it is the strip's
 /// SelectedTab. Any COM failure reads as "unknown" (not found), so the check never turns into a new error.
@@ -317,6 +308,65 @@ std::vector<ConnectionLauncher::ExistingSession> ComAutomationEngine::open_sessi
     return existing_sessions;
 }
 
+/// The explicit opt-in fallback when native COM did not open a connection: sapshcut, then wait for a NEW session of
+/// that entry (an existing one is not evidence that this launch succeeded) and bind it. true: a session is bound.
+bool ComAutomationEngine::launch_by_sapshcut(const std::string& connection_name, json& trace) {
+    // A launched session must be new; an existing session on the same
+    // SAP Logon entry is not evidence that this launch succeeded.
+    if (!app_) throw std::runtime_error("Cannot inspect SAP sessions before launch");
+    connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
+    const std::vector<ConnectionLauncher::ExistingSession> existing_sessions = open_sessions_now();
+
+    bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name);
+    trace.push_back({
+        {"step", "launch_sapshcut"},
+        {"success", launch_success}
+    });
+
+    if (!launch_success) {
+        throw std::runtime_error("Failed to launch sapshcut.exe");
+    }
+
+    // Step 3: Wait for session to be created
+    auto [connection, session] = connection_launcher_->wait_for_session(
+        connection_name, constants::SESSION_CREATION_TIMEOUT_SEC, existing_sessions);
+    const bool session_created = (connection != nullptr && session != nullptr);
+
+    if (session_created) {
+        bind_session(connection, session);
+    }
+    trace.push_back({
+        {"step", "wait_for_session"},
+        {"success", session_created},
+        {"timeout_seconds", constants::SESSION_CREATION_TIMEOUT_SEC}
+    });
+    return session_created;
+}
+
+/// No session after the launch: SAP_GUI_SECURITY_PROMPT when sapshcut's connection waits for the SAP GUI Security
+/// dialog, SESSION_TIMEOUT otherwise.
+void ComAutomationEngine::no_session_error(Result& result, bool used_sapshcut) const {
+    result.status = Result::Status::Error;
+    if (used_sapshcut && connection_launcher_ &&
+        connection_launcher_->wait_failure() == ConnectionLauncher::WaitFailure::SecurityPrompt) {
+        result.error["code"] = "SAP_GUI_SECURITY_PROMPT";
+        result.error["message"] = "SAP GUI Security is waiting for a decision on the shortcut connection";
+        result.error["suggestions"] = json::array({
+            "Review the SAP GUI Security dialog for this connection",
+            "Use native SAP GUI launch when available"
+        });
+    } else {
+        result.error["code"] = "SESSION_TIMEOUT";
+        result.error["message"] = "Session was not created within timeout period";
+        result.error["suggestions"] = json::array({
+            "Verify the SAP Logon entry is configured and reachable",
+            "Check that SAP GUI scripting is enabled",
+            "Ensure SAP system is accessible and responding",
+            "Try increasing timeout or manual login first"
+        });
+    }
+}
+
 Result ComAutomationEngine::launch_connection(const std::string& connection_name, bool allow_sapshcut) {
     const Stopwatch timer;
     Result result;
@@ -362,57 +412,11 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         if (!session_created) {
             // Step 2: Explicit opt-in fallback when native COM did not open a connection.
             used_sapshcut = true;
-            // A launched session must be new; an existing session on the same
-            // SAP Logon entry is not evidence that this launch succeeded.
-            if (!app_) throw std::runtime_error("Cannot inspect SAP sessions before launch");
-            connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
-            const std::vector<ConnectionLauncher::ExistingSession> existing_sessions = open_sessions_now();
-
-            bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name);
-            trace.push_back({
-                {"step", "launch_sapshcut"},
-                {"success", launch_success}
-            });
-
-            if (!launch_success) {
-                throw std::runtime_error("Failed to launch sapshcut.exe");
-            }
-
-            // Step 3: Wait for session to be created
-            auto [connection, session] = connection_launcher_->wait_for_session(
-                connection_name, constants::SESSION_CREATION_TIMEOUT_SEC, existing_sessions);
-            session_created = (connection != nullptr && session != nullptr);
-
-            if (session_created) {
-                bind_session(connection, session);
-            }
-            trace.push_back({
-                {"step", "wait_for_session"},
-                {"success", session_created},
-                {"timeout_seconds", constants::SESSION_CREATION_TIMEOUT_SEC}
-            });
+            session_created = launch_by_sapshcut(connection_name, trace);
         }
 
         if (!session_created) {
-            result.status = Result::Status::Error;
-            if (used_sapshcut && connection_launcher_ &&
-                connection_launcher_->wait_failure() == ConnectionLauncher::WaitFailure::SecurityPrompt) {
-                result.error["code"] = "SAP_GUI_SECURITY_PROMPT";
-                result.error["message"] = "SAP GUI Security is waiting for a decision on the shortcut connection";
-                result.error["suggestions"] = json::array({
-                    "Review the SAP GUI Security dialog for this connection",
-                    "Use native SAP GUI launch when available"
-                });
-            } else {
-                result.error["code"] = "SESSION_TIMEOUT";
-                result.error["message"] = "Session was not created within timeout period";
-                result.error["suggestions"] = json::array({
-                    "Verify the SAP Logon entry is configured and reachable",
-                    "Check that SAP GUI scripting is enabled",
-                    "Ensure SAP system is accessible and responding",
-                    "Try increasing timeout or manual login first"
-                });
-            }
+            no_session_error(result, used_sapshcut);
             result.duration = timer.elapsed();
             result.diagnostics["trace"] = trace;
             return result;
@@ -1120,7 +1124,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         const auto before_status = read_action_status(session);
 
         // Press the toolbar button
-        elem->press_button(button_id);
+        as_toolbar(*elem).press_button(button_id);
         session->wait_for_completion(500);
         const auto after_status = read_action_status(session);
         if (auto rejection = classify_action_status(before_status, after_status,
@@ -1309,7 +1313,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->modify_grid_cell(row, column, value, checkbox, commit);
+        as_grid(*grid).modify_grid_cell(row, column, value, checkbox, commit);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "modify_grid_cell";
@@ -1348,7 +1352,7 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->select_grid_row(row, column);
+        as_grid(*grid).select_grid_row(row, column);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "select_grid_row";

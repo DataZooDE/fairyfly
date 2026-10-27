@@ -148,6 +148,16 @@ private:
     };
     std::optional<HttpResponse> protocol_refusal(const HttpRequest& request, const Message& message, RequestProtocol& out) const;
     HttpResponse dispatch(const HttpRequest& request, const Principal& principal);
+    // the parts of dispatch (http_endpoint.cpp)
+    struct RouteRefusal {
+        std::string message;
+        std::string code;
+    };
+    std::optional<RouteRefusal> admit_session_route(const json& params, const Principal& principal,
+                                                    const AuthRequest& execution_auth, Principal& admission_principal,
+                                                    SessionRoute& session_route);
+    struct ToolJob;   // http_endpoint.cpp
+    json run_tool_job(const ToolJob& job, CallState& state);
     HttpResponse finish(const HttpRequest& request, HttpResponse response) const;
     bool host_allowed(const std::string& host_header) const;
     bool origin_allowed(const std::string& origin) const;
