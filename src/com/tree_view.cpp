@@ -1,4 +1,5 @@
 // ComGuiTree: the tree methods of a GuiTree / tree shell (moved out of ComGuiElement).
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
 #include "include/com/invoke.h"
 #include "include/string_utils.h"
@@ -78,6 +79,17 @@ std::string ComGuiTree::string_by_key(const wchar_t* method, const std::string& 
     }
 }
 
+std::vector<std::string> ComGuiTree::item_texts(const std::string& key, const std::vector<std::string>& columns,
+                                                bool skip_hierarchy) const {
+    std::vector<std::string> texts;
+    texts.reserve(columns.size());
+    for (const auto& column : columns) {
+        const bool skipped = skip_hierarchy && (column.empty() || column == "HierarchyHeader");
+        texts.push_back(skipped ? std::string() : get_item_text(key, column));
+    }
+    return texts;
+}
+
 std::string ComGuiTree::get_node_text_by_key(const std::string& key) const {
     return string_by_key(L"GetNodeTextByKey", key, "get_node_text_by_key");
 }
@@ -114,8 +126,8 @@ std::string ComGuiTree::get_item_text(const std::string& node_key, const std::st
             std::string context = fmt::format("get_item_text key='{}' col='{}'", node_key, column_name);
             text = safe_bstr_to_string(result_var, context.c_str());
         } else {
-            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr=0x{:08X}",
-                         node_key, column_name, hr);
+            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr={}",
+                         node_key, column_name, hresult_hex(hr));
         }
 
         // Cleanup happens automatically via VariantGuard RAII

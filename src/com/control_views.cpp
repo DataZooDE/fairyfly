@@ -1,4 +1,5 @@
 // ComGuiGrid and ComGuiToolbar: the grid and toolbar methods of SAP GUI controls (moved out of ComGuiElement).
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
 #include "include/com/invoke.h"
 #include "include/string_utils.h"
@@ -152,7 +153,7 @@ std::string ComGuiToolbar::button_string(const wchar_t* method, int position) co
         _variant_t result;
         const HRESULT hr = element_.call_method(method, {_variant_t(position)}, result);
         if (FAILED(hr))
-            spdlog::debug("{} failed for position {}: hr=0x{:08X}", text::wide_to_utf8_lossy(method), position, (unsigned)hr);
+            spdlog::debug("{} failed for position {}: hr={}", text::wide_to_utf8_lossy(method), position, hresult_hex(hr));
         return text_result(hr, result);
     } catch (const std::exception& e) {
         spdlog::debug("{} failed for position {}: {}", text::wide_to_utf8_lossy(method), position, e.what());
