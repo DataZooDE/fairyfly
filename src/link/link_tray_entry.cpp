@@ -8,6 +8,7 @@
 #include "include/config/mcp_config.h"
 #include "include/link/link_console.h"
 #include "include/link/link_runner.h"
+#include "include/packaging.h"
 #include "include/tray/tray.h"
 #include "include/tray/tray_win32.h"
 
@@ -50,8 +51,10 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     autostart.line = entry.autostart_line;
     autostart.exe = exe;
     autostart.program = program;
+    // an MSIX package starts the tray through its StartupTask: no Run value, no "Start with Windows" item
     auto settings = tray::make_win32_tray_settings();
-    if (tray::settle_autostart(autostart, launched, *registry, *settings)) spdlog::info("link tray: Start with Windows set");
+    if (entry.run_key_autostart && tray::settle_autostart(autostart, launched, *registry, *settings))
+        spdlog::info("link tray: Start with Windows set");
 
     auto host = tray::make_win32_tray_host(tray::TrayKind::Link);
     auto opener = tray::make_win32_file_opener();
@@ -65,7 +68,8 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     auto mcp_tray = tray::make_win32_single_instance(tray::kTrayMutexName);   // probed only: "Start local MCP server"
     tray_services.mcp_tray = mcp_tray.get();
     tray_services.stop_link = [] { request_stop(); };
-    tray_services.run_key = registry.get();
+    if (entry.run_key_autostart) tray_services.run_key = registry.get();
+    tray_services.self_update = packaging::self_updates(packaging::kPackage);
     tray_services.autostart = autostart;
     tray_services.link_busy = [lock = link_run_lock_name(o.state_path.empty() ? default_state_path() : o.state_path)] {
         return tray::make_win32_single_instance(lock)->exists();

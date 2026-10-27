@@ -212,4 +212,6 @@ Decision decide(const Facts& f) {
     return d;
 }
 
+Decision store_managed() { return {}; }
+
 }  // namespace fairyfly::update

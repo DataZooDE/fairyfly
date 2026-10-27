@@ -91,4 +91,8 @@ struct Decision {
 };
 Decision decide(const Facts& facts);
 
+/// A Microsoft Store (MSIX) installation: its folder is read-only and the Store updates it, so `fairyfly update` and
+/// apply() refuse (UPDATE_MANAGED_BY_STORE) without asking the GitHub channel (include/packaging.h, docs/MSIX.md).
+Decision store_managed();
+
 }  // namespace fairyfly::update

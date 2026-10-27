@@ -76,6 +76,7 @@ struct TrayState {
     std::string last_error;        ///< non-empty: the server failed (red icon)
     bool start_notice = true;      ///< balloon once when the server is up (always shown when it has warnings)
     LinkView link;                 ///< refreshed on every tick
+    bool self_update = true;       ///< "Check for updates"; false in an MSIX build (packaging::self_updates)
 };
 
 struct MenuItem {
@@ -319,6 +320,9 @@ struct TrayEntry {
     std::string autostart_name = kAutostartValueName;   ///< the Run value
     std::string autostart_line;      ///< non-empty: registered instead of autostart_command(exe, config_path)
     std::string name = "fairyfly MCP tray";   ///< in the console messages
+    /// false in an MSIX build (packaging::run_key_autostart): the package's StartupTask starts the tray, and
+    /// --install-autostart/--remove-autostart write nothing (TRAY_AUTOSTART_PACKAGED)
+    bool run_key_autostart = true;
 };
 
 struct TrayEntryServices {
@@ -371,9 +375,10 @@ struct AutostartView {
 };
 
 /// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again (unpaired: Pair with the fairyfly cloud),
-/// Start local MCP server, Start with Windows, Open log/audit trail folder, Check for updates, Quit.
+/// Start local MCP server, Start with Windows, Open log/audit trail folder, Check for updates (not without
+/// `self_update`: an MSIX build), Quit.
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {}, const McpTrayView& mcp = {},
-                              const AutostartView& autostart = {});
+                              const AutostartView& autostart = {}, bool self_update = true);
 
 struct LinkTrayServices {
     TrayHost* host = nullptr;
@@ -390,6 +395,7 @@ struct LinkTrayServices {
     /// optional: true while another link (e.g. `link run` in a console) serves this pairing; the tray then waits, with
     /// a notice, instead of failing, and starts its link once that one ends. Polled every pairing_poll.
     std::function<bool()> link_busy;
+    bool self_update = true;   ///< "Check for updates"; false in an MSIX build (packaging::self_updates)
 };
 
 class LinkTrayController : public TrayListener {

@@ -15,6 +15,7 @@
 
 #include "include/com/utf8.h"
 #include "include/config/mcp_config.h"
+#include "include/packaging.h"
 #include "tray_resource.h"
 
 namespace fairyfly::tray {

@@ -1,6 +1,7 @@
 #include "include/text/utf8.h"
 #include "include/update/updater.h"
 #include "include/config/environment.h"
+#include "include/packaging.h"
 
 #include <chrono>
 #include <cstdlib>

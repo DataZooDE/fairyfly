@@ -17,7 +17,7 @@ std::string who(const LinkView& link) { return link.organisation + " (" + link.a
 std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
 
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp,
-                              const AutostartView& autostart) {
+                              const AutostartView& autostart, bool self_update) {
     TrayMenuModel model;
     if (link.state == link::state::kConnected) model.icon = IconState::Running;
     else if (link.state == link::state::kPaused) model.icon = IconState::Warning;
@@ -115,7 +115,9 @@ AutostartView LinkTrayController::autostart_view() {
     return v;
 }
 
-TrayMenuModel LinkTrayController::menu() { return build_link_menu(link_, writes_view(), mcp_view(), autostart_view()); }
+TrayMenuModel LinkTrayController::menu() {
+    return build_link_menu(link_, writes_view(), mcp_view(), autostart_view(), services_.self_update);
+}
 
 TrayView LinkTrayController::view() {
     const auto model = build_link_menu(link_, writes_view());

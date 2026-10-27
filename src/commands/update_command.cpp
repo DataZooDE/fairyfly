@@ -26,6 +26,12 @@ update. Restart running fairyfly processes (tray, link) afterwards.
 Example: fairyfly update apply
 )HELP");
     apply_cmd_->add_flag("--allow-unsigned", allow_unsigned_, "Accept an unsigned release on an unsigned installation (self-built or a release from before signing)");
+    if (!packaging::self_updates(package_)) {
+        const std::string store = "This fairyfly is a Microsoft Store package: the Store updates it, and both verbs answer\n"
+                                  "UPDATE_MANAGED_BY_STORE without asking GitHub.\n";
+        check_cmd_->footer(store);
+        apply_cmd_->footer(store);
+    }
     return cmd_;
 }
 

@@ -187,3 +187,92 @@ jobs:
         name: test-results
         path: build/test-results.xml
         retention-days: 30
+
+  # The Microsoft Store configuration (FAIRYFLY_PACKAGE=msix, docs/MSIX.md): builds and runs the unit tests (the
+  # [msix-build] cases check this build's wiring), checks the real fairyfly.exe answers `update` with the Store's code and
+  # the rendered AppxManifest.xml parses. No MakeAppx, no signing, no secrets. Runs beside build-windows (same vcpkg
+  # cache), so the wall time stays the same; it costs a second Windows runner.
+  build-windows-msix:
+    timeout-minutes: 40
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        git checkout ${{ env.VCPKG_COMMIT }}
+        .\bootstrap-vcpkg.bat
+      shell: pwsh
+
+    - name: Cache vcpkg (comprehensive)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/vcpkg_installed
+          ${{ github.workspace }}/vcpkg/packages
+          ${{ github.workspace }}/vcpkg/buildtrees
+          ${{ github.workspace }}/vcpkg/downloads
+        key: vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+        restore-keys: |
+          vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+          vcpkg-${{ runner.os }}-
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Configure and build (FAIRYFLY_PACKAGE=msix)
+      run: |
+        $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        cmake -B build-msix `
+          -G "Visual Studio 17 2022" `
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" `
+          -DFAIRYFLY_PACKAGE=msix
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        cmake --build build-msix --config Release --target fairyfly unit_tests --parallel
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+      shell: pwsh
+
+    - name: Run unit tests (msix build)
+      run: |
+        & "build-msix/Release/unit_tests.exe" "~[!mayfail]" --reporter junit --out build-msix/test-results.xml
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+      shell: pwsh
+
+    - name: The msix fairyfly.exe leaves updates to the Store; its manifest parses
+      run: |
+        $out = (& build-msix/Release/fairyfly.exe --no-audit update check 2>&1 | Out-String)
+        Write-Host $out
+        if ($LASTEXITCODE -eq 0 -or $out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "update check did not answer UPDATE_MANAGED_BY_STORE"; exit 1 }
+        $out = (& build-msix/Release/fairyfly.exe --no-audit update apply 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -or $out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "update apply did not answer UPDATE_MANAGED_BY_STORE: $out"; exit 1 }
+        $manifest = [xml](Get-Content build-msix/msix/AppxManifest.xml -Raw)
+        $id = $manifest.Package.Identity
+        Write-Host "AppxManifest.xml: $($id.Name) $($id.Version) ($($id.Publisher))"
+        if ($id.Version -ne (& ./packaging/msix_version.ps1).Trim()) { Write-Error "manifest version $($id.Version) differs from msix_version.ps1"; exit 1 }
+      shell: pwsh
+
+    - name: Upload msix test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-msix
+        path: build-msix/test-results.xml
+        retention-days: 30
+
+  # The MSIX manifest template as CMake renders it (packaging/msix/tests/Test-AppxManifest.ps1): pwsh and cmake only.
+  msix-manifest:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: AppxManifest template checks
+      run: ./packaging/msix/tests/Test-AppxManifest.ps1
+      shell: pwsh
