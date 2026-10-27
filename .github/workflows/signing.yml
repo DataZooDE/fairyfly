@@ -1,0 +1,58 @@
+name: Release signing checks
+
+# Tests packaging/sign/Test-Signature.ps1, the check release.yml runs on every file it signs (Authenticode valid,
+# chains to a trusted root, RFC 3161 time stamp, signer O=DataZoo GmbH, C=DE), without any signing secret: an
+# unsigned file and a self-signed certificate must be refused, a validly signed file of the expected publisher must
+# pass (packaging/sign/tests/Test-Signature.Tests.ps1). Also lints the workflows, so a broken release.yml is seen in
+# the pull request and not first on a release tag.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'packaging/sign/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/signing.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'packaging/sign/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/signing.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-signature:
+    timeout-minutes: 15
+    runs-on: windows-2022
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Test-Signature.ps1 (unsigned, self-signed, untimestamped, wrong signer, valid)
+      run: ./packaging/sign/tests/Test-Signature.Tests.ps1
+      shell: pwsh
+
+    - name: release.yml supply-chain rules and Install-Wix.ps1 (tag = ref, checkouts = github.sha, pinned actions, WiX hash)
+      if: ${{ !cancelled() }}
+      run: ./packaging/sign/tests/Test-ReleaseWorkflow.ps1 -Install
+      shell: pwsh
+
+  actionlint:
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: actionlint (all workflows)
+      run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
