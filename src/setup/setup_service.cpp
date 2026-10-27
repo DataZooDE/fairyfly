@@ -823,6 +823,43 @@ int step_failure(const RunEnv& env, bool as_json, Report& rep, const StepRun& ru
     return finish(env, as_json, rep, 1);
 }
 
+/// After apply: the reservation, binding and certificate steps must now be in place, then one unauthenticated
+/// request must be answered 401 by this server (TLS pinned to the bound certificate, whose SAN is checked separately).
+VerifyOut verify_setup(Hosts& h, const Options& o, const Plan& plan, const std::string& thumb) {
+    VerifyOut vo;
+    Options again = o;
+    const Diagnosis after = diagnose(h, again);
+    const Plan check = MakePlan(after, again);
+    std::string missing;
+    for (const auto& s : check.steps)
+        if ((s.id == "urlacl" || s.id == "sslcert" || s.id == "certificate" || s.id == "certificate_export") &&
+            (s.status.rfind("would", 0) == 0 || s.status == "blocked"))
+            missing += (missing.empty() ? "" : ", ") + s.id;
+    if (!missing.empty()) {
+        vo = {"failed", "", 0, false, "after apply these are not in place: " + missing};
+    } else {
+        VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
+        const VerifyResult vr = h.verify.round_trip(req);
+        vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
+        if (plan.tls && vr.status != "skipped") {
+            // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
+            // checked separately, against the SAN of the pinned certificate.
+            try {
+                const CertInfo bound = h.certs.find_by_thumbprint(thumb);
+                vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
+            } catch (const std::exception&) {
+                vo.name_match = false;
+            }
+        }
+        if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
+            vo.status = "failed";
+            vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
+                                              : "the presented certificate is not the bound one";
+        }
+    }
+    return vo;
+}
+
 int run_setup(Hosts& h, Options o, const RunEnv& env) {
     fill_defaults(h, o);
     if (const auto e = validate_options(o)) return finish_error(env, o.json, *e);
@@ -923,39 +960,7 @@ int run_setup(Hosts& h, Options o, const RunEnv& env) {
     if (any_failed) return step_failure(env, o.json, rep, run);
 
     // ---- verify ----
-    VerifyOut vo;
-    {
-        Options again = o;
-        const Diagnosis after = diagnose(h, again);
-        const Plan check = MakePlan(after, again);
-        std::string missing;
-        for (const auto& s : check.steps)
-            if ((s.id == "urlacl" || s.id == "sslcert" || s.id == "certificate" || s.id == "certificate_export") &&
-                (s.status.rfind("would", 0) == 0 || s.status == "blocked"))
-                missing += (missing.empty() ? "" : ", ") + s.id;
-        if (!missing.empty()) {
-            vo = {"failed", "", 0, false, "after apply these are not in place: " + missing};
-        } else {
-            VerifyRequest req{plan.tls, plan.hostname, plan.port, plan.tls ? thumb : "", plan.sid};
-            const VerifyResult vr = h.verify.round_trip(req);
-            vo = {vr.status, vr.protocol, vr.http_status, vr.thumbprint_match, vr.detail, true};
-            if (plan.tls && vr.status != "skipped") {
-                // The probe is pinned by thumbprint (it ignores name errors on purpose); ordinary client name validation is
-                // checked separately, against the SAN of the pinned certificate.
-                try {
-                    const CertInfo bound = h.certs.find_by_thumbprint(thumb);
-                    vo.name_match = bound.found && san_matches(bound.dns_names, plan.hostname);
-                } catch (const std::exception&) {
-                    vo.name_match = false;
-                }
-            }
-            if (vr.status == "ok" && (vr.http_status != 401 || (plan.tls && !vr.thumbprint_match))) {
-                vo.status = "failed";
-                vo.detail = vr.http_status != 401 ? "expected HTTP 401 for an unauthenticated request, got " + std::to_string(vr.http_status)
-                                                  : "the presented certificate is not the bound one";
-            }
-        }
-    }
+    const VerifyOut vo = verify_setup(h, o, plan, thumb);
     rep.verify = vo;
     rep.human = plan.human;
     if (plan.tls && vo.status != "skipped" && !vo.name_match)
