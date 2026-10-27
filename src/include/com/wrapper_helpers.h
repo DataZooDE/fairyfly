@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "include/com/invoke.h"
+#include "include/com/hresult.h"
 
 namespace fairyfly {
 namespace sap {
@@ -33,14 +34,14 @@ inline int get_int_property(IDispatch* obj, const char* prop_name) {
         // CRITICAL FIX: Use get_dispid_via_typeinfo for SAP GUI compatibility
         HRESULT hr = get_dispid_via_typeinfo(obj, prop.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|get_dispid_via_typeinfo failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
         _variant_t result;
         hr = invoke(obj, dispid, DISPATCH_PROPERTYGET, {}, &result);
         if (FAILED(hr)) {
-            spdlog::debug("get_int_property|Invoke failed|prop={}|hr=0x{:08X}", prop_name, hr);
+            spdlog::debug("get_int_property|Invoke failed|prop={}|hr={}", prop_name, hresult_hex(hr));
             return 0;
         }
 
