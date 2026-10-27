@@ -18,6 +18,7 @@ public:
     struct StickyTarget {
         int connection;
         std::string session_identity;
+        std::string sap_identity;  ///< "SYS/CLIENT/USER" of that session when attached (empty: unknown)
     };
 
     std::optional<StickyTarget> sticky_target(const std::string& principal_key) const {
@@ -31,9 +32,10 @@ public:
         return target ? std::optional<int>(target->connection) : std::nullopt;
     }
 
-    void set_sticky_connection(const std::string& principal_key, int connection, std::string session_identity) {
+    void set_sticky_connection(const std::string& principal_key, int connection, std::string session_identity,
+                               std::string sap_identity = "") {
         std::lock_guard<std::mutex> lock(mu_);
-        sticky_[principal_key] = StickyTarget{connection, std::move(session_identity)};
+        sticky_[principal_key] = StickyTarget{connection, std::move(session_identity), std::move(sap_identity)};
     }
 
     /// An unauthenticated SAP window has no SAP user to authorize. Only the token that

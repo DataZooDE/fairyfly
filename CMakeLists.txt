@@ -27,7 +27,7 @@ endif()
 # the same day. Keep it equal to FAIRYFLY_VERSION in src/include/version.h and "version" in vcpkg.json
 # (packaging/set_version.ps1 sets all three; configuring fails when they differ). Here and in vcpkg.json the plain
 # numbers (2026.10.5), in version.h the zero-padded form (2026.10.05) that --version prints and the tag uses.
-project(fairyfly VERSION 2026.10.25.1 LANGUAGES CXX)
+project(fairyfly VERSION 2026.10.25.2 LANGUAGES CXX)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/calendar_version.cmake)
 fairyfly_check_calendar_version("${PROJECT_VERSION}")   # a real date (2026.2.30 is refused), N 1..99
 math(EXPR _ff_minor "${PROJECT_VERSION_MINOR}")
@@ -305,6 +305,17 @@ endif()
 
 # Set library properties
 target_include_directories(fairyfly_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
+# The publisher `fairyfly update apply` accepts: O= and C= of the release's Authenticode leaf certificate (compared
+# normalised, not the whole subject). A fork that signs its own releases sets its own (docs/SIGNING.md, "Updates").
+set(FAIRYFLY_UPDATE_SIGNER_ORGANIZATION "DataZoo GmbH" CACHE STRING "Organisation (O=) an update must be signed by")
+set(FAIRYFLY_UPDATE_SIGNER_COUNTRY "DE" CACHE STRING "Country (C=) of the update signer; empty: not checked")
+if(FAIRYFLY_UPDATE_SIGNER_ORGANIZATION STREQUAL "")
+    message(FATAL_ERROR "FAIRYFLY_UPDATE_SIGNER_ORGANIZATION must not be empty (it would accept no signed update)")
+endif()
+target_compile_definitions(fairyfly_core PUBLIC
+    "FAIRYFLY_UPDATE_SIGNER_ORGANIZATION=\"${FAIRYFLY_UPDATE_SIGNER_ORGANIZATION}\""
+    "FAIRYFLY_UPDATE_SIGNER_COUNTRY=\"${FAIRYFLY_UPDATE_SIGNER_COUNTRY}\"")
 
 # Link library dependencies
 target_link_libraries(fairyfly_core PUBLIC
