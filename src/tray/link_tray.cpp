@@ -1,4 +1,5 @@
 // The link tray (`fairyfly link run --tray`): the cloud link on its own, without the MCP server.
+#include "include/link/link_state_names.h"
 #include <thread>
 
 #include <spdlog/spdlog.h>
@@ -9,20 +10,6 @@ namespace fairyfly::tray {
 
 namespace {
 
-MenuItem item(std::string label, TrayAction action, bool enabled = true) {
-    MenuItem m;
-    m.label = std::move(label);
-    m.action = action;
-    m.enabled = enabled;
-    return m;
-}
-
-MenuItem separator() {
-    MenuItem m;
-    m.separator = true;
-    return m;
-}
-
 std::string who(const LinkView& link) { return link.organisation + " (" + link.account + ")"; }
 
 } // namespace
@@ -32,8 +19,8 @@ std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp,
                               const AutostartView& autostart) {
     TrayMenuModel model;
-    if (link.state == "connected") model.icon = IconState::Running;
-    else if (link.state == "paused") model.icon = IconState::Warning;
+    if (link.state == link::state::kConnected) model.icon = IconState::Running;
+    else if (link.state == link::state::kPaused) model.icon = IconState::Warning;
     else model.icon = IconState::Stopped;
     const std::string clock = link.state == "connected" ? clock_skew_text(link) : std::string();
     if (!clock.empty()) model.icon = IconState::Warning;   // connected, but every call is refused until the clock is synced
@@ -80,6 +67,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(separator());
     model.items.push_back(item("Open log", TrayAction::OpenLog));
     model.items.push_back(item("Open audit trail folder", TrayAction::OpenAuditFolder));
+    model.items.push_back(version_item());
     model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
     model.items.push_back(item("Quit", TrayAction::Quit));
@@ -95,8 +83,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     }
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
-    if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
-    model.tooltip = tooltip;
+    model.tooltip = fit_tooltip(tooltip);
     return model;
 }
 
@@ -153,23 +140,17 @@ void LinkTrayController::on_tick() {
     const std::string state = link_.state;
     if (state == last_state_) return;
     // "not running" before the first status is written (start) or after Quit says nothing new
-    if (state == "connected") notify(last_state_ == "paused" ? "Cloud link resumed" : "Cloud link running for " + who(link_));
-    else if (state == "paused") notify("Cloud link paused: the AI assistant cannot reach this desktop");
+    if (state == link::state::kConnected) notify(last_state_ == link::state::kPaused ? "Cloud link resumed" : "Cloud link running for " + who(link_));
+    else if (state == link::state::kPaused) notify("Cloud link paused: the AI assistant cannot reach this desktop");
     else if (!last_state_.empty() && !quit_requested_) notify("Cloud link stopped");
     last_state_ = state;
 }
 
 void LinkTrayController::on_action(TrayAction action) {
-    auto open = [&](const std::filesystem::path& path, const char* what) {
-        if (!services_.opener || !services_.opener->open(path)) notify(std::string("Could not open ") + what + ": " + path.string());
-    };
-    auto console = [&](const std::vector<std::string>& args) {
-        if (!services_.launcher) return;
-        LaunchRequest request;
-        request.command_line = console_command_line(paths_.exe, args);
-        request.new_console = true;
-        if (!services_.launcher->launch(request)) notify("Could not open a console");
-    };
+    const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
+                              [this](const std::string& text) { notify(text); }};
+    const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };
+    const auto console = [&](const std::vector<std::string>& args) { actions.console(args); };
 
     switch (action) {
     case TrayAction::LinkPause:
@@ -201,13 +182,7 @@ void LinkTrayController::on_action(TrayAction action) {
             notify("The local MCP server is already running (its own tray icon)");
             break;
         }
-        bool ok = false;
-        if (services_.launcher) {
-            LaunchRequest request;   // detached: the MCP tray has its own icon, Quit and log (mcp.log)
-            request.command_line = join_command_line(paths_.exe, mcp_tray_args());
-            request.detached = true;
-            ok = services_.launcher->launch(request).has_value();
-        }
+        const bool ok = actions.start_detached(mcp_tray_args());   // the MCP tray has its own icon, Quit and log
         notify(ok ? "Starting the local MCP server; it gets its own tray icon" : "Could not start the local MCP server");
         break;
     }
@@ -243,8 +218,8 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     }
     const std::string log_file = paths.log_file.string();
     LinkTrayController controller(services, std::move(paths));
-    std::thread ui;
-    if (!detail::start_ui(*services.host, controller, ui)) {
+    const auto ui = UiThread::start(*services.host, controller);   // ended (quit + join) on every return
+    if (!ui) {
         services.host->message_box("fairyfly link", "The fairyfly link tray could not create its tray window. Details are in the log: " +
                                                         log_file);
         return 1;
@@ -259,11 +234,7 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
                                                 "\"Pair with the fairyfly cloud...\".");
         while (!controller.quit_requested() && !services.link->view().paired)
             std::this_thread::sleep_for(services.pairing_poll);
-        if (controller.quit_requested()) {
-            services.host->post_quit();
-            ui.join();
-            return 0;
-        }
+        if (controller.quit_requested()) return 0;
         spdlog::info("link tray: paired; starting the link");
     }
     // One link per pairing: a console `link run` already serving it would refuse ours (LINK_ALREADY_RUNNING).
@@ -274,11 +245,7 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
                                                 "connects as soon as it ends (Ctrl+C there).");
         while (!controller.quit_requested() && services.link_busy()) std::this_thread::sleep_for(services.pairing_poll);
     }
-    if (controller.quit_requested()) {   // Quit right after the pairing appeared (or while another link ran)
-        services.host->post_quit();
-        ui.join();
-        return 0;
-    }
+    if (controller.quit_requested()) return 0;   // Quit right after the pairing appeared (or while another link ran)
 
     int code = 1;
     try {
@@ -309,8 +276,6 @@ int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices se
     if (code != 0 && !controller.quit_requested())
         services.host->message_box("fairyfly link", "The cloud link stopped (exit code " + std::to_string(code) +
                                                         "). Details are in the log: " + log_file);
-    services.host->post_quit();
-    ui.join();
     return code;
 }
 

@@ -1,4 +1,5 @@
 #include "include/auth/ip.h"
+#include "include/text/utf8.h"
 #include "include/auth/token_store.h"
 #include "include/mcp/constants.h"
 #include "include/string_utils.h"
@@ -558,7 +559,7 @@ ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& en
     }
     const std::string from_env = env ? utils::trim(env(env::kMcpConfig)) : std::string();
     if (!from_env.empty()) {
-        out.path = from_env; out.source = Source::Env; out.explicit_request = true;
+        out.path = text::utf8_path(from_env); out.source = Source::Env; out.explicit_request = true;
         return out;
     }
     out.path = Environment(env).data_dir() / "mcp.yaml";

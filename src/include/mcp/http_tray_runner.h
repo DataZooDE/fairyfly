@@ -9,7 +9,7 @@
 #include "include/commands/global_options.h"
 #include "include/mcp/run_mcp.h"
 #include "include/mcp/types.h"
-#include "include/tray/tray.h"
+#include "include/tray/mcp_tray.h"
 
 namespace fairyfly::mcp {
 
