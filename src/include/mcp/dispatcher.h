@@ -240,6 +240,10 @@ private:
     std::optional<CallRefusal> check_screen_guard(const json& args, const CallContext& ctx,
                                                   const std::optional<audit::SapFacts>& owner_pre_facts,
                                                   std::string& expected_screen_guard);
+    void retry_after_reattach(Result& result, const ToolSpec& spec, const json& args, const Policy& effective,
+                              const std::vector<std::string>& argv, McpCallRecord& record,
+                              const std::function<std::optional<int>(const std::string&, const std::string&)>& reattach,
+                              const std::function<Result(const std::vector<std::string>&)>& invoke_selected);
     std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                          const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)

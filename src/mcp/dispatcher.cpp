@@ -1786,6 +1786,28 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::check_screen_gu
     return std::nullopt;
 }
 
+/// 5c: the call failed with INVALID_CONNECTION because the implicit default names a closed session; when the only open
+/// session of the stale record's SAP identity is re-attached, the call runs again on it (the same argv with the new
+/// default connection).
+void CommandDispatcher::retry_after_reattach(
+    Result& result, const ToolSpec& spec, const json& args, const Policy& effective, const std::vector<std::string>& argv,
+    McpCallRecord& record, const std::function<std::optional<int>(const std::string&, const std::string&)>& reattach,
+    const std::function<Result(const std::vector<std::string>&)>& invoke_selected) {
+    const json stale = result.error.is_object() && result.error.contains("stale_connection")
+                           ? result.error["stale_connection"] : json::object();
+    const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
+    if (const auto id = reattach(recorded_sap_identity(stale), stale_id)) {
+        record.connection = id;
+        Policy reattached_policy = effective;
+        reattached_policy.default_connection = id;
+        std::vector<std::string> reattached_argv;
+        try { reattached_argv = spec.build_argv(args, reattached_policy); }
+        catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
+        record.argv = reattached_argv;
+        result = invoke_selected(reattached_argv);
+    }
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1989,19 +2011,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         if (policy_.auto_attach && !ctx.http && !worker_bound && implicit_sticky && reattach_note.empty() &&
             name.rfind("gui_session_", 0) != 0 && result.status != Result::Status::Success &&
             result_error_code(result) == "INVALID_CONNECTION") {
-            const json stale = result.error.is_object() && result.error.contains("stale_connection")
-                                   ? result.error["stale_connection"] : json::object();
-            const std::string stale_id = stale.is_object() && stale.contains("id") ? stale["id"].dump() : "?";
-            if (const auto id = reattach_only_session(recorded_sap_identity(stale), stale_id)) {
-                record.connection = id;
-                Policy reattached_policy = effective;
-                reattached_policy.default_connection = id;
-                std::vector<std::string> reattached_argv;
-                try { reattached_argv = spec->build_argv(args, reattached_policy); }
-                catch (const std::exception&) { reattached_argv = argv; }  // built once already: cannot fail
-                record.argv = reattached_argv;
-                result = invoke_selected(reattached_argv);
-            }
+            retry_after_reattach(result, *spec, args, effective, argv, record, reattach_only_session, invoke_selected);
         }
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
     }
