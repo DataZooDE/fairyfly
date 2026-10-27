@@ -229,6 +229,17 @@ private:
                                     const std::optional<audit::SapFacts>& login_pre_facts,
                                     const std::optional<audit::SapFacts>& checked_launch_facts,
                                     std::optional<audit::SapFacts>& anticipated_login);
+    struct LeaseWriteScope;   // dispatcher.cpp
+    std::optional<ToolResult> resolve_attach_session(const ToolSpec& spec, json& args, std::string& code,
+                                                     const Principal& principal,
+                                                     const std::function<std::optional<PolicyDecision>(const json&)>& check_target,
+                                                     const RefuseCall& refuse);
+    std::optional<CallRefusal> begin_owner_lease(const json& args, const CallContext& ctx, const Principal& principal,
+                                                 const std::optional<audit::SapFacts>& owner_pre_facts,
+                                                 const McpCallRecord& record, LeaseWriteScope& lease_scope);
+    std::optional<CallRefusal> check_screen_guard(const json& args, const CallContext& ctx,
+                                                  const std::optional<audit::SapFacts>& owner_pre_facts,
+                                                  std::string& expected_screen_guard);
     std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                          const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)

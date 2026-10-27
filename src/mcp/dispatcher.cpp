@@ -691,7 +691,9 @@ struct SelectionScope {
     }
 };
 
-struct LeaseWriteScope {
+}  // namespace
+
+struct CommandDispatcher::LeaseWriteScope {
     std::shared_ptr<SessionLeases> leases;
     std::string session, token, id;
     bool active = false;
@@ -699,6 +701,8 @@ struct LeaseWriteScope {
         if (active) leases->end_write(session, token, id, SessionLeases::Clock::now());
     }
 };
+
+namespace {
 
 struct OwnerSessionScope {
     const CommandDispatcher::OwnerSessionOverride& hook;
@@ -1709,6 +1713,79 @@ bool CommandDispatcher::owner_login_target_allowed(const audit::SapFacts& facts,
 
 }
 
+/// gui_session_attach without session_id: the only open SAP GUI session (as the token may see it) becomes the call's
+/// session_id, checked against the token like an explicit one. A value: the call answers here (the list's own error,
+/// no session, several sessions, or a refused target).
+std::optional<ToolResult> CommandDispatcher::resolve_attach_session(
+    const ToolSpec& spec, json& args, std::string& code, const Principal& principal,
+    const std::function<std::optional<PolicyDecision>(const json&)>& check_target, const RefuseCall& refuse) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
+    Result listed = invoke({"session", "list"});
+    // A token limited to named connections only ever sees (and can only be offered) its own sessions.
+    if (!auth::filter_listing_for_connections(principal, "gui_session_list", listed))
+        return fail("RESULT_FILTER_FAILED", "the session list could not be limited to the connections of token '" +
+                                             principal.name + "'");
+    if (listed.status != Result::Status::Success) {
+        code = result_error_code(listed);
+        return shape_result(listed, spec, policy_, "", nullptr);
+    }
+    const json sessions = open_sessions(listed);
+    if (sessions.empty())
+        return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
+    if (sessions.size() > 1)
+        return fail("MULTIPLE_SESSIONS",
+                    std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
+                    "Sessions: " + dump_compact(sessions));
+    args["session_id"] = sessions[0]["session_id"];
+    // The session is known now: the token's system/connection allowlists apply to it like to an explicit id.
+    if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    return std::nullopt;
+}
+
+/// An owner-mode call that changes SAP needs the session's lease: inside a batch the batch's pinned lease must be this
+/// one, otherwise the write is begun here and ended by `lease_scope` when the call returns.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::begin_owner_lease(
+    const json& args, const CallContext& ctx, const Principal& principal,
+    const std::optional<audit::SapFacts>& owner_pre_facts, const McpCallRecord& record, LeaseWriteScope& lease_scope) {
+    if (!owner_pre_facts || principal.id.empty() || !session_leases_)
+        return CallRefusal{"LEASE_UNAVAILABLE", "the session lease cannot be verified"};
+    if (!args.is_object() || !args.contains("lease_id") || !args["lease_id"].is_string())
+        return CallRefusal{"LEASE_REQUIRED", "acquire a session lease and pass its lease_id"};
+    const std::string id = args["lease_id"].get<std::string>();
+    if (ctx.batch_lease) {
+        const auto& held = *ctx.batch_lease;
+        if (held.session_identity != owner_pre_facts->session_identity || held.token_id != principal.id ||
+            held.lease_id != id || !record.connection || held.connection != *record.connection)
+            return CallRefusal{"LEASE_REQUIRED", "the batch lease does not match this SAP session"};
+    } else {
+        lease_scope.leases = session_leases_;
+        lease_scope.session = owner_pre_facts->session_identity;
+        lease_scope.token = principal.id;
+        lease_scope.id = id;
+        lease_scope.active = session_leases_->begin_write(lease_scope.session, lease_scope.token, lease_scope.id,
+                                                         SessionLeases::Clock::now());
+        if (!lease_scope.active) return CallRefusal{"LEASE_REQUIRED", "the session lease is missing or expired"};
+    }
+    return std::nullopt;
+}
+
+/// The client's expected_screen_guard (owner-routed sessions only): a 64-character digest that must still match the
+/// session and dynpro checked before the call.
+std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::check_screen_guard(
+    const json& args, const CallContext& ctx, const std::optional<audit::SapFacts>& owner_pre_facts,
+    std::string& expected_screen_guard) {
+    if (!owner_mode(ctx) || !owner_pre_facts)
+        return CallRefusal{"INVALID_ARGUMENT", "a screen guard requires an owner-routed SAP session"};
+    expected_screen_guard = args["expected_screen_guard"].get<std::string>();
+    if (expected_screen_guard.size() != 64)
+        return CallRefusal{"INVALID_ARGUMENT", "expected_screen_guard must be a 64-character digest"};
+    if (screen_guard_for(*owner_pre_facts) != expected_screen_guard)
+        return CallRefusal{"SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read"};
+    return std::nullopt;
+}
+
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1777,27 +1854,9 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     else if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
 
     // gui_session_attach without session_id: resolve through `list`.
-    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id")) {
-        Result listed = invoke({"session", "list"});
-        // A token limited to named connections only ever sees (and can only be offered) its own sessions.
-        if (!auth::filter_listing_for_connections(principal, "gui_session_list", listed))
-            return fail("RESULT_FILTER_FAILED", "the session list could not be limited to the connections of token '" +
-                                                 principal.name + "'");
-        if (listed.status != Result::Status::Success) {
-            code = result_error_code(listed);
-            return shape_result(listed, *spec, policy_, "", nullptr);
-        }
-        const json sessions = open_sessions(listed);
-        if (sessions.empty())
-            return fail("NO_SESSIONS", "no SAP GUI session is open", "start SAP GUI / gui_session_launch, then retry");
-        if (sessions.size() > 1)
-            return fail("MULTIPLE_SESSIONS",
-                        std::to_string(sessions.size()) + " SAP GUI sessions are open; call gui_session_attach again with session_id. "
-                        "Sessions: " + dump_compact(sessions));
-        args["session_id"] = sessions[0]["session_id"];
-        // The session is known now: the token's system/connection allowlists apply to it like to an explicit id.
-        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
-    }
+    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))
+        if (auto answered = resolve_attach_session(*spec, args, code, principal, check_target, fail))
+            return *answered;
 
     // 4. build argv
     std::vector<std::string> argv;
@@ -1815,38 +1874,14 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
 
     LeaseWriteScope lease_scope;
     if (owner_mode(ctx) && !prelogin_close_facts &&
-        lease_required_for_call(name, args)) {
-        if (!owner_pre_facts || principal.id.empty() || !session_leases_)
-            return fail("LEASE_UNAVAILABLE", "the session lease cannot be verified");
-        if (!args.is_object() || !args.contains("lease_id") || !args["lease_id"].is_string())
-            return fail("LEASE_REQUIRED", "acquire a session lease and pass its lease_id");
-        const std::string id = args["lease_id"].get<std::string>();
-        if (ctx.batch_lease) {
-            const auto& held = *ctx.batch_lease;
-            if (held.session_identity != owner_pre_facts->session_identity || held.token_id != principal.id ||
-                held.lease_id != id || !record.connection || held.connection != *record.connection)
-                return fail("LEASE_REQUIRED", "the batch lease does not match this SAP session");
-        } else {
-            lease_scope.leases = session_leases_;
-            lease_scope.session = owner_pre_facts->session_identity;
-            lease_scope.token = principal.id;
-            lease_scope.id = id;
-            lease_scope.active = session_leases_->begin_write(lease_scope.session, lease_scope.token, lease_scope.id,
-                                                             SessionLeases::Clock::now());
-            if (!lease_scope.active) return fail("LEASE_REQUIRED", "the session lease is missing or expired");
-        }
-    }
+        lease_required_for_call(name, args))
+        if (auto refused = begin_owner_lease(args, ctx, principal, owner_pre_facts, record, lease_scope))
+            return fail(refused->code, refused->message, refused->hint);
 
     std::string expected_screen_guard;
-    if (args.is_object() && args.contains("expected_screen_guard")) {
-        if (!owner_mode(ctx) || !owner_pre_facts)
-            return fail("INVALID_ARGUMENT", "a screen guard requires an owner-routed SAP session");
-        expected_screen_guard = args["expected_screen_guard"].get<std::string>();
-        if (expected_screen_guard.size() != 64)
-            return fail("INVALID_ARGUMENT", "expected_screen_guard must be a 64-character digest");
-        if (screen_guard_for(*owner_pre_facts) != expected_screen_guard)
-            return fail("SCREEN_CHANGED", "the SAP session or dynpro changed since the client's screen read");
-    }
+    if (args.is_object() && args.contains("expected_screen_guard"))
+        if (auto refused = check_screen_guard(args, ctx, owner_pre_facts, expected_screen_guard))
+            return fail(refused->code, refused->message, refused->hint);
 
     if ((owner_pre_facts || prelogin_close_facts) && !owner_session_override_)
         return fail("OWNER_IDENTITY_UNKNOWN", "the server cannot bind this call to its checked SAP session");
