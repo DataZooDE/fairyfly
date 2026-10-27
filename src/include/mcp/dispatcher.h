@@ -244,6 +244,14 @@ private:
                               const std::vector<std::string>& argv, McpCallRecord& record,
                               const std::function<std::optional<int>(const std::string&, const std::string&)>& reattach,
                               const std::function<Result(const std::vector<std::string>&)>& invoke_selected);
+    struct InvocationRun;   // dispatcher.cpp
+    ToolResult run_invocation(const std::string& name, McpCallRecord& record, std::string& code, const CallContext& ctx,
+                              CallState& state, const RefuseCall& refuse, const std::vector<std::string>& argv,
+                              const Policy& effective, const InvocationRun& run);
+    ToolResult invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code, const CallContext& ctx,
+                                 CallState& state, const RefuseCall& refuse, const std::vector<std::string>& argv,
+                                 const Policy& effective, const std::string& expected_screen_guard,
+                                 const std::function<std::optional<PolicyDecision>(const json&)>& check_target);
     std::optional<ToolResult> admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                          const CallContext& ctx, CallState& state, const RefuseCall& refuse);
     // owner-mode branches of execute_call's pre-call checks (dispatcher.cpp)
