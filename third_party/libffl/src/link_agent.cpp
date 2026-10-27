@@ -183,16 +183,23 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     // person guessing (live 2026-10-27: the desktop clock was 346 s behind).
     try {
         c = ver_.verify(req.assertion, st_.device_id, req.id);
-    } catch (const assertion::ClockSkew& e) {
+    } catch (const assertion::ClockSkew& e) {  // iat beyond the tolerance in the future: only a clock behind explains it
         spdlog::warn("assertion rejected ({}): {}", req.id, e.what());
+        expired_in_a_row_ = 0;
         report_clock_skew(e.offset_s);
         return fail(req.id, "ASSERTION_CLOCK_SKEW", assertion::clock_skew_message(e.offset_s));
+    } catch (const assertion::Expired& e) {
+        // late delivery or a clock ahead: neutral once; the tray hears of it only when it keeps happening
+        spdlog::warn("assertion rejected ({}): {}", req.id, e.what());
+        if (++expired_in_a_row_ >= kExpiredAsSkew) report_clock_skew(e.offset_s);
+        return fail(req.id, "ASSERTION_EXPIRED", assertion::expired_message(e.late_s));
     } catch (const Error& e) {
         spdlog::warn("assertion rejected ({}): {}", req.id, e.what());
         std::string why = e.what();
         if (why.rfind("assertion: ", 0) == 0) why = why.substr(11);
         return fail(req.id, "ASSERTION_REJECTED", "the desktop rejected the gateway's authorization (" + why + ")");
     }
+    expired_in_a_row_ = 0;
     report_clock_skew(0);
     const json& rpc = req.rpc;
     std::string tool;

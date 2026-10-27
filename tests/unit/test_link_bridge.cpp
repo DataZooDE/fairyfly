@@ -432,3 +432,27 @@ TEST_CASE("link bridge: a desktop clock 346 s behind is refused as clock skew, w
     CHECK(res.error->message.find("346 s behind") != std::string::npos);
     CHECK(res.error->message.find("Sync now") != std::string::npos);
 }
+
+// A stale assertion (retry, queued frame, replay) with iat not in the future proves nothing about the clock: neutral.
+TEST_CASE("link bridge: an assertion that arrives after it expired is ASSERTION_EXPIRED, not clock skew", "[link][clock]") {
+    TestSigner gw;
+    ffy::link::State st;
+    st.device_id = "dev_1"; st.issuer = "ffy-gateway"; st.tenant = "acme"; st.gateway_keys = gw.public_keys(); st.key = ffy::ec_generate();
+    ffy::link::AgentConfig cfg;
+    cfg.local = std::make_shared<MainThreadTools>();
+    int heard = 0;
+    cfg.on_clock_skew = [&](std::int64_t) { ++heard; };
+    ffy::link::Agent agent(st, cfg);
+    ffy::assertion::Claims c;
+    c.iss = "ffy-gateway"; c.aud = "dev_1"; c.tenant = "acme"; c.sub = "lee@acme.example"; c.jti = ffy::rand_hex(8); c.client = "claude";
+    c.iat = ffy::now_unix() - 300; c.exp = c.iat + 60; c.req = "inst.late";
+    c.grants.tools = {"screen"};
+    ffy::proto::Frame f;
+    f.t = ffy::proto::TReq; f.id = c.req; f.assertion = ffy::assertion::sign(gw, c);
+    f.rpc = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"}, {"params", {{"name", "gui_screen_read"}, {"arguments", json::object()}}}};
+    const auto res = agent.process(f);
+    REQUIRE(res.error);
+    CHECK(res.error->code == "ASSERTION_EXPIRED");
+    CHECK(res.error->message.find("too late") != std::string::npos);
+    CHECK(heard == 0);   // once is no reason to turn the tray yellow
+}

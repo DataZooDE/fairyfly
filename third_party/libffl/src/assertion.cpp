@@ -17,6 +17,11 @@ std::string clock_skew_message(int64_t offset_s) {
            " the gateway's; sync the Windows clock (Settings > Time & language > Date & time > Sync now) and try again";
 }
 
+std::string expired_message(int64_t late_s) {
+    return "the request reached the desktop too late (" + std::to_string(late_s) +
+           " s after its authorization expired); try again, and if this repeats, check the PC's clock";
+}
+
 Verifier::Verifier(std::string issuer, std::string tenant, const std::vector<Jwk>& keys) : issuer_(std::move(issuer)), tenant_(std::move(tenant)) {
     if (tenant_.empty()) throw Error("assertion: no tenant in device state (re-enrol)");
     for (auto& k : keys) {
@@ -58,7 +63,8 @@ Claims Verifier::verify(const std::string& token, const std::string& device_id, 
                                      (offset < 0 ? "ahead of" : "behind") + " the gateway (tolerance " + std::to_string(kFutureLeewaySec) + " s)");
     };
     if (c.iat > now + kFutureLeewaySec) throw skew("issued in the future");
-    if (c.exp <= now - kExpiryLeewaySec) throw skew("expired");
+    if (c.exp <= now - kExpiryLeewaySec)
+        throw Expired(now - c.exp, offset, "assertion: expired " + std::to_string(now - c.exp) + " s ago (slack " + std::to_string(kExpiryLeewaySec) + " s)");
     if (c.jti.empty()) throw Error("assertion: missing jti");
     std::lock_guard<std::mutex> lk(mu_);
     for (auto it = seen_.begin(); it != seen_.end();) it = it->second < now - kSeenKeepSec ? seen_.erase(it) : std::next(it);
