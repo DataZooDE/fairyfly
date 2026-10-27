@@ -42,6 +42,11 @@ jobs:
       run: ./packaging/sign/tests/Test-Signature.Tests.ps1
       shell: pwsh
 
+    - name: release.yml supply-chain rules and Install-Wix.ps1 (tag = ref, checkouts = github.sha, pinned actions, WiX hash)
+      if: ${{ !cancelled() }}
+      run: ./packaging/sign/tests/Test-ReleaseWorkflow.ps1 -Install
+      shell: pwsh
+
   actionlint:
     timeout-minutes: 10
     runs-on: ubuntu-latest
