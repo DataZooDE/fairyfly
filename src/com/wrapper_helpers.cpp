@@ -23,6 +23,28 @@ int get_collection_count_checked(IDispatch* collection) {
     return count;
 }
 
+std::vector<_variant_t> collection_member_items(IDispatch* owner, const wchar_t* member, WORD flags, int limit) {
+    std::vector<_variant_t> items;
+    if (!owner) return items;
+    DISPID member_id;
+    if (FAILED(get_dispid_via_typeinfo(owner, member, &member_id))) return items;
+    _variant_t answer;
+    if (FAILED(invoke(owner, member_id, flags, {}, &answer)) || answer.vt != VT_DISPATCH || !answer.pdispVal)
+        return items;
+    IDispatch* collection = answer.pdispVal;   // `answer` keeps it alive
+    DISPID count_id, item_id;
+    if (FAILED(get_dispid_via_typeinfo(collection, L"Count", &count_id))) return items;
+    _variant_t count;
+    if (FAILED(invoke(collection, count_id, DISPATCH_PROPERTYGET, {}, &count)) || count.vt != VT_I4) return items;
+    if (FAILED(get_dispid_via_typeinfo(collection, L"Item", &item_id))) return items;
+    for (long i = 0; i < count.lVal && i < limit; ++i) {
+        _variant_t item;
+        if (SUCCEEDED(invoke(collection, item_id, DISPATCH_METHOD, {_variant_t(i)}, &item)))
+            items.push_back(std::move(item));
+    }
+    return items;
+}
+
 // Helper function for AddRef validation with SEH (no C++ objects allowed)
 static ULONG safe_addref_check(IDispatch* obj) {
     __try {
