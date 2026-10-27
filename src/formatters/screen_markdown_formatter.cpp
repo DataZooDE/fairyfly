@@ -1,4 +1,5 @@
 #include "include/shell_kind.h"
+#include "include/string_utils.h"
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/grid_analyzer.h"
 #include "include/formatters/grid_renderer.h"
@@ -188,9 +189,7 @@ std::vector<LabelInfo> collect_report_labels(const json& hierarchy) {
         if (type == "GuiLabel") {
             std::string text = elem.value("text", "");
             // Skip whitespace-only labels
-            std::string trimmed = text;
-            trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-            trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
+            const std::string trimmed = utils::trim(text);
 
             if (!trimmed.empty()) {
                 LabelInfo info;
@@ -386,11 +385,7 @@ void render_status(std::ostringstream& oss, [[maybe_unused]] const json& data, [
             if (type == "GuiStatusPane" && id.find("/sbar/pane[") != std::string::npos) {
                 std::string text = elem.value("text", "");
                 // Only include panes with non-empty, non-whitespace text
-                std::string trimmed = text;
-                trimmed.erase(0, trimmed.find_first_not_of(" \t\n\r"));
-                trimmed.erase(trimmed.find_last_not_of(" \t\n\r") + 1);
-
-                if (!trimmed.empty()) {
+                if (!utils::trim(text).empty()) {
                     status_panes.push_back(elem);
                 }
             }

@@ -181,6 +181,146 @@ std::function<bool(const std::string&)> lease_holder_check(const std::shared_ptr
 
 } // namespace
 
+/// What the transports share once run_mcp has resolved the options: the policy, the audit hook, the lazily configured
+/// handler and the state the HTTP routing hands to the session workers.
+struct ServeContext {
+    const ServeOptions& options;
+    Policy policy;
+    AuditHook hook;
+    std::function<cli::CommandHandler&()> lazy_handler;
+    ServerOptions server_options;
+    audit::AuditSink* sink;
+    bool read_only;
+    const HttpRunHooks* hooks;
+    std::shared_ptr<std::function<void(int)>> on_connection_changed;
+    std::shared_ptr<std::function<std::shared_ptr<void>(const std::string&, const std::function<bool()>&)>> on_login_lane_reserve;
+    std::shared_ptr<std::shared_timed_mutex> control_probe_gate;
+};
+
+/// The remote transport (http.sys; TLS in the kernel with --tls): bearer tokens, the dispatcher per read-only mode,
+/// and with owner identities the session worker routing. Runs until the server stops.
+int serve_http(const ServeContext& context) {
+    const ServeOptions& options = context.options;
+    const Policy& policy = context.policy;
+    const AuditHook& hook = context.hook;
+    const auto& lazy_handler = context.lazy_handler;
+    const ServerOptions& server_options = context.server_options;
+    audit::AuditSink* sink = context.sink;
+    const bool read_only = context.read_only;
+    const HttpRunHooks* hooks = context.hooks;
+    const auto& on_connection_changed = context.on_connection_changed;
+    const auto& on_login_lane_reserve = context.on_login_lane_reserve;
+    const auto& control_probe_gate = context.control_probe_gate;
+    if (options.allow_ip_include_loopback && options.allow_ip.empty())
+        return refuse("INVALID_ARGUMENT", "--allow-ip-include-loopback requires a nonempty --allow-ip list");
+    // Remote transport: http.sys (TLS in the kernel when --tls). The provider is rebuilt when the
+    // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
+    if (audit_unavailable(sink)) return refuse_audit(sink);
+    for (const auto& cidr : options.allow_ip) {
+        if (!auth::parse_ip_rule(cidr))
+            return refuse("INVALID_ARGUMENT", "invalid --allow-ip entry '" + cidr + "': expected an IPv4/IPv6 address or CIDR block");
+    }
+    // Bearer-token authentication (Credential Manager); --insecure-no-auth bypasses the factory in
+    // make_http_authenticator.
+    g_make_authenticator = [] { return auth::make_default_authenticator(auth::AuthConfig{}); };
+    HttpRunArgs http_args;
+    http_args.options = options;
+    http_args.server_options = server_options;
+    http_args.read_only = read_only;
+    http_args.read_only_cap = config::read_only_cap();
+    const auto families = options.families;
+    // Token mutations run in a separate CLI process. On a competing lease
+    // acquire, read the current Credential Manager record before retaining
+    // the old holder; a revoked/rotated/expired token cannot occupy the
+    // window for the rest of its lease TTL.
+    auto routing_state = std::make_shared<SessionRoutingState>();
+    auto session_policy_state = std::make_shared<SessionPolicyState>();
+    auto owner_listing = std::make_shared<CommandDispatcher::OwnerSessionListingProvider>();
+    auto lease_token_store = std::make_shared<auth::TokenStore>(
+        auth::make_credential_manager_backend(auth::kTokenTargetPrefix));
+    auto session_leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), SessionLeases::IdFactory{},
+        lease_holder_check(lease_token_store, routing_state, session_policy_state));
+    std::unique_ptr<PeriodicSessionStateCleanup> state_cleanup;
+    auto shared_rate_limiter = std::make_shared<KeyedRateLimiter>();
+    http_args.make_provider = [policy, hook, lazy_handler, families, session_leases, routing_state,
+                               session_policy_state, shared_rate_limiter, on_login_lane_reserve,
+                               control_probe_gate, owner_listing](bool ro) mutable -> std::unique_ptr<ToolProvider> {
+        Policy p = policy;
+        p.read_only = ro;
+        p.allow_write = !ro;
+        auto dispatcher = std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
+                                                              retain_families(all_tool_specs(), families));
+        dispatcher->set_session_leases(session_leases);
+        dispatcher->set_routing_state(routing_state);
+        dispatcher->set_session_policy_state(session_policy_state);
+        dispatcher->set_shared_rate_limiter(shared_rate_limiter);
+        connect_to_handler(*dispatcher, lazy_handler);
+        if (*owner_listing) dispatcher->set_owner_session_listing_provider(*owner_listing);
+        dispatcher->set_login_lane_reserver([on_login_lane_reserve](
+            const std::string& key, const std::function<bool()>& cancelled) -> std::shared_ptr<void> {
+            return *on_login_lane_reserve ? (*on_login_lane_reserve)(key, cancelled) : nullptr;
+        });
+        dispatcher->set_control_probe_gate(control_probe_gate);
+        return dispatcher;
+    };
+    http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };
+    if (!options.owner_sap_identities.empty()) {
+        if (options.insecure_no_auth)
+            return refuse("INVALID_ARGUMENT", "owner session routing requires bearer-token authentication");
+#ifdef _WIN32
+        std::wstring executable = own_executable_path();
+        if (executable.empty())
+            return refuse("WORKER_UNAVAILABLE", "cannot locate the fairyfly session worker executable");
+        auto broker = std::make_shared<SessionWorkerBroker>(std::move(executable), L"--mcp-session-worker",
+                                                             8, server_options.max_queue,
+                                                             server_options.call_timeout_ms);
+        *owner_listing = [broker](std::chrono::milliseconds budget, const std::function<bool()>& cancelled) {
+            return result_from_worker_json(broker->enumerate_sessions(budget, cancelled));
+        };
+        SessionWorkerRuntimeConfig routed;
+        routed.policy = policy;
+        routed.specs = retain_families(all_tool_specs(), families);
+        routed.audit = sink && sink->enabled() ? make_mcp_audit_hook(sink, {}, read_only) : AuditHook{};
+        routed.leases = session_leases;
+        routed.routing = routing_state;
+        routed.policy_state = session_policy_state;
+        routed.rate_limiter = shared_rate_limiter;
+        routed.on_connection_changed = on_connection_changed;
+        routed.on_login_lane_reserve = on_login_lane_reserve;
+        routed.control_probe_gate = control_probe_gate;
+        routed.max_queue = server_options.max_queue;
+        routed.call_timeout_ms = server_options.call_timeout_ms;
+        routed.probe = [broker](std::optional<int> connection) {
+            return broker->probe(connection.value_or(-1));
+        };
+        routed.invoke = [broker](const WorkerCall& call, const std::function<void()>& before_send) {
+            return broker->invoke_direct(call, before_send);
+        };
+        routed.retire_connection = [broker](int connection, const std::string& identity) {
+            (void)broker->retire_connection(connection, identity);
+        };
+        routed.shutdown = [broker] { broker->shutdown(); };
+        http_args.configure_session_routing = [routed = std::move(routed)](McpHttpServer& server) mutable {
+            configure_session_worker_routing(server, std::move(routed));
+        };
+        state_cleanup = std::make_unique<PeriodicSessionStateCleanup>(std::chrono::seconds(30),
+            [session_policy_state, session_leases, routing_state, lease_token_store] {
+                session_leases->sweep_expired(SessionLeases::Clock::now());
+                cleanup_invalid_token_state(*session_policy_state, *session_leases, *routing_state,
+                    [&] { return lease_token_store->scan_fresh(); },
+                    lease_token_store->now());
+            });
+#else
+        return refuse("WORKER_UNAVAILABLE", "parallel SAP session workers require Windows");
+#endif
+    }
+    if (hooks) http_args.on_control = hooks->on_control;
+    return serve_audited(sink, read_only, [&] {
+        return run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
+    });
+
+}
+
 int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler&()>& get_handler,
               const commands::GlobalOptions& global, audit::AuditSink* sink,
               const std::function<cli::CommandHandler*()>& peek_handler, const HttpRunHooks* hooks) {
@@ -279,116 +419,9 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     server_options.instructions = kInstructions;
     server_options.call_timeout_ms = options.call_timeout_ms;
 
-    if (http) {
-        if (options.allow_ip_include_loopback && options.allow_ip.empty())
-            return refuse("INVALID_ARGUMENT", "--allow-ip-include-loopback requires a nonempty --allow-ip list");
-        // Remote transport: http.sys (TLS in the kernel when --tls). The provider is rebuilt when the
-        // tray/IServerControl toggles the read-only mode, so subsequent calls use the new policy.
-        if (audit_unavailable(sink)) return refuse_audit(sink);
-        for (const auto& cidr : options.allow_ip) {
-            if (!auth::parse_ip_rule(cidr))
-                return refuse("INVALID_ARGUMENT", "invalid --allow-ip entry '" + cidr + "': expected an IPv4/IPv6 address or CIDR block");
-        }
-        // Bearer-token authentication (Credential Manager); --insecure-no-auth bypasses the factory in
-        // make_http_authenticator.
-        g_make_authenticator = [] { return auth::make_default_authenticator(auth::AuthConfig{}); };
-        HttpRunArgs http_args;
-        http_args.options = options;
-        http_args.server_options = server_options;
-        http_args.read_only = read_only;
-        http_args.read_only_cap = config::read_only_cap();
-        const auto families = options.families;
-        // Token mutations run in a separate CLI process. On a competing lease
-        // acquire, read the current Credential Manager record before retaining
-        // the old holder; a revoked/rotated/expired token cannot occupy the
-        // window for the rest of its lease TTL.
-        auto routing_state = std::make_shared<SessionRoutingState>();
-        auto session_policy_state = std::make_shared<SessionPolicyState>();
-        auto owner_listing = std::make_shared<CommandDispatcher::OwnerSessionListingProvider>();
-        auto lease_token_store = std::make_shared<auth::TokenStore>(
-            auth::make_credential_manager_backend(auth::kTokenTargetPrefix));
-        auto session_leases = std::make_shared<SessionLeases>(std::chrono::seconds(60), SessionLeases::IdFactory{},
-            lease_holder_check(lease_token_store, routing_state, session_policy_state));
-        std::unique_ptr<PeriodicSessionStateCleanup> state_cleanup;
-        auto shared_rate_limiter = std::make_shared<KeyedRateLimiter>();
-        http_args.make_provider = [policy, hook, lazy_handler, families, session_leases, routing_state,
-                                   session_policy_state, shared_rate_limiter, on_login_lane_reserve,
-                                   control_probe_gate, owner_listing](bool ro) mutable -> std::unique_ptr<ToolProvider> {
-            Policy p = policy;
-            p.read_only = ro;
-            p.allow_write = !ro;
-            auto dispatcher = std::make_unique<CommandDispatcher>(make_registry_invoker(lazy_handler), p, hook,
-                                                                  retain_families(all_tool_specs(), families));
-            dispatcher->set_session_leases(session_leases);
-            dispatcher->set_routing_state(routing_state);
-            dispatcher->set_session_policy_state(session_policy_state);
-            dispatcher->set_shared_rate_limiter(shared_rate_limiter);
-            connect_to_handler(*dispatcher, lazy_handler);
-            if (*owner_listing) dispatcher->set_owner_session_listing_provider(*owner_listing);
-            dispatcher->set_login_lane_reserver([on_login_lane_reserve](
-                const std::string& key, const std::function<bool()>& cancelled) -> std::shared_ptr<void> {
-                return *on_login_lane_reserve ? (*on_login_lane_reserve)(key, cancelled) : nullptr;
-            });
-            dispatcher->set_control_probe_gate(control_probe_gate);
-            return dispatcher;
-        };
-        http_args.apply_read_only = [lazy_handler](bool ro) { lazy_handler().set_read_only(ro); };
-        if (!options.owner_sap_identities.empty()) {
-            if (options.insecure_no_auth)
-                return refuse("INVALID_ARGUMENT", "owner session routing requires bearer-token authentication");
-#ifdef _WIN32
-            std::wstring executable = own_executable_path();
-            if (executable.empty())
-                return refuse("WORKER_UNAVAILABLE", "cannot locate the fairyfly session worker executable");
-            auto broker = std::make_shared<SessionWorkerBroker>(std::move(executable), L"--mcp-session-worker",
-                                                                 8, server_options.max_queue,
-                                                                 server_options.call_timeout_ms);
-            *owner_listing = [broker](std::chrono::milliseconds budget, const std::function<bool()>& cancelled) {
-                return result_from_worker_json(broker->enumerate_sessions(budget, cancelled));
-            };
-            SessionWorkerRuntimeConfig routed;
-            routed.policy = policy;
-            routed.specs = retain_families(all_tool_specs(), families);
-            routed.audit = sink && sink->enabled() ? make_mcp_audit_hook(sink, {}, read_only) : AuditHook{};
-            routed.leases = session_leases;
-            routed.routing = routing_state;
-            routed.policy_state = session_policy_state;
-            routed.rate_limiter = shared_rate_limiter;
-            routed.on_connection_changed = on_connection_changed;
-            routed.on_login_lane_reserve = on_login_lane_reserve;
-            routed.control_probe_gate = control_probe_gate;
-            routed.max_queue = server_options.max_queue;
-            routed.call_timeout_ms = server_options.call_timeout_ms;
-            routed.probe = [broker](std::optional<int> connection) {
-                return broker->probe(connection.value_or(-1));
-            };
-            routed.invoke = [broker](const WorkerCall& call, const std::function<void()>& before_send) {
-                return broker->invoke_direct(call, before_send);
-            };
-            routed.retire_connection = [broker](int connection, const std::string& identity) {
-                (void)broker->retire_connection(connection, identity);
-            };
-            routed.shutdown = [broker] { broker->shutdown(); };
-            http_args.configure_session_routing = [routed = std::move(routed)](McpHttpServer& server) mutable {
-                configure_session_worker_routing(server, std::move(routed));
-            };
-            state_cleanup = std::make_unique<PeriodicSessionStateCleanup>(std::chrono::seconds(30),
-                [session_policy_state, session_leases, routing_state, lease_token_store] {
-                    session_leases->sweep_expired(SessionLeases::Clock::now());
-                    cleanup_invalid_token_state(*session_policy_state, *session_leases, *routing_state,
-                        [&] { return lease_token_store->scan_fresh(); },
-                        lease_token_store->now());
-                });
-#else
-            return refuse("WORKER_UNAVAILABLE", "parallel SAP session workers require Windows");
-#endif
-        }
-        if (hooks) http_args.on_control = hooks->on_control;
-        return serve_audited(sink, read_only, [&] {
-            return run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
-        });
-    }
-
+    if (http)
+        return serve_http(ServeContext{options, policy, hook, lazy_handler, server_options, sink, read_only, hooks,
+                                       on_connection_changed, on_login_lane_reserve, control_probe_gate});
     if (link) {
         if (!hooks || !hooks->link_loop) return refuse("INVALID_ARGUMENT", "transport 'link' is started by `fairyfly link run`");
         CommandDispatcher link_dispatcher(make_registry_invoker(lazy_handler), policy, hook,
