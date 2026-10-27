@@ -324,6 +324,10 @@ TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryService
     if (entry.install_autostart && entry.remove_autostart)
         return fail("--install-autostart and --remove-autostart cannot be combined");
 
+    if ((entry.install_autostart || entry.remove_autostart) && !entry.run_key_autostart)
+        return fail("TRAY_AUTOSTART_PACKAGED: this fairyfly is a Microsoft Store package; it starts the link tray at logon "
+                    "itself (switch it in Settings > Apps > Startup) and writes no Run value");
+
     if (entry.install_autostart) {
         if (!services.registry) return fail("TRAY_AUTOSTART_FAILED: no registry access");
         const std::string command = entry.autostart_line.empty() ? autostart_command(entry.exe, entry.config_path) : entry.autostart_line;

@@ -8,6 +8,16 @@ namespace fairyfly {
 namespace commands {
 
 namespace {
+/// `update check|apply` of a Microsoft Store installation: where its updates come from instead.
+Result store_managed_result() {
+    const auto d = update::store_managed();
+    Result r = Result::fail(d.code, d.message,
+                            json::array({"Update fairyfly in the Microsoft Store app (Library > Get updates)",
+                                         "Windows installs Store updates on its own when automatic app updates are on"}));
+    r.error["update_channel"] = "microsoft-store";
+    r.error["current"] = FAIRYFLY_VERSION;
+    return r;
+}
 }  // namespace
 
 CLI::App* UpdateCommand::setup_cli(CLI::App& app) {
@@ -36,6 +46,8 @@ Example: fairyfly update apply
 }
 
 Result UpdateCommand::execute(cli::CommandHandler&) {
+    if (!packaging::self_updates(package_) && ((check_cmd_ && *check_cmd_) || (apply_cmd_ && *apply_cmd_)))
+        return store_managed_result();
     try {
         if (check_cmd_ && *check_cmd_) {
             auto c = update::check(FAIRYFLY_VERSION);

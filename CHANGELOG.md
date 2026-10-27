@@ -2,6 +2,19 @@
 
 ## 2026.10.27 (2026-10-27)
 
+### Microsoft Store (MSIX): build option and manifest template (preparation)
+
+- CMake option `FAIRYFLY_PACKAGE=msi|msix` (default `msi`, unchanged). An `msix` build does not update itself:
+  `fairyfly update check|apply` answer `UPDATE_MANAGED_BY_STORE` without asking GitHub, the trays have no
+  "Check for updates" item and no background check. It writes no HKCU Run value (`--install-autostart` answers
+  `TRAY_AUTOSTART_PACKAGED`), because the package starts the link tray through its StartupTask.
+- `packaging/msix/AppxManifest.xml.in` (tray + CLI with the `fairyfly.exe` execution alias, StartupTask, toast
+  activator, `%LOCALAPPDATA%\fairyfly` excluded from virtualization), rendered at configure time with the
+  Partner Center identity from CMake cache variables (placeholders until then). The MSIX version is
+  `YYYY.MM.(DD*100+N).0` (`packaging/msix_version.ps1`).
+- [docs/MSIX.md](docs/MSIX.md): what fairyfly writes at run time and what MSIX virtualization does with each write,
+  and what is left before a Store submission.
+
 ### Link audit trail: a closed "Change Password" menu entry no longer drops the screenshot
 
 - Live on SU01 → Logon data, the closed menu entry `wnd[0]/mbar/menu[0]/menu[8]` ("Change Password") counted as a

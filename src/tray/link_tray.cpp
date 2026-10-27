@@ -68,7 +68,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     model.items.push_back(item("Open log", TrayAction::OpenLog));
     model.items.push_back(item("Open audit trail folder", TrayAction::OpenAuditFolder));
     model.items.push_back(version_item());
-    model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
+    if (self_update) model.items.push_back(item("Check for updates (console)", TrayAction::UpdateCheck));
     model.items.push_back(separator());
     model.items.push_back(item("Quit", TrayAction::Quit));
 

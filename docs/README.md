@@ -33,6 +33,7 @@ New to fairyfly? Start with the [project README](../README.md): what fairyfly is
 |---|---|
 | [BUILDING.md](BUILDING.md) | Toolchain, build, tests, Makefile, icons, versions and releases |
 | [SIGNING.md](SIGNING.md) | Code signing options and the release procedure |
+| [MSIX.md](MSIX.md) | The Microsoft Store (MSIX) build option: no self-update, StartupTask, manifest template, what MSIX virtualizes and what is left |
 | [../tests/integration/README.md](../tests/integration/README.md) | Live SAP integration scripts and their prerequisites |
 | [../CHANGELOG.md](../CHANGELOG.md) | User-visible changes per version |
 | [examples/](examples/) | Example MCP client configurations |

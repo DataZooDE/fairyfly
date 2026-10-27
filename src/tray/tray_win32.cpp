@@ -637,6 +637,7 @@ TrayStart prepare_tray_start(const std::string& mutex_name) {
     start.entry.args = current_args();   // the detached child (and the autostart) get the same arguments
     // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
     start.program = tray_start_program(start.entry.exe, path_exists);
+    start.entry.run_key_autostart = packaging::run_key_autostart(packaging::kPackage);   // MSIX: its StartupTask
     start.registry = make_win32_run_key();
     start.launcher = make_win32_process_launcher();
     start.guard = make_win32_single_instance(mutex_name);
