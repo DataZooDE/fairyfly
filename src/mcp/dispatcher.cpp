@@ -624,6 +624,71 @@ void CommandDispatcher::auto_attach_and_retry(Result& result, const std::string&
     }
 }
 
+namespace {
+
+// The per-call RAII scopes of execute_call: each puts a handler setting in place for one call and back afterwards,
+// also when the invocation throws or a CALL_TIMEOUT unwinds it.
+
+struct ReadOnlyScope {
+    const CommandDispatcher::ReadOnlyOverride& hook;
+    bool server_value;
+    bool active;
+    ReadOnlyScope(const CommandDispatcher::ReadOnlyOverride& h, bool apply, bool value, bool server)
+        : hook(h), server_value(server), active(apply && static_cast<bool>(h)) {
+        if (active) hook(value);
+    }
+    ~ReadOnlyScope() {
+        if (active) { try { hook(server_value); } catch (...) {} }
+    }
+};
+
+struct SelectionScope {
+    const CommandDispatcher::SelectionInputOverride& hook;
+    bool active;
+    SelectionScope(const CommandDispatcher::SelectionInputOverride& h, bool apply, const std::string& program, const std::string& screen)
+        : hook(h), active(apply && static_cast<bool>(h)) {
+        if (active) hook(true, program, screen);
+    }
+    ~SelectionScope() {
+        if (active) { try { hook(false, std::string(), std::string()); } catch (...) {} }
+    }
+};
+
+struct LeaseWriteScope {
+    std::shared_ptr<SessionLeases> leases;
+    std::string session, token, id;
+    bool active = false;
+    ~LeaseWriteScope() {
+        if (active) leases->end_write(session, token, id, SessionLeases::Clock::now());
+    }
+};
+
+struct OwnerSessionScope {
+    const CommandDispatcher::OwnerSessionOverride& hook;
+    bool active;
+    OwnerSessionScope(const CommandDispatcher::OwnerSessionOverride& h, const std::optional<audit::SapFacts>& facts)
+        : hook(h), active(static_cast<bool>(facts) && static_cast<bool>(h)) {
+        if (active) hook(facts->session_identity, sap_identity(*facts));
+    }
+    ~OwnerSessionScope() {
+        if (active) { try { hook("", ""); } catch (...) {} }
+    }
+};
+
+/// Installs a target guard through its override for one call and removes it again.
+template <typename Override, typename Guard>
+struct GuardScope {
+    const Override& hook;
+    bool active;
+    GuardScope(const Override& override, Guard guard)
+        : hook(override), active(static_cast<bool>(override) && static_cast<bool>(guard)) {
+        if (active) hook(std::move(guard));
+    }
+    ~GuardScope() { if (active) { try { hook({}); } catch (...) {} } }
+};
+
+}  // namespace
+
 /// execute_call, owner mode, gui_session_login: the target must be a known pre-logon session (owned by this principal
 /// when the endpoint has several identities); its window lane is reserved, the probe gate taken, the token
 /// re-authorized after the wait and the session re-read unchanged. Sets record.connection, login_pre_facts and
@@ -1142,18 +1207,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
     // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
     // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
-    struct ReadOnlyScope {
-        const ReadOnlyOverride& hook;
-        bool server_value;
-        bool active;
-        ReadOnlyScope(const ReadOnlyOverride& h, bool apply, bool value, bool server)
-            : hook(h), server_value(server), active(apply && static_cast<bool>(h)) {
-            if (active) hook(value);
-        }
-        ~ReadOnlyScope() {
-            if (active) { try { hook(server_value); } catch (...) {} }
-        }
-    } read_only_scope(read_only_override_,
+    ReadOnlyScope read_only_scope(read_only_override_,
                       selection_input || (principal.read_only && !policy_.read_only),
                       selection_input ? false : true, policy_.read_only);
 
@@ -1161,17 +1215,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
     // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
     // would be unchecked, so the call is refused.
-    struct SelectionScope {
-        const SelectionInputOverride& hook;
-        bool active;
-        SelectionScope(const SelectionInputOverride& h, bool apply, const std::string& program, const std::string& screen)
-            : hook(h), active(apply && static_cast<bool>(h)) {
-            if (active) hook(true, program, screen);
-        }
-        ~SelectionScope() {
-            if (active) { try { hook(false, std::string(), std::string()); } catch (...) {} }
-        }
-    } selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
+    SelectionScope selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
     if (selection_input && !selection_input_override_)
         return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
 
@@ -1217,14 +1261,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     for (std::size_t i = 0; i + 1 < argv.size(); ++i)
         if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
 
-    struct LeaseWriteScope {
-        std::shared_ptr<SessionLeases> leases;
-        std::string session, token, id;
-        bool active = false;
-        ~LeaseWriteScope() {
-            if (active) leases->end_write(session, token, id, SessionLeases::Clock::now());
-        }
-    } lease_scope;
+    LeaseWriteScope lease_scope;
     if (owner_mode(ctx) && !prelogin_close_facts &&
         lease_required_for_call(name, args)) {
         if (!owner_pre_facts || principal.id.empty() || !session_leases_)
@@ -1268,17 +1305,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                                         prelogin_close_facts->session_identity))
             return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
     }
-    struct OwnerSessionScope {
-        const OwnerSessionOverride& hook;
-        bool active;
-        OwnerSessionScope(const OwnerSessionOverride& h, const std::optional<audit::SapFacts>& facts)
-            : hook(h), active(static_cast<bool>(facts) && static_cast<bool>(h)) {
-            if (active) hook(facts->session_identity, sap_identity(*facts));
-        }
-        ~OwnerSessionScope() {
-            if (active) { try { hook("", ""); } catch (...) {} }
-        }
-    } owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
+    OwnerSessionScope owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
 
     // 5. invoke
     if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
@@ -1345,15 +1372,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             if (auto refused = check_target(args))
                 return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
     }
-    struct AttachGuardScope {
-        const AttachTargetGuardOverride& hook;
-        bool active;
-        AttachGuardScope(const AttachTargetGuardOverride& override, AttachTargetGuard guard)
-            : hook(override), active(static_cast<bool>(override) && static_cast<bool>(guard)) {
-            if (active) hook(std::move(guard));
-        }
-        ~AttachGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
-    } attach_guard_scope(attach_target_guard_override_,
+    GuardScope<AttachTargetGuardOverride, AttachTargetGuard> attach_guard_scope(attach_target_guard_override_,
         owner_mode(ctx) && name == "gui_session_attach"
             ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
                 if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
@@ -1407,30 +1426,14 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         checked_launch_facts = facts;
         return true;
     };
-    struct LaunchGuardScope {
-        const LaunchTargetGuardOverride& hook;
-        bool active;
-        LaunchGuardScope(const LaunchTargetGuardOverride& override, LaunchTargetGuard guard)
-            : hook(override), active(static_cast<bool>(override) && static_cast<bool>(guard)) {
-            if (active) hook(std::move(guard));
-        }
-        ~LaunchGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
-    } launch_guard_scope(launch_target_guard_override_,
+    GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
         owner_mode(ctx) && name == "gui_session_launch"
             ? owner_launch_guard : LaunchTargetGuard{});
     if (owner_mode(ctx) && name == "gui_session_launch" &&
         (!launch_target_guard_override_ || !launch_rollback_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
     std::optional<audit::SapFacts> anticipated_login;
-    struct LoginGuardScope {
-        const LoginTargetGuardOverride& hook;
-        bool active;
-        LoginGuardScope(const LoginTargetGuardOverride& override, LoginTargetGuard guard)
-            : hook(override), active(static_cast<bool>(override) && static_cast<bool>(guard)) {
-            if (active) hook(std::move(guard));
-        }
-        ~LoginGuardScope() { if (active) { try { hook({}); } catch (...) {} } }
-    } login_guard_scope(login_target_guard_override_,
+    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
         owner_mode(ctx) &&
             (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
             ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
