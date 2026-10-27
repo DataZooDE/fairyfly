@@ -1,3 +1,4 @@
+#include "include/com/hresult.h"
 #include "include/screenshot_handler.h"
 #include "include/com/invoke.h"
 #include "include/com/utf8.h"
@@ -28,10 +29,10 @@ _variant_t call_window(IDispatch* window, const wchar_t* method, const char* lab
     DISPID dispid;
     LPOLESTR method_name = const_cast<LPOLESTR>(method);
     HRESULT hr = window->GetIDsOfNames(IID_NULL, &method_name, 1, LOCALE_USER_DEFAULT, &dispid);
-    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} method unavailable: 0x{:08X}", label, static_cast<unsigned long>(hr)));
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} method unavailable: {}", label, hresult_hex(hr)));
     _variant_t answer;
     hr = invoke(window, dispid, DISPATCH_METHOD, args, &answer);
-    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} failed: 0x{:08X}", label, static_cast<unsigned long>(hr)));
+    if (FAILED(hr)) throw std::runtime_error(fmt::format("{} failed: {}", label, hresult_hex(hr)));
     return answer;
 }
 
