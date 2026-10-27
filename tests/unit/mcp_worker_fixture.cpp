@@ -30,9 +30,20 @@ int main(int argc, char** argv) {
         std::getline(std::cin, line);
         return 7;
     }
-    if (argc > 1 && std::string(argv[1]) == "--hang-on-call") {
+    // --hang-on-call[=<event name>]: read the request, set that named event (the test knows it arrived), then hang
+    const std::string hang_prefix = "--hang-on-call";
+    if (argc > 1 && std::string(argv[1]).rfind(hang_prefix, 0) == 0) {
         std::string line;
         std::getline(std::cin, line);
+#ifdef _WIN32
+        const std::string arg = argv[1];
+        if (arg.size() > hang_prefix.size() + 1 && arg[hang_prefix.size()] == '=') {
+            if (HANDLE received = OpenEventA(EVENT_MODIFY_STATE, FALSE, arg.c_str() + hang_prefix.size() + 1)) {
+                SetEvent(received);
+                CloseHandle(received);
+            }
+        }
+#endif
         for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     const bool sleep_first = argc > 1 && std::string(argv[1]) == "--sleep-first-call";
