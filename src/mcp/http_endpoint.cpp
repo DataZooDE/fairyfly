@@ -603,8 +603,9 @@ HttpResponse wait_for_answer(const HttpRequest& request, const json& id, Waiter&
     return json_response(200, waiter.final_message);
 }
 
-/// An SSE answer: the job's progress frames as they come, keep-alive comments while it runs, then its final message
-/// (a 503 error when the server stopped first); a client that goes away cancels the job.
+/// An SSE answer (HTTP 200): the job's progress frames as they come, keep-alive comments while it runs, then its final
+/// message, or a JSON-RPC kServerBusy error when the job ended without one. A client that goes away or a server that
+/// stops before the job is done cancels it and ends the stream without a final message.
 HttpResponse sse_answer(std::shared_ptr<Waiter> waiter, std::shared_ptr<CallState> state, std::function<void()> cancel,
                         std::function<bool()> stopping, std::chrono::milliseconds poll, int keepalive_ms) {
     HttpResponse r;
