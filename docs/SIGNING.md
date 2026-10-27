@@ -45,17 +45,55 @@ Signing needs **no secret**: the release job logs in to Azure with GitHub's OIDC
 4. **Certificate profile**, type **Public Trust**, e.g. `fairyfly-public`, on the completed validation. Leave "include
    street address" and "include postal code" unticked (fewer fields that a later re-validation could change):
    `az artifact-signing certificate-profile create -g rg-codesigning --account-name datazoosigning -n fairyfly-public --profile-type PublicTrust --identity-validation-id <id>`.
-5. **Entra app registration** `fairyfly-release-signing`, **without a client secret**. Add a federated credential:
-   issuer `https://token.actions.githubusercontent.com`, subject
-   **`repo:DataZooDE/fairyfly:environment:release-signing`**, audience `api://AzureADTokenExchange`
-   (`az ad app federated-credential create --id <appId> --parameters '{"name":"fairyfly-release-signing","issuer":"https://token.actions.githubusercontent.com","subject":"repo:DataZooDE/fairyfly:environment:release-signing","audiences":["api://AzureADTokenExchange"]}'`).
-   The sign job runs in that environment, so the token's subject is the environment, not the tag.
+5. **Entra app registration** `fairyfly-release-signing`, **without a client secret**, with a **flexible federated
+   identity credential** (Entra, preview, verified 2026-10-27 on
+   [Microsoft Learn](https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-flexible-federated-identity-credentials):
+   for GitHub it matches `sub` and `job_workflow_ref` with `eq`/`matches`, and requires `repository_id` or
+   `repository_owner_id`). A plain credential with only the subject `repo:DataZooDE/fairyfly:environment:release-signing`
+   would give a signing token to **any** workflow file that names the environment, for example one pushed on a
+   branch together with a tag that passes the environment rule; the expression below also binds the token to
+   `release.yml` run from a `v*` tag of this repository (ids: repository 1084036170, owner 136052936). `az` cannot
+   create or read flexible credentials yet, so use Microsoft Graph (beta) through `az rest`, with the app's
+   **object id**:
+
+   ```sh
+   cat > fic.json <<'JSON'
+   {"name": "fairyfly-release-yml-tags",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "audiences": ["api://AzureADTokenExchange"],
+    "claimsMatchingExpression": {"languageVersion": 1,
+      "value": "claims['sub'] eq 'repo:DataZooDE/fairyfly:environment:release-signing' and claims['repository_id'] eq '1084036170' and claims['repository_owner_id'] eq '136052936' and claims['job_workflow_ref'] matches 'DataZooDE/fairyfly/.github/workflows/release.yml@refs/tags/v*'"}}
+   JSON
+   az rest --method post --url "https://graph.microsoft.com/beta/applications/<appObjectId>/federatedIdentityCredentials" \
+     --headers Content-Type=application/json --body @fic.json
+   ```
+
+   If the repository later opts into GitHub's immutable subject format, `sub` changes and the expression must follow.
+   Do not add a second, plain (subject-only) credential: it would undo the binding.
 6. **Role**: assign **Artifact Signing Certificate Profile Signer** to the app's service principal on the
    *certificate profile* (the narrowest scope; no subscription role is needed):
    `az role assignment create --assignee <appId> --role "Artifact Signing Certificate Profile Signer" --scope <profile resource id>`.
-7. **GitHub environment** `release-signing` (Settings > Environments): deployment branches and tags = **selected,
-   tag rule `v*` only**, so only release tags can obtain a signing token. A required reviewer is optional.
-   A manual run (`workflow_dispatch`) therefore has to run on the tag: `gh workflow run release.yml --ref vYYYY.MM.DD -f tag=vYYYY.MM.DD`.
+7. **Only admins create release tags, and a person approves every signing run.**
+   - **Tag ruleset** (otherwise anyone with write access can push a `v*` tag on a commit with a changed `release.yml`):
+     creating, moving and deleting `v*` tags is reserved to repository admins (role id 5):
+
+     ```sh
+     gh api -X POST repos/DataZooDE/fairyfly/rulesets --input - <<'JSON'
+     {"name": "release tags: admins only", "target": "tag", "enforcement": "active",
+      "conditions": {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}},
+      "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}],
+      "bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}]}
+     JSON
+     ```
+
+   - **GitHub environment** `release-signing` (Settings > Environments): deployment branches and tags = **selected,
+     tag rule `v*` only**, and **required reviewers: mandatory** (e.g. `@jrosskopf`). The sign job then waits for an
+     approval before it can obtain a token; the reviewer checks that the run is `release.yml` on the expected tag.
+   - A manual run (`workflow_dispatch`) has no tag input; it must run on the tag itself:
+     `gh workflow run release.yml --ref vYYYY.MM.DD`. The build and sign jobs refuse any run whose `github.ref` is not
+     `refs/tags/<tag>`, and every job checks out `github.sha`, the commit of that tag
+     (`packaging/sign/tests/Test-ReleaseWorkflow.ps1` guards these rules, and that every action in `release.yml` is
+     pinned to a commit SHA).
 8. **Repository variables** (Settings > Secrets and variables > Actions > *Variables*, not secrets):
 
    | Variable | Value |

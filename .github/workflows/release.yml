@@ -11,19 +11,20 @@ name: Release fairyfly
 # packaging/sign/Test-Signature.ps1 (valid, trusted chain, time stamp, signer = the updater pin O=DataZoo GmbH, C=DE).
 # SHA256SUMS and the winget manifests hash the signed files. Without AZURE_SIGNING_ACCOUNT the release is unsigned,
 # unless REQUIRE_SIGNING is 'true', which fails it.
+# Supply chain: a release is always the commit of the tag the run is on (github.ref = refs/tags/<tag>, checked by the
+# build and sign jobs; every checkout is github.sha; no tag input), every action is pinned to a commit SHA, and WiX
+# is installed from a SHA-512-pinned package before azure/login (packaging/sign/tests/Test-ReleaseWorkflow.ps1).
 
 on:
   push:
     tags: [ 'v*' ]
+  # a manual run must be started ON the tag: gh workflow run release.yml --ref vYYYY.MM.DD (no tag input: the release
+  # is always the commit github.ref points to, which the environment release-signing and the guard below check)
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing tag to release (vYYYY.MM.DD or vYYYY.MM.DD.N)'
-        required: true
 
 env:
   VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ github.ref_name }}
 
 permissions:
   contents: read
@@ -36,6 +37,17 @@ jobs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       signing: ${{ steps.cfg.outputs.signing }}
     steps:
+    - name: Release ref guard
+      # only a tag run releases: github.ref must be refs/tags/<RELEASE_TAG> (also for workflow_dispatch)
+      env:
+        REF: ${{ github.ref }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        if ($env:REF_TYPE -ne 'tag' -or $env:REF -cne "refs/tags/$env:RELEASE_TAG" -or $env:RELEASE_TAG -cnotmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') {
+          Write-Error "release.yml runs only on a release tag vYYYY.MM.DD[.N]; github.ref is '$env:REF' ($env:REF_TYPE)"; exit 1
+        }
+      shell: pwsh
+
     - name: Signing configured?
       # from repository variables (OIDC needs no secret); a partial configuration fails instead of shipping unsigned
       id: cfg
@@ -63,9 +75,9 @@ jobs:
       shell: pwsh
 
     - name: Checkout the tagged source
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       with:
-        ref: ${{ env.RELEASE_TAG }}
+        ref: ${{ github.sha }}
 
     - name: Setup vcpkg
       run: |
@@ -76,7 +88,7 @@ jobs:
       shell: pwsh
 
     - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
       with:
         arch: x64
 
@@ -109,7 +121,7 @@ jobs:
 
     - name: Upload unsigned fairyfly.exe and fairyfly-tray.exe
       id: upload
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
       with:
         name: fairyfly-unsigned
         # fairyfly-tray.exe (the tray starter) ships in the MSI only
@@ -134,13 +146,29 @@ jobs:
       exe-sha256: ${{ steps.hashes.outputs.exe }}
       msi-sha256: ${{ steps.hashes.outputs.msi }}
     steps:
+    - name: Release ref guard
+      # only a tag run releases: github.ref must be refs/tags/<RELEASE_TAG> (also for workflow_dispatch)
+      env:
+        REF: ${{ github.ref }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        if ($env:REF_TYPE -ne 'tag' -or $env:REF -cne "refs/tags/$env:RELEASE_TAG" -or $env:RELEASE_TAG -cnotmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') {
+          Write-Error "release.yml runs only on a release tag vYYYY.MM.DD[.N]; github.ref is '$env:REF' ($env:REF_TYPE)"; exit 1
+        }
+      shell: pwsh
+
     - name: Checkout the tagged source (packaging/, CMakeLists.txt for the signer pin)
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       with:
-        ref: ${{ env.RELEASE_TAG }}
+        ref: ${{ github.sha }}
+        persist-credentials: false
+
+    - name: Install WiX (SHA-512 verified; before azure/login)
+      run: ./packaging/sign/Install-Wix.ps1
+      shell: pwsh
 
     - name: Download the unsigned build
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: fairyfly-unsigned
         path: exe
@@ -187,7 +215,6 @@ jobs:
 
     - name: Build the MSI around the signed exes
       run: |
-        dotnet tool install --global wix --version 5.0.2
         $msiVersion = (& ./packaging/msi_version.ps1 -Version "${{ env.RELEASE_TAG }}").Trim()
         New-Item -ItemType Directory -Force msi | Out-Null
         wix build packaging/fairyfly.wxs -arch x64 -d ExePath=exe/fairyfly.exe -d TrayExePath=exe/fairyfly-tray.exe -d MsiVersion=$msiVersion -o msi/fairyfly.msi
@@ -229,7 +256,7 @@ jobs:
       shell: pwsh
 
     - name: Upload the signed fairyfly.exe and fairyfly-tray.exe
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
       with:
         name: fairyfly-signed
         path: |
@@ -238,7 +265,7 @@ jobs:
         if-no-files-found: error
 
     - name: Upload the signed MSI
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
       with:
         name: fairyfly-signed-msi
         path: msi/fairyfly.msi
@@ -253,20 +280,20 @@ jobs:
     runs-on: windows-2022
     steps:
     - name: Checkout the tagged source (packaging/)
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       with:
-        ref: ${{ env.RELEASE_TAG }}
+        ref: ${{ github.sha }}
 
     - name: Download the signed MSI
       if: needs.sign.result == 'success'
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: fairyfly-signed-msi
         path: msi
 
     - name: Download the unsigned fairyfly.exe and fairyfly-tray.exe
       if: needs.sign.result != 'success'
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: fairyfly-unsigned
         path: exe
@@ -274,7 +301,7 @@ jobs:
     - name: Build the MSI (unsigned release)
       if: needs.sign.result != 'success'
       run: |
-        dotnet tool install --global wix --version 5.0.2
+        ./packaging/sign/Install-Wix.ps1
         $msiVersion = (& ./packaging/msi_version.ps1 -Version "${{ env.RELEASE_TAG }}").Trim()
         New-Item -ItemType Directory -Force msi | Out-Null
         wix build packaging/fairyfly.wxs -arch x64 -d ExePath=exe/fairyfly.exe -d TrayExePath=exe/fairyfly-tray.exe -d MsiVersion=$msiVersion -o msi/fairyfly.msi
@@ -282,7 +309,7 @@ jobs:
       shell: pwsh
 
     - name: Upload the MSI
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
       with:
         name: fairyfly-msi
         path: msi/fairyfly.msi
@@ -304,7 +331,7 @@ jobs:
       shell: pwsh
 
     - name: Upload the winget manifests
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
       with:
         name: fairyfly-winget
         path: winget/*.yaml
@@ -320,19 +347,19 @@ jobs:
       contents: write
     steps:
     - name: Download the signed build (or the unsigned one)
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: ${{ needs.sign.result == 'success' && 'fairyfly-signed' || 'fairyfly-unsigned' }}
         path: dist
 
     - name: Download the MSI
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: fairyfly-msi
         path: dist
 
     - name: Download the winget manifests
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
       with:
         name: fairyfly-winget
         path: dist

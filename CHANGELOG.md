@@ -19,6 +19,14 @@
   checked, with `signtool verify /pa` alone (any trusted signer, no time stamp needed), and the MSI not at all. Its
   tests (`signing.yml`, no secrets) refuse an unsigned file, a self-signed certificate, a missing time stamp and a
   wrong `O=`/`C=`, and accept a valid signature; the workflow also runs actionlint.
+- Only the tagged commit is built and signed: the manual run has no tag input any more (`gh workflow run release.yml
+  --ref vYYYY.MM.DD`), the build and sign jobs refuse a run whose `github.ref` is not `refs/tags/<tag>`, and every job
+  checks out `github.sha`. All actions in `release.yml` are pinned to commit SHAs, and WiX is installed by
+  `packaging/sign/Install-Wix.ps1` from a SHA-512-pinned package, before the Azure login. `Test-ReleaseWorkflow.ps1`
+  (signing.yml) guards these rules.
+- docs/SIGNING.md: the Entra credential is a flexible federated credential bound to `release.yml` on `v*` tags
+  (`job_workflow_ref`), the `release-signing` environment needs a required reviewer, and a tag ruleset (the `gh api`
+  command is documented, not applied) reserves `v*` tags to admins.
 
 ### winget: manifests on schema 1.12.0, with PrivacyUrl and the copyright years
 
