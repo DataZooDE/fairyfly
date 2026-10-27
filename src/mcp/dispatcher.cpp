@@ -1808,32 +1808,37 @@ void CommandDispatcher::retry_after_reattach(
     }
 }
 
-ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
-                                           std::string& code, const CallContext& ctx) {
-    auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
-        if (owner_mode(ctx) &&
-            (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
-             c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
-             c == "SESSION_TARGET_CHANGED")) {
-            record.error_code = c;  // the audit sink may distinguish boundary probes; the caller may not
-            code = "OWNER_SESSION_UNAVAILABLE";
-            return error_result(code, "the requested SAP session is unavailable");
-        }
-        code = c;
-        return error_result(c, message, hint);
-    };
+/// execute_call from step 5 on: the invocation (owner listings, the worker or the handler, auto-attach and the 5c
+/// retry) with the attach/launch/login guards installed, the post-call checks, the image cap and the shaping. Runs
+/// inside execute_call, so its read-only, selection, lease and owner-session scopes cover all of it.
+/// What run_invocation takes from invoke_and_finish: when the call started, whether it goes to a private worker and
+/// how it is invoked, and the guards' findings (references: the guards fill them in during the call).
+struct CommandDispatcher::InvocationRun {
+    std::chrono::steady_clock::time_point invoke_started;
+    bool worker_bound;
+    std::function<Result(const std::vector<std::string>&)> invoke_selected;   ///< a copy: its captures are references
+    const std::optional<audit::SapFacts>& checked_launch_facts;
+    const LaunchTargetGuard& owner_launch_guard;
+    const std::optional<audit::SapFacts>& anticipated_login;
+};
 
-    CallState state;
-    if (auto refused = admit_call(name, raw_args, record, ctx, state, fail)) return *refused;
+/// invoke_and_finish's invocation and everything after it, with the guards of invoke_and_finish installed: the owner
+/// listings or the call (auto-attach, 5c retry), the disconnect cleanup, the owner checks after the call, the listing
+/// filter, the T-code recheck, the image cap and the shaping.
+ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRecord& record, std::string& code,
+                                             const CallContext& ctx, CallState& state, const RefuseCall& refuse,
+                                             const std::vector<std::string>& argv, const Policy& effective,
+                                             const InvocationRun& run) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
     const ToolSpec* spec = state.spec;
     json& args = state.args;
     const bool accepts_connection = state.accepts_connection;
     const bool implicit_sticky = state.implicit_sticky;
-    const bool selection_input = state.selection_input;
     const Principal& principal = ctx.principal;
     std::string& reattach_note = state.reattach_note;
     bool& reattach_refused = state.reattach_refused;
-    const std::string reattach_again_hint = kReattachAgainHint;
     const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
         return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
     };
@@ -1841,149 +1846,13 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     auto& owner_pre_facts = state.owner_pre_facts;
     auto& login_pre_facts = state.login_pre_facts;
     auto& prelogin_close_facts = state.prelogin_close_facts;
-    const auth::InitialScreen& selection_initial = state.selection_initial;
+    const auto invoke_started = run.invoke_started;
+    const bool worker_bound = run.worker_bound;
+    const auto& invoke_selected = run.invoke_selected;
+    const auto& checked_launch_facts = run.checked_launch_facts;
+    const auto& owner_launch_guard = run.owner_launch_guard;
+    const auto& anticipated_login = run.anticipated_login;
 
-    // 2c. session/connection targets (session_target_refusal)
-    const auto check_target = [&](const json& call_args) {
-        return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
-    };
-    const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
-    if (!attach_needs_resolution)
-        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
-
-    // Broker-native lease control runs only after the same scope, owner, SAP-system and
-    // saved-connection checks as ordinary calls. Its secret never enters CLI argv or audit.
-    if (name == "gui_session_lease") return run_session_lease(*spec, args, principal, record, owner_pre_facts, ctx, fail);
-
-    // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
-    // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
-    // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
-    ReadOnlyScope read_only_scope(read_only_override_,
-                      selection_input || (principal.read_only && !policy_.read_only),
-                      selection_input ? false : true, policy_.read_only);
-
-    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
-    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
-    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
-    // would be unchecked, so the call is refused.
-    SelectionScope selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
-    if (selection_input && !selection_input_override_)
-        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
-
-    // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
-    Policy effective = policy_;
-    if (record.connection) effective.default_connection = record.connection;
-    else if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
-
-    // gui_session_attach without session_id: resolve through `list`.
-    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))
-        if (auto answered = resolve_attach_session(*spec, args, code, principal, check_target, fail))
-            return *answered;
-
-    // 4. build argv
-    std::vector<std::string> argv;
-    try {
-        argv = spec->build_argv(args, effective);
-    } catch (const std::invalid_argument& e) {
-        return fail("INVALID_ARGUMENT", e.what());
-    } catch (const std::exception& e) {
-        return fail("INVALID_ARGUMENT", std::string("invalid arguments: ") + e.what());
-    }
-    record.argv = argv;
-    record.command = command_of(argv);
-    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
-        if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
-
-    LeaseWriteScope lease_scope;
-    if (owner_mode(ctx) && !prelogin_close_facts &&
-        lease_required_for_call(name, args))
-        if (auto refused = begin_owner_lease(args, ctx, principal, owner_pre_facts, record, lease_scope))
-            return fail(refused->code, refused->message, refused->hint);
-
-    std::string expected_screen_guard;
-    if (args.is_object() && args.contains("expected_screen_guard"))
-        if (auto refused = check_screen_guard(args, ctx, owner_pre_facts, expected_screen_guard))
-            return fail(refused->code, refused->message, refused->hint);
-
-    if ((owner_pre_facts || prelogin_close_facts) && !owner_session_override_)
-        return fail("OWNER_IDENTITY_UNKNOWN", "the server cannot bind this call to its checked SAP session");
-    if (prelogin_close_facts) {
-        bool current = false;
-        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!current || !routing_state_->owns_prelogin(principal.id, *prelogin_close_facts->connection_id,
-                                                        prelogin_close_facts->session_identity))
-            return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
-    }
-    OwnerSessionScope owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
-
-    // 5. invoke
-    if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
-    const auto invoke_started = std::chrono::steady_clock::now();
-    const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
-    const bool worker_bound = worker_mode && worker_command_allowed(argv);
-    if (worker_mode && !worker_bound)
-        return fail("WORKER_UNSUPPORTED", "the session command is not supported by the private worker");
-    if (worker_bound && !record.connection)
-        return fail("OWNER_SESSION_UNAVAILABLE", "the checked SAP session has no saved connection");
-    const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
-        if (!worker_bound) return invoke(selected_argv);
-        return invoke_on_worker(selected_argv, name, args, ctx, principal, record.connection, *owner_pre_facts,
-                                expected_screen_guard, selection_input, selection_initial);
-    };
-    if (owner_mode(ctx) &&
-        (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
-        if (ctx.cancelled && ctx.cancelled())
-            return fail("CANCELLED", "session control was cancelled before selecting the SAP session");
-        bool current = false;
-        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
-        if (!current)
-            return fail("TOKEN_CHANGED", "authorization changed before selecting the SAP session");
-        if (name == "gui_session_attach")
-            if (auto refused = check_target(args))
-                return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
-    }
-    GuardScope<AttachTargetGuardOverride, AttachTargetGuard> attach_guard_scope(attach_target_guard_override_,
-        owner_mode(ctx) && name == "gui_session_attach"
-            ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
-                if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
-                auth::SessionTarget target;
-                target.system = facts.system + "/" + facts.client;
-                target.user = facts.user;
-                target.connection_name = connection_name;
-                return auth::authorize_session_target(principal, "gui_session_attach", args, target).allowed;
-            }) : AttachTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_attach" &&
-        (!attach_target_guard_override_ || !attach_finalize_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the attach target cannot be checked before changing the saved connection");
-    std::optional<audit::SapFacts> checked_launch_facts;
-    const LaunchTargetGuard owner_launch_guard = [this, &principal, &args, &ctx, &checked_launch_facts]
-        (const audit::SapFacts& facts, const std::string& connection_name) {
-        return owner_launch_target_allowed(facts, connection_name, principal, args, ctx, checked_launch_facts);
-    };
-    GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
-        owner_mode(ctx) && name == "gui_session_launch"
-            ? owner_launch_guard : LaunchTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_launch" &&
-        (!launch_target_guard_override_ || !launch_rollback_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
-    std::optional<audit::SapFacts> anticipated_login;
-    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
-        owner_mode(ctx) &&
-            (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
-            ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
-                                &checked_launch_facts, &anticipated_login]
-                (const audit::SapFacts& facts, const std::string& connection_name) {
-                return owner_login_target_allowed(facts, connection_name, name, principal, args, ctx, login_pre_facts,
-                                                  checked_launch_facts, anticipated_login);
-            }) : LoginTargetGuard{});
-    if (owner_mode(ctx) && name == "gui_session_login" &&
-        (!login_pre_facts || !login_target_guard_override_))
-        return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
-    if (owner_mode(ctx) && name == "gui_session_launch" &&
-        args.is_object() && args.value("login", false) && !login_target_guard_override_)
-        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP login cannot be verified");
-    if (policy_.audit_required && mcp_audit_failed())
-        return fail("AUDIT_UNAVAILABLE", "the required audit trail failed before the action");
     const bool owner_connection_list = owner_mode(ctx) &&
                                        (name == "gui_connection_list" || name == "gui_doctor");
     const bool owner_session_list = owner_mode(ctx) &&
@@ -2082,6 +1951,195 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
             return fail(refused->code, refused->message, refused->hint);
 
     return shape_call(name, result, record, code, ctx, state, tcode_left);
+}
+
+ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code,
+                                                const CallContext& ctx, CallState& state, const RefuseCall& refuse,
+                                                const std::vector<std::string>& argv, const Policy& effective,
+                                                const std::string& expected_screen_guard,
+                                                const std::function<std::optional<PolicyDecision>(const json&)>& check_target) {
+    const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        return refuse(c, message, hint);
+    };
+    json& args = state.args;
+    const bool selection_input = state.selection_input;
+    const Principal& principal = ctx.principal;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& login_pre_facts = state.login_pre_facts;
+    const auth::InitialScreen& selection_initial = state.selection_initial;
+
+    // 5. invoke
+    if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
+    const auto invoke_started = std::chrono::steady_clock::now();
+    const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
+    const bool worker_bound = worker_mode && worker_command_allowed(argv);
+    if (worker_mode && !worker_bound)
+        return fail("WORKER_UNSUPPORTED", "the session command is not supported by the private worker");
+    if (worker_bound && !record.connection)
+        return fail("OWNER_SESSION_UNAVAILABLE", "the checked SAP session has no saved connection");
+    const auto invoke_selected = [&](const std::vector<std::string>& selected_argv) -> Result {
+        if (!worker_bound) return invoke(selected_argv);
+        return invoke_on_worker(selected_argv, name, args, ctx, principal, record.connection, *owner_pre_facts,
+                                expected_screen_guard, selection_input, selection_initial);
+    };
+    if (owner_mode(ctx) &&
+        (name == "gui_session_attach" || name == "gui_session_login" || name == "gui_session_launch")) {
+        if (ctx.cancelled && ctx.cancelled())
+            return fail("CANCELLED", "session control was cancelled before selecting the SAP session");
+        bool current = false;
+        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+        if (!current)
+            return fail("TOKEN_CHANGED", "authorization changed before selecting the SAP session");
+        if (name == "gui_session_attach")
+            if (auto refused = check_target(args))
+                return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+    }
+    GuardScope<AttachTargetGuardOverride, AttachTargetGuard> attach_guard_scope(attach_target_guard_override_,
+        owner_mode(ctx) && name == "gui_session_attach"
+            ? AttachTargetGuard([principal, args](const audit::SapFacts& facts, const std::string& connection_name) {
+                if (facts.system.empty() || facts.client.empty() || facts.user.empty()) return false;
+                auth::SessionTarget target;
+                target.system = facts.system + "/" + facts.client;
+                target.user = facts.user;
+                target.connection_name = connection_name;
+                return auth::authorize_session_target(principal, "gui_session_attach", args, target).allowed;
+            }) : AttachTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_attach" &&
+        (!attach_target_guard_override_ || !attach_finalize_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the attach target cannot be checked before changing the saved connection");
+    std::optional<audit::SapFacts> checked_launch_facts;
+    const LaunchTargetGuard owner_launch_guard = [this, &principal, &args, &ctx, &checked_launch_facts]
+        (const audit::SapFacts& facts, const std::string& connection_name) {
+        return owner_launch_target_allowed(facts, connection_name, principal, args, ctx, checked_launch_facts);
+    };
+    GuardScope<LaunchTargetGuardOverride, LaunchTargetGuard> launch_guard_scope(launch_target_guard_override_,
+        owner_mode(ctx) && name == "gui_session_launch"
+            ? owner_launch_guard : LaunchTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
+        (!launch_target_guard_override_ || !launch_rollback_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
+    std::optional<audit::SapFacts> anticipated_login;
+    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
+        owner_mode(ctx) &&
+            (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
+            ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
+                                &checked_launch_facts, &anticipated_login]
+                (const audit::SapFacts& facts, const std::string& connection_name) {
+                return owner_login_target_allowed(facts, connection_name, name, principal, args, ctx, login_pre_facts,
+                                                  checked_launch_facts, anticipated_login);
+            }) : LoginTargetGuard{});
+    if (owner_mode(ctx) && name == "gui_session_login" &&
+        (!login_pre_facts || !login_target_guard_override_))
+        return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
+    if (owner_mode(ctx) && name == "gui_session_launch" &&
+        args.is_object() && args.value("login", false) && !login_target_guard_override_)
+        return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP login cannot be verified");
+    if (policy_.audit_required && mcp_audit_failed())
+        return fail("AUDIT_UNAVAILABLE", "the required audit trail failed before the action");
+    const InvocationRun run{invoke_started, worker_bound, invoke_selected, checked_launch_facts, owner_launch_guard,
+                            anticipated_login};
+    return run_invocation(name, record, code, ctx, state, refuse, argv, effective, run);
+}
+
+ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
+                                           std::string& code, const CallContext& ctx) {
+    auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
+        if (owner_mode(ctx) &&
+            (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
+             c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
+             c == "SESSION_TARGET_CHANGED")) {
+            record.error_code = c;  // the audit sink may distinguish boundary probes; the caller may not
+            code = "OWNER_SESSION_UNAVAILABLE";
+            return error_result(code, "the requested SAP session is unavailable");
+        }
+        code = c;
+        return error_result(c, message, hint);
+    };
+
+    CallState state;
+    if (auto refused = admit_call(name, raw_args, record, ctx, state, fail)) return *refused;
+    const ToolSpec* spec = state.spec;
+    json& args = state.args;
+    const bool selection_input = state.selection_input;
+    const Principal& principal = ctx.principal;
+    auto& owner_pre_facts = state.owner_pre_facts;
+    auto& prelogin_close_facts = state.prelogin_close_facts;
+    const auth::InitialScreen& selection_initial = state.selection_initial;
+
+    // 2c. session/connection targets (session_target_refusal)
+    const auto check_target = [&](const json& call_args) {
+        return session_target_refusal(name, call_args, ctx, principal, record.connection, prelogin_close_facts.has_value());
+    };
+    const bool attach_needs_resolution = name == "gui_session_attach" && args.is_object() && !args.contains("session_id");
+    if (!attach_needs_resolution)
+        if (auto refused = check_target(args)) return fail(refused->code.empty() ? "REFUSED" : refused->code, refused->message);
+
+    // Broker-native lease control runs only after the same scope, owner, SAP-system and
+    // saved-connection checks as ordinary calls. Its secret never enters CLI argv or audit.
+    if (name == "gui_session_lease") return run_session_lease(*spec, args, principal, record, owner_pre_facts, ctx, fail);
+
+    // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
+    // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and
+    // restores the server value afterwards, also when the invocation throws. No other tool ever runs with the guard lifted.
+    ReadOnlyScope read_only_scope(read_only_override_,
+                      selection_input || (principal.read_only && !policy_.read_only),
+                      selection_input ? false : true, policy_.read_only);
+
+    // The same call also switches the handler into selection-input mode: the handler validates the LIVE control (plain
+    // changeable text field, no credential id/name/label) and the live screen right before the write. Restored on every
+    // path (the destructor runs for exceptions and for CALL_TIMEOUT unwinding as well). Without a hook the lifted guard
+    // would be unchecked, so the call is refused.
+    SelectionScope selection_scope(selection_input_override_, selection_input, selection_initial.program, selection_initial.screen_number);
+    if (selection_input && !selection_input_override_)
+        return fail("INPUT_TARGET_DENIED", "the server cannot validate the field before typing (fail closed)");
+
+    // Effective policy: call argument > policy default > sticky default (the argument wins in build_argv).
+    Policy effective = policy_;
+    if (record.connection) effective.default_connection = record.connection;
+    else if (!effective.default_connection) effective.default_connection = sticky_connection(principal_key(ctx.principal));
+
+    // gui_session_attach without session_id: resolve through `list`.
+    if (name == "gui_session_attach" && args.is_object() && !args.contains("session_id"))
+        if (auto answered = resolve_attach_session(*spec, args, code, principal, check_target, fail))
+            return *answered;
+
+    // 4. build argv
+    std::vector<std::string> argv;
+    try {
+        argv = spec->build_argv(args, effective);
+    } catch (const std::invalid_argument& e) {
+        return fail("INVALID_ARGUMENT", e.what());
+    } catch (const std::exception& e) {
+        return fail("INVALID_ARGUMENT", std::string("invalid arguments: ") + e.what());
+    }
+    record.argv = argv;
+    record.command = command_of(argv);
+    for (std::size_t i = 0; i + 1 < argv.size(); ++i)
+        if (argv[i] == "--connection") record.connection = int_from_json(json(argv[i + 1]));
+
+    LeaseWriteScope lease_scope;
+    if (owner_mode(ctx) && !prelogin_close_facts &&
+        lease_required_for_call(name, args))
+        if (auto refused = begin_owner_lease(args, ctx, principal, owner_pre_facts, record, lease_scope))
+            return fail(refused->code, refused->message, refused->hint);
+
+    std::string expected_screen_guard;
+    if (args.is_object() && args.contains("expected_screen_guard"))
+        if (auto refused = check_screen_guard(args, ctx, owner_pre_facts, expected_screen_guard))
+            return fail(refused->code, refused->message, refused->hint);
+
+    if ((owner_pre_facts || prelogin_close_facts) && !owner_session_override_)
+        return fail("OWNER_IDENTITY_UNKNOWN", "the server cannot bind this call to its checked SAP session");
+    if (prelogin_close_facts) {
+        bool current = false;
+        try { current = ctx.reauthorize && ctx.reauthorize(); } catch (...) {}
+        if (!current || !routing_state_->owns_prelogin(principal.id, *prelogin_close_facts->connection_id,
+                                                        prelogin_close_facts->session_identity))
+            return fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+    }
+    OwnerSessionScope owner_session_scope(owner_session_override_, owner_pre_facts ? owner_pre_facts : prelogin_close_facts);
+
+    return invoke_and_finish(name, record, code, ctx, state, fail, argv, effective, expected_screen_guard, check_target);
 }
 
 /// gui_batch in owner mode: every item a screen-bound call on the batch's one explicit saved connection (set into
