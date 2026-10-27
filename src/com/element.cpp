@@ -1,4 +1,6 @@
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
+#include "include/com/invoke.h"
 #include "include/string_utils.h"
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
@@ -17,6 +19,19 @@
 
 namespace fairyfly {
 namespace sap {
+
+namespace {
+}  // namespace
+
+void ComGuiElement::call(const wchar_t* method, std::initializer_list<_variant_t> args, const char* unavailable,
+                         const char* failed) {
+    DISPID dispid;
+    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method, &dispid);
+    if (FAILED(hr)) throw ComException(unavailable, hr);
+    hr = invoke(dispatch_, dispid, DISPATCH_METHOD, args);
+    if (FAILED(hr)) throw ComException(failed, hr);
+}
+
 
 // ============================================================================
 // ComGuiElement Implementation
@@ -149,11 +164,8 @@ std::string ComGuiElement::get_text() const {
 bool ComGuiElement::explicitly_read_only() const {
     DISPID changeable_id;
     if (FAILED(resolve_dispid(L"Changeable", &changeable_id))) return false;
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
     _variant_t changeable;
-    const HRESULT hr = dispatch_->Invoke(changeable_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                         DISPATCH_PROPERTYGET, &no_params,
-                                         &changeable, nullptr, nullptr);
+    const HRESULT hr = invoke(dispatch_, changeable_id, DISPATCH_PROPERTYGET, {}, &changeable);
     return SUCCEEDED(hr) && changeable.vt == VT_BOOL && changeable.boolVal == VARIANT_FALSE;
 }
 
@@ -304,9 +316,7 @@ bool ComGuiElement::is_enabled() const {
 
     // Property exists, get its value
     _variant_t result;
-    DISPPARAMS params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                           &params, &result, nullptr, nullptr);
+    hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYGET, {}, &result);
     if (FAILED(hr)) return true;  // If we can't read it, assume enabled
 
     // Verify variant type before accessing boolVal to avoid undefined behavior
@@ -382,13 +392,7 @@ ComGuiElement::Rect ComGuiElement::get_rect() const {
 
 void ComGuiElement::set_focus() {
     if (!dispatch_) throw ComException("Null element");
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetFocus", &dispid);
-    if (FAILED(hr)) throw ComException("SetFocus method not found on element", hr);
-    DISPPARAMS params = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                           &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to focus element", hr);
+    call(L"SetFocus", {}, "SetFocus method not found on element", "Failed to focus element");
 }
 
 void ComGuiElement::press() {
@@ -419,16 +423,14 @@ void ComGuiElement::press() {
                 select(true);
                 return;
             }
-            trace.mark_error(fmt::format("get_dispid_via_typeinfo failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("get_dispid_via_typeinfo failed: {}", hresult_hex(hr)));
             throw ComException("Press method not found on element", hr);
         }
 
-        DISPPARAMS params = {nullptr, nullptr, 0, 0};
         _variant_t result;
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                            &params, &result, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Invoke failed: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Invoke failed: {}", hresult_hex(hr)));
             throw ComException("Failed to press element", hr);
         }
 
@@ -456,17 +458,15 @@ void ComGuiElement::select(bool selected) {
             DISPID dispid;
             HRESULT hr = get_dispid_via_typeinfo(dispatch_, method.GetBSTR(), &dispid);
             if (FAILED(hr)) {
-                trace.mark_error(fmt::format("Select method not found: 0x{:08X}", hr));
+                trace.mark_error(fmt::format("Select method not found: {}", hresult_hex(hr)));
                 throw ComException("Select method not found on tab or menu element", hr);
             }
 
             // Call Select() method with no parameters
-            DISPPARAMS params = {nullptr, nullptr, 0, 0};
             _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                &params, &result, nullptr, nullptr);
+            hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, &result);
             if (FAILED(hr)) {
-                trace.mark_error(fmt::format("Failed to call Select(): 0x{:08X}", hr));
+                trace.mark_error(fmt::format("Failed to call Select(): {}", hresult_hex(hr)));
                 throw ComException("Failed to select tab or menu element", hr);
             }
 
@@ -485,10 +485,8 @@ void ComGuiElement::select(bool selected) {
             _bstr_t sel_method("Select");
             DISPID sel_dispid;
             if (SUCCEEDED(get_dispid_via_typeinfo(dispatch_, sel_method.GetBSTR(), &sel_dispid))) {
-                DISPPARAMS params = {nullptr, nullptr, 0, 0};
                 _variant_t result;
-                if (SUCCEEDED(dispatch_->Invoke(sel_dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                              &params, &result, nullptr, nullptr))) {
+                if (SUCCEEDED(invoke(dispatch_, sel_dispid, DISPATCH_METHOD, {}, &result))) {
                     trace.mark_success();
                     spdlog::debug("RadioButton selected via Select(): {}", get_id());
                     return;
@@ -500,20 +498,13 @@ void ComGuiElement::select(bool selected) {
         DISPID dispid;
         HRESULT hr = get_dispid_via_typeinfo(dispatch_, prop.GetBSTR(), &dispid);
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Selected property not found: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Selected property not found: {}", hresult_hex(hr)));
             throw ComException("Selected property not found", hr);
         }
 
-        _variant_t var;
-        var.vt = VT_BOOL;
-        var.boolVal = selected ? VARIANT_TRUE : VARIANT_FALSE;
-
-        DISPID propput_id = DISPID_PROPERTYPUT;
-        DISPPARAMS params = {(VARIANT*)&var, &propput_id, 1, 1};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYPUT,
-                            &params, nullptr, nullptr, nullptr);
+        hr = invoke(dispatch_, dispid, DISPATCH_PROPERTYPUT, {_variant_t(selected)});   // VT_BOOL
         if (FAILED(hr)) {
-            trace.mark_error(fmt::format("Failed to set Selected: 0x{:08X}", hr));
+            trace.mark_error(fmt::format("Failed to set Selected: {}", hresult_hex(hr)));
             throw ComException("Failed to set selected state", hr);
         }
 
@@ -699,358 +690,10 @@ std::string ComGuiElement::get_subtype() const {
     }
 }
 
-std::vector<std::string> ComGuiElement::get_all_node_keys() const {
-    std::vector<std::string> keys;
 
-    try {
-        // Call GetAllNodeKeys() method on the tree control
-        // This returns a collection object
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetAllNodeKeys", &dispid);
-        if (FAILED(hr)) {
-            spdlog::debug("Could not get DISPID for GetAllNodeKeys");
-            return keys;
-        }
 
-        DISPPARAMS params = {0};
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
 
-        hr = dispatch_->Invoke(
-            dispid,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_METHOD,
-            &params,
-            result_guard.get(),
-            nullptr,
-            nullptr
-        );
 
-        if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
-            // Result is a collection - enumerate it
-            IDispatch* coll = result_var.pdispVal;
-
-            // Get Count property
-            DISPID count_dispid;
-            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
-            if (FAILED(hr)) {
-                return keys;
-            }
-
-            DISPPARAMS count_params = {0};
-            VARIANT count_result_var;
-            com::VariantGuard count_result_guard(&count_result_var);
-
-            hr = coll->Invoke(
-                count_dispid,
-                IID_NULL,
-                LOCALE_USER_DEFAULT,
-                DISPATCH_PROPERTYGET,
-                &count_params,
-                count_result_guard.get(),
-                nullptr,
-                nullptr
-            );
-
-            if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
-                int count = count_result_var.lVal;
-
-                // Get Item method dispid
-                DISPID item_dispid;
-                hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
-                if (FAILED(hr)) {
-                    return keys;
-                }
-
-                // Enumerate items (0-based indexing)
-                for (int i = 0; i < count; ++i) {
-                    VARIANT index_var;
-                    com::VariantGuard index_guard(&index_var);
-                    index_var.vt = VT_I4;
-                    index_var.lVal = i;
-
-                    DISPPARAMS item_params;
-                    item_params.cArgs = 1;
-                    item_params.rgvarg = &index_var;
-                    item_params.cNamedArgs = 0;
-                    item_params.rgdispidNamedArgs = nullptr;
-
-                    VARIANT item_result_var;
-                    com::VariantGuard item_result_guard(&item_result_var);
-
-                    hr = coll->Invoke(
-                        item_dispid,
-                        IID_NULL,
-                        LOCALE_USER_DEFAULT,
-                        DISPATCH_METHOD,
-                        &item_params,
-                        item_result_guard.get(),
-                        nullptr,
-                        nullptr
-                    );
-
-                    if (SUCCEEDED(hr)) {
-                        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-                        if (item_result_var.vt == VT_BSTR) {
-                            std::string context = fmt::format("get_all_node_keys item[{}]", i);
-                            std::string key = safe_bstr_to_string(item_result_var, context.c_str());
-                            if (!key.empty()) {
-                                keys.push_back(key);
-                            }
-                        } else if (item_result_var.vt == VT_I4) {
-                            keys.push_back(std::to_string(item_result_var.lVal));
-                        }
-                    }
-                }
-            }
-        }
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_all_node_keys failed: {}", e.what());
-    }
-
-    return keys;
-}
-
-std::string ComGuiElement::get_node_text_by_key(const std::string& key) const {
-    try {
-        if (!dispatch_) {
-            spdlog::warn("get_node_text_by_key called with null dispatch pointer");
-            return "";
-        }
-
-        // Call GetNodeTextByKey(key) method
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodeTextByKey", &dispid);
-        if (FAILED(hr)) {
-            spdlog::debug("Could not get DISPID for GetNodeTextByKey");
-            return "";
-        }
-
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        const auto wide_key = com::utf8_to_wide(key);
-        arg_var.bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(
-            dispid,
-            IID_NULL,
-            LOCALE_USER_DEFAULT,
-            DISPATCH_METHOD,
-            &params,
-            result_guard.get(),
-            nullptr,
-            nullptr
-        );
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string text;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_node_text_by_key key='{}'", key);
-            text = safe_bstr_to_string(result_var, context.c_str());
-        }
-
-        return text;
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_node_text_by_key|exception|key={}|error={}", key, e.what());
-        return "";
-    }
-}
-
-std::string ComGuiElement::get_node_path_by_key(const std::string& key) const {
-    try {
-        if (!dispatch_) {
-            spdlog::warn("get_node_path_by_key called with null dispatch pointer");
-            return "";
-        }
-
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetNodePathByKey", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        const auto wide_key = com::utf8_to_wide(key);
-        arg_var.bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, result_guard.get(), nullptr, nullptr);
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string path;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_node_path_by_key key='{}'", key);
-            path = safe_bstr_to_string(result_var, context.c_str());
-        }
-
-        return path;
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_node_path_by_key|exception|key={}|error={}", key, e.what());
-        return "";
-    }
-}
-
-std::vector<std::string> ComGuiElement::get_column_order() const {
-    std::vector<std::string> columns;
-
-    try {
-        // Get ColumnOrder property (returns a collection)
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"ColumnOrder", &dispid);
-        if (FAILED(hr)) {
-            return columns;
-        }
-
-        DISPPARAMS params = {0};
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
-                              &params, result_guard.get(), nullptr, nullptr);
-
-        if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
-            IDispatch* coll = result_var.pdispVal;
-
-            // Get Count property
-            DISPID count_dispid;
-            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
-            if (SUCCEEDED(hr)) {
-                DISPPARAMS count_params = {0};
-                VARIANT count_result_var;
-                com::VariantGuard count_result_guard(&count_result_var);
-
-                hr = coll->Invoke(count_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                DISPATCH_PROPERTYGET, &count_params, count_result_guard.get(), nullptr, nullptr);
-
-                if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
-                    int count = count_result_var.lVal;
-
-                    // Get Item method dispid
-                    DISPID item_dispid;
-                    hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
-                    if (SUCCEEDED(hr)) {
-                        for (int i = 0; i < count; ++i) {
-                            VARIANT index_var;
-                            com::VariantGuard index_guard(&index_var);
-                            index_var.vt = VT_I4;
-                            index_var.lVal = i;
-
-                            DISPPARAMS item_params;
-                            item_params.cArgs = 1;
-                            item_params.rgvarg = &index_var;
-                            item_params.cNamedArgs = 0;
-                            item_params.rgdispidNamedArgs = nullptr;
-
-                            VARIANT item_result_var;
-                            com::VariantGuard item_result_guard(&item_result_var);
-
-                            hr = coll->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                            DISPATCH_METHOD, &item_params, item_result_guard.get(), nullptr, nullptr);
-
-                            // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-                            if (SUCCEEDED(hr)) {
-                                std::string context = fmt::format("get_column_order item[{}]", i);
-                                std::string col = safe_bstr_to_string(item_result_var, context.c_str());
-                                if (!col.empty()) {
-                                    columns.push_back(col);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_column_order failed: {}", e.what());
-    }
-
-    return columns;
-}
-
-std::string ComGuiElement::get_cell_value(int row, const std::string& column_name) const {
-    try {
-        if (!dispatch_) {
-            spdlog::warn("get_cell_value called with null dispatch pointer");
-            return "";
-        }
-
-        // Call GetCellValue(row As Long, column As String) As String
-        DISPID dispid;
-        HRESULT hr = resolve_dispid(L"GetCellValue", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        // Prepare parameters: row (int) and column_name (string)
-        // Parameters are passed in REVERSE order in DISPPARAMS
-        VARIANT params[2];
-        com::VariantGuard param_guards[2] = {
-            com::VariantGuard(&params[0]),  // column_name (second parameter, first in array)
-            com::VariantGuard(&params[1])  // row (first parameter, second in array)
-        };
-
-        params[0].vt = VT_BSTR;
-        const auto wide_column = com::utf8_to_wide(column_name);
-        params[0].bstrVal = SysAllocStringLen(wide_column.data(), static_cast<UINT>(wide_column.size()));
-
-        params[1].vt = VT_I4;
-        params[1].lVal = row;
-
-        DISPPARAMS disp_params;
-        disp_params.cArgs = 2;
-        disp_params.rgvarg = params;
-        disp_params.cNamedArgs = 0;
-        disp_params.rgdispidNamedArgs = nullptr;
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                              DISPATCH_METHOD, &disp_params, result_guard.get(), nullptr, nullptr);
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string cell_value;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_cell_value row={} col='{}'", row, column_name);
-            cell_value = safe_bstr_to_string(result_var, context.c_str());
-        }
-
-        // Cleanup happens automatically via RAII guards
-        return cell_value;
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_cell_value|exception|row={}|column={}|error={}", row, column_name, e.what());
-        return "";
-    }
-}
 
 AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     if (!dispatch_ || max_lines < 1)
@@ -1059,10 +702,9 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     DISPID count_id;
     HRESULT hr = resolve_dispid(L"GetLineCount", &count_id);
     if (FAILED(hr)) throw ComException("GetLineCount method not found", hr);
-    DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
     VARIANT count_result;
     com::VariantGuard count_guard(&count_result);
-    hr = safe_invoke(dispatch_, count_id, DISPATCH_METHOD, &no_params, count_guard.get());
+    hr = safe_invoke(dispatch_, count_id, DISPATCH_METHOD, {}, count_guard.get());
     if (FAILED(hr) || count_result.vt != VT_I4)
         throw ComException("GetLineCount failed", hr);
 
@@ -1076,17 +718,13 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     if (FAILED(hr)) throw ComException("GetLineText method not found", hr);
     constexpr size_t max_chars = 1024 * 1024;
     for (int line = 0; line < limit; ++line) {
-        VARIANT argument;
-        com::VariantGuard argument_guard(&argument);
-        argument.vt = VT_I4;
-        argument.lVal = line + 1;  // SAP ABAP editor lines are one-based.
         VARIANT line_result;
         com::VariantGuard line_guard(&line_result);
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, line_id, DISPATCH_METHOD, &params, line_guard.get());
+        // SAP ABAP editor lines are one-based
+        hr = safe_invoke(dispatch_, line_id, DISPATCH_METHOD, {_variant_t(static_cast<long>(line + 1))}, line_guard.get());
         if (FAILED(hr) || line_result.vt != VT_BSTR)
-            throw ComException(fmt::format("GetLineText failed (hr=0x{:08X}, type={})",
-                                         static_cast<unsigned int>(hr), line_result.vt), hr);
+            throw ComException(fmt::format("GetLineText failed (hr={}, type={})",
+                                         hresult_hex(hr), line_result.vt), hr);
         const std::string value = com::bstr_to_utf8(line_result.bstrVal);
         if (content.text.size() + value.size() + 1 > max_chars) break;
         if (content.lines_read) content.text += '\n';
@@ -1097,667 +735,43 @@ AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     return content;
 }
 
-std::vector<std::string> ComGuiElement::get_tree_column_names() const {
-    std::vector<std::string> names;
-    if (!dispatch_) return names;
-    try {
-        DISPID method_id;
-        if (FAILED(get_dispid_via_typeinfo(dispatch_, L"GetColumnNames", &method_id))) return names;
-        DISPPARAMS no_params = {nullptr, nullptr, 0, 0};
-        VARIANT result;
-        com::VariantGuard result_guard(&result);
-        if (FAILED(dispatch_->Invoke(method_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                     DISPATCH_METHOD, &no_params, result_guard.get(), nullptr, nullptr)) ||
-            result.vt != VT_DISPATCH || !result.pdispVal) return names;
-        IDispatch* collection = result.pdispVal;
-        DISPID count_id, item_id;
-        if (FAILED(get_dispid_via_typeinfo(collection, L"Count", &count_id)) ||
-            FAILED(get_dispid_via_typeinfo(collection, L"Item", &item_id))) return names;
-        VARIANT count;
-        com::VariantGuard count_guard(&count);
-        if (FAILED(collection->Invoke(count_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                      DISPATCH_PROPERTYGET, &no_params, count_guard.get(), nullptr, nullptr)) ||
-            count.vt != VT_I4) return names;
-        for (int i = 0; i < count.lVal && i < 100; ++i) {
-            _variant_t index(i), item;
-            DISPPARAMS item_params = {&index, nullptr, 1, 0};
-            if (SUCCEEDED(collection->Invoke(item_id, IID_NULL, LOCALE_USER_DEFAULT,
-                                             DISPATCH_METHOD, &item_params, &item, nullptr, nullptr)) &&
-                item.vt == VT_BSTR)
-                names.push_back(safe_bstr_to_string(item, "get_tree_column_names item"));
-        }
-    } catch (const std::exception& e) {
-        spdlog::debug("get_tree_column_names failed: {}", e.what());
-    }
-    return names;
-}
 
-void ComGuiElement::modify_grid_cell(int row, const std::string& column_name,
-                                     const std::string& value, bool checkbox, bool commit) {
-    if (!dispatch_) throw ComException("Null GridView element");
-    if (row < 0 || column_name.empty()) throw ComException("Invalid GridView cell coordinates");
 
-    const wchar_t* method_name = checkbox ? L"ModifyCheckBox" : L"ModifyCell";
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-    if (FAILED(hr)) throw ComException("GridView cell modification is unavailable", hr);
 
-    _variant_t arguments[3];
-    if (checkbox) {
-        bool checked;
-        if (value == "X" || value == "x" || value == "1" || value == "true" || value == "True") {
-            checked = true;
-        } else if (value.empty() || value == "0" || value == "false" || value == "False") {
-            checked = false;
-        } else {
-            throw ComException("Checkbox value must be X, 1, true, 0, or false");
-        }
-        arguments[0] = _variant_t(checked);
-    } else {
-        const auto wide_value = com::utf8_to_wide(value);
-        arguments[0] = _variant_t(wide_value.c_str());
-    }
-    const auto wide_column = com::utf8_to_wide(column_name);
-    arguments[1] = _variant_t(wide_column.c_str());
-    arguments[2] = _variant_t(row);
-    DISPPARAMS params = {arguments, nullptr, 3, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to modify GridView cell", hr);
 
-    if (commit) {
-        hr = get_dispid_via_typeinfo(dispatch_, L"TriggerModified", &dispid);
-        if (FAILED(hr)) throw ComException("GridView TriggerModified method not found", hr);
-        DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &no_arguments, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Failed to commit GridView changes", hr);
-    }
-}
 
-void ComGuiElement::select_grid_row(int row, const std::string& column_name) {
-    if (!dispatch_) throw ComException("Null GridView element");
-    if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");
 
-    auto invoke_cell = [&](const wchar_t* method_name) {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-        if (FAILED(hr)) throw ComException("GridView cell action is unavailable", hr);
-        _variant_t arguments[2];
-        const auto wide_column = com::utf8_to_wide(column_name);
-        arguments[0] = _variant_t(wide_column.c_str());
-        arguments[1] = _variant_t(row);
-        DISPPARAMS params = {arguments, nullptr, 2, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Failed to activate GridView cell", hr);
-    };
 
-    // Click refreshes some detail panes, but read-only grids can reject it.
-    // SelectedRows is the operation required for row-targeted toolbar actions.
-    try {
-        invoke_cell(L"SetCurrentCell");
-        try { invoke_cell(L"Click"); }
-        catch (const ComException&) { /* Read-only cells can reject Click. */ }
-        set_string_property(L"SelectedRows", std::to_string(row));
-    } catch (...) {
-        try { set_string_property(L"SelectedRows", ""); }
-        catch (...) { /* Preserve the original selection error. */ }
-        throw;
-    }
-}
-
-void ComGuiElement::doubleclick_grid_cell(int row, const std::string& column_name) {
-    if (!dispatch_) throw ComException("Null GridView element");
-    if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");
-
-    DISPID dispid;
-    HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetCurrentCell", &dispid);
-    if (FAILED(hr)) throw ComException("GridView SetCurrentCell method not found", hr);
-    _variant_t arguments[2];
-    const auto wide_column = com::utf8_to_wide(column_name);
-    arguments[0] = _variant_t(wide_column.c_str());
-    arguments[1] = _variant_t(row);
-    DISPPARAMS params = {arguments, nullptr, 2, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to set GridView current cell", hr);
-
-    hr = get_dispid_via_typeinfo(dispatch_, L"DoubleClickCurrentCell", &dispid);
-    if (FAILED(hr)) throw ComException("GridView DoubleClickCurrentCell method not found", hr);
-    DISPPARAMS no_arguments = {nullptr, nullptr, 0, 0};
-    hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                           DISPATCH_METHOD, &no_arguments, nullptr, nullptr, nullptr);
-    if (FAILED(hr)) throw ComException("Failed to double-click GridView cell", hr);
-}
-
-int ComGuiElement::get_grid_toolbar_button_count() const {
-    try { return get_int_property(L"ToolbarButtonCount"); }
-    catch (const std::exception&) { return 0; }
-}
-
-std::string ComGuiElement::get_grid_toolbar_button_id(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = resolve_dispid(L"GetToolbarButtonId", &dispid);
-        if (FAILED(hr)) return "";
-        _variant_t argument(position), result;
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
-        return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
-    } catch (const std::exception&) { return ""; }
-}
-
-std::string ComGuiElement::get_grid_toolbar_button_tooltip(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = resolve_dispid(L"GetToolbarButtonTooltip", &dispid);
-        if (FAILED(hr)) return "";
-        _variant_t argument(position), result;
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD, &params, &result);
-        return SUCCEEDED(hr) && result.vt == VT_BSTR ? com::bstr_to_utf8(result.bstrVal) : "";
-    } catch (const std::exception&) { return ""; }
-}
-
-std::string ComGuiElement::get_item_text(const std::string& node_key, const std::string& column_name) const {
-    try {
-        // Validate dispatch pointer before attempting COM calls
-        if (!dispatch_) {
-            spdlog::warn("get_item_text called with null dispatch pointer");
-            return "";
-        }
-
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetItemText", &dispid);
-        if (FAILED(hr)) {
-            if (hr == E_FAIL) {
-                spdlog::error("get_item_text|stale_com_pointer|key={}|column={}", node_key, column_name);
-            }
-            return "";
-        }
-
-        // Two arguments: node_key and column_name (in reverse order for DISPPARAMS)
-        // CRITICAL FIX: Use SysAllocString() instead of _bstr_t direct assignment
-        // This ensures proper BSTR ownership by the VARIANT
-        VARIANT args[2];
-        com::VariantGuard arg_guards[2] = {
-            com::VariantGuard(&args[0]),
-            com::VariantGuard(&args[1])
-        };
-
-        args[1].vt = VT_BSTR;  // First argument (node_key)
-        const auto wide_key = com::utf8_to_wide(node_key);
-        args[1].bstrVal = SysAllocStringLen(wide_key.data(), static_cast<UINT>(wide_key.size()));
-
-        args[0].vt = VT_BSTR;  // Second argument (column_name)
-        const auto wide_column = com::utf8_to_wide(column_name);
-        args[0].bstrVal = SysAllocStringLen(wide_column.data(), static_cast<UINT>(wide_column.size()));
-
-        DISPPARAMS params;
-        params.cArgs = 2;
-        params.rgvarg = args;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, result_guard.get(), nullptr, nullptr);
-
-        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-        std::string text;
-        if (SUCCEEDED(hr)) {
-            std::string context = fmt::format("get_item_text key='{}' col='{}'", node_key, column_name);
-            text = safe_bstr_to_string(result_var, context.c_str());
-        } else {
-            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr=0x{:08X}",
-                         node_key, column_name, hr);
-        }
-
-        // Cleanup happens automatically via VariantGuard RAII
-        return text;
-
-    } catch (const std::exception& e) {
-        spdlog::debug("get_item_text|exception|key={}|column={}|error={}", node_key, column_name, e.what());
-        return "";
-    }
-}
 
 // ============================================================================
 // GuiShell Tree Navigation Methods
 // ============================================================================
 
-void ComGuiElement::select_node(const std::string& node_key) {
-    try {
-        // SelectNode may add to an existing tree selection. A subsequent SAP toolbar
-        // action can then operate on the stale node instead of the requested one.
-        DISPID unselect_dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"UnselectAll", &unselect_dispid);
-        if (FAILED(hr)) {
-            throw ComException("UnselectAll method not found - element may not be a tree control", hr);
-        }
-        DISPPARAMS no_args{};
-        hr = dispatch_->Invoke(unselect_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &no_args, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) {
-            throw ComException("Failed to clear earlier tree selections", hr);
-        }
 
-        DISPID dispid;
-        hr = get_dispid_via_typeinfo(dispatch_, L"SelectNode", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("SelectNode method not found - element may not be a tree control", hr);
-        }
 
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
 
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
 
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
-
-        if (FAILED(hr)) {
-            throw ComException("Failed to select tree node '" + node_key + "'", hr);
-        }
-
-        spdlog::debug("Successfully selected tree node: {}", node_key);
-
-    } catch (const std::exception& e) {
-        spdlog::error("select_node failed for key '{}': {}", node_key, e.what());
-        throw;
-    }
-}
-
-void ComGuiElement::expand_node(const std::string& node_key) {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"ExpandNode", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("ExpandNode method not found - element may not be a tree control", hr);
-        }
-
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
-
-        if (FAILED(hr)) {
-            throw ComException("Failed to expand tree node '" + node_key + "'", hr);
-        }
-
-        spdlog::debug("Successfully expanded tree node: {}", node_key);
-
-    } catch (const std::exception& e) {
-        spdlog::error("expand_node failed for key '{}': {}", node_key, e.what());
-        throw;
-    }
-}
-
-void ComGuiElement::collapse_node(const std::string& node_key) {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"CollapseNode", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("CollapseNode method not found - element may not be a tree control", hr);
-        }
-
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
-
-        if (FAILED(hr)) {
-            throw ComException("Failed to collapse tree node '" + node_key + "'", hr);
-        }
-
-        spdlog::debug("Successfully collapsed tree node: {}", node_key);
-
-    } catch (const std::exception& e) {
-        spdlog::error("collapse_node failed for key '{}': {}", node_key, e.what());
-        throw;
-    }
-}
-
-void ComGuiElement::doubleclick_node(const std::string& node_key) {
-    try {
-        // Some list trees (SUIM) expose the visible label as a TEXT item while
-        // GetNodeTextByKey returns an empty string. DoubleClickNode succeeds but
-        // does not activate that text item on those controls.
-        if (get_node_text_by_key(node_key).empty()) {
-            const auto item_columns = get_tree_column_names();
-            if (std::find(item_columns.begin(), item_columns.end(), "TEXT") != item_columns.end() &&
-                !get_item_text(node_key, "TEXT").empty()) {
-                DISPID item_dispid;
-                if (SUCCEEDED(get_dispid_via_typeinfo(dispatch_, L"DoubleClickItem", &item_dispid))) {
-                    const auto wide_key = com::utf8_to_wide(node_key);
-                    VARIANT args[2];
-                    com::VariantGuard guards[2] = {com::VariantGuard(&args[0]),
-                                                   com::VariantGuard(&args[1])};
-                    args[0].vt = VT_BSTR;
-                    args[0].bstrVal = SysAllocString(L"TEXT");
-                    args[1].vt = VT_BSTR;
-                    args[1].bstrVal = SysAllocStringLen(wide_key.data(),
-                                                        static_cast<UINT>(wide_key.size()));
-                    if (!args[0].bstrVal || !args[1].bstrVal)
-                        throw ComException("Could not allocate tree item arguments", E_OUTOFMEMORY);
-                    DISPPARAMS params = {args, nullptr, 2, 0};
-                    HRESULT hr = dispatch_->Invoke(item_dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                                   DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-                    if (FAILED(hr)) throw ComException("Failed to double-click tree text item", hr);
-                    return;
-                }
-            }
-        }
-
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"DoubleClickNode", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("DoubleClickNode method not found - element may not be a tree control", hr);
-        }
-
-        _bstr_t key_bstr(node_key.c_str());
-        VARIANT arg_var;
-        com::VariantGuard arg_guard(&arg_var);
-        arg_var.vt = VT_BSTR;
-        arg_var.bstrVal = key_bstr.copy();
-
-        DISPPARAMS params;
-        params.cArgs = 1;
-        params.rgvarg = &arg_var;
-        params.cNamedArgs = 0;
-        params.rgdispidNamedArgs = nullptr;
-
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                              &params, nullptr, nullptr, nullptr);
-
-        if (FAILED(hr)) {
-            throw ComException("Failed to double-click tree node '" + node_key + "'", hr);
-        }
-
-        spdlog::debug("Successfully double-clicked tree node: {}", node_key);
-
-    } catch (const std::exception& e) {
-        spdlog::error("doubleclick_node failed for key '{}': {}", node_key, e.what());
-        throw;
-    }
-}
-
-void ComGuiElement::select_node_context_item(const std::string& node_key,
-                                             const std::string& item_text) {
-    if (!dispatch_) throw ComException("Null tree element");
-    if (item_text.empty()) throw ComException("Context-menu item text is empty");
-
-    auto invoke_with_string = [this](const wchar_t* method_name,
-                                     const std::string& value) {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-        if (FAILED(hr)) throw ComException("Tree context-menu method not found", hr);
-
-        _variant_t argument(value.c_str());
-        DISPPARAMS params = {&argument, nullptr, 1, 0};
-        hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                               DISPATCH_METHOD, &params, nullptr, nullptr, nullptr);
-        if (FAILED(hr)) throw ComException("Tree context-menu action failed", hr);
-    };
-
-    invoke_with_string(L"NodeContextMenu", node_key);
-    invoke_with_string(L"SelectContextMenuItemByText", item_text);
-}
 
 // ============================================================================
 // GuiShell Toolbar Button Methods
 // ============================================================================
 
-int ComGuiElement::get_button_count() const {
-    return get_int_property(L"ButtonCount");
-}
 
-std::string ComGuiElement::get_button_id(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonId", &dispid);
-        if (FAILED(hr)) {
-            throw ComException("GetButtonId method not found", hr);
-        }
 
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            throw ComException("Failed to get button ID", hr);
-        }
 
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_id failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
 
-std::string ComGuiElement::get_button_text(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonText", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
 
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_text failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
-
-std::string ComGuiElement::get_button_tooltip(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonTooltip", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_tooltip failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
-
-std::string ComGuiElement::get_button_type(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonType", &dispid);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return "";
-        }
-
-        if (result.vt == VT_BSTR) {
-            return com::bstr_to_utf8(result.bstrVal);
-        }
-        return "";
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_type failed for position {}: {}", position, e.what());
-        return "";
-    }
-}
-
-bool ComGuiElement::get_button_enabled(int position) const {
-    try {
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetButtonEnabled", &dispid);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        _variant_t pos_var(position);
-        DISPPARAMS params = {(VARIANT*)&pos_var, nullptr, 1, 0};
-        _variant_t result;
-        hr = safe_invoke(dispatch_, dispid, DISPATCH_METHOD,
-                         &params, &result);
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        // Result is a byte (VT_UI1) or boolean
-        if (result.vt == VT_UI1 || result.vt == VT_BOOL) {
-            return result.boolVal != 0;
-        }
-        return false;
-    } catch (const std::exception& e) {
-        spdlog::debug("get_button_enabled failed for position {}: {}", position, e.what());
-        return false;
-    }
-}
-
-bool ComGuiElement::find_toolbar_button_labels(const std::string& button_id, std::string& text,
-                                               std::string& tooltip) const {
-    try {
-        int count = 0;
-        try { count = get_button_count(); } catch (const std::exception&) {}
-        for (int i = 0; i < count; ++i) {
-            if (get_button_id(i) != button_id) continue;
-            text = get_button_text(i);
-            tooltip = get_button_tooltip(i);
-            return true;
-        }
-        const int grid_count = get_grid_toolbar_button_count();
-        for (int i = 0; i < grid_count; ++i) {
-            if (get_grid_toolbar_button_id(i) != button_id) continue;
-            text.clear();
-            tooltip = get_grid_toolbar_button_tooltip(i);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        spdlog::debug("find_toolbar_button_labels failed for '{}': {}", button_id, e.what());
-    }
-    return false;
-}
-
-void ComGuiElement::press_button(const std::string& button_id) {
-    try {
-        _variant_t button_id_var(button_id.c_str());
-        DISPPARAMS params = {(VARIANT*)&button_id_var, nullptr, 1, 0};
-        HRESULT last_error = DISP_E_MEMBERNOTFOUND;
-        // GuiShell Toolbar uses PressButton; GuiGridView's built-in toolbar
-        // uses PressToolbarButton. Both are exposed as synthetic CLI buttons.
-        for (const wchar_t* method_name : {L"PressButton", L"PressToolbarButton"}) {
-            DISPID dispid;
-            HRESULT hr = get_dispid_via_typeinfo(dispatch_, method_name, &dispid);
-            if (FAILED(hr)) {
-                last_error = hr;
-                continue;
-            }
-            _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT,
-                                   DISPATCH_METHOD, &params, &result, nullptr, nullptr);
-            if (SUCCEEDED(hr)) {
-                spdlog::debug("Pressed toolbar button: {}", button_id);
-                return;
-            }
-            last_error = hr;
-        }
-        throw ComException("Failed to press button '" + button_id + "'", last_error);
-    } catch (const std::exception& e) {
-        spdlog::error("press_button failed for button_id '{}': {}", button_id, e.what());
-        throw;
-    }
-}
 
 void ComGuiElement::press_f4() {
     try {
-        // F4 is sent as a virtual key event to the element
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"SetFocus", &dispid);
-        if (SUCCEEDED(hr)) {
-            DISPPARAMS params = {nullptr, nullptr, 0, 0};
-            dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                            &params, nullptr, nullptr, nullptr);
-        }
-
-        // Send F4 key directly on element if supported
-        hr = get_dispid_via_typeinfo(dispatch_, L"SendVKey", &dispid);
-        if (SUCCEEDED(hr)) {
-            // VK_F4 = 115 (0x73)
-            _variant_t vkey_var(4);  // SAP uses index 4 for F4
-            DISPPARAMS params = {(VARIANT*)&vkey_var, nullptr, 1, 0};
-            _variant_t result;
-            hr = dispatch_->Invoke(dispid, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                  &params, &result, nullptr, nullptr);
-            if (SUCCEEDED(hr)) {
-                spdlog::debug("Sent F4 key directly to element");
-            }
-        } else {
-            spdlog::debug("Element does not expose SendVKey directly; focus set for window send_vkey");
-        }
+        // F4 is sent as a virtual key event to the element (focus first; a failure is ignored)
+        _variant_t ignored;
+        (void)call_method(L"SetFocus", {}, ignored, Lookup::TypeInfo, Protection::Plain);
+        _variant_t result;
+        if (SUCCEEDED(call_method(L"SendVKey", {_variant_t(4)}, result, Lookup::TypeInfo, Protection::Plain)))   // index 4 is F4
+            spdlog::debug("Sent F4 key directly to element");
+        else
+            spdlog::debug("Element does not take SendVKey directly; focus set for window send_vkey");
     } catch (const std::exception& e) {
         spdlog::error("press_f4 failed: {}", e.what());
         throw;

@@ -1,5 +1,6 @@
 // Windows UI of the desktop approval (see the header): the toast, its COM activator for the notification centre, the
 // approval window and the check for a locked or non-interactive session.
+#include "include/com/hresult.h"
 #include "include/link/desktop_approval_win32.h"
 
 #include <windows.h>
@@ -49,7 +50,12 @@ namespace wf = ABI::Windows::Foundation;
 namespace fs = std::filesystem;
 
 constexpr wchar_t kGroup[] = L"approval";
-constexpr GUID kActivatorClsid = {0xDAAF1065, 0xEF17, 0x4CFF, {0xB3, 0xD2, 0xEF, 0xAF, 0x70, 0x59, 0x49, 0x59}};
+/// The activator's CLSID as COM wants it, parsed from the one spelling (tray::contract::kToastActivatorClsid).
+GUID activator_clsid() {
+    GUID clsid{};
+    CLSIDFromString(kToastActivatorClsid, &clsid);
+    return clsid;
+}
 
 std::wstring wide(const std::string& s) {
     try {
@@ -123,13 +129,13 @@ public:
 
 private:
     void start() {
-        const std::wstring aumid_key = std::wstring(L"Software\\Classes\\AppUserModelId\\") + kAppUserModelId;
+        const std::wstring aumid_key = std::wstring(tray::contract::kAppUserModelIdKeyPrefix) + kAppUserModelId;
         set_value(HKEY_CURRENT_USER, aumid_key, L"DisplayName", L"fairyfly");
         set_value(HKEY_CURRENT_USER, aumid_key, L"CustomActivator", kToastActivatorClsid);
         const fs::path starter = module_dir() / L"fairyfly-tray.exe";
         std::error_code ec;
         if (fs::exists(starter, ec))
-            set_value(HKEY_CURRENT_USER, std::wstring(L"Software\\Classes\\CLSID\\") + kToastActivatorClsid + L"\\LocalServer32", nullptr,
+            set_value(HKEY_CURRENT_USER, std::wstring(tray::contract::kClsidKeyPrefix) + kToastActivatorClsid + L"\\LocalServer32", nullptr,
                       L"\"" + starter.wstring() + L"\"");
         SetCurrentProcessExplicitAppUserModelID(kAppUserModelId);
 
@@ -143,8 +149,8 @@ private:
             DWORD cookie = 0;
             HRESULT hr = E_FAIL;
             if (auto factory = Microsoft::WRL::Make<ActivatorFactory>())
-                hr = CoRegisterClassObject(kActivatorClsid, factory.Get(), CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
-            if (FAILED(hr)) spdlog::warn("approval: the notification centre cannot answer (CoRegisterClassObject 0x{:08X})", unsigned(hr));
+                hr = CoRegisterClassObject(activator_clsid(), factory.Get(), CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+            if (FAILED(hr)) spdlog::warn("approval: the notification centre cannot answer (CoRegisterClassObject {})", hresult_hex(hr));
             p.set_value(true);  // the toast's own Activated event still answers while it is on screen
             // keeps the apartment (and the activator) for the life of the process
             HANDLE never = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -315,7 +321,7 @@ public:
         if (!ToastService::get().ready()) return false;
         Apartment apartment;
         auto failed = [&](const char* step, HRESULT hr) {
-            spdlog::warn("approval {}: no notification ({} 0x{:08X}); the approval window opens", r.id, step, unsigned(hr));
+            spdlog::warn("approval {}: no notification ({} {}); the approval window opens", r.id, step, hresult_hex(hr));
             return false;
         };
         ComPtr<wn::IToastNotificationManagerStatics> manager;
@@ -453,7 +459,7 @@ public:
         if (big) DestroyIcon(big);
         if (st.icon_small) DestroyIcon(st.icon_small);
         if (FAILED(hr)) {
-            spdlog::error("approval {}: denied, the approval window failed (0x{:08X})", r.id, unsigned(hr));
+            spdlog::error("approval {}: denied, the approval window failed ({})", r.id, hresult_hex(hr));
             return Answer::Deny;
         }
         if (st.stopped) return Answer::None;

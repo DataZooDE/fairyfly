@@ -37,6 +37,7 @@ add_executable(unit_tests
     unit/test_mcp_types.cpp
     unit/test_mcp_policy.cpp
     unit/test_environment.cpp
+    unit/test_env_paths.cpp
     unit/test_core_result.cpp
     unit/test_string_utils.cpp
     unit/test_text_utf8.cpp
@@ -47,6 +48,17 @@ add_executable(unit_tests
     unit/test_sap_identity.cpp
     unit/test_command_handler.cpp
     unit/test_doctor_checks.cpp
+    unit/test_screen_markdown_golden.cpp
+    unit/test_semantic_classifier.cpp
+    unit/test_session_lease_policy.cpp
+    unit/test_grid_renderer.cpp
+    unit/test_unique_handle.cpp
+    unit/test_http_probe.cpp
+    unit/test_engine_actions.cpp
+    unit/test_login_handler.cpp
+    unit/test_trail_screen_source.cpp
+    unit/test_session_worker_main.cpp
+    unit/test_mcp_config_command.cpp
     unit/test_mcp_json_rpc.cpp
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
