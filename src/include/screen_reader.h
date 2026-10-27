@@ -1,5 +1,6 @@
 #pragma once
 
+#include "include/shell_kind.h"
 #include "bulk_screen_reader.h"
 #include "core.h"
 #include "com/wrapper.h"
@@ -13,21 +14,11 @@
 #include <tuple>
 #include <vector>
 #include <string>
+#include "include/shell_kind.h"
 
 namespace fairyfly {
 namespace sap {
 
-enum class ShellExtractionKind { Grid, Tree, Metadata };
-
-inline ShellExtractionKind classify_shell_extraction(const std::string& subtype) {
-    if (subtype == "GridView") return ShellExtractionKind::Grid;
-    if (subtype == "Tree" || subtype == "TableTreeControl")
-        return ShellExtractionKind::Tree;
-    // Everything else (Toolbar, HTMLViewer, AbapEditor, TextEdit, Calendar,
-    // unknown or empty SubType) goes through the metadata probe so its
-    // content is not silently dropped (ERR-137).
-    return ShellExtractionKind::Metadata;
-}
 
 /// Whether `screen find` can report a simple text value for this element type.
 inline bool find_type_has_simple_text(const std::string& type) {
@@ -123,6 +114,13 @@ const char* tab_read_failure_reason(TabReadStatus status);
 void set_tab_wait_timeout_ms_for_testing(int ms);
 
 struct ScreenSearchContext;
+class TreeNodeTexts;
+
+/// A tab strip found on the screen and its tabs ({id, type, text, strip_id}), for read_tab.
+struct LocatedTabStrip {
+    std::string id;
+    std::vector<json> tabs;
+};
 
 /// Handles screen reading and element discovery
 /// Extracted from ComAutomationEngine to improve separation of concerns
@@ -239,6 +237,10 @@ private:
     void discover_elements(ComGuiWindowPtr window, ScreenElementCollector& collector,
                            bool skip_trees = false, ScreenSearchContext* search = nullptr);
 
+    // the parts of read_tab (screen_reader.cpp)
+    std::vector<LocatedTabStrip> locate_tab_strips(const std::string& window_id);
+    void add_tab_strips_by_search(const ComGuiWindowPtr& window, bool skip_trees, std::vector<LocatedTabStrip>& strips);
+
     // the stages of traverse_element_tree (screen_reader.cpp)
     bool collect_shell_or_grid(const ComGuiElementPtr& element, const std::string& type, const std::string& elem_id,
                                ScreenElementCollector& collector, int depth, bool skip_trees);
@@ -282,6 +284,15 @@ private:
     /// select. `elements` is the tab subtree only (not the surrounding window chrome).
     TabReadStatus read_tab_content(const std::string& tab_id, bool needs_select, bool skip_trees,
                           json& elements);
+    static json tree_node_json(ComGuiElement& tree, const std::string& elem_id, const std::string& key,
+                               const std::vector<std::string>& columns, TreeNodeTexts& node_texts);
+    // the shared steps of read_tab and read_with_tabs (screen_reader.cpp)
+    std::string selected_tab_of(const std::string& strip_id) const;
+    bool expand_tab(const json& tab, size_t index, const std::string& strip_id, bool skip_trees,
+                    std::map<std::string, std::string>& current_selected, json& tabs_content, json& tabs_failed,
+                    json& tab_elements_list);
+    bool restore_tab_selection(const TabSelectionSnapshot& original, std::map<std::string, std::string>& current_selected);
+    std::vector<json> tabs_in_hierarchy(const json& screen_data) const;
 
     /// Extract metadata for all elements collected in collector
     /// With a snapshot (bulk path), plain elements the tree describes are built from it without

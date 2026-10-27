@@ -63,3 +63,28 @@ TEST_CASE("grid renderer: a rotated table needs property names and a data column
     CHECK(GridRenderer::render_rotated_table({cell(1, 0, "  "), cell(1, 1, "x")}).empty());
     CHECK(GridRenderer::render_rotated_table({cell(1, -1, "No."), cell(1, 0, "x")}).empty());
 }
+
+TEST_CASE("grid renderer: the status section and the rotated table, complete", "[grid][renderer][golden]") {
+    // Codex on #96: substrings cannot show that labels and values stay paired; the whole output is pinned
+    const std::string status = GridRenderer::render_status_section({
+        cell(1, 0, "System:"), cell(1, 20, "Client:"),
+        cell(0, 0, "UP"), cell(0, 20, "999"),       // above, same overlap as the row below ...
+        cell(2, 0, "S4H"), cell(2, 20, "100"),      // ... the row below wins the tie
+    });
+    CHECK(status ==
+          "## Status Information\n\n"
+          "| Property | Value |\n"
+          "|:---------|:------|\n"
+          "| **System**   | S4H   |\n"
+          "| **Client**   | 100   |\n\n");
+    const std::string rotated = GridRenderer::render_rotated_table({
+        cell(1, 0, " No. "), cell(1, 1, "1"), cell(1, 2, "2"), cell(1, 3, " "),
+        cell(2, 0, "Status"), cell(2, 1, "running"), cell(2, 2, "waiting"),
+    });
+    CHECK(rotated ==
+          "## Threads\n\n"
+          "| No. | Status  |\n"
+          "|:----|:--------|\n"
+          "| 1   | running |\n"
+          "| 2   | waiting |\n\n");
+}
