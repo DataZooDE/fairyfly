@@ -9,6 +9,7 @@
 
 #include "include/com/wrapper.h"
 #include "include/com/wrapper_helpers.h"
+#include "include/com/hresult.h"
 #include "include/table_data_extractor.h"
 #include "include/com/control_views.h"
 #include "include/com/tree_view.h"
@@ -238,12 +239,12 @@ TEST_CASE("tree item texts: one value per column; a failed read is empty and the
     ComGuiElement element(IDispatchPtr(control, false));
     using Calls = std::vector<std::pair<std::wstring, std::wstring>>;
 
-    SECTION("the screen reader skips the hierarchy and unnamed columns") {
+    SECTION("skip_hierarchy (the screen reader's flag) skips the hierarchy and unnamed columns") {
         CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL1", "", "COL3", "COL2"}, true) ==
               std::vector<std::string>{"", "a", "", "", "b"});
         CHECK(control->calls == Calls{{L"GetItemText", L"N1,COL1"}, {L"GetItemText", L"N1,COL3"}, {L"GetItemText", L"N1,COL2"}});
     }
-    SECTION("the table extractor asks every data column, as before") {
+    SECTION("without skip_hierarchy (the table extractor's flag) every column is asked, as before") {
         CHECK(as_tree(element).item_texts("N1", {"HierarchyHeader", "COL3", "COL2"}, false) ==
               std::vector<std::string>{"h", "", "b"});
         CHECK(control->calls == Calls{{L"GetItemText", L"N1,HierarchyHeader"}, {L"GetItemText", L"N1,COL3"},
@@ -282,4 +283,11 @@ TEST_CASE("tree shell extraction: each node path is read once; nodes nest, data 
     const auto path_reads = std::count_if(tree->calls.begin(), tree->calls.end(),
                                           [](const auto& call) { return call.first == L"GetNodePathByKey"; });
     CHECK(path_reads == 2);   // once per node
+}
+
+TEST_CASE("hresult_hex prints an HRESULT unsigned, as Windows documents it", "[com][hresult]") {
+    // the {:08X} of a signed HRESULT printed 0x-7FFDFFF7 in ~35 error and log messages
+    CHECK(fairyfly::hresult_hex(DISP_E_EXCEPTION) == "0x80020009");
+    CHECK(fairyfly::hresult_hex(E_FAIL) == "0x80004005");
+    CHECK(fairyfly::hresult_hex(S_OK) == "0x00000000");
 }

@@ -31,6 +31,9 @@ private:
     void extract_table_or_tree(const ComGuiElementPtr& elem, const std::string& elem_id, const std::string& type,
                                const std::string& text, bool probe_grid, json& metadata);
     static void read_abap_editor(const ComGuiElementPtr& elem, json& metadata);
+    static void read_html_viewer(const ComGuiElementPtr& elem, json& metadata);
+    static void read_toolbar_buttons(const ComGuiElementPtr& elem, const std::string& elem_id, json& metadata);
+    static bool probe_unknown_shell(const ComGuiElementPtr& elem, const std::string& text, json& metadata);
     static void list_child_ids(const ComGuiElementPtr& elem, const std::string& type, const std::string& container_type,
                                int depth, json& metadata);
 
