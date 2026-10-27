@@ -37,6 +37,35 @@
   winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
   `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
 
+### Fixed
+
+- COM errors and logs print an HRESULT as Windows documents it (`0x80020009`), not as a signed number
+  (`0x-7FFDFFF7`); for example "SendVKey invoke failed", "OpenConnection failed: hr=..." and the screenshot errors.
+
+### No hand-written function over 150 lines (2026-10-25 code review)
+
+- `CommandDispatcher::execute_call` (794 lines with the re-attach from 2026.10.25.2) is the admission
+  (`admit_call`, `admit_live_session` over a `CallState`), then `execute_call` (100 lines), `invoke_and_finish` (93)
+  and `run_invocation` (127) nested along their scopes, plus named checks for the lease, the screen guard, the
+  owner attach/launch/login and the image cap. `run_mcp` (HTTP: `serve_http`), `HttpEndpoint::dispatch`,
+  `ComAutomationEngine::launch_connection` and `run_setup` are split as well; the only longer functions left are the
+  tool catalog and the element registries (tables).
+- A timing test of the object tree parser compares against a plain JSON parse in the same run (it failed on a busy
+  machine).
+
+### Shorter functions, shared tree and tab steps (2026-10-25 code review)
+
+- The two tree readers share the item texts, the data columns and the nesting by path, which no longer asks SAP
+  for every node's path a second time. `read_tab` and `read_with_tabs` share their tab steps.
+- The response redaction has one classify loop instead of ten copies, with its 13 patterns unchanged. The
+  screenshot capture makes one `HardCopy` call, and the error of a failed capture keeps what it had already
+  recorded.
+- `handle_login`, `handle_click`, `run_mcp`, `run_mcp_doctor`, `run_batch`, the dispatcher's owner checks, the
+  HTTP route admission, `ComGuiApplication::create`, `run_link`, `MakeTeardownPlan` and the Markdown and grid
+  renderers are split into named parts.
+- New tests: the logon under an owner guard through the real handler, the collection walks through their callers,
+  the screenshot paths through a fake window, and the doctor's check order and setup query.
+
 ### Typed views and shorter functions (2026-10-25 code review)
 
 - `ComGuiElement` keeps its general methods (59 -> 34); trees, grids and toolbars are typed views

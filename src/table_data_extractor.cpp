@@ -339,6 +339,18 @@ TableData TableDataExtractor::extract_table_data(ComGuiElementPtr element) const
     return data;
 }
 
+namespace {
+
+/// A tree shell's data columns: its column order without the first, the hierarchy column (the node text itself).
+std::vector<std::string> tree_data_columns(ComGuiElement& tree) {
+    auto all_columns = as_grid(tree).get_column_order();
+    if (all_columns.size() <= 1) return {};
+    spdlog::debug("Tree has {} data columns", all_columns.size() - 1);
+    return std::vector<std::string>(all_columns.begin() + 1, all_columns.end());
+}
+
+}  // namespace
+
 TreeData TableDataExtractor::extract_tree_data(ComGuiElementPtr element) const {
     spdlog::trace("EXTRACT_TREE_DATA: Starting tree data extraction");
     TreeData data;
@@ -358,14 +370,7 @@ TreeData TableDataExtractor::extract_tree_data(ComGuiElementPtr element) const {
 
             // For GuiShell trees, use ColumnOrder
             if (type == "GuiShell" && subtype == "Tree") {
-                spdlog::trace("EXTRACT_TREE_DATA: Getting column order");
-                auto all_columns = as_grid(*element).get_column_order();
-                spdlog::trace("EXTRACT_TREE_DATA: Got {} columns", all_columns.size());
-                if (all_columns.size() > 1) {
-                    // Skip first column (HierarchyHeader) - it's the text column
-                    data.columns = std::vector<std::string>(all_columns.begin() + 1, all_columns.end());
-                    spdlog::debug("GuiShell tree has {} data columns", data.columns.size());
-                }
+                data.columns = tree_data_columns(*element);
             } else {
                 // For other tree types, try ColumnCount
                 try {
@@ -414,6 +419,111 @@ std::vector<std::string> TableDataExtractor::get_column_names(ComGuiElementPtr e
     return columns;
 }
 
+void nest_tree_nodes_by_path(std::map<std::string, TreeNode>& by_key, const std::map<std::string, std::string>& paths,
+                             std::vector<TreeNode>& roots) {
+    // depth first through what is nested so far; the first node with the parent path takes the child
+    const std::function<bool(std::vector<TreeNode>&, const std::string&, TreeNode&)> add_to_parent =
+        [&](std::vector<TreeNode>& tree_nodes, const std::string& parent_path, TreeNode& child) -> bool {
+        for (auto& n : tree_nodes) {
+            const auto path = paths.find(n.key);
+            if (path != paths.end() && path->second == parent_path) {
+                n.children.push_back(std::move(child));
+                return true;
+            }
+            if (add_to_parent(n.children, parent_path, child)) return true;
+        }
+        return false;
+    };
+    for (auto& [key, node] : by_key) {
+        if (node.level == 0) {
+            roots.push_back(std::move(node));
+            continue;
+        }
+        const auto path = paths.find(key);
+        if (path == paths.end()) continue;
+        const size_t last_backslash = path->second.find_last_of('\\');
+        if (last_backslash != std::string::npos) add_to_parent(roots, path->second.substr(0, last_backslash), node);
+    }
+}
+
+/// A tree shell (GuiShell, SubType Tree): all its nodes through GetAllNodeKeys, with text, level (from the path) and the
+/// data columns (the column order without its first, the hierarchy column), nested by path.
+void TableDataExtractor::read_shell_tree(const ComGuiElementPtr& tree_element, std::vector<TreeNode>& nodes) const {
+    spdlog::debug("Detected GuiShell tree control, using GetAllNodeKeys()");
+
+    // Get all node keys from the tree
+    auto node_keys = as_tree(*tree_element).get_all_node_keys();
+    spdlog::info("Retrieved {} nodes from GuiShell tree", node_keys.size());
+
+    const std::vector<std::string> data_columns = tree_data_columns(*tree_element);
+
+    // Build flat list with hierarchy information
+    std::map<std::string, TreeNode> node_map;  // key -> node
+
+    // Pre-compute paths once to avoid excessive COM calls
+    spdlog::trace("TREE_EXTRACT: Pre-computing paths for {} nodes...", node_keys.size());
+    std::map<std::string, std::string> key_to_path;
+    int path_count = 0;
+    for (const auto& key : node_keys) {
+        try {
+            spdlog::trace("TREE_EXTRACT: Getting path for node key {} ({}/{})", key, ++path_count, node_keys.size());
+            key_to_path[key] = as_tree(*tree_element).get_node_path_by_key(key);
+        } catch (const std::exception& e) {
+            spdlog::warn("Failed to get path for node key {}: {}", key, e.what());
+            key_to_path[key] = "";
+        }
+    }
+    spdlog::trace("TREE_EXTRACT: Paths pre-computed successfully");
+
+    spdlog::trace("TREE_EXTRACT: Processing {} nodes...", node_keys.size());
+    int node_count = 0;
+    TreeNodeTexts node_texts(*tree_element);
+    for (const auto& key : node_keys) {
+        try {
+            spdlog::trace("TREE_EXTRACT: Processing node {}/{}: key={}", ++node_count, node_keys.size(), key);
+            TreeNode node;
+            node.key = key;
+
+            // Get node text with error handling
+            try {
+                node.text = node_texts.text(key);
+                spdlog::trace("TREE_EXTRACT: Got text for node {}", key);
+            } catch (const std::exception& e) {
+                spdlog::warn("Failed to get text for node {}: {}", key, e.what());
+                node.text = "<error>";
+            }
+
+            // Get path to determine hierarchy level
+            std::string path = key_to_path[key];
+            if (path.empty()) {
+                spdlog::debug("Skipping node {} with empty path", key);
+                continue;
+            }
+
+            // Parse path to determine level (count backslashes)
+            int level = 0;
+            for (char c : path) {
+                if (c == '\\') level++;
+            }
+            node.level = level;
+
+            // Get column values for this node with error handling
+            spdlog::trace("TREE_EXTRACT: Getting {} column values for node {}...", data_columns.size(), key);
+            node.column_values = as_tree(*tree_element).item_texts(key, data_columns, /*skip_hierarchy=*/false);
+            spdlog::trace("TREE_EXTRACT: Node {} processed successfully", key);
+
+            node.expanded = false;
+
+            node_map[key] = std::move(node);
+        } catch (const std::exception& e) {
+            spdlog::warn("Failed to process tree node {}: {}", key, e.what());
+            continue;
+        }
+    }
+
+    nest_tree_nodes_by_path(node_map, key_to_path, nodes);
+}
+
 void TableDataExtractor::traverse_tree_nodes(
     ComGuiElementPtr tree_element,
     std::vector<TreeNode>& nodes,
@@ -439,125 +549,7 @@ void TableDataExtractor::traverse_tree_nodes(
 
         // Special handling for GuiShell containing TableTreeControl
         if (type == "GuiShell" && subtype == "Tree") {
-            spdlog::debug("Detected GuiShell tree control, using GetAllNodeKeys()");
-
-            // Get all node keys from the tree
-            auto node_keys = as_tree(*tree_element).get_all_node_keys();
-            spdlog::info("Retrieved {} nodes from GuiShell tree", node_keys.size());
-
-            // Get column names (skip first column which is the hierarchy/text column)
-            auto all_columns = as_grid(*tree_element).get_column_order();
-            std::vector<std::string> data_columns;
-            if (all_columns.size() > 1) {
-                data_columns = std::vector<std::string>(all_columns.begin() + 1, all_columns.end());
-                spdlog::debug("Tree has {} data columns", data_columns.size());
-            }
-
-            // Build flat list with hierarchy information
-            std::map<std::string, TreeNode> node_map;  // key -> node
-
-            // Pre-compute paths once to avoid excessive COM calls
-            spdlog::trace("TREE_EXTRACT: Pre-computing paths for {} nodes...", node_keys.size());
-            std::map<std::string, std::string> key_to_path;
-            int path_count = 0;
-            for (const auto& key : node_keys) {
-                try {
-                    spdlog::trace("TREE_EXTRACT: Getting path for node key {} ({}/{})", key, ++path_count, node_keys.size());
-                    key_to_path[key] = as_tree(*tree_element).get_node_path_by_key(key);
-                } catch (const std::exception& e) {
-                    spdlog::warn("Failed to get path for node key {}: {}", key, e.what());
-                    key_to_path[key] = "";
-                }
-            }
-            spdlog::trace("TREE_EXTRACT: Paths pre-computed successfully");
-
-            spdlog::trace("TREE_EXTRACT: Processing {} nodes...", node_keys.size());
-            int node_count = 0;
-            TreeNodeTexts node_texts(*tree_element);
-            for (const auto& key : node_keys) {
-                try {
-                    spdlog::trace("TREE_EXTRACT: Processing node {}/{}: key={}", ++node_count, node_keys.size(), key);
-                    TreeNode node;
-                    node.key = key;
-
-                    // Get node text with error handling
-                    try {
-                        node.text = node_texts.text(key);
-                        spdlog::trace("TREE_EXTRACT: Got text for node {}", key);
-                    } catch (const std::exception& e) {
-                        spdlog::warn("Failed to get text for node {}: {}", key, e.what());
-                        node.text = "<error>";
-                    }
-
-                    // Get path to determine hierarchy level
-                    std::string path = key_to_path[key];
-                    if (path.empty()) {
-                        spdlog::debug("Skipping node {} with empty path", key);
-                        continue;
-                    }
-
-                    // Parse path to determine level (count backslashes)
-                    int level = 0;
-                    for (char c : path) {
-                        if (c == '\\') level++;
-                    }
-                    node.level = level;
-
-                    // Get column values for this node with error handling
-                    spdlog::trace("TREE_EXTRACT: Getting {} column values for node {}...", data_columns.size(), key);
-                    for (const auto& col_name : data_columns) {
-                        try {
-                            std::string col_value = as_tree(*tree_element).get_item_text(key, col_name);
-                            node.column_values.push_back(col_value);
-                        } catch (const std::exception& e) {
-                            spdlog::debug("Failed to get column {} for node {}: {}", col_name, key, e.what());
-                            node.column_values.push_back("");  // Empty value on error
-                        }
-                    }
-                    spdlog::trace("TREE_EXTRACT: Node {} processed successfully", key);
-
-                    node.expanded = false;
-
-                    node_map[key] = std::move(node);
-                } catch (const std::exception& e) {
-                    spdlog::warn("Failed to process tree node {}: {}", key, e.what());
-                    continue;
-                }
-            }
-
-            // Build hierarchical structure
-            for (auto& [key, node] : node_map) {
-                if (node.level == 0) {
-                    // Top-level node
-                    nodes.push_back(std::move(node));
-                } else {
-                    // Find parent and add as child
-                    std::string path = as_tree(*tree_element).get_node_path_by_key(key);
-                    size_t last_backslash = path.find_last_of('\\');
-                    if (last_backslash != std::string::npos) {
-                        std::string parent_path = path.substr(0, last_backslash);
-
-                        // Find parent node in our tree using pre-computed paths
-                        std::function<bool(std::vector<TreeNode>&, const std::string&, TreeNode&)> add_to_parent;
-                        add_to_parent = [&](std::vector<TreeNode>& tree_nodes, const std::string& target_path, TreeNode& child) -> bool {
-                            for (auto& n : tree_nodes) {
-                                auto path_it = key_to_path.find(n.key);
-                                if (path_it != key_to_path.end() && path_it->second == target_path) {
-                                    n.children.push_back(std::move(child));
-                                    return true;
-                                }
-                                if (add_to_parent(n.children, target_path, child)) {
-                                    return true;
-                                }
-                            }
-                            return false;
-                        };
-
-                        add_to_parent(nodes, parent_path, node);
-                    }
-                }
-            }
-
+            read_shell_tree(tree_element, nodes);
             return;
         }
 
