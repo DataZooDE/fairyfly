@@ -539,33 +539,12 @@ void route_link_logging(bool tray, const std::shared_ptr<LinkStatusPrinter>& pri
 
 }  // namespace
 
-int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
-             audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
-    LinkRuntime& runtime = LinkRuntime::process();
-    std::unique_ptr<tray::SingleInstance> run_lock;
-    ffy::link::State st;
-    if (auto exit_code = prepare_link_run(o, run_lock, st)) return *exit_code;
-    // The person at the desktop sees one line per change of the connection. libffl's agent reports it only through
-    // spdlog, so its messages go to the status printer as well as, filtered by --log-level, to stderr.
-    const std::string sp = state_path(o);
-    auto printer = std::make_shared<LinkStatusPrinter>(url_host(st.link_url), st.email, st.tenant_name.empty() ? st.tenant : st.tenant_name,
-                                                       [tray = o.tray](const std::string& line) {
-                                                           if (!tray) write_utf8(line + "\n");  // the tray shows the state itself
-                                                       });
-    route_link_logging(o.tray, printer);
-
-    // Everything the network thread uses lives here: when it does not end in time after Ctrl+C (a connect in
-    // progress cannot be interrupted), the process ends without waiting for it.
-    struct Net {
-        explicit Net(ffy::link::State s, ffy::link::AgentConfig c) : agent(std::move(s), std::move(c)) {}
-        ffy::link::Agent agent;
-        std::string state_path;
-        std::atomic<bool> done{false};
-    };
-    auto tools = std::make_shared<MainThreadTools>();
-    ffy::link::AgentConfig cfg;
-    cfg.local = tools;
-    cfg.version = fairyfly::FAIRYFLY_VERSION;
+/// How a change is approved: on Windows at this desktop ("Allow changes in SAP", the standing approval, or a
+/// notification and the approval window on Details, desktop_approval_win32) with the desktop's own write permit;
+/// elsewhere libffl's desktop approver. --approve no refuses every change.
+void configure_approval(ffy::link::AgentConfig& cfg, const LinkOptions& o, LinkRuntime& runtime,
+                        const std::shared_ptr<MainThreadTools>& tools,
+                        const std::function<cli::CommandHandler*()>& peek) {
 #ifdef _WIN32
     // a change is approved at this desktop: "Allow changes in SAP" (the standing approval), or a notification and the
     // approval window on Details (desktop_approval_win32). libffl's own window is off: a yes approves one change.
@@ -598,6 +577,84 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
 #else
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : ffy::link::desktop_approver();
 #endif
+}
+
+/// The audit trail (docs/LINK.md "Audit trail"): libffl announces it and asks for steps only while the gateway's
+/// policy is on; the recorder reads SAP on the main thread through `tools`, shows the notice and flags
+/// `trail_changed` for the status file.
+std::shared_ptr<trail::TrailRecorder> make_trail_recorder(bool tray, const std::shared_ptr<MainThreadTools>& tools,
+                                                          const std::function<cli::CommandHandler*()>& peek,
+                                                          const std::shared_ptr<std::atomic<bool>>& trail_changed) {
+    trail::RecorderOptions ro;
+    ro.source = trail::make_com_screen_source(peek);
+    ro.run_on_main = [weak = std::weak_ptr<MainThreadTools>(tools)](std::function<void()> fn) {
+        auto t = weak.lock();
+        return t && t->invoke(std::move(fn), 5000);  // never holds up the answer for long
+    };
+    ro.on_policy = [trail_changed, tray](const ffy::proto::TrailPolicy& p) {
+        const std::string line = trail::notice_line(p);
+        if (!tray) write_utf8(line + "\n");
+        spdlog::info("{}", line);
+        *trail_changed = true;
+    };
+    return std::make_shared<trail::TrailRecorder>(ro);
+}
+
+/// The link's tool loop on the main (COM) thread: the change tools (destructiveHint) for the recorder, the gateway's
+/// calls through the provider until the link stops.
+int serve_link_tools(mcp::ToolProvider& provider, MainThreadTools& tools, trail::TrailRecorder& recorder,
+                     LinkRuntime& runtime, const ffy::link::State& st) {
+    {
+        // the tools that change SAP (destructiveHint): their steps carry field changes
+        std::set<std::string> change_tools;
+        for (const auto& t : tools_json(provider))
+            if (t.contains("annotations") && t["annotations"].is_object() && t["annotations"].value("destructiveHint", false))
+                change_tools.insert(t.value("name", std::string()));
+        recorder.set_change_tools(std::move(change_tools));
+    }
+    tools.set_handlers([&provider] { return tools_json(provider); },
+                        [&provider, &runtime](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {
+                            mcp::CallContext ctx = link_call_context(info, runtime.stop);
+                            provider.set_client_info({{"name", info.client}, {"version", "fairyfly-link"}});
+                            mcp::ToolResult r = provider.call_tool(name, args, ctx);
+                            json out = {{"content", r.content}, {"isError", r.is_error}};
+                            if (r.structured) out["structuredContent"] = *r.structured;
+                            return out;
+                        });
+    spdlog::info("fairyfly link: serving {} for {} ({})", st.tenant_name.empty() ? st.tenant : st.tenant_name, st.email, st.device_id);
+    tools.pump(runtime.stop);  // this is the main (COM) thread
+    tools.shutdown();
+    return 0;
+}
+
+int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& get_handler, const commands::GlobalOptions& global,
+             audit::AuditSink* sink, const std::function<cli::CommandHandler*()>& peek) {
+    LinkRuntime& runtime = LinkRuntime::process();
+    std::unique_ptr<tray::SingleInstance> run_lock;
+    ffy::link::State st;
+    if (auto exit_code = prepare_link_run(o, run_lock, st)) return *exit_code;
+    // The person at the desktop sees one line per change of the connection. libffl's agent reports it only through
+    // spdlog, so its messages go to the status printer as well as, filtered by --log-level, to stderr.
+    const std::string sp = state_path(o);
+    auto printer = std::make_shared<LinkStatusPrinter>(url_host(st.link_url), st.email, st.tenant_name.empty() ? st.tenant : st.tenant_name,
+                                                       [tray = o.tray](const std::string& line) {
+                                                           if (!tray) write_utf8(line + "\n");  // the tray shows the state itself
+                                                       });
+    route_link_logging(o.tray, printer);
+
+    // Everything the network thread uses lives here: when it does not end in time after Ctrl+C (a connect in
+    // progress cannot be interrupted), the process ends without waiting for it.
+    struct Net {
+        explicit Net(ffy::link::State s, ffy::link::AgentConfig c) : agent(std::move(s), std::move(c)) {}
+        ffy::link::Agent agent;
+        std::string state_path;
+        std::atomic<bool> done{false};
+    };
+    auto tools = std::make_shared<MainThreadTools>();
+    ffy::link::AgentConfig cfg;
+    cfg.local = tools;
+    cfg.version = fairyfly::FAIRYFLY_VERSION;
+    configure_approval(cfg, o, runtime, tools, peek);
     // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
     // otherwise it uses its built-in catalog
     cfg.publish_catalog = true;
@@ -608,19 +665,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // policy is on; the recorder reads SAP on the main thread through `tools`, shows the notice and puts the policy
     // into the status file for the tray.
     auto trail_changed = std::make_shared<std::atomic<bool>>(false);
-    trail::RecorderOptions ro;
-    ro.source = trail::make_com_screen_source(peek);
-    ro.run_on_main = [weak = std::weak_ptr<MainThreadTools>(tools)](std::function<void()> fn) {
-        auto t = weak.lock();
-        return t && t->invoke(std::move(fn), 5000);  // never holds up the answer for long
-    };
-    ro.on_policy = [trail_changed, tray = o.tray](const ffy::proto::TrailPolicy& p) {
-        const std::string line = trail::notice_line(p);
-        if (!tray) write_utf8(line + "\n");
-        spdlog::info("{}", line);
-        *trail_changed = true;
-    };
-    auto recorder = std::make_shared<trail::TrailRecorder>(ro);
+    auto recorder = make_trail_recorder(o.tray, tools, peek, trail_changed);
     cfg.recorder = recorder;
     // calls refused for clock skew: the tray shows the offset and how to sync until a call is accepted again
     auto clock_skew = std::make_shared<std::atomic<std::int64_t>>(0);
@@ -664,27 +709,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     mcp::HttpRunHooks hooks;
     hooks.keep_logging = true;  // the logger above; run_mcp would replace it
     hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>&) -> int {
-        {
-            // the tools that change SAP (destructiveHint): their steps carry field changes
-            std::set<std::string> change_tools;
-            for (const auto& t : tools_json(provider))
-                if (t.contains("annotations") && t["annotations"].is_object() && t["annotations"].value("destructiveHint", false))
-                    change_tools.insert(t.value("name", std::string()));
-            recorder->set_change_tools(std::move(change_tools));
-        }
-        tools->set_handlers([&provider] { return tools_json(provider); },
-                            [&provider, &runtime](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {
-                                mcp::CallContext ctx = link_call_context(info, runtime.stop);
-                                provider.set_client_info({{"name", info.client}, {"version", "fairyfly-link"}});
-                                mcp::ToolResult r = provider.call_tool(name, args, ctx);
-                                json out = {{"content", r.content}, {"isError", r.is_error}};
-                                if (r.structured) out["structuredContent"] = *r.structured;
-                                return out;
-                            });
-        spdlog::info("fairyfly link: serving {} for {} ({})", st.tenant_name.empty() ? st.tenant : st.tenant_name, st.email, st.device_id);
-        tools->pump(runtime.stop);  // this is the main (COM) thread
-        tools->shutdown();
-        return 0;
+        return serve_link_tools(provider, *tools, *recorder, runtime, st);
     };
     const int rc = mcp::run_mcp(so, get_handler, global, sink, peek, &hooks);
     runtime.stop = true;

@@ -1,5 +1,6 @@
 // Window-level and grid/menu actions for ComAutomationEngine: doubleclick_grid_cell,
 // send_key, close_popup, read_menu and select_menu.
+#include "include/com/control_views.h"
 #include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/action_status.h"
@@ -54,7 +55,7 @@ Result ComAutomationEngine::doubleclick_grid_cell(const ElementId& element, int 
         }
 
         const auto before_status = read_action_status(session);
-        grid->doubleclick_grid_cell(row, column);
+        as_grid(*grid).doubleclick_grid_cell(row, column);
         session->wait_for_completion(500);
         const auto after_status = read_action_status(session);
 
