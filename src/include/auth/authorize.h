@@ -109,6 +109,9 @@ struct SessionTarget {
     std::string connection_name;  ///< live connection description / saved connection / SAP Logon entry name
     bool ambiguous = false;       ///< launch: open sessions of the entry name run on different systems
     std::string user;             ///< live SAP user; empty when not known
+
+    /// "SID/CLIENT/USER" (system already holds SID/CLIENT).
+    std::string identity() const { return system + "/" + user; }
 };
 
 /// True when `tool` must be checked against the target (see authorize_session_target) for this principal, so the

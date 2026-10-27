@@ -1,0 +1,99 @@
+{
+ "compact": false,
+ "input": {
+  "element_count": 6,
+  "elements": [
+   {
+    "grid_col": 1,
+    "grid_row": 0,
+    "id": "wnd[0]/usr/lbl[1,0]",
+    "text": "Date and Time",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 1,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[1,1]",
+    "text": "Short Text",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 40,
+    "grid_row": 1,
+    "id": "wnd[0]/usr/lbl[40,1]",
+    "text": "OFFSET_TOO_LARGE",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 1,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[1,2]",
+    "text": "Runtime Errors",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 25,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[25,2]",
+    "text": "XX",
+    "type": "GuiLabel"
+   },
+   {
+    "grid_col": 40,
+    "grid_row": 2,
+    "id": "wnd[0]/usr/lbl[40,2]",
+    "text": "STRING_OFFSET_TOO_LARGE",
+    "type": "GuiLabel"
+   }
+  ],
+  "hierarchy": {
+   "form_fields": [
+    {
+     "grid_col": 1,
+     "grid_row": 0,
+     "id": "wnd[0]/usr/lbl[1,0]",
+     "text": "Date and Time",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 1,
+     "grid_row": 1,
+     "id": "wnd[0]/usr/lbl[1,1]",
+     "text": "Short Text",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 40,
+     "grid_row": 1,
+     "id": "wnd[0]/usr/lbl[40,1]",
+     "text": "OFFSET_TOO_LARGE",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 1,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[1,2]",
+     "text": "Runtime Errors",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 25,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[25,2]",
+     "text": "XX",
+     "type": "GuiLabel"
+    },
+    {
+     "grid_col": 40,
+     "grid_row": 2,
+     "id": "wnd[0]/usr/lbl[40,2]",
+     "text": "STRING_OFFSET_TOO_LARGE",
+     "type": "GuiLabel"
+    }
+   ]
+  },
+  "title": "Runtime Error Long Text",
+  "transaction": "ST22"
+ },
+ "output": "# Runtime Error Long Text\n\n**Transaction:** `ST22`\n\n**Screen ID:** ``\n\n## Report Output\n\n```\n Date and Time\nShort Text OFFSET_TOO_LARGE\nRuntime Errors XX STRING_OFFSET_TOO_LARGE\n```\n\n---\n**Screen Elements:** 6 top-level\n"
+}

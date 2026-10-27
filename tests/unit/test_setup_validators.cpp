@@ -7,6 +7,7 @@
 
 #include "include/setup/setup_validators.h"
 #include "include/system/cert_scripts.h"
+#include "include/config/environment.h"
 #include "include/system/powershell_runner.h"
 
 using namespace fairyfly::setup;
@@ -20,6 +21,16 @@ TEST_CASE("PowerShell runner launches after restricting inherited handles", "[ps
     CHECK_FALSE(result.timed_out);
     CHECK(result.exit_code == 0);
     CHECK_THAT(result.out, ContainsSubstring("handle-list-ok"));
+}
+
+TEST_CASE("PowerShell runner hands the parameters over, removes them again and stops at the timeout", "[ps][live]") {
+    auto runner = sys::make_windows_powershell_runner();
+    const auto echoed = runner->run("Write-Output $env:FAIRYFLY_PS_PARAMS", R"({"port":8443})", 10000);
+    CHECK(echoed.exit_code == 0);
+    CHECK_THAT(echoed.out, ContainsSubstring(R"({"port":8443})"));
+    CHECK(fairyfly::config::Environment::process().get(fairyfly::config::env::kPsParams).empty());   // not left behind
+    const auto slow = runner->run("Start-Sleep -Seconds 20", "{}", 1500);
+    CHECK(slow.timed_out);
 }
 #endif
 

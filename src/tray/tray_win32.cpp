@@ -1,5 +1,6 @@
 #include "include/text/utf8.h"
 #include "include/tray/tray_win32.h"
+#include "include/tray/tray_contract.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -7,6 +8,7 @@
 #include <atomic>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <mutex>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/spdlog.h>
@@ -32,10 +34,10 @@ constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTickMs = 2000;
 constexpr int kIconGiveUpTicks = 30;   // 60 s without a taskbar: tell the person once
 constexpr int kFirstCommandId = 1000;
-constexpr const wchar_t* kWindowClass = L"fairyfly_tray_window";
 // Another process (a second start, fairyfly-tray.exe --close from the installer) talks to a running tray through these.
-constexpr const wchar_t* kShowMenuMessage = L"fairyfly-tray-show-menu";
-constexpr const wchar_t* kQuitMessage = L"fairyfly-tray-quit";
+using contract::kQuitMessage;
+using contract::kShowMenuMessage;
+using contract::kWindowClass;
 
 const wchar_t* window_title(TrayKind kind) { return kind == TrayKind::Link ? L"fairyfly link tray" : L"fairyfly MCP tray"; }
 
@@ -503,7 +505,7 @@ public:
     }
 
 private:
-    static constexpr const wchar_t* kSubKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    static constexpr const wchar_t* kSubKey = contract::kRunKey;
 };
 
 class Win32TraySettings : public TraySettings {
@@ -522,7 +524,7 @@ public:
     }
 
 private:
-    static constexpr const wchar_t* kSubKey = L"Software\\DataZoo\\fairyfly\\tray";
+    static constexpr const wchar_t* kSubKey = contract::kSettingsKey;
 };
 
 class Win32SingleInstance : public SingleInstance {
@@ -555,28 +557,6 @@ private:
     HANDLE handle_ = nullptr;
 };
 
-class Win32Clipboard : public Clipboard {
-public:
-    bool set_text(const std::string& text) override {
-        const std::wstring wide = display_wide(text);
-        if (!OpenClipboard(nullptr)) return false;
-        EmptyClipboard();
-        const size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
-        HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-        bool ok = false;
-        if (mem) {
-            if (void* dst = GlobalLock(mem)) {
-                memcpy(dst, wide.c_str(), bytes);
-                GlobalUnlock(mem);
-                ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
-            }
-            if (!ok) GlobalFree(mem);
-        }
-        CloseClipboard();
-        return ok;
-    }
-};
-
 } // namespace
 
 std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind) { return std::make_unique<Win32TrayHost>(kind); }
@@ -587,7 +567,6 @@ std::unique_ptr<RegistryRunKey> make_win32_run_key() { return std::make_unique<W
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name) {
     return std::make_unique<Win32SingleInstance>(name);
 }
-std::unique_ptr<Clipboard> make_win32_clipboard() { return std::make_unique<Win32Clipboard>(); }
 
 std::string current_exe_path() {
     wchar_t buffer[MAX_PATH * 4];
@@ -616,9 +595,9 @@ bool startup_error_needs_dialog_here() {
     return startup_error_needs_dialog(is_tray_child_process(), process_has_console(), console_process_count());
 }
 
-bool is_tray_child_process() { return config::process_env()(kTrayChildEnv) == "1"; }
+bool is_tray_child_process() { return config::process_env()(config::env::kTrayChild) == "1"; }
 
-bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(kTrayLaunchedEnv) == "1"; }
+bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(config::env::kTrayLaunched) == "1"; }
 
 bool path_exists(const std::filesystem::path& path) {
     std::error_code ec;
@@ -628,8 +607,8 @@ bool path_exists(const std::filesystem::path& path) {
 void detach_console() { FreeConsole(); }
 
 void clear_tray_child_marker() {
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_CHILD", nullptr);
-    SetEnvironmentVariableW(L"FAIRYFLY_TRAY_LAUNCHED", nullptr);
+    config::unset_process_env(config::env::kTrayChild);
+    config::unset_process_env(config::env::kTrayLaunched);
 }
 
 std::string route_logging_to_file(const std::string& file_name) {
@@ -646,6 +625,43 @@ std::string route_logging_to_file(const std::string& file_name) {
     } catch (const std::exception&) {
     }
     return file.string();
+}
+
+TrayStart prepare_tray_start(const std::string& mutex_name) {
+    TrayStart start;
+    start.entry.tray_requested = true;
+    start.entry.is_child = is_tray_child_process();
+    start.entry.has_console = process_has_console();
+    start.entry.exe = current_exe_path();
+    start.entry.args = current_args();   // the detached child (and the autostart) get the same arguments
+    // the Run value starts fairyfly-tray.exe when it is installed: no console window at logon
+    start.program = tray_start_program(start.entry.exe, path_exists);
+    start.registry = make_win32_run_key();
+    start.launcher = make_win32_process_launcher();
+    start.guard = make_win32_single_instance(mutex_name);
+    return start;
+}
+
+std::optional<int> settle_tray_start(TrayStart& start, TrayKind kind, const std::string& title) {
+    TrayEntryServices services;
+    services.registry = start.registry.get();
+    services.launcher = start.launcher.get();
+    services.guard = start.guard.get();
+    services.print = [](const std::string& line) { std::cout << line << std::endl; };
+    const TrayEntryResult decided = decide_tray_entry(start.entry, services);
+    if (decided.outcome == TrayEntryOutcome::Failed && startup_error_needs_dialog_here())
+        make_win32_tray_host()->message_box(title, decided.message);   // nobody reads this console
+    if (decided.outcome == TrayEntryOutcome::AlreadyRunning) {
+        auto other = make_win32_tray_host(kind);
+        if (!other->show_running_instance() && startup_error_needs_dialog_here())
+            other->message_box(title, "The " + start.entry.name + " is already running: its icon is in the notification area.");
+    }
+    if (decided.outcome != TrayEntryOutcome::RunHere) return decided.exit_code;
+    // From here on this process is the tray: no console, logs to a file.
+    if (start.entry.is_child) detach_console();
+    start.launched = is_tray_launched_process();
+    clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
+    return std::nullopt;
 }
 
 } // namespace fairyfly::tray
