@@ -114,6 +114,7 @@ const char* tab_read_failure_reason(TabReadStatus status);
 void set_tab_wait_timeout_ms_for_testing(int ms);
 
 struct ScreenSearchContext;
+class TreeNodeTexts;
 
 /// A tab strip found on the screen and its tabs ({id, type, text, strip_id}), for read_tab.
 struct LocatedTabStrip {
@@ -283,6 +284,15 @@ private:
     /// select. `elements` is the tab subtree only (not the surrounding window chrome).
     TabReadStatus read_tab_content(const std::string& tab_id, bool needs_select, bool skip_trees,
                           json& elements);
+    static json tree_node_json(ComGuiElement& tree, const std::string& elem_id, const std::string& key,
+                               const std::vector<std::string>& columns, TreeNodeTexts& node_texts);
+    // the shared steps of read_tab and read_with_tabs (screen_reader.cpp)
+    std::string selected_tab_of(const std::string& strip_id) const;
+    bool expand_tab(const json& tab, size_t index, const std::string& strip_id, bool skip_trees,
+                    std::map<std::string, std::string>& current_selected, json& tabs_content, json& tabs_failed,
+                    json& tab_elements_list);
+    bool restore_tab_selection(const TabSelectionSnapshot& original, std::map<std::string, std::string>& current_selected);
+    std::vector<json> tabs_in_hierarchy(const json& screen_data) const;
 
     /// Extract metadata for all elements collected in collector
     /// With a snapshot (bulk path), plain elements the tree describes are built from it without
