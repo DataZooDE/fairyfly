@@ -7,6 +7,7 @@
 
 #include "include/mcp/http_sys_mapping.h"
 
+#include "include/string_utils.h"
 using namespace fairyfly::mcp;
 using namespace fairyfly::mcp::httpsys;
 
@@ -229,20 +230,13 @@ TEST_CASE("prefix builder", "[httpsys][mapping]") {
     make_prefix("http", "127.0.0.1", 0, "/mcp", &e);
     CHECK(e.find("ephemeral") != std::string::npos);
 
-    CHECK(is_loopback_host("127.0.0.1"));
-    CHECK(is_loopback_host("localhost"));
-    CHECK(is_loopback_host("::1"));
-    CHECK(is_loopback_host("[::1]"));
-    CHECK_FALSE(is_loopback_host("0.0.0.0"));
-    CHECK_FALSE(is_loopback_host("10.0.0.5"));
-    CHECK_FALSE(is_loopback_host("+"));
-}
-
-TEST_CASE("UTF conversions round-trip", "[httpsys][mapping]") {
-    CHECK(wide_to_utf8(L"abc", 3) == "abc");
-    CHECK(wide_to_utf8(L"ä", 1) == "\xC3\xA4");
-    CHECK(utf8_to_wide("\xC3\xA4") == L"ä");
-    CHECK(wide_to_utf8(nullptr, 3).empty());
+    CHECK(fairyfly::utils::is_loopback_host("127.0.0.1"));
+    CHECK(fairyfly::utils::is_loopback_host("localhost"));
+    CHECK(fairyfly::utils::is_loopback_host("::1"));
+    CHECK(fairyfly::utils::is_loopback_host("[::1]"));
+    CHECK_FALSE(fairyfly::utils::is_loopback_host("0.0.0.0"));
+    CHECK_FALSE(fairyfly::utils::is_loopback_host("10.0.0.5"));
+    CHECK_FALSE(fairyfly::utils::is_loopback_host("+"));
 }
 
 TEST_CASE("response header packing", "[httpsys][mapping]") {

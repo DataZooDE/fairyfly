@@ -7,11 +7,6 @@ namespace commands {
 
 class SendKeyCommand : public CommandBase {
 public:
-    std::string name() const override { return "key send"; }
-
-    std::string description() const override {
-        return "Send a key (enter, f1..f12, shift+f1..shift+f12 or a raw VKey number) to a window";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"key","send"});
@@ -32,12 +27,7 @@ Example: fairyfly key send f3 --connection 3
         return handler.handle_send_key(key_, window_, conn_id_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     std::string key_;
     std::string window_ = "@active";
     std::optional<int> conn_id_;

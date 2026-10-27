@@ -1,0 +1,26 @@
+{
+ "compact": false,
+ "input": {
+  "elements": [
+   {
+    "content_available": false,
+    "id": "wnd[0]/usr/html",
+    "subtype": "HTMLViewer",
+    "type": "GuiShell"
+   }
+  ],
+  "hierarchy": {
+   "other": [
+    {
+     "content_available": false,
+     "id": "wnd[0]/usr/html",
+     "subtype": "HTMLViewer",
+     "type": "GuiShell"
+    }
+   ]
+  },
+  "title": "Database check",
+  "transaction": "SE14"
+ },
+ "output": "# Database check\n\n**Transaction:** `SE14`\n\n**Screen ID:** ``\n\n### HTML viewer\n\n_Page content unavailable through SAP GUI scripting and UI Automation._\n\n**Technical ID:** `wnd[0]/usr/html`\n\n---\n**Screen Elements:** 0 top-level\n"
+}

@@ -14,8 +14,6 @@ namespace commands {
 /// the options before the registry is rebuilt.
 class McpCommand : public CommandBase {
 public:
-    std::string name() const override { return "mcp"; }
-    std::string description() const override { return "Start the MCP server (stdio)"; }
 
     CLI::App* setup_cli(CLI::App& app) override;
     Result execute(cli::CommandHandler& handler) override;
@@ -36,7 +34,6 @@ public:
     McpExtras& extras() { return extras_; }
 
 private:
-    CLI::App* cmd_ = nullptr;
     CLI::App* tools_cmd_ = nullptr;
     mcp::ServeOptions options_;
     int default_connection_ = -1;

@@ -12,6 +12,17 @@ namespace fairyfly {
 using json = nlohmann::json;
 
 // Core result type for all operations
+/// Time since construction in whole milliseconds (an action's Result::duration).
+class Stopwatch {
+public:
+    std::chrono::milliseconds elapsed() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_);
+    }
+
+private:
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
+};
+
 struct Result {
     enum class Status {
         Success,
@@ -19,11 +30,38 @@ struct Result {
         NotImplemented
     };
 
-    Status status = Status::NotImplemented;
+    /// A Result nobody set is an error (INTERNAL_NO_STATUS in to_json), never a silent success.
+    Status status = Status::Error;
     json data;
     json error;
     json diagnostics;  // Detailed trace for autonomous debugging
     std::chrono::milliseconds duration{0};
+
+    static Result ok(json data = nullptr) {
+        Result r;
+        r.status = Status::Success;
+        r.data = std::move(data);
+        return r;
+    }
+    /// {"code", "message"} plus "suggestions" when given.
+    static Result fail(std::string code, std::string message, json suggestions = nullptr) {
+        Result r;
+        r.status = Status::Error;
+        r.error = {{"code", std::move(code)}, {"message", std::move(message)}};
+        if (!suggestions.is_null()) r.error["suggestions"] = std::move(suggestions);
+        return r;
+    }
+
+    /// Makes this result an error with "code", "message" (and "suggestions"); data, diagnostics, duration and any
+    /// other error fields stay as they are.
+    Result& set_error(std::string code, std::string message, json suggestions = nullptr) {
+        status = Status::Error;
+        if (!error.is_object()) error = json::object();
+        error["code"] = std::move(code);
+        error["message"] = std::move(message);
+        if (!suggestions.is_null()) error["suggestions"] = std::move(suggestions);
+        return *this;
+    }
 
     json to_json() const {
         json response;
@@ -34,15 +72,15 @@ struct Result {
                 break;
             case Status::Error:
                 response["status"] = "error";
-                response["error"] = error;
+                response["error"] = error.is_null() || error.empty()
+                                        ? json{{"code", "INTERNAL_NO_STATUS"}, {"message", "The command produced no result"}}
+                                        : error;
                 break;
             case Status::NotImplemented:
                 response["status"] = "error";
-                response["error"]["code"] = "NOT_IMPLEMENTED";
-                response["error"]["message"] = "Command not yet implemented";
-                response["error"]["suggestions"] = json::array({
-                    "This is Phase 1 scaffolding - SAP COM integration coming next"
-                });
+                response["error"] = error.is_null() || error.empty()
+                                        ? json{{"code", "NOT_IMPLEMENTED"}, {"message", "Command not yet implemented"}}
+                                        : error;
                 break;
         }
         response["metadata"]["duration_ms"] = duration.count();
@@ -65,7 +103,7 @@ struct ResultT {
         NotImplemented
     };
 
-    Status status = Status::NotImplemented;
+    Status status = Status::Error;
     T value;
     json error;
     json diagnostics;

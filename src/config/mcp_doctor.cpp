@@ -1,5 +1,7 @@
 #include "include/config/mcp_doctor.h"
 
+#include "include/sap_identity.h"
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 
@@ -18,17 +20,11 @@ SapState::Tri classify_logged_in_users(const std::vector<std::optional<std::stri
 bool owner_sap_identity_allowed(const std::string& system, const std::string& client,
                                 const std::string& user, const std::vector<std::string>& identities) {
     if (identities.empty()) return true;
-    if (system.empty() || client.empty() || user.empty()) return false;
-    const std::string identity = system + "/" + client + "/" + user;
-    return std::find(identities.begin(), identities.end(), identity) != identities.end();
+    struct Facts { const std::string& system; const std::string& client; const std::string& user; } facts{system, client, user};
+    return sap_identity_known(facts) && identity_listed(identities, sap_identity(facts));
 }
 
 namespace {
-
-std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
 
 DoctorCheck check(std::string id, CheckStatus status, std::string message, std::string remediation = {}) {
     return {std::move(id), status, std::move(message), std::move(remediation)};
@@ -60,38 +56,39 @@ std::optional<int> count_active_tokens(auth::TokenStore& store) {
     }
 }
 
-std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& probes) {
-    std::vector<DoctorCheck> out;
-    const bool http = in.transport == "http";
+namespace {
 
-    // 1. config
-    {
-        const bool has_error = std::any_of(in.config.issues.begin(), in.config.issues.end(),
-                                           [](const ConfigIssue& i) { return i.severity == Severity::Error; });
-        size_t warnings = 0;
-        const ConfigIssue* first_error = nullptr;
-        for (const auto& i : in.config.issues) {
-            if (i.severity == Severity::Warning) ++warnings;
-            else if (!first_error) first_error = &i;
-        }
-        if (in.config.read_error) {
-            out.push_back(check("config", CheckStatus::Fail, "config file cannot be read: " + in.config.path,
-                                "Check the path and permissions."));
-        } else if (has_error) {
-            out.push_back(check("config", CheckStatus::Fail, format_issue(*first_error, in.config.path),
-                                "Fix the file; run 'fairyfly mcp config validate' for all problems."));
-        } else if (!in.config.exists) {
-            out.push_back(check("config", CheckStatus::Pass, "no config file (" + in.config.path + "); defaults apply",
-                                "Optional: 'fairyfly mcp config init' writes a commented template."));
-        } else if (warnings > 0) {
-            out.push_back(check("config", CheckStatus::Warn, in.config.path + " is valid with " + std::to_string(warnings) + " warning(s)",
-                                "Run 'fairyfly mcp config validate' to see them."));
-        } else {
-            out.push_back(check("config", CheckStatus::Pass, in.config.path + " is valid"));
-        }
+/// 1. config: the config file: unreadable or invalid fails, warnings warn, a missing file passes (defaults apply).
+void doctor_config(std::vector<DoctorCheck>& out, const DoctorInput& in, DoctorProbes&,
+                 bool) {
+    const bool has_error = std::any_of(in.config.issues.begin(), in.config.issues.end(),
+                                       [](const ConfigIssue& i) { return i.severity == Severity::Error; });
+    size_t warnings = 0;
+    const ConfigIssue* first_error = nullptr;
+    for (const auto& i : in.config.issues) {
+        if (i.severity == Severity::Warning) ++warnings;
+        else if (!first_error) first_error = &i;
     }
+    if (in.config.read_error) {
+        out.push_back(check("config", CheckStatus::Fail, "config file cannot be read: " + in.config.path,
+                            "Check the path and permissions."));
+    } else if (has_error) {
+        out.push_back(check("config", CheckStatus::Fail, format_issue(*first_error, in.config.path),
+                            "Fix the file; run 'fairyfly mcp config validate' for all problems."));
+    } else if (!in.config.exists) {
+        out.push_back(check("config", CheckStatus::Pass, "no config file (" + in.config.path + "); defaults apply",
+                            "Optional: 'fairyfly mcp config init' writes a commented template."));
+    } else if (warnings > 0) {
+        out.push_back(check("config", CheckStatus::Warn, in.config.path + " is valid with " + std::to_string(warnings) + " warning(s)",
+                            "Run 'fairyfly mcp config validate' to see them."));
+    } else {
+        out.push_back(check("config", CheckStatus::Pass, in.config.path + " is valid"));
+    }
+}
 
-    // 2. port
+/// 2. port: the HTTP port: free passes, in use passes only when the tray serves it.
+void doctor_port(std::vector<DoctorCheck>& out, const DoctorInput& in, DoctorProbes& probes,
+                 bool http) {
     if (!http) {
         out.push_back(check("port", CheckStatus::Skip, "stdio transport, no port used"));
     } else {
@@ -113,51 +110,56 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
             out.push_back(check("port", CheckStatus::Skip, "could not probe " + where));
         }
     }
+}
 
-    // 3/4. SAP GUI scripting and a logged-in session
-    {
-        const SapState sap = probes.sap();
-        switch (sap.scripting_available) {
-        case SapState::Tri::Yes:
-            out.push_back(check("sap_scripting", CheckStatus::Pass, "SAP GUI scripting is available"));
-            break;
-        case SapState::Tri::No:
-            out.push_back(check("sap_scripting", CheckStatus::Fail, "SAP GUI scripting is not available" + (sap.detail.empty() ? "" : ": " + sap.detail),
-                                "Start SAP Logon and enable scripting (client and server); see 'fairyfly doctor'."));
-            break;
-        default:
-            out.push_back(check("sap_scripting", CheckStatus::Skip, "could not determine SAP GUI scripting availability"));
-        }
-        switch (sap.session_present) {
-        case SapState::Tri::Yes:
-            out.push_back(check("sap_session", CheckStatus::Pass, "a logged-in SAP session is present"));
-            break;
-        case SapState::Tri::No:
-            out.push_back(check("sap_session", CheckStatus::Warn, "no logged-in SAP session",
-                                "Log on (fairyfly session launch <name> --login) before clients call tools."));
-            break;
-        default:
-            out.push_back(check("sap_session", CheckStatus::Skip, "session state unknown"));
-        }
+/// 3/4. SAP GUI scripting and a logged-in session.
+void doctor_sap(std::vector<DoctorCheck>& out, const DoctorInput&, DoctorProbes& probes,
+                 bool) {
+    const SapState sap = probes.sap();
+    switch (sap.scripting_available) {
+    case SapState::Tri::Yes:
+        out.push_back(check("sap_scripting", CheckStatus::Pass, "SAP GUI scripting is available"));
+        break;
+    case SapState::Tri::No:
+        out.push_back(check("sap_scripting", CheckStatus::Fail, "SAP GUI scripting is not available" + (sap.detail.empty() ? "" : ": " + sap.detail),
+                            "Start SAP Logon and enable scripting (client and server); see 'fairyfly doctor'."));
+        break;
+    default:
+        out.push_back(check("sap_scripting", CheckStatus::Skip, "could not determine SAP GUI scripting availability"));
     }
-
-    // 5. interactive desktop
-    {
-        const DesktopState d = probes.desktop();
-        if (d.session_id && *d.session_id == 0) {
-            out.push_back(check("desktop", CheckStatus::Fail, "running in Session 0 (non-interactive, e.g. a service or scheduled task)",
-                                "SAP GUI scripting needs the logged-on user's interactive desktop: start fairyfly from that user's session."));
-        } else if (!d.interactive_window_station) {
-            out.push_back(check("desktop", CheckStatus::Warn, "not on the interactive window station (WinSta0)",
-                                "Run from the user's desktop session."));
-        } else if (!d.session_id) {
-            out.push_back(check("desktop", CheckStatus::Skip, "session id unknown"));
-        } else {
-            out.push_back(check("desktop", CheckStatus::Pass, "interactive desktop (session " + std::to_string(*d.session_id) + ")"));
-        }
+    switch (sap.session_present) {
+    case SapState::Tri::Yes:
+        out.push_back(check("sap_session", CheckStatus::Pass, "a logged-in SAP session is present"));
+        break;
+    case SapState::Tri::No:
+        out.push_back(check("sap_session", CheckStatus::Warn, "no logged-in SAP session",
+                            "Log on (fairyfly session launch <name> --login) before clients call tools."));
+        break;
+    default:
+        out.push_back(check("sap_session", CheckStatus::Skip, "session state unknown"));
     }
+}
 
-    // 6. locked / RDP disconnected
+/// 5. interactive desktop: the interactive desktop (Session 0 fails).
+void doctor_desktop(std::vector<DoctorCheck>& out, const DoctorInput&, DoctorProbes& probes,
+                 bool) {
+    const DesktopState d = probes.desktop();
+    if (d.session_id && *d.session_id == 0) {
+        out.push_back(check("desktop", CheckStatus::Fail, "running in Session 0 (non-interactive, e.g. a service or scheduled task)",
+                            "SAP GUI scripting needs the logged-on user's interactive desktop: start fairyfly from that user's session."));
+    } else if (!d.interactive_window_station) {
+        out.push_back(check("desktop", CheckStatus::Warn, "not on the interactive window station (WinSta0)",
+                            "Run from the user's desktop session."));
+    } else if (!d.session_id) {
+        out.push_back(check("desktop", CheckStatus::Skip, "session id unknown"));
+    } else {
+        out.push_back(check("desktop", CheckStatus::Pass, "interactive desktop (session " + std::to_string(*d.session_id) + ")"));
+    }
+}
+
+/// 6. locked / RDP disconnected: a locked workstation or a disconnected RDP session (black screenshots).
+void doctor_session_lock(std::vector<DoctorCheck>& out, const DoctorInput&, DoctorProbes& probes,
+                 bool) {
     switch (probes.lock_state()) {
     case LockState::Locked:
         out.push_back(check("session_lock", CheckStatus::Warn, "the workstation is locked: screenshots will be black and some controls unreachable",
@@ -173,109 +175,175 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
     default:
         out.push_back(check("session_lock", CheckStatus::Skip, "lock/RDP state unknown"));
     }
+}
 
-    // 7. tokens
-    {
-        const auto count = probes.token_count();
-        if (!count) {
-            out.push_back(check("tokens", CheckStatus::Skip, "token count unknown (token store could not be read)"));
-        } else if (*count == 0 && http) {
-            out.push_back(check("tokens", CheckStatus::Warn, "no tokens exist: the HTTP server answers every request with 401",
-                                "Create one with 'fairyfly mcp token create'."));
-        } else {
-            out.push_back(check("tokens", CheckStatus::Pass, std::to_string(*count) + " token(s)"));
-        }
+/// 7. tokens: the bearer tokens (none on HTTP: every request gets 401).
+void doctor_tokens(std::vector<DoctorCheck>& out, const DoctorInput&, DoctorProbes& probes,
+                 bool http) {
+    const auto count = probes.token_count();
+    if (!count) {
+        out.push_back(check("tokens", CheckStatus::Skip, "token count unknown (token store could not be read)"));
+    } else if (*count == 0 && http) {
+        out.push_back(check("tokens", CheckStatus::Warn, "no tokens exist: the HTTP server answers every request with 401",
+                            "Create one with 'fairyfly mcp token create'."));
+    } else {
+        out.push_back(check("tokens", CheckStatus::Pass, std::to_string(*count) + " token(s)"));
     }
+}
 
-    // 7b. http.sys setup (read-only facts; never elevated)
-    {
-        SetupQuery query;
-        query.tls = in.tls;
-        query.hostname = in.hostname;
-        query.port = in.port;
-        const SetupFacts f = probes.setup_facts(query);
-        const bool relevant = f.available && (http || f.manifest_present);
-        const std::string skip_reason = f.available ? "stdio transport, no http.sys setup needed" : "setup state not collected";
-        const std::string tls_flag = in.tls ? "--self-signed" : "--no-tls";
-        const std::string fix = "Run 'fairyfly mcp setup " + tls_flag + "' (see docs/MCP_SETUP.md).";
-        const bool tls = f.manifest_present ? f.manifest_mode == "tls" : in.tls;
-
-        // elevation (info)
-        if (!f.available || f.elevation.empty() || f.elevation == "unknown") out.push_back(check("elevation", CheckStatus::Skip, "elevation state unknown"));
-        else out.push_back(check("elevation", CheckStatus::Pass, f.elevation + (f.elevation == "elevated" ? " (doctor itself never needs it)" : "")));
-
-        // setup_manifest
-        if (!relevant) out.push_back(check("setup_manifest", CheckStatus::Skip, skip_reason));
-        else if (f.manifest_unreadable) out.push_back(check("setup_manifest", CheckStatus::Warn, "the setup manifest is unreadable: " + f.manifest_path, "Run 'fairyfly mcp teardown --hostname H --port P' and set up again."));
-        else if (!f.manifest_present) out.push_back(check("setup_manifest", CheckStatus::Warn, "no setup recorded (" + f.manifest_path + ")", fix));
-        else out.push_back(check("setup_manifest", CheckStatus::Pass, "setup for " + f.manifest_hostname + ":" + std::to_string(f.manifest_port) + " (" + f.manifest_mode + ")"));
-
-        // urlacl
-        if (!relevant) out.push_back(check("urlacl", CheckStatus::Skip, skip_reason));
-        else if (!f.urlacl_known) out.push_back(check("urlacl", CheckStatus::Skip, "could not read the URL reservation of " + f.prefix));
-        else if (!f.urlacl_reserved && !tls) out.push_back(check("urlacl", CheckStatus::Pass, "not required for the loopback prefix " + f.prefix + " on this Windows build"));
-        else if (!f.urlacl_reserved) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is not reserved: the server cannot listen without elevation", fix));
-        else if (!f.urlacl_covers_user && tls) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is reserved, but not for the current user", "Run 'fairyfly mcp setup " + tls_flag + "' as this user (it adds the user to the reservation) or use --user."));
-        else out.push_back(check("urlacl", CheckStatus::Pass, f.prefix + " is reserved for the current user"));
-
-        // sslcert
-        if (!relevant) out.push_back(check("sslcert", CheckStatus::Skip, skip_reason));
-        else if (!tls) out.push_back(check("sslcert", CheckStatus::Skip, "plain HTTP mode: no TLS binding"));
-        else if (!f.ssl_known) out.push_back(check("sslcert", CheckStatus::Skip, "could not read the TLS bindings"));
-        else if (f.ssl_foreign) out.push_back(check("sslcert", CheckStatus::Warn, "port " + std::to_string(in.port) + " is bound by another application", "Free the binding or re-run setup with --force-binding."));
-        else if (!f.ssl_v4) out.push_back(check("sslcert", CheckStatus::Fail, "no certificate is bound to 0.0.0.0:" + std::to_string(in.port), fix));
-        else if (!f.cert_found && f.cert_known) out.push_back(check("sslcert", CheckStatus::Fail, "the bound certificate " + f.ssl_thumbprint + " is not in LocalMachine\\My", fix));
-        else if (!f.manifest_thumbprint.empty() && f.manifest_thumbprint != f.ssl_thumbprint) out.push_back(check("sslcert", CheckStatus::Warn, "the bound certificate differs from the one recorded by setup", "Run 'fairyfly mcp setup " + tls_flag + "' to rebind."));
-        else if (!f.ssl_v6) out.push_back(check("sslcert", CheckStatus::Warn, "bound on 0.0.0.0:" + std::to_string(in.port) + " but not on [::]:" + std::to_string(in.port) + " (IPv6 clients cannot connect)", fix));
-        else out.push_back(check("sslcert", CheckStatus::Pass, "certificate " + f.ssl_thumbprint.substr(0, 8) + "... bound on 0.0.0.0 and [::]"));
-
-        // certificate
-        if (!relevant) out.push_back(check("certificate", CheckStatus::Skip, skip_reason));
-        else if (!tls) out.push_back(check("certificate", CheckStatus::Skip, "plain HTTP mode: no certificate"));
-        else if (!f.cert_known) out.push_back(check("certificate", CheckStatus::Skip, "could not read LocalMachine\\My"));
-        else if (!f.cert_found) out.push_back(check("certificate", CheckStatus::Fail, "no certificate for this server in LocalMachine\\My", fix));
-        else if (!f.cert_has_key) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " has no private key", "Import the certificate with its private key into LocalMachine\\My."));
-        else if (f.cert_not_after <= f.now) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " expired", "Run 'fairyfly mcp teardown' then 'fairyfly mcp setup " + tls_flag + "' to issue a new one (clients must trust it again)."));
-        else if (!f.cert_san_ok) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " does not cover the host name" + (in.hostname.empty() ? std::string() : " '" + in.hostname + "'"), "Set up again with --hostname matching the certificate."));
-        else if ((f.cert_not_after - f.now) < 30LL * 86400) out.push_back(check("certificate", CheckStatus::Warn, "certificate expires in " + std::to_string((f.cert_not_after - f.now) / 86400) + " days", "Plan a renewal: 'fairyfly mcp teardown' then 'fairyfly mcp setup " + tls_flag + "'."));
-        else out.push_back(check("certificate", CheckStatus::Pass, "certificate " + f.cert_thumbprint.substr(0, 8) + "... valid for " + std::to_string((f.cert_not_after - f.now) / 86400) + " more days, private key present"));
-
-        // firewall (only when setup recorded a rule)
-        if (!relevant || f.manifest_firewall_rule.empty()) out.push_back(check("firewall", CheckStatus::Skip, "no firewall rule recorded by setup"));
-        else if (!f.firewall_known) out.push_back(check("firewall", CheckStatus::Skip, "could not read the firewall rule"));
-        else if (!f.firewall_exists) out.push_back(check("firewall", CheckStatus::Warn, "the firewall rule '" + f.manifest_firewall_rule + "' recorded by setup is gone", "Run 'fairyfly mcp setup " + tls_flag + " --open-firewall'."));
-        else out.push_back(check("firewall", CheckStatus::Pass, "rule '" + f.manifest_firewall_rule + "' exists"));
-
-        // tls_handshake (only when something listens)
-        if (!relevant || !tls) out.push_back(check("tls_handshake", CheckStatus::Skip, relevant ? "plain HTTP mode" : skip_reason));
-        else if (!f.port_listening || f.tls_status.empty()) out.push_back(check("tls_handshake", CheckStatus::Skip, "nothing listens on port " + std::to_string(in.port) + " (start 'fairyfly mcp --http')"));
-        else if (f.tls_status != "ok") out.push_back(check("tls_handshake", CheckStatus::Warn, "TLS handshake failed (" + f.tls_status + ")", "Check the TLS binding and the certificate."));
-        else if (!f.tls_thumbprint_match) out.push_back(check("tls_handshake", CheckStatus::Warn, "the server presents a different certificate than the one installed", "Rebind with 'fairyfly mcp setup " + tls_flag + "' and restart the server."));
-        else if (f.tls_protocol == "TLS 1.0" || f.tls_protocol == "TLS 1.1" || f.tls_protocol.rfind("SSL", 0) == 0) out.push_back(check("tls_handshake", CheckStatus::Warn, "negotiated " + f.tls_protocol, "Raise the machine Schannel policy to TLS 1.2 or newer."));
-        else out.push_back(check("tls_handshake", CheckStatus::Pass, "negotiated " + (f.tls_protocol.empty() ? std::string("TLS") : f.tls_protocol) + ", certificate matches"));
-
-        // legacy proxy secret (retired reverse-proxy design)
-        if (probes.legacy_proxy_secret())
-            out.push_back(check("legacy_proxy_secret", CheckStatus::Warn, "the retired proxy secret 'fairyfly:fairyfly-mcp-proxy' is still stored", "cmdkey /delete:fairyfly:fairyfly-mcp-proxy"));
-        else out.push_back(check("legacy_proxy_secret", CheckStatus::Pass, "no legacy proxy secret"));
+/// 8. autostart: the tray's autostart entry points at this fairyfly.exe.
+void doctor_autostart(std::vector<DoctorCheck>& out, const DoctorInput& in, DoctorProbes& probes,
+                 bool) {
+    const auto command = probes.autostart_command();
+    if (!command) {
+        out.push_back(check("autostart", CheckStatus::Skip, "not registered (optional: 'fairyfly mcp --tray --install-autostart')"));
+    } else if (!in.exe_path.empty() && utils::lower_ascii(*command).find(utils::lower_ascii(in.exe_path)) == std::string::npos) {
+        out.push_back(check("autostart", CheckStatus::Warn, "registered for a different fairyfly.exe: " + *command,
+                            "Run '--install-autostart' again from the current install."));
+    } else {
+        out.push_back(check("autostart", CheckStatus::Pass, "registered: " + *command));
     }
+}
 
-    // 8. autostart
-    {
-        const auto command = probes.autostart_command();
-        if (!command) {
-            out.push_back(check("autostart", CheckStatus::Skip, "not registered (optional: 'fairyfly mcp --tray --install-autostart')"));
-        } else if (!in.exe_path.empty() && lower(*command).find(lower(in.exe_path)) == std::string::npos) {
-            out.push_back(check("autostart", CheckStatus::Warn, "registered for a different fairyfly.exe: " + *command,
-                                "Run '--install-autostart' again from the current install."));
-        } else {
-            out.push_back(check("autostart", CheckStatus::Pass, "registered: " + *command));
-        }
-    }
-
-    // 9. tray
+/// 9. tray: the tray.
+void doctor_tray(std::vector<DoctorCheck>& out, const DoctorInput&, DoctorProbes& probes,
+                 bool) {
     out.push_back(probes.tray_running() ? check("tray", CheckStatus::Pass, "tray is running")
                                         : check("tray", CheckStatus::Skip, "tray is not running"));
+}
+
+/// What the http.sys setup checks share: the read-only facts and how to read them for this server.
+struct SetupView {
+    SetupFacts f;
+    bool relevant = false;         ///< facts available and HTTP (or a recorded setup)
+    std::string skip_reason;
+    std::string tls_flag;          ///< --self-signed or --no-tls, for the remediation commands
+    std::string fix;               ///< the common remediation: run setup again
+    bool tls = false;              ///< the recorded mode, else the requested one
+};
+
+/// http.sys setup, elevation (info).
+void setup_elevation(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput&, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!f.available || f.elevation.empty() || f.elevation == "unknown") out.push_back(check("elevation", CheckStatus::Skip, "elevation state unknown"));
+    else out.push_back(check("elevation", CheckStatus::Pass, f.elevation + (f.elevation == "elevated" ? " (doctor itself never needs it)" : "")));
+}
+
+/// http.sys setup, setup_manifest.
+void setup_manifest(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput&, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant) out.push_back(check("setup_manifest", CheckStatus::Skip, v.skip_reason));
+    else if (f.manifest_unreadable) out.push_back(check("setup_manifest", CheckStatus::Warn, "the setup manifest is unreadable: " + f.manifest_path, "Run 'fairyfly mcp teardown --hostname H --port P' and set up again."));
+    else if (!f.manifest_present) out.push_back(check("setup_manifest", CheckStatus::Warn, "no setup recorded (" + f.manifest_path + ")", v.fix));
+    else out.push_back(check("setup_manifest", CheckStatus::Pass, "setup for " + f.manifest_hostname + ":" + std::to_string(f.manifest_port) + " (" + f.manifest_mode + ")"));
+}
+
+/// http.sys setup, urlacl.
+void setup_urlacl(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput&, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant) out.push_back(check("urlacl", CheckStatus::Skip, v.skip_reason));
+    else if (!f.urlacl_known) out.push_back(check("urlacl", CheckStatus::Skip, "could not read the URL reservation of " + f.prefix));
+    else if (!f.urlacl_reserved && !v.tls) out.push_back(check("urlacl", CheckStatus::Pass, "not required for the loopback prefix " + f.prefix + " on this Windows build"));
+    else if (!f.urlacl_reserved) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is not reserved: the server cannot listen without elevation", v.fix));
+    else if (!f.urlacl_covers_user && v.tls) out.push_back(check("urlacl", CheckStatus::Fail, f.prefix + " is reserved, but not for the current user", "Run 'fairyfly mcp setup " + v.tls_flag + "' as this user (it adds the user to the reservation) or use --user."));
+    else out.push_back(check("urlacl", CheckStatus::Pass, f.prefix + " is reserved for the current user"));
+}
+
+/// http.sys setup, sslcert.
+void setup_sslcert(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput& in, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant) out.push_back(check("sslcert", CheckStatus::Skip, v.skip_reason));
+    else if (!v.tls) out.push_back(check("sslcert", CheckStatus::Skip, "plain HTTP mode: no TLS binding"));
+    else if (!f.ssl_known) out.push_back(check("sslcert", CheckStatus::Skip, "could not read the TLS bindings"));
+    else if (f.ssl_foreign) out.push_back(check("sslcert", CheckStatus::Warn, "port " + std::to_string(in.port) + " is bound by another application", "Free the binding or re-run setup with --force-binding."));
+    else if (!f.ssl_v4) out.push_back(check("sslcert", CheckStatus::Fail, "no certificate is bound to 0.0.0.0:" + std::to_string(in.port), v.fix));
+    else if (!f.cert_found && f.cert_known) out.push_back(check("sslcert", CheckStatus::Fail, "the bound certificate " + f.ssl_thumbprint + " is not in LocalMachine\\My", v.fix));
+    else if (!f.manifest_thumbprint.empty() && f.manifest_thumbprint != f.ssl_thumbprint) out.push_back(check("sslcert", CheckStatus::Warn, "the bound certificate differs from the one recorded by setup", "Run 'fairyfly mcp setup " + v.tls_flag + "' to rebind."));
+    else if (!f.ssl_v6) out.push_back(check("sslcert", CheckStatus::Warn, "bound on 0.0.0.0:" + std::to_string(in.port) + " but not on [::]:" + std::to_string(in.port) + " (IPv6 clients cannot connect)", v.fix));
+    else out.push_back(check("sslcert", CheckStatus::Pass, "certificate " + f.ssl_thumbprint.substr(0, 8) + "... bound on 0.0.0.0 and [::]"));
+}
+
+/// http.sys setup, certificate.
+void setup_certificate(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput& in, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant) out.push_back(check("certificate", CheckStatus::Skip, v.skip_reason));
+    else if (!v.tls) out.push_back(check("certificate", CheckStatus::Skip, "plain HTTP mode: no certificate"));
+    else if (!f.cert_known) out.push_back(check("certificate", CheckStatus::Skip, "could not read LocalMachine\\My"));
+    else if (!f.cert_found) out.push_back(check("certificate", CheckStatus::Fail, "no certificate for this server in LocalMachine\\My", v.fix));
+    else if (!f.cert_has_key) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " has no private key", "Import the certificate with its private key into LocalMachine\\My."));
+    else if (f.cert_not_after <= f.now) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " expired", "Run 'fairyfly mcp teardown' then 'fairyfly mcp setup " + v.tls_flag + "' to issue a new one (clients must trust it again)."));
+    else if (!f.cert_san_ok) out.push_back(check("certificate", CheckStatus::Fail, "certificate " + f.cert_thumbprint + " does not cover the host name" + (in.hostname.empty() ? std::string() : " '" + in.hostname + "'"), "Set up again with --hostname matching the certificate."));
+    else if ((f.cert_not_after - f.now) < 30LL * 86400) out.push_back(check("certificate", CheckStatus::Warn, "certificate expires in " + std::to_string((f.cert_not_after - f.now) / 86400) + " days", "Plan a renewal: 'fairyfly mcp teardown' then 'fairyfly mcp setup " + v.tls_flag + "'."));
+    else out.push_back(check("certificate", CheckStatus::Pass, "certificate " + f.cert_thumbprint.substr(0, 8) + "... valid for " + std::to_string((f.cert_not_after - f.now) / 86400) + " more days, private key present"));
+}
+
+/// http.sys setup, firewall (only when setup recorded a rule).
+void setup_firewall(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput&, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant || f.manifest_firewall_rule.empty()) out.push_back(check("firewall", CheckStatus::Skip, "no firewall rule recorded by setup"));
+    else if (!f.firewall_known) out.push_back(check("firewall", CheckStatus::Skip, "could not read the firewall rule"));
+    else if (!f.firewall_exists) out.push_back(check("firewall", CheckStatus::Warn, "the firewall rule '" + f.manifest_firewall_rule + "' recorded by setup is gone", "Run 'fairyfly mcp setup " + v.tls_flag + " --open-firewall'."));
+    else out.push_back(check("firewall", CheckStatus::Pass, "rule '" + f.manifest_firewall_rule + "' exists"));
+}
+
+/// http.sys setup, tls_handshake (only when something listens).
+void setup_tls_handshake(std::vector<DoctorCheck>& out, const SetupView& v, const DoctorInput& in, DoctorProbes&) {
+    const SetupFacts& f = v.f;
+    if (!v.relevant || !v.tls) out.push_back(check("tls_handshake", CheckStatus::Skip, v.relevant ? "plain HTTP mode" : v.skip_reason));
+    else if (!f.port_listening || f.tls_status.empty()) out.push_back(check("tls_handshake", CheckStatus::Skip, "nothing listens on port " + std::to_string(in.port) + " (start 'fairyfly mcp --http')"));
+    else if (f.tls_status != "ok") out.push_back(check("tls_handshake", CheckStatus::Warn, "TLS handshake failed (" + f.tls_status + ")", "Check the TLS binding and the certificate."));
+    else if (!f.tls_thumbprint_match) out.push_back(check("tls_handshake", CheckStatus::Warn, "the server presents a different certificate than the one installed", "Rebind with 'fairyfly mcp setup " + v.tls_flag + "' and restart the server."));
+    else if (f.tls_protocol == "TLS 1.0" || f.tls_protocol == "TLS 1.1" || f.tls_protocol.rfind("SSL", 0) == 0) out.push_back(check("tls_handshake", CheckStatus::Warn, "negotiated " + f.tls_protocol, "Raise the machine Schannel policy to TLS 1.2 or newer."));
+    else out.push_back(check("tls_handshake", CheckStatus::Pass, "negotiated " + (f.tls_protocol.empty() ? std::string("TLS") : f.tls_protocol) + ", certificate matches"));
+}
+
+/// http.sys setup, legacy proxy secret (retired reverse-proxy design).
+void setup_legacy(std::vector<DoctorCheck>& out, const SetupView&, const DoctorInput&, DoctorProbes& probes) {
+    if (probes.legacy_proxy_secret())
+        out.push_back(check("legacy_proxy_secret", CheckStatus::Warn, "the retired proxy secret 'fairyfly:fairyfly-mcp-proxy' is still stored", "cmdkey /delete:fairyfly:fairyfly-mcp-proxy"));
+    else out.push_back(check("legacy_proxy_secret", CheckStatus::Pass, "no legacy proxy secret"));
+}
+
+/// 7b. http.sys setup (read-only facts; never elevated): elevation, manifest, URL reservation, TLS binding,
+/// certificate, firewall rule, TLS handshake and the retired proxy secret.
+void doctor_setup(std::vector<DoctorCheck>& out, const DoctorInput& in, DoctorProbes& probes, bool http) {
+    SetupQuery query;
+    query.tls = in.tls;
+    query.hostname = in.hostname;
+    query.port = in.port;
+    SetupView v;
+    v.f = probes.setup_facts(query);
+    const SetupFacts& f = v.f;
+    v.relevant = f.available && (http || f.manifest_present);
+    v.skip_reason = f.available ? "stdio transport, no http.sys setup needed" : "setup state not collected";
+    v.tls_flag = in.tls ? "--self-signed" : "--no-tls";
+    v.fix = "Run 'fairyfly mcp setup " + v.tls_flag + "' (see docs/MCP_SETUP.md).";
+    v.tls = f.manifest_present ? f.manifest_mode == "tls" : in.tls;
+
+    setup_elevation(out, v, in, probes);
+    setup_manifest(out, v, in, probes);
+    setup_urlacl(out, v, in, probes);
+    setup_sslcert(out, v, in, probes);
+    setup_certificate(out, v, in, probes);
+    setup_firewall(out, v, in, probes);
+    setup_tls_handshake(out, v, in, probes);
+    setup_legacy(out, v, in, probes);
+}
+
+}  // namespace
+
+std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& probes) {
+    std::vector<DoctorCheck> out;
+    const bool http = in.transport == "http";
+    doctor_config(out, in, probes, http);
+    doctor_port(out, in, probes, http);
+    doctor_sap(out, in, probes, http);
+    doctor_desktop(out, in, probes, http);
+    doctor_session_lock(out, in, probes, http);
+    doctor_tokens(out, in, probes, http);
+    doctor_setup(out, in, probes, http);
+    doctor_autostart(out, in, probes, http);
+    doctor_tray(out, in, probes, http);
     return out;
 }
 
@@ -291,7 +359,7 @@ std::string overall_status(const std::vector<DoctorCheck>& checks) {
 std::string format_doctor_text(const std::vector<DoctorCheck>& checks) {
     std::string out;
     for (const auto& c : checks) {
-        std::string tag = lower(check_status_name(c.status));
+        std::string tag = utils::lower_ascii(check_status_name(c.status));
         for (auto& ch : tag) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
         out += "[" + tag + "] " + c.id + ": " + c.message + "\n";
         if (!c.remediation.empty() && (c.status == CheckStatus::Warn || c.status == CheckStatus::Fail))

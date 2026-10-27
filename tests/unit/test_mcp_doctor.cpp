@@ -34,7 +34,11 @@ struct FakeProbes : DoctorProbes {
     SetupFacts setup;
     bool legacy_secret = false;
 
-    SetupFacts setup_facts(const SetupQuery&) override { return setup; }
+    std::optional<SetupQuery> setup_query;   ///< what the doctor asked for
+    SetupFacts setup_facts(const SetupQuery& query) override {
+        setup_query = query;
+        return setup;
+    }
     bool legacy_proxy_secret() override { return legacy_secret; }
     std::string probed_host;
     PortState probe_port(const std::string& host, int) override {
@@ -442,4 +446,33 @@ TEST_CASE("mcp doctor: stdio without a manifest skips the http.sys checks", "[mc
     const auto checks = run_mcp_doctor(in, probes);
     CHECK(get(checks, "urlacl").status == CheckStatus::Skip);
     CHECK(get(checks, "certificate").status == CheckStatus::Skip);
+}
+
+TEST_CASE("mcp doctor: the checks come in their documented order and the setup query carries the server's TLS, host and port",
+          "[mcp_doctor]") {
+    // Codex on #93: run_mcp_doctor became one function per section; the order and the query forwarding are now pinned
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    const auto checks = run_mcp_doctor(tls_input(), probes);
+    std::vector<std::string> ids;
+    for (const auto& c : checks) ids.push_back(c.id);
+    CHECK(ids == std::vector<std::string>{"config", "port", "sap_scripting", "sap_session", "desktop", "session_lock",
+                                          "tokens", "elevation", "setup_manifest", "urlacl", "sslcert", "certificate",
+                                          "firewall", "tls_handshake", "legacy_proxy_secret", "autostart", "tray"});
+    REQUIRE(probes.setup_query.has_value());
+    CHECK(probes.setup_query->tls);
+    CHECK(probes.setup_query->hostname == "sapbox");
+    CHECK(probes.setup_query->port == 8443);
+}
+
+TEST_CASE("mcp doctor: a recorded plain-HTTP setup wins over a requested TLS server for the TLS checks", "[mcp_doctor]") {
+    FakeProbes probes;
+    probes.setup = healthy_tls_facts();
+    probes.setup.manifest_mode = "http";   // setup recorded plain HTTP; the server is asked for TLS
+    const auto checks = run_mcp_doctor(tls_input(), probes);
+    CHECK(get(checks, "sslcert").status == CheckStatus::Skip);
+    CHECK(get(checks, "sslcert").message == "plain HTTP mode: no TLS binding");
+    CHECK(get(checks, "certificate").message == "plain HTTP mode: no certificate");
+    CHECK(get(checks, "tls_handshake").message == "plain HTTP mode");
+    CHECK(get(checks, "setup_manifest").message == "setup for sapbox:8443 (http)");
 }

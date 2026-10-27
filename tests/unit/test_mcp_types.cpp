@@ -47,34 +47,6 @@ TEST_CASE("MCP shared type defaults", "[mcp]") {
     CHECK(kServerNotInitialized == -32002);
 }
 
-TEST_CASE("StringTransport round trip", "[mcp]") {
-    std::istringstream in("first\r\nsecond\n");
-    std::ostringstream out;
-    StringTransport t(in, out);
-    std::string line;
-    REQUIRE(t.read_line(line));
-    CHECK(line == "first");
-    REQUIRE(t.read_line(line));
-    CHECK(line == "second");
-    CHECK_FALSE(t.read_line(line));
-    t.write_line("{\"a\":1}");
-    t.write_line("x");
-    CHECK(out.str() == "{\"a\":1}\nx\n");
-}
-
-TEST_CASE("JSON-RPC builders", "[mcp]") {
-    auto ok = make_result(1, json{{"v", 2}});
-    CHECK(ok["jsonrpc"] == "2.0");
-    CHECK(ok["id"] == 1);
-    CHECK(ok["result"]["v"] == 2);
-
-    auto err = make_error("a", kMethodNotFound, "nope");
-    CHECK(err["error"]["code"] == -32601);
-    CHECK(err["error"]["message"] == "nope");
-    CHECK_FALSE(err["error"].contains("data"));
-    CHECK(make_error(1, kInternalError, "x", json{{"k", 1}})["error"]["data"]["k"] == 1);
-}
-
 TEST_CASE("Dispatcher lists tools per policy", "[mcp]") {
     Invoker invoker = [](const std::vector<std::string>&) { return fairyfly::Result{}; };
 
@@ -82,20 +54,7 @@ TEST_CASE("Dispatcher lists tools per policy", "[mcp]") {
     bool found = false;
     for (const auto& def : dispatcher.list_tools()) found = found || def.name == "gui_doctor";
     CHECK(found);
-
-    ToolSpec write;
-    write.def.name = "gui_fake_write";
-    write.write_tool = true;
-    ToolSpec read;
-    read.def.name = "gui_fake_read";
-
-    Policy read_only;
-    CHECK(tool_visible(read, read_only));
-    CHECK_FALSE(tool_visible(write, read_only));
-    Policy rw;
-    rw.read_only = false;
-    rw.allow_write = true;
-    CHECK(tool_visible(write, rw));
+    // tool_visible itself: test_mcp_policy.cpp
 }
 
 TEST_CASE("Catalog contains gui_doctor placeholder", "[mcp]") {

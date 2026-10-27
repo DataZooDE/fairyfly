@@ -1,5 +1,6 @@
 #include "include/mcp/protocol_session.h"
 
+#include "include/mcp/constants.h"
 #include <algorithm>
 #include <exception>
 
@@ -26,7 +27,7 @@ json tool_to_json(const ToolDef& tool) {
 }
 
 std::string negotiate_version(const std::vector<std::string>& supported, const std::string& requested) {
-    std::string version = supported.empty() ? std::string("2025-11-25") : supported.front();
+    std::string version = supported.empty() ? stdio_protocol_versions().front() : supported.front();
     for (const auto& s : supported)
         if (s == requested) version = requested;
     return version;

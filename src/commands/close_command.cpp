@@ -7,11 +7,6 @@ namespace commands {
 
 class CloseCommand : public CommandBase {
 public:
-    std::string name() const override { return "popup close"; }
-
-    std::string description() const override {
-        return "Close the active popup (sends F12 to wnd[N>0]) and verify it closed";
-    }
 
     CLI::App* setup_cli(CLI::App& app) override {
         cmd_ = add_leaf(app, {"popup","close"});
@@ -31,12 +26,7 @@ Example: fairyfly popup close --connection 3
         return handler.handle_close(vkey_, conn_id_);
     }
 
-    bool was_invoked() const override {
-        return cmd_ && *cmd_;
-    }
-
 private:
-    CLI::App* cmd_ = nullptr;
     int vkey_ = 12;
     std::optional<int> conn_id_;
 };

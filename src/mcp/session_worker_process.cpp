@@ -1,5 +1,7 @@
 #include "include/mcp/session_worker_process.h"
 
+#include "include/text/command_line.h"
+#include "include/system/unique_handle.h"
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -58,27 +60,19 @@ void SessionWorkerProcess::terminate() {
 
 #ifdef _WIN32
 namespace {
-struct Handle {
-    HANDLE value = nullptr;
-    ~Handle() { if (value && value != INVALID_HANDLE_VALUE) CloseHandle(value); }
-    Handle() = default;
-    explicit Handle(HANDLE h) : value(h) {}
-    Handle(const Handle&) = delete;
-    Handle& operator=(const Handle&) = delete;
-    HANDLE release() { HANDLE h = value; value = nullptr; return h; }
-};
+using Handle = system::UniqueHandle;
 
 void start_child(SessionWorkerProcess::Impl& child) {
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     Handle stdin_read, stdin_write, stdout_read, stdout_write;
-    if (!CreatePipe(&stdin_read.value, &stdin_write.value, &sa, 0) ||
-        !CreatePipe(&stdout_read.value, &stdout_write.value, &sa, 0) ||
-        !SetHandleInformation(stdin_write.value, HANDLE_FLAG_INHERIT, 0) ||
-        !SetHandleInformation(stdout_read.value, HANDLE_FLAG_INHERIT, 0))
+    if (!CreatePipe(stdin_read.out(), stdin_write.out(), &sa, 0) ||
+        !CreatePipe(stdout_read.out(), stdout_write.out(), &sa, 0) ||
+        !SetHandleInformation(stdin_write.get(), HANDLE_FLAG_INHERIT, 0) ||
+        !SetHandleInformation(stdout_read.get(), HANDLE_FLAG_INHERIT, 0))
         throw WorkerTransportError("WORKER_UNAVAILABLE", "cannot create private worker pipes");
     Handle stderr_handle(CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                                      &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-    if (stderr_handle.value == INVALID_HANDLE_VALUE)
+    if (!stderr_handle)
         throw WorkerTransportError("WORKER_UNAVAILABLE", "cannot open worker diagnostic sink");
 
     SIZE_T bytes = 0;
@@ -91,7 +85,7 @@ void start_child(SessionWorkerProcess::Impl& child) {
         LPPROC_THREAD_ATTRIBUTE_LIST value;
         ~AttributeGuard() { DeleteProcThreadAttributeList(value); }
     } guard{attributes};
-    std::array<HANDLE, 3> inherited{stdin_read.value, stdout_write.value, stderr_handle.value};
+    std::array<HANDLE, 3> inherited{stdin_read.get(), stdout_write.get(), stderr_handle.get()};
     if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
                                    inherited.data(), sizeof(inherited), nullptr, nullptr))
         throw WorkerTransportError("WORKER_UNAVAILABLE", "cannot restrict worker inherited handles");
@@ -99,12 +93,12 @@ void start_child(SessionWorkerProcess::Impl& child) {
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = stdin_read.value;
-    startup.StartupInfo.hStdOutput = stdout_write.value;
-    startup.StartupInfo.hStdError = stderr_handle.value;
+    startup.StartupInfo.hStdInput = stdin_read.get();
+    startup.StartupInfo.hStdOutput = stdout_write.get();
+    startup.StartupInfo.hStdError = stderr_handle.get();
     startup.lpAttributeList = attributes;
     PROCESS_INFORMATION pi{};
-    std::wstring command = L"\"" + child.executable + L"\"";
+    std::wstring command = text::quote_argument_always<wchar_t>(child.executable);
     if (!child.argument.empty()) command += L" " + child.argument;
     if (!CreateProcessW(child.executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW, nullptr, nullptr,

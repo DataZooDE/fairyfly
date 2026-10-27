@@ -17,14 +17,7 @@ namespace cli {
 
 namespace {
 
-Result error_result(const std::string& code, const std::string& message) {
-    Result result;
-    result.status = Result::Status::Error;
-    result.error = {{"code", code}, {"message", message}};
-    return result;
-}
-
-Result store_error(const cred::CredentialError& e) { return error_result(e.code(), e.what()); }
+Result store_error(const cred::CredentialError& e) { return Result::fail(e.code(), e.what()); }
 
 bool valid_client(const std::string& client) {
     return client.size() == 3 &&
@@ -32,7 +25,7 @@ bool valid_client(const std::string& client) {
 }
 
 Result prompt_unavailable(const char* command) {
-    Result result = error_result("CREDENTIALS_PROMPT_UNAVAILABLE",
+    Result result = Result::fail("CREDENTIALS_PROMPT_UNAVAILABLE",
                                  std::string("credentials ") + command +
                                      " needs an interactive prompt or standard input, which batch mode does not provide");
     result.error["suggestions"] = nlohmann::json::array(
@@ -48,10 +41,10 @@ Result CommandHandler::handle_credentials_set(const std::string& connection, con
 {
     if (batch_mode_) return prompt_unavailable("set");
     if (cred::trim_connection_name(connection).empty()) {
-        return error_result("INVALID_ARGUMENT", "A connection name is required");
+        return Result::fail("INVALID_ARGUMENT", "A connection name is required");
     }
-    if (user.empty()) return error_result("INVALID_ARGUMENT", "--user is required");
-    if (!valid_client(client)) return error_result("INVALID_ARGUMENT", "--client must be a three-digit SAP client");
+    if (user.empty()) return Result::fail("INVALID_ARGUMENT", "--user is required");
+    if (!valid_client(client)) return Result::fail("INVALID_ARGUMENT", "--client must be a three-digit SAP client");
 
     try {
         cred::SecretBuffer password;
@@ -61,10 +54,10 @@ Result CommandHandler::handle_credentials_set(const std::string& connection, con
             password = cred::read_secret("SAP password: ", cred::PromptSource::Console);
             cred::SecretBuffer confirm = cred::read_secret("Repeat password: ", cred::PromptSource::Console);
             if (password.utf16() != confirm.utf16()) {
-                return error_result("PASSWORD_MISMATCH", "The two passwords are not identical; nothing was stored");
+                return Result::fail("PASSWORD_MISMATCH", "The two passwords are not identical; nothing was stored");
             }
         }
-        if (password.empty()) return error_result("EMPTY_PASSWORD", "No password was provided; nothing was stored");
+        if (password.empty()) return Result::fail("EMPTY_PASSWORD", "No password was provided; nothing was stored");
 
         cred::CredentialSummary meta;
         meta.username = user;
@@ -103,7 +96,7 @@ Result CommandHandler::handle_credentials_delete(const std::string& connection)
     try {
         const bool removed = credential_store().remove(connection);
         if (!removed) {
-            return error_result("CREDENTIALS_NOT_FOUND",
+            return Result::fail("CREDENTIALS_NOT_FOUND",
                                 "No stored credentials for connection '" + cred::trim_connection_name(connection) + "'");
         }
         Result result;
@@ -121,13 +114,13 @@ Result CommandHandler::handle_credentials_import_env(const std::string& path, co
     if (batch_mode_) return prompt_unavailable("import-env");
 
     std::ifstream file(path, std::ios::binary);
-    if (!file) return error_result("CREDENTIAL_FILE_UNAVAILABLE", "Cannot open credential file");
+    if (!file) return Result::fail("CREDENTIAL_FILE_UNAVAILABLE", "Cannot open credential file");
 
     LoginCredentials credentials;
     try {
         credentials = parse_login_credentials(file);
     } catch (const std::invalid_argument& e) {
-        return error_result("INVALID_CREDENTIAL_FILE", e.what());
+        return Result::fail("INVALID_CREDENTIAL_FILE", e.what());
     }
     file.close();
 
@@ -143,7 +136,7 @@ Result CommandHandler::handle_credentials_import_env(const std::string& path, co
     std::string name = !credentials.connection.empty() ? credentials.connection : connection;
     name = cred::trim_connection_name(name);
     if (name.empty()) {
-        return error_result("CONNECTION_NAME_REQUIRED",
+        return Result::fail("CONNECTION_NAME_REQUIRED",
                             "The file has no `Connection:` line; pass --connection NAME");
     }
 

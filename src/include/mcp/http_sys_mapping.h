@@ -18,9 +18,6 @@
 
 namespace fairyfly::mcp::httpsys {
 
-/// True for 127.0.0.1, localhost, ::1 and [::1] (case-insensitive).
-bool is_loopback_host(std::string_view host);
-
 /// http.sys URL prefix for `scheme` ("http" | "https"), host, port and endpoint path: "https://+:8443/mcp/".
 /// Wildcard hosts ("", "+", "*", "0.0.0.0") become "+", "localhost" becomes 127.0.0.1, "::1" becomes "[::1]",
 /// other IPv6 literals get brackets. The trailing slash is mandatory for http.sys and always added.
@@ -28,10 +25,6 @@ bool is_loopback_host(std::string_view host);
 std::string make_prefix(std::string_view scheme, std::string_view host, int port, std::string_view path,
                         std::string* error = nullptr);
 
-/// UTF-16 -> UTF-8 (invalid sequences become U+FFFD).
-std::string wide_to_utf8(const wchar_t* text, std::size_t chars);
-/// UTF-8 -> UTF-16.
-std::wstring utf8_to_wide(std::string_view text);
 
 /// HTTP_VERB -> method name; HttpVerbUnknown -> pUnknownVerb (UnknownVerbLength bytes).
 std::string verb_to_string(const HTTP_REQUEST& request);

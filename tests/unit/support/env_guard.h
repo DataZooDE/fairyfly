@@ -1,35 +1,31 @@
 #pragma once
-// Sets one process environment variable for a test and puts the previous value (or its absence) back.
+// Sets one process environment variable for a test and puts the previous value (or its absence) back. Values are
+// UTF-8, written and read through config (the wide environment), as fairyfly itself does.
 #include <catch2/catch_test_macros.hpp>
 
-#include <cstdlib>
 #include <string>
+
+#include "include/config/environment.h"
 
 namespace fairyfly::test {
 
 class EnvGuard {
 public:
-    EnvGuard(std::string name, const std::string& value) : name_(std::move(name)) {
-        if (const char* v = std::getenv(name_.c_str())) {
-            had_ = true;
-            old_ = v;
-        }
-        REQUIRE(set(value) == 0);
+    EnvGuard(std::string name, const std::string& value)
+        : name_(std::move(name)), old_(config::Environment::process().get(name_.c_str())) {
+        set(value);
+        REQUIRE(config::Environment::process().get(name_.c_str()) == value);
     }
-    ~EnvGuard() { set(had_ ? old_ : std::string()); }
+    ~EnvGuard() { set(old_); }
     EnvGuard(const EnvGuard&) = delete;
     EnvGuard& operator=(const EnvGuard&) = delete;
 
 private:
-    int set(const std::string& value) const {
-#ifdef _WIN32
-        return _putenv_s(name_.c_str(), value.c_str());
-#else
-        return value.empty() ? unsetenv(name_.c_str()) : setenv(name_.c_str(), value.c_str(), 1);
-#endif
+    void set(const std::string& value) const {
+        if (value.empty()) config::unset_process_env(name_.c_str());  // on Windows an empty value is no variable
+        else config::set_process_env(name_.c_str(), value);
     }
     std::string name_, old_;
-    bool had_ = false;
 };
 
 }  // namespace fairyfly::test

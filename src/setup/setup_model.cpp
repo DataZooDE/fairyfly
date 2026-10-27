@@ -1,5 +1,6 @@
 #include "include/setup/setup_model.h"
 
+#include "include/string_utils.h"
 #include <algorithm>
 #include <cctype>
 #include <ctime>
@@ -12,13 +13,7 @@ namespace fairyfly::setup {
 
 using nlohmann::json;
 
-// ---- small helpers ---------------------------------------------------------------------------------
-std::string lower_ascii(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-std::string default_hostname(const std::string& dns) { return lower_ascii(dns); }
+std::string default_hostname(const std::string& dns) { return utils::lower_ascii(dns); }
 
 std::string url_prefix(bool tls, const std::string& hostname, int port) {
     (void)hostname;
@@ -36,8 +31,8 @@ std::vector<std::string> ssl_ipports(int port) {
 std::string sddl_for_sid(const std::string& sid) { return "D:(A;;GX;;;" + sid + ")"; }
 
 bool sddl_covers_sid(const std::string& sddl, const std::string& sid) {
-    const std::string s = lower_ascii(sddl);
-    if (!sid.empty() && s.find(";;;" + lower_ascii(sid) + ")") != std::string::npos) return true;
+    const std::string s = utils::lower_ascii(sddl);
+    if (!sid.empty() && s.find(";;;" + utils::lower_ascii(sid) + ")") != std::string::npos) return true;
     // Everyone (WD) and Authenticated Users (AU) cover any user.
     return s.find(";;;wd)") != std::string::npos || s.find(";;;au)") != std::string::npos;
 }
@@ -51,9 +46,9 @@ std::string merge_sddl(const std::string& existing, const std::string& sid) {
 }
 
 bool san_matches(const std::vector<std::string>& dns_names, const std::string& hostname) {
-    const std::string host = lower_ascii(hostname);
+    const std::string host = utils::lower_ascii(hostname);
     for (const auto& raw : dns_names) {
-        const std::string name = lower_ascii(raw);
+        const std::string name = utils::lower_ascii(raw);
         if (name == host) return true;
         if (name.size() > 2 && name.rfind("*.", 0) == 0) {
             const std::string suffix = name.substr(1);   // ".example.com"
@@ -145,7 +140,7 @@ const char* elevation_name(ElevationType type) {
 }
 
 std::string normalize_app_id(const std::string& app_id) {
-    std::string s = lower_ascii(app_id);
+    std::string s = utils::lower_ascii(app_id);
     if (!s.empty() && s.front() != '{') s = "{" + s + "}";
     return s;
 }
@@ -193,10 +188,10 @@ std::optional<ErrorInfo> validate_options(Options& o) {
     if (auto e = port_error(o.port)) return invalid("--port: " + *e);
     if (!o.no_tls) {
         if (o.hostname.empty()) return invalid("No host name: pass --hostname");
-        o.hostname = lower_ascii(o.hostname);
+        o.hostname = utils::lower_ascii(o.hostname);
         if (auto e = hostname_error(o.hostname)) return invalid("--hostname: " + *e);
     } else {
-        o.hostname = o.hostname.empty() ? "127.0.0.1" : lower_ascii(o.hostname);
+        o.hostname = o.hostname.empty() ? "127.0.0.1" : utils::lower_ascii(o.hostname);
         if (o.open_firewall) return invalid("--open-firewall makes no sense with --no-tls (the listener is loopback only)");
         if (!o.allow_ip.empty()) return invalid("--allow-ip makes no sense with --no-tls (the listener is loopback only)");
     }
@@ -208,7 +203,7 @@ std::optional<ErrorInfo> validate_options(Options& o) {
 
 std::optional<ErrorInfo> validate_teardown_options(TeardownOptions& o) {
     if (!o.hostname.empty()) {
-        o.hostname = lower_ascii(o.hostname);
+        o.hostname = utils::lower_ascii(o.hostname);
         if (auto e = hostname_error(o.hostname)) return invalid("--hostname: " + *e);
     }
     if (o.port != 0)
@@ -424,39 +419,10 @@ std::string elevation_text(ElevationType type) {
 
 } // namespace
 
-Plan MakePlan(const Diagnosis& d, const Options& o) {
-    Plan p;
-    p.operation = "setup";
-    p.tls = d.tls;
-    p.hostname = d.hostname;
-    p.port = d.port;
-    p.prefix = d.prefix;
-    p.ipports = d.ipports;
-    p.sid = d.sid;
-    p.user = d.user;
-    p.elevation = d.elevation;
-    p.url = endpoint_url(d.tls, d.hostname, d.port);
-    p.cert_mode = o.cert_mode;
-    p.force_binding = o.force_binding;
-    p.open_firewall = o.open_firewall;
-    p.cer_path = d.cer_path;
-    p.manifest_path = d.manifest_path;
-    p.config_path = d.config_path;
-    p.firewall_display = firewall_rule_name(d.port);
-    p.firewall_rule = d.firewall_name;
+namespace {
 
-    if (!d.identity_error.empty()) {
-        p.error = ErrorInfo{"USER_NOT_FOUND", d.identity_error, 2};
-        return p;
-    }
-
-    // ---- diagnosis items ----
-    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
-    if (d.manifest_unreadable) p.diagnosis.push_back({"setup_manifest", "warn", "unreadable: " + d.manifest_path});
-    else if (d.manifest) p.diagnosis.push_back({"setup_manifest", "ok", "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port)});
-    else p.diagnosis.push_back({"setup_manifest", "missing", "no setup recorded (" + d.manifest_path + ")"});
-
-    // ---- certificate ----
+/// MakePlan: certificate.
+void plan_certificate(Plan& p, const Diagnosis& d, const Options& o) {
     const bool tls = d.tls;
     std::string cert_thumb;   // thumbprint to bind when known
     StepItem cert_step;
@@ -501,9 +467,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     }
     p.thumbprint = cert_thumb;
     p.steps.push_back(cert_step);
-    const bool cert_will_be_new = p.create_cert;
+}
 
-    // ---- urlacl ----
+/// MakePlan: urlacl.
+void plan_urlacl(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
     {
         StepItem s = make_step("urlacl", "URL reservation " + d.prefix + " for " + d.user, "", "", true);
         if (!tls) {
@@ -537,8 +505,13 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         }
         p.steps.push_back(s);
     }
+}
 
-    // ---- sslcert ----
+/// MakePlan: sslcert.
+void plan_sslcert(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
     if (!tls) {
         p.steps.push_back(make_step("sslcert", "TLS binding", "skipped", "--no-tls: nothing to bind"));
         p.diagnosis.push_back({"sslcert", "skip", "--no-tls"});
@@ -590,8 +563,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         p.steps.push_back(s);
         p.diagnosis.push_back({"sslcert", diag_status, diag});
     }
+}
 
-    // ---- firewall ----
+/// MakePlan: firewall.
+void plan_firewall(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     if (!tls) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--no-tls: loopback only"));
     } else if (!o.open_firewall) {
@@ -610,15 +586,21 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         p.steps.push_back(make_step("firewall", "Firewall rule " + p.firewall_display, "would_create", "inbound TCP " + std::to_string(d.port) + " (rule name " + p.firewall_rule + ")", true));
         p.diagnosis.push_back({"firewall", "missing", "rule '" + p.firewall_display + "' does not exist"});
     }
+}
 
-    // ---- certificate_export ----
+/// MakePlan: certificate_export.
+void plan_certificate_export(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
+    const std::string cert_status = p.step("certificate")->status;   // set by plan_certificate
     if (!tls) {
         p.steps.push_back(make_step("certificate_export", "Export the public certificate", "skipped", "--no-tls"));
     } else if (cert_will_be_new || (cert_thumb.empty())) {
         // the certificate does not exist yet (or is blocked)
         p.steps.push_back(make_step("certificate_export", "Export the public certificate to " + d.cer_path,
-                                    cert_step.status == "blocked" ? "skipped" : (d.cer == CerState::Missing ? "would_create" : "would_update"),
-                                    cert_step.status == "blocked" ? "no usable certificate" : "after the certificate exists"));
+                                    cert_status == "blocked" ? "skipped" : (d.cer == CerState::Missing ? "would_create" : "would_update"),
+                                    cert_status == "blocked" ? "no usable certificate" : "after the certificate exists"));
     } else if (d.cer == CerState::Matches) {
         p.steps.push_back(make_step("certificate_export", "Export the public certificate to " + d.cer_path, "unchanged", "file matches the certificate"));
     } else {
@@ -626,8 +608,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
                                     d.cer == CerState::Missing ? "would_create" : "would_update",
                                     d.cer == CerState::Missing ? "not exported yet" : "file holds a different certificate"));
     }
+}
 
-    // ---- config ----
+/// MakePlan: config.
+void plan_config(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     {
         const auto want = desired_config(tls, d.hostname, d.port, o.allow_ip);
         std::vector<std::string> differing;
@@ -649,8 +634,13 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             p.human.push_back({"config_keys", "Edit " + d.config_path + " and set:" + keys});
         }
     }
+}
 
-    // ---- manifest ----
+/// MakePlan: manifest.
+void plan_manifest(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
+    const std::string& cert_thumb = p.thumbprint;   // set by plan_certificate
+    const bool cert_will_be_new = p.create_cert;   // set by plan_certificate
     {
         Manifest m;
         m.mode = tls ? "tls" : "no-tls";
@@ -724,12 +714,16 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
             p.human.push_back({"previous_setup", "A previous setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) +
                                                      " is recorded; it is replaced in the manifest but its reservations stay. Run 'fairyfly mcp teardown' first to remove it cleanly."});
     }
+}
 
-    // ---- port ----
+/// MakePlan: port.
+void plan_port(Plan& p, const Diagnosis& d, const Options&) {
     p.diagnosis.push_back({"port", d.port_listening ? "info" : "ok",
                            d.port_listening ? "port " + std::to_string(d.port) + " is already served (tray or server running)" : "port " + std::to_string(d.port) + " is free"});
+}
 
-    // ---- summary flags ----
+/// MakePlan: summary flags.
+void plan_summary_flags(Plan& p, const Diagnosis&, const Options&) {
     bool nothing = true;
     for (const auto& s : p.steps) {
         if (s.status == "blocked") p.blocked = true;
@@ -739,8 +733,11 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
         }
     }
     p.nothing = nothing && !p.blocked;
+}
 
-    // ---- Left for a human ----
+/// MakePlan: Left for a human.
+void plan_left_for_a_human(Plan& p, const Diagnosis& d, const Options& o) {
+    const bool tls = d.tls;
     if (tls) {
         if (o.cert_mode == CertMode::SelfSigned)
             p.human.push_back({"trust_certificate", "Trust the exported certificate " + d.cer_path + " on every client:\n" + [&] {
@@ -758,47 +755,69 @@ Plan MakePlan(const Diagnosis& d, const Options& o) {
     }
     if (d.tls_probe.status == "ok" && !d.tls_probe.protocol.empty() && (d.tls_probe.protocol == "TLS 1.0" || d.tls_probe.protocol == "TLS 1.1" || d.tls_probe.protocol.rfind("SSL", 0) == 0))
         p.human.push_back({"schannel", "The server negotiated " + d.tls_probe.protocol + ": raise the machine's Schannel policy to TLS 1.2 or newer (registry SCHANNEL\\Protocols)."});
+}
 
-    // ---- next steps ----
+/// MakePlan: next steps.
+void plan_next_steps(Plan& p, const Diagnosis& d, const Options&) {
+    const bool tls = d.tls;
     p.next_steps.push_back("fairyfly mcp token create NAME   (bearer token for a client; shown once)");
     p.next_steps.push_back(tls ? "fairyfly mcp --http   (or --tray --http) serves " + p.url : "fairyfly mcp --http   serves " + p.url);
     p.next_steps.push_back("fairyfly mcp doctor");
+}
+
+}  // namespace
+
+Plan MakePlan(const Diagnosis& d, const Options& o) {
+    Plan p;
+    p.operation = "setup";
+    p.tls = d.tls;
+    p.hostname = d.hostname;
+    p.port = d.port;
+    p.prefix = d.prefix;
+    p.ipports = d.ipports;
+    p.sid = d.sid;
+    p.user = d.user;
+    p.elevation = d.elevation;
+    p.url = endpoint_url(d.tls, d.hostname, d.port);
+    p.cert_mode = o.cert_mode;
+    p.force_binding = o.force_binding;
+    p.open_firewall = o.open_firewall;
+    p.cer_path = d.cer_path;
+    p.manifest_path = d.manifest_path;
+    p.config_path = d.config_path;
+    p.firewall_display = firewall_rule_name(d.port);
+    p.firewall_rule = d.firewall_name;
+
+    if (!d.identity_error.empty()) {
+        p.error = ErrorInfo{"USER_NOT_FOUND", d.identity_error, 2};
+        return p;
+    }
+
+    // ---- diagnosis items ----
+    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
+    if (d.manifest_unreadable) p.diagnosis.push_back({"setup_manifest", "warn", "unreadable: " + d.manifest_path});
+    else if (d.manifest) p.diagnosis.push_back({"setup_manifest", "ok", "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port)});
+    else p.diagnosis.push_back({"setup_manifest", "missing", "no setup recorded (" + d.manifest_path + ")"});
+
+    plan_certificate(p, d, o);
+    plan_urlacl(p, d, o);
+    plan_sslcert(p, d, o);
+    plan_firewall(p, d, o);
+    plan_certificate_export(p, d, o);
+    plan_config(p, d, o);
+    plan_manifest(p, d, o);
+    plan_port(p, d, o);
+    plan_summary_flags(p, d, o);
+    plan_left_for_a_human(p, d, o);
+    plan_next_steps(p, d, o);
     return p;
 }
 
 // ---- MakeTeardownPlan -----------------------------------------------------------------------------------
-Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
-    Plan p;
-    p.operation = "teardown";
-    p.hostname = d.hostname;
-    p.port = d.port;
-    p.elevation = d.elevation;
-    p.manifest_path = d.manifest_path;
-    p.cer_path = d.cer_path;
-    const bool have_manifest = d.manifest.has_value();
-    p.tls = !have_manifest || d.manifest->mode == "tls";
-    p.url = have_manifest ? endpoint_url(p.tls, d.manifest->hostname, d.manifest->port) : std::string();
-    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
-    p.diagnosis.push_back({"setup_manifest", have_manifest ? "ok" : "missing",
-                           have_manifest ? "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) : "no manifest at " + d.manifest_path});
+namespace {
 
-    const bool anything_found = !d.urlacls.empty() || !d.ssl_ours.empty() || d.firewall_exists;
-    if (!have_manifest && !d.explicit_target) {
-        if (anything_found) {
-            p.error = ErrorInfo{"MANIFEST_MISSING", "No setup manifest at " + d.manifest_path + ", but fairyfly reservations exist. Pass --hostname and --port to remove them.", 2};
-            return p;
-        }
-        p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
-        p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
-        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
-        p.steps.push_back(make_step("certificate", "Certificate", "unchanged", "nothing recorded"));
-        p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
-        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "no manifest"));
-        p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
-        p.nothing = true;
-        return p;
-    }
-
+/// MakeTeardownPlan: sslcert.
+void teardown_sslcert(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     // sslcert
     for (const auto& ip : d.ssl_ours) {
         p.teardown.ipports.push_back(ip);
@@ -814,6 +833,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
     }
+}
+
+/// MakeTeardownPlan: urlacl.
+void teardown_urlacl(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // urlacl: only a reservation that setup created and that still has the SDDL setup recorded
     {
         std::vector<std::string> foreign;
@@ -846,6 +870,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
             p.human.push_back({"urlacl_foreign", text});
         }
     }
+}
+
+/// MakeTeardownPlan: firewall.
+void teardown_firewall(Plan& p, const TeardownDiagnosis& d, const TeardownOptions& o) {
+    const bool have_manifest = d.manifest.has_value();
     // firewall: only the rule whose unique internal Name the manifest records (never by display name)
     if (o.keep_firewall) {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "--keep-firewall"));
@@ -863,6 +892,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("firewall", "Firewall rule", "skipped", "setup did not create one"));
     }
+}
+
+/// MakeTeardownPlan: certificate.
+void teardown_certificate(Plan& p, const TeardownDiagnosis& d, const TeardownOptions& o) {
+    const bool have_manifest = d.manifest.has_value();
     // certificate
     if (o.keep_cert) {
         p.steps.push_back(make_step("certificate", "Certificate", "skipped", "--keep-cert"));
@@ -879,6 +913,10 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.teardown.cert_thumbprint = d.cert.thumbprint;
         p.steps.push_back(make_step("certificate", "Remove self-signed certificate and its key", "would_remove", d.cert.thumbprint, true));
     }
+}
+
+/// MakeTeardownPlan: certificate_export.
+void teardown_certificate_export(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     // certificate_export: only the file at the path derived from the validated host name, holding the recorded certificate
     if (!d.cer_refusal.empty()) {
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "skipped", d.cer_refusal + "; not deleted"));
@@ -892,6 +930,11 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
     } else {
         p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
     }
+}
+
+/// MakeTeardownPlan: config.
+void teardown_config(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // config: only a file setup created and nobody has edited since
     if (!have_manifest || !d.manifest->config_created) {
         p.steps.push_back(make_step("config", "mcp.yaml", "skipped", "not created by setup; left untouched"));
@@ -904,10 +947,18 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.steps.push_back(make_step("config", "mcp.yaml", "skipped", d.config_path + " was modified after setup; left in place"));
         p.human.push_back({"config_modified", "Review " + d.config_path + " and delete it yourself if you no longer need it: it was changed after 'mcp setup' created it."});
     }
+}
+
+/// MakeTeardownPlan: manifest.
+void teardown_manifest(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
+    const bool have_manifest = d.manifest.has_value();
     // manifest
     if (have_manifest) p.steps.push_back(make_step("manifest", "Delete " + d.manifest_path, "would_remove", "setup manifest"));
     else p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
+}
 
+/// MakeTeardownPlan: the summary flags and what is left for a human.
+void teardown_summary(Plan& p, const TeardownDiagnosis& d, const TeardownOptions&) {
     bool nothing = true;
     for (const auto& s : p.steps)
         if (changes(s.status)) {
@@ -919,6 +970,50 @@ Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
         p.human.push_back({"config_tls", "Edit " + d.config_path + ": it still says 'tls: true' (and server.host: '+'); the server will not start until you set tls: false or run setup again."});
     if (d.cer_exists || !p.teardown.cert_thumbprint.empty())
         p.human.push_back({"untrust_certificate", "Remove the trusted fairyfly certificate from every client that imported it."});
+}
+
+}  // namespace
+
+Plan MakeTeardownPlan(const TeardownDiagnosis& d, const TeardownOptions& o) {
+    Plan p;
+    p.operation = "teardown";
+    p.hostname = d.hostname;
+    p.port = d.port;
+    p.elevation = d.elevation;
+    p.manifest_path = d.manifest_path;
+    p.cer_path = d.cer_path;
+    const bool have_manifest = d.manifest.has_value();
+    p.tls = !have_manifest || d.manifest->mode == "tls";
+    p.url = have_manifest ? endpoint_url(p.tls, d.manifest->hostname, d.manifest->port) : std::string();
+    p.diagnosis.push_back({"elevation", "info", elevation_text(d.elevation)});
+    p.diagnosis.push_back({"setup_manifest", have_manifest ? "ok" : "missing",
+                           have_manifest ? "recorded setup for " + d.manifest->hostname + ":" + std::to_string(d.manifest->port) : "no manifest at " + d.manifest_path});
+
+    const bool anything_found = !d.urlacls.empty() || !d.ssl_ours.empty() || d.firewall_exists;
+    if (!have_manifest && !d.explicit_target) {
+        if (anything_found) {
+            p.error = ErrorInfo{"MANIFEST_MISSING", "No setup manifest at " + d.manifest_path + ", but fairyfly reservations exist. Pass --hostname and --port to remove them.", 2};
+            return p;
+        }
+        p.steps.push_back(make_step("sslcert", "TLS binding", "unchanged", "not bound"));
+        p.steps.push_back(make_step("urlacl", "URL reservation", "unchanged", "not reserved"));
+        p.steps.push_back(make_step("firewall", "Firewall rule", "unchanged", "no rule"));
+        p.steps.push_back(make_step("certificate", "Certificate", "unchanged", "nothing recorded"));
+        p.steps.push_back(make_step("certificate_export", "Exported certificate", "unchanged", "no file"));
+        p.steps.push_back(make_step("config", "mcp.yaml", "unchanged", "no manifest"));
+        p.steps.push_back(make_step("manifest", "Setup manifest", "unchanged", "no manifest"));
+        p.nothing = true;
+        return p;
+    }
+
+    teardown_sslcert(p, d, o);
+    teardown_urlacl(p, d, o);
+    teardown_firewall(p, d, o);
+    teardown_certificate(p, d, o);
+    teardown_certificate_export(p, d, o);
+    teardown_config(p, d, o);
+    teardown_manifest(p, d, o);
+    teardown_summary(p, d, o);
     return p;
 }
 

@@ -1,0 +1,63 @@
+#pragma once
+// `fairyfly doctor`: each check is a probe (what the desktop, the process list or the registry say; Win32) and a
+// judge (what that means; pure, unit-tested). CommandHandler::handle_doctor runs the probes and collects the judges.
+#include <nlohmann/json.hpp>
+
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace fairyfly::cli::doctor {
+
+/// One line of the report. status: pass | warn | fail | info.
+struct Check {
+    std::string name;
+    std::string status;
+    std::string message;
+    std::string details;
+    std::string remediation;
+};
+
+nlohmann::json to_json(const Check& check);
+/// error (a fail), warning (a warn) or ok.
+std::string overall_health(const std::vector<Check>& checks);
+
+// ---- judges ----
+Check judge_desktop(const std::string& window_station, const std::string& desktop);
+
+struct ProcessScan {
+    bool logon = false;  ///< saplogon.exe
+    bool gui = false;    ///< sapgui.exe
+    bool pad = false;    ///< saplgpad.exe
+    std::size_t matched = 0;          ///< SAP GUI processes found
+    std::size_t toolhelp_count = 0;   ///< processes Toolhelp listed
+    unsigned long toolhelp_error = 0;
+    bool fallback_attempted = false;  ///< PSAPI ran (Toolhelp found no SAP GUI)
+    std::size_t fallback_count = 0;
+    unsigned long fallback_error = 0;
+};
+Check judge_processes(const ProcessScan& scan);
+
+/// HKCU\Software\SAP\SAPGUI Front\SAP Frontend Server\Security
+struct ClientSecurity {
+    bool key_found = false;
+    std::optional<unsigned long> user_scripting;
+    std::optional<unsigned long> warn_on_attach;
+    std::optional<unsigned long> warn_on_connection;
+};
+Check judge_client_security(const ClientSecurity& security);
+
+Check judge_engine(bool available);
+/// From AutomationEngine::get_application_info().
+Check judge_sessions(const nlohmann::json& application_info);
+/// get_application_info threw.
+Check judge_sessions_error(const std::string& what);
+
+// ---- probes (Windows; elsewhere they report "unknown") ----
+/// Name of this process's window station and of its thread's desktop ("Unknown" when it cannot be read).
+void probe_desktop(std::string& window_station, std::string& desktop);
+ProcessScan probe_processes();
+ClientSecurity probe_client_security();
+
+}  // namespace fairyfly::cli::doctor

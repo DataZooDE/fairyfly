@@ -1,4 +1,5 @@
 #include "include/menu_navigation.h"
+#include "include/string_utils.h"
 #include "include/constants.h"
 #include <algorithm>
 #include <cctype>
@@ -6,18 +7,10 @@
 namespace fairyfly::sap {
 
 namespace {
-std::string trim(const std::string& text) {
-    const auto first = std::find_if_not(text.begin(), text.end(),
-        [](unsigned char c) { return std::isspace(c) != 0; });
-    const auto last = std::find_if_not(text.rbegin(), text.rend(),
-        [](unsigned char c) { return std::isspace(c) != 0; }).base();
-    return first < last ? std::string(first, last) : std::string();
-}
-
 std::string menu_text(const ComGuiElementPtr& item) {
     std::string text;
     try { text = item->get_property_string(L"Text"); } catch (const std::exception&) {}
-    if (trim(text).empty()) {
+    if (utils::trim(text).empty()) {
         try { text = item->get_name(); } catch (const std::exception&) {}
     }
     return text;
@@ -30,7 +23,7 @@ std::string normalize_menu_label(const std::string& label) {
         if (c == '&') continue;
         cleaned.push_back(static_cast<char>(std::tolower(c)));
     }
-    return trim(cleaned);
+    return utils::trim(cleaned);
 }
 
 std::vector<std::string> split_menu_path(const std::string& path) {
@@ -38,7 +31,7 @@ std::vector<std::string> split_menu_path(const std::string& path) {
     size_t start = 0;
     while (start <= path.size()) {
         const auto end = path.find('/', start);
-        const auto piece = trim(path.substr(start, end == std::string::npos ? end : end - start));
+        const auto piece = utils::trim(path.substr(start, end == std::string::npos ? end : end - start));
         if (!piece.empty()) segments.push_back(piece);
         if (end == std::string::npos) break;
         start = end + 1;

@@ -41,6 +41,9 @@ struct KeySpec {
     std::optional<long long> max;
     std::vector<std::string> allowed;   ///< String enum (empty = any)
     std::string env;                    ///< environment variable overriding the key
+    std::vector<std::string> cli;       ///< `fairyfly mcp` options feeding the key (first given wins)
+    /// Copies the value into the server options (apply_config); empty for keys that do not configure the server.
+    std::function<void(mcp::ServeOptions&, const Value&)> apply;
 };
 
 const std::vector<KeySpec>& key_specs();
@@ -98,6 +101,11 @@ using Effective = std::map<std::string, EffectiveValue>;
 Effective resolve(const McpConfig& yaml, const McpConfig& flags, const EnvLookup& env,
                   std::vector<ConfigIssue>* env_issues = nullptr);
 
+/// The same with the environment layer already parsed. The one place that knows the order.
+Effective resolve_layers(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags);
+/// The values of `effective` that a layer set (defaults dropped).
+McpConfig given(const Effective& effective);
+
 /// The environment layer alone (used by resolve and by tests).
 McpConfig env_layer(const EnvLookup& env, std::vector<ConfigIssue>* issues = nullptr);
 
@@ -108,6 +116,10 @@ McpConfig merged_layers(const McpConfig& yaml, const McpConfig& flags, const Env
 /// Sets mode.*, limits.*, tools.families, default_connection, format and server.transport/port/host/sse/
 /// allowed_hosts/cors_origins. insecure_no_auth is never set from configuration (flag only).
 void apply_config(const McpConfig& layers, mcp::ServeOptions& options);
+/// audit.enabled / audit.required / audit.file of one layer (or of merged layers).
+audit::AuditFileSettings audit_settings(const McpConfig& layers);
+/// The same from the three layers: enabled and file flag > env > yaml, required from ANY layer (monotonic, fail safe).
+audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags);
 
 // ---- Paths and text -----------------------------------------------------------------------------
 /// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %LOCALAPPDATA%\fairyfly\mcp.yaml.

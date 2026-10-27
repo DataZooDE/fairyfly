@@ -1,0 +1,543 @@
+{
+ "compact": true,
+ "input": {
+  "compact": true,
+  "connection_id": 1,
+  "element_count": 10,
+  "elements": [
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD0",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD1",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "value",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD2",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD3",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "value",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4",
+    "name": "B",
+    "text": "Save",
+    "tooltip": "",
+    "type": "GuiButton"
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD0",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD1",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "value",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD2",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": true,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD3",
+    "label": "",
+    "name": "F",
+    "required": false,
+    "text": "value",
+    "tooltip": "",
+    "type": "GuiTextField",
+    "visible": true
+   },
+   {
+    "capabilities": [],
+    "changeable": false,
+    "enabled": true,
+    "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4",
+    "name": "B",
+    "text": "Save",
+    "tooltip": "",
+    "type": "GuiButton"
+   }
+  ],
+  "hierarchy": {
+   "buttons": [
+    {
+     "capabilities": [],
+     "changeable": false,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4",
+     "name": "B",
+     "text": "Save",
+     "tooltip": "",
+     "type": "GuiButton"
+    },
+    {
+     "capabilities": [],
+     "changeable": false,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4",
+     "name": "B",
+     "text": "Save",
+     "tooltip": "",
+     "type": "GuiButton"
+    }
+   ],
+   "form_fields": [
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD0",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD1",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "value",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD2",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD3",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "value",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD0",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD1",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "value",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD2",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    },
+    {
+     "capabilities": [],
+     "changeable": true,
+     "enabled": true,
+     "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD3",
+     "label": "",
+     "name": "F",
+     "required": false,
+     "text": "value",
+     "tooltip": "",
+     "type": "GuiTextField",
+     "visible": true
+    }
+   ]
+  },
+  "screen_id": "SU01",
+  "tabs_content": [
+   {
+    "element_count": 5,
+    "elements": [
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD0",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD1",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "value",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD2",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD3",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "value",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": false,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4",
+      "name": "B",
+      "text": "Save",
+      "tooltip": "",
+      "type": "GuiButton"
+     }
+    ],
+    "hierarchy": {
+     "buttons": [
+      {
+       "capabilities": [],
+       "changeable": false,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4",
+       "name": "B",
+       "text": "Save",
+       "tooltip": "",
+       "type": "GuiButton"
+      }
+     ],
+     "form_fields": [
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD0",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD1",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "value",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD2",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD3",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "value",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      }
+     ]
+    },
+    "tab_id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB0",
+    "tab_name": "TAB0"
+   },
+   {
+    "element_count": 5,
+    "elements": [
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD0",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD1",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "value",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD2",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": true,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD3",
+      "label": "",
+      "name": "F",
+      "required": false,
+      "text": "value",
+      "tooltip": "",
+      "type": "GuiTextField",
+      "visible": true
+     },
+     {
+      "capabilities": [],
+      "changeable": false,
+      "enabled": true,
+      "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4",
+      "name": "B",
+      "text": "Save",
+      "tooltip": "",
+      "type": "GuiButton"
+     }
+    ],
+    "hierarchy": {
+     "buttons": [
+      {
+       "capabilities": [],
+       "changeable": false,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4",
+       "name": "B",
+       "text": "Save",
+       "tooltip": "",
+       "type": "GuiButton"
+      }
+     ],
+     "form_fields": [
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD0",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD1",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "value",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD2",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      },
+      {
+       "capabilities": [],
+       "changeable": true,
+       "enabled": true,
+       "id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD3",
+       "label": "",
+       "name": "F",
+       "required": false,
+       "text": "value",
+       "tooltip": "",
+       "type": "GuiTextField",
+       "visible": true
+      }
+     ]
+    },
+    "tab_id": "wnd[0]/usr/tabsTABSTRIP/tabpTAB1",
+    "tab_name": "TAB1"
+   }
+  ],
+  "tabs_expanded": true
+ },
+ "output": "# Screen\n\n## Toolbar Buttons\n\n| Button | Tooltip | State   | Technical ID                                       |\n|:-------|:--------|:--------|:---------------------------------------------------|\n| **Save**   |  | Enabled | `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4` |\n| **Save**   |  | Enabled | `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4` |\n\n_Click with_: `fairyfly element click '@active/<button_path>'`\n\n## Form Fields\n\n| Field          | Value | State    |\n|:---------------|:------|:---------|\n| **F**              | value | Editable |\n| **F**              | value | Editable |\n| **[Button: Save]** | -     | Enabled  |\n| **F**              | value | Editable |\n| **F**              | value | Editable |\n| **[Button: Save]** | -     | Enabled  |\n\n## Tabs (Expanded)\n\n### TAB0\n**Technical ID:** `wnd[0]/usr/tabsTABSTRIP/tabpTAB0` | **Elements:** 5\n\n| Field | Value | State | Technical ID |\n|-------|-------|-------|-------------|\n| **F** | _empty_ | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD0` |\n| **F** | value | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD1` |\n| **F** | _empty_ | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD2` |\n| **F** | value | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD3` |\n\n**Buttons:** Save `wnd[0]/usr/tabsTABSTRIP/tabpTAB0/ssubSUB/txtFIELD4`\n\n### TAB1\n**Technical ID:** `wnd[0]/usr/tabsTABSTRIP/tabpTAB1` | **Elements:** 5\n\n| Field | Value | State | Technical ID |\n|-------|-------|-------|-------------|\n| **F** | _empty_ | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD0` |\n| **F** | value | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD1` |\n| **F** | _empty_ | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD2` |\n| **F** | value | Editable | `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD3` |\n\n**Buttons:** Save `wnd[0]/usr/tabsTABSTRIP/tabpTAB1/ssubSUB/txtFIELD4`\n\n---\n**Screen Elements:** 10 top-level\n"
+}

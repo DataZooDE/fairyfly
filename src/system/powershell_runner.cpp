@@ -1,5 +1,7 @@
 #include "include/system/powershell_runner.h"
+#include "include/system/unique_handle.h"
 
+#include "include/text/utf8.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -16,14 +18,6 @@ namespace fairyfly::sys {
 
 namespace {
 
-std::wstring widen(const std::string& s) {
-    if (s.empty()) return {};
-    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    std::wstring out(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-    return out;
-}
-
 std::string first_line(const std::string& s) {
     std::string line = s.substr(0, s.find_first_of("\r\n"));
     if (line.size() > 300) line.resize(300);
@@ -34,10 +28,10 @@ class WindowsPowerShellRunner final : public PowerShellRunner {
 public:
     PsResult run(const std::string& script, const std::string& params_json, int timeout_ms) override {
         PsResult result;
-        const std::wstring wide = widen(script);
+        const std::wstring wide = text::utf8_to_wide(script);
         std::vector<uint8_t> bytes(wide.size() * 2);
         std::memcpy(bytes.data(), wide.data(), bytes.size());
-        const std::wstring encoded = widen(utils::base64_encode(bytes));
+        const std::wstring encoded = text::utf8_to_wide(utils::base64_encode(bytes));
 
         wchar_t sysdir[MAX_PATH] = {};
         GetSystemDirectoryW(sysdir, MAX_PATH);
@@ -45,66 +39,48 @@ public:
         std::wstring cmd = L"\"" + exe + L"\" -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand " + encoded;
 
         SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
-        HANDLE out_r = nullptr, out_w = nullptr, err_r = nullptr, err_w = nullptr;
-        if (!CreatePipe(&out_r, &out_w, &sa, 0)) {
+        system::UniqueHandle out_r, out_w, err_r, err_w;   // every return and throw below closes what is open
+        if (!CreatePipe(out_r.out(), out_w.out(), &sa, 0) || !CreatePipe(err_r.out(), err_w.out(), &sa, 0))
             throw PowerShellError{"PS_SCRIPT_FAILED", "could not create pipes for PowerShell"};
-        }
-        if (!CreatePipe(&err_r, &err_w, &sa, 0)) {
-            CloseHandle(out_r); CloseHandle(out_w);
-            throw PowerShellError{"PS_SCRIPT_FAILED", "could not create pipes for PowerShell"};
-        }
-        if (!SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0) ||
-            !SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0)) {
-            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w);
+        if (!SetHandleInformation(out_r.get(), HANDLE_FLAG_INHERIT, 0) || !SetHandleInformation(err_r.get(), HANDLE_FLAG_INHERIT, 0))
             throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell pipe handles"};
-        }
-        HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+        system::UniqueHandle nul(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr));
+        if (!nul) throw PowerShellError{"PS_SCRIPT_FAILED", "could not open PowerShell input sink"};
 
-        if (nul == INVALID_HANDLE_VALUE) {
-            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w);
-            throw PowerShellError{"PS_SCRIPT_FAILED", "could not open PowerShell input sink"};
-        }
         SIZE_T attribute_bytes = 0;
         InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_bytes);
         std::vector<unsigned char> attribute_storage(attribute_bytes);
         auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_storage.data());
-        if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes)) {
-            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w); CloseHandle(nul);
+        if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes))
             throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell handles"};
-        }
         struct AttributeGuard {
             LPPROC_THREAD_ATTRIBUTE_LIST value;
             ~AttributeGuard() { DeleteProcThreadAttributeList(value); }
         } attribute_guard{attributes};
-        std::array<HANDLE, 3> inherited{nul, out_w, err_w};
+        std::array<HANDLE, 3> inherited{nul.get(), out_w.get(), err_w.get()};   // the child inherits only these
         if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                       inherited.data(), sizeof inherited, nullptr, nullptr)) {
-            CloseHandle(out_r); CloseHandle(out_w); CloseHandle(err_r); CloseHandle(err_w); CloseHandle(nul);
+                                       inherited.data(), sizeof inherited, nullptr, nullptr))
             throw PowerShellError{"PS_SCRIPT_FAILED", "could not restrict PowerShell handles"};
-        }
         STARTUPINFOEXW si{};
         si.StartupInfo.cb = sizeof si;
         si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput = nul;
-        si.StartupInfo.hStdOutput = out_w;
-        si.StartupInfo.hStdError = err_w;
+        si.StartupInfo.hStdInput = nul.get();
+        si.StartupInfo.hStdOutput = out_w.get();
+        si.StartupInfo.hStdError = err_w.get();
         si.lpAttributeList = attributes;
         PROCESS_INFORMATION pi{};
 
-        const std::wstring env_name = widen(kParamsEnvVar);
-        SetEnvironmentVariableW(env_name.c_str(), widen(params_json).c_str());
+        config::set_process_env(kParamsEnvVar, params_json);
         const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE,
                                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
                                             nullptr, nullptr, &si.StartupInfo, &pi);
-        SetEnvironmentVariableW(env_name.c_str(), nullptr);
-        CloseHandle(out_w);
-        CloseHandle(err_w);
-        if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
-        if (!created) {
-            CloseHandle(out_r);
-            CloseHandle(err_r);
-            throw PowerShellError{"PS_SCRIPT_FAILED", "could not start powershell.exe"};
-        }
+        config::unset_process_env(kParamsEnvVar);
+        // the child holds its own copies; ours would keep the pipes open after it exits
+        out_w.reset();
+        err_w.reset();
+        nul.reset();
+        if (!created) throw PowerShellError{"PS_SCRIPT_FAILED", "could not start powershell.exe"};
+        const system::UniqueHandle process(pi.hProcess), thread(pi.hThread);
 
         auto drain = [](HANDLE h, std::string& into) {
             DWORD avail = 0;
@@ -117,25 +93,21 @@ public:
         };
         const ULONGLONG deadline = GetTickCount64() + static_cast<ULONGLONG>(timeout_ms);
         for (;;) {
-            drain(out_r, result.out);
-            drain(err_r, result.err);
-            if (WaitForSingleObject(pi.hProcess, 25) == WAIT_OBJECT_0) break;
+            drain(out_r.get(), result.out);
+            drain(err_r.get(), result.err);
+            if (WaitForSingleObject(process.get(), 25) == WAIT_OBJECT_0) break;
             if (GetTickCount64() > deadline) {
-                TerminateProcess(pi.hProcess, 1);
-                WaitForSingleObject(pi.hProcess, 2000);
+                TerminateProcess(process.get(), 1);
+                WaitForSingleObject(process.get(), 2000);
                 result.timed_out = true;
                 break;
             }
         }
-        drain(out_r, result.out);
-        drain(err_r, result.err);
+        drain(out_r.get(), result.out);
+        drain(err_r.get(), result.err);
         DWORD code = 0;
-        GetExitCodeProcess(pi.hProcess, &code);
+        GetExitCodeProcess(process.get(), &code);
         result.exit_code = static_cast<int>(code);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        CloseHandle(out_r);
-        CloseHandle(err_r);
         return result;
     }
 };
