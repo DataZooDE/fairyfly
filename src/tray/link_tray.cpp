@@ -21,9 +21,12 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     if (link.state == "connected") model.icon = IconState::Running;
     else if (link.state == "paused") model.icon = IconState::Warning;
     else model.icon = IconState::Stopped;
+    const std::string clock = link.state == "connected" ? clock_skew_text(link) : std::string();
+    if (!clock.empty()) model.icon = IconState::Warning;   // connected, but every call is refused until the clock is synced
 
     if (link.paired) {
         model.items.push_back(item(who(link) + ": " + link.state, TrayAction::None, false));
+        if (!clock.empty()) model.items.push_back(item(clock, TrayAction::None, false));
         if (link.trail_on) model.items.push_back(item(trail_menu_text(link), TrayAction::None, false));
         model.items.push_back(separator());
         if (link.paused) model.items.push_back(item("Resume", TrayAction::LinkResume));
@@ -73,6 +76,10 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         tooltip += writes.locked                                ? " (read-only)"
                    : writes.allowed && !writes.enforced ? " (changes allowed)"
                                                         : " (changes need your approval)";
+    if (!clock.empty()) {   // before the names: the tooltip is cut at 127 bytes
+        const auto d = link.clock_skew_s < 0 ? -link.clock_skew_s : link.clock_skew_s;
+        tooltip += " - clock " + std::to_string(d) + " s " + (link.clock_skew_s < 0 ? "ahead" : "behind") + ", sync it";
+    }
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
     if (tooltip.size() > 127) tooltip = tooltip.substr(0, 124) + "...";
@@ -128,6 +135,8 @@ void LinkTrayController::on_tick() {
         notify(trail_balloon_text(link_));
         last_trail_ = link_.trail_on;
     }
+    if (link_.clock_skew_s != 0 && last_clock_skew_ == 0) notify(clock_skew_text(link_));   // once, when it starts
+    last_clock_skew_ = link_.clock_skew_s;
     const std::string state = link_.state;
     if (state == last_state_) return;
     // "not running" before the first status is written (start) or after Quit says nothing new
