@@ -1517,3 +1517,40 @@ TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][c
     REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
     CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
 }
+
+TEST_CASE("link tray: a desktop clock off by minutes is shown with the fix", "[tray][link_tray][clock]") {
+    auto v = paired("connected");
+    v.clock_skew_s = 346;
+    const auto m = build_link_menu(v);
+    CHECK(m.icon == IconState::Warning);
+    const auto labels = top_labels(m);
+    REQUIRE(labels.size() > 1);
+    CHECK(labels[1].find("346 s behind") != std::string::npos);
+    CHECK(labels[1].find("Sync now") != std::string::npos);
+    CHECK(m.tooltip.find("clock 346 s behind") != std::string::npos);
+    CHECK(m.tooltip.size() <= 127);
+    v.clock_skew_s = -120;
+    CHECK(clock_skew_text(v).find("120 s ahead") != std::string::npos);
+    v.clock_skew_s = 0;
+    CHECK(clock_skew_text(v).empty());
+    CHECK(build_link_menu(v).icon == IconState::Running);
+}
+
+TEST_CASE("link tray controller: one balloon when the clock goes off, none while it stays off", "[tray][link_tray][clock]") {
+    Fixture f;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    LinkTrayController controller(services, f.paths);
+    f.link.current = paired("connected");
+    controller.on_tick();
+    const auto before = f.host.balloons.size();
+    f.link.current.clock_skew_s = 346;
+    controller.on_tick();
+    controller.on_tick();
+    REQUIRE(f.host.balloons.size() == before + 1);
+    CHECK(f.host.balloons.back().find("346 s behind") != std::string::npos);
+    f.link.current.clock_skew_s = 0;
+    controller.on_tick();
+    CHECK(f.host.balloons.size() == before + 1);   // fixed: the menu line goes away, no extra noise
+}
