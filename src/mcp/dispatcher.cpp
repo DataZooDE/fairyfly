@@ -1961,15 +1961,9 @@ ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCall
     const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
         return refuse(c, message, hint);
     };
-    const ToolSpec* spec = state.spec;
     json& args = state.args;
     const bool selection_input = state.selection_input;
     const Principal& principal = ctx.principal;
-    std::string& reattach_note = state.reattach_note;
-    bool& reattach_refused = state.reattach_refused;
-    const auto reattach_only_session = [&](const std::string& recorded, const std::string& stale_id) {
-        return reattach_only_session_for(*spec, name, principal, recorded, stale_id, reattach_note, reattach_refused);
-    };
     auto& owner_pre_facts = state.owner_pre_facts;
     auto& login_pre_facts = state.login_pre_facts;
     const auth::InitialScreen& selection_initial = state.selection_initial;
