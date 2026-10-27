@@ -1,3 +1,5 @@
+#include "include/com/control_views.h"
+#include "include/shell_kind.h"
 #include "include/com_automation_engine.h"
 #include "include/element_errors.h"
 #include "include/object_tree_diag.h"
@@ -53,16 +55,6 @@ namespace fairyfly {
 namespace sap {
 
 using utils::TraceGuard;
-
-static ComGuiElementPtr find_element_if_present(const ComGuiSessionPtr& session,
-                                                const std::string& path) {
-    try {
-        return session->find_element_by_id(path);
-    } catch (const ComException& error) {
-        if (!is_missing_element_error(error.what())) throw;
-        return nullptr;
-    }
-}
 
 /// State of a tab page for the inactive-tab check: whether it exists, its caption and whether it is the strip's
 /// SelectedTab. Any COM failure reads as "unknown" (not found), so the check never turns into a new error.
@@ -186,7 +178,7 @@ bool ComAutomationEngine::owner_window_allowed(const ComGuiSessionPtr& session) 
 }
 
 Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -221,8 +213,7 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
         result.data["connection_id"] = current_connection_->get_id();
         result.data["session_id"] = current_session_->get_id();
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Attached to SAP session via window click (duration: {}ms)", result.duration.count());
 
     } catch (const ComException& e) {
@@ -253,8 +244,131 @@ Result ComAutomationEngine::attach_by_session_id(const std::string& session_id) 
     return result;
 }
 
+/// Step 1 of a launch: SAP GUI's own OpenConnection (fast, in-process, no sapshcut security prompt), bound when it
+/// yields a session within two seconds.
+ComAutomationEngine::NativeOpen ComAutomationEngine::open_native_connection(const std::string& connection_name, json& trace) {
+    NativeOpen out;
+    try {
+        if (!app_) {
+            app_ = ComGuiApplication::create();
+        }
+        if (app_) {
+            spdlog::info("Attempting native COM OpenConnection('{}')", connection_name);
+            auto conn = app_->open_connection(connection_name, true, false);
+            out.opened = conn != nullptr;
+            if (conn) {
+                try {
+                    out.scripting_disabled = conn->get_bool_property(L"DisabledByServer");
+                } catch (const ComException&) {
+                    // Older SAP GUI versions may not expose this property.
+                }
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                while (!out.scripting_disabled && conn->get_session_count() == 0 &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
+                }
+            }
+            if (conn && conn->get_session_count() > 0) {
+                bind_session(conn, conn->get_session(0));
+                out.session_created = true;
+                spdlog::info("Native COM OpenConnection established session: {}", current_session_->get_id());
+                trace.push_back({
+                    {"step", "native_open_connection"},
+                    {"success", true},
+                    {"session_id", current_session_->get_id()}
+                });
+            }
+        }
+    } catch (const SapLogonNotRunningException& e) {
+        out.logon_missing = true;
+        out.error = e.what();
+        spdlog::warn("Launch refused: {}", out.error);
+    } catch (const std::exception& e) {
+        out.error = e.what();
+        spdlog::debug("Native COM OpenConnection attempt failed: {}", out.error);
+    }
+    return out;
+}
+
+/// Every session SAP GUI has open now (a launch must yield a new one; an existing session on the same SAP Logon
+/// entry is no evidence that it worked).
+std::vector<ConnectionLauncher::ExistingSession> ComAutomationEngine::open_sessions_now() const {
+    std::vector<ConnectionLauncher::ExistingSession> existing_sessions;
+    for (int c = 0; c < app_->get_connection_count(); ++c) {
+        auto existing_connection = app_->get_connection(c);
+        if (!existing_connection) continue;
+        for (int s = 0; s < existing_connection->get_session_count(); ++s) {
+            auto existing_session = existing_connection->get_session(s);
+            if (existing_session) {
+                existing_sessions.push_back({existing_session->get_id(), existing_session->get_server_session_key(),
+                                             existing_session});
+            }
+        }
+    }
+    return existing_sessions;
+}
+
+/// The explicit opt-in fallback when native COM did not open a connection: sapshcut, then wait for a NEW session of
+/// that entry (an existing one is not evidence that this launch succeeded) and bind it. true: a session is bound.
+bool ComAutomationEngine::launch_by_sapshcut(const std::string& connection_name, json& trace) {
+    // A launched session must be new; an existing session on the same
+    // SAP Logon entry is not evidence that this launch succeeded.
+    if (!app_) throw std::runtime_error("Cannot inspect SAP sessions before launch");
+    connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
+    const std::vector<ConnectionLauncher::ExistingSession> existing_sessions = open_sessions_now();
+
+    bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name);
+    trace.push_back({
+        {"step", "launch_sapshcut"},
+        {"success", launch_success}
+    });
+
+    if (!launch_success) {
+        throw std::runtime_error("Failed to launch sapshcut.exe");
+    }
+
+    // Step 3: Wait for session to be created
+    auto [connection, session] = connection_launcher_->wait_for_session(
+        connection_name, constants::SESSION_CREATION_TIMEOUT_SEC, existing_sessions);
+    const bool session_created = (connection != nullptr && session != nullptr);
+
+    if (session_created) {
+        bind_session(connection, session);
+    }
+    trace.push_back({
+        {"step", "wait_for_session"},
+        {"success", session_created},
+        {"timeout_seconds", constants::SESSION_CREATION_TIMEOUT_SEC}
+    });
+    return session_created;
+}
+
+/// No session after the launch: SAP_GUI_SECURITY_PROMPT when sapshcut's connection waits for the SAP GUI Security
+/// dialog, SESSION_TIMEOUT otherwise.
+void ComAutomationEngine::no_session_error(Result& result, bool used_sapshcut) const {
+    result.status = Result::Status::Error;
+    if (used_sapshcut && connection_launcher_ &&
+        connection_launcher_->wait_failure() == ConnectionLauncher::WaitFailure::SecurityPrompt) {
+        result.error["code"] = "SAP_GUI_SECURITY_PROMPT";
+        result.error["message"] = "SAP GUI Security is waiting for a decision on the shortcut connection";
+        result.error["suggestions"] = json::array({
+            "Review the SAP GUI Security dialog for this connection",
+            "Use native SAP GUI launch when available"
+        });
+    } else {
+        result.error["code"] = "SESSION_TIMEOUT";
+        result.error["message"] = "Session was not created within timeout period";
+        result.error["suggestions"] = json::array({
+            "Verify the SAP Logon entry is configured and reachable",
+            "Check that SAP GUI scripting is enabled",
+            "Ensure SAP system is accessible and responding",
+            "Try increasing timeout or manual login first"
+        });
+    }
+}
+
 Result ComAutomationEngine::launch_connection(const std::string& connection_name, bool allow_sapshcut) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     json trace = json::array();  // Diagnostic trace
 
@@ -265,51 +379,13 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         trace.push_back({{"step", "launch_start"}, {"connection_name", connection_name}});
 
         // Step 1: Try native COM OpenConnection first (fast, in-process, avoids sapshcut security prompt)
-        bool session_created = false;
-        bool native_connection_opened = false;
-        bool backend_scripting_disabled = false;
+        const NativeOpen native = open_native_connection(connection_name, trace);
+        bool session_created = native.session_created;
+        const bool native_connection_opened = native.opened;
+        const bool backend_scripting_disabled = native.scripting_disabled;
+        const bool sap_logon_missing = native.logon_missing;
+        const std::string& native_error = native.error;
         bool used_sapshcut = false;
-        bool sap_logon_missing = false;
-        std::string native_error;
-        try {
-            if (!app_) {
-                app_ = ComGuiApplication::create();
-            }
-            if (app_) {
-                spdlog::info("Attempting native COM OpenConnection('{}')", connection_name);
-                auto conn = app_->open_connection(connection_name, true, false);
-                native_connection_opened = conn != nullptr;
-                if (conn) {
-                    try {
-                        backend_scripting_disabled = conn->get_bool_property(L"DisabledByServer");
-                    } catch (const ComException&) {
-                        // Older SAP GUI versions may not expose this property.
-                    }
-                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-                    while (!backend_scripting_disabled && conn->get_session_count() == 0 &&
-                           std::chrono::steady_clock::now() < deadline) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(constants::SESSION_WAIT_INTERVAL_MS));
-                    }
-                }
-                if (conn && conn->get_session_count() > 0) {
-                    bind_session(conn, conn->get_session(0));
-                    session_created = true;
-                    spdlog::info("Native COM OpenConnection established session: {}", current_session_->get_id());
-                    trace.push_back({
-                        {"step", "native_open_connection"},
-                        {"success", true},
-                        {"session_id", current_session_->get_id()}
-                    });
-                }
-            }
-        } catch (const SapLogonNotRunningException& e) {
-            sap_logon_missing = true;
-            native_error = e.what();
-            spdlog::warn("Launch refused: {}", native_error);
-        } catch (const std::exception& e) {
-            native_error = e.what();
-            spdlog::debug("Native COM OpenConnection attempt failed: {}", native_error);
-        }
 
         if (!session_created && (native_connection_opened || !allow_sapshcut || sap_logon_missing)) {
             const char* code = native_connection_opened ? "SESSION_NOT_READY"
@@ -328,8 +404,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
                                        "(it can stay minimized), then call the launch again.";
             }
             if (!native_error.empty()) result.error["native_error"] = native_error;
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            result.duration = timer.elapsed();
             result.diagnostics["trace"] = trace;
             return result;
         }
@@ -337,71 +412,12 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         if (!session_created) {
             // Step 2: Explicit opt-in fallback when native COM did not open a connection.
             used_sapshcut = true;
-            // A launched session must be new; an existing session on the same
-            // SAP Logon entry is not evidence that this launch succeeded.
-            std::vector<ConnectionLauncher::ExistingSession> existing_sessions;
-            if (!app_) throw std::runtime_error("Cannot inspect SAP sessions before launch");
-            connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
-            for (int c = 0; c < app_->get_connection_count(); ++c) {
-                auto existing_connection = app_->get_connection(c);
-                if (!existing_connection) continue;
-                for (int s = 0; s < existing_connection->get_session_count(); ++s) {
-                    auto existing_session = existing_connection->get_session(s);
-                    if (existing_session) {
-                        existing_sessions.push_back({existing_session->get_id(),
-                                                     existing_session->get_server_session_key(),
-                                                     existing_session});
-                    }
-                }
-            }
-
-            bool launch_success = ConnectionLauncher::launch_sapshcut(connection_name);
-            trace.push_back({
-                {"step", "launch_sapshcut"},
-                {"success", launch_success}
-            });
-
-            if (!launch_success) {
-                throw std::runtime_error("Failed to launch sapshcut.exe");
-            }
-
-            // Step 3: Wait for session to be created
-            auto [connection, session] = connection_launcher_->wait_for_session(
-                connection_name, constants::SESSION_CREATION_TIMEOUT_SEC, existing_sessions);
-            session_created = (connection != nullptr && session != nullptr);
-
-            if (session_created) {
-                bind_session(connection, session);
-            }
-            trace.push_back({
-                {"step", "wait_for_session"},
-                {"success", session_created},
-                {"timeout_seconds", constants::SESSION_CREATION_TIMEOUT_SEC}
-            });
+            session_created = launch_by_sapshcut(connection_name, trace);
         }
 
         if (!session_created) {
-            result.status = Result::Status::Error;
-            if (used_sapshcut && connection_launcher_ &&
-                connection_launcher_->wait_failure() == ConnectionLauncher::WaitFailure::SecurityPrompt) {
-                result.error["code"] = "SAP_GUI_SECURITY_PROMPT";
-                result.error["message"] = "SAP GUI Security is waiting for a decision on the shortcut connection";
-                result.error["suggestions"] = json::array({
-                    "Review the SAP GUI Security dialog for this connection",
-                    "Use native SAP GUI launch when available"
-                });
-            } else {
-                result.error["code"] = "SESSION_TIMEOUT";
-                result.error["message"] = "Session was not created within timeout period";
-                result.error["suggestions"] = json::array({
-                    "Verify the SAP Logon entry is configured and reachable",
-                    "Check that SAP GUI scripting is enabled",
-                    "Ensure SAP system is accessible and responding",
-                    "Try increasing timeout or manual login first"
-                });
-            }
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            no_session_error(result, used_sapshcut);
+            result.duration = timer.elapsed();
             result.diagnostics["trace"] = trace;
             return result;
         }
@@ -418,7 +434,6 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             {"status", "success"}
         });
 
-        auto end = std::chrono::high_resolution_clock::now();
         result.status = Result::Status::Success;
         result.data["connection_name"] = connection_name;
         result.data["connection_id"] = conn_id;
@@ -426,7 +441,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         result.data["message"] = fmt::format("Launched SAP connection '{}' using {}", connection_name,
                                                used_sapshcut ? "sapshcut" : "native COM");
 
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         result.diagnostics["trace"] = trace;
         result.diagnostics["timing_ms"] = result.duration.count();
 
@@ -438,7 +453,6 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
         spdlog::info("Successfully launched SAP connection '{}' (duration: {}ms)", connection_name, result.duration.count());
 
     } catch (const std::exception& e) {
-        auto end = std::chrono::high_resolution_clock::now();
 
         trace.push_back({
             {"step", "exception"},
@@ -452,7 +466,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
             "Check SAP GUI scripting is enabled (Options → Accessibility & Scripting)",
             fmt::format("Verify connection '{}' is configured in SAP Logon", connection_name)
         }));
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         result.diagnostics["trace"] = trace;
         result.diagnostics["timing_ms"] = result.duration.count();
 
@@ -463,7 +477,7 @@ Result ComAutomationEngine::launch_connection(const std::string& connection_name
 }
 
 Result ComAutomationEngine::disconnect() {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -476,8 +490,7 @@ Result ComAutomationEngine::disconnect() {
         result.status = Result::Status::Success;
         result.data["message"] = "Disconnected from SAP";
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Disconnected from SAP");
 
     } catch (const std::exception& e) {
@@ -690,7 +703,7 @@ std::string ComAutomationEngine::current_server_session_key() const {
 }
 
 Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -699,8 +712,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         if (!request.valid) {
             result.set_error(request.error_code, request.error_message);
             result.error["tcode"] = tcode;
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            result.duration = timer.elapsed();
             return result;
         }
         const std::string& expected_tcode = request.expected_tcode;
@@ -736,8 +748,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 if (message) {
                     if (auto rejection = classify_transaction_modal(active_window_id,
                                                                      message->get_text(), expected_tcode)) {
-                        rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            std::chrono::high_resolution_clock::now() - start);
+                        rejection->duration = timer.elapsed();
                         return *rejection;
                     }
                 }
@@ -760,8 +771,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                     result.error["message_type"] = post_sbar_type;
                     attach_status_bar(result, prev_status, post_status);
 
-                    result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::high_resolution_clock::now() - start);
+                    result.duration = timer.elapsed();
                     spdlog::warn("Transaction {} failed with statusbar error [{}]: {}", tcode, post_sbar_type, post_sbar_text);
                     return result;
                 }
@@ -805,8 +815,7 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 }
                 result.error["tcode"] = tcode;
                 result.error["actual_tcode"] = actual_tcode;
-                result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start);
+                result.duration = timer.elapsed();
                 return result;
             }
         }
@@ -817,20 +826,17 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
         result.data["message"] = "Transaction started";
         attach_status_bar(result, prev_status, post_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Executed transaction {} (duration: {}ms)", tcode, result.duration.count());
 
     } catch (const ComException& e) {
         result.set_error("TRANSACTION_FAILED", e.what());
         result.error["tcode"] = tcode;
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
         spdlog::error("Transaction {} failed: {}", tcode, e.what());
     } catch (const std::exception& e) {
         result.set_error("EXCEPTION", e.what());
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     }
 
     return result;
@@ -857,7 +863,7 @@ ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
 }
 
 Result ComAutomationEngine::click_element(const ElementId& element) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -928,8 +934,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         if (auto rejection = classify_action_status(before_status, after_status, resolved_element.path,
                 elem_type == "GuiButton" || activate_list_label)) {
             attach_status_bar(*rejection, before_status, after_status);
-            rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            rejection->duration = timer.elapsed();
             return *rejection;
         }
         if (activate_list_label) {
@@ -953,8 +958,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
                     same_label, same_window, same_title, before_status, after_status,
                     resolved_element.path)) {
                 attach_status_bar(*unchanged, before_status, after_status);
-                unchanged->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::high_resolution_clock::now() - start);
+                unchanged->duration = timer.elapsed();
                 return *unchanged;
             }
         }
@@ -971,8 +975,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
         result.data["window"] = resolved_element.get_window().id;
         attach_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Clicked element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -987,7 +990,7 @@ Result ComAutomationEngine::click_element(const ElementId& element) {
 }
 
 Result ComAutomationEngine::press_f4(const ElementId& element) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1051,8 +1054,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         if (!f4_dialog) {
             auto outcome = classify_f4_outcome(false, read_action_status(session), resolved_element.path);
             result = *outcome;
-            auto end = std::chrono::high_resolution_clock::now();
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            result.duration = timer.elapsed();
             spdlog::warn("F4 dialog did not open for {}: {}", resolved_element.path,
                          result.error.value("message", ""));
             return result;
@@ -1068,8 +1070,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
         result.data["window"] = resolved_element.get_window().id;
         result.data["f4_dialog_opened"] = (f4_dialog != nullptr);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Pressed F4 for element {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -1084,7 +1085,7 @@ Result ComAutomationEngine::press_f4(const ElementId& element) {
 }
 
 Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_element, const std::string& button_id) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1123,14 +1124,13 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         const auto before_status = read_action_status(session);
 
         // Press the toolbar button
-        elem->press_button(button_id);
+        as_toolbar(*elem).press_button(button_id);
         session->wait_for_completion(500);
         const auto after_status = read_action_status(session);
         if (auto rejection = classify_action_status(before_status, after_status,
                                              resolved_element.path + "/btn_" + button_id, true)) {
             attach_status_bar(*rejection, before_status, after_status);
-            rejection->duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::high_resolution_clock::now() - start);
+            rejection->duration = timer.elapsed();
             return *rejection;
         }
 
@@ -1143,8 +1143,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
         }
         attach_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Pressed toolbar button {} on {} (duration: {}ms)",
                     button_id, resolved_element.path, result.duration.count());
 
@@ -1161,7 +1160,7 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
 }
 
 Result ComAutomationEngine::fill_field(const ElementId& element, const std::string& value) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     try {
@@ -1283,8 +1282,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         if (outcome.display_value) result.data["display_value"] = *outcome.display_value;
         attach_fresh_status_bar(result, before_status, after_status);
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Filled field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
@@ -1300,7 +1298,7 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
 Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
                                             const std::string& column, const std::string& value,
                                             bool checkbox, bool commit) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     try {
         ElementId resolved = resolve_element_path(element);
@@ -1315,7 +1313,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->modify_grid_cell(row, column, value, checkbox, commit);
+        as_grid(*grid).modify_grid_cell(row, column, value, checkbox, commit);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "modify_grid_cell";
@@ -1326,8 +1324,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         result.data["checkbox"] = checkbox;
         result.data["committed"] = commit;
         attach_status_bar(result, before_status, after_status);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
@@ -1338,7 +1335,7 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
 
 Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
                                              const std::string& column) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
     try {
         ElementId resolved = resolve_element_path(element);
@@ -1350,12 +1347,12 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         }
         const std::string type = grid->get_type();
         if (type != "GuiGridView" &&
-            (type != "GuiShell" || grid->get_string_property(L"SubType") != "GridView")) {
+            (type != "GuiShell" || !is_grid_shell(grid->get_string_property(L"SubType")))) {
             result.set_error("WRONG_ELEMENT_TYPE", "Element is not a GridView");
             return result;
         }
         const auto before_status = read_action_status(session);
-        grid->select_grid_row(row, column);
+        as_grid(*grid).select_grid_row(row, column);
         const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "select_grid_row";
@@ -1363,8 +1360,7 @@ Result ComAutomationEngine::select_grid_row(const ElementId& element, int row,
         result.data["row"] = row;
         result.data["column"] = column;
         attach_status_bar(result, before_status, after_status);
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start);
+        result.duration = timer.elapsed();
     } catch (const ComException& e) {
         result.set_error("COM_ERROR", e.what());
     } catch (const std::exception& e) {
@@ -1412,7 +1408,7 @@ Result ComAutomationEngine::read_field(const ElementId& element) {
 }
 
 Result ComAutomationEngine::read_field(const ElementId& element, bool activate_tab) {
-    auto start = std::chrono::high_resolution_clock::now();
+    const Stopwatch timer;
     Result result;
 
     // Tabs activated for the read are put back on EVERY exit path (success, error result, exception): the guard records the
@@ -1486,8 +1482,7 @@ Result ComAutomationEngine::read_field(const ElementId& element, bool activate_t
         }
         attach_status_bar(result, read_action_status(session));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        result.duration = timer.elapsed();
         spdlog::info("Read field {} (duration: {}ms)", resolved_element.path, result.duration.count());
 
     } catch (const ComException& e) {
