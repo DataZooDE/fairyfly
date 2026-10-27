@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### winget: manifests on schema 1.12.0, with PrivacyUrl and the copyright years
+
+- The manifests of `DataZoo.fairyfly` (packaging/winget/templates) use manifest schema 1.12.0, the version
+  microsoft/winget-pkgs recommends (1.10.0 is the oldest it still accepts), add `PrivacyUrl` (the privacy statement in
+  docs/SECURITY.md) and carry the exe's copyright, `Copyright (c) 2025-2026 DataZoo GmbH`.
+- `packaging/winget/tests/Test-WingetTemplates.ps1` (any pwsh 7, run by winget.yml) checks the templates against the
+  winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
+  `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
+
 ### `fairyfly update apply`: the publisher is pinned (security)
 
 - A release must be signed by `O=DataZoo GmbH, C=DE` (organisation and country of the signer's certificate, compared
