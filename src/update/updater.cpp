@@ -138,6 +138,9 @@ Signature authenticode(const fs::path& file) {
     wd.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &action, &wd);
     s.valid = rc == ERROR_SUCCESS;
+    // anything but "no signature" means a signature is there (expired, revoked, tampered, unreadable): such a file is
+    // refused, never treated as an unsigned build (update_model.h)
+    s.present = rc != TRUST_E_NOSIGNATURE;
 
     // the signer's subject (also for an invalid signature, so the message can name it)
     HCERTSTORE store = nullptr;
@@ -167,7 +170,7 @@ Signature authenticode(const fs::path& file) {
     }
     if (msg) CryptMsgClose(msg);
     if (store) CertCloseStore(store, 0);
-    if (!s.valid && s.subject.empty()) s.subject.clear();
+    if (!s.subject.empty()) s.present = true;
     return s;
 }
 
