@@ -1,4 +1,5 @@
 // ComGuiTree: the tree methods of a GuiTree / tree shell (moved out of ComGuiElement).
+#include "include/com/hresult.h"
 #include "include/text/utf8.h"
 #include "include/com/invoke.h"
 #include "include/string_utils.h"
@@ -23,75 +24,20 @@ namespace sap {
 
 std::vector<std::string> ComGuiTree::get_all_node_keys() const {
     std::vector<std::string> keys;
-
     try {
-        // Call GetAllNodeKeys() method on the tree control
-        // This returns a collection object
-        DISPID dispid;
-        HRESULT hr = get_dispid_via_typeinfo(dispatch_, L"GetAllNodeKeys", &dispid);
-        if (FAILED(hr)) {
-            spdlog::debug("Could not get DISPID for GetAllNodeKeys");
-            return keys;
-        }
-
-        VARIANT result_var;
-        com::VariantGuard result_guard(&result_var);
-
-        hr = invoke(dispatch_, dispid, DISPATCH_METHOD, {}, result_guard.get());
-
-        if (SUCCEEDED(hr) && result_var.vt == VT_DISPATCH && result_var.pdispVal) {
-            // Result is a collection - enumerate it
-            IDispatch* coll = result_var.pdispVal;
-
-            // Get Count property
-            DISPID count_dispid;
-            hr = get_dispid_via_typeinfo(coll, L"Count", &count_dispid);
-            if (FAILED(hr)) {
-                return keys;
-            }
-
-            VARIANT count_result_var;
-            com::VariantGuard count_result_guard(&count_result_var);
-
-            hr = invoke(coll, count_dispid, DISPATCH_PROPERTYGET, {}, count_result_guard.get());
-
-            if (SUCCEEDED(hr) && count_result_var.vt == VT_I4) {
-                int count = count_result_var.lVal;
-
-                // Get Item method dispid
-                DISPID item_dispid;
-                hr = get_dispid_via_typeinfo(coll, L"Item", &item_dispid);
-                if (FAILED(hr)) {
-                    return keys;
-                }
-
-                // Enumerate items (0-based indexing)
-                for (int i = 0; i < count; ++i) {
-                    VARIANT item_result_var;
-                    com::VariantGuard item_result_guard(&item_result_var);
-
-                    hr = invoke(coll, item_dispid, DISPATCH_METHOD, {_variant_t(static_cast<long>(i))}, item_result_guard.get());   // VT_I4, as SAP expects
-
-                    if (SUCCEEDED(hr)) {
-                        // CRITICAL FIX: Use safe_bstr_to_string() to handle NULL BSTR and access violations
-                        if (item_result_var.vt == VT_BSTR) {
-                            std::string context = fmt::format("get_all_node_keys item[{}]", i);
-                            std::string key = safe_bstr_to_string(item_result_var, context.c_str());
-                            if (!key.empty()) {
-                                keys.push_back(key);
-                            }
-                        } else if (item_result_var.vt == VT_I4) {
-                            keys.push_back(std::to_string(item_result_var.lVal));
-                        }
-                    }
-                }
+        const auto items = collection_member_items(dispatch_, L"GetAllNodeKeys", DISPATCH_METHOD);
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (items[i].vt == VT_BSTR) {
+                const std::string context = fmt::format("get_all_node_keys item[{}]", i);
+                std::string key = safe_bstr_to_string(items[i], context.c_str());
+                if (!key.empty()) keys.push_back(std::move(key));
+            } else if (items[i].vt == VT_I4) {
+                keys.push_back(std::to_string(items[i].lVal));
             }
         }
-
     } catch (const std::exception& e) {
         spdlog::debug("get_all_node_keys failed: {}", e.what());
     }
-
     return keys;
 }
 
@@ -99,26 +45,8 @@ std::vector<std::string> ComGuiTree::get_tree_column_names() const {
     std::vector<std::string> names;
     if (!dispatch_) return names;
     try {
-        DISPID method_id;
-        if (FAILED(get_dispid_via_typeinfo(dispatch_, L"GetColumnNames", &method_id))) return names;
-        VARIANT result;
-        com::VariantGuard result_guard(&result);
-        if (FAILED(invoke(dispatch_, method_id, DISPATCH_METHOD, {}, result_guard.get())) ||
-            result.vt != VT_DISPATCH || !result.pdispVal) return names;
-        IDispatch* collection = result.pdispVal;
-        DISPID count_id, item_id;
-        if (FAILED(get_dispid_via_typeinfo(collection, L"Count", &count_id)) ||
-            FAILED(get_dispid_via_typeinfo(collection, L"Item", &item_id))) return names;
-        VARIANT count;
-        com::VariantGuard count_guard(&count);
-        if (FAILED(invoke(collection, count_id, DISPATCH_PROPERTYGET, {}, count_guard.get())) ||
-            count.vt != VT_I4) return names;
-        for (int i = 0; i < count.lVal && i < 100; ++i) {
-            _variant_t item;
-            if (SUCCEEDED(invoke(collection, item_id, DISPATCH_METHOD, {_variant_t(i)}, &item)) &&
-                item.vt == VT_BSTR)
-                names.push_back(safe_bstr_to_string(item, "get_tree_column_names item"));
-        }
+        for (const auto& item : collection_member_items(dispatch_, L"GetColumnNames", DISPATCH_METHOD, 100))
+            if (item.vt == VT_BSTR) names.push_back(safe_bstr_to_string(item, "get_tree_column_names item"));
     } catch (const std::exception& e) {
         spdlog::debug("get_tree_column_names failed: {}", e.what());
     }
@@ -149,6 +77,17 @@ std::string ComGuiTree::string_by_key(const wchar_t* method, const std::string& 
         spdlog::debug("{}|exception|key={}|error={}", operation, key, e.what());
         return "";
     }
+}
+
+std::vector<std::string> ComGuiTree::item_texts(const std::string& key, const std::vector<std::string>& columns,
+                                                bool skip_hierarchy) const {
+    std::vector<std::string> texts;
+    texts.reserve(columns.size());
+    for (const auto& column : columns) {
+        const bool skipped = skip_hierarchy && (column.empty() || column == "HierarchyHeader");
+        texts.push_back(skipped ? std::string() : get_item_text(key, column));
+    }
+    return texts;
 }
 
 std::string ComGuiTree::get_node_text_by_key(const std::string& key) const {
@@ -187,8 +126,8 @@ std::string ComGuiTree::get_item_text(const std::string& node_key, const std::st
             std::string context = fmt::format("get_item_text key='{}' col='{}'", node_key, column_name);
             text = safe_bstr_to_string(result_var, context.c_str());
         } else {
-            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr=0x{:08X}",
-                         node_key, column_name, hr);
+            spdlog::debug("get_item_text|invoke_failed|key={}|column={}|hr={}",
+                         node_key, column_name, hresult_hex(hr));
         }
 
         // Cleanup happens automatically via VariantGuard RAII
