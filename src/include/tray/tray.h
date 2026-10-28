@@ -60,10 +60,16 @@ struct LinkView {
     /// The desktop clock's offset to the gateway in seconds (> 0: behind) while the link refuses calls for clock skew
     /// (the running link's status file); 0 when the clock is fine.
     std::int64_t clock_skew_s = 0;
+    /// A call SAP GUI has not answered for 60 s or more (the running link's status file, `stuck_call`): its tool, its
+    /// connection ("" when it named none) and the seconds so far. Empty `stuck_tool`: none.
+    std::string stuck_tool, stuck_connection;
+    std::int64_t stuck_s = 0;
 };
 
 /// The menu line, tooltip part and balloon while the desktop clock is off (clock_skew_s != 0); empty otherwise.
 std::string clock_skew_text(const LinkView& link);
+/// The menu line and balloon while SAP GUI does not answer a call (stuck_tool set); empty otherwise.
+std::string stuck_call_text(const LinkView& link);
 
 /// The persistent menu entry while the audit trail is on; empty while it is off.
 std::string trail_menu_text(const LinkView& link);
@@ -424,6 +430,7 @@ private:
     TrayPaths paths_;
     LinkView link_;
     std::int64_t last_clock_skew_ = 0;   ///< the clock skew seen on the previous tick
+    std::string last_stuck_tool_;        ///< the stuck call seen on the previous tick
     std::string last_state_;   ///< the state seen on the previous tick, for the change notices
     bool last_trail_ = false;  ///< the audit trail as seen on the previous tick
     std::atomic<bool> quit_requested_{false};

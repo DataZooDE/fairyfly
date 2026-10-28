@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Cloud link: a call SAP GUI does not answer is named, and the diagnostic tools no longer wait behind it
+
+- Live 2026-10-27: `gui_screen_read` (SU01, tab `tabpLOGO`) never returned because SAP GUI stopped answering
+  scripting. Every later call, also `gui_doctor` and `gui_session_list`, waited 126 s behind it and failed with
+  "fairyfly is busy: the call did not start within 126 s", and the link tray stayed teal.
+- `gui_doctor` and `gui_session_list` over the link no longer queue behind a call that has run 10 s or longer: they
+  answer `SAP_GUI_NOT_RESPONDING` (isError, `structuredContent.error` with `running_tool`, `connection`,
+  `elapsed_ms`, `started`, `hint`) from the link's own queue, at once or after waiting up to 10 s, and never run
+  later. fairyfly still makes no second COM call into SAP GUI from another thread.
+- Any other call that does not start in time names the blocking call: "...did not start within 126 s; SAP GUI has
+  not answered gui_screen_read on connection 0 for 183 s (started 20:27:21)", with the hint (a hidden SAP dialog;
+  ending the SAP session releases it). The hanging call's own timeout says `SAP_GUI_NOT_RESPONDING` instead of
+  "did not start".
+- Once the running call is 60 s old, a new call fails like that at once instead of waiting its whole time limit
+  in one of libffl's four local call slots (four such waiters kept every further call out, the diagnostic tools too).
+- A call the gateway cancelled while it still waited in the queue no longer runs later: before, a `gui_element_fill`
+  queued behind a hung call ran in SAP once the hidden dialog was closed, although its caller had been told it
+  failed. The main thread now skips it (cancelled, nothing ran), like a call whose caller timed out.
+- A change (destructiveHint) whose caller gets `SAP_GUI_NOT_RESPONDING` while it runs is told that it may still be
+  applied once SAP answers, so the screen is read before a retry (no double fills).
+- The hint, here and in the tray, names a long-running step (e.g. a report started with F8) besides a hidden dialog:
+  a legitimate call over 60 s turns the tray amber too, and back when it finishes.
+- The link tray turns amber after 60 s with a menu line and tooltip naming the call, and one notice; it turns teal
+  again when the call returns (status file `stuck_call`, `src/link/main_thread_tools.*`). docs/LINK.md
+  "What runs where".
+
 ### Configuration: one source for flags, defaults, setup and tray settings
 
 - `fairyfly mcp` refuses a flag value that the key table does not allow (range or allowed values) with

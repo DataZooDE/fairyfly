@@ -67,6 +67,7 @@ add_executable(unit_tests
     unit/test_http_sys_mapping.cpp
     unit/test_command_table.cpp
     unit/test_link_bridge.cpp
+    unit/test_link_hung_call.cpp
     unit/test_link_control.cpp
     unit/test_desktop_approval.cpp
     unit/test_desktop_approval_win32.cpp

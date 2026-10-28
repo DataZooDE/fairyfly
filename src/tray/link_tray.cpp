@@ -24,10 +24,14 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
     else model.icon = IconState::Stopped;
     const std::string clock = link.state == "connected" ? clock_skew_text(link) : std::string();
     if (!clock.empty()) model.icon = IconState::Warning;   // connected, but every call is refused until the clock is synced
+    // connected, but SAP GUI does not answer a call, and every later one waits behind it
+    const std::string stuck = link.state == link::state::kConnected ? stuck_call_text(link) : std::string();
+    if (!stuck.empty()) model.icon = IconState::Warning;
 
     if (link.paired) {
         model.items.push_back(item(who(link) + ": " + link.state, TrayAction::None, false));
         if (!clock.empty()) model.items.push_back(item(clock, TrayAction::None, false));
+        if (!stuck.empty()) model.items.push_back(item(stuck, TrayAction::None, false));
         if (link.trail_on) model.items.push_back(item(trail_menu_text(link), TrayAction::None, false));
         model.items.push_back(separator());
         if (link.paused) model.items.push_back(item("Resume", TrayAction::LinkResume));
@@ -81,6 +85,8 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         const auto d = link.clock_skew_s < 0 ? -link.clock_skew_s : link.clock_skew_s;
         tooltip += " - clock " + std::to_string(d) + " s " + (link.clock_skew_s < 0 ? "ahead" : "behind") + ", sync it";
     }
+    if (!stuck.empty())   // before the names: the tooltip is cut at 127 bytes
+        tooltip += " - SAP GUI not answering " + link.stuck_tool + " (" + std::to_string(link.stuck_s) + " s)";
     if (link.trail_on) tooltip += " - audit trail on";   // before the names: the tooltip is cut at 127 bytes
     if (link.paired) tooltip += " - " + who(link);
     model.tooltip = fit_tooltip(tooltip);
@@ -139,6 +145,8 @@ void LinkTrayController::on_tick() {
     }
     if (link_.clock_skew_s != 0 && last_clock_skew_ == 0) notify(clock_skew_text(link_));   // once, when it starts
     last_clock_skew_ = link_.clock_skew_s;
+    if (!link_.stuck_tool.empty() && last_stuck_tool_.empty()) notify(stuck_call_text(link_));   // once, when it starts
+    last_stuck_tool_ = link_.stuck_tool;
     const std::string state = link_.state;
     if (state == last_state_) return;
     // "not running" before the first status is written (start) or after Quit says nothing new
