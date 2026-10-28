@@ -707,6 +707,7 @@ TEST_CASE("only=fields on a display screen says which read-only fields it left o
     const std::string note = suppressed.at("note");
     CHECK(note.find("4 read-only field(s) not included with only=fields") != std::string::npos);
     CHECK(note.find("use no filter") != std::string::npos);
+    CHECK(note.find("no changeable fields") != std::string::npos);   // nothing kept: say why it looks empty
 
     SECTION("Markdown says so too") {
         const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
@@ -729,6 +730,25 @@ TEST_CASE("only=fields on a display screen says which read-only fields it left o
         cli::apply_screen_filters(entry, filters);
         REQUIRE(entry.contains("suppressed"));   // the password-state display field stays read-only
         CHECK(entry.at("suppressed").at("read_only_fields") == 1);
+        // the screen has changeable fields: the note must not call it a display screen
+        CHECK(entry.at("suppressed").at("note").get<std::string>().find("no changeable fields") == std::string::npos);
+    }
+    SECTION("a long display screen lists at most 50 ids, the count stays complete") {
+        json big = su01_logon_tab(true);
+        auto& tab = big["tabs_content"][0];
+        for (int i = 0; i < 60; ++i) {
+            const json f = {{"id", "wnd[0]/usr/txtF" + std::to_string(i)}, {"type", "GuiTextField"}, {"text", "v"},
+                            {"changeable", false}};
+            tab["elements"].push_back(f);
+            tab["hierarchy"]["form_fields"].push_back(f);
+            big["elements"].push_back(f);
+        }
+        cli::apply_screen_filters(big, filters);
+        const auto& s = big.at("suppressed");
+        CHECK(s.at("read_only_fields") == 64);
+        CHECK(s.at("read_only_field_ids").size() == 50);
+        CHECK(s.at("read_only_field_ids_truncated") == true);
+        CHECK(big.at("tabs_content").at(0).at("suppressed").at("read_only_field_ids").size() == 50);
     }
 }
 

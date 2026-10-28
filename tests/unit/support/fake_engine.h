@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -99,6 +100,14 @@ public:
         return same(id, key);
     }
     std::string current_server_session_key() const override { return server_key; }
+    mutable int key_reads = 0;   ///< how often live_session_key was asked
+    /// nullopt: no live session at the path; otherwise its key from session_keys ("" when unknown or unreadable)
+    std::optional<std::string> live_session_key(const std::string& id) const override {
+        ++key_reads;
+        if (!alive(id)) return std::nullopt;
+        const auto k = session_keys.find(id);
+        return k == session_keys.end() ? std::string() : k->second;
+    }
     Result execute_transaction(const std::string& tcode) override { return record("execute_transaction " + tcode); }
     Result click_element(const ElementId& e) override { return record("click_element " + e.path); }
     Result fill_field(const ElementId& e, const std::string& value) override { return record("fill_field " + e.path + "=" + value); }

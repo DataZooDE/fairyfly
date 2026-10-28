@@ -4,6 +4,7 @@
 
 #include "include/cli_handler.h"
 #include "include/connection_manager.h"
+#include "include/fill_fields.h"
 #include "include/credential_store.h"
 #include "support/fake_engine.h"
 #include "support/temp_dir.h"
@@ -166,6 +167,9 @@ TEST_CASE("command handler: a session replaced while the action ran is SESSION_C
         CHECK(r.error.value("session_id", std::string()) == kSession);
         CHECK(r.error.value("message", std::string()).find("replaced") != std::string::npos);
         CHECK(r.error.contains("hint"));
+        // what the action itself answered stays as evidence (a status bar like "Document 4711 posted")
+        REQUIRE(r.error.contains("action_result"));
+        CHECK(r.error.at("action_result").value("status", std::string()) == "success");
         rig.engine->session_keys[kSession] = "SID-OLD:1";   // the next action starts on the checked session again
     };
     SECTION("key send") { check_changed(rig.handler->handle_send_key("enter", "", 0)); }
@@ -206,4 +210,46 @@ TEST_CASE("command handler: an unchanged session keeps the action's success", "[
     keyless.engine->session_keys[kSession] = "SID-OLD:1";
     keyless.engine->on_call = [&](const std::string&) { keyless.engine->session_keys[kSession] = "SID-NEW:1"; };
     CHECK(code_of(keyless.handler->handle_transaction("SU01", 0)) == "SESSION_CHANGED");
+}
+
+TEST_CASE("command handler: an unreadable session key after the action is inconclusive, never SESSION_CHANGED", "[handler][session]") {
+    // SAP still in a round trip or tearing down (/nend, log off): Info.SystemSessionId reads empty. A save that
+    // succeeded must not be reported as failed (the caller would repeat it).
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-OLD:1";
+    rig.engine->on_call = [&](const std::string&) { rig.engine->session_keys[kSession] = ""; };
+    const Result r = rig.handler->handle_transaction("SU01", 0);
+    INFO(r.to_json().dump());
+    CHECK(r.status == Result::Status::Success);
+    CHECK(r.data.value("session_check", std::string()) == "inconclusive");
+    REQUIRE(r.data.contains("warnings"));
+    CHECK(r.data.at("warnings").dump().find("could not be confirmed") != std::string::npos);
+    CHECK_FALSE(r.data.contains("session_closed"));
+}
+
+TEST_CASE("command handler: fill with fields checks the session once per call", "[handler][session]") {
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-OLD:1";
+    test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    std::vector<sap::FillField> fields(3);
+    fields[0].element = "wnd[0]/usr/txtA"; fields[0].value = "1";
+    fields[1].element = "wnd[0]/usr/txtB"; fields[1].value = "2";
+    fields[2].element = "wnd[0]/usr/txtC"; fields[2].value = "3";
+    const Result ok = rig.handler->handle_fill_fields(fields, "enter", true, 0);
+    INFO(ok.to_json().dump());
+    CHECK(ok.status == Result::Status::Success);
+    CHECK(rig.engine->key_reads == 1);
+
+    SECTION("a session replaced during the call still turns the whole call into SESSION_CHANGED") {
+        rig.engine->key_reads = 0;
+        scripting.on_call = [&](const std::string&) { rig.engine->session_keys[kSession] = "SID-NEW:1"; };
+        const Result r = rig.handler->handle_fill_fields(fields, "enter", true, 0);
+        INFO(r.to_json().dump());
+        CHECK(code_of(r) == "SESSION_CHANGED");
+        CHECK(r.error.contains("action_result"));
+        CHECK(rig.engine->key_reads == 1);
+    }
 }
