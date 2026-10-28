@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Configuration: one source for flags, defaults, setup and tray settings
+
+- `fairyfly mcp` refuses a flag value that the key table does not allow (range or allowed values) with
+  `CONFIG_FLAG_INVALID` (exit 2; `mcp config show` exits 1, `mcp doctor` lists it). Before, the value was dropped
+  from the configuration but still reached the server, e.g. `--call-timeout-ms 1` despite the 1000 ms minimum.
+- The defaults of `fairyfly mcp` exist once, in the server options: the key table, `mcp config show`, the template
+  and the `--help` texts read them, and `--format`/`--transport` check against the key table's allowed values.
+- `mcp setup` reads an existing `mcp.yaml` with the server's own parser, so `tls: True` or `port: 08443` counts as
+  the value the server would use (before, only the literal text `true` did).
+- The names of the trays' saved settings (`link_allow_changes`, `link-autostart-defaulted`) are kept in one table
+  in `tray.h`, and one function creates "Allow changes in SAP" from the settings. A unit test fails when a source
+  file spells one of these names, or the settings key, anywhere else.
+- The MCP tray's "Open audit folder" opens the folder of `audit.file` from `mcp.yaml` when it is set, which is the
+  folder the server writes to.
+
 ## 2026.10.27 (2026-10-27)
 
 ### MCP tray: a Start right after Stop is no longer lost; the doctor unit test no longer touches SAP GUI

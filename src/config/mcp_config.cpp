@@ -73,50 +73,52 @@ KeySpec with(KeySpec spec, std::vector<std::string> cli, std::nullptr_t) {
 std::vector<KeySpec> build_specs() {
     std::vector<KeySpec> s;
     auto add = [&](KeySpec spec) { s.push_back(std::move(spec)); };
+    const mcp::ServeOptions d;   // the defaults live in ServeOptions; the table, the template and --help read them here
+    const auto n = [](auto v) { return Value{static_cast<long long>(v)}; };
 
     KeySpec k = make("default_connection", ValueType::Int, std::nullopt,
                      "Connection index used when a tool call omits 'connection' (unset = none)");
     k.min = 0; k.max = 1000000;
     add(with(k, {"--default-connection"}, &mcp::ServeOptions::default_connection));
-    k = make("format", ValueType::String, Value{std::string("markdown")}, "Text format of tool results: markdown or json");
+    k = make("format", ValueType::String, Value{d.format}, "Text format of tool results: markdown or json");
     k.allowed = {"markdown", "json"};
     add(with(k, {"--format"}, &mcp::ServeOptions::format));
 
-    k = make("server.host", ValueType::String, Value{std::string("127.0.0.1")},
+    k = make("server.host", ValueType::String, Value{d.host},
              "URL prefix host: 127.0.0.1 (default, loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
     add(with(k, {"--mcp-host"}, &mcp::ServeOptions::host));
     k = make("server.port", ValueType::Int, Value{static_cast<long long>(mcp::kDefaultHttpPort)}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
     add(with(k, {"--mcp-port", "--port"}, &mcp::ServeOptions::port));
-    k = make("server.transport", ValueType::String, Value{std::string("stdio")}, "stdio (default) or http");
+    k = make("server.transport", ValueType::String, Value{d.transport}, "stdio (default) or http");
     k.allowed = {"stdio", "http"};
     add(with(k, {"--transport"}, &mcp::ServeOptions::transport));
-    add(with(make("server.tls", ValueType::Bool, Value{false},
+    add(with(make("server.tls", ValueType::Bool, Value{d.tls},
              "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"), {"--tls"}, &mcp::ServeOptions::tls));
     add(with(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
              "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback exempt by default"), {"--allow-ip"}, &mcp::ServeOptions::allow_ip));
-    add(with(make("server.allow_ip_include_loopback", ValueType::Bool, Value{false},
+    add(with(make("server.allow_ip_include_loopback", ValueType::Bool, Value{d.allow_ip_include_loopback},
              "Require loopback clients to match a nonempty server.allow_ip list too"), {"--allow-ip-include-loopback"}, &mcp::ServeOptions::allow_ip_include_loopback));
-    add(with(make("server.sse", ValueType::Bool, Value{true}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"), {"--sse"}, &mcp::ServeOptions::sse));
+    add(with(make("server.sse", ValueType::Bool, Value{d.sse}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"), {"--sse"}, &mcp::ServeOptions::sse));
     add(with(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
              "Extra accepted Host header values (loopback names are always accepted)"), {"--allowed-hosts"}, &mcp::ServeOptions::allowed_hosts));
     add(with(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"), {"--cors-origin"}, &mcp::ServeOptions::cors_origins));
     add(with(make("owner.sap_identities", ValueType::StringList, Value{Vec{}},
              "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint (empty = legacy unrestricted mode)"), {}, &mcp::ServeOptions::owner_sap_identities));
 
-    add(with(make("mode.read_only", ValueType::Bool, Value{false}, "Force the read-only guard (the guard is also the default without allow_write)"), {"--read-only"}, &mcp::ServeOptions::read_only));
-    add(with(make("mode.allow_write", ValueType::Bool, Value{false}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"), {"--allow-write"}, &mcp::ServeOptions::allow_write));
+    add(with(make("mode.read_only", ValueType::Bool, Value{d.read_only}, "Force the read-only guard (the guard is also the default without allow_write)"), {"--read-only"}, &mcp::ServeOptions::read_only));
+    add(with(make("mode.allow_write", ValueType::Bool, Value{d.allow_write}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"), {"--allow-write"}, &mcp::ServeOptions::allow_write));
 
-    k = make("limits.max_result_chars", ValueType::Int, Value{60000LL}, "Truncate text results beyond this many characters");
+    k = make("limits.max_result_chars", ValueType::Int, n(d.max_result_chars), "Truncate text results beyond this many characters");
     k.min = 100; k.max = 100000000;
     add(with(k, {"--max-result-chars"}, &mcp::ServeOptions::max_result_chars));
-    k = make("limits.max_image_bytes", ValueType::Int, Value{2097152LL}, "Refuse screenshots larger than this many bytes");
+    k = make("limits.max_image_bytes", ValueType::Int, n(d.max_image_bytes), "Refuse screenshots larger than this many bytes");
     k.min = 1024; k.max = 1073741824LL;
     add(with(k, {"--max-image-bytes"}, &mcp::ServeOptions::max_image_bytes));
-    k = make("limits.max_calls_per_minute", ValueType::Int, Value{120LL}, "Rate limit for tool calls");
+    k = make("limits.max_calls_per_minute", ValueType::Int, n(d.max_calls_per_minute), "Rate limit for tool calls");
     k.min = 1; k.max = 1000000;
     add(with(k, {"--max-calls-per-minute"}, &mcp::ServeOptions::max_calls_per_minute));
-    k = make("limits.call_timeout_ms", ValueType::Int, Value{120000LL}, "Soft timeout per tool call in milliseconds");
+    k = make("limits.call_timeout_ms", ValueType::Int, n(d.call_timeout_ms), "Soft timeout per tool call in milliseconds");
     k.min = 1000; k.max = 3600000;
     add(with(k, {"--call-timeout-ms"}, &mcp::ServeOptions::call_timeout_ms));
 

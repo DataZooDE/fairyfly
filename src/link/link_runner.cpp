@@ -53,18 +53,20 @@ namespace fairyfly::link {
 
 using json = nlohmann::json;
 
+std::shared_ptr<approval::Standing> saved_standing(std::shared_ptr<tray::TraySettings> settings, std::string name) {
+    return std::make_shared<approval::Standing>([settings, name] { return settings->get(name); },
+                                                [settings, name](const std::string& v) { return settings->set(name, v); });
+}
+
 namespace {
 
 void on_signal(int) { LinkRuntime::process().stop = true; }
 void on_pair_signal(int) { LinkRuntime::process().pair_stop = true; }
 
-/// "Allow changes in SAP" (approval model v2): the standing approval at this desktop, saved for the user in the tray
-/// settings (HKCU), shared by the link tray's switch and the approval window's "Don't ask again".
-std::shared_ptr<approval::Standing> saved_standing() {
+/// The standing approval of this user (HKCU tray settings).
+std::shared_ptr<approval::Standing> user_standing() {
 #ifdef _WIN32
-    std::shared_ptr<tray::TraySettings> settings = tray::make_win32_tray_settings();
-    return std::make_shared<approval::Standing>([settings] { return settings->get("link_allow_changes"); },
-                                                [settings](const std::string& v) { return settings->set("link_allow_changes", v); });
+    return saved_standing(tray::make_win32_tray_settings());
 #else
     return std::make_shared<approval::Standing>();
 #endif
@@ -267,7 +269,7 @@ std::string pair_next_step_now(const std::string& path) {
 LinkRuntime::LinkRuntime(std::shared_ptr<approval::Standing> standing) : standing(std::move(standing)) {}
 
 LinkRuntime& LinkRuntime::process() {
-    static LinkRuntime runtime(saved_standing());
+    static LinkRuntime runtime(user_standing());
     return runtime;
 }
 

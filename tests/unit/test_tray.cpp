@@ -12,6 +12,7 @@
 #include <mutex>
 #include <thread>
 
+#include "include/link/link_runner.h"
 #include "include/tray/mcp_tray.h"
 #include "include/tray/tray_contract.h"
 
@@ -1314,6 +1315,39 @@ AutostartPlan link_plan() {
     return plan;
 }
 } // namespace
+
+TEST_CASE("tray settings: \"Allow changes in SAP\" is stored under its name in the settings table", "[tray][settings]") {
+    // review 2026-10-27 (Codex): the link and the approval test each spelled the value and wired Standing themselves
+    auto settings = std::make_shared<FakeSettings>();
+    const auto standing = fairyfly::link::saved_standing(settings);
+    CHECK_FALSE(standing->on());
+    CHECK(standing->set(true));
+    CHECK(settings->values.at(kLinkAllowChangesSetting) == "1");
+    CHECK(fairyfly::link::saved_standing(settings)->on());   // read back by the next start
+    CHECK(std::find(std::begin(kTraySettingNames), std::end(kTraySettingNames), std::string(kLinkAllowChangesSetting)) !=
+          std::end(kTraySettingNames));
+    CHECK(std::find(std::begin(kTraySettingNames), std::end(kTraySettingNames), std::string(kAutostartDefaultedSetting)) !=
+          std::end(kTraySettingNames));
+}
+
+TEST_CASE("tray settings: no file under src/ spells a setting name or the settings key outside the table", "[tray][settings]") {
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".hpp")) continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel == fs::path("include") / "tray" / "tray.h" || rel == fs::path("include") / "tray" / "tray_contract.h") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (const char* name : kTraySettingNames)
+            if (text.find(std::string("\"") + name + "\"") != std::string::npos) offenders.push_back(rel.string() + ": " + name);
+        if (text.find(R"(DataZoo\\fairyfly\\tray)") != std::string::npos) offenders.push_back(rel.string() + ": settings key");
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}
 
 TEST_CASE("tray start program: fairyfly-tray.exe next to fairyfly.exe when it is installed", "[tray][starter]") {
     const std::string exe = "C:\\Programs\\fairyfly\\fairyfly.exe";

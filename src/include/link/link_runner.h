@@ -25,6 +25,11 @@
 
 namespace fairyfly::link {
 
+/// "Allow changes in SAP" (approval model v2): the standing approval at this desktop, saved for the user in the tray
+/// settings, shared by the link tray's switch and the approval window's "Don't ask again".
+std::shared_ptr<approval::Standing> saved_standing(std::shared_ptr<tray::TraySettings> settings,
+                                                   std::string name = tray::kLinkAllowChangesSetting);
+
 /// %LOCALAPPDATA%\fairyfly\link\state.json (the device key inside is DPAPI-protected).
 std::string default_state_path();
 

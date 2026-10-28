@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <sstream>
 
 #include <map>
 
@@ -7,6 +9,8 @@
 #include "include/commands/cli_app.h"
 #include "include/commands/global_options.h"
 #include "include/commands/mcp_extras.h"
+#include "include/config/environment.h"
+#include "support/env_guard.h"
 
 #include <CLI/CLI.hpp>
 using namespace fairyfly;
@@ -483,6 +487,45 @@ TEST_CASE("config: every key with a setting moves exactly its ServeOptions field
     CHECK(untouched.format == mcp::ServeOptions{}.format);
 }
 
+TEST_CASE("config: the defaults of the key table are the defaults of ServeOptions", "[config][keys]") {
+    // review 2026-10-27 (Codex): the defaults lived in the key table, in ServeOptions and in the --help texts
+    const auto render = [](const mcp::ServeOptions& o) {
+        std::ostringstream out;
+        out << o.read_only << o.allow_write << o.default_connection.value_or(-1) << o.format << '|' << o.max_result_chars << '|'
+            << o.max_image_bytes << '|' << o.max_calls_per_minute << '|' << o.call_timeout_ms << '|' << o.transport << '|'
+            << o.host << '|' << o.sse << o.tls << o.allow_ip_include_loopback << o.allow_ip.size() << o.allowed_hosts.size()
+            << o.cors_origins.size() << o.families.size() << o.owner_sap_identities.size();
+        return out.str();
+    };
+    McpConfig defaults;
+    for (const auto& spec : key_specs())
+        if (spec.def && spec.apply && spec.key != "server.port") defaults.set(spec.key, *spec.def);  // port 0 = by --tls
+    mcp::ServeOptions o;
+    apply_config(defaults, o);
+    CHECK(render(o) == render(mcp::ServeOptions{}));
+}
+
+TEST_CASE("config: every --help default of `fairyfly mcp` is the key table's default", "[config][keys]") {
+    CLI::App app{"fairyfly"};
+    commands::GlobalOptions global;
+    commands::add_global_options(app, global);
+    commands::build_command_tree(app);
+    const CLI::App* mcp_app = app.get_subcommand_no_throw("mcp");
+    REQUIRE(mcp_app != nullptr);
+    std::size_t checked = 0;
+    for (const auto& spec : key_specs()) {
+        // every option with a scalar default names it, from the key table (bool flags say what they switch on)
+        if (!spec.def || spec.cli.empty() || (spec.type != ValueType::Int && spec.type != ValueType::String && spec.key != "server.sse"))
+            continue;
+        const CLI::Option* option = mcp_app->get_option_no_throw(spec.cli.front());
+        REQUIRE(option != nullptr);
+        CAPTURE(spec.key, option->get_description());
+        CHECK(option->get_description().find("(default " + value_to_string(*spec.def) + ")") != std::string::npos);
+        ++checked;
+    }
+    CHECK(checked >= 8);
+}
+
 TEST_CASE("config: merged layers are what resolve says, without the defaults", "[config][precedence]") {
     McpConfig yaml;
     yaml.set("server.port", 1111LL);
@@ -534,7 +577,9 @@ TEST_CASE("config: the flags of a real `fairyfly mcp` command line become the fl
     app.parse(static_cast<int>(std::size(argv)), argv);
     const CLI::App* mcp_app = app.get_subcommand_no_throw("mcp");
     REQUIRE(mcp_app != nullptr);
-    const McpConfig flags = commands::flags_layer(*mcp_app);
+    std::vector<ConfigIssue> issues;
+    const McpConfig flags = commands::flags_layer(*mcp_app, issues);
+    CHECK(issues.empty());
     CHECK(flags.get_int("server.port") == 9100);  // --port is the second spelling of --mcp-port
     CHECK(flags.get_list("tools.families") == std::vector<std::string>{"screen", "element"});
     CHECK(flags.get_bool("mode.allow_write") == true);
@@ -548,4 +593,42 @@ TEST_CASE("config: the flags of a real `fairyfly mcp` command line become the fl
     CHECK(o.allow_write);
     CHECK(o.format == mcp::ServeOptions{}.format);
     CHECK(o.max_calls_per_minute == mcp::ServeOptions{}.max_calls_per_minute);
+}
+
+TEST_CASE("config: the tray opens the audit folder the server writes to, audit.file included", "[config][audit]") {
+    // review 2026-10-27 (Codex): the tray's "Open audit folder" left out mcp.yaml's audit.file
+    mcp::ServeOptions o;
+    McpConfig yaml;
+    yaml.set("audit.file", std::string("D:/fairyfly-audit/trail.jsonl"));
+    apply_config(yaml, o);
+    {
+        const test::EnvGuard no_env_file{config::env::kAuditFile, ""};
+        CHECK(commands::tray_audit_dir(o) == std::filesystem::path("D:/fairyfly-audit"));
+        CHECK(commands::tray_audit_dir(mcp::ServeOptions{}).filename() == "audit");   // the default folder otherwise
+        // a relative file is written next to the server's working directory: the tray opens that folder, not ""
+        mcp::ServeOptions relative;
+        relative.audit_file.file = "trail.jsonl";
+        CHECK(commands::tray_audit_dir(relative) == std::filesystem::current_path());
+    }
+    const test::EnvGuard env_file{config::env::kAuditFile, "E:/env-audit/trail.jsonl"};
+    CHECK(commands::tray_audit_dir(o) == std::filesystem::path("E:/env-audit"));   // FAIRYFLY_AUDIT_FILE wins, like the server
+}
+
+TEST_CASE("config: a flag repeated the way CLI11 accepts it is not refused", "[config][keys]") {
+    // review 2026-10-28 (Codex): the joined raw results of --tls --no-tls ("true,false") were refused as invalid
+    CLI::App app{"fairyfly"};
+    commands::GlobalOptions global;
+    commands::add_global_options(app, global);
+    commands::build_command_tree(app);
+    const char* argv[] = {"fairyfly", "mcp", "--tls", "--no-tls", "--tray", "--tray", "--port", "9200",
+                          "--allowed-hosts", "a", "--allowed-hosts", "b"};
+    app.parse(static_cast<int>(std::size(argv)), argv);
+    std::vector<ConfigIssue> issues;
+    const McpConfig flags = commands::flags_layer(*app.get_subcommand_no_throw("mcp"), issues);
+    CAPTURE(issues.empty() ? std::string() : issues.front().message);
+    CHECK(issues.empty());
+    CHECK(flags.get_bool("server.tls") == false);   // the last one wins, as in ServeOptions
+    CHECK(flags.get_bool("tray.enabled") == true);
+    CHECK(flags.get_int("server.port") == 9200);
+    CHECK(flags.get_list("server.allowed_hosts") == std::vector<std::string>{"a", "b"});
 }
