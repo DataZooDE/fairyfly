@@ -58,6 +58,9 @@ struct FakeRunLog {
     std::vector<bool> allow_write_at_start;
     std::atomic<bool> released{false};
     std::atomic<FakeServer*> current{nullptr};
+    // hold the fake server between "down" and returning, where the runner still holds its control
+    std::atomic<bool> hold_exit{false};
+    std::atomic<bool> exiting{false};
 };
 
 template <class Pred>
@@ -105,6 +108,9 @@ struct Harness {
                 if (server.restart && hooks && hooks->restart_requested) *hooks->restart_requested = true;
             }
             lg->up = false;
+            lg->exiting = true;
+            while (lg->hold_exit && !lg->released) std::this_thread::sleep_for(1ms);
+            lg->exiting = false;
             lg->current = nullptr;
             return 0;
         };
@@ -236,6 +242,37 @@ TEST_CASE("tray runner: failing start goes idle with a warning and does not busy
     h.runner->control().request_start();  // user retries; the fake now succeeds
     REQUIRE(wait_until([&] { return h.log->runs == 2 && h.runner->control().status().running; }));
     CHECK(h.runner->control().status().warnings.empty());
+    h.runner->request_quit();
+    CHECK(h.join() == 0);
+}
+
+TEST_CASE("tray runner: a Start right after Stop, while the server is still shutting down, is not lost",
+          "[mcp][tray_runner]") {
+    Harness h;
+    h.start_loop();
+    REQUIRE(wait_until([&] { return h.log->up.load(); }));
+
+    h.log->hold_exit = true;
+    h.runner->control().request_stop();
+    REQUIRE(wait_until([&] { return h.log->exiting.load(); }));  // down, but run_mcp has not returned yet
+    h.runner->control().request_start();
+    h.log->hold_exit = false;
+
+    CHECK(wait_until([&] { return h.log->runs == 2 && h.log->up.load(); }));
+    h.runner->request_quit();
+    CHECK(h.join() == 0);
+}
+
+TEST_CASE("tray runner: Start while running and a later Stop leave the server stopped", "[mcp][tray_runner]") {
+    Harness h;
+    h.start_loop();
+    REQUIRE(wait_until([&] { return h.log->up.load(); }));
+    h.runner->control().request_start();  // already running: no effect
+    h.runner->control().request_stop();
+    REQUIRE(wait_until([&] { return !h.log->up.load() && !h.runner->control().status().running; }));
+    std::this_thread::sleep_for(50ms);
+    CHECK(h.log->runs == 1);
+    CHECK_FALSE(h.log->up.load());
     h.runner->request_quit();
     CHECK(h.join() == 0);
 }
