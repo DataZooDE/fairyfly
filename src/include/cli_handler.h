@@ -134,6 +134,12 @@ private:
     ResultT<Connection> resolve_and_validate_connection(std::optional<int> explicit_conn_id,
                                                         bool update_cache = true);
 
+    /// After an action on `conn` (key, transaction, click, fill, F4, popup, menu): the session it acted on must still
+    /// be the one resolve_and_validate_connection checked. Another session at the same path (SAP ended and logged on
+    /// again) turns `result` into SESSION_CHANGED; a session that is gone (the action may have closed it, /nex) keeps
+    /// the outcome and adds `session_closed`. Returns `result`.
+    Result& confirm_session_after_action(const Connection& conn, Result& result) const;
+
     /// When several cache files exist, delete those whose SAP session is
     /// confirmed gone so auto-detect is not blocked by stale files.
     /// Entries whose liveness cannot be determined are kept.

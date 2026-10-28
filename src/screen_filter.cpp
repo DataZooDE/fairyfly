@@ -234,24 +234,42 @@ static std::string only_selector_name(const ScreenFilterOptions& filters)
     return "";
 }
 
-/// Grids/trees that an `only` selector dropped: they would otherwise vanish without a trace.
+/// A field control that shows a value (text, ctext, password, combo box, check box, radio button).
+static bool element_is_value_field(const json& elem)
+{
+    const std::string type = elem.value("type", "");
+    return type == "GuiTextField" || type == "GuiCTextField" || type == "GuiPasswordField" || type == "GuiComboBox" ||
+           type == "GuiCheckBox" || type == "GuiRadioButton";
+}
+
+/// A read-only field that only=fields / only=editable leaves out: on a display screen (SU01 Display Users) that is
+/// every field, and the result would look empty without saying so.
+static bool counts_as_read_only_field(const json& elem, const ScreenFilterOptions& filters)
+{
+    return (filters.only_fields || filters.only_editable) && element_is_value_field(elem) &&
+           !elem.value("changeable", false);
+}
+
+/// Grids/trees (and, for only=fields/editable, read-only fields) that an `only` selector dropped: they would otherwise
+/// vanish without a trace.
 static void collect_suppressed(const json& elements, const std::unordered_set<std::string>& kept,
-                               json& suppressed, int depth = 0)
+                               const ScreenFilterOptions& filters, json& suppressed, int depth = 0)
 {
     if (!elements.is_array() || depth > 64) return;
     for (const auto& elem : elements) {
         if (!elem.is_object()) continue;
         const std::string id = elem.value("id", "");
         if (kept.count(id) == 0) {
-            const char* ids_key = element_is_table(elem) ? "grid_ids" : element_is_tree(elem) ? "tree_ids" : nullptr;
+            const char* ids_key = element_is_table(elem) ? "grid_ids" : element_is_tree(elem) ? "tree_ids"
+                                : counts_as_read_only_field(elem, filters) ? "read_only_field_ids" : nullptr;
             if (ids_key) {
                 auto& ids = suppressed[ids_key];
                 if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
             }
         }
-        if (elem.contains("children")) collect_suppressed(elem["children"], kept, suppressed, depth + 1);
+        if (elem.contains("children")) collect_suppressed(elem["children"], kept, filters, suppressed, depth + 1);
         if (elem.contains("toolbar_buttons"))
-            collect_suppressed(elem["toolbar_buttons"], kept, suppressed, depth + 1);
+            collect_suppressed(elem["toolbar_buttons"], kept, filters, suppressed, depth + 1);
     }
 }
 
@@ -473,15 +491,18 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
     screen_data["filter_stats"] = filter_stats;
 
     const std::string only_name = only_selector_name(filters);
-    json suppressed = {{"by", only_name}, {"grid_ids", json::array()}, {"tree_ids", json::array()}};
-    if (!only_name.empty()) collect_suppressed(all_elements, wanted_ids, suppressed);
+    json suppressed = {{"by", only_name}, {"grid_ids", json::array()}, {"tree_ids", json::array()},
+                       {"read_only_field_ids", json::array()}};
+    if (!only_name.empty()) collect_suppressed(all_elements, wanted_ids, filters, suppressed);
 
+    // A tab's dropped elements count for the whole result, each id once (read_tab lists the tab's elements both at
+    // the top level and under tabs_content).
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
         for (auto& tab_data : screen_data["tabs_content"]) {
             if (!tab_data.is_object()) continue;
             apply_screen_filters_impl(tab_data, filters);
             if (!tab_data.contains("suppressed")) continue;
-            for (const char* key : {"grid_ids", "tree_ids"}) {
+            for (const char* key : {"grid_ids", "tree_ids", "read_only_field_ids"}) {
                 for (const auto& id : tab_data["suppressed"].value(key, json::array())) {
                     auto& ids = suppressed[key];
                     if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
@@ -489,9 +510,11 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
             }
         }
     }
-    if (!suppressed["grid_ids"].empty() || !suppressed["tree_ids"].empty()) {
+    if (!suppressed["grid_ids"].empty() || !suppressed["tree_ids"].empty() ||
+        !suppressed["read_only_field_ids"].empty()) {
         suppressed["grids"] = suppressed["grid_ids"].size();
         suppressed["trees"] = suppressed["tree_ids"].size();
+        suppressed["read_only_fields"] = suppressed["read_only_field_ids"].size();
         std::string note;
         const auto describe = [&](const char* key, const char* noun) {
             const size_t count = suppressed[key].size();
@@ -501,8 +524,11 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
         };
         describe("grid_ids", "grid");
         describe("tree_ids", "tree");
+        describe("read_only_field_ids", "read-only field");
         note += " not included with only=" + only_name +
                 (suppressed["grid_ids"].empty() ? "; use no filter" : "; use only=tables or no filter");
+        if (!suppressed["read_only_field_ids"].empty())
+            note += " (only=" + only_name + " lists changeable fields; a display screen has none)";
         suppressed["note"] = note;
         screen_data["suppressed"] = suppressed;
     }

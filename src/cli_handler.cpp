@@ -243,6 +243,41 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     return result;
 }
 
+Result& CommandHandler::confirm_session_after_action(const Connection& conn, Result& result) const
+{
+    bool same = true;
+    try { same = engine_->validate_session(conn.session_id, conn.server_session_key); }
+    catch (const std::exception& e) { spdlog::debug("Session check after the action failed: {}", e.what()); }
+    if (same) return result;
+    bool present = false;
+    if (!conn.server_session_key.empty()) {
+        try { present = engine_->validate_session(conn.session_id, ""); } catch (const std::exception&) {}
+    }
+    if (present) {
+        // Another SAP session sits at the saved path now (SAP was ended and logged on again): the action may have
+        // gone to the old, closed session, whose COM objects can still answer S_OK. Never report that as success.
+        spdlog::warn("Connection {}: the SAP session at {} was replaced while the action ran", conn.id, conn.session_id);
+        Result changed;
+        changed.set_error("SESSION_CHANGED",
+                          fmt::format("The SAP session of connection {} ({}) was replaced while the action ran (SAP "
+                                      "ended and logged on again); whether the action reached SAP is unknown",
+                                      conn.id, conn.session_id));
+        changed.error["session_id"] = conn.session_id;
+        changed.error["connection_id"] = conn.id;
+        changed.error["hint"] = "read the screen first (gui_screen_read; it re-attaches a closed default connection), "
+                                "then repeat the action only if it did not happen";
+        changed.duration = result.duration;
+        result = std::move(changed);
+        return result;
+    }
+    // Gone: the action may have closed it itself (/nex, log off). Its outcome stands; say that the session is gone.
+    if (result.status == Result::Status::Success) {
+        result.data["session_closed"] = true;
+        result.data["session_note"] = fmt::format("the SAP session of connection {} closed during the action", conn.id);
+    }
+    return result;
+}
+
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
 {
     pending_owner_attach_.reset();
@@ -954,7 +989,7 @@ Result CommandHandler::handle_transaction(const std::string& tcode, std::optiona
         result.data["connection_id"] = conn_result.value.id;
     }
 
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 /// element click --node-key: select, expand, collapse, double-click or a context-menu item of a tree node.
@@ -1187,11 +1222,14 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
                              : com_engine->select_grid_row(elem, *row, column);
         if (result.status == Result::Status::Success)
             result.data["connection_id"] = conn_result.value.id;
-        return result;
+        return confirm_session_after_action(conn_result.value, result);
     }
 
     // Check if node_key is provided - if so, this is a tree operation
-    if (!node_key.empty()) return click_tree_node(elem, element_id, node_key, tree_action, menu_item, conn_result.value.id);
+    if (!node_key.empty()) {
+        result = click_tree_node(elem, element_id, node_key, tree_action, menu_item, conn_result.value.id);
+        return confirm_session_after_action(conn_result.value, result);
+    }
 
     // Handle synthetic toolbar buttons differently
     if (is_synthetic_button) {
@@ -1218,7 +1256,7 @@ Result CommandHandler::handle_click(const std::string& element_id, std::optional
         if (wait_for_window) wait_for_screen_change(result, window_before, snapshot_before, snapshot_engine, timeout_ms);
     }
 
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 Result CommandHandler::handle_press_f4(const std::string& element_id, std::optional<int> connection_id)
@@ -1247,7 +1285,7 @@ Result CommandHandler::handle_press_f4(const std::string& element_id, std::optio
         result.data["message"] = "F4 search help opened successfully";
     }
 
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 Result CommandHandler::handle_fill(const std::string& element_id, const std::string& value,
@@ -1315,7 +1353,7 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
         result.data["connection_id"] = conn_result.value.id;
     }
 
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fields, const std::string& then_key,
