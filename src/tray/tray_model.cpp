@@ -151,7 +151,7 @@ std::string stuck_call_text(const LinkView& link) {
     if (link.stuck_tool.empty()) return {};
     return "SAP GUI has not answered " + link.stuck_tool +
            (link.stuck_connection.empty() ? std::string() : " on connection " + link.stuck_connection) + " for " +
-           std::to_string(link.stuck_s) + " s: look for a hidden SAP dialog, or end that SAP session";
+           std::to_string(link.stuck_s) + " s: look for a hidden SAP dialog or a long-running step (e.g. a report started with F8), or end that SAP session";
 }
 
 std::string trail_balloon_text(const LinkView& link) {

@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 
 #include <nlohmann/json.hpp>
@@ -83,6 +84,9 @@ public:
 
     /// Any thread: the call the main thread runs now; nullopt while it is idle.
     std::optional<InFlightCall> in_flight() const;
+    /// The tools that change SAP (destructiveHint): a caller that gave up on one of them while it ran is told the
+    /// change may still be applied. Set before pumping.
+    void set_change_tools(std::set<std::string> tools);
     /// Tests: the clock for the age of the running call (default steady_clock::now). Set before pumping.
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
     void set_clock(Clock now);
@@ -107,6 +111,7 @@ private:
     PermitFn permit_;
     Clock now_ = [] { return std::chrono::steady_clock::now(); };
     std::chrono::milliseconds diagnostic_wait_ = kDiagnosticWait;
+    std::set<std::string> change_tools_;
     std::shared_ptr<Job> running_;  ///< the job on the main thread now
     mutable std::mutex mu_;
     std::condition_variable work_cv_, done_cv_;

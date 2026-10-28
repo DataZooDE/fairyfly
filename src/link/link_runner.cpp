@@ -617,6 +617,7 @@ int serve_link_tools(mcp::ToolProvider& provider, MainThreadTools& tools, trail:
         for (const auto& t : tools_json(provider))
             if (t.contains("annotations") && t["annotations"].is_object() && t["annotations"].value("destructiveHint", false))
                 change_tools.insert(t.value("name", std::string()));
+        tools.set_change_tools(change_tools);   // a caller that gave up on one is told it may still apply
         recorder.set_change_tools(std::move(change_tools));
     }
     tools.set_handlers([&provider] { return tools_json(provider); },

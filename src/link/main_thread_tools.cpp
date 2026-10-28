@@ -31,7 +31,12 @@ std::string local_hms(std::int64_t unix_s) {
 
 constexpr const char* kNotRespondingHint =
     "Look in SAP GUI for a dialog or popup that waits for input, possibly hidden behind other windows, and answer or "
-    "close it; ending the SAP session (or SAP GUI) also releases fairyfly. Until then every call waits.";
+    "close it, or for a long-running step (e.g. a report started with F8); ending the SAP session (or SAP GUI) also "
+    "releases fairyfly. Until then every call waits.";
+
+/// For the caller that gave up on a running change: it is not undone, and repeating it blindly fills twice.
+constexpr const char* kChangeMayApply =
+    " The change may still be applied once SAP answers: read the screen before you retry it.";
 
 }  // namespace
 
@@ -75,6 +80,11 @@ void MainThreadTools::set_write_permit(PermitFn permit) {
 void MainThreadTools::set_clock(Clock now) {
     std::lock_guard<std::mutex> l(mu_);
     now_ = std::move(now);
+}
+
+void MainThreadTools::set_change_tools(std::set<std::string> tools) {
+    std::lock_guard<std::mutex> l(mu_);
+    change_tools_ = std::move(tools);
 }
 
 void MainThreadTools::set_diagnostic_wait(std::chrono::milliseconds wait) {
@@ -149,7 +159,9 @@ json MainThreadTools::rpc(const std::string& method, const json& params, int tim
     }
     if (!done_cv_.wait_for(l, budget, finished)) {
         // it ran all this time: SAP GUI has not answered it (it finishes in the background, if ever)
-        if (job->running) throw ffy::Error("SAP_GUI_NOT_RESPONDING: " + not_responding_text(in_flight_locked(*job)) + ". " + kNotRespondingHint);
+        if (job->running)
+            throw ffy::Error("SAP_GUI_NOT_RESPONDING: " + not_responding_text(in_flight_locked(*job)) + ". " + kNotRespondingHint +
+                             (change_tools_.count(job->tool) ? kChangeMayApply : ""));
         job->abandoned = true;  // never started: the main thread skips it
         std::string message = "fairyfly is busy: the call did not start within " + std::to_string(timeout_ms / 1000) + " s";
         if (running_) message += "; " + not_responding_text(in_flight_locked(*running_)) + ". " + kNotRespondingHint;
@@ -203,7 +215,19 @@ bool MainThreadTools::pump_once(std::chrono::milliseconds wait) {
     {
         std::unique_lock<std::mutex> l(mu_);
         work_cv_.wait_for(l, wait, [&] { return !queue_.empty() || shutdown_; });
-        while (!queue_.empty() && queue_.front()->abandoned) queue_.pop_front();
+        // never run late: a call whose caller timed out (abandoned) or that the gateway cancelled while it waited,
+        // e.g. behind a call SAP GUI did not answer; the change would happen although the caller was told it failed
+        bool skipped = false;
+        while (!queue_.empty() && (queue_.front()->abandoned || queue_.front()->info.cancelled())) {
+            auto& front = queue_.front();
+            if (!front->abandoned) {
+                front->error = "fairyfly link: the call was cancelled before it started; nothing ran";
+                front->done = true;
+                skipped = true;
+            }
+            queue_.pop_front();
+        }
+        if (skipped) done_cv_.notify_all();
         if (queue_.empty() || shutdown_) return false;
         job = queue_.front();
         queue_.pop_front();

@@ -257,12 +257,17 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
     once the running call is 60 s old, a new call fails like that at once ("the call did not start; ...") instead of
     holding one of the link's few local call slots, where it would also keep `gui_doctor` out;
   - the hanging call itself, when the gateway's time limit passes, fails with `SAP_GUI_NOT_RESPONDING: SAP GUI has not
-    answered ...`;
+    answered ...`; for a tool that changes SAP (destructiveHint: fill, click, key, transaction, batch...) it adds that
+    the change may still be applied once SAP answers, so read the screen before retrying it;
+  - a call the gateway cancelled (its time limit) while it still waited in the queue never runs later, also when SAP
+    GUI answers again: it ends as cancelled, nothing ran;
   - after 60 s the tray turns amber (within one status heartbeat, 15 s) with the menu line "SAP GUI has not answered
-    gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog, or end that SAP session", a tooltip that
-    names the call and one notice; it turns teal again when the call returns.
+    gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog or a long-running step (e.g. a report
+    started with F8), or end that SAP session", a tooltip that names the call and one notice; it turns teal again
+    when the call returns (a long report that finishes after 60 s too).
 
-  Answering or closing the SAP dialog, or ending the SAP session (or SAP GUI), releases fairyfly. The log has one
+  Answering or closing the SAP dialog, waiting for the long-running step, or ending the SAP session (or SAP GUI)
+  releases fairyfly. The log has one
   `SAP_GUI_NOT_RESPONDING` warning per diagnosis.
 
 ## The shared protocol library

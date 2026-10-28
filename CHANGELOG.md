@@ -17,6 +17,13 @@
   "did not start".
 - Once the running call is 60 s old, a new call fails like that at once instead of waiting its whole time limit
   in one of libffl's four local call slots (four such waiters kept every further call out, the diagnostic tools too).
+- A call the gateway cancelled while it still waited in the queue no longer runs later: before, a `gui_element_fill`
+  queued behind a hung call ran in SAP once the hidden dialog was closed, although its caller had been told it
+  failed. The main thread now skips it (cancelled, nothing ran), like a call whose caller timed out.
+- A change (destructiveHint) whose caller gets `SAP_GUI_NOT_RESPONDING` while it runs is told that it may still be
+  applied once SAP answers, so the screen is read before a retry (no double fills).
+- The hint, here and in the tray, names a long-running step (e.g. a report started with F8) besides a hidden dialog:
+  a legitimate call over 60 s turns the tray amber too, and back when it finishes.
 - The link tray turns amber after 60 s with a menu line and tooltip naming the call, and one notice; it turns teal
   again when the call returns (status file `stuck_call`, `src/link/main_thread_tools.*`). docs/LINK.md
   "What runs where".
