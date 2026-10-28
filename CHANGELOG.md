@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.28 (2026-10-28)
 
 ### Screen read: `only` says which read-only fields it left out; actions notice a replaced SAP session
 
@@ -68,9 +68,6 @@
   it only compares. Only `src/config/mcp_config.cpp` parses YAML, and a unit test fails when another file does.
 - List defaults come from the server options too. Each list key says once what an empty list means (`any`, `all`,
   `none`), for the template and for `--help`, and no `mcp` option's help text states a default in other words.
-
-## 2026.10.27 (2026-10-27)
-
 ### MCP tray: a Start right after Stop is no longer lost; the doctor unit test no longer touches SAP GUI
 
 - `mcp --tray --http`: a tray Start that arrived while the stopped server was still shutting down was dropped
@@ -110,41 +107,6 @@
   closed menu entry with -1 everywhere; that answer (`Field::not_drawn`, set only when all four reads succeed) now
   excuses menus alone. A menu entry with a position is blurred like any field (SAP can fill a caption from a program
   field), and one whose geometry could not be read still drops the shot.
-
-### Releases: code signing with Microsoft Artifact Signing (ready, off until configured)
-
-- `release.yml` signs with `azure/artifact-signing-action` v2.0.0 (pinned to its commit) after an OIDC `azure/login`:
-  no client secret, the Entra federated credential is bound to the environment `release-signing`. It signs every exe
-  of the build (`fairyfly.exe`, `fairyfly-tray.exe`), builds the MSI around the signed exes and signs the MSI, all
-  with RFC 3161 time stamps. The winget manifests and `SHA256SUMS` are made from the signed files, and the release job
-  checks that what it publishes is what was verified.
-- Signing is switched on by the repository **variable** `AZURE_SIGNING_ACCOUNT` (with `AZURE_SIGNING_PROFILE`,
-  `_ENDPOINT`, `_CLIENT_ID`, `_TENANT_ID`, `_SUBSCRIPTION_ID`; a partial set fails the release), no longer by the secret
-  `AZURE_SIGNING_CLIENT_SECRET`. Without it the release is unsigned as before; `REQUIRE_SIGNING=true` makes that an
-  error. The one-time Azure and GitHub setup is in [docs/SIGNING.md](docs/SIGNING.md).
-- New `packaging/sign/Test-Signature.ps1` checks every signed file and fails the release unless the embedded
-  signature is valid and trusted (`Get-AuthenticodeSignature`, `signtool verify /pa`), time-stamped, and made by the
-  updater's pin (exactly one `O=DataZoo GmbH` and one `C=DE`, read from `CMakeLists.txt`). Before, only the exes were
-  checked, with `signtool verify /pa` alone (any trusted signer, no time stamp needed), and the MSI not at all. Its
-  tests (`signing.yml`, no secrets) refuse an unsigned file, a self-signed certificate, a missing time stamp and a
-  wrong `O=`/`C=`, and accept a valid signature; the workflow also runs actionlint.
-- Only the tagged commit is built and signed: the manual run has no tag input any more (`gh workflow run release.yml
-  --ref vYYYY.MM.DD`), the build and sign jobs refuse a run whose `github.ref` is not `refs/tags/<tag>`, and every job
-  checks out `github.sha`. All actions in `release.yml` are pinned to commit SHAs, and WiX is installed by
-  `packaging/sign/Install-Wix.ps1` from a SHA-512-pinned package, before the Azure login. `Test-ReleaseWorkflow.ps1`
-  (signing.yml) guards these rules.
-- docs/SIGNING.md: the Entra credential is a flexible federated credential bound to `release.yml` on `v*` tags
-  (`job_workflow_ref`), the `release-signing` environment needs a required reviewer, and a tag ruleset (the `gh api`
-  command is documented, not applied) reserves `v*` tags to admins.
-
-### winget: manifests on schema 1.12.0, with PrivacyUrl and the copyright years
-
-- The manifests of `DataZoo.fairyfly` (packaging/winget/templates) use manifest schema 1.12.0, the version
-  microsoft/winget-pkgs recommends (1.10.0 is the oldest it still accepts), add `PrivacyUrl` (the privacy statement in
-  docs/SECURITY.md) and carry the exe's copyright, `Copyright (c) 2025-2026 DataZoo GmbH`.
-- `packaging/winget/tests/Test-WingetTemplates.ps1` (any pwsh 7, run by winget.yml) checks the templates against the
-  winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
-  `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
 
 ### Fixed
 
@@ -368,6 +330,43 @@
 
 - Both trays (the link tray and the local MCP server's tray) show the running version, greyed out, above **Check for
   updates**, e.g. "fairyfly 2026.10.25.1".
+
+## 2026.10.27 (2026-10-27)
+
+### Releases: code signing with Microsoft Artifact Signing (ready, off until configured)
+
+- `release.yml` signs with `azure/artifact-signing-action` v2.0.0 (pinned to its commit) after an OIDC `azure/login`:
+  no client secret, the Entra federated credential is bound to the environment `release-signing`. It signs every exe
+  of the build (`fairyfly.exe`, `fairyfly-tray.exe`), builds the MSI around the signed exes and signs the MSI, all
+  with RFC 3161 time stamps. The winget manifests and `SHA256SUMS` are made from the signed files, and the release job
+  checks that what it publishes is what was verified.
+- Signing is switched on by the repository **variable** `AZURE_SIGNING_ACCOUNT` (with `AZURE_SIGNING_PROFILE`,
+  `_ENDPOINT`, `_CLIENT_ID`, `_TENANT_ID`, `_SUBSCRIPTION_ID`; a partial set fails the release), no longer by the secret
+  `AZURE_SIGNING_CLIENT_SECRET`. Without it the release is unsigned as before; `REQUIRE_SIGNING=true` makes that an
+  error. The one-time Azure and GitHub setup is in [docs/SIGNING.md](docs/SIGNING.md).
+- New `packaging/sign/Test-Signature.ps1` checks every signed file and fails the release unless the embedded
+  signature is valid and trusted (`Get-AuthenticodeSignature`, `signtool verify /pa`), time-stamped, and made by the
+  updater's pin (exactly one `O=DataZoo GmbH` and one `C=DE`, read from `CMakeLists.txt`). Before, only the exes were
+  checked, with `signtool verify /pa` alone (any trusted signer, no time stamp needed), and the MSI not at all. Its
+  tests (`signing.yml`, no secrets) refuse an unsigned file, a self-signed certificate, a missing time stamp and a
+  wrong `O=`/`C=`, and accept a valid signature; the workflow also runs actionlint.
+- Only the tagged commit is built and signed: the manual run has no tag input any more (`gh workflow run release.yml
+  --ref vYYYY.MM.DD`), the build and sign jobs refuse a run whose `github.ref` is not `refs/tags/<tag>`, and every job
+  checks out `github.sha`. All actions in `release.yml` are pinned to commit SHAs, and WiX is installed by
+  `packaging/sign/Install-Wix.ps1` from a SHA-512-pinned package, before the Azure login. `Test-ReleaseWorkflow.ps1`
+  (signing.yml) guards these rules.
+- docs/SIGNING.md: the Entra credential is a flexible federated credential bound to `release.yml` on `v*` tags
+  (`job_workflow_ref`), the `release-signing` environment needs a required reviewer, and a tag ruleset (the `gh api`
+  command is documented, not applied) reserves `v*` tags to admins.
+
+### winget: manifests on schema 1.12.0, with PrivacyUrl and the copyright years
+
+- The manifests of `DataZoo.fairyfly` (packaging/winget/templates) use manifest schema 1.12.0, the version
+  microsoft/winget-pkgs recommends (1.10.0 is the oldest it still accepts), add `PrivacyUrl` (the privacy statement in
+  docs/SECURITY.md) and carry the exe's copyright, `Copyright (c) 2025-2026 DataZoo GmbH`.
+- `packaging/winget/tests/Test-WingetTemplates.ps1` (any pwsh 7, run by winget.yml) checks the templates against the
+  winget-pkgs rules: schema header and version, required fields, ShortDescription and tag limits, https URLs,
+  `PrivacyUrl`, no `Agreements`, Publisher/PackageName/Copyright equal to the MSI and the exe.
 
 ### `fairyfly update apply`: the publisher is pinned (security)
 
