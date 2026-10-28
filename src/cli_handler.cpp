@@ -243,38 +243,55 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     return result;
 }
 
-Result& CommandHandler::confirm_session_after_action(const Connection& conn, Result& result) const
+Result& CommandHandler::confirm_session_after_action(const Connection& conn, Result& result)
 {
-    bool same = true;
-    try { same = engine_->validate_session(conn.session_id, conn.server_session_key); }
-    catch (const std::exception& e) { spdlog::debug("Session check after the action failed: {}", e.what()); }
-    if (same) return result;
-    bool present = false;
-    if (!conn.server_session_key.empty()) {
-        try { present = engine_->validate_session(conn.session_id, ""); } catch (const std::exception&) {}
-    }
-    if (present) {
-        // Another SAP session sits at the saved path now (SAP was ended and logged on again): the action may have
-        // gone to the old, closed session, whose COM objects can still answer S_OK. Never report that as success.
-        spdlog::warn("Connection {}: the SAP session at {} was replaced while the action ran", conn.id, conn.session_id);
-        Result changed;
-        changed.set_error("SESSION_CHANGED",
-                          fmt::format("The SAP session of connection {} ({}) was replaced while the action ran (SAP "
-                                      "ended and logged on again); whether the action reached SAP is unknown",
-                                      conn.id, conn.session_id));
-        changed.error["session_id"] = conn.session_id;
-        changed.error["connection_id"] = conn.id;
-        changed.error["hint"] = "read the screen first (gui_screen_read; it re-attaches a closed default connection), "
-                                "then repeat the action only if it did not happen";
-        changed.duration = result.duration;
-        result = std::move(changed);
+    if (defer_session_check_) {   // fill with `fields`: checked once, after the call's last step
+        deferred_session_check_ = conn;
         return result;
     }
-    // Gone: the action may have closed it itself (/nex, log off). Its outcome stands; say that the session is gone.
-    if (result.status == Result::Status::Success) {
-        result.data["session_closed"] = true;
-        result.data["session_note"] = fmt::format("the SAP session of connection {} closed during the action", conn.id);
+    const auto inconclusive = [&](const std::string& why) -> Result& {
+        spdlog::warn("Connection {}: {}", conn.id, why);
+        json& target = result.status == Result::Status::Success ? result.data : result.error;
+        target["session_check"] = "inconclusive";
+        if (!target.contains("warnings") || !target["warnings"].is_array()) target["warnings"] = json::array();
+        target["warnings"].push_back(why);
+        return result;
+    };
+    std::optional<std::string> live;
+    try {
+        live = engine_->live_session_key(conn.session_id);
+    } catch (const std::exception& e) {
+        return inconclusive(fmt::format("the SAP session after the action could not be confirmed ({})", e.what()));
     }
+    if (!live) {
+        // Gone: the action may have closed it itself (/nex, log off). Its outcome stands; say that the session is gone.
+        if (result.status == Result::Status::Success) {
+            result.data["session_closed"] = true;
+            result.data["session_note"] = fmt::format("the SAP session of connection {} closed during the action", conn.id);
+        }
+        return result;
+    }
+    if (conn.server_session_key.empty()) return result;   // positionally identified (no key known): nothing to compare
+    if (live->empty())
+        return inconclusive("the SAP session after the action could not be confirmed (its server session key is not "
+                            "readable: a round trip or a logoff in progress)");
+    if (*live == conn.server_session_key) return result;
+
+    // Another SAP session sits at the saved path now (SAP was ended and logged on again): the action may have gone to
+    // the old, closed session, whose COM objects can still answer S_OK. Never report that as success.
+    spdlog::warn("Connection {}: the SAP session at {} was replaced while the action ran", conn.id, conn.session_id);
+    Result changed;
+    changed.set_error("SESSION_CHANGED",
+                      fmt::format("The SAP session of connection {} ({}) was replaced while the action ran (SAP "
+                                  "ended and logged on again); whether the action reached SAP is unknown",
+                                  conn.id, conn.session_id));
+    changed.error["session_id"] = conn.session_id;
+    changed.error["connection_id"] = conn.id;
+    changed.error["hint"] = "read the screen first (gui_screen_read; it re-attaches a closed default connection), "
+                            "then repeat the action only if it did not happen";
+    changed.error["action_result"] = result.to_json();   // what the action answered (e.g. a status bar) is evidence
+    changed.duration = result.duration;
+    result = std::move(changed);
     return result;
 }
 
@@ -1358,6 +1375,30 @@ Result CommandHandler::handle_fill(const std::string& element_id, const std::str
 
 Result CommandHandler::handle_fill_fields(const std::vector<sap::FillField>& fields, const std::string& then_key,
                                           bool stop_on_error, std::optional<int> connection_id, bool allow_fill)
+{
+    // The single fills and the key check their session once, after the last step, not once per step.
+    struct DeferScope {
+        CommandHandler& handler;
+        explicit DeferScope(CommandHandler& h) : handler(h) {
+            handler.defer_session_check_ = true;
+            handler.deferred_session_check_.reset();
+        }
+        ~DeferScope() { handler.defer_session_check_ = false; }
+    };
+    Result result;
+    std::optional<Connection> acted_on;
+    {
+        DeferScope defer(*this);
+        result = fill_fields_steps(fields, then_key, stop_on_error, connection_id, allow_fill);
+        acted_on = deferred_session_check_;
+        deferred_session_check_.reset();
+    }
+    if (acted_on) confirm_session_after_action(*acted_on, result);
+    return result;
+}
+
+Result CommandHandler::fill_fields_steps(const std::vector<sap::FillField>& fields, const std::string& then_key,
+                                         bool stop_on_error, std::optional<int> connection_id, bool allow_fill)
 {
     Result result;
     std::optional<int> then_vkey;

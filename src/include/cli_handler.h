@@ -137,8 +137,14 @@ private:
     /// After an action on `conn` (key, transaction, click, fill, F4, popup, menu): the session it acted on must still
     /// be the one resolve_and_validate_connection checked. Another session at the same path (SAP ended and logged on
     /// again) turns `result` into SESSION_CHANGED; a session that is gone (the action may have closed it, /nex) keeps
-    /// the outcome and adds `session_closed`. Returns `result`.
-    Result& confirm_session_after_action(const Connection& conn, Result& result) const;
+    /// the outcome and adds `session_closed`; an unreadable key keeps it with `session_check: "inconclusive"` and a
+    /// warning. SESSION_CHANGED only for a readable key that differs; it carries the action's own `action_result`.
+    Result& confirm_session_after_action(const Connection& conn, Result& result);
+    bool defer_session_check_ = false;                    ///< inside handle_fill_fields: remember, check at the end
+    std::optional<Connection> deferred_session_check_;    ///< the connection the deferred steps acted on
+    /// handle_fill_fields' steps (the fills and then_key), run with the session check deferred.
+    Result fill_fields_steps(const std::vector<sap::FillField>& fields, const std::string& then_key,
+                             bool stop_on_error, std::optional<int> connection_id, bool allow_fill);
 
     /// When several cache files exist, delete those whose SAP session is
     /// confirmed gone so auto-detect is not blocked by stale files.

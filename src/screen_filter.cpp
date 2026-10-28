@@ -416,10 +416,27 @@ void annotate_text_filter_coverage(json& screen_data, const json& coverage, size
     screen_data["text_filter_note"] = note;
 }
 
+/// At most this many read-only field ids are listed (the count stays complete): a long display screen must not bloat
+/// the result with ids nobody asked for.
+constexpr size_t kMaxListedReadOnlyIds = 50;
+
+static void cap_read_only_ids(json& data)
+{
+    if (!data.is_object() || !data.contains("suppressed") || !data["suppressed"].is_object()) return;
+    auto& ids = data["suppressed"]["read_only_field_ids"];
+    if (!ids.is_array() || ids.size() <= kMaxListedReadOnlyIds) return;
+    ids.erase(ids.begin() + kMaxListedReadOnlyIds, ids.end());
+    data["suppressed"]["read_only_field_ids_truncated"] = true;
+}
+
 void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 {
     const json coverage = filters.text_contains.has_value() ? describe_tab_coverage(screen_data) : json::object();
     apply_screen_filters_impl(screen_data, filters);
+    // capped only now: the tabs' full lists were needed to count each id once across the result
+    cap_read_only_ids(screen_data);
+    if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array())
+        for (auto& tab : screen_data["tabs_content"]) cap_read_only_ids(tab);
     if (coverage.empty()) return;
     size_t matches = screen_data.value("element_count", static_cast<size_t>(0));
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array())
@@ -497,10 +514,12 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
 
     // A tab's dropped elements count for the whole result, each id once (read_tab lists the tab's elements both at
     // the top level and under tabs_content).
+    size_t kept = filtered.size();   // elements kept here and in the tabs
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array()) {
         for (auto& tab_data : screen_data["tabs_content"]) {
             if (!tab_data.is_object()) continue;
             apply_screen_filters_impl(tab_data, filters);
+            kept += tab_data.value("element_count", static_cast<size_t>(0));
             if (!tab_data.contains("suppressed")) continue;
             for (const char* key : {"grid_ids", "tree_ids", "read_only_field_ids"}) {
                 for (const auto& id : tab_data["suppressed"].value(key, json::array())) {
@@ -528,7 +547,9 @@ static void apply_screen_filters_impl(json& screen_data, const ScreenFilterOptio
         note += " not included with only=" + only_name +
                 (suppressed["grid_ids"].empty() ? "; use no filter" : "; use only=tables or no filter");
         if (!suppressed["read_only_field_ids"].empty())
-            note += " (only=" + only_name + " lists changeable fields; a display screen has none)";
+            note += kept == 0 ? " (only=" + only_name + " lists changeable fields; this screen has no changeable fields, "
+                                "e.g. a display transaction)"
+                              : " (only=" + only_name + " lists changeable fields)";
         suppressed["note"] = note;
         screen_data["suppressed"] = suppressed;
     }

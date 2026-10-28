@@ -52,7 +52,7 @@ public:
     virtual std::string current_server_session_key() const = 0;
     /// The SAP server session key of the live session at `session_id` now: nullopt when no session is there, "" when
     /// one is there but its key cannot be read (a round trip or a logoff in progress). Throws when it cannot tell.
-    virtual std::optional<std::string> live_session_key(const std::string& /*session_id*/) const { return std::nullopt; }
+    virtual std::optional<std::string> live_session_key(const std::string& session_id) const = 0;
 
     // Transaction execution
     virtual Result execute_transaction(const std::string& tcode) = 0;

@@ -11,13 +11,17 @@
   dropped in `suppressed` (`read_only_fields`, `read_only_field_ids`, counted once across the top level and the
   tabs) with a note in Markdown and JSON: "4 read-only field(s) not included with only=fields; use no filter ...".
   `no_tabs` keeps its meaning (do not select the other tabs); the selected tab's page is part of the base read.
+  `read_only_field_ids` lists at most 50 ids (`read_only_field_ids_truncated`; the count stays complete).
 - Live 2026-10-28: connection 1 was saved for `/app/con[0]/ses[0]`; SAP was ended and logged on again. `gui_key_send
   enter` then reported success (5 ms, no effect) and only the next `gui_screen_read` noticed that connection 1 had
-  closed. Every state-changing action (key, transaction, click incl. grid/tree, fill, F4, popup close, menu select)
-  now checks after the action that the session it acted on is still the one checked before it (path and SAP server
-  session key): another session at the same path gives `SESSION_CHANGED` (outcome unknown, read the screen before
-  repeating; never retried on another session); a session that is gone (the action may have closed it, `/nex`)
-  keeps the result and adds `session_closed`. Reads and actions on a replaced default connection re-attach alike
+  closed. Every state-changing action (key, transaction, click incl. grid/tree, fill, F4, popup close, menu select;
+  `fields` with `then_key` once per call) now reads the SAP server session key at the saved path after the action:
+  a readable key that differs from the saved one gives `SESSION_CHANGED` (outcome unknown, read the screen before
+  repeating, never retried on another session; the action's own answer is kept as `action_result`); an unreadable
+  key (a round trip or a logoff in progress) keeps the result with `session_check: "inconclusive"` and a warning; a
+  session that is gone (the action may have closed it, `/nex`) keeps the result and adds `session_closed`. A session
+  replaced before the action was already refused (INVALID_CONNECTION) by the key check of the connection lookup.
+  Reads and actions on a replaced default connection re-attach alike
   (unit-tested with the fakes; not yet verified live).
 
 ### Cloud link: a call SAP GUI does not answer is named, and the diagnostic tools no longer wait behind it
