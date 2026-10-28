@@ -40,6 +40,7 @@ struct KeySpec {
     std::optional<long long> min;       ///< Int range
     std::optional<long long> max;
     std::vector<std::string> allowed;   ///< String enum (empty = any)
+    std::string empty_means;            ///< StringList: what an empty list does ("any", "all", "none")
     std::string env;                    ///< environment variable overriding the key
     std::vector<std::string> cli;       ///< `fairyfly mcp` options feeding the key (first given wins)
     /// Copies the value into the server options (apply_config); empty for keys that do not configure the server.
@@ -51,6 +52,8 @@ const KeySpec* find_key(const std::string& key);
 
 /// Renders a value the way it appears in `config show` ("8383", "true", "[a, b]", "text").
 std::string value_to_string(const Value& value);
+/// The key's default as `fairyfly mcp --help` shows it: value_to_string, an empty list as what it means.
+std::string default_text(const KeySpec& spec);
 /// Parses a flag/environment string for `spec`. Returns nullopt (and `error`) when it does not fit.
 std::optional<Value> parse_value(const KeySpec& spec, const std::string& text, std::string* error = nullptr);
 
@@ -85,8 +88,9 @@ struct ParseResult {
     std::string first_error_code() const;
 };
 
-/// Strict parse + validation of YAML text. Never throws.
-ParseResult parse_yaml(const std::string& yaml_text);
+/// Strict parse + validation of YAML text. Never throws. A file with an error has no values, so it is never applied
+/// in part; `keep_valid_values` keeps the values that are valid, for a reader that only compares (mcp setup).
+ParseResult parse_yaml(const std::string& yaml_text, bool keep_valid_values = false);
 
 // ---- Precedence ---------------------------------------------------------------------------------
 struct EffectiveValue {

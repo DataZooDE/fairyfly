@@ -8,8 +8,6 @@
 #include <set>
 #include <sstream>
 
-#include <yaml-cpp/yaml.h>
-
 #include "include/auth/crypto.h"
 #include "include/config/mcp_config.h"
 #include "include/setup/setup_validators.h"
@@ -29,20 +27,6 @@ bool sid_ok(const std::string& sid) {
     return std::regex_match(sid, re);
 }
 
-std::string yaml_scalar(const YAML::Node& n) {
-    if (n.IsScalar()) return n.as<std::string>();
-    if (n.IsSequence()) {
-        std::string out = "[";
-        bool first = true;
-        for (const auto& item : n) {
-            out += (first ? "" : ", ") + (item.IsScalar() ? item.as<std::string>() : std::string("?"));
-            first = false;
-        }
-        return out + "]";
-    }
-    return "";
-}
-
 void read_config(SystemProbe& sys, const std::string& path, Diagnosis& d) {
     const auto text = sys.read_file(path);
     if (!text) {
@@ -51,24 +35,17 @@ void read_config(SystemProbe& sys, const std::string& path, Diagnosis& d) {
         return;
     }
     d.config_exists = true;
-    // A file the server accepts is read by the server's own parser ("tls: True" is true, "port: 08443" is 8443);
-    // only a file it refuses is compared as raw text, so setup still names the keys to fix.
-    const config::ParseResult parsed = config::parse_yaml(*text);
-    try {
-        const YAML::Node root = YAML::Load(*text);
-        if (root.IsMap() && root["server"] && root["server"].IsMap()) {
-            const YAML::Node server = root["server"];
-            for (const char* key : kSetupKeys) {
-                const std::string name = std::string(key).substr(std::string("server.").size());
-                if (!server[name]) continue;
-                const auto value = parsed.config.values.find(key);
-                d.config_current[key] = value != parsed.config.values.end() ? config::value_to_string(value->second)
-                                                                             : yaml_scalar(server[name]);
-            }
+    // the server's own parser: a value it takes counts as that value ("tls: True" is true, "port: 08443" is 8443);
+    // a value it refuses is missing, so setup names that key to fix
+    const config::ParseResult parsed = config::parse_yaml(*text, true);
+    for (const auto& issue : parsed.issues)
+        if (issue.code == "CONFIG_PARSE_ERROR") {
+            d.config_unreadable = true;
+            return;
         }
-    } catch (const std::exception&) {
-        d.config_unreadable = true;
-    }
+    for (const char* key : kSetupKeys)
+        if (const auto value = parsed.config.values.find(key); value != parsed.config.values.end())
+            d.config_current[key] = config::value_to_string(value->second);
 }
 
 /// True when the DER/PEM file holds exactly the certificate with this SHA-1 thumbprint (independent of the store).

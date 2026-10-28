@@ -443,6 +443,19 @@ TEST_CASE("plan: existing mcp.yaml is never rewritten", "[mcp_setup]") {
     CHECK(Rig::status(p, "config") == "unchanged");
 }
 
+TEST_CASE("plan: an mcp.yaml the server cannot parse blocks the config step; an invalid value is named to fix", "[mcp_setup]") {
+    Rig r;
+    r.m.sys.files[kConfigPath] = "server: [unclosed\n";
+    CHECK(Rig::status(r.plan(Rig::self_signed()), "config") == "blocked");
+    r.m.sys.files[kConfigPath] = "server:\n  tls: maybe\n  host: '+'\n  port: 8443\n  allowed_hosts: [" + kHost + "]\n";
+    const Plan p = r.plan(Rig::self_signed());
+    CHECK(Rig::status(p, "config") == "skipped");
+    bool named = false;
+    for (const auto& h : p.human)
+        if (h.id == "config_keys") named = h.text.find("server.tls: true") != std::string::npos && h.text.find("server.port") == std::string::npos;
+    CHECK(named);   // only the key that differs
+}
+
 TEST_CASE("plan: mcp.yaml values are read the way the server reads them", "[mcp_setup]") {
     // review 2026-10-27 (Codex): setup compared the raw YAML text, so 'tls: True' (which the server takes as true)
     // was "different" and teardown did not warn about it

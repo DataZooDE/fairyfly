@@ -12,7 +12,7 @@ namespace {
 /// The help text with the key table's default, so --help, `mcp config show` and the template cannot disagree.
 std::string with_default(const std::string& text, const char* key) {
     const config::KeySpec* spec = config::find_key(key);
-    return spec && spec->def ? text + " (default " + config::value_to_string(*spec->def) + ")" : text;
+    return spec && spec->def ? text + " (default " + config::default_text(*spec) + ")" : text;
 }
 /// The values the key table allows.
 CLI::IsMember allowed(const char* key) { return CLI::IsMember(config::find_key(key)->allowed); }
@@ -29,7 +29,7 @@ Examples:
   fairyfly mcp tools --markdown
 )HELP");
     cmd_->add_flag("--read-only", options_.read_only,
-                   "Read-only guard mode (default): state-changing actions are refused, write tools are hidden; FAIRYFLY_READ_ONLY=1 forces it");
+                   "Read-only guard mode, on unless --allow-write: state-changing actions are refused, write tools are hidden; FAIRYFLY_READ_ONLY=1 forces it");
     cmd_->add_flag("--allow-write", options_.allow_write,
                    "Enable write mode: expose gui_element_fill, allow multiple_logon=end and close_session, turn the read-only guard off");
     cmd_->add_option("--default-connection", default_connection_,
@@ -53,29 +53,31 @@ Examples:
     cmd_->add_flag("--tls,!--no-tls", options_.tls,
                    "HTTP only: serve HTTPS; http.sys terminates TLS with the certificate bound by 'fairyfly mcp setup'");
     cmd_->add_option("--allow-ip", options_.allow_ip,
-                     "HTTP only: accept clients only from these addresses or CIDR blocks (comma separated; "
-                     "loopback exempt by default; empty = any)")
+                     with_default("HTTP only: accept clients only from these addresses or CIDR blocks (comma separated; "
+                                  "loopback is exempt unless --allow-ip-include-loopback)", "server.allow_ip"))
         ->delimiter(',');
     cmd_->add_flag("--allow-ip-include-loopback", options_.allow_ip_include_loopback,
                    "HTTP only: require loopback peers to match a nonempty --allow-ip list too");
     cmd_->add_flag("--insecure-http", options_.insecure_http,
                    "HTTP only: allow plain HTTP on a non-loopback host (dangerous; flag only, never from config)");
     cmd_->add_option("--allowed-hosts", options_.allowed_hosts,
-                     "Extra Host header values accepted besides loopback (comma separated; DNS-rebinding defence)")
+                     with_default("Extra Host header values accepted besides loopback (comma separated; DNS-rebinding defence)",
+                                  "server.allowed_hosts"))
         ->delimiter(',');
     cmd_->add_option("--cors-origin", options_.cors_origins,
-                     "Origin values accepted (comma separated or repeated); default: none, requests with an Origin are rejected")
+                     with_default("Origin values accepted (comma separated or repeated); requests with another Origin are rejected",
+                                  "server.cors_origins"))
         ->delimiter(',');
     cmd_->add_flag("--insecure-no-auth", options_.insecure_no_auth,
                    "HTTP only: disable authentication (dangerous; for local experiments)");
     cmd_->add_flag("--sse,!--no-sse", options_.sse, with_default("HTTP only: allow SSE streaming for tools/call", "server.sse"));
     cmd_->add_option("--tools", tools_filter_,
-                     "Only expose the tools of these families (comma or space separated), e.g. "
-                     "\"session,screen,element\". Families: " + [] {
-                         std::string out;
-                         for (const auto& family : command_table::families()) out += (out.empty() ? "" : ", ") + family;
-                         return out;
-                     }() + ". Default: all families");
+                     with_default("Only expose the tools of these families (comma or space separated), e.g. "
+                                  "\"session,screen,element\". Families: " + [] {
+                                      std::string out;
+                                      for (const auto& family : command_table::families()) out += (out.empty() ? "" : ", ") + family;
+                                      return out;
+                                  }(), "tools.families"));
 
     tools_cmd_ = add_leaf(app, {"mcp", "tools"});
     tools_cmd_->footer(R"HELP(Usage notes:
