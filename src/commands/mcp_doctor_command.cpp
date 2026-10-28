@@ -190,7 +190,7 @@ int run_mcp_doctor_command(McpExtras& x, const HandlerProvider& get_handler) {
     input.config.issues = loaded.parsed.issues;
     input.exe_path = tray::current_exe_path();
 
-    const Effective effective = resolve(loaded.parsed.config, flags_layer(*x.mcp_app), env);
+    const Effective effective = resolve(loaded.parsed.config, flags_layer(*x.mcp_app, input.config.issues), env);
     input.transport = std::get<std::string>(effective.at("server.transport").value);
     input.host = std::get<std::string>(effective.at("server.host").value);
     input.port = static_cast<int>(std::get<long long>(effective.at("server.port").value));

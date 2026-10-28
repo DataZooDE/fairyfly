@@ -120,6 +120,16 @@ TEST_CASE("mcp config show reports the effective values: a flag over the file", 
     CHECK(flagged["source"] == "flag");
 }
 
+TEST_CASE("mcp config show refuses a flag value the key table does not allow", "[mcp][config][command]") {
+    // the flag was dropped silently and the raw value stayed in the server options (1 ms despite the 1000 ms minimum)
+    ConfigFile cfg;
+    cfg.write("server:\n  port: 9555\n");
+    const Run r = cli({"mcp", "--call-timeout-ms", "1", "config", "show", "--output", "json"});
+    CHECK(r.exit_code != 0);
+    CHECK(r.out.find("CONFIG_FLAG_INVALID") != std::string::npos);
+    CHECK(r.out.find("--call-timeout-ms") != std::string::npos);
+}
+
 TEST_CASE("an mcp command leaves no tray runner factory behind", "[mcp][config][command]") {
     // the factory captured run_cli's locals by reference: after run_cli returned it dangled, and a later test saw it
     ConfigFile cfg;

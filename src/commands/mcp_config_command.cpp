@@ -28,9 +28,12 @@ CLI::Option* output_option(CLI::App* cmd, std::string& target) {
         ->check(CLI::IsMember({"text", "json", "markdown"}));
 }
 
-std::string join_results(const CLI::Option& option) {
+/// The option's value as the key table parses it: a list joins every occurrence, a scalar takes what CLI11 bound
+/// (the last of a repeated flag, so `--tls --no-tls` is false, as in ServeOptions).
+std::string flag_text(const KeySpec& spec, const CLI::Option& option) {
+    const auto& results = spec.type == ValueType::StringList ? option.results() : option.reduced_results();
     std::string out;
-    for (const auto& r : option.results()) out += (out.empty() ? "" : ",") + r;
+    for (const auto& r : results) out += (out.empty() ? "" : ",") + r;
     return out;
 }
 
@@ -96,8 +99,15 @@ int cmd_show(McpExtras& x) {
         else for (const auto& i : loaded.parsed.issues) std::cerr << format_issue(i, label) << "\n";
         return 1;
     }
+    std::vector<ConfigIssue> flag_issues;
+    const McpConfig flags = flags_layer(*x.mcp_app, flag_issues);
+    if (!flag_issues.empty()) {
+        if (x.output == "json") print_json({{"status", "error"}, {"error", {{"code", flag_issues.front().code}, {"message", flag_issues.front().message}}}, {"issues", issues_json(flag_issues)}});
+        else for (const auto& i : flag_issues) std::cerr << format_issue(i) << "\n";
+        return 1;
+    }
     std::vector<ConfigIssue> env_issues;
-    const Effective effective = resolve(loaded.parsed.config, flags_layer(*x.mcp_app), env, &env_issues);
+    const Effective effective = resolve(loaded.parsed.config, flags, env, &env_issues);
     if (x.output == "json") {
         json data = {{"config_file", {{"path", label}, {"exists", loaded.exists}}}, {"values", effective_to_json(effective)}};
         json issues = issues_json(loaded.parsed.issues);
@@ -171,7 +181,7 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
 
     tray::TrayPaths paths;
     paths.log_file = log_file;
-    paths.audit_dir = audit::resolve_config(process_env(), false, false, std::chrono::system_clock::now()).file.parent_path();
+    paths.audit_dir = tray_audit_dir(options);
     paths.config_file = loaded.path.path;
     paths.exe = exe;
     tray::TrayState state;
@@ -184,6 +194,11 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
 } // namespace
 
 // ---- shared helpers ------------------------------------------------------------------------------
+std::filesystem::path tray_audit_dir(const mcp::ServeOptions& options) {
+    const auto file = audit::resolve_config(process_env(), false, false, std::chrono::system_clock::now(), options.audit_file).file;
+    return std::filesystem::absolute(file).parent_path();   // a relative audit.file is next to the working directory
+}
+
 int report_error(const std::string& output, const std::string& code, const std::string& message, int exit_code) {
     if (output == "json") print_json({{"status", "error"}, {"error", {{"code", code}, {"message", message}}}});
     else std::cerr << "error " << code << ": " << message << std::endl;
@@ -205,13 +220,15 @@ LoadedConfig load_config(const std::string& flag_path, const EnvLookup& env) {
     return out;
 }
 
-McpConfig flags_layer(const CLI::App& mcp_app) {
+McpConfig flags_layer(const CLI::App& mcp_app, std::vector<ConfigIssue>& issues) {
     McpConfig layer;
     for (const auto& spec : key_specs()) {  // the key table names the options of each key (first given wins)
         for (const auto& name : spec.cli) {
             const CLI::Option* option = mcp_app.get_option_no_throw(name);
             if (!option || option->count() == 0) continue;
-            if (auto value = parse_value(spec, join_results(*option))) layer.set(spec.key, std::move(*value));
+            std::string why;
+            if (auto value = parse_value(spec, flag_text(spec, *option), &why)) layer.set(spec.key, std::move(*value));
+            else issues.push_back({Severity::Error, "CONFIG_FLAG_INVALID", name + ": " + why, 0, spec.key});
             break;
         }
     }
@@ -309,7 +326,9 @@ std::optional<int> run_mcp_extras(McpExtras& x, mcp::ServeOptions& options, cons
             return startup_error(x.tray, issue.code, issue.message, 2);
         spdlog::warn("{}", format_issue(issue));
     }
-    const McpConfig flags = flags_layer(*x.mcp_app);
+    std::vector<ConfigIssue> flag_issues;
+    const McpConfig flags = flags_layer(*x.mcp_app, flag_issues);
+    if (!flag_issues.empty()) return startup_error(x.tray, flag_issues.front().code, flag_issues.front().message, 2);
     const McpConfig layers = given(resolve_layers(loaded.parsed.config, env_config, flags));  // the env layer read once
     apply_config(layers, options);
     options.audit_file = audit_settings(loaded.parsed.config, env_config, flags);  // audit.required from any layer

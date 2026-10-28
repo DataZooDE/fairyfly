@@ -195,7 +195,10 @@ struct AutostartPlan {
     std::string exe;                  ///< fairyfly.exe; a Run value that starts it directly is moved to `program`
     std::string program;              ///< tray_start_program(exe)
 };
+/// The values the trays keep in TraySettings: every name lives here (docs/MSIX.md lists them for the package move).
 inline constexpr const char* kAutostartDefaultedSetting = "link-autostart-defaulted";
+inline constexpr const char* kLinkAllowChangesSetting = "link_allow_changes";   ///< "Allow changes in SAP" (approval::Standing)
+inline constexpr const char* kTraySettingNames[] = {kAutostartDefaultedSetting, kLinkAllowChangesSetting};
 /// At the start of a tray that fairyfly-tray.exe started (`launched`): the very first time it turns "Start with Windows"
 /// on (and notes that, so turning it off in the menu stays off); a Run value of an older version that starts fairyfly.exe
 /// (a console at every logon) starts `program` instead, its options kept. Started any other way it changes nothing.

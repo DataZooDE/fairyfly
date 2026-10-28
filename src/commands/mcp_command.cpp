@@ -1,12 +1,22 @@
 #include "include/commands/mcp_command.h"
 
-#include "include/mcp/constants.h"
 #include <memory>
 
 #include "include/command_table.h"
+#include "include/config/mcp_config.h"
 
 namespace fairyfly {
 namespace commands {
+
+namespace {
+/// The help text with the key table's default, so --help, `mcp config show` and the template cannot disagree.
+std::string with_default(const std::string& text, const char* key) {
+    const config::KeySpec* spec = config::find_key(key);
+    return spec && spec->def ? text + " (default " + config::value_to_string(*spec->def) + ")" : text;
+}
+/// The values the key table allows.
+CLI::IsMember allowed(const char* key) { return CLI::IsMember(config::find_key(key)->allowed); }
+}  // namespace
 
 CLI::App* McpCommand::setup_cli(CLI::App& app) {
     cmd_ = noun_app(app, "mcp");
@@ -24,22 +34,22 @@ Examples:
                    "Enable write mode: expose gui_element_fill, allow multiple_logon=end and close_session, turn the read-only guard off");
     cmd_->add_option("--default-connection", default_connection_,
                      "Connection index used when a tool call omits 'connection'");
-    cmd_->add_option("--format", options_.format, "Text format of tool results: markdown (default), json")
-        ->check(CLI::IsMember({"markdown", "json"}));
+    cmd_->add_option("--format", options_.format, with_default("Text format of tool results: markdown or json", "format"))
+        ->check(allowed("format"));
     cmd_->add_option("--max-result-chars", options_.max_result_chars,
-                     "Truncate text results beyond this many characters (default 60000)");
+                     with_default("Truncate text results beyond this many characters", "limits.max_result_chars"));
     cmd_->add_option("--max-image-bytes", options_.max_image_bytes,
-                     "Refuse images larger than this many bytes (default 2097152)");
+                     with_default("Refuse images larger than this many bytes", "limits.max_image_bytes"));
     cmd_->add_option("--max-calls-per-minute", options_.max_calls_per_minute,
-                     "Rate limit for tool calls (default 120)");
+                     with_default("Rate limit for tool calls", "limits.max_calls_per_minute"));
     cmd_->add_option("--call-timeout-ms", options_.call_timeout_ms,
-                     "Soft timeout per tool call in milliseconds (default 120000)");
-    cmd_->add_option("--transport", options_.transport, "Transport: stdio (default) or http (same as --http)")
-        ->check(CLI::IsMember({"stdio", "http"}));
+                     with_default("Soft timeout per tool call in milliseconds", "limits.call_timeout_ms"));
+    cmd_->add_option("--transport", options_.transport, with_default("Transport: stdio or http (same as --http)", "server.transport"))
+        ->check(allowed("server.transport"));
     cmd_->add_flag("--http", http_flag_,
                    "Serve MCP over HTTP or HTTPS (http.sys) instead of stdio");
-    cmd_->add_option("--mcp-host", options_.host, "HTTP bind address (default 127.0.0.1)");
-    cmd_->add_option("--mcp-port,--port", options_.port, "HTTP port (default " + std::to_string(mcp::kDefaultHttpPort) + ")");
+    cmd_->add_option("--mcp-host", options_.host, with_default("HTTP bind address", "server.host"));
+    cmd_->add_option("--mcp-port,--port", options_.port, with_default("HTTP port", "server.port"));
     cmd_->add_flag("--tls,!--no-tls", options_.tls,
                    "HTTP only: serve HTTPS; http.sys terminates TLS with the certificate bound by 'fairyfly mcp setup'");
     cmd_->add_option("--allow-ip", options_.allow_ip,
@@ -58,7 +68,7 @@ Examples:
         ->delimiter(',');
     cmd_->add_flag("--insecure-no-auth", options_.insecure_no_auth,
                    "HTTP only: disable authentication (dangerous; for local experiments)");
-    cmd_->add_flag("--sse,!--no-sse", options_.sse, "HTTP only: allow SSE streaming for tools/call (default on)");
+    cmd_->add_flag("--sse,!--no-sse", options_.sse, with_default("HTTP only: allow SSE streaming for tools/call", "server.sse"));
     cmd_->add_option("--tools", tools_filter_,
                      "Only expose the tools of these families (comma or space separated), e.g. "
                      "\"session,screen,element\". Families: " + [] {

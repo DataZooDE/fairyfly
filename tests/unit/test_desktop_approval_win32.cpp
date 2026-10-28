@@ -11,6 +11,8 @@
 #include <thread>
 
 #include "include/link/desktop_approval_win32.h"
+#include "include/link/link_runner.h"
+#include "include/tray/tray_contract.h"
 #include "include/tray/tray_win32.h"
 
 using namespace fairyfly::link::approval;
@@ -76,16 +78,14 @@ TEST_CASE("standing approval: saved in the real tray settings (HKCU) and read ba
     // the same key as "Allow changes in SAP" (link_allow_changes), under a value of its own that the test removes
     const char* name = "link_allow_changes_unit_test";
     std::shared_ptr<fairyfly::tray::TraySettings> settings = fairyfly::tray::make_win32_tray_settings();
-    auto open = [&] {
-        return std::make_shared<Standing>([&] { return settings->get(name); }, [&](const std::string& v) { return settings->set(name, v); });
-    };
+    auto open = [&] { return fairyfly::link::saved_standing(settings, name); };
     CHECK_FALSE(open()->on());
     CHECK(open()->set(true));
     CHECK(settings->get(name) == std::optional<std::string>("1"));
     CHECK(open()->on());  // a restart (or the next version) reads it back
     CHECK(open()->set(false));
     CHECK_FALSE(open()->on());
-    RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\DataZoo\\fairyfly\\tray", L"link_allow_changes_unit_test");
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, fairyfly::tray::contract::kSettingsKey, L"link_allow_changes_unit_test");
     CHECK_FALSE(settings->get(name).has_value());
 }
 

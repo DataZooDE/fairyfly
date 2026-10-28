@@ -443,6 +443,16 @@ TEST_CASE("plan: existing mcp.yaml is never rewritten", "[mcp_setup]") {
     CHECK(Rig::status(p, "config") == "unchanged");
 }
 
+TEST_CASE("plan: mcp.yaml values are read the way the server reads them", "[mcp_setup]") {
+    // review 2026-10-27 (Codex): setup compared the raw YAML text, so 'tls: True' (which the server takes as true)
+    // was "different" and teardown did not warn about it
+    Rig r;
+    r.m.sys.files[kConfigPath] =
+        "server:\n  tls: True\n  host: '+'\n  port: 08443\n  allowed_hosts: [" + kHost + "]\n";
+    Plan p = r.plan(Rig::self_signed());
+    CHECK(Rig::status(p, "config") == "unchanged");
+}
+
 // ---- consent / exit code matrix ----------------------------------------------------------------------------------
 TEST_CASE("setup --dry-run prints the plan and changes nothing", "[mcp_setup]") {
     Rig r;
@@ -1083,6 +1093,16 @@ TEST_CASE("teardown leaves a pre-existing mcp.yaml alone", "[mcp_setup]") {
     t.yes = true;
     REQUIRE(r.teardown(t) == 0);
     CHECK(r.m.sys.files.count(kConfigPath) == 1);   // setup never created it
+}
+
+TEST_CASE("teardown warns about a kept mcp.yaml that still turns TLS on, in any spelling the server accepts", "[mcp_setup]") {
+    Rig r;
+    r.m.sys.files[kConfigPath] = "server:\n  tls: True\n  host: '+'\n  port: 8443\n  allowed_hosts: [" + kHost + "]\n";
+    REQUIRE(r.setup(Rig::self_signed()) == 0);
+    TeardownOptions t;
+    t.yes = true;
+    REQUIRE(r.teardown(t) == 0);
+    CHECK(r.out.str().find("it still says 'tls: true'") != std::string::npos);
 }
 
 TEST_CASE("teardown --dry-run json lists the config step", "[mcp_setup]") {

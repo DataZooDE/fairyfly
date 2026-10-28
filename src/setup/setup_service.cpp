@@ -11,6 +11,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "include/auth/crypto.h"
+#include "include/config/mcp_config.h"
 #include "include/setup/setup_validators.h"
 
 namespace fairyfly::setup {
@@ -50,13 +51,19 @@ void read_config(SystemProbe& sys, const std::string& path, Diagnosis& d) {
         return;
     }
     d.config_exists = true;
+    // A file the server accepts is read by the server's own parser ("tls: True" is true, "port: 08443" is 8443);
+    // only a file it refuses is compared as raw text, so setup still names the keys to fix.
+    const config::ParseResult parsed = config::parse_yaml(*text);
     try {
         const YAML::Node root = YAML::Load(*text);
         if (root.IsMap() && root["server"] && root["server"].IsMap()) {
             const YAML::Node server = root["server"];
             for (const char* key : kSetupKeys) {
                 const std::string name = std::string(key).substr(std::string("server.").size());
-                if (server[name]) d.config_current[key] = yaml_scalar(server[name]);
+                if (!server[name]) continue;
+                const auto value = parsed.config.values.find(key);
+                d.config_current[key] = value != parsed.config.values.end() ? config::value_to_string(value->second)
+                                                                             : yaml_scalar(server[name]);
             }
         }
     } catch (const std::exception&) {

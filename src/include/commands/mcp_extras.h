@@ -4,6 +4,7 @@
 // parallel phases (HTTP flags, token) only need to touch single hook lines there.
 
 #include <CLI/CLI.hpp>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -56,8 +57,12 @@ struct LoadedConfig {
     config::ParseResult parsed;
 };
 LoadedConfig load_config(const std::string& flag_path, const config::EnvLookup& env);
-/// The flag layer: only options the user really typed (CLI11 counts), parsed with the key table.
-config::McpConfig flags_layer(const CLI::App& mcp_app);
+/// The flag layer: only options the user really typed (CLI11 counts), parsed with the key table. A value the
+/// key table refuses (out of range, not allowed) is left out and reported in `issues` as CONFIG_FLAG_INVALID.
+config::McpConfig flags_layer(const CLI::App& mcp_app, std::vector<config::ConfigIssue>& issues);
+/// The folder of the audit trail the server writes (FAIRYFLY_AUDIT_FILE > mcp.yaml audit.file > default): the tray's
+/// "Open audit folder".
+std::filesystem::path tray_audit_dir(const mcp::ServeOptions& options);
 /// Prints an error as text (stderr) or JSON (stdout) and returns `exit_code`.
 int report_error(const std::string& output, const std::string& code, const std::string& message, int exit_code = 1);
 
