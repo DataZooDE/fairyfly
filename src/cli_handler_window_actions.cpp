@@ -56,7 +56,7 @@ Result CommandHandler::handle_send_key(const std::string& key, const std::string
         result.error["hint"] = "to read further rows of a grid use `screen read --offset N` (MCP: gui_screen_read offset); "
                                "page keys only work on classic list screens";
     }
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
@@ -78,7 +78,7 @@ Result CommandHandler::handle_close(int vkey, std::optional<int> connection_id)
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
     }
-    return result;
+    return confirm_session_after_action(conn_result.value, result);
 }
 
 Result CommandHandler::handle_screen_menu(const std::string& select_path, const std::string& window,
@@ -111,7 +111,8 @@ Result CommandHandler::handle_screen_menu(const std::string& select_path, const 
     if (result.status == Result::Status::Success) {
         result.data["connection_id"] = conn_result.value.id;
     }
-    return result;
+    // a menu selection acts on SAP; listing the menu does not
+    return select_path.empty() ? result : confirm_session_after_action(conn_result.value, result);
 }
 
 } // namespace cli

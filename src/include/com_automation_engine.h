@@ -92,6 +92,7 @@ public:
     Result disconnect() override;
     Result close_current_session() override;
     bool is_connected() const override;
+    std::optional<std::string> live_session_key(const std::string& session_id) const override;
     bool validate_session(const std::string& session_id,
                           const std::string& server_session_key = "") const override;
     bool validate_session_for_cleanup(const std::string& session_id,

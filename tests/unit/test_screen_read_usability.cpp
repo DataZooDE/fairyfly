@@ -590,3 +590,177 @@ TEST_CASE("Screen markdown header names the SAP system, client and user", "[scre
         CHECK(fairyfly::cli::ScreenMarkdownFormatter::format(bare).find("**System:**") == std::string::npos);
     }
 }
+
+// ---- tab= with only/text/id/type/first: the tab's matching elements (SU01 Logon Data, live 2026-10-28) -----------
+
+namespace {
+/// A `screen read --tab tabpLOGO` result shaped like ScreenReader::read_tab: the strip and its tab headers, the
+/// tab's subscreen fields at the top level and once more under `tabs_content`. `display` makes every field read-only
+/// (SU01 "Display Users"); otherwise the user-alias and the user-type fields are changeable.
+json su01_logon_tab(bool display) {
+    const std::string sub = "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO/ssubMAINAREA:SAPLSUID_MAINTENANCE:1101/";
+    const auto field = [&](const std::string& id, const std::string& type, const std::string& text, bool changeable) {
+        return json{{"id", sub + id}, {"type", type}, {"text", text}, {"changeable", changeable}};
+    };
+    const json alias = field("ctxtSUID_ST_NODE_LOGONDATA-USERALIAS", "GuiCTextField", "", !display);
+    const json ustyp = field("cmbSUID_ST_NODE_LOGONDATA-USTYP", "GuiComboBox", "Dialog", !display);
+    const json pwd_state = field("txtPASSWORD_EXT_PWD_STATE", "GuiTextField", "Production Password", false);
+    const json user_class = field("ctxtSUID_ST_NODE_LOGONDATA-CLASS", "GuiCTextField", "SUPER", !display);
+    const json label = field("lblSUID_ST_NODE_LOGONDATA-CLASS", "GuiLabel", "User Group", false);
+    const json button = {{"id", sub + "btnPASSWORD_GENERATE"}, {"type", "GuiButton"}, {"text", "Generate"},
+                         {"changeable", true}};
+    const json tab_elements = json::array({alias, ustyp, pwd_state, label, user_class, button});
+    const json strip = {{"id", "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1"}, {"type", "GuiTabStrip"}};
+    const json header = {{"id", "/app/con[0]/ses[0]/wnd[0]/usr/tabsTABSTRIP1/tabpLOGO"}, {"type", "GuiTab"},
+                         {"text", "Logon Data"}};
+    json elements = json::array({strip, header});
+    for (const auto& e : tab_elements) elements.push_back(e);
+    const json tab_hierarchy = {{"form_fields", json::array({alias, ustyp, pwd_state, label, user_class})},
+                                {"buttons", json::array({button})}};
+    return {{"screen_id", "/app/con[0]/ses[0]/wnd[0]"},
+            {"title", "Display Users"},
+            {"elements", elements},
+            {"element_count", elements.size()},
+            {"hierarchy", {{"tabs", json::array({strip, header})},
+                           {"form_fields", tab_hierarchy["form_fields"]},
+                           {"buttons", tab_hierarchy["buttons"]}}},
+            {"tabs_content", json::array({{{"tab_id", header["id"]}, {"tab_name", "Logon Data"},
+                                           {"tab_type", "GuiTab"}, {"tab_index", 0},
+                                           {"elements", tab_elements},
+                                           {"hierarchy", tab_hierarchy},
+                                           {"element_count", tab_elements.size()}}})},
+            {"tabs_expanded", true},
+            {"expanded_tab_count", 1}};
+}
+
+std::vector<std::string> ids_of(const json& elements) {
+    std::vector<std::string> ids;
+    for (const auto& e : elements) {
+        const std::string id = e.value("id", "");
+        ids.push_back(id.substr(id.rfind('/') + 1));
+    }
+    return ids;
+}
+}  // namespace
+
+TEST_CASE("tab= with an element filter returns the tab's matching elements", "[screen][filters][tabs]") {
+    using V = std::vector<std::string>;
+    json data = su01_logon_tab(false);
+    cli::ScreenFilterOptions filters;
+    const auto tab_ids = [&] { return ids_of(data.at("tabs_content").at(0).at("elements")); };
+
+    SECTION("only=fields: the changeable text fields of the tab") {
+        filters.only_fields = true;
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"ctxtSUID_ST_NODE_LOGONDATA-USERALIAS", "ctxtSUID_ST_NODE_LOGONDATA-CLASS"});
+        CHECK(data.at("tabs_content").at(0).at("element_count") == 2);
+        CHECK(ids_of(data.at("elements")) == tab_ids());
+    }
+    SECTION("only=editable: every changeable control of the tab, the combo box and the button included") {
+        filters.only_editable = true;
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"ctxtSUID_ST_NODE_LOGONDATA-USERALIAS", "cmbSUID_ST_NODE_LOGONDATA-USTYP",
+                             "ctxtSUID_ST_NODE_LOGONDATA-CLASS", "btnPASSWORD_GENERATE"});
+    }
+    SECTION("only=buttons") {
+        filters.only_buttons = true;
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"btnPASSWORD_GENERATE"});
+    }
+    SECTION("text_contains, id_contains, type and first") {
+        filters.text_contains = "production";
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"txtPASSWORD_EXT_PWD_STATE"});
+
+        data = su01_logon_tab(false);
+        filters = {};
+        filters.id_contains = "LOGONDATA-CLASS";
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"lblSUID_ST_NODE_LOGONDATA-CLASS", "ctxtSUID_ST_NODE_LOGONDATA-CLASS"});
+
+        data = su01_logon_tab(false);
+        filters = {};
+        filters.type_filter = "GuiCTextField";
+        filters.first_match_only = true;
+        cli::apply_screen_filters(data, filters);
+        CHECK(tab_ids() == V{"ctxtSUID_ST_NODE_LOGONDATA-USERALIAS"});
+    }
+}
+
+TEST_CASE("only=fields on a display screen says which read-only fields it left out", "[screen][filters][tabs][suppressed]") {
+    // Live: SU01 Display Users, tab=tabpLOGO only=fields gave "Elements: 0" with no word about the 26 read-only
+    // fields on the tab. only=fields lists input fields (ERR-073: read-only captions are not inputs); a display
+    // screen has none, so the result must say what it dropped instead of looking empty.
+    json data = su01_logon_tab(true);
+    cli::ScreenFilterOptions filters;
+    filters.only_fields = true;
+    cli::apply_screen_filters(data, filters);
+
+    CHECK(data.at("tabs_content").at(0).at("elements").empty());
+    REQUIRE(data.contains("suppressed"));
+    const auto& suppressed = data.at("suppressed");
+    CHECK(suppressed.at("by") == "fields");
+    // the text fields, the combo box; counted once although read_tab lists them at the top level and in the tab
+    CHECK(suppressed.at("read_only_fields") == 4);
+    CHECK(suppressed.at("read_only_field_ids").size() == 4);
+    CHECK(suppressed.at("grids") == 0);
+    const std::string note = suppressed.at("note");
+    CHECK(note.find("4 read-only field(s) not included with only=fields") != std::string::npos);
+    CHECK(note.find("use no filter") != std::string::npos);
+    CHECK(note.find("no changeable fields") != std::string::npos);   // nothing kept: say why it looks empty
+
+    SECTION("Markdown says so too") {
+        const auto md = fairyfly::cli::ScreenMarkdownFormatter::format(data);
+        CHECK(md.find("4 read-only field(s) not included with only=fields") != std::string::npos);
+    }
+    SECTION("the JSON result carries it (format=json)") {
+        CHECK(data.dump().find("\"read_only_fields\":4") != std::string::npos);
+    }
+    SECTION("only=editable reports the same read-only fields") {
+        json again = su01_logon_tab(true);
+        cli::ScreenFilterOptions editable;
+        editable.only_editable = true;
+        cli::apply_screen_filters(again, editable);
+        REQUIRE(again.contains("suppressed"));
+        CHECK(again.at("suppressed").at("read_only_fields") == 4);
+        CHECK(again.at("suppressed").at("by") == "editable");
+    }
+    SECTION("an entry screen with input fields keeps the note quiet about read-only fields only when there are none") {
+        json entry = su01_logon_tab(false);
+        cli::apply_screen_filters(entry, filters);
+        REQUIRE(entry.contains("suppressed"));   // the password-state display field stays read-only
+        CHECK(entry.at("suppressed").at("read_only_fields") == 1);
+        // the screen has changeable fields: the note must not call it a display screen
+        CHECK(entry.at("suppressed").at("note").get<std::string>().find("no changeable fields") == std::string::npos);
+    }
+    SECTION("a long display screen lists at most 50 ids, the count stays complete") {
+        json big = su01_logon_tab(true);
+        auto& tab = big["tabs_content"][0];
+        for (int i = 0; i < 60; ++i) {
+            const json f = {{"id", "wnd[0]/usr/txtF" + std::to_string(i)}, {"type", "GuiTextField"}, {"text", "v"},
+                            {"changeable", false}};
+            tab["elements"].push_back(f);
+            tab["hierarchy"]["form_fields"].push_back(f);
+            big["elements"].push_back(f);
+        }
+        cli::apply_screen_filters(big, filters);
+        const auto& s = big.at("suppressed");
+        CHECK(s.at("read_only_fields") == 64);
+        CHECK(s.at("read_only_field_ids").size() == 50);
+        CHECK(s.at("read_only_field_ids_truncated") == true);
+        CHECK(big.at("tabs_content").at(0).at("suppressed").at("read_only_field_ids").size() == 50);
+    }
+}
+
+TEST_CASE("no_tabs: the selected tab's subscreen fields are part of the base read and its filters", "[screen][filters][tabs]") {
+    // `no_tabs` skips selecting the OTHER tabs; the selected tab's page is on screen and the base read walks
+    // GuiTabStrip/GuiTab/GuiSubScreen as containers, so its fields arrive as ordinary elements (no tabs_content).
+    json data = su01_logon_tab(false);
+    data.erase("tabs_content");
+    data["tabs_expanded"] = false;
+    cli::ScreenFilterOptions filters;
+    filters.only_fields = true;
+    cli::apply_screen_filters(data, filters);
+    CHECK(ids_of(data.at("elements")) ==
+          std::vector<std::string>{"ctxtSUID_ST_NODE_LOGONDATA-USERALIAS", "ctxtSUID_ST_NODE_LOGONDATA-CLASS"});
+}

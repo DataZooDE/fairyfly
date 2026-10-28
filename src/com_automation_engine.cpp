@@ -677,6 +677,13 @@ bool ComAutomationEngine::validate_session(const std::string& session_id,
     }
 }
 
+std::optional<std::string> ComAutomationEngine::live_session_key(const std::string& session_id) const {
+    // COM errors propagate: the caller cannot tell then (inconclusive), unlike validate_session's false
+    auto session = find_session_by_id(session_id).second;
+    if (!session || !owner_window_allowed(session)) return std::nullopt;
+    return session->get_server_session_key();
+}
+
 bool ComAutomationEngine::validate_session_for_cleanup(
     const std::string& session_id, const std::string& server_session_key) const {
     return session_present_checked(app_, session_id, server_session_key);
