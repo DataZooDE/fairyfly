@@ -16,6 +16,10 @@
   file spells one of these names, or the settings key, anywhere else.
 - The MCP tray's "Open audit folder" opens the folder of `audit.file` from `mcp.yaml` when it is set, which is the
   folder the server writes to.
+- `mcp setup` no longer has its own YAML reader: it uses the server's parser, keeping the valid values of a file
+  it only compares. Only `src/config/mcp_config.cpp` parses YAML, and a unit test fails when another file does.
+- List defaults come from the server options too. Each list key says once what an empty list means (`any`, `all`,
+  `none`), for the template and for `--help`, and no `mcp` option's help text states a default in other words.
 
 ## 2026.10.27 (2026-10-27)
 

@@ -5,6 +5,7 @@
 #include <map>
 
 #include "include/config/mcp_config.h"
+#include "include/string_utils.h"
 
 #include "include/commands/cli_app.h"
 #include "include/commands/global_options.h"
@@ -514,16 +515,31 @@ TEST_CASE("config: every --help default of `fairyfly mcp` is the key table's def
     REQUIRE(mcp_app != nullptr);
     std::size_t checked = 0;
     for (const auto& spec : key_specs()) {
-        // every option with a scalar default names it, from the key table (bool flags say what they switch on)
-        if (!spec.def || spec.cli.empty() || (spec.type != ValueType::Int && spec.type != ValueType::String && spec.key != "server.sse"))
-            continue;
+        // every option with a default names it, from the key table (a bool flag off by default says what it turns on)
+        if (!spec.def || spec.cli.empty()) continue;
         const CLI::Option* option = mcp_app->get_option_no_throw(spec.cli.front());
         REQUIRE(option != nullptr);
         CAPTURE(spec.key, option->get_description());
-        CHECK(option->get_description().find("(default " + value_to_string(*spec.def) + ")") != std::string::npos);
+        if (spec.type == ValueType::Bool && !std::get<bool>(*spec.def)) continue;
+        CHECK(option->get_description().find("(default " + default_text(spec) + ")") != std::string::npos);
         ++checked;
     }
-    CHECK(checked >= 8);
+    CHECK(checked >= 12);
+    // and no help text of a key's option describes the default in its own words
+    for (const auto& spec : key_specs()) {
+        if (spec.cli.empty()) continue;
+        const CLI::Option* option = mcp_app->get_option_no_throw(spec.cli.front());
+        std::string help = option->get_description();
+        const auto at = help.find("(default ");
+        if (at != std::string::npos) help.erase(at, help.find(')', at) - at + 1);
+        CAPTURE(option->get_name(), help);
+        CHECK(utils::lower_ascii(help).find("default") == std::string::npos);
+    }
+    // nor does the key table's own description (the template's comment shows the value below it)
+    for (const auto& spec : key_specs()) {
+        CAPTURE(spec.key, spec.doc);
+        CHECK(utils::lower_ascii(spec.doc).find("default") == std::string::npos);
+    }
 }
 
 TEST_CASE("config: merged layers are what resolve says, without the defaults", "[config][precedence]") {

@@ -70,6 +70,14 @@ KeySpec with(KeySpec spec, std::vector<std::string> cli, std::nullptr_t) {
     return spec;
 }
 
+/// A list key: `empty_means` is said once, in the template comment and in --help.
+KeySpec list(const char* key, const Vec& def, const std::string& doc, const char* empty_means) {
+    KeySpec spec = make(key, ValueType::StringList, Value{def}, "");
+    spec.doc = doc + " (empty = " + empty_means + ")";
+    spec.empty_means = empty_means;
+    return spec;
+}
+
 std::vector<KeySpec> build_specs() {
     std::vector<KeySpec> s;
     auto add = [&](KeySpec spec) { s.push_back(std::move(spec)); };
@@ -85,28 +93,28 @@ std::vector<KeySpec> build_specs() {
     add(with(k, {"--format"}, &mcp::ServeOptions::format));
 
     k = make("server.host", ValueType::String, Value{d.host},
-             "URL prefix host: 127.0.0.1 (default, loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
+             "URL prefix host: 127.0.0.1 (loopback), '+' (all interfaces, TLS recommended) or a host name; localhost is treated as 127.0.0.1");
     add(with(k, {"--mcp-host"}, &mcp::ServeOptions::host));
     k = make("server.port", ValueType::Int, Value{static_cast<long long>(mcp::kDefaultHttpPort)}, "Listen port of the HTTP transport");
     k.min = 1; k.max = 65535;
     add(with(k, {"--mcp-port", "--port"}, &mcp::ServeOptions::port));
-    k = make("server.transport", ValueType::String, Value{d.transport}, "stdio (default) or http");
+    k = make("server.transport", ValueType::String, Value{d.transport}, "Transport: stdio or http");
     k.allowed = {"stdio", "http"};
     add(with(k, {"--transport"}, &mcp::ServeOptions::transport));
     add(with(make("server.tls", ValueType::Bool, Value{d.tls},
              "TLS via http.sys; the certificate binding is created by 'fairyfly mcp setup'"), {"--tls"}, &mcp::ServeOptions::tls));
-    add(with(make("server.allow_ip", ValueType::StringList, Value{Vec{}},
-             "Client IP allow-list (addresses or CIDR blocks); empty = any, loopback exempt by default"), {"--allow-ip"}, &mcp::ServeOptions::allow_ip));
+    add(with(list("server.allow_ip", d.allow_ip,
+             "Client IP allow-list (addresses or CIDR blocks); loopback is exempt unless server.allow_ip_include_loopback", "any"), {"--allow-ip"}, &mcp::ServeOptions::allow_ip));
     add(with(make("server.allow_ip_include_loopback", ValueType::Bool, Value{d.allow_ip_include_loopback},
              "Require loopback clients to match a nonempty server.allow_ip list too"), {"--allow-ip-include-loopback"}, &mcp::ServeOptions::allow_ip_include_loopback));
-    add(with(make("server.sse", ValueType::Bool, Value{d.sse}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call (default on, like the --sse flag)"), {"--sse"}, &mcp::ServeOptions::sse));
-    add(with(make("server.allowed_hosts", ValueType::StringList, Value{Vec{}},
-             "Extra accepted Host header values (loopback names are always accepted)"), {"--allowed-hosts"}, &mcp::ServeOptions::allowed_hosts));
-    add(with(make("server.cors_origins", ValueType::StringList, Value{Vec{}}, "Browser origins allowed to call the server (empty = none)"), {"--cors-origin"}, &mcp::ServeOptions::cors_origins));
-    add(with(make("owner.sap_identities", ValueType::StringList, Value{Vec{}},
-             "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint (empty = legacy unrestricted mode)"), {}, &mcp::ServeOptions::owner_sap_identities));
+    add(with(make("server.sse", ValueType::Bool, Value{d.sse}, "Allow Server-Sent Events streaming (progress, keep-alive) on tools/call"), {"--sse"}, &mcp::ServeOptions::sse));
+    add(with(list("server.allowed_hosts", d.allowed_hosts,
+             "Extra accepted Host header values (loopback names are always accepted)", "none"), {"--allowed-hosts"}, &mcp::ServeOptions::allowed_hosts));
+    add(with(list("server.cors_origins", d.cors_origins, "Browser origins allowed to call the server", "none"), {"--cors-origin"}, &mcp::ServeOptions::cors_origins));
+    add(with(list("owner.sap_identities", d.owner_sap_identities,
+             "Exact uppercase SID/CLIENT/USER identities allowed through the HTTP endpoint", "legacy unrestricted mode"), {}, &mcp::ServeOptions::owner_sap_identities));
 
-    add(with(make("mode.read_only", ValueType::Bool, Value{d.read_only}, "Force the read-only guard (the guard is also the default without allow_write)"), {"--read-only"}, &mcp::ServeOptions::read_only));
+    add(with(make("mode.read_only", ValueType::Bool, Value{d.read_only}, "Force the read-only guard (without allow_write the guard is on anyway)"), {"--read-only"}, &mcp::ServeOptions::read_only));
     add(with(make("mode.allow_write", ValueType::Bool, Value{d.allow_write}, "Write mode: expose write tools and turn the guard off. FAIRYFLY_READ_ONLY=1 still wins"), {"--allow-write"}, &mcp::ServeOptions::allow_write));
 
     k = make("limits.max_result_chars", ValueType::Int, n(d.max_result_chars), "Truncate text results beyond this many characters");
@@ -122,7 +130,7 @@ std::vector<KeySpec> build_specs() {
     k.min = 1000; k.max = 3600000;
     add(with(k, {"--call-timeout-ms"}, &mcp::ServeOptions::call_timeout_ms));
 
-    add(with(make("tools.families", ValueType::StringList, Value{Vec{}}, "Only expose these tool families (empty = all)"), {"--tools"}, &mcp::ServeOptions::families));
+    add(with(list("tools.families", d.families, "Only expose these tool families", "all"), {"--tools"}, &mcp::ServeOptions::families));
 
     add(with(make("tray.enabled", ValueType::Bool, Value{false}, "Run with the system tray icon (same as --tray)"), {"--tray"}, nullptr));
     add(make("tray.start_minimized_notice", ValueType::Bool, Value{true}, "Show a balloon when the tray starts"));
@@ -378,6 +386,12 @@ std::string value_to_string(const Value& value) {
     return "[" + join_list(std::get<Vec>(value)) + "]";
 }
 
+std::string default_text(const KeySpec& spec) {
+    if (!spec.def) return {};
+    if (const auto* list = std::get_if<Vec>(&*spec.def); list && list->empty() && !spec.empty_means.empty()) return spec.empty_means;
+    return value_to_string(*spec.def);
+}
+
 std::optional<Value> parse_value(const KeySpec& spec, const std::string& text, std::string* error) {
     auto fail = [&](const std::string& why) -> std::optional<Value> {
         if (error) *error = why;
@@ -459,7 +473,7 @@ std::string ParseResult::first_error_code() const {
     return {};
 }
 
-ParseResult parse_yaml(const std::string& yaml_text) {
+ParseResult parse_yaml(const std::string& yaml_text, bool keep_valid_values) {
     ParseResult out;
     try {
         const YAML::Node root = YAML::Load(yaml_text);
@@ -469,7 +483,7 @@ ParseResult parse_yaml(const std::string& yaml_text) {
     } catch (const std::exception& e) {
         out.issues.push_back({Severity::Error, "CONFIG_PARSE_ERROR", e.what(), 0, {}});
     }
-    if (!out.ok()) out.config = McpConfig{};   // never apply a partially valid file
+    if (!out.ok() && !keep_valid_values) out.config = McpConfig{};   // never apply a partially valid file
     return out;
 }
 
@@ -598,8 +612,6 @@ std::string config_template() {
         out << "\n" << indent;
         if (!spec.def) {
             out << "# " << name << ": " << (spec.type == ValueType::Int ? "0" : "\"\"") << "\n";
-        } else if (spec.type == ValueType::StringList) {
-            out << name << ": []\n";
         } else {
             out << name << ": " << value_to_string(*spec.def) << "\n";
         }

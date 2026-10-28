@@ -153,6 +153,24 @@ TEST_CASE("environment: a process variable is set and removed through config", "
     CHECK(config::Environment::process().get(name).empty());
 }
 
+TEST_CASE("config: only config/mcp_config.cpp parses YAML", "[config]") {
+    // review 2026-10-28: mcp setup had a second reader of mcp.yaml next to the server's
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".hpp")) continue;
+        const fs::path rel = fs::relative(e.path(), src);
+        if (rel == fs::path("config") / "mcp_config.cpp") continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        if (text.find("yaml-cpp/") != std::string::npos || text.find("YAML::") != std::string::npos) offenders.push_back(rel.string());
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
+}
+
 TEST_CASE("environment: names and writers of the environment live in config only", "[config][env]") {
     namespace fs = std::filesystem;
     const fs::path src = FAIRYFLY_SOURCE_DIR;
