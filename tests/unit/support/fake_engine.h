@@ -16,6 +16,7 @@ class FakeScripting : public SapGuiScripting {
 public:
     std::vector<std::string> calls;
     Result next = Result::ok(json::object());
+    std::function<void(const std::string& call)> on_call;   ///< runs after each action is recorded, before it answers
 
     std::shared_ptr<sap::ComGuiSession> session;   ///< what unchecked_session answers (null: no COM session)
     std::string connection_description;           ///< what peek_session_connection_description answers
@@ -53,7 +54,8 @@ public:
 
 private:
     Result record(std::string call) {
-        calls.push_back(std::move(call));
+        calls.push_back(call);
+        if (on_call) on_call(call);
         return next;
     }
 };
@@ -77,6 +79,8 @@ public:
 
     // ---- scripted answers ----
     std::map<std::string, bool> live_sessions;  ///< session id -> alive (select_session / validate_session)
+    /// session id -> SAP server session key of the session at that path now; a saved key must match it (none: any key)
+    std::map<std::string, std::string> session_keys;
     Result next = Result::ok(json::object());   ///< result of every action
     std::string active_window = "wnd[0]";
     std::string server_key;                                  ///< what current_server_session_key answers
@@ -88,11 +92,11 @@ public:
     Result disconnect() override { return record("disconnect"); }
     Result close_current_session() override { return record("close_current_session"); }
     bool is_connected() const override { return true; }
-    bool validate_session(const std::string& id, const std::string&) const override { return alive(id); }
-    bool validate_session_for_cleanup(const std::string& id, const std::string&) const override { return alive(id); }
-    bool select_session(const std::string& id, const std::string&) override {
+    bool validate_session(const std::string& id, const std::string& key) const override { return same(id, key); }
+    bool validate_session_for_cleanup(const std::string& id, const std::string& key) const override { return same(id, key); }
+    bool select_session(const std::string& id, const std::string& key) override {
         calls.push_back("select_session " + id);
-        return alive(id);
+        return same(id, key);
     }
     std::string current_server_session_key() const override { return server_key; }
     Result execute_transaction(const std::string& tcode) override { return record("execute_transaction " + tcode); }
@@ -115,6 +119,12 @@ private:
     bool alive(const std::string& id) const {
         const auto i = live_sessions.find(id);
         return i != live_sessions.end() && i->second;
+    }
+    /// alive, and (when a key is asked for and the fake knows one) the same server session
+    bool same(const std::string& id, const std::string& key) const {
+        if (!alive(id)) return false;
+        const auto k = session_keys.find(id);
+        return key.empty() || k == session_keys.end() || k->second == key;
     }
     Result record(std::string call) {
         calls.push_back(call);

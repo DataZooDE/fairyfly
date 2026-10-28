@@ -22,11 +22,11 @@ struct Rig {
     FakeEngine* engine = nullptr;  // owned by the handler
     std::unique_ptr<cli::CommandHandler> handler;
 
-    explicit Rig(bool with_connection = true) {
+    explicit Rig(bool with_connection = true, const std::string& server_key = "") {
         auto fake = std::make_unique<FakeEngine>();
         engine = fake.get();
         auto connections = std::make_unique<cli::ConnectionManager>(dir.path().string());
-        if (with_connection) connections->create_or_update_connection(kSession, "/app/con[0]", "BIG", "route", "SAP", "");
+        if (with_connection) connections->create_or_update_connection(kSession, "/app/con[0]", "BIG", "route", "SAP", server_key);
         handler = std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
                                                         std::move(connections));
     }
@@ -133,4 +133,77 @@ TEST_CASE("command handler: popup close under --read-only refuses Enter (it woul
     CHECK(scripting.calls.empty());
     CHECK(rig.handler->handle_close(12, 0).status == Result::Status::Success);
     CHECK(scripting.calls == std::vector<std::string>{"close_popup 12"});
+}
+
+// ---- the SAP session behind a saved connection replaced or closed (live 2026-10-28) ----------------------------------
+// Connection 1 was saved for /app/con[0]/ses[0]; SAP was ended and logged on again, so a new session sat at the same
+// path. Key send and the okcd fill reported success, and only the next screen read noticed that the saved connection
+// no longer named that session. An action must never report success for a session other than the one it checked.
+
+TEST_CASE("command handler: a session replaced at the same path before the action is refused, nothing is sent", "[handler][session]") {
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-NEW:1";   // SAP logged on again: same path, another server session
+    test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    CHECK(code_of(rig.handler->handle_send_key("enter", "", 0)) == "INVALID_CONNECTION");
+    CHECK(scripting.calls.empty());
+}
+
+TEST_CASE("command handler: a session replaced while the action ran is SESSION_CHANGED, not success", "[handler][session]") {
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-OLD:1";
+    test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    const auto replace = [&](const std::string&) { rig.engine->session_keys[kSession] = "SID-NEW:1"; };
+    rig.engine->on_call = replace;
+    scripting.on_call = replace;
+    const auto check_changed = [&](const Result& r) {
+        INFO(r.to_json().dump());
+        CHECK(r.status == Result::Status::Error);
+        CHECK(code_of(r) == "SESSION_CHANGED");
+        CHECK(r.error.value("session_id", std::string()) == kSession);
+        CHECK(r.error.value("message", std::string()).find("replaced") != std::string::npos);
+        CHECK(r.error.contains("hint"));
+        rig.engine->session_keys[kSession] = "SID-OLD:1";   // the next action starts on the checked session again
+    };
+    SECTION("key send") { check_changed(rig.handler->handle_send_key("enter", "", 0)); }
+    SECTION("transaction") { check_changed(rig.handler->handle_transaction("SU01", 0)); }
+    SECTION("fill") { check_changed(rig.handler->handle_fill("wnd[0]/tbar[0]/okcd", "/nSU01", 0)); }
+    SECTION("click") { check_changed(rig.handler->handle_click("wnd[0]/tbar[0]/btn[0]", 0)); }
+    SECTION("popup close") {
+        rig.engine->active_window = "wnd[1]";
+        check_changed(rig.handler->handle_close(12, 0));
+    }
+}
+
+TEST_CASE("command handler: an action that closes its own session still reports its outcome", "[handler][session]") {
+    // e.g. /nex: the session is gone afterwards, which the action caused; say so instead of failing
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-OLD:1";
+    rig.engine->on_call = [&](const std::string&) { rig.engine->live_sessions[kSession] = false; };
+    const Result r = rig.handler->handle_transaction("/nex", 0);
+    INFO(r.to_json().dump());
+    CHECK(r.status == Result::Status::Success);
+    CHECK(r.data.value("session_closed", false));
+}
+
+TEST_CASE("command handler: an unchanged session keeps the action's success", "[handler][session]") {
+    Rig rig(true, "SID-OLD:1");
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->session_keys[kSession] = "SID-OLD:1";
+    test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    const Result r = rig.handler->handle_send_key("enter", "", 0);
+    CHECK(r.status == Result::Status::Success);
+    CHECK_FALSE(r.data.contains("session_closed"));
+    // a connection saved without a key (older file) is learned on first use and then checked by it
+    Rig keyless;
+    keyless.engine->live_sessions[kSession] = true;
+    keyless.engine->server_key = "SID-OLD:1";
+    keyless.engine->session_keys[kSession] = "SID-OLD:1";
+    keyless.engine->on_call = [&](const std::string&) { keyless.engine->session_keys[kSession] = "SID-NEW:1"; };
+    CHECK(code_of(keyless.handler->handle_transaction("SU01", 0)) == "SESSION_CHANGED");
 }

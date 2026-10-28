@@ -1357,3 +1357,90 @@ TEST_CASE("Link: a read-only refusal names its cause - the organisation's grant,
         CHECK(key.find(org) != std::string::npos);
     }
 }
+
+TEST_CASE("Dispatcher: a default whose session was replaced at the same path is handled alike by reads and actions", "[mcp][dispatcher][auto_attach][reattach]") {
+    // live 2026-10-28: connection 1 attached to /app/con[0]/ses[0]; SAP was ended and logged on again (a new session at
+    // the same path). Key send and fill must not act on it under the old connection while the screen read re-attaches.
+    Policy writable;
+    writable.auto_attach = true;
+    writable.read_only = false;
+    writable.allow_write = true;
+    using fairyfly::audit::SapFacts;
+    auto facts_of = [](int id, const std::string& identity) {
+        SapFacts f{"BFX", "100", "LEE", "SESSION_MANAGER"};
+        f.connection_id = id;
+        f.session_identity = identity;
+        return f;
+    };
+    struct Desk {
+        bool attached_again = false;
+        std::map<int, SapFacts> live;
+        Result operator()(const Argv& argv) {
+            const std::string command = fairyfly::command_table::command_of_argv(argv);
+            if (command == "session list") return list_sessions({kBigfox});
+            if (command == "session attach") {
+                if (!attached_again && argv.back() == "/app/con[0]/ses[0]" && live.count(1)) return Result::ok({{"connection_file_id", 1}});
+                attached_again = true;
+                return Result::ok({{"connection_file_id", 0}});
+            }
+            if (attached_again && has_pair(argv, "--connection", "0")) return Result::ok({{"done", true}});
+            return stale_connection(1, kBigfox);   // the old server session key no longer matches
+        }
+    };
+    struct ToolCall { const char* tool; json args; };
+    for (const ToolCall& call : {ToolCall{"gui_screen_read", json::object()},
+                                 ToolCall{"gui_key_send", json{{"key", "enter"}}},
+                                 ToolCall{"gui_element_fill", json{{"element", "wnd[0]/tbar[0]/okcd"}, {"value", "/nSU01"}}},
+                                 ToolCall{"gui_element_click", json{{"element", "wnd[0]/tbar[0]/btn[0]"}}},
+                                 ToolCall{"gui_transaction_start", json{{"code", "SU01"}}}}) {
+        INFO(call.tool);
+        Fixture f;
+        Desk desk;
+        f.handler = [&](const Argv& argv) { return desk(argv); };
+        auto d = f.make(writable);
+        desk.live[1] = facts_of(1, "/app/con[0]/ses[0]|SID-OLD:1|g1");
+        d.set_sap_facts_provider([&desk](std::optional<int> c) -> std::optional<SapFacts> {
+            const auto it = desk.live.find(c.value_or(-1));
+            return it == desk.live.end() ? std::optional<SapFacts>(SapFacts{}) : std::optional<SapFacts>(it->second);
+        });
+        REQUIRE_FALSE(d.call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+        REQUIRE(d.sticky_connection() == 1);
+        // logged on again: the saved key no longer finds a session, the new one is only reachable by a new attach
+        desk.live.erase(1);
+        desk.live[0] = facts_of(0, "/app/con[0]/ses[0]|SID-NEW:1|g2");
+        f.calls.clear();
+
+        auto r = d.call_tool(call.tool, call.args, ctx_with_id());
+        INFO(text_of(r));
+        REQUIRE_FALSE(r.is_error);
+        CHECK(desk.attached_again);
+        CHECK(d.sticky_connection() == 0);
+        REQUIRE_FALSE(f.calls.empty());
+        CHECK(has_pair(f.calls.back(), "--connection", "0"));
+        for (const auto& argv : f.calls) CHECK_FALSE(has_pair(argv, "--connection", "1"));   // never acted on the old one
+        std::string all;
+        for (const auto& c : r.content) if (c.value("type", "") == "text") all += c["text"].get<std::string>();
+        CHECK(all.find("note: the saved SAP connection 1 had closed; re-attached to the only open SAP session") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("Dispatcher: SESSION_CHANGED from an action is reported, never retried on another session", "[mcp][dispatcher][reattach]") {
+    Policy writable;
+    writable.auto_attach = true;
+    writable.read_only = false;
+    writable.allow_write = true;
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "session attach") return Result::ok({{"connection_file_id", 0}});
+        return err("SESSION_CHANGED", "The SAP session of connection 0 was replaced while the action ran",
+                   {{"session_id", "/app/con[0]/ses[0]"}});
+    };
+    auto d = f.make(writable);
+    REQUIRE_FALSE(d.call_tool("gui_session_attach", json{{"session_id", "/app/con[0]/ses[0]"}}, ctx_with_id()).is_error);
+    f.calls.clear();
+    auto r = d.call_tool("gui_key_send", json{{"key", "enter"}}, ctx_with_id());
+    REQUIRE(r.is_error);
+    CHECK(text_of(r).rfind("ERROR SESSION_CHANGED", 0) == 0);
+    CHECK(f.calls.size() == 1);   // the key was sent once; no session list, no attach, no second send
+}
