@@ -1633,3 +1633,50 @@ TEST_CASE("link tray controller: one balloon when the clock goes off, none while
     controller.on_tick();
     CHECK(f.host.balloons.size() == before + 1);   // fixed: the menu line goes away, no extra noise
 }
+
+TEST_CASE("link tray: a call SAP GUI does not answer turns the icon amber and names it", "[tray][link_tray][hung]") {
+    // live 2026-10-27: gui_screen_read hung in SAP GUI, every later call waited, and the tray stayed teal
+    auto v = paired("connected");
+    v.stuck_tool = "gui_screen_read";
+    v.stuck_connection = "0";
+    v.stuck_s = 75;
+    const auto m = build_link_menu(v);
+    CHECK(m.icon == IconState::Warning);
+    const auto labels = top_labels(m);
+    REQUIRE(labels.size() > 1);
+    CHECK(labels[1] == "SAP GUI has not answered gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog, "
+                       "or end that SAP session");
+    CHECK(m.tooltip.find("SAP GUI not answering gui_screen_read (75 s)") != std::string::npos);
+    CHECK(m.tooltip.size() <= 127);
+    v.stuck_connection.clear();
+    CHECK(stuck_call_text(v).find("gui_screen_read for 75 s") != std::string::npos);
+    v.stuck_tool.clear();   // the call returned
+    CHECK(stuck_call_text(v).empty());
+    CHECK(build_link_menu(v).icon == IconState::Running);
+}
+
+TEST_CASE("link tray controller: one balloon when a call hangs, back to normal when it returns", "[tray][link_tray][hung]") {
+    Fixture f;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    LinkTrayController controller(services, f.paths);
+    f.link.current = paired("connected");
+    controller.on_tick();
+    CHECK(controller.view().icon == IconState::Running);
+    const auto before = f.host.balloons.size();
+    f.link.current.stuck_tool = "gui_screen_read";
+    f.link.current.stuck_connection = "0";
+    f.link.current.stuck_s = 61;
+    controller.on_tick();
+    f.link.current.stuck_s = 76;
+    controller.on_tick();
+    CHECK(controller.view().icon == IconState::Warning);
+    REQUIRE(f.host.balloons.size() == before + 1);
+    CHECK(f.host.balloons.back().find("SAP GUI has not answered gui_screen_read") != std::string::npos);
+    f.link.current.stuck_tool.clear();
+    f.link.current.stuck_s = 0;
+    controller.on_tick();
+    CHECK(controller.view().icon == IconState::Running);
+    CHECK(f.host.balloons.size() == before + 1);
+}
