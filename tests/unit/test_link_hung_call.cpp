@@ -54,7 +54,7 @@ struct HungLink {
     MainThreadTools tools;
     FakeClock clock;
     Latch sap;
-    std::atomic<int> ran_doctor{0}, ran_session_list{0}, ran_other{0};
+    std::atomic<int> ran_doctor{0}, ran_session_list{0}, ran_other{0}, ran_fill{0};
     std::atomic<bool> stop{false};
     std::thread main;
     std::thread hung_caller;
@@ -62,11 +62,13 @@ struct HungLink {
 
     HungLink() {
         tools.set_clock([this] { return clock.now(); });
+        tools.set_change_tools({"gui_element_fill", "gui_element_click", "gui_batch"});
         tools.set_handlers([] { return json::array(); },
                            [this](const std::string& name, const json&, const ffy::link::CallInfo&) {
                                if (name == "gui_screen_read") sap.wait();
                                else if (name == "gui_doctor") ++ran_doctor;
                                else if (name == "gui_session_list") ++ran_session_list;
+                               else if (name == "gui_element_fill") ++ran_fill;
                                else ++ran_other;
                                return json{{"content", json::array({{{"type", "text"}, {"text", name}}})}, {"isError", false}};
                            });
@@ -231,4 +233,82 @@ TEST_CASE("hung SAP call: the status names it only after the threshold and clear
     link.sap.release();
     link.hung_caller.join();
     CHECK(fairyfly::link::stuck_call_status(link.tools.in_flight(), 60s).is_null());
+}
+
+TEST_CASE("hung SAP call: a change the gateway cancelled while it waited never runs when SAP answers again", "[link][hung]") {
+    // hang at t=0, a fill queued at t=5 s, the gateway gives up at t=30 s, the dialog is closed at t=50 s: before,
+    // the fill still ran in SAP although its caller had been told it failed
+    HungLink link;
+    link.hang();
+    auto cancel = std::make_shared<std::atomic<bool>>(false);
+    ffy::link::CallInfo info;
+    info.write_granted = true;
+    info.cancel = cancel;
+    std::string error;
+    std::thread fill([&] {
+        try {
+            link.tools.rpc("tools/call", {{"name", "gui_element_fill"}, {"arguments", {{"fields", json::object()}}}}, 30000, info);
+        } catch (const std::exception& e) {
+            error = e.what();
+        }
+    });
+    std::this_thread::sleep_for(50ms);   // queued behind the hung call
+    *cancel = true;                      // the gateway's deadline
+    link.sap.release();                  // SAP answers again
+    fill.join();
+    link.hung_caller.join();
+    CHECK(link.ran_fill == 0);
+    CHECK(error.find("cancelled") != std::string::npos);
+    // the main thread goes on with the next call
+    CHECK(text_of(call(link.tools, "gui_doctor")) == "gui_doctor");
+}
+
+TEST_CASE("hung SAP call: a change whose caller gave up may still be applied, a read says nothing of that", "[link][hung]") {
+    for (const std::string tool : {"gui_element_fill", "gui_screen_read"}) {
+        MainThreadTools tools;
+        tools.set_change_tools({"gui_element_fill"});
+        Latch sap;
+        tools.set_handlers([] { return json::array(); }, [&](const std::string&, const json&, const ffy::link::CallInfo&) {
+            sap.wait();
+            return json{{"content", json::array()}, {"isError", false}};
+        });
+        std::atomic<bool> stop{false};
+        std::thread main([&] { tools.pump(stop); });
+        std::string msg;
+        try {
+            call(tools, tool, 200);
+        } catch (const std::exception& e) {
+            msg = e.what();
+        }
+        sap.release();
+        stop = true;
+        main.join();
+        CHECK(msg.rfind("SAP_GUI_NOT_RESPONDING: SAP GUI has not answered " + tool, 0) == 0);
+        const bool warns = msg.find("may still be applied once SAP answers") != std::string::npos &&
+                           msg.find("read the screen before you retry") != std::string::npos;
+        CHECK(warns == (tool == "gui_element_fill"));
+    }
+}
+
+TEST_CASE("hung SAP call: the hint also names a long-running step", "[link][hung]") {
+    HungLink link;
+    link.hang();
+    link.clock.advance(61s);
+    const std::string text = text_of(call(link.tools, "gui_doctor"));
+    CHECK(text.find("long-running step (e.g. a report started with F8)") != std::string::npos);
+    CHECK(text.find("dialog") != std::string::npos);
+}
+
+TEST_CASE("hung SAP call: a legitimate call over 60 s that completes clears the record, the next call runs", "[link][hung]") {
+    HungLink link;
+    link.hang();
+    link.clock.advance(75s);
+    CHECK(fairyfly::link::stuck_call_status(link.tools.in_flight()).is_object());   // the tray is amber now
+    link.sap.release();   // the report finished
+    link.hung_caller.join();
+    CHECK(text_of(link.hung_result) == "gui_screen_read");   // its caller gets the result
+    CHECK_FALSE(link.tools.in_flight().has_value());
+    CHECK(fairyfly::link::stuck_call_status(link.tools.in_flight()).is_null());   // the tray goes back to normal
+    CHECK(text_of(call(link.tools, "gui_element_click")) == "gui_element_click");
+    CHECK(link.ran_other == 1);
 }

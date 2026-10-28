@@ -1644,8 +1644,8 @@ TEST_CASE("link tray: a call SAP GUI does not answer turns the icon amber and na
     CHECK(m.icon == IconState::Warning);
     const auto labels = top_labels(m);
     REQUIRE(labels.size() > 1);
-    CHECK(labels[1] == "SAP GUI has not answered gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog, "
-                       "or end that SAP session");
+    CHECK(labels[1] == "SAP GUI has not answered gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog "
+                       "or a long-running step (e.g. a report started with F8), or end that SAP session");
     CHECK(m.tooltip.find("SAP GUI not answering gui_screen_read (75 s)") != std::string::npos);
     CHECK(m.tooltip.size() <= 127);
     v.stuck_connection.clear();
