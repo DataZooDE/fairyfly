@@ -464,6 +464,13 @@ public:
         }
         if (v.state != "not running" && status.contains("clock_skew_s") && status["clock_skew_s"].is_number_integer())
             v.clock_skew_s = status["clock_skew_s"].get<std::int64_t>();
+        if (v.state != "not running" && status.contains("stuck_call") && status["stuck_call"].is_object()) {
+            const json& stuck = status["stuck_call"];
+            v.stuck_tool = stuck.value("tool", std::string());
+            if (v.stuck_tool.empty()) v.stuck_tool = "a screen read";   // the audit trail's (a posted task)
+            v.stuck_connection = stuck.value("connection", std::string());
+            v.stuck_s = stuck.value("elapsed_s", std::int64_t{0});
+        }
         return v;
     }
     bool set_paused(bool paused) override {
@@ -684,8 +691,11 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     // the link (outbound WebSocket), closed while paused; tool calls come back via `tools`
     SupervisorOptions supervision;
     supervision.status_changed = trail_changed.get();
-    supervision.status_extra = [recorder, clock_skew] {
-        return json{{"trail", recorder->current_policy().to_json()}, {"clock_skew_s", clock_skew->load()}};
+    // a call SAP GUI has not answered for kStuckCallAfter: the tray turns amber and names it (within a heartbeat)
+    supervision.status_extra = [recorder, clock_skew, tools] {
+        return json{{"trail", recorder->current_policy().to_json()},
+                    {"clock_skew_s", clock_skew->load()},
+                    {"stuck_call", stuck_call_status(tools->in_flight())}};
     };
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {

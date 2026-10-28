@@ -71,7 +71,8 @@ or an HTTP endpoint.
   `https://fairyfly.io` filled in, unless `FAIRYFLY_LINK_GATEWAY` is set). The link starts by itself as soon as the pairing is saved.
 - An error while starting (for example a failed relaunch) is shown in a message box, not only in the
   console, which closes at once when the tray was started from the Start menu or the autostart.
-- The icon is teal while connected, has an amber badge while paused and is faded otherwise.
+- The icon is teal while connected, has an amber badge while paused and is faded otherwise. It also has the amber
+  badge while connected when the desktop clock is off or a call has waited 60 s for SAP GUI (see "What runs where").
 - A notice appears when the link starts, pauses, resumes or stops.
 - The menu has:
   - the pairing (organisation, account) and the link's state;
@@ -243,6 +244,26 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   id>/<user>`, the AI client and the gateway's request id, so it can be matched with the cloud audit.
 - Calls arrive on the link's network threads and are handed to the main (COM) thread one at a time
   (`src/link/main_thread_tools.*`).
+- When SAP GUI stops answering a call (a dialog waiting for input, possibly hidden behind other windows; seen live
+  with `gui_screen_read` on SU01), every later call waits behind it, because SAP GUI scripting is bound to the main
+  thread and fairyfly never makes a second COM call into it from another thread. What the caller gets then:
+  - `gui_doctor` and `gui_session_list` do not queue behind it: once the running call is 10 s old (at once, or after
+    waiting up to 10 s) they answer `SAP_GUI_NOT_RESPONDING`, a tool result with `isError`, the text "SAP GUI has not
+    answered gui_screen_read on connection 0 for 183 s (started 20:27:21); gui_doctor did not run." and what to do,
+    and `structuredContent.error` with `code`, `message`, `running_tool`, `connection` ("" when the call named
+    none), `elapsed_ms`, `started` (local time) and `hint`. They never run later;
+  - any other call that does not start within the gateway's time limit fails with "fairyfly is busy: the call did not
+    start within N s; SAP GUI has not answered <tool> on connection <n> for <s> s (started HH:MM:SS)" and the hint;
+    once the running call is 60 s old, a new call fails like that at once ("the call did not start; ...") instead of
+    holding one of the link's few local call slots, where it would also keep `gui_doctor` out;
+  - the hanging call itself, when the gateway's time limit passes, fails with `SAP_GUI_NOT_RESPONDING: SAP GUI has not
+    answered ...`;
+  - after 60 s the tray turns amber (within one status heartbeat, 15 s) with the menu line "SAP GUI has not answered
+    gui_screen_read on connection 0 for 75 s: look for a hidden SAP dialog, or end that SAP session", a tooltip that
+    names the call and one notice; it turns teal again when the call returns.
+
+  Answering or closing the SAP dialog, or ending the SAP session (or SAP GUI), releases fairyfly. The log has one
+  `SAP_GUI_NOT_RESPONDING` warning per diagnosis.
 
 ## The shared protocol library
 
