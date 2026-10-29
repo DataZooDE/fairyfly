@@ -8,6 +8,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -75,7 +76,7 @@ struct FakeSapLogon {
         app->dispatches[L"OpenConnection"] = connection;
     }
     /// What SapROTWr / GetObject("SAPGUI") answer while it runs (AddRef'd).
-    IDispatchPtr entry() const { return IDispatchPtr(rot_entry); }
+    IDispatchPtr entry() const { return IDispatchPtr(static_cast<IDispatch*>(rot_entry)); }
 };
 
 /// Runs `body` on a new thread (a fresh apartment: ComGuiApplication::create initializes an STA) and rethrows what
@@ -250,7 +251,7 @@ TEST_CASE("doctor: SAP Logon not running is reported as such, not as an initiali
     FakeEngine* engine = fake.get();
     engine->status = EngineStatus{false, false, "SAP Logon (saplogon.exe) is not running on this desktop"};
     cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
-                                std::make_unique<ConnectionManager>(dir.path().string()));
+                                std::make_unique<cli::ConnectionManager>(dir.path().string()));
     const Result result = handler.handle_doctor();
     REQUIRE(result.status == Result::Status::Success);
     CHECK(engine->refreshes >= 1);   // the doctor looks SAP Logon up now
@@ -269,7 +270,7 @@ TEST_CASE("Every command looks SAP Logon up again before it runs", "[cli][sap-lo
     auto fake = std::make_unique<FakeEngine>();
     FakeEngine* engine = fake.get();
     cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
-                                std::make_unique<ConnectionManager>(dir.path().string()));
+                                std::make_unique<cli::ConnectionManager>(dir.path().string()));
     auto invoke = mcp::make_registry_invoker([&]() -> cli::CommandHandler& { return handler; });
     invoke({"connection", "list"});
     CHECK(engine->refreshes == 1);
