@@ -931,7 +931,8 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
         }
         ~EnvRestore() { set_env(name, old ? old->c_str() : nullptr); }
     };
-    EnvRestore restore_profile(profile_var), restore_guard("FAIRYFLY_LINK_FORBID_DEFAULT_STATE");
+    EnvRestore restore_profile(profile_var), restore_guard("FAIRYFLY_LINK_FORBID_DEFAULT_STATE"), restore_data("FAIRYFLY_DATA_DIR");
+    set_env("FAIRYFLY_DATA_DIR", nullptr);   // test_main.cpp sets it for the whole run; here the profile decides
     set_env(profile_var, (tmp / "profile").string().c_str());
     REQUIRE(default_state_path().rfind((tmp / "profile").string(), 0) == 0);
     const std::string fake_default = default_state_path();

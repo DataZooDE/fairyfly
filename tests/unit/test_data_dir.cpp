@@ -16,9 +16,14 @@
 #include <vector>
 
 #include "include/audit_log.h"
+#include "include/connection_manager.h"
+#include "include/doctor_checks.h"
+#include "include/exceptions.h"
+#include "include/tray/tray.h"
 #include "include/config/data_dir.h"
 #include "include/config/environment.h"
 #include "include/text/utf8.h"
+#include "support/env_guard.h"
 #include "support/temp_dir.h"
 
 using namespace fairyfly;
@@ -79,6 +84,19 @@ void legacy_layout(const fs::path& dir) {
     write(dir / "mcp-setup.json", "{\"host\":\"sap.example\"}");
 }
 
+bool has_conflict(const config::MigrationResult& r, const std::string& path) {
+    return std::any_of(r.conflicts.begin(), r.conflicts.end(), [&](const auto& c) { return c.path == path; });
+}
+
+/// Every line of `text` is one complete JSON record ("{...}\n"): nothing glued, nothing cut.
+bool well_formed_lines(const std::string& text) {
+    if (!text.empty() && text.back() != '\n') return false;
+    std::istringstream in(text);
+    for (std::string line; std::getline(in, line);)
+        if (line.empty() || line.front() != '{' || line.back() != '}' || count_of(line, "{\"ts\"") != 1) return false;
+    return true;
+}
+
 /// A lock that is never granted (another fairyfly holds it for longer than the timeout).
 class BusyLock : public config::MigrationLock {
 public:
@@ -112,11 +130,67 @@ TEST_CASE("data dir: FAIRYFLY_DATA_DIR overrides it", "[config][datadir]") {
     CHECK(config::env::kDataDir == std::string("FAIRYFLY_DATA_DIR"));
 }
 
-TEST_CASE("data dir: falls back to HOME, then to the temp directory", "[config][datadir]") {
+TEST_CASE("data dir: falls back to HOME, never to the temp directory or a relative path", "[config][datadir]") {
     CHECK(config::Environment(env_of({{"HOME", "/home/ada"}})).data_dir() == fs::path("/home/ada") / ".fairyfly");
-    CHECK(config::Environment(env_of({})).data_dir() == fs::temp_directory_path() / "fairyfly");
+    // no profile at all: no data directory (every user of it fails closed)
+    CHECK(config::Environment(env_of({})).data_dir().empty());
     // no LOCALAPPDATA: nothing to migrate from (never the temp directory)
     CHECK(config::Environment(env_of({})).legacy_data_dir().empty());
+}
+
+#ifdef _WIN32
+TEST_CASE("data dir: a process without USERPROFILE takes the Profile known folder", "[config][datadir]") {
+    const auto known = config::known_user_data_dirs();
+    REQUIRE_FALSE(known.empty());
+    const test::EnvGuard no_profile(config::env::kUserProfile, "");
+    CHECK(text::utf8_path(config::Environment::process().get(config::env::kUserProfile)) == known[0].parent_path());
+}
+#endif
+
+TEST_CASE("data dir: the unit tests never use the real profile", "[config][datadir][isolation]") {
+    // tests/unit/test_main.cpp points FAIRYFLY_DATA_DIR, USERPROFILE, LOCALAPPDATA and HOME into a temporary folder
+    // for the whole run: an in-process run_cli must not move a developer's %LOCALAPPDATA%\fairyfly
+    const auto& env = config::Environment::process();
+    const fs::path data = env.data_dir();
+    const fs::path tmp = fs::weakly_canonical(fs::temp_directory_path());
+    auto under = [](const fs::path& p, const fs::path& dir) {
+        const auto rel = fs::weakly_canonical(p).lexically_relative(fs::weakly_canonical(dir));
+        return !rel.empty() && *rel.begin() != "..";
+    };
+    REQUIRE_FALSE(data.empty());
+    CHECK(env.data_dir_overridden());
+    CHECK(under(data, tmp));
+    CHECK(under(env.legacy_data_dir(), tmp));
+    for (const auto& real : config::known_user_data_dirs()) {
+        CAPTURE(real);
+        CHECK_FALSE(under(data, real));
+        CHECK_FALSE(under(real, data));
+    }
+}
+
+TEST_CASE("data dir: without a profile every user of it fails closed", "[config][datadir]") {
+    const auto none = env_of({});
+    const auto audit = audit::resolve_config(env_of({{"FAIRYFLY_AUDIT", "required"}}), false, false, std::chrono::system_clock::now());
+    CHECK(audit.file.empty());
+    audit::AuditSink sink(audit);
+    CHECK_FALSE(sink.probe());
+    CHECK(audit::preflight_error(sink.mode(), false) == std::optional<std::string>("AUDIT_UNAVAILABLE"));
+    CHECK(tray::log_directory(none).empty());
+    CHECK_THROWS_AS(cli::ConnectionManager::default_cache_directory(config::Environment(none)), SystemError);
+    CHECK(config::default_pairing_file(config::Environment(none), std::nullopt).empty());
+    FreeLock lock;
+    const auto r = config::migrate_data_dir(fs::path(), {}, lock);
+    CHECK(r.outcome == config::MigrationOutcome::Failed);
+    CHECK(r.error.find("no data directory") != std::string::npos);
+}
+
+TEST_CASE("data dir: the session cache is under it, FAIRYFLY_CACHE_DIR overrides, no temp fallback", "[config][datadir]") {
+    test::TempDir tmp("datadir-cache");
+    const auto in_profile = cli::ConnectionManager::default_cache_directory(config::Environment(env_of({{"USERPROFILE", (tmp / "u").string()}})));
+    CHECK(fs::path(in_profile) == tmp / "u" / ".fairyfly" / "sessions");
+    const auto own = cli::ConnectionManager::default_cache_directory(
+        config::Environment(env_of({{"USERPROFILE", (tmp / "u").string()}, {"FAIRYFLY_CACHE_DIR", (tmp / "c").string()}})));
+    CHECK(fs::path(own) == tmp / "c");
 }
 
 TEST_CASE("data dir: a non-ASCII user profile stays intact", "[config][datadir]") {
@@ -218,7 +292,8 @@ TEST_CASE("migration: under MSIX on Windows 10 the package's private copy is mig
           "{\"ts\":\"2026-10-01T10:00:00.000Z\",\"command\":\"screen read\"}\n"       // also in the real one
           "{\"ts\":\"2026-10-03T09:00:00.000Z\",\"command\":\"menu list\"}\n");       // only here
     write(package / "audit" / "2026-08.jsonl", "{\"ts\":\"2026-08-01T00:00:00.000Z\",\"command\":\"doctor\"}\n");
-    write(package / "link" / "state.json", "{\"device_id\":\"dev_store\"}");          // a different pairing
+    write(package / "link" / "state.json", "{\"device_id\":\"dev_store\"}");          // a different, older pairing
+    fs::last_write_time(package / "link" / "state.json", fs::last_write_time(real / "link" / "state.json") - std::chrono::hours(24));
     write(package / "sessions" / "Store.con", "{\"id\":\"Store\"}");
 
     FreeLock lock;
@@ -231,8 +306,8 @@ TEST_CASE("migration: under MSIX on Windows 10 the package's private copy is mig
     CHECK(count_of(audit, "2026-10-02T10:00:00.000Z") == 1);
     CHECK(count_of(audit, "2026-10-03T09:00:00.000Z") == 1);           // nothing lost
     CHECK(read(target / "audit" / "2026-08.jsonl") == read(package / "audit" / "2026-08.jsonl"));
-    CHECK(read(target / "link" / "state.json") == read(real / "link" / "state.json"));   // the first folder wins
-    CHECK(std::find(r.conflicts.begin(), r.conflicts.end(), "link/state.json") != r.conflicts.end());
+    CHECK(read(target / "link" / "state.json") == read(real / "link" / "state.json"));   // the newer pairing wins
+    CHECK(has_conflict(r, "link/state.json"));
     CHECK(fs::exists(target / "sessions" / "Store.con"));
     CHECK(fs::exists(real / config::kMovedNote));
     CHECK(fs::exists(package / config::kMovedNote));
@@ -291,7 +366,12 @@ TEST_CASE("migration: an existing data directory is never overwritten; old audit
     const auto r = config::migrate_data_dir(target, {old}, lock);
     REQUIRE(r.outcome == config::MigrationOutcome::Merged);
     CHECK(read(target / "mcp.yaml") == "server:\n  port: 9999\n");      // kept
-    CHECK(std::find(r.conflicts.begin(), r.conflicts.end(), "mcp.yaml") != r.conflicts.end());
+    CHECK(has_conflict(r, "mcp.yaml"));
+    // recorded for doctor and link status, and printed with its file name
+    const auto recorded = config::recorded_conflicts(target);
+    CHECK(std::any_of(recorded.begin(), recorded.end(), [](const auto& c) { return c.path == "mcp.yaml"; }));
+    const auto warnings = config::migration_warnings(r);
+    CHECK(std::any_of(warnings.begin(), warnings.end(), [](const auto& w) { return w.find("mcp.yaml") != std::string::npos; }));
     const std::string audit = read(target / "audit" / "2026-10.jsonl");
     CHECK(count_of(audit, "2026-10-01T10:00:00.000Z") == 1);             // added
     CHECK(count_of(audit, "2026-10-02T10:00:00.000Z") == 1);             // not duplicated
@@ -347,7 +427,7 @@ TEST_CASE("migration: the tray and the CLI starting together migrate once", "[co
     std::vector<std::thread> starts;
     for (int i = 0; i < kStarts; ++i)
         starts.emplace_back([&, i] {
-            auto lock = config::make_migration_lock(lock_name);
+            auto lock = config::make_migration_lock(lock_name, tmp.path());
             while (!go) std::this_thread::yield();
             results[i] = config::migrate_data_dir(target, {old}, *lock);
         });
@@ -366,11 +446,11 @@ TEST_CASE("migration: the tray and the CLI starting together migrate once", "[co
 TEST_CASE("migration: the real lock is exclusive and released", "[config][datadir][migration]") {
     test::TempDir tmp("datadir-lock");
     const std::string name = "fairyfly-data-migration-test-" + tmp.path().filename().string();
-    auto a = config::make_migration_lock(name);
+    auto a = config::make_migration_lock(name, tmp.path());
     REQUIRE(a->acquire(std::chrono::milliseconds(1000)));
     bool b_got = true;
     std::thread other([&] {
-        auto b = config::make_migration_lock(name);
+        auto b = config::make_migration_lock(name, tmp.path());
         b_got = b->acquire(std::chrono::milliseconds(100));
         if (b_got) b->release();
     });
@@ -378,7 +458,7 @@ TEST_CASE("migration: the real lock is exclusive and released", "[config][datadi
     CHECK_FALSE(b_got);
     a->release();
     std::thread later([&] {
-        auto b = config::make_migration_lock(name);
+        auto b = config::make_migration_lock(name, tmp.path());
         b_got = b->acquire(std::chrono::milliseconds(1000));
         if (b_got) b->release();
     });
@@ -454,4 +534,193 @@ TEST_CASE("data dir: only config/ builds paths from LOCALAPPDATA", "[config][dat
     }
     CAPTURE(offenders);
     CHECK(offenders.empty());
+}
+
+// ---- review 2026-10-29 ---------------------------------------------------------------------------------------------
+
+TEST_CASE("migration: the MSI moves first, the Store package's private copy is merged at its first packaged start", "[config][datadir][migration]") {
+    test::TempDir tmp("datadir-msi-then-store");
+    const fs::path real = tmp / "Local" / "fairyfly";
+    const fs::path package = tmp / "Packages" / "fam" / "LocalCache" / "Local" / "fairyfly";
+    const fs::path target = tmp / "profile" / ".fairyfly";
+    legacy_layout(real);
+    write(package / "audit" / "2026-10.jsonl", "{\"ts\":\"2026-10-05T10:00:00.000Z\",\"command\":\"store\"}\n");
+    FreeLock lock;
+    REQUIRE(config::migrate_data_dir(target, {real}, lock).outcome == config::MigrationOutcome::Migrated);   // MSI start
+    const auto r = config::migrate_data_dir(target, {real, package}, lock);                                  // Store start
+    CHECK(r.outcome == config::MigrationOutcome::Merged);
+    REQUIRE(r.migrated_from.size() == 1);
+    CHECK(r.migrated_from[0] == package);
+    const std::string audit = read(target / "audit" / "2026-10.jsonl");
+    CHECK(count_of(audit, "2026-10-05T10:00:00.000Z") == 1);
+    CHECK(count_of(audit, "2026-10-01T10:00:00.000Z") == 1);
+    CHECK(fs::exists(package / config::kMovedNote));
+    CHECK(config::migrate_data_dir(target, {real, package}, lock).outcome == config::MigrationOutcome::Current);
+}
+
+TEST_CASE("migration: the Store package moves first, a later MSI folder is merged", "[config][datadir][migration]") {
+    test::TempDir tmp("datadir-store-then-msi");
+    const fs::path real = tmp / "Local" / "fairyfly";
+    const fs::path package = tmp / "Packages" / "fam" / "LocalCache" / "Local" / "fairyfly";
+    const fs::path target = tmp / "profile" / ".fairyfly";
+    write(package / "audit" / "2026-10.jsonl", "{\"ts\":\"2026-10-05T10:00:00.000Z\",\"command\":\"store\"}\n");
+    FreeLock lock;
+    REQUIRE(config::migrate_data_dir(target, {real, package}, lock).outcome == config::MigrationOutcome::Migrated);
+    legacy_layout(real);   // an old MSI fairyfly ran afterwards
+    const auto r = config::migrate_data_dir(target, {real}, lock);
+    CHECK(r.outcome == config::MigrationOutcome::Merged);
+    const std::string audit = read(target / "audit" / "2026-10.jsonl");
+    CHECK(count_of(audit, "2026-10-05T10:00:00.000Z") == 1);
+    CHECK(count_of(audit, "2026-10-02T10:00:00.000Z") == 1);
+    CHECK(fs::exists(target / "link" / "state.json"));
+    CHECK(fs::exists(real / config::kMovedNote));
+}
+
+TEST_CASE("migration: a failure after the rename leaves the old folders pending; the next start completes it", "[config][datadir][migration]") {
+    test::TempDir tmp("datadir-after-rename");
+    const fs::path old = tmp / "Local" / "fairyfly";
+    const fs::path target = tmp / "profile" / ".fairyfly";
+    legacy_layout(old);
+    config::MigrationOptions failing;
+    failing.after_rename = [] { throw std::runtime_error("disk full"); };
+    FreeLock lock;
+    const auto failed = config::migrate_data_dir(target, {old}, lock, failing);
+    CHECK(failed.outcome == config::MigrationOutcome::Failed);
+    CHECK(failed.error.find("disk full") != std::string::npos);
+    CHECK_FALSE(fs::exists(old / config::kMovedNote));
+    const auto retried = config::migrate_data_dir(target, {old}, lock);
+    CHECK(retried.outcome == config::MigrationOutcome::Merged);
+    CHECK(fs::exists(old / config::kMovedNote));
+    CHECK(fs::exists(target / config::kDataDirMarker));
+    CHECK(count_of(read(target / "audit" / "2026-10.jsonl"), "2026-10-01T10:00:00.000Z") == 1);
+}
+
+TEST_CASE("migration: the most recently modified pairing wins and the decision is reported", "[config][datadir][migration]") {
+    for (const bool package_newer : {true, false}) {
+        CAPTURE(package_newer);
+        test::TempDir tmp("datadir-pairing");
+        const fs::path real = tmp / "Local" / "fairyfly";
+        const fs::path package = tmp / "pkg" / "fairyfly";
+        const fs::path target = tmp / "profile" / ".fairyfly";
+        write(real / "link" / "state.json", "{\"device_id\":\"dev_msi\"}");
+        write(package / "link" / "state.json", "{\"device_id\":\"dev_store\"}");
+        const auto t = fs::last_write_time(real / "link" / "state.json");
+        fs::last_write_time(package / "link" / "state.json", package_newer ? t + std::chrono::hours(1) : t - std::chrono::hours(1));
+        FreeLock lock;
+        const auto r = config::migrate_data_dir(target, {real, package}, lock);
+        REQUIRE(r.ok());
+        CHECK(read(target / "link" / "state.json") == (package_newer ? "{\"device_id\":\"dev_store\"}" : "{\"device_id\":\"dev_msi\"}"));
+        REQUIRE(has_conflict(r, config::kPairingFile));
+        const auto c = *std::find_if(r.conflicts.begin(), r.conflicts.end(), [](const auto& x) { return x.path == config::kPairingFile; });
+        CHECK(c.reason == (package_newer ? "newer copy taken" : "existing copy is newer"));
+        CHECK(fs::path(c.kept) == (package_newer ? package : real));
+        CHECK(fs::path(c.other) == (package_newer ? real : package));
+        const auto warnings = config::migration_warnings(r);
+        CHECK(std::any_of(warnings.begin(), warnings.end(), [](const auto& w) { return w.find("link/state.json") != std::string::npos; }));
+    }
+}
+
+TEST_CASE("migration: copied files keep their modification time", "[config][datadir][migration]") {
+    test::TempDir tmp("datadir-mtime");
+    const fs::path old = tmp / "Local" / "fairyfly";
+    legacy_layout(old);
+    const auto t = fs::last_write_time(old / "mcp.yaml") - std::chrono::hours(48);
+    fs::last_write_time(old / "mcp.yaml", t);
+    FreeLock lock;
+    REQUIRE(config::migrate_data_dir(tmp / ".fairyfly", {old}, lock).ok());
+    CHECK(fs::last_write_time(tmp / ".fairyfly" / "mcp.yaml") == t);
+}
+
+TEST_CASE("migration: a process appending to the audit trail meanwhile loses nothing", "[config][datadir][migration][audit]") {
+    test::TempDir tmp("datadir-appender");
+    const fs::path old = tmp / "Local" / "fairyfly";
+    const fs::path target = tmp / "profile" / ".fairyfly";
+    legacy_layout(old);
+    for (int i = 0; i < 200; ++i)   // plenty of old records to merge
+        append(old / "audit" / "2026-10.jsonl", "{\"ts\":\"2026-10-03T00:00:" + std::to_string(i) + "Z\",\"old\":" + std::to_string(i) + "}\n");
+    write(target / "audit" / "2026-10.jsonl", "{\"ts\":\"2026-10-29T00:00:00.000Z\",\"command\":\"new\"}\n");   // already in use
+
+    audit::AuditConfig live;
+    live.mode = audit::Mode::Enabled;
+    live.file = target / "audit" / "2026-10.jsonl";
+    audit::AuditSink sink(live);
+    std::atomic<bool> go{false};
+    constexpr int kAppends = 300;
+    std::thread appender([&] {
+        while (!go) std::this_thread::yield();
+        for (int i = 0; i < kAppends; ++i) {
+            audit::AuditRecord rec;
+            rec.ts = std::chrono::system_clock::now();
+            rec.command = "appender " + std::to_string(i);
+            sink.append(rec);
+        }
+    });
+    FreeLock lock;
+    go = true;
+    const auto r = config::migrate_data_dir(target, {old}, lock);
+    appender.join();
+    REQUIRE(r.outcome == config::MigrationOutcome::Merged);
+    const std::string all = read(target / "audit" / "2026-10.jsonl") +
+                            (fs::exists(target / "audit" / "2026-10.migrated.jsonl") ? read(target / "audit" / "2026-10.migrated.jsonl") : "");
+    CHECK(well_formed_lines(read(target / "audit" / "2026-10.jsonl")));
+    for (int i = 0; i < kAppends; ++i) CHECK(count_of(all, "\"appender " + std::to_string(i) + "\"") == 1);
+    for (int i = 0; i < 200; ++i) CHECK(count_of(all, "\"old\":" + std::to_string(i) + "}") == 1);
+    CHECK(count_of(all, "2026-10-29T00:00:00.000Z") == 1);
+}
+
+TEST_CASE("migration: a cut-off last line in the data directory is never written into", "[config][datadir][migration][audit]") {
+    test::TempDir tmp("datadir-cut-tail");
+    const fs::path old = tmp / "Local" / "fairyfly";
+    const fs::path target = tmp / "profile" / ".fairyfly";
+    legacy_layout(old);
+    const std::string live = "{\"ts\":\"2026-10-29T00:00:00.000Z\",\"command\":\"new\"}\n{\"ts\":\"2026-10-29T00:00:01";
+    write(target / "audit" / "2026-10.jsonl", live);   // another process is in the middle of writing a record
+    FreeLock lock;
+    REQUIRE(config::migrate_data_dir(target, {old}, lock).outcome == config::MigrationOutcome::Merged);
+    CHECK(read(target / "audit" / "2026-10.jsonl") == live);
+    const std::string part = read(target / "audit" / "2026-10.migrated.jsonl");
+    CHECK(well_formed_lines(part));
+    CHECK(count_of(part, "2026-10-01T10:00:00.000Z") == 1);
+    CHECK(count_of(part, "2026-10-02T10:00:00.000Z") == 1);
+    // a rerun adds nothing twice
+    fs::remove(old / config::kMovedNote);
+    REQUIRE(config::migrate_data_dir(target, {old}, lock).ok());
+    CHECK(read(target / "audit" / "2026-10.migrated.jsonl") == part);
+}
+
+TEST_CASE("migration: the pairing of a failed move is used from the old folder for this run", "[config][datadir][link]") {
+    test::TempDir tmp("datadir-pairing-fallback");
+    const config::Environment env(env_of({{"USERPROFILE", (tmp / "u").string()}, {"LOCALAPPDATA", (tmp / "l").string()}}));
+    const fs::path fresh = tmp / "u" / ".fairyfly" / "link" / "state.json";
+    const fs::path old = tmp / "l" / "fairyfly" / "link" / "state.json";
+    config::MigrationResult failed;
+    failed.outcome = config::MigrationOutcome::Failed;
+    CHECK(config::default_pairing_file(env, std::nullopt) == fresh);
+    CHECK(config::default_pairing_file(env, failed) == fresh);           // nothing in the old folder
+    write(old, "{\"device_id\":\"dev_1\"}");
+    CHECK(config::default_pairing_file(env, failed) == old);             // rather than looking unpaired
+    config::MigrationResult timeout;
+    timeout.outcome = config::MigrationOutcome::LockTimeout;
+    CHECK(config::default_pairing_file(env, timeout) == old);
+    config::MigrationResult done;
+    done.outcome = config::MigrationOutcome::Migrated;
+    CHECK(config::default_pairing_file(env, done) == fresh);
+    write(fresh, "{\"device_id\":\"dev_1\"}");
+    CHECK(config::default_pairing_file(env, failed) == fresh);           // the new folder has one: always that
+}
+
+TEST_CASE("migration: doctor reports the data directory, its failure and its conflicts", "[config][datadir][doctor]") {
+    using cli::doctor::judge_data_dir;
+    CHECK(judge_data_dir("C:\\Users\\ada\\.fairyfly", "", {}).status == "pass");
+    const auto none = judge_data_dir("", "", {});
+    CHECK(none.status == "fail");
+    CHECK(none.code == "DATA_DIR_UNAVAILABLE");
+    const auto failed = judge_data_dir("C:\\Users\\ada\\.fairyfly", "cannot move fairyfly's data: disk full", {});
+    CHECK(failed.status == "fail");
+    CHECK(failed.details.find("disk full") != std::string::npos);
+    config::MigrationConflict c{"link/state.json", "C:\\pkg\\fairyfly", "C:\\L\\fairyfly", "newer copy taken"};
+    const auto conflicted = judge_data_dir("C:\\Users\\ada\\.fairyfly", "", {c});
+    CHECK(conflicted.status == "warn");
+    CHECK(conflicted.details.find("link/state.json") != std::string::npos);
+    CHECK(conflicted.details.find("C:\\L\\fairyfly") != std::string::npos);
 }

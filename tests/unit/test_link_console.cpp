@@ -26,7 +26,9 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
+#include "include/config/data_dir.h"
 #include "include/link/link_console.h"
+#include "include/text/utf8.h"
 #include "include/link/link_control.h"
 #include "include/link/link_runner.h"
 #include "include/tray/tray_win32.h"
@@ -510,6 +512,42 @@ TEST_CASE("link status: a stored pairing with a plain ws:// link to another host
     st.link_url = "wss://fairyfly.io/link";   // the same pairing with a wss:// link is fine
     ffy::link::save_state(st, o.state_path);
     CHECK(link_status(o).status == fairyfly::Result::Status::Success);
+}
+
+TEST_CASE("link status: a pairing conflict from the data directory move is shown", "[link][run][datadir]") {
+    // review 2026-10-29: two pairings in the old folders; the newest was taken, the status says which and where the
+    // other one is, never silently
+    const TempDir dir("state-conflict");
+    const auto real = dir / "Local" / "fairyfly";
+    const auto package = dir / "pkg" / "fairyfly";
+    const auto data = dir / "profile" / ".fairyfly";
+    ffy::link::State st;
+    st.link_url = "wss://fairyfly.io/link";
+    st.device_id = "dev-msi";
+    st.tenant = "t-1";
+    st.issuer = "https://fairyfly.io";
+    st.key = ffy::ec_generate();
+    std::filesystem::create_directories(real / "link");
+    std::filesystem::create_directories(package / "link");
+    ffy::link::save_state(st, (real / "link" / "state.json").string());
+    st.device_id = "dev-store";
+    ffy::link::save_state(st, (package / "link" / "state.json").string());
+    auto lock = fairyfly::config::make_migration_lock("fairyfly-link-status-conflict-test", dir.path());
+    REQUIRE(fairyfly::config::migrate_data_dir(data, {real, package}, *lock).ok());
+
+    const fairyfly::test::EnvGuard over(fairyfly::config::env::kDataDir, fairyfly::text::path_utf8(data));
+    LinkOptions o;
+    o.state_path = (data / "link" / "state.json").string();
+    const auto r = link_status(o);
+    REQUIRE(r.status == fairyfly::Result::Status::Success);
+    REQUIRE(r.data.contains("data_dir_conflicts"));
+    REQUIRE(r.data["data_dir_conflicts"].size() == 1);
+    CHECK(r.data["data_dir_conflicts"][0]["path"] == "link/state.json");
+    CHECK(r.data.value("warning", "").find("link/state.json") != std::string::npos);
+
+    const TempDir clean("state-no-conflict");
+    const fairyfly::test::EnvGuard over_clean(fairyfly::config::env::kDataDir, fairyfly::text::path_utf8(clean.path()));
+    CHECK_FALSE(link_status(o).data.contains("data_dir_conflicts"));
 }
 
 TEST_CASE("link run lock: one name per pairing state file", "[link][run]") {
