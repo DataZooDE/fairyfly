@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### SAP Logon started after fairyfly: found at the next call; no embedded SAP GUI, no hanging GetObject("SAPGUI")
+
+- Live 2026-10-28 (Windows 10, MSIX 2026.10.2800.0; the MSI behaves the same): the link tray started at Windows logon,
+  before SAP Logon. Its first call found no SAPGUI entry in the running object table and fell back to creating an
+  embedded `SapGui.ScriptingCtrl.1` inside the tray (`gui_doctor`: com_engine "initialized successfully"), and kept
+  that engine for the life of the process: after SAP Logon was started and logged on, `gui_session_list` still saw
+  0 connections, and every other process that asked for SAP GUI scripting (`fairyfly session list`, a VBScript
+  `GetObject("SAPGUI")`) hung until the tray was killed; restarting SAP Logon did not help.
+- fairyfly never starts a SAP GUI scripting engine of its own any more: the `SapGui.ScriptingCtrl` fallback is gone
+  for every mode (CLI, stdio, HTTP, link). Without SAP Logon a call fails with `SAP_LOGON_NOT_RUNNING` (launch) or
+  "SAP Logon (saplogon.exe) is not running on this desktop". `ComGuiApplication::set_embedded_fallback_allowed` and
+  `mcp/sap_gui_hosting.h` are removed.
+- SAP Logon is looked up again before every call (`AutomationEngine::refresh_application`, from
+  `CommandRegistry::execute_active_command` and, before its checks, `CommandDispatcher::call_tool`): a tray or server
+  started before SAP Logon finds it at the next call, and after SAP Logon was restarted the old GuiApplication and the
+  session bound to it are released (COM identity of the GuiApplication changed) instead of being used forever.
+- `doctor`/`gui_doctor` check `com_engine` now reports what is there at that moment: "SAP Logon is not running" (fail)
+  when there is no SAPGUI entry, "SAP Logon is running, but its scripting engine is not available" when scripting
+  does not answer, and passes only with SAP Logon's own scripting engine ("Connected to SAP Logon's scripting
+  engine"). `active_sessions` is checked only then.
+- COM apartment: each SAP GUI thread enters its single-threaded apartment once (`ensure_thread_apartment`, at the
+  first SAP GUI call) and leaves it only when the thread ends. `ComGuiApplication` no longer calls
+  `CoInitializeEx`/`CoUninitialize`, so dropping SAP Logon's objects never ends the apartment that other objects of
+  the thread (the cached UI Automation instance of the HTML viewer reader) live in.
+- Without SAP Logon, `session list`, `session attach` and every command on a saved connection answer
+  `SAP_LOGON_NOT_RUNNING` (with a hint), and saved connections are kept instead of being pruned as dead; the doctor's
+  `com_engine` check carries `code: SAP_LOGON_NOT_RUNNING`.
+- A saved connection without a SAP server session key is no longer re-bound by its position (`/app/con[0]/ses[0]`)
+  after SAP Logon was replaced inside a running tray or server: it is used only when the session there has the same
+  SAP system, client and user as recorded, otherwise the call answers `SESSION_TARGET_CHANGED` ("attach the SAP
+  session again").
+- One SAP Logon lookup per MCP call, also for a whole `gui_batch` (link, stdio and HTTP dispatchers); the log says
+  "SAP GUI scripting engine changed" only when SAP Logon was really replaced.
+
 ### Uninstalling the MSI ends the running fairyfly; `link status` follows the link process
 
 - Live 2026-10-29 (Windows 10 19045): `msiexec /x` of the per-user MSI 2026.10.28 exited 0 and removed the files and

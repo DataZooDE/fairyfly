@@ -25,7 +25,6 @@
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/http_server.h"
 #include "include/mcp/mcp_audit.h"
-#include "include/mcp/sap_gui_hosting.h"
 #include "include/mcp/server.h"
 #include "include/mcp/session_worker_broker.h"
 #include "include/mcp/session_worker_provider.h"
@@ -115,6 +114,7 @@ int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<in
 /// read-only and selection-input overrides, the connection snapshot and the owner-mode guards, all through the
 /// handler that is configured on first use.
 void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler) {
+    dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
     // Token authorization needs the target SAP system and a per-call read-only override.
     dispatcher.set_sap_facts_provider([lazy_handler](std::optional<int> connection) -> std::optional<audit::SapFacts> {
         // Facts of the connection THIS call will use (never the merely attached session).
@@ -378,10 +378,6 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
 #endif
 
     const Policy policy = make_policy(options, read_only, allow_write, sink, http, link);
-#ifdef _WIN32
-    // Owner-mode workers attach to SAP GUI through the running object table: never host SAP GUI windows in-process.
-    sap::ComGuiApplication::set_embedded_fallback_allowed(embedded_sap_gui_allowed(http, options.owner_sap_identities));
-#endif
     auto on_connection_changed = std::make_shared<std::function<void(int)>>();
     auto on_login_lane_reserve =
         std::make_shared<std::function<std::shared_ptr<void>(const std::string&,
@@ -429,6 +425,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
         // a call the gateway granted read-only runs with the handler's read-only guard on, even when this
         // desktop allows writes (--allow-write); the server value is restored after the call
         link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
+        link_dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
         if (audit_unavailable(sink)) return refuse_audit(sink);
         const bool hard_read_only = options.read_only || config::read_only_cap();
         const auto set_read_only = [&](bool ro) {
@@ -445,6 +442,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
 
     CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,
                                  retain_families(all_tool_specs(), options.families));
+    dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
     StdioTransport transport;
 
     McpServer server(transport, dispatcher, server_options);

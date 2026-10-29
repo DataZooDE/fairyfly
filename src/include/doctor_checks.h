@@ -17,6 +17,7 @@ struct Check {
     std::string message;
     std::string details;
     std::string remediation;
+    std::string code;  ///< the error code a command would answer for the same cause (e.g. SAP_LOGON_NOT_RUNNING)
 };
 
 nlohmann::json to_json(const Check& check);
@@ -48,7 +49,9 @@ struct ClientSecurity {
 };
 Check judge_client_security(const ClientSecurity& security);
 
-Check judge_engine(bool available);
+/// SAP Logon's scripting engine (AutomationEngine::engine_status): pass only when the engine holds the running SAP
+/// Logon's GuiApplication; "SAP Logon is not running" when there is no SAPGUI entry in the running object table.
+Check judge_engine(bool available, bool sap_logon_running = true, const std::string& detail = "");
 /// From AutomationEngine::get_application_info().
 Check judge_sessions(const nlohmann::json& application_info);
 /// get_application_info threw.

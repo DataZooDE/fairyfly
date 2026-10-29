@@ -10,6 +10,8 @@
 #include "screen_snapshot.h"
 #include "login_flow.h"
 #include <string>
+#include <cstdint>
+#include <map>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -150,6 +152,14 @@ private:
     /// confirmed gone so auto-detect is not blocked by stale files.
     /// Entries whose liveness cannot be determined are kept.
     std::vector<int> prune_dead_entries();
+    /// SAP_LOGON_NOT_RUNNING (with the engine's detail and a hint) when the engine knows SAP Logon is not running;
+    /// nullopt otherwise. Checked before anything reads or prunes saved connections: without SAP Logon every saved
+    /// session looks dead, and that is no reason to forget it.
+    std::optional<Result> sap_logon_missing() const;
+    /// SAP Logon generation (AutomationEngine::application_generation) at which each saved connection was last
+    /// validated in this process: a keyless entry must not be re-bound by position after SAP Logon was replaced.
+    std::map<int, std::uint64_t> validated_generation_;
+    int refresh_holds_ = 0;  ///< > 0: inside one MCP call / gui_batch that already looked SAP Logon up
 
 public:
     explicit CommandHandler(std::unique_ptr<cred::CredentialStore> store = nullptr);
@@ -295,6 +305,13 @@ public:
     // Diagnostic and enumeration
     Result handle_list_all();
     Result handle_doctor();
+    /// Before every call: look up the running SAP Logon again and drop what is cached from an earlier one
+    /// (AutomationEngine::refresh_application). CommandRegistry::execute_active_command and the MCP dispatcher call it.
+    void refresh_sap_gui() { if (engine_ && refresh_holds_ == 0) engine_->refresh_application(); }
+    /// Looks SAP Logon up now and suppresses refresh_sap_gui until the returned token is released: one lookup per
+    /// MCP call, also for a whole gui_batch (CommandDispatcher::set_before_call). No batch step can (re)start SAP Logon;
+    /// a step that needs it while none is held looks it up itself (ComAutomationEngine::require_application).
+    std::shared_ptr<void> refresh_sap_gui_for_call();
 
     // Getters
     const SessionId& get_current_session() const { return current_session_; }

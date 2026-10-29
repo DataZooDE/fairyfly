@@ -1636,21 +1636,29 @@ TEST_CASE("CLI exception honors screen Markdown output", "[com][cli][format]") {
     REQUIRE(result.output.find('{') == std::string::npos);
 }
 
-TEST_CASE("SAP application wrapper balances COM initialization", "[com][lifecycle]") {
-    HRESULT apartment_after = S_OK;
+TEST_CASE("SAP application wrapper keeps one COM apartment for the thread's life", "[com][lifecycle]") {
+    // The thread's STA is entered once and never left by a wrapper: dropping SAP Logon's application (SAP Logon
+    // closed) must not end the apartment that other objects of this thread (cached IUIAutomation) live in.
+    HRESULT apartment_after = E_FAIL;
+    APTTYPE type_after = APTTYPE_MTA;
+    int entries = -1;
     std::thread worker([&] {
-        try {
-            auto app = ComGuiApplication::create();
-            app.reset();
-        } catch (const ComException&) {
-            // SAP GUI may be absent; failure must also balance CoInitializeEx.
+        for (int i = 0; i < 3; ++i) {
+            try {
+                auto app = ComGuiApplication::create();
+                app.reset();
+            } catch (const ComException&) {
+                // SAP GUI may be absent
+            }
         }
-        APTTYPE type;
         APTTYPEQUALIFIER qualifier;
-        apartment_after = CoGetApartmentType(&type, &qualifier);
+        apartment_after = CoGetApartmentType(&type_after, &qualifier);
+        entries = thread_apartment_entries();
     });
     worker.join();
-    REQUIRE(apartment_after == CO_E_NOTINITIALIZED);
+    REQUIRE(apartment_after == S_OK);
+    CHECK((type_after == APTTYPE_STA || type_after == APTTYPE_MAINSTA));   // MAINSTA: the first STA of the process
+    CHECK(entries == 1);
 }
 
 TEST_CASE("Read-only SAP field rejects fill before Text property write", "[com][fill][readonly]") {

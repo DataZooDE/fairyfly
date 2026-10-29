@@ -148,9 +148,33 @@ void CommandHandler::set_attach_owner_identities(std::vector<std::string> identi
     set_owner_window_guard(!attach_owner_identities_.empty());
 }
 
+std::optional<Result> CommandHandler::sap_logon_missing() const
+{
+    if (!engine_) return std::nullopt;
+    const EngineStatus status = engine_->engine_status();
+    if (status.sap_logon_running) return std::nullopt;
+    Result missing = Result::fail("SAP_LOGON_NOT_RUNNING",
+                                  status.detail.empty() ? "SAP Logon (saplogon.exe) is not running on this desktop"
+                                                        : status.detail);
+    missing.error["hint"] = "Start SAP Logon in the interactive Windows session (it can stay minimized) and log on, "
+                            "then call again; a running fairyfly finds it without a restart.";
+    return missing;
+}
+
+std::shared_ptr<void> CommandHandler::refresh_sap_gui_for_call()
+{
+    refresh_sap_gui();  // may throw: then nothing is held
+    ++refresh_holds_;
+    return std::shared_ptr<int>(new int(0), [this](int* token) {
+        delete token;
+        --refresh_holds_;
+    });
+}
+
 std::vector<int> CommandHandler::prune_dead_entries()
 {
     std::vector<int> removed;
+    if (sap_logon_missing()) return removed;  // every session looks dead without SAP Logon
     auto all = conn_mgr_->list_connections();
     if (all.size() < 2) return removed;
 
@@ -174,6 +198,13 @@ std::vector<int> CommandHandler::prune_dead_entries()
 ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id,
                                                                     bool update_cache)
 {
+    if (auto missing = sap_logon_missing()) {
+        ResultT<Connection> refused;
+        refused.status = ResultT<Connection>::Status::Error;
+        refused.error = missing->error;
+        return refused;
+    }
+
     if (update_cache && !explicit_conn_id.has_value()) {
         prune_dead_entries();
     }
@@ -210,6 +241,36 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
         return result;
     }
 
+    // A saved connection without a SAP server session key names its session only by position (/app/con[0]/ses[0]).
+    // When SAP Logon was replaced since this process last used the entry (restarted, or closed and started again),
+    // the session at that position may be another one: keep it only when it is provably the same SAP system, client
+    // and user (as the automatic re-attach requires), otherwise ask for a new attach. Nothing is deleted.
+    const std::uint64_t generation = engine_->application_generation();
+    if (conn.server_session_key.empty()) {
+        const auto seen = validated_generation_.find(conn.id);
+        if (seen != validated_generation_.end() && seen->second != generation) {
+            const auto* com = engine_->scripting();
+            const audit::SapFacts live = com ? com->peek_session_facts(conn.session_id, "") : audit::SapFacts{};
+            const bool same = conn.identity.complete() && live.system == conn.identity.system &&
+                              live.client == conn.identity.client && live.user == conn.identity.user;
+            if (!same) {
+                spdlog::warn("Connection {}: SAP Logon was replaced and the entry has no session key; not re-binding "
+                             "{} by position", conn.id, conn.session_id);
+                ResultT<Connection> changed;
+                changed.status = ResultT<Connection>::Status::Error;
+                changed.error = {{"code", "SESSION_TARGET_CHANGED"},
+                                 {"message", fmt::format("SAP Logon was restarted since connection {} was last used, and "
+                                                         "the session now at {} cannot be shown to be the same one",
+                                                         conn.id, conn.session_id)},
+                                 {"hint", "attach the SAP session again (gui_session_attach / fairyfly session attach) "
+                                          "and retry"}};
+                return changed;
+            }
+            spdlog::info("Connection {}: SAP Logon was replaced; {} is the same SAP system, client and user", conn.id,
+                         conn.session_id);
+        }
+    }
+
     // The dispatcher checked this exact saved connection before invoking the command. Recheck
     // after selecting it and before any SAP action or cache touch; a closed/reused GUI index or
     // changed cache generation must not silently redirect a queued MCP call.
@@ -237,6 +298,7 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
         conn_mgr_->touch_connection(conn);
     }
 
+    validated_generation_[conn.id] = generation;
     ResultT<Connection> result;
     result.status = ResultT<Connection>::Status::Success;
     result.value = conn;
@@ -298,6 +360,7 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
 {
     pending_owner_attach_.reset();
+    if (auto missing = sap_logon_missing()) return *missing;
     try {
     if (session_id) {
         spdlog::info("Attaching to SAP GUI session {}", *session_id);
@@ -1706,6 +1769,8 @@ Result CommandHandler::handle_list_all()
     Result result;
     result.status = Result::Status::Success;
     
+    if (auto missing = sap_logon_missing()) return *missing;
+
     try {
         // Get application info
         json info = engine_->get_application_info();

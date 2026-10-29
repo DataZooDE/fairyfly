@@ -23,6 +23,7 @@ nlohmann::json to_json(const Check& check) {
     c["message"] = check.message;
     if (!check.details.empty()) c["details"] = check.details;
     if (!check.remediation.empty()) c["remediation"] = check.remediation;
+    if (!check.code.empty()) c["code"] = check.code;
     return c;
 }
 
@@ -76,10 +77,17 @@ Check judge_client_security(const ClientSecurity& s) {
     return {"client_registry", "pass", "Client scripting security configuration is optimal (enabled, modal warnings suppressed)"};
 }
 
-Check judge_engine(bool available) {
-    if (available) return {"com_engine", "pass", "SAP GUI COM scripting engine initialized successfully"};
-    return {"com_engine", "fail", "Failed to initialize SAP GUI COM scripting engine", "AutomationEngine returned null",
-            "Verify SAP GUI Scripting component is installed via SAP GUI setup."};
+Check judge_engine(bool available, bool sap_logon_running, const std::string& detail) {
+    if (available) return {"com_engine", "pass", "Connected to SAP Logon's scripting engine"};
+    if (!sap_logon_running)
+        return {"com_engine", "fail", "SAP Logon is not running", detail,
+                "Start SAP Logon (saplogon.exe) in this Windows session and log on; fairyfly finds it at the next call "
+                "without a restart.",
+                "SAP_LOGON_NOT_RUNNING"};
+    return {"com_engine", "fail", "SAP Logon is running, but its scripting engine is not available",
+            detail.empty() ? "AutomationEngine returned null" : detail,
+            "Enable scripting in the SAP GUI options and verify the SAP GUI Scripting component is installed via SAP "
+            "GUI setup."};
 }
 
 Check judge_sessions(const nlohmann::json& info) {

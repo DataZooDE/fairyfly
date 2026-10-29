@@ -13,9 +13,6 @@
 #include <spdlog/sinks/stdout_sinks.h>
 
 #include "include/cli_handler.h"
-#ifdef _WIN32
-#include "include/com/wrapper.h"
-#endif
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/session_worker_protocol.h"
 #include "include/mcp/screen_guard.h"
@@ -130,10 +127,6 @@ int run_session_worker_stdio() {
     // spdlog output may share it, even when command execution fails.
     spdlog::set_default_logger(std::make_shared<spdlog::logger>(
         "mcp-session-worker", std::make_shared<spdlog::sinks::stderr_sink_mt>()));
-#ifdef _WIN32
-    // Workers only exist for owner-mode endpoints and must reach SAP Logon's windows, never host their own.
-    sap::ComGuiApplication::set_embedded_fallback_allowed(false);
-#endif
     return run_worker_loop(std::cin, std::cout, make_session_worker_invoker([] { return std::make_unique<cli::CommandHandler>(); }));
 }
 

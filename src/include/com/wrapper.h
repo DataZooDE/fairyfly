@@ -4,6 +4,7 @@
 #include "include/sap_gui_base.h"
 #include <string>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <vector>
 #include <stdexcept>
@@ -31,8 +32,8 @@ public:
     using ComException::ComException;
 };
 
-/// SAP Logon is not reachable through the running object table, and the embedded SapGui.ScriptingCtrl fallback is
-/// switched off for this process (see ComGuiApplication::set_embedded_fallback_allowed).
+/// SAP Logon is not reachable through the running object table (no SAPGUI entry): saplogon.exe is not running on
+/// this desktop. fairyfly never starts a scripting engine of its own instead.
 class SapLogonNotRunningException : public ComException {
 public:
     using ComException::ComException;
@@ -403,26 +404,34 @@ public:
     IDispatch* get_com_object() const { return dispatch_; }
 };
 
-/// COM-based SAP GUI application wrapper (root object)
+/// Enter this thread's single-threaded apartment once; it is left only when the thread ends. ComGuiApplication::create
+/// calls it; nothing in fairyfly leaves (CoUninitialize) the apartment of a SAP GUI thread. Throws
+/// ComInitializationException when the thread already is in the multithreaded apartment.
+void ensure_thread_apartment();
+/// Tests: how often this thread entered its apartment through ensure_thread_apartment (0 or 1).
+int thread_apartment_entries();
+
+/// COM-based SAP GUI application wrapper (root object). Does not own the thread's COM apartment.
 class ComGuiApplication : public SapGuiObject {
-    int com_uninit_count_ = 0;
 public:
-    explicit ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count = 0);
-    explicit ComGuiApplication(IDispatchPtr sap_gui_app, bool owns_com_apartment);
+    explicit ComGuiApplication(IDispatchPtr sap_gui_app);
     ComGuiApplication(const ComGuiApplication&) = delete;
     ComGuiApplication& operator=(const ComGuiApplication&) = delete;
 
-    /// Create SAP GUI application COM wrapper
-    /// Initializes COM library and creates root SAPGUI object
-    /// Throws ComException if SAP GUI not installed or not accessible, SapLogonNotRunningException when SAP Logon
-    /// is not running and the embedded fallback is switched off.
-    static ComGuiApplicationPtr create();
+    /// SAP Logon's SapGuiAuto object (the SAPGUI entry of the running object table), or null when SAP Logon is not
+    /// running. Only looks it up: never creates or registers anything.
+    using SapLogonLocator = std::function<IDispatchPtr()>;
+    static IDispatchPtr running_sap_logon();
 
-    /// Whether create() may fall back to an embedded SapGui.ScriptingCtrl inside this process when SAP Logon is not
-    /// running (default: yes). Its windows belong to this process and are invisible to other processes through the
-    /// running object table, so owner-mode MCP endpoints, whose session workers attach through it, switch it off.
-    static void set_embedded_fallback_allowed(bool allowed);
-    static bool embedded_fallback_allowed();
+    /// The GuiApplication of the running SAP Logon (create(): found through running_sap_logon). Initializes COM
+    /// (STA) on this thread for the wrapper's lifetime. Throws SapLogonNotRunningException when the locator finds no
+    /// SAP Logon, ComException when SAP Logon runs but its scripting engine does not answer. Never creates a SAP GUI
+    /// scripting engine of its own (no embedded scripting control fallback).
+    static ComGuiApplicationPtr create();
+    static ComGuiApplicationPtr create(const SapLogonLocator& locate);
+
+    /// Whether both wrap the same COM object (IUnknown identity): the same running SAP Logon's GuiApplication.
+    bool same_object(const ComGuiApplication& other) const;
 
     // Base class get_id(), get_type(), get_name() inherited from SapGuiObject
 
@@ -463,8 +472,10 @@ public:
     /// Get raw COM application object - deprecated, use get_dispatch()
     IDispatch* get_app_object() const { return dispatch_; }
 
-    ~ComGuiApplication() override;
 };
+
+/// COM identity of two interface pointers (equal IUnknown); null equals only null.
+bool same_com_object(IDispatch* a, IDispatch* b);
 
 /// Utility function: Select SAP GUI window by mouse click
 /// Prompts user to click on SAP window within timeout period

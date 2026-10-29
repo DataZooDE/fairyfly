@@ -69,6 +69,13 @@ public:
 
     /// What get_application_info answers (the SAP GUI connections and sessions the doctor reports).
     nlohmann::json application_info = nlohmann::json::object();
+    /// What engine_status answers (SAP Logon found, not running, scripting engine missing).
+    EngineStatus status;
+    int refreshes = 0;   ///< how often SAP Logon was looked up again (refresh_application)
+    void refresh_application() override { ++refreshes; }
+    EngineStatus engine_status() const override { return status; }
+    std::uint64_t generation = 1;   ///< what application_generation answers (++: SAP Logon was replaced)
+    std::uint64_t application_generation() const override { return generation; }
 
     // ---- what the handler asked ----
     std::vector<std::string> calls;  ///< "fill_field wnd[0]/usr/txtA=x", "select_session /app/con[0]/ses[0]", ...

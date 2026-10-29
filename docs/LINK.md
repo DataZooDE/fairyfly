@@ -187,6 +187,10 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 
 ## What runs where
 
+- The tray may start before SAP Logon (at Windows logon): until SAP Logon runs, calls answer that it is not running
+  (`gui_doctor`: com_engine "SAP Logon is not running"). Every call looks SAP Logon up again, so once you start it and
+  log on the next call sees the session; after SAP Logon was restarted the tray drops the old one by itself. fairyfly
+  never starts a SAP GUI scripting engine of its own.
 - Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
   itself (with several open, the assistant is told to pick one or to ask you). After SAP Logon or the tray restarted,
   a closed default connection is re-attached the same way, only to a session of the same SAP system, client and user,

@@ -1,6 +1,7 @@
 // CommandHandler::handle_doctor: the preflight checks of `fairyfly doctor` (probes and judges in doctor_checks.h).
 #include "include/cli_handler.h"
 #include "include/doctor_checks.h"
+#include "include/automation_engine.h"
 
 #include <spdlog/spdlog.h>
 
@@ -22,8 +23,10 @@ Result CommandHandler::handle_doctor()
     checks.push_back({"sapgui_processes", "info", "Non-Windows environment, process check skipped"});
     checks.push_back({"client_registry", "info", "Non-Windows environment, registry check skipped"});
 #endif
-    checks.push_back(doctor::judge_engine(engine_ != nullptr));
-    if (engine_) {
+    refresh_sap_gui();  // what SAP Logon is running now (no second lookup inside an MCP call that did it)
+    const EngineStatus engine = engine_ ? engine_->engine_status() : EngineStatus{false, true, "no automation engine"};
+    checks.push_back(doctor::judge_engine(engine.available, engine.sap_logon_running, engine.detail));
+    if (engine_ && engine.available) {
         try {
             checks.push_back(doctor::judge_sessions(engine_->get_application_info()));
         } catch (const std::exception& e) {

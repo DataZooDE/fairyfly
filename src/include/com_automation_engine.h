@@ -9,6 +9,7 @@
 #include "screenshot_handler.h"
 #include "screen_reader.h"
 #include "element_metadata_extractor.h"
+#include <functional>
 #include <memory>
 #include <cstdint>
 #include <optional>
@@ -28,8 +29,16 @@ bool session_present_checked(const ComGuiApplicationPtr& app,
 /// Implements the AutomationEngine interface using Windows COM
 /// for actual SAP GUI interactions
 class ComAutomationEngine : public AutomationEngine, public SapGuiScripting {
+public:
+    /// Where the engine gets SAP Logon's GuiApplication: the running one or a SapLogonNotRunningException /
+    /// ComException (default ComGuiApplication::create). Asked again before every call (refresh_application).
+    using ApplicationSource = std::function<ComGuiApplicationPtr()>;
+
 private:
+    ApplicationSource source_;
     ComGuiApplicationPtr app_;
+    EngineStatus status_{false, false, "SAP Logon has not been looked up yet"};
+    std::uint64_t generation_ = 0;  ///< ++ at every adopted SAP Logon
     ComGuiConnectionPtr current_connection_;
     ComGuiSessionPtr current_session_;
 
@@ -43,6 +52,14 @@ private:
     bool grid_rows_needed_ = true;
     bool owner_window_guard_ = false;
     sap::SelectionInputPolicy selection_input_policy_;
+
+    /// Take `app` as the SAP Logon of this engine and bind its first session (as at start-up).
+    void adopt_application(ComGuiApplicationPtr app);
+    /// Forget the SAP Logon and everything bound to it (session, connection, readers), releasing the COM references.
+    void drop_application();
+    /// The SAP Logon's application, looked up now when there is none; throws SapLogonNotRunningException or
+    /// ComException (why) when there still is none.
+    const ComGuiApplicationPtr& require_application();
 
     // Helper to ensure connection exists
     ComGuiConnectionPtr ensure_connection();
@@ -73,10 +90,16 @@ private:
     std::vector<ConnectionLauncher::ExistingSession> open_sessions_now() const;
 
 public:
-    /// Constructor - initializes COM but doesn't connect to SAP
+    /// The engine on the running SAP Logon (none yet is not an error: every call looks it up again).
     ComAutomationEngine();
     /// The engine on a given SAP GUI application object (tests pass a fake one); binds its first session.
     explicit ComAutomationEngine(ComGuiApplicationPtr app);
+    /// The engine on whatever `source` answers, now and before every call (tests script SAP Logon coming and going).
+    explicit ComAutomationEngine(ApplicationSource source);
+
+    void refresh_application() override;
+    EngineStatus engine_status() const override { return status_; }
+    std::uint64_t application_generation() const override { return generation_; }
 
     ~ComAutomationEngine() override = default;
 
