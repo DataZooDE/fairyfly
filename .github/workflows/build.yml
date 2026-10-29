@@ -322,7 +322,7 @@ jobs:
         if ($exported.HasPrivateKey -or $exported.Subject -ne $publisher) { Write-Error "exported .cer is not the public test certificate"; exit 1 }
         # Add-AppxPackage in the next step refuses a package whose signature does not chain to the imported .cer
         $sig = Get-AuthenticodeSignature $signed
-        Write-Host "signed $signed: $($sig.Status), signer '$($sig.SignerCertificate.Subject)', test certificate $($exported.Thumbprint)"
+        Write-Host "signed ${signed}: $($sig.Status), signer '$($sig.SignerCertificate.Subject)', test certificate $($exported.Thumbprint)"
         if ($sig.SignerCertificate -and $sig.SignerCertificate.Thumbprint -ne $exported.Thumbprint) { Write-Error "the package is not signed with the test certificate"; exit 1 }
       shell: pwsh
 
