@@ -107,7 +107,7 @@ struct FakeSystem : SystemProbe {
     TlsProbe tls;                                    ///< answer of tls_probe
     long long clock = 1800000000;
     std::string dns_name = "sapbox.corp.example";
-    std::string lad = "C:\\Users\\jr\\AppData\\Local";
+    std::string data = "C:\\Users\\jr\\.fairyfly";
     bool tls_probe_called = false;
 
     bool tcp_listening(const std::string&, int port) override {
@@ -133,7 +133,7 @@ struct FakeSystem : SystemProbe {
     bool file_exists(const std::string& path) override { return files.count(path) != 0; }
     long long now() override { return clock; }
     std::string computer_dns_name() override { return dns_name; }
-    std::string local_app_data() override { return lad; }
+    std::string data_dir() override { return data; }
 };
 
 struct FakeCertStore : CertStore {

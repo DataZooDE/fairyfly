@@ -3,7 +3,7 @@
 //
 // Where: config::Environment::data_dir() (FAIRYFLY_DATA_DIR > %USERPROFILE%\.fairyfly > $HOME/.fairyfly > temp).
 // Everything fairyfly keeps per user (audit trail, logs, mcp.yaml, link state, sessions, `mcp setup` files) derives
-// from it. Up to 2026.10.29 it was %LOCALAPPDATA%\fairyfly, which a Microsoft Store (MSIX) fairyfly cannot use on
+// from it. Up to 2026.10.28 it was %LOCALAPPDATA%\fairyfly, which a Microsoft Store (MSIX) fairyfly cannot use on
 // Windows 10: a new folder under AppData is redirected into the package's private store (invisible to other programs,
 // deleted on uninstall), and the manifest's ExcludedDirectories only works on Windows 11. The user profile is not
 // virtualized on any Windows version.

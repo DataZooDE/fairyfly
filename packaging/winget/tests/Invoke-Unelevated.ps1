@@ -83,7 +83,7 @@ public static class Unelevated {
             int err = Marshal.GetLastWin32Error();
             // ERROR_PRIVILEGE_NOT_HELD: fall back to the secondary logon service (needs SeImpersonatePrivilege only)
             // (not for !wait: the secondary logon service builds the environment from the profile, and the caller's
-            // environment, e.g. an isolated LOCALAPPDATA, must reach the child)
+            // environment, e.g. an isolated USERPROFILE/LOCALAPPDATA, must reach the child)
             if (err == 1314 && !wait) throw new Win32Exception(err, "CreateProcessAsUser (no fallback without waiting)");
             if (err != 1314 || !CreateProcessWithTokenW(token, 0, null, commandLine, flags, IntPtr.Zero, cwd, ref si, out pi))
                 throw new Win32Exception(err == 1314 ? Marshal.GetLastWin32Error() : err, "CreateProcess with the basic-user token");

@@ -87,8 +87,8 @@ if (-not $ProtocolOnly) {
     $profileA = Get-CimInstance Win32_UserProfile -Filter "SID='$($proofA.Sid)'"
     $profileB = Get-CimInstance Win32_UserProfile -Filter "SID='$($proofB.Sid)'"
     if ($null -eq $profileA -or $null -eq $profileB) { throw 'Could not resolve both Windows user profiles' }
-    $CacheDirA = Join-Path $profileA.LocalPath 'AppData\Local\fairyfly\sessions'
-    $CacheDirB = Join-Path $profileB.LocalPath 'AppData\Local\fairyfly\sessions'
+    $CacheDirA = Join-Path $profileA.LocalPath '.fairyfly\sessions'
+    $CacheDirB = Join-Path $profileB.LocalPath '.fairyfly\sessions'
 }
 
 function Get-CacheSnapshot([string]$path) {

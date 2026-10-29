@@ -29,7 +29,7 @@
   the PowerShell client are reported as SKIP with the reason.
 
   Side effects: a self-signed certificate in LocalMachine\My, a URL ACL and an SSL binding for the port (all
-  created by `mcp setup`, all removed by `mcp teardown`), files under %LOCALAPPDATA%\fairyfly, a temp
+  created by `mcp setup`, all removed by `mcp teardown`), files under %USERPROFILE%\.fairyfly, a temp
   config (-c), a temp audit file (FAIRYFLY_AUDIT_FILE) and temporary tokens named ffe2e-<rand>-<role> (deleted
   in finally). If the script aborts after setup ran but before teardown, it prints the recovery command
   `fairyfly mcp teardown --yes` (and runs it in finally when -Yes is given).
@@ -105,7 +105,7 @@ $A_TextSetupNothing    = 'nothing - already set up.'
 $A_TextTeardownNothing = 'nothing - already removed.'
 $A_RunbookMarkers      = @('netsh', 'New-SelfSignedCertificate')
 # -- files written by setup
-$A_LocalDir         = (Join-Path $env:LOCALAPPDATA 'fairyfly')
+$A_LocalDir         = (Join-Path $env:USERPROFILE '.fairyfly')
 $A_CerFile          = 'fairyfly-mcp-{HOST}.cer'                # in $A_LocalDir
 $A_ManifestFile     = 'mcp-setup.json'                          # in $A_LocalDir
 $A_CertMatch        = 'fairyfly'                                # subject / friendly name fragment of our certificate in LocalMachine\My
@@ -1156,7 +1156,7 @@ try {
         foreach ($n in $suiteNames) { Skip-Check $n '-SkipSuites' }
     } else {
         Write-Host '== suites: unit tests and the other live suites (each must be green)'
-        # The child suites must not be influenced by a leftover default %LOCALAPPDATA%\fairyfly\mcp.yaml: point them at a private,
+        # The child suites must not be influenced by a leftover default %USERPROFILE%\.fairyfly\mcp.yaml: point them at a private,
         # comment-only config (all defaults). It is deliberately an EXISTING file: fairyfly treats an explicitly requested
         # (-c or FAIRYFLY_MCP_CONFIG) but missing config file as CONFIG_NOT_FOUND (exit 2), which would fail the stdio suites.
         $script:SuiteConfigPath = Join-Path $TempDir 'suites-neutral-mcp.yaml'

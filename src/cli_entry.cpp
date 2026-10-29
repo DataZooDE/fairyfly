@@ -1,5 +1,7 @@
 #include <CLI/CLI.hpp>
+#include "include/config/data_dir.h"
 #include "include/config/environment.h"
+#include "include/text/utf8.h"
 #include "include/string_utils.h"
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -442,6 +444,12 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
         return *handler;
     };
 
+    // The data directory moved to %USERPROFILE%\.fairyfly (after 2026.10.28): the first start moves %LOCALAPPDATA%\fairyfly
+    // there, before anything (the audit trail first) opens it. A failure leaves the old folder alone; the next start
+    // tries again (docs/DATA_DIR.md).
+    const config::MigrationResult moved = config::migrate_process_data_dir();
+    if (!moved.ok()) std::cerr << "fairyfly: warning: " << moved.error << std::endl;
+
     // Audit trail: flags are pre-scanned so the sink exists before parsing (parse errors are audited too).
     bool cli_no_audit = false, cli_required = false;
     for (int i = 1; i < argc; ++i) {
@@ -459,7 +467,8 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
 
     if (const auto refusal = audit::preflight_error(sink.mode(), sink.mode() != audit::Mode::Required || sink.probe())) {
         Result failure;
-        failure.set_error(*refusal, "Audit trail is required but cannot be written: " + sink.file().string());
+        failure.set_error(*refusal, "Audit trail is required but cannot be written: " + text::path_utf8(sink.file()) +
+                                        (moved.ok() ? std::string() : " (" + moved.error + ")"));
         print_compact_json(failure.to_json());
         return 1;
     }

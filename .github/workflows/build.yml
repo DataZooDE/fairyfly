@@ -104,6 +104,65 @@ jobs:
         }
       shell: pwsh
 
+    - name: Data directory - migration from %LOCALAPPDATA%\fairyfly to %USERPROFILE%\.fairyfly (real exe, isolated profiles)
+      run: |
+        # docs/DATA_DIR.md. Every case runs in its own profile folder: the runner's own data is never touched.
+        $exe = (Resolve-Path build/Release/fairyfly.exe).Path
+        $root = Join-Path $env:RUNNER_TEMP 'ffy-data-dir'
+        Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item Env:FAIRYFLY_DATA_DIR, Env:FAIRYFLY_AUDIT, Env:FAIRYFLY_AUDIT_FILE -ErrorAction SilentlyContinue
+        function Use-Profile([string]$name) {
+          $p = Join-Path $root $name
+          New-Item -ItemType Directory -Force (Join-Path $p 'Local'), (Join-Path $p 'User') | Out-Null
+          $env:LOCALAPPDATA = Join-Path $p 'Local'; $env:USERPROFILE = Join-Path $p 'User'
+          return $p
+        }
+        function Lines([string]$file, [string]$pattern) { @(Select-String -Path $file -SimpleMatch $pattern).Count }
+
+        # 1. an MSI user's old folder; four fairyfly start at once (tray + CLI), then a command is audited
+        $p = Use-Profile 'msi'
+        $old = Join-Path $env:LOCALAPPDATA 'fairyfly'
+        New-Item -ItemType Directory -Force (Join-Path $old 'audit'), (Join-Path $old 'link'), (Join-Path $old 'logs') | Out-Null
+        $rec = '{"ts":"2026-10-01T10:00:00.000Z","command":"screen read","ci":"seed"}'
+        [IO.File]::WriteAllText((Join-Path $old 'audit\2026-10.jsonl'), "$rec`n")
+        [IO.File]::WriteAllText((Join-Path $old 'link\state.json'), '{"device_id":"dev_ci"}')
+        [IO.File]::WriteAllText((Join-Path $old 'logs\link.log'), "old log`n")
+        [IO.File]::WriteAllText((Join-Path $old 'mcp.yaml'), "server:`n  port: 8383`n")
+        $starts = 1..4 | ForEach-Object { Start-Process $exe -ArgumentList '--version' -PassThru -NoNewWindow }
+        $starts | ForEach-Object { $_.WaitForExit() }
+        & $exe connection list | Out-Null
+        $new = Join-Path $env:USERPROFILE '.fairyfly'
+        $audit = Join-Path $new ("audit\" + (Get-Date).ToUniversalTime().ToString('yyyy-MM') + '.jsonl')
+        Get-ChildItem $new -Recurse -Force | ForEach-Object { Write-Host "  $($_.FullName)" }
+        if (-not (Test-Path (Join-Path $new '.data-dir.json'))) { Write-Error 'no marker in the new data directory'; exit 1 }
+        if ((Lines (Join-Path $new 'audit\2026-10.jsonl') 'ci":"seed') -ne 1) { Write-Error 'the old audit record is not in the new trail exactly once'; exit 1 }
+        if (-not (Test-Path $audit) -or (Lines $audit '"cmd":"connection list"') -ne 1) { Write-Error "the new command was not audited once in $audit"; exit 1 }
+        foreach ($f in 'link\state.json', 'logs\link.log', 'mcp.yaml') {
+          if ((Get-FileHash (Join-Path $new $f)).Hash -ne (Get-FileHash (Join-Path $old $f)).Hash) { Write-Error "$f differs after the move"; exit 1 }
+        }
+        if (-not (Test-Path (Join-Path $old 'MOVED-TO-USERPROFILE-.fairyfly.txt'))) { Write-Error 'no note in the old folder'; exit 1 }
+        if ((Lines (Join-Path $old 'audit\2026-10.jsonl') '"command"') -ne 1) { Write-Error 'the old audit trail was changed'; exit 1 }
+        if (Test-Path "$new.migrating") { Write-Error 'the staging directory was left behind'; exit 1 }
+        if ((Get-Item $new -Force).Attributes -band [IO.FileAttributes]::Hidden) { Write-Error '.fairyfly is hidden (it should be found, like .ssh)'; exit 1 }
+        Write-Host 'MSI -> %USERPROFILE%\.fairyfly OK'
+
+        # 2. a fresh profile: no old folder, the data directory is created on first use
+        $p = Use-Profile 'fresh'
+        & $exe connection list | Out-Null
+        if (-not (Test-Path (Join-Path $env:USERPROFILE '.fairyfly\.data-dir.json'))) { Write-Error 'fresh profile: no data directory'; exit 1 }
+        if (Test-Path (Join-Path $env:LOCALAPPDATA 'fairyfly')) { Write-Error 'fresh profile: %LOCALAPPDATA%\fairyfly was created'; exit 1 }
+        Write-Host 'fresh profile OK'
+
+        # 3. a required audit trail fails closed when the data directory cannot be written
+        $p = Use-Profile 'unwritable'
+        $env:USERPROFILE = Join-Path $p 'not-a-folder'
+        [IO.File]::WriteAllText($env:USERPROFILE, 'a file where the profile should be')
+        $out = (& $exe --audit-required connection list 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -or $out -notmatch 'AUDIT_UNAVAILABLE') { Write-Error "required audit did not fail closed (exit $LASTEXITCODE): $out"; exit 1 }
+        Write-Host "required audit fails closed OK: $($out.Trim())"
+        exit 0
+      shell: pwsh
+
     - name: Per-user MSI - build, install, check, uninstall (real installer run)
       env:
         FAIRYFLY_GITHUB_TOKEN: ${{ github.token }}
@@ -180,7 +239,7 @@ jobs:
         if (Test-Path $lnk) { Write-Error "shortcut still present after uninstall"; exit 1 }
         if (Get-Process -Id $trays[0].ProcessId -ErrorAction SilentlyContinue) { Write-Error "the uninstall did not close the tray"; exit 1 }
         # the tray quit as from its menu (asked first), not only terminated
-        $linkLog = Join-Path $env:LOCALAPPDATA 'fairyfly\logs\link.log'
+        $linkLog = Join-Path $env:USERPROFILE '.fairyfly\logs\link.log'
         if (-not (Select-String -Path $linkLog -Pattern 'asked to quit by another process' -Quiet)) { Get-Content $linkLog -Tail 20; Write-Error "the tray was not asked to quit"; exit 1 }
         if (-not $mcp.WaitForExit(5000)) { Write-Error "the uninstall left fairyfly mcp (pid $($mcp.Id)) running from the removed files"; exit 1 }
         $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$installDir\", [StringComparison]::OrdinalIgnoreCase) })
@@ -366,7 +425,26 @@ jobs:
         if ($pkg.Version -ne $env:MSIX_VERSION) { Write-Error "installed version $($pkg.Version), expected $env:MSIX_VERSION"; exit 1 }
         $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\fairyfly.exe'
         if (-not (Test-Path $alias)) { Write-Error "execution alias $alias missing"; exit 1 }
-        $v = (& $alias --version | Out-String).Trim()
+        # the data directory (docs/DATA_DIR.md): a Store fairyfly that ran before has its data in the package's private
+        # copy of %LOCALAPPDATA%\fairyfly; the first start of this version moves it to %USERPROFILE%\.fairyfly, which
+        # other programs see (not virtualized) and which stays after the package is removed
+        $data = Join-Path $env:USERPROFILE '.fairyfly'
+        $realOld = Join-Path $env:LOCALAPPDATA 'fairyfly'
+        $parked = @()
+        foreach ($d in $data, $realOld) { if (Test-Path $d) { Rename-Item $d "$d.ci-parked"; $parked += $d } }
+        $private = Join-Path $env:LOCALAPPDATA "Packages\$($pkg.PackageFamilyName)\LocalCache\Local\fairyfly"
+        New-Item -ItemType Directory -Force (Join-Path $private 'audit') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $private 'audit\2026-10.jsonl'), "{`"ts`":`"2026-10-01T10:00:00.000Z`",`"ci`":`"store`"}`n")
+        try {
+          $v = (& $alias --version | Out-String).Trim()
+          if (-not (Test-Path (Join-Path $data '.data-dir.json'))) { Write-Error "the packaged fairyfly's data directory $data is not visible outside the package"; exit 1 }
+          $moved = @(Select-String -Path (Join-Path $data 'audit\2026-10.jsonl') -SimpleMatch 'ci":"store' -ErrorAction SilentlyContinue).Count
+          if ($moved -ne 1) { Write-Error "the package's private audit record is in $data $moved times, expected once"; exit 1 }
+          if (-not (Test-Path (Join-Path $private 'MOVED-TO-USERPROFILE-.fairyfly.txt'))) { Write-Error 'no note in the package copy'; exit 1 }
+          Write-Host "packaged data directory OK: $data"
+        } finally {
+          Remove-Item $private -Recurse -Force -ErrorAction SilentlyContinue
+        }
         $expected = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
         if ($v -ne $expected) { Write-Error "alias answers '$v', expected '$expected'"; exit 1 }
         $out = (& $alias --no-audit update check 2>&1 | Out-String)
@@ -374,7 +452,10 @@ jobs:
         Write-Host "alias OK: fairyfly $v, update check -> UPDATE_MANAGED_BY_STORE"
         Remove-AppxPackage -Package $pkg.PackageFullName
         if (Get-AppxPackage -Name DataZoo.fairyfly) { Write-Error 'still installed after Remove-AppxPackage'; exit 1 }
-        Write-Host 'removed OK'
+        if (-not (Test-Path (Join-Path $data '.data-dir.json'))) { Write-Error "removing the package deleted $data"; exit 1 }
+        Remove-Item $data -Recurse -Force
+        foreach ($d in $parked) { Rename-Item "$d.ci-parked" (Split-Path $d -Leaf) }
+        Write-Host 'removed OK (the data directory stays)'
         exit 0
       shell: powershell   # Windows PowerShell 5.1: the Appx cmdlets are native there
 

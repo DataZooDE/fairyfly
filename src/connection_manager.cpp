@@ -322,26 +322,14 @@ std::string ConnectionManager::get_default_cache_directory() {
         }
     }
 
-    // 2. User local app data on Windows, ~/.cache on POSIX
-#ifdef _WIN32
-    std::string local_app_data = get_env(config::env::kLocalAppData);
-    if (!local_app_data.empty()) {
-        fs::path p = text::utf8_path(local_app_data) / "fairyfly" / "sessions";
+    // 2. The data directory (%USERPROFILE%\.fairyfly\sessions, docs/DATA_DIR.md)
+    {
+        fs::path p = config::Environment::process().data_dir() / "sessions";
         fs::create_directories(p, ec);
         if (!ec && fs::exists(p)) {
             return p.string();
         }
     }
-#else
-    std::string home = get_env(config::env::kHome);
-    if (!home.empty()) {
-        fs::path p = text::utf8_path(home) / ".cache" / "fairyfly" / "sessions";
-        fs::create_directories(p, ec);
-        if (!ec && fs::exists(p)) {
-            return p.string();
-        }
-    }
-#endif
 
     // 3. System temp directory fallback
     fs::path temp_p = fs::temp_directory_path() / "fairyfly" / "sessions";

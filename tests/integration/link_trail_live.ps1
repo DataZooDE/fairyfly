@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Never touches this desktop's real pairing: everything runs with -State (a file outside
-  %LOCALAPPDATA%\fairyfly\link\, checked before anything starts) and FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1, so every
+  %USERPROFILE%\.fairyfly\link\, checked before anything starts) and FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1, so every
   `fairyfly link` verb refuses the real state even if a path slipped through. It never stops, pauses, resumes or
   unpairs another link, never kills fairyfly by name (only the process it started) and starts no tray and no HTTP
   endpoint.
@@ -38,7 +38,7 @@
 
 .PARAMETER State
   The test pairing's state file, e.g. C:\Tools\fairyfly-link-trail-test\state.json. Required; refused when it lies in
-  %LOCALAPPDATA%\fairyfly\link\.
+  %USERPROFILE%\.fairyfly\link\.
 .PARAMETER Exe
   fairyfly.exe of your test build (default: build\Release\fairyfly.exe under the repo root).
 .PARAMETER UnitTests
@@ -83,7 +83,7 @@ function Ask([string]$question) { $a = Read-Host "$question [y/n]"; return $a -m
 
 # ---- state isolation first: resolve, print, refuse the real pairing ----------------------------------------------
 $State = [IO.Path]::GetFullPath($State)
-$real = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'fairyfly\link'))
+$real = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.fairyfly\link'))
 Write-Host "state: $State"
 if ($State.TrimEnd('\').StartsWith($real.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
     $State.TrimEnd('\').Equals($real.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {

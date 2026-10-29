@@ -125,7 +125,7 @@ session attach (`--allow-write` or its tray setting), with no
 `FAIRYFLY_READ_ONLY=1` hard cap. Put distinct visible transaction or
 screen text in the two windows. The script reads screens and attempts only an
 explicit foreign session path; it does not navigate or change SAP data. Use
-the default per-user Fairyfly session cache (`%LOCALAPPDATA%\fairyfly\sessions`),
+the default per-user Fairyfly session cache (`%USERPROFILE%\.fairyfly\sessions`),
 without `FAIRYFLY_CACHE_DIR` overrides. The controller must be able to read
 both user-profile cache directories to verify that the rejected attach wrote
 no saved connection.

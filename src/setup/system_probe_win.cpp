@@ -111,7 +111,7 @@ public:
         return "localhost";
     }
 
-    std::string local_app_data() override { return text::path_utf8(config::Environment::process().local_app_data()); }
+    std::string data_dir() override { return text::path_utf8(config::Environment::process().data_dir()); }
 };
 
 } // namespace

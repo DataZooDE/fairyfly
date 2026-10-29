@@ -64,7 +64,7 @@ std::size_t count_of(const std::string& text, const std::string& needle) {
     return n;
 }
 
-/// What an MSI fairyfly up to 2026.10.29 leaves in %LOCALAPPDATA%\fairyfly.
+/// What an MSI fairyfly up to 2026.10.28 leaves in %LOCALAPPDATA%\fairyfly.
 void legacy_layout(const fs::path& dir) {
     write(dir / "audit" / "2026-09.jsonl", "{\"ts\":\"2026-09-30T10:00:00.000Z\",\"command\":\"session list\"}\n");
     write(dir / "audit" / "2026-10.jsonl",

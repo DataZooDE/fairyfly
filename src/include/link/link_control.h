@@ -64,7 +64,7 @@ struct SupervisorOptions {
 /// Runs `agent(net_stop)` (libffl's Agent::run) on a thread while the link is not paused; pausing sets net_stop and
 /// waits for the agent to close its connection; resuming starts it again. Returns when `stop` becomes true, after
 /// writing the status "stopped".
-/// True when `state_path` lies in the default pairing directory (%LOCALAPPDATA%\fairyfly\link, `default_dir`).
+/// True when `state_path` lies in the default pairing directory (%USERPROFILE%\.fairyfly\link, `default_dir`).
 /// With FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1 (tests and the live trail script) `fairyfly link` refuses such a path,
 /// so a test can never touch the pairing the person at this desktop relies on.
 bool in_default_state_dir(const std::string& state_path, const std::string& default_dir);

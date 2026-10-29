@@ -37,7 +37,7 @@ bool setup_read_only(bool read_only_flag, const config::Environment& env = confi
 int run_teardown(Hosts& hosts, TeardownOptions options, const RunEnv& env);
 
 struct CertExportOptions {
-    std::string out_path;                 ///< empty = %LOCALAPPDATA%\fairyfly\fairyfly-mcp-<host>.cer|pem
+    std::string out_path;                 ///< empty = %USERPROFILE%\.fairyfly\fairyfly-mcp-<host>.cer|pem
     CerFormat format = CerFormat::Der;
     std::string hostname;
     int port = 0;
@@ -69,7 +69,7 @@ nlohmann::json apply_plan_bytes(Hosts& hosts, const std::string& plan_bytes, con
 /// through apply_plan_bytes, writes the result. Exit code 0 when every step succeeded, 1 otherwise.
 int run_apply_plan(Hosts& hosts, const std::string& plan_file, const std::string& result_file, const ApplyArgs& args);
 
-/// Reads %LOCALAPPDATA%\fairyfly\mcp-setup.json (or `path`). nullopt when absent; `unreadable` set when present but bad.
+/// Reads %USERPROFILE%\.fairyfly\mcp-setup.json (or `path`). nullopt when absent; `unreadable` set when present but bad.
 std::optional<Manifest> load_manifest(SystemProbe& sys, const std::string& path, bool* unreadable = nullptr);
 std::string manifest_path_for(SystemProbe& sys);
 

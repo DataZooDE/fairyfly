@@ -232,13 +232,17 @@ try {
     $sc = $shortcuts[0]
     Assert (@(Get-FairyflyProcesses).Count -eq 0) 'no fairyfly process before the shortcut is started'
     # an isolated profile folder: no pairing, logs or audit trail of the runner's user are read or written
-    $trayHome = Join-Path $WorkDir 'shortcut-localappdata'
-    New-Item -ItemType Directory -Force $trayHome | Out-Null
+    # (the data directory is %USERPROFILE%\.fairyfly, docs/DATA_DIR.md; LOCALAPPDATA, where it was up to 2026.10.28
+    # and from where it is moved, is isolated too)
+    $trayHome = Join-Path $WorkDir 'shortcut-profile'
+    New-Item -ItemType Directory -Force (Join-Path $trayHome 'AppData\Local') | Out-Null
     $savedLocalAppData = $env:LOCALAPPDATA
-    $env:LOCALAPPDATA = $trayHome
+    $savedUserProfile = $env:USERPROFILE
+    $env:LOCALAPPDATA = Join-Path $trayHome 'AppData\Local'
+    $env:USERPROFILE = $trayHome
     try {
         $started = & $unelevated -CommandLine "`"$($sc.TargetPath)`" $($sc.Arguments)" -WorkingDirectory $sc.WorkingDirectory -NoWait
-    } finally { $env:LOCALAPPDATA = $savedLocalAppData }
+    } finally { $env:LOCALAPPDATA = $savedLocalAppData; $env:USERPROFILE = $savedUserProfile }
     Start-Sleep -Seconds 10
     $alive = @(Get-FairyflyProcesses)
     foreach ($p in $alive) {
@@ -255,8 +259,8 @@ try {
     Assert ($sc.WorkingDirectory.TrimEnd('\') -ieq $installDir) "shortcut WorkingDirectory = $installDir"
     Assert (@($alive | Where-Object { $_.CommandLine -like "*$shortcutArguments*" }).Count -ge 1) "the running process is the link tray ($shortcutArguments)"
     Assert (@($alive | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).MainWindowTitle }).Count -eq 0) 'no visible window (no error message box): it sits in the tray'
-    $linkLog = Join-Path $trayHome 'fairyfly\logs\link.log'
-    Assert (Test-Path $linkLog) 'the tray logs to the isolated LOCALAPPDATA (link.log)'
+    $linkLog = Join-Path $trayHome '.fairyfly\logs\link.log'
+    Assert (Test-Path $linkLog) 'the tray logs to the isolated profile (%USERPROFILE%\.fairyfly\logs\link.log)'
     # The icon itself can only be checked where an unelevated process can reach the taskbar. On the hosted runners
     # Explorer runs at HIGH integrity (the runner account's full administrator token), so UIPI refuses the medium-integrity
     # tray's Shell_NotifyIcon (error 5); on a user's desktop Explorer is unelevated. The tray then keeps running and
@@ -298,7 +302,7 @@ namespace Ffy { public static class Integrity {
         Assert ((Get-Content $linkLog -Raw) -match 'tray: the notification icon could not be added yet') 'no reachable taskbar here: the tray says so in link.log and keeps running'
         Write-Host '  (icon check skipped: no taskbar an unelevated process can reach)'
     }
-    Assert (-not (Test-Path (Join-Path $trayHome 'fairyfly\link\state.json'))) 'nothing was paired'
+    Assert (-not (Test-Path (Join-Path $trayHome '.fairyfly\link\state.json'))) 'nothing was paired'
     $alive | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     $deadline = (Get-Date).AddSeconds(15)
     while (@(Get-FairyflyProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }

@@ -363,7 +363,7 @@ std::string make_runbook(const Options& o, const RunbookContext& c) {
             << "Export-Certificate -Cert Cert:\\LocalMachine\\My\\" << thumb << " -FilePath '"
             << (c.cer_path.empty() ? cer_file_name(o.hostname) : c.cer_path) << "' -Type CERT\n";
     }
-    out << "\n# " << n++ << ". mcp.yaml (unelevated; " << (o.config_path.empty() ? "%LOCALAPPDATA%\\fairyfly\\mcp.yaml" : o.config_path) << ")\n";
+    out << "\n# " << n++ << ". mcp.yaml (unelevated; " << (o.config_path.empty() ? "%USERPROFILE%\\.fairyfly\\mcp.yaml" : o.config_path) << ")\n";
     for (const auto& [key, value] : desired_config(tls, o.hostname, o.port, o.allow_ip)) out << "#   " << key << ": " << value << "\n";
     out << "\n# Then: fairyfly mcp token create NAME ; fairyfly mcp --http\n";
     if (tls) out << "# Clients must trust the certificate:\n" << [&] {

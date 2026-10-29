@@ -60,6 +60,23 @@ std::filesystem::path Environment::local_app_data() const {
     return ec ? std::filesystem::path() : tmp;
 }
 
+std::filesystem::path Environment::data_dir() const {
+    if (const std::string dir = get(env::kDataDir); !dir.empty()) return text::utf8_path(dir);
+    // the user profile: not virtualized for a Microsoft Store fairyfly on any Windows version (AppData is on 10)
+    for (const char* home : {env::kUserProfile, env::kHome})
+        if (const std::string dir = get(home); !dir.empty()) return text::utf8_path(dir) / ".fairyfly";
+    std::error_code ec;
+    auto tmp = std::filesystem::temp_directory_path(ec);
+    return ec ? std::filesystem::path(".fairyfly") : tmp / "fairyfly";
+}
+
+bool Environment::data_dir_overridden() const { return !get(env::kDataDir).empty(); }
+
+std::filesystem::path Environment::legacy_data_dir() const {
+    const std::string dir = get(env::kLocalAppData);
+    return dir.empty() ? std::filesystem::path() : text::utf8_path(dir) / "fairyfly";
+}
+
 EnvLookup process_env() { return Environment::process().lookup(); }
 
 void set_process_env(const char* name, const std::string& value) {

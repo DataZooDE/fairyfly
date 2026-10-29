@@ -126,7 +126,7 @@ audit::AuditFileSettings audit_settings(const McpConfig& layers);
 audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags);
 
 // ---- Paths and text -----------------------------------------------------------------------------
-/// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %LOCALAPPDATA%\fairyfly\mcp.yaml.
+/// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %USERPROFILE%\.fairyfly\mcp.yaml.
 struct ConfigPath {
     std::filesystem::path path;
     Source source = Source::Default;

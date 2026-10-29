@@ -8,7 +8,7 @@ namespace commands {
 
 CLI::App* LinkCommand::setup_cli(CLI::App& app) {
     cmd_ = noun_app(app, "link");
-    auto add_state = [this](CLI::App* c) { c->add_option("--state", options_.state_path, "Pairing state file (default %LOCALAPPDATA%\\fairyfly\\link\\state.json)"); };
+    auto add_state = [this](CLI::App* c) { c->add_option("--state", options_.state_path, "Pairing state file (default %USERPROFILE%\\.fairyfly\\link\\state.json)"); };
 
     pair_cmd_ = add_leaf(app, {"link", "pair"});
     pair_cmd_->footer(R"HELP(Usage notes:

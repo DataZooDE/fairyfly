@@ -69,7 +69,7 @@ public:
     std::filesystem::path data_dir() const;
     /// True when FAIRYFLY_DATA_DIR names the data directory (then nothing is migrated).
     bool data_dir_overridden() const;
-    /// The data directory up to 2026.10.29: local_app_data() / "fairyfly", only from LOCALAPPDATA (empty when it is
+    /// The data directory up to 2026.10.28: local_app_data() / "fairyfly", only from LOCALAPPDATA (empty when it is
     /// unset). Read only to migrate from it (config/data_dir.h).
     std::filesystem::path legacy_data_dir() const;
     const EnvLookup& lookup() const { return lookup_; }

@@ -145,7 +145,7 @@ if ($NoStart) {
     # Agent-opened windows: the MCP audit trail records each successful gui_session_launch with the token name and the
     # saved connection, which leads to the SAP session and its window. Remember where the file ends before the start.
     $auditFile = if ($env:FAIRYFLY_AUDIT_FILE) { $env:FAIRYFLY_AUDIT_FILE }
-                 else { Join-Path $env:LOCALAPPDATA ('fairyfly\audit\' + (Get-Date).ToUniversalTime().ToString('yyyy-MM') + '.jsonl') }
+                 else { Join-Path $env:USERPROFILE ('.fairyfly\audit\' + (Get-Date).ToUniversalTime().ToString('yyyy-MM') + '.jsonl') }
     $offset = if (Test-Path -LiteralPath $auditFile) { (Get-Item -LiteralPath $auditFile).Length } else { 0 }
     Remove-Item -LiteralPath (Join-Path $OutDir 'launched.json') -ErrorAction SilentlyContinue
     $pending = @{}
