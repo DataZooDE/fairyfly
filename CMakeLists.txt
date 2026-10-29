@@ -247,6 +247,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp
+    src/system/process_probe.cpp
     src/system/cert_scripts.cpp
     src/setup/setup_validators.cpp
     src/setup/setup_model.cpp

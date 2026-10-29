@@ -5,6 +5,8 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <map>
+#include <optional>
 #include <thread>
 
 #include "include/link/link_control.h"
@@ -151,4 +153,104 @@ TEST_CASE("link control: a reconnect request closes the link and opens it again 
 
     stop = true;
     sup.join();
+}
+
+// ---- liveness: the status file names the process that wrote it; a dead or replaced process is "not running" ----
+namespace {
+/// The processes a status reader sees: pid -> identity; a pid not listed has ended.
+struct FakeProbe : fairyfly::system::ProcessProbe {
+    std::map<std::uint32_t, fairyfly::system::ProcessIdentity> running;
+    std::optional<fairyfly::system::ProcessIdentity> find(std::uint32_t pid) override {
+        const auto it = running.find(pid);
+        if (it == running.end()) return std::nullopt;
+        return it->second;
+    }
+};
+constexpr const char* kLinkExe = "C:\\Users\\ada\\AppData\\Local\\Programs\\fairyfly\\fairyfly.exe";
+nlohmann::json written_status(const std::string& state, std::int64_t updated, std::int64_t pid = 2892,
+                              const std::string& image = kLinkExe, std::int64_t started = 1761700000) {
+    nlohmann::json s{{"state", state}, {"pid", pid}, {"updated", updated}};
+    if (!image.empty()) s["image"] = image;
+    if (started) s["started"] = started;
+    return s;
+}
+}  // namespace
+
+TEST_CASE("link control: a status whose process has ended reads \"not running\" at once, not after the heartbeat window", "[link][liveness]") {
+    // live 2026-10-29: the link was killed seconds before `fairyfly link status`, which still said "connected"
+    FakeProbe probe;   // no process 2892
+    const std::int64_t now = 1761750000;
+    CHECK(describe(written_status("connected", now - 2), now, probe) == "not running");
+    CHECK(describe(written_status("paused", now - 2), now, probe) == "not running");
+    // a status of an older link (no image, no start time): its pid alone decides
+    CHECK(describe(written_status("connected", now - 2, 2892, "", 0), now, probe) == "not running");
+}
+
+TEST_CASE("link control: a pid that now belongs to another program is not the link", "[link][liveness]") {
+    const std::int64_t now = 1761750000;
+    FakeProbe probe;
+    probe.running[2892] = {"C:\\Windows\\System32\\notepad.exe", 1761740000};
+    CHECK(describe(written_status("connected", now - 2), now, probe) == "not running");
+    // the same program started again under the reused pid (another start time) is not the link that wrote it either
+    probe.running[2892] = {kLinkExe, 1761749990};
+    CHECK(describe(written_status("connected", now - 2), now, probe) == "not running");
+}
+
+TEST_CASE("link control: the live link with a fresh heartbeat is connected; a stale heartbeat keeps the hung-link rule", "[link][liveness]") {
+    const std::int64_t now = 1761750000;
+    FakeProbe probe;
+    // the probe may spell the path differently (case, separators, \\?\ prefix) and round the start time
+    probe.running[2892] = {"\\\\?\\c:/users/ada/appdata/local/programs/fairyfly/FAIRYFLY.EXE", 1761700001};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
+    CHECK(describe(written_status("paused", now - 5), now, probe) == "paused");
+    // alive but no status for longer than the heartbeat window: hung, as before
+    CHECK(describe(written_status("connected", now - kStatusStaleSeconds - 30), now, probe) == "not running");
+    // a process the reader may not inspect (empty identity) still counts as running
+    probe.running[2892] = {};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
+    CHECK(describe(written_status("stopped", now - 5), now, probe) == "not running");
+}
+
+TEST_CASE("link control: link status keeps what the ended link last wrote as last_seen", "[link][liveness]") {
+    const std::int64_t now = 1761750000;
+    FakeProbe probe;
+    const auto status = written_status("connected", now - 3);
+    const auto gone = link_liveness(status, now, probe);
+    CHECK(gone.link == "not running");
+    REQUIRE(gone.last_seen.is_object());
+    CHECK(gone.last_seen["state"] == "connected");
+    CHECK(gone.last_seen["updated"] == now - 3);
+    CHECK(gone.last_seen["pid"] == 2892);
+    probe.running[2892] = {kLinkExe, 1761700000};
+    const auto alive = link_liveness(status, now, probe);
+    CHECK(alive.link == "connected");
+    CHECK(alive.last_seen.is_null());
+    // no status file at all: nothing was seen
+    CHECK(link_liveness(nlohmann::json(), now, probe).last_seen.is_null());
+}
+
+TEST_CASE("link control: the status names the process that wrote it", "[link][liveness]") {
+    const fairyfly::test::TempDir dir("link-ctl-who");
+    const auto st = dir / "state.json";
+    write_status(st.string(), "connected");
+    const auto s = read_status(st.string());
+    REQUIRE(s.contains("image"));
+    CHECK(fairyfly::system::same_executable(s["image"].get<std::string>(), fairyfly::system::current_process_identity().image));
+    // this test process runs, so the status it wrote reads as written
+    CHECK(describe(s, s["updated"].get<std::int64_t>() + 1, fairyfly::system::os_process_probe()) == "connected");
+}
+
+TEST_CASE("link control: the start time decides who the process is; the executable only when a start time is missing", "[link][liveness]") {
+    const std::int64_t now = 1761750000;
+    FakeProbe probe;
+    // the same process (same start time) whose exe was renamed or replaced in place (`update apply`): still the link
+    probe.running[2892] = {"C:\\Users\\ada\\AppData\\Local\\Programs\\fairyfly\\fairyfly.exe.old", 1761700000};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
+    // no start time on one side: the executable decides
+    probe.running[2892] = {"C:\\Windows\\System32\\notepad.exe", 0};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "not running");
+    probe.running[2892] = {"C:\\Windows\\System32\\notepad.exe", 1761740000};
+    CHECK(describe(written_status("connected", now - 5, 2892, kLinkExe, 0), now, probe) == "not running");
+    probe.running[2892] = {kLinkExe, 0};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
 }

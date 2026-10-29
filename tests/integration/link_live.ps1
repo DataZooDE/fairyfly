@@ -139,8 +139,9 @@ try {
     Remove-Item Env:FAIRYFLY_AUDIT_FILE -ErrorAction SilentlyContinue
     Remove-Item $audit -ErrorAction SilentlyContinue
 }
-# a killed process cannot write "stopped": the status goes stale and reads "not running" after 60 s
-Check (WaitFor { (Ffy @('link', 'status')).data.link -eq 'not running' } 75) "after the link ends: not running"
+# a killed process cannot write "stopped": its pid is gone, so the status reads "not running" at once
+Check (WaitFor { (Ffy @('link', 'status')).data.link -eq 'not running' } 5) "after the link ends: not running (at once)"
+Check ($null -ne (Ffy @('link', 'status')).data.last_seen) "after the link ends: last_seen keeps what it last wrote"
 
 if ($script:failures -gt 0) { Write-Host "$script:failures check(s) failed"; exit 1 }
 Write-Host "all checks passed"

@@ -52,8 +52,11 @@ What the console shows:
 Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
 - `state.json`: the pairing. The device key inside it is protected with DPAPI.
 - `state.json.paused`: exists while the link is paused.
-- `state.json.status.json`: written by the running link (`connected`, `paused`, `stopped`, with its process id and
-  time). `link status` and the tray read it; a status older than 60 s means the link is not running.
+- `state.json.status.json`: written by the running link (`connected`, `paused`, `stopped`, with its process id,
+  executable, start time and the time of writing). `link status` and the tray read it: when that process has ended,
+  or its id now belongs to another program, the link is `not running` at once (`link status` then adds `last_seen`:
+  the state, time and process id the link last wrote); a live link whose status is older than 60 s (hung) is
+  `not running` as well.
 
 ## Tray
 
@@ -283,12 +286,22 @@ pairing), pairing, the DPAPI state and the link agent:
 - `fairyfly.msi` (per user, no administrator rights): installs to `%LOCALAPPDATA%\Programs\fairyfly`, extends the
   user's `PATH` and adds the Start-menu entry "fairyfly" (the link tray, `link run --tray`; up to 2026.10.23 it was
   "fairyfly (tray)", which an MSI or winget upgrade removes; `update apply` only swaps the exe). The entry starts
-  `fairyfly-tray.exe` (no console window). Before replacing or removing the files the installer asks running trays to
-  quit (`fairyfly-tray.exe --close`), so no reboot is needed; an uninstall also removes the Run values `fairyfly-link`
-  and `fairyfly-mcp` of this folder and the trays' settings (`fairyfly-tray.exe --uninstall`). After an interactive
-  install it starts the tray (`LAUNCHAPP=0` turns that off; never with `/qn`). Source: `packaging/fairyfly.wxs`. The
-  CI builds it, installs it on the runner, starts the tray through the shortcut's target, checks the result and
-  uninstalls it again (the tray must be closed and the Run value gone).
+  `fairyfly-tray.exe` (no console window). Before replacing or removing the files the installer ends this
+  installation's fairyfly (`fairyfly-tray.exe --close <folder>`, the copy inside the MSI): the trays are asked to quit
+  as from their menu, and what still runs after 10 s (a link stuck in a SAP call, `fairyfly mcp` for an assistant) is
+  terminated, so no reboot is needed and nothing keeps running from removed files. A fairyfly.exe of another folder
+  (the Microsoft Store package) is not touched. An uninstall also removes the Run values `fairyfly-link` and
+  `fairyfly-mcp` of this folder and the trays' settings (`fairyfly-tray.exe --uninstall <folder>`). After an
+  interactive install it starts the tray (`LAUNCHAPP=0` turns that off; never with `/qn`). Source:
+  `packaging/fairyfly.wxs`. The CI builds it, installs it on the runner, starts the tray through the shortcut's target
+  and `fairyfly mcp`, checks the result and uninstalls it again (the tray must have been asked to quit, nothing of the
+  folder may still run, a fairyfly.exe elsewhere must, and the Run value must be gone).
+- A tray start that finds its single-instance guard held looks at the holder: this installation's tray opens its menu
+  (as before); a tray whose fairyfly.exe no longer exists (left running by an uninstalled MSI up to 2026.10.28) is
+  asked to quit and this one starts (after 10 s without success a message names the PID to end in Task Manager); a
+  tray of another installation (MSI beside the Store package, another folder) is named in a message and the log
+  (`link.log`, `mcp.log`), instead of the start ending silently. The trays also quit on `WM_CLOSE` (`taskkill` without
+  `/f`) as from their menu.
 - `fairyfly update check|apply`: the update channel is the project's GitHub releases. A release is installed only
   when it is newer, matches `SHA256SUMS` and carries a valid Authenticode signature by the pinned publisher `O=DataZoo GmbH, C=DE`.
   A signed installation never takes an unsigned release; an unsigned installation accepts an unsigned release only

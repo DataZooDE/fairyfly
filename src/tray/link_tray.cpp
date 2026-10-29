@@ -220,12 +220,9 @@ void LinkTrayController::on_action(TrayAction action) {
 int run_link_with_tray(const std::function<int()>& run_link, LinkTrayServices services, SingleInstance& guard,
                        TrayPaths paths) {
     if (!services.host) return 1;
-    if (!guard.acquire()) {
-        // started again (Start menu): the running tray opens its menu, as other tray apps come to the front
-        if (!services.host->show_running_instance())
-            services.host->message_box("fairyfly link", "The fairyfly link tray is already running.");
-        return 0;
-    }
+    // started again (Start menu): the running tray opens its menu, as other tray apps come to the front; a tray left
+    // running by a removed installation is asked to quit, another installation's is named
+    if (!claim_tray(guard, *services.host, services.claim, paths.exe, "fairyfly link", "fairyfly link tray")) return 0;
     const std::string log_file = paths.log_file.string();
     LinkTrayController controller(services, std::move(paths));
     const auto ui = UiThread::start(*services.host, controller);   // ended (quit + join) on every return

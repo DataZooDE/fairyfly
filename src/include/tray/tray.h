@@ -219,6 +219,53 @@ public:
     virtual bool exists() = 0;    ///< probe without acquiring (another instance holds it)
 };
 
+class TrayHost;
+
+/// A tray that runs now, as its window shows it: the process and its executable ("" when it could not be read).
+struct RunningTray {
+    std::uint32_t pid = 0;
+    std::string image;
+};
+
+/// The running trays of one kind (their hidden windows) and the quit request another process can send one (the same
+/// as its menu's Quit). Win32: make_win32_tray_instances; a fake in tests.
+class TrayInstances {
+public:
+    virtual ~TrayInstances() = default;
+    virtual std::vector<RunningTray> running() = 0;
+    /// False when that process has no tray window to ask.
+    virtual bool ask_to_quit(std::uint32_t pid) = 0;
+};
+
+/// What a tray start does when another process holds its single-instance guard.
+enum class HeldTrayAction {
+    ShowRunning,   ///< the running tray is this installation's (or cannot be told): it opens its menu, as before
+    TakeOver,      ///< its executable no longer exists (an uninstalled MSI left it running): ask it to quit, then run
+    Explain,       ///< another installation's tray (MSI vs Microsoft Store, another folder): say which, do not run
+};
+struct HeldTray {
+    HeldTrayAction action = HeldTrayAction::ShowRunning;
+    std::vector<std::uint32_t> pids;   ///< TakeOver: the processes to ask; Explain: the other installation's
+    std::string message;               ///< TakeOver: the log line; Explain: the message box text
+};
+/// `running` = the trays of this kind that run now, `own_exe` = this fairyfly.exe, `exists` = whether a file exists,
+/// `tray_name` e.g. "fairyfly link tray". Pure.
+HeldTray decide_held_tray(const std::vector<RunningTray>& running, const std::string& own_exe,
+                          const std::function<bool(const std::filesystem::path&)>& exists, const std::string& tray_name);
+
+/// How a tray start handles a held single-instance guard (decide_held_tray and its effects).
+struct TrayClaim {
+    TrayInstances* instances = nullptr;   ///< optional: without it a held guard always opens the running tray's menu
+    std::function<bool(const std::filesystem::path&)> exists;   ///< file probe for decide_held_tray
+    std::chrono::milliseconds takeover_wait{10000};   ///< how long a removed installation's tray gets to quit
+    std::chrono::milliseconds poll{250};
+};
+/// Acquires `guard`. When another process holds it: opens that tray's menu, takes over from a tray whose files were
+/// removed (asks it to quit and waits up to takeover_wait), or explains in a message box (and the log) that another
+/// installation's tray runs. True when this process now holds the guard and runs the tray.
+bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, const std::string& own_exe,
+                const std::string& title, const std::string& tray_name);
+
 /// The desktop's cloud link as the tray sees it (implemented in src/link, a fake in tests).
 class LinkControl {
 public:
@@ -300,6 +347,7 @@ struct TrayServices {
     /// version or nullopt. Runs on its own thread; may block (network) and is never waited for on Quit.
     std::function<std::optional<std::string>()> latest_update;
     std::chrono::milliseconds update_check_delay{30000};
+    TrayClaim claim;   ///< a held single-instance guard (another installation's tray, a removed one's)
 };
 
 /// The effects both trays' menus share: open a file or folder, run a command in a console that stays open, start
@@ -405,6 +453,7 @@ struct LinkTrayServices {
     /// a notice, instead of failing, and starts its link once that one ends. Polled every pairing_poll.
     std::function<bool()> link_busy;
     bool self_update = true;   ///< "Check for updates"; false in an MSIX build (packaging::self_updates)
+    TrayClaim claim;           ///< a held single-instance guard (another installation's tray, a removed one's)
 };
 
 class LinkTrayController : public TrayListener {

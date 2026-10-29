@@ -6,8 +6,10 @@
   - Appends that folder to the user's PATH and adds the Start-menu entry "fairyfly": the cloud link tray
     (fairyfly link run with the tray option; unpaired it leads to pairing, its menu can start the local MCP server
     tray). The entry starts fairyfly-tray.exe, a Windows-subsystem starter, so no console window flashes.
-  - Before it replaces or removes the files it asks running trays to quit (fairyfly-tray.exe close option); an
-    uninstall also removes the trays' Run values and settings. After an interactive install (not with /qn or
+  - Before it replaces or removes the files it ends this installation's running fairyfly (fairyfly-tray.exe close
+    option, the copy carried in this MSI's Binary table, with the install folder): the trays are asked to quit as from
+    their menu, what still runs after 10 s is terminated; a Microsoft Store fairyfly.exe is not touched. An uninstall
+    also removes the trays' Run values and settings. After an interactive install (not with /qn or
     /quiet) it starts the tray; LAUNCHAPP=0 turns that off. Up to 2026.10.23 the entry was "fairyfly (tray)" (the MCP tray without the HTTP option, which exits at
     once); it lives in
     the same component, so an upgrade (MajorUpgrade removes the old product first) replaces it.
@@ -32,16 +34,26 @@
 
     <!-- 1: start the tray after an interactive install or upgrade (silent installs never start it) -->
     <Property Id="LAUNCHAPP" Value="1" Secure="yes" />
-    <!-- the trays hold fairyfly.exe open: they quit first (as from their menu), so no reboot is needed. The installed
-         starter does it; on a first install there is none yet and the action is ignored. -->
-    <CustomAction Id="CloseTrays" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot; --close"
+    <!-- the trays and `fairyfly mcp` hold fairyfly.exe open: they end first, so no reboot is needed and nothing keeps
+         running from removed files (live 2026-10-29: the link tray of an uninstalled MSI kept the single-instance
+         guard and the Microsoft Store tray could not start). This MSI's own starter does it, not the installed one: on
+         an upgrade that is the old version's, and on a first install there is none. It runs from a temporary copy, so
+         it is given the folder ([INSTALLFOLDER] ends in a backslash; the added one makes that pair one backslash before
+         the closing quote, not an escaped quote) and ends only
+         fairyfly.exe and fairyfly-tray.exe started from there (src/include/tray/tray_close.h). Not util:CloseApplication:
+         that finds processes by file name only and would also end the Store package's fairyfly.exe.
+         packaging/tests/Test-WxsClose.ps1 checks this. -->
+    <Binary Id="TrayStarter" SourceFile="$(var.TrayExePath)" />
+    <CustomAction Id="CloseTrays" BinaryRef="TrayStarter" ExeCommand="--close &quot;[INSTALLFOLDER]\&quot;"
                   Execute="immediate" Return="ignore" />
-    <CustomAction Id="UninstallCleanup" Directory="INSTALLFOLDER"
-                  ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot; --uninstall" Execute="immediate" Return="ignore" />
+    <CustomAction Id="UninstallCleanup" BinaryRef="TrayStarter" ExeCommand="--uninstall &quot;[INSTALLFOLDER]\&quot;"
+                  Execute="immediate" Return="ignore" />
     <CustomAction Id="LaunchTray" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot;"
                   Execute="immediate" Return="asyncNoWait" />
     <InstallExecuteSequence>
-      <Custom Action="CloseTrays" Before="InstallValidate" Condition="NOT (REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE)" />
+      <!-- install and major upgrade (the new product is not installed yet); not a repair or modify, which replaces no
+         file of the same version and, silent, would leave the trays closed -->
+      <Custom Action="CloseTrays" Before="InstallValidate" Condition="NOT Installed" />
       <Custom Action="UninstallCleanup" Before="InstallValidate" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="LaunchTray" After="InstallFinalize" Condition="NOT REMOVE AND LAUNCHAPP=&quot;1&quot; AND UILevel &gt;= 3" />
     </InstallExecuteSequence>

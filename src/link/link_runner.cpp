@@ -394,10 +394,15 @@ Result link_status(const LinkOptions& o) {
         r.status = Result::Status::Success;
         r.data = {{"paired", true}, {"device", st.device_id}, {"account", st.email}, {"organisation_id", st.tenant},
                   {"organisation", st.tenant_name}, {"gateway", st.link_url}, {"pinned_gateway_keys", st.gateway_keys.size()}, {"state", state_path(o)},
-                  {"paused", is_paused(state_path(o))}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
-        // the audit trail this desktop runs under, as the running link last wrote it
+                  {"paused", is_paused(state_path(o))}};
+        // the running link as its status file says, if the process that wrote it still runs; when it has ended (or
+        // hangs), what it last wrote
         const json status = read_status(state_path(o));
-        const bool running = r.data["link"] != state::kNotRunning;
+        const auto live = link_liveness(status, ffy::now_unix(), system::os_process_probe());
+        r.data["link"] = live.link;
+        if (!live.last_seen.is_null()) r.data["last_seen"] = live.last_seen;
+        // the audit trail this desktop runs under, as the running link last wrote it
+        const bool running = live.link != state::kNotRunning;
         r.data["audit_trail"] = running && status.contains("trail") ? trail::status_text(status["trail"]) : std::string("off");
         return r;
     } catch (const std::exception&) {
@@ -424,7 +429,7 @@ Result link_pause(const LinkOptions& o) {
     if (!set_paused(state_path(o), true)) return error("PAUSE_FAILED", "could not write " + pause_marker(state_path(o)).string());
     Result r;
     r.status = Result::Status::Success;
-    r.data = {{"paused", true}, {"link", describe(read_status(state_path(o)), ffy::now_unix())},
+    r.data = {{"paused", true}, {"link", describe(read_status(state_path(o)), ffy::now_unix(), system::os_process_probe())},
               {"note", "a running link disconnects within a second; the AI assistant cannot reach this desktop until: fairyfly link resume"}};
     return r;
 }
@@ -434,7 +439,7 @@ Result link_resume(const LinkOptions& o) {
     if (!set_paused(state_path(o), false)) return error("RESUME_FAILED", "could not remove " + pause_marker(state_path(o)).string());
     Result r;
     r.status = Result::Status::Success;
-    r.data = {{"paused", false}, {"link", describe(read_status(state_path(o)), ffy::now_unix())}};
+    r.data = {{"paused", false}, {"link", describe(read_status(state_path(o)), ffy::now_unix(), system::os_process_probe())}};
     return r;
 }
 
@@ -454,7 +459,7 @@ public:
             return v;  // not paired (or the state is unreadable for this Windows user)
         }
         const json status = read_status(path_);
-        v.state = describe(status, ffy::now_unix());
+        v.state = describe(status, ffy::now_unix(), system::os_process_probe());
         if (v.state != state::kNotRunning && status.contains("trail")) {
             const auto p = ffy::proto::TrailPolicy::from_json(status["trail"]);
             v.trail_on = p.on;

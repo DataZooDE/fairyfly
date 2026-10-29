@@ -17,6 +17,8 @@ std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name = kTrayMutexName);
+/// The running trays of `kind` (their windows, any installation) and their quit message.
+std::unique_ptr<TrayInstances> make_win32_tray_instances(TrayKind kind);
 
 /// Full path of the running fairyfly.exe.
 std::string current_exe_path();
@@ -34,6 +36,9 @@ bool is_tray_child_process();
 bool is_tray_launched_process();
 /// True when `path` is an existing file.
 bool path_exists(const std::filesystem::path& path);
+/// False only when `path` is known not to exist (file or folder not found); true also when it cannot be checked, so
+/// a tray is never taken for a removed installation's by mistake (TrayClaim::exists).
+bool file_not_missing(const std::filesystem::path& path);
 /// Removes FAIRYFLY_TRAY_CHILD and FAIRYFLY_TRAY_LAUNCHED from this process's environment, so the processes it starts
 /// do not inherit them.
 void clear_tray_child_marker();
