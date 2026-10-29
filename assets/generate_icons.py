@@ -3,7 +3,8 @@
     python assets/generate_icons.py [--preview out.png]
 
 Needs Pillow (pip install pillow). Writes assets/icons/fairyfly.ico (executable icon: mark on the light tile) and
-assets/icons/tray_<kind>_<state>_<theme>.ico (tray icons, dark/light taskbar): the mark in the tray's own colour (link:
+assets/icons/tray_<kind>_<state>_<theme>.ico (tray icons, dark/light taskbar) and the MSIX logos
+packaging/msix/Assets/*.png (the app icon's tile at the sizes the Store asks for, docs/MSIX.md): the mark in the tray's own colour (link:
 brand teal, mcp: violet, so the two trays side by side are told apart), a badge for warning/paused (amber) and error
 (red), faded when stopped.
 The polygons are the ones of assets/logo/fairyfly_mark.svg; keep both in sync when the logo changes.
@@ -17,6 +18,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent
 ICONS = ROOT / "icons"
+MSIX_ASSETS = ROOT.parent / "packaging" / "msix" / "Assets"
 
 # Mark geometry (SVG units, origin at the spine). Order: wing planes, then spine and head on top.
 LEFT_MAIN = [(-6, -60), (-150, -110), (-115, 25)]
@@ -54,6 +56,10 @@ FADED_SATURATION = 0.35
 FADED_ALPHA = 0.55
 
 TRAY_SIZES = [16, 20, 24, 32, 40, 48, 64]
+# MSIX logos referenced by packaging/msix/AppxManifest.xml.in: file -> (width, height)
+MSIX_LOGOS = {"Square44x44Logo.png": (44, 44), "Square150x150Logo.png": (150, 150),
+              "Wide310x150Logo.png": (310, 150), "StoreLogo.png": (50, 50)}
+APP_TILE = ("#F8FAFC", "#E2E8F0")
 APP_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 SUPERSAMPLE = 8
 
@@ -150,8 +156,25 @@ def tray_images(kind, theme, state):
 
 def app_images():
     pal = dict(LIGHT)
-    return [render(s, pal, fill=0.70 if s >= 48 else 0.84, tile=("#F8FAFC", "#E2E8F0"), spine_boost=spine_boost_for(s))
+    return [render(s, pal, fill=0.70 if s >= 48 else 0.84, tile=APP_TILE, spine_boost=spine_boost_for(s))
             for s in APP_SIZES]
+
+
+def msix_image(width, height):
+    """The app icon's look (mark on the light tile) as an MSIX logo; a wide logo is the tile stretched, mark centred."""
+    pal = dict(LIGHT)
+    if width == height:
+        return render(width, pal, fill=0.70 if width >= 48 else 0.84, tile=APP_TILE, spine_boost=spine_boost_for(width))
+    n_w, n_h = width * SUPERSAMPLE, height * SUPERSAMPLE
+    img = Image.new("RGBA", (n_w, n_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    fill_rgb, border_rgb = APP_TILE
+    draw.rounded_rectangle([0, 0, n_w - 1, n_h - 1], radius=n_h * 100 / 512, fill=hex_rgb(fill_rgb),
+                           outline=hex_rgb(border_rgb), width=max(SUPERSAMPLE, round(n_h * 2 / 512)))
+    img = img.resize((width, height), Image.LANCZOS)
+    mark = render(height, pal, fill=0.70, spine_boost=spine_boost_for(height))
+    img.alpha_composite(mark, ((width - height) // 2, 0))
+    return img
 
 
 def preview(out):
@@ -196,6 +219,9 @@ def main():
             for state in STATES:
                 save_ico(ICONS / f"tray_{kind}_{state}_{theme}.ico", tray_images(kind, theme, state))
     save_ico(ICONS / "fairyfly.ico", app_images())
+    MSIX_ASSETS.mkdir(parents=True, exist_ok=True)
+    for name, (w, h) in MSIX_LOGOS.items():
+        msix_image(w, h).save(MSIX_ASSETS / name, format="PNG", optimize=True)
     if args.preview:
         preview(args.preview)
 

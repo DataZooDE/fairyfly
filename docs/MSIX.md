@@ -1,9 +1,27 @@
 # fairyfly as an MSIX package (Microsoft Store)
 
-Status: preparation. The build option, the manifest template and this audit are in the repository. The Partner Center
-identity, the packaging step (MakeAppx), signing and the Store submission are not done yet (see
-[What is left](#what-is-left)). The per-user MSI ([packaging/fairyfly.wxs](../packaging/fairyfly.wxs)) is unchanged and
-stays the default.
+Status: the package is built. The build option, the manifest with fairyfly's Partner Center identity, the logos and
+the packaging step are in the repository, and CI (`build-windows-msix`) packs an unsigned MSIX for the Store and a
+test-signed copy for sideloading, which it installs and removes once. The VM sideload test and the Store submission are
+not done yet (see [What is left](#what-is-left)). The per-user MSI ([packaging/fairyfly.wxs](../packaging/fairyfly.wxs))
+is unchanged and stays the default.
+
+## Identity
+
+| Partner Center | Value | Where |
+|---|---|---|
+| Package/Identity/Name | `DataZoo.fairyfly` | CMake `FAIRYFLY_MSIX_IDENTITY_NAME` |
+| Package/Identity/Publisher | `CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC` | CMake `FAIRYFLY_MSIX_PUBLISHER` |
+| Package/Properties/PublisherDisplayName | `DataZoo` | CMake `FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME` |
+| Package family name | `DataZoo.fairyfly_73q587949tsjt` | follows from Name and Publisher |
+| Store ID | `9N5TSPSX6Q0V` | the listing, `ms-windows-store://pdp/?productid=9N5TSPSX6Q0V` |
+
+These values are public (every installed package's full name contains them), not secrets. They are the defaults of the
+three cache variables ([cmake/msix_manifest.cmake](../cmake/msix_manifest.cmake), `FAIRYFLY_MSIX_DEFAULT_*`); `-D`
+still overrides them, for example for a private test identity.
+[packaging/msix/tests/Test-AppxManifest.ps1](../packaging/msix/tests/Test-AppxManifest.ps1) checks that the default
+manifest carries exactly these values and that the package family name computed from them is the one Partner Center
+shows.
 
 ## Build option `FAIRYFLY_PACKAGE`
 
@@ -14,17 +32,13 @@ stays the default.
 
 ~~~powershell
 cmake -B build-msix -G "Visual Studio 17 2022" -DFAIRYFLY_PACKAGE=msix `
-  -DFAIRYFLY_MSIX_IDENTITY_NAME=<Package/Identity/Name> `
-  -DFAIRYFLY_MSIX_PUBLISHER="CN=<Package/Identity/Publisher>" `
-  -DFAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME="<Package/Properties/PublisherDisplayName>" `
   -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 cmake --build build-msix --config Release --target fairyfly unit_tests
 ~~~
 
 Configuring renders `build-msix/msix/AppxManifest.xml` from
 [packaging/msix/AppxManifest.xml.in](../packaging/msix/AppxManifest.xml.in) through
-[cmake/msix_manifest.cmake](../cmake/msix_manifest.cmake). Without the three identity values it uses `PLACEHOLDER`
-values and warns. The code reads the option through `include/packaging.h` (`FAIRYFLY_PACKAGE_MSIX` on `fairyfly_core`).
+[cmake/msix_manifest.cmake](../cmake/msix_manifest.cmake) with the identity above. The code reads the option through `include/packaging.h` (`FAIRYFLY_PACKAGE_MSIX` on `fairyfly_core`).
 
 An `update` call in an MSIX build answers (the `suggestions` appear with verbose errors, as for every command):
 
@@ -50,7 +64,80 @@ the same result and that each version is higher than the one before.
   it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not needed.
 - `runFullTrust`, and `unvirtualizedResources` with `virtualization:ExcludedDirectories` for
   `$(KnownFolder:LocalAppData)\fairyfly` (see the recommendation below).
-- `Assets\StoreLogo.png`, `Square150x150Logo.png` and `Square44x44Logo.png` are referenced but not in the repository yet.
+- `Assets\Square44x44Logo.png` (44x44), `Square150x150Logo.png` (150x150), `Wide310x150Logo.png` (310x150, the tray's
+  `DefaultTile`) and `StoreLogo.png` (50x50) are [packaging/msix/Assets](../packaging/msix/Assets): the app icon's look
+  (the fairyfly mark on the light tile), drawn from the logo geometry by
+  [assets/generate_icons.py](../assets/generate_icons.py) (`python assets/generate_icons.py`, Pillow). No scale
+  variants: without a `resources.pri` Windows uses these files as they are and scales them.
+
+## Packaging (CI)
+
+`build-windows-msix` in [.github/workflows/build.yml](../.github/workflows/build.yml) does, after the msix build and its
+unit tests, on the same runner:
+
+1. **Payload = the MSI's.** [packaging/msix/New-MsixLayout.ps1](../packaging/msix/New-MsixLayout.ps1) stages
+   `build-msix/layout`: every `<File>` of [packaging/fairyfly.wxs](../packaging/fairyfly.wxs) by its installed name
+   (today `fairyfly.exe` and `fairyfly-tray.exe`, both statically linked), `AppxManifest.xml` and the `Assets\` images
+   the manifest references. There is no second file list: a file added to the wxs is packaged in the MSIX too. Staging
+   fails if the build lacks a file the MSI ships, if the manifest starts an `Executable` the MSI does not ship (the two
+   have diverged) or if a referenced image is missing.
+   [packaging/msix/tests/Test-MsixLayout.ps1](../packaging/msix/tests/Test-MsixLayout.ps1) (job `msix-manifest`, Linux)
+   checks these refusals, the exact layout, and that `packaging/msix/Assets` holds exactly the referenced images in their
+   sizes. CI also checks with `dumpbin /dependents` that neither exe imports a runtime DLL (`vcruntime*`, `msvcp*`, ...)
+   that neither installer carries.
+2. **`MakeAppx pack`** (Windows SDK on the runner) builds `fairyfly-<msixversion>.msix`, for example
+   `fairyfly-2026.10.2800.0.msix`. Packing validates the manifest against the AppxManifest schema and fails on any
+   error. An unpack round trip checks that the package holds exactly the layout.
+3. **Test-signed copy.** A self-signed code-signing certificate is made fresh in each run with Subject exactly the
+   manifest's Publisher (`CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC`, which Windows requires for a sideload). `signtool`
+   signs a copy, `fairyfly-<msixversion>-testsigned.msix`; the public certificate is exported as
+   `fairyfly-<msixversion>-testsigned.cer` and the private key is deleted from the runner. No secret is involved.
+4. **Install check.** The runner imports the `.cer` into `LocalMachine\TrustedPeople`, installs the test-signed package
+   with `Add-AppxPackage`, checks the package family name `DataZoo.fairyfly_73q587949tsjt` and the version, runs
+   `fairyfly.exe --version` and `update check` through the execution alias and removes the package again.
+
+Artifacts of each run (Actions > the run > Artifacts, or `gh run download <run id> -R DataZooDE/fairyfly -n <name>`):
+
+| Artifact | Content | Use |
+|---|---|---|
+| `fairyfly-msix` | `fairyfly-<msixversion>.msix`, **unsigned** | the Store submission (the Store signs it) |
+| `fairyfly-msix-testsigned` | `fairyfly-<msixversion>-testsigned.msix` + `fairyfly-<msixversion>-testsigned.cer` | sideload tests on a test machine only |
+
+The test certificate is **only for sideload tests**. It is not DataZoo's code-signing certificate, it is different in
+every run, nobody holds its private key after the run, and a machine that trusts it trusts nothing else. Never
+distribute the test-signed package or ask users to import the `.cer`.
+
+## Sideload test on a test machine (VM)
+
+Windows 10 1809 (17763) or later, x64, with sideloading allowed (the default on Windows 10 2004+ and Windows 11; else
+Settings > For developers > Install apps from any source / Sideload apps). An MSI installation of fairyfly may stay;
+for a clean test uninstall it first.
+
+1. Download `fairyfly-msix-testsigned` from the CI run and unpack it.
+2. In an **elevated** PowerShell, trust the run's test certificate for packages:
+   `Import-Certificate -FilePath .\fairyfly-<msixversion>-testsigned.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`
+   (or double-click the `.cer` > Install Certificate > Local Machine > Trusted People).
+3. As the normal user: `Add-AppxPackage .\fairyfly-<msixversion>-testsigned.msix` (or double-click the `.msix`).
+4. Check:
+   - Start menu: "fairyfly" starts the link tray; there is no console window and no "Check for updates" item.
+   - Settings > Apps > Startup lists "fairyfly cloud link"; after a logoff/logon the link tray is running.
+   - A **new** terminal: `fairyfly --version` and `fairyfly update check` (`UPDATE_MANAGED_BY_STORE`) run through the
+     alias; `Get-Command fairyfly` shows `%LOCALAPPDATA%\Microsoft\WindowsApps\fairyfly.exe`.
+   - An MCP client (stdio, `"command": "fairyfly"`) starts `fairyfly mcp`.
+   - The approval toast's Approve/Deny buttons reach the tray (open: needs the code change in the table below).
+   - `fairyfly mcp setup` works (Windows 10 and 11, see the table).
+   - `%LOCALAPPDATA%\fairyfly\audit` and `logs` show up in Explorer (Windows 11) and stay after removal.
+5. Remove: `Get-AppxPackage DataZoo.fairyfly | Remove-AppxPackage`, and the certificate from
+   `Cert:\LocalMachine\TrustedPeople` (`Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq
+   'CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC' | Remove-Item`).
+
+## Store submission (later)
+
+Partner Center > fairyfly (9N5TSPSX6Q0V) > a submission > Packages: upload the **unsigned** `fairyfly-<msixversion>.msix`
+from the `fairyfly-msix` artifact, never the test-signed one. The Store checks that its identity matches the reserved
+one and signs it with the Store's certificate; the version must be higher than the last submitted one (the calendar
+version scheme above guarantees that). The submission also needs the justifications for the restricted capabilities
+`runFullTrust` and `unvirtualizedResources` (see the recommendation below) and the listing.
 
 ## What fairyfly writes at run time, and what MSIX does with it
 
@@ -117,11 +204,10 @@ is a record that must stay readable by the user and admins and must outlive the 
 
 ## What is left
 
-1. **Identity**: Package Name, Publisher (`CN=…`) and PublisherDisplayName from Partner Center into the three CMake
-   cache variables (CI: repository variables). Check them against the Store listing.
-2. **Packaging**: logo assets, a layout folder (`fairyfly.exe`, `fairyfly-tray.exe`, `AppxManifest.xml`, `Assets\`),
-   `makeappx pack`, and a test certificate whose subject equals the Publisher.
-3. **VM sideload test** (`Add-AppxPackage`): the StartupTask starts the link tray at logon. `fairyfly` from a fresh terminal
+1. **Identity**: done (Partner Center values are the CMake defaults; [Identity](#identity)).
+2. **Packaging**: done in CI ([Packaging (CI)](#packaging-ci)). Not in the release workflow yet: a release does not
+   attach the MSIX.
+3. **VM sideload test** ([steps](#sideload-test-on-a-test-machine-vm)) (`Add-AppxPackage`): the StartupTask starts the link tray at logon. `fairyfly` from a fresh terminal
    and from an MCP client (stdio) runs through the alias. The approval toast's Approve/Deny buttons activate the tray.
    `mcp setup` works, on Windows 10 and 11. The audit trail and logs show up in Explorer, and stay after
    `Remove-AppxPackage`. `update check` answers `UPDATE_MANAGED_BY_STORE`.

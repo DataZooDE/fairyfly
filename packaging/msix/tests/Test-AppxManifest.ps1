@@ -60,6 +60,16 @@ try {
     Check ($did -and $did.Name -ceq $storeName) "default Identity Name '$($did.Name)' is exactly '$storeName'"
     Check ($did -and $did.Publisher -ceq $storePublisher) "default Identity Publisher '$($did.Publisher)' is exactly '$storePublisher'"
     Check ($ddisplay -and $ddisplay.InnerText -ceq $storeDisplay) "default PublisherDisplayName '$($ddisplay.InnerText)' is exactly '$storeDisplay'"
+    # The package family name is <Name>_<publisher id>, the publisher id the first 8 bytes of SHA-256 over the
+    # Publisher (UTF-16LE) in base32 (0-9, a-z without i l o u). Partner Center lists DataZoo.fairyfly_73q587949tsjt.
+    $pfn = ''
+    if ($did) {
+        $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::Unicode.GetBytes($did.Publisher))
+        $bits = (($hash[0..7] | ForEach-Object { [Convert]::ToString($_, 2).PadLeft(8, '0') }) -join '') + '0'
+        $alphabet = '0123456789abcdefghjkmnpqrstvwxyz'
+        $pfn = $did.Name + '_' + ((0..12 | ForEach-Object { $alphabet[[Convert]::ToInt32($bits.Substring($_ * 5, 5), 2)] }) -join '')
+    }
+    Check ($pfn -ceq 'DataZoo.fairyfly_73q587949tsjt') "package family name '$pfn' is Partner Center's DataZoo.fairyfly_73q587949tsjt"
     $defaultText = if (Test-Path $r.File) { Get-Content $r.File -Raw } else { '' }
     Check ($defaultText -and $defaultText -cnotmatch 'PLACEHOLDER') 'no PLACEHOLDER in the default manifest'
     $cmakeLists = Get-Content (Join-Path $repo 'CMakeLists.txt') -Raw

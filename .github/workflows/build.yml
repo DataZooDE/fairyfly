@@ -189,9 +189,14 @@ jobs:
         retention-days: 30
 
   # The Microsoft Store configuration (FAIRYFLY_PACKAGE=msix, docs/MSIX.md): builds and runs the unit tests (the
-  # [msix-build] cases check this build's wiring), checks the real fairyfly.exe answers `update` with the Store's code and
-  # the rendered AppxManifest.xml parses. No MakeAppx, no signing, no secrets. Runs beside build-windows (same vcpkg
-  # cache), so the wall time stays the same; it costs a second Windows runner.
+  # [msix-build] cases check this build's wiring), checks the real fairyfly.exe answers `update` with the Store's code,
+  # then packs the MSIX: the MSI's payload (packaging/fairyfly.wxs) staged with the rendered AppxManifest.xml and the
+  # logos (packaging/msix/New-MsixLayout.ps1), `MakeAppx pack` (schema validation) and an unpack round trip. Artifacts:
+  # fairyfly-msix (unsigned, what the Store submission takes; the Store signs it) and fairyfly-msix-testsigned (signed
+  # with a self-signed certificate made fresh in this run, Subject = the manifest's Publisher, for sideload tests only;
+  # only its public .cer is uploaded, the key never leaves the runner). The test-signed package is installed with
+  # Add-AppxPackage, run through its execution alias and removed again. No secrets. Runs beside build-windows (same
+  # vcpkg cache), so the wall time stays the same; it costs a second Windows runner.
   build-windows-msix:
     timeout-minutes: 40
     runs-on: windows-2022
@@ -258,6 +263,110 @@ jobs:
         if ($id.Version -ne (& ./packaging/msix_version.ps1).Trim()) { Write-Error "manifest version $($id.Version) differs from msix_version.ps1"; exit 1 }
         exit 0   # not the exit code of `update apply` above (the expected refusal)
       shell: pwsh
+
+    - name: MSIX package - stage the MSI payload, MakeAppx pack and unpack (unsigned, for the Store)
+      run: |
+        $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makeappx.exe' |
+          Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+        if (-not $makeappx) { Write-Error 'MakeAppx.exe not found in the Windows SDK'; exit 1 }
+        $sdkBin = $makeappx.DirectoryName
+        Write-Host "Windows SDK tools: $sdkBin"
+        "WINSDK_BIN=$sdkBin" >> $env:GITHUB_ENV
+
+        # the MSI ships the two exes alone: they must not need a runtime DLL that neither installer carries
+        foreach ($exe in 'fairyfly.exe', 'fairyfly-tray.exe') {
+          $deps = @(& dumpbin.exe /nologo /dependents "build-msix/Release/$exe" | ForEach-Object {
+            if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } })
+          Write-Host "$exe imports: $($deps -join ', ')"
+          $bad = @($deps | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbased)' -or (Test-Path "build-msix/Release/$_") })
+          if (-not $deps -or $bad) { Write-Error "$exe needs $($bad -join ', '), which the MSI (packaging/fairyfly.wxs) does not ship"; exit 1 }
+        }
+
+        $manifest = [xml](Get-Content build-msix/msix/AppxManifest.xml -Raw)
+        $version = $manifest.Package.Identity.Version
+        "MSIX_VERSION=$version" >> $env:GITHUB_ENV
+        $files = ./packaging/msix/New-MsixLayout.ps1 -BinDir build-msix/Release -Manifest build-msix/msix/AppxManifest.xml -Layout build-msix/layout
+        Write-Host "layout: $($files -join ', ')"
+        New-Item -ItemType Directory -Force build-msix/out | Out-Null
+        $msix = "build-msix/out/fairyfly-$version.msix"
+        & "$sdkBin\makeappx.exe" pack /d build-msix/layout /p $msix /o
+        if ($LASTEXITCODE -ne 0) { Write-Error "MakeAppx pack failed ($LASTEXITCODE)"; exit 1 }
+
+        # round trip: the package holds exactly the layout (plus MakeAppx's block map and content types)
+        & "$sdkBin\makeappx.exe" unpack /p $msix /d build-msix/unpacked /o
+        if ($LASTEXITCODE -ne 0) { Write-Error "MakeAppx unpack failed ($LASTEXITCODE)"; exit 1 }
+        $rel = { param($root) @(Get-ChildItem $root -Recurse -File | ForEach-Object { [IO.Path]::GetRelativePath((Resolve-Path $root).Path, $_.FullName) } | Sort-Object) }
+        $packed = @(& $rel build-msix/unpacked | Where-Object { $_ -notin 'AppxBlockMap.xml', '[Content_Types].xml' })
+        $staged = & $rel build-msix/layout
+        if (($packed -join '|') -ne ($staged -join '|')) { Write-Error "package content '$($packed -join ', ')' differs from the layout '$($staged -join ', ')'"; exit 1 }
+        $id = ([xml](Get-Content build-msix/unpacked/AppxManifest.xml -Raw)).Package.Identity
+        Write-Host "packed $msix ($([math]::Round((Get-Item $msix).Length / 1MB, 2)) MB): $($id.Name) $($id.Version) $($id.Publisher)"
+      shell: pwsh
+
+    - name: MSIX package - test-signed copy for sideloading (fresh self-signed certificate, Subject = Publisher)
+      run: |
+        $publisher = ([xml](Get-Content build-msix/msix/AppxManifest.xml -Raw)).Package.Identity.Publisher
+        $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher -KeyUsage DigitalSignature `
+          -FriendlyName 'fairyfly MSIX TEST signing (CI, sideload tests only)' -CertStoreLocation Cert:\CurrentUser\My `
+          -NotAfter (Get-Date).AddDays(90) -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+        if ($cert.Subject -ne $publisher) { Write-Error "certificate subject '$($cert.Subject)' differs from the Publisher '$publisher'"; exit 1 }
+        $signed = "build-msix/out/fairyfly-$env:MSIX_VERSION-testsigned.msix"
+        $cer = "build-msix/out/fairyfly-$env:MSIX_VERSION-testsigned.cer"
+        Copy-Item "build-msix/out/fairyfly-$env:MSIX_VERSION.msix" $signed
+        & "$env:WINSDK_BIN\signtool.exe" sign /fd SHA256 /sha1 $cert.Thumbprint /s My $signed
+        if ($LASTEXITCODE -ne 0) { Write-Error "signtool sign failed ($LASTEXITCODE)"; exit 1 }
+        # the public certificate only (DER .cer); the private key stays in this runner's store and is deleted
+        Export-Certificate -Cert $cert -FilePath $cer -Type CERT | Out-Null
+        Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -DeleteKey -ErrorAction Continue
+        $exported = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path $cer).Path)
+        if ($exported.HasPrivateKey -or $exported.Subject -ne $publisher) { Write-Error "exported .cer is not the public test certificate"; exit 1 }
+        # Add-AppxPackage in the next step refuses a package whose signature does not chain to the imported .cer
+        $sig = Get-AuthenticodeSignature $signed
+        Write-Host "signed $signed: $($sig.Status), signer '$($sig.SignerCertificate.Subject)', test certificate $($exported.Thumbprint)"
+        if ($sig.SignerCertificate -and $sig.SignerCertificate.Thumbprint -ne $exported.Thumbprint) { Write-Error "the package is not signed with the test certificate"; exit 1 }
+      shell: pwsh
+
+    - name: MSIX package - sideload install, run through the alias, remove (test-signed)
+      run: |
+        $signed = (Resolve-Path "build-msix/out/fairyfly-$env:MSIX_VERSION-testsigned.msix").Path
+        Import-Certificate -FilePath "build-msix/out/fairyfly-$env:MSIX_VERSION-testsigned.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+        Add-AppxPackage -Path $signed
+        $pkg = Get-AppxPackage -Name DataZoo.fairyfly
+        if (-not $pkg) { Write-Error 'DataZoo.fairyfly is not installed after Add-AppxPackage'; exit 1 }
+        Write-Host "installed $($pkg.PackageFullName) at $($pkg.InstallLocation)"
+        if ($pkg.PackageFamilyName -ne 'DataZoo.fairyfly_73q587949tsjt') { Write-Error "package family name $($pkg.PackageFamilyName), Partner Center has DataZoo.fairyfly_73q587949tsjt"; exit 1 }
+        if ($pkg.Version -ne $env:MSIX_VERSION) { Write-Error "installed version $($pkg.Version), expected $env:MSIX_VERSION"; exit 1 }
+        $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\fairyfly.exe'
+        if (-not (Test-Path $alias)) { Write-Error "execution alias $alias missing"; exit 1 }
+        $v = (& $alias --version | Out-String).Trim()
+        $expected = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        if ($v -ne $expected) { Write-Error "alias answers '$v', expected '$expected'"; exit 1 }
+        $out = (& $alias --no-audit update check 2>&1 | Out-String)
+        if ($out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "the installed package does not leave updates to the Store: $out"; exit 1 }
+        Write-Host "alias OK: fairyfly $v, update check -> UPDATE_MANAGED_BY_STORE"
+        Remove-AppxPackage -Package $pkg.PackageFullName
+        if (Get-AppxPackage -Name DataZoo.fairyfly) { Write-Error 'still installed after Remove-AppxPackage'; exit 1 }
+        Write-Host 'removed OK'
+        exit 0
+      shell: powershell   # Windows PowerShell 5.1: the Appx cmdlets are native there
+
+    - name: Upload MSIX (unsigned, for the Store submission)
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-msix
+        path: build-msix/out/fairyfly-${{ env.MSIX_VERSION }}.msix
+        retention-days: 90
+        if-no-files-found: error
+
+    - name: Upload MSIX (test-signed, sideload tests only) and its public test certificate
+      uses: actions/upload-artifact@v4
+      with:
+        name: fairyfly-msix-testsigned
+        path: |
+          build-msix/out/fairyfly-${{ env.MSIX_VERSION }}-testsigned.msix
+          build-msix/out/fairyfly-${{ env.MSIX_VERSION }}-testsigned.cer
+        retention-days: 30
+        if-no-files-found: error
 
     - name: Upload msix test results
       uses: actions/upload-artifact@v4
