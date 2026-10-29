@@ -227,7 +227,7 @@ SAP shows "License Information for Multiple Logons":
 
 ## Audit trail
 
-Every command, and every line of a `batch`, adds one JSON record to `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl`
+Every command, and every line of a `batch`, adds one JSON record to `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl`
 (UTC month). It is on by default.
 
 - Recorded: timestamp, process id, command, redacted arguments, connection, SAP system, client, user and transaction,

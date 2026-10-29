@@ -49,7 +49,7 @@ What the console shows:
   attaching to SAP GUI first.
 - `--log-level debug` also shows how long the gateway took to answer, and libffl's own log messages.
 
-Files, all in `%LOCALAPPDATA%\fairyfly\link\`:
+Files, all in `%USERPROFILE%\.fairyfly\link\`:
 - `state.json`: the pairing. The device key inside it is protected with DPAPI.
 - `state.json.paused`: exists while the link is paused.
 - `state.json.status.json`: written by the running link (`connected`, `paused`, `stopped`, with its process id,
@@ -97,7 +97,7 @@ or an HTTP endpoint.
   - **Start with Windows** (a check mark): the Run value `fairyfly-link` (below). It is turned on once, at the first
     start from the Start menu or the installer (`fairyfly-tray.exe`); after that only this item changes it. A Run value
     of an older version that starts `fairyfly.exe` directly is moved to `fairyfly-tray.exe`, its options kept;
-  - **Open log** (`%LOCALAPPDATA%\fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
+  - **Open log** (`%USERPROFILE%\.fairyfly\logs\link.log`), **Open audit trail folder**, **Check for updates**;
   - **Quit**, which disconnects the link and ends the process.
 - The other `link run` options apply as usual: `fairyfly link run --tray --tools session,screen`. `--allow-write` is
   still accepted and has no effect (changes are possible, each approved).
@@ -181,7 +181,7 @@ screen content).
 
 **Testing without the live pairing.** Use your own state file for every manual test (`--state`), and set
 `FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1`: then every `link` verb refuses (`STATE_GUARD`) a state in
-`%LOCALAPPDATA%\fairyfly\link\`, so a test copy cannot pause, unpair or overwrite the pairing the person at this
+`%USERPROFILE%\.fairyfly\link\`, so a test copy cannot pause, unpair or overwrite the pairing the person at this
 desktop relies on. `link pair` and `link run` print the state they use first (`state: <path>`).
 `tests/integration/link_trail_live.ps1` is the live check.
 
@@ -324,7 +324,7 @@ gateway's MCP endpoint with an access token and checks:
 - the local audit record (`audit_source: "link"`, request id, principal, no screen content);
 - pause (`DEVICE_OFFLINE`), resume, and the status after the link ends.
 
-It uses this desktop's real pairing (`%LOCALAPPDATA%\fairyfly\link\state.json`) and its pause marker:
+It uses this desktop's real pairing (`%USERPROFILE%\.fairyfly\link\state.json`) and its pause marker:
 - Stop a `link run` that is already running first. Otherwise there are two connections for the same device, and the
   test's pause disconnects both.
 - It needs an access token in `FFY_ACCESS_TOKEN` and a logged-in SAP GUI session with scripting enabled.

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Data directory moved to %USERPROFILE%\.fairyfly (Microsoft Store on Windows 10)
+
+- fairyfly keeps its per-user data in `%USERPROFILE%\.fairyfly` instead of `%LOCALAPPDATA%\fairyfly`: the audit trail
+  (`audit\YYYY-MM.jsonl`), the logs (`logs\mcp.log`, `link.log`), `mcp.yaml`, the cloud link pairing (`link\`), saved
+  connections (`sessions\`) and the `mcp setup` files (`mcp-setup.json`, `run\`, the exported certificate). The same
+  for the MSI and the Microsoft Store package on every Windows version. `FAIRYFLY_DATA_DIR` moves it elsewhere;
+  `FAIRYFLY_CACHE_DIR`, `FAIRYFLY_AUDIT_FILE` and `FAIRYFLY_MCP_CONFIG` still override their own file.
+- Why: verified live 2026-10-29 on Windows 10 (19045), a Store-installed fairyfly's writes into a new folder under
+  `%LOCALAPPDATA%` land in `%LOCALAPPDATA%\Packages\DataZoo.fairyfly_73q587949tsjt\LocalCache\Local\…`, invisible to
+  Explorer, editors and admins and deleted on uninstall; the manifest's `ExcludedDirectories` only works on Windows 11.
+  The user profile outside AppData is not virtualized anywhere.
+- The first start of this version moves the old folder: it is copied to a staging folder next to the new one and
+  renamed into place, under a lock shared by the tray and the CLI. The old folder is never deleted; it gets a note
+  `MOVED-TO-USERPROFILE-.fairyfly.txt`. Audit records are merged record by record (none lost, none duplicated), an
+  interrupted move starts over, an existing `%USERPROFILE%\.fairyfly` is never overwritten. A Store fairyfly also
+  moves its package's private copy of the old folder. If the new folder cannot be written, the old data stays as it
+  is and `--audit-required` fails closed with `AUDIT_UNAVAILABLE`. Details: [docs/DATA_DIR.md](docs/DATA_DIR.md).
+- MSIX manifest: `virtualization:ExcludedDirectories` and the restricted capability `unvirtualizedResources` are
+  removed (nothing fairyfly writes is under AppData any more); `runFullTrust` is the only capability left.
+- The MSI's uninstall cleanup (`fairyfly-tray.exe --uninstall`) still removes registry values only, never the data
+  folder (unit-tested).
+
 ### SAP Logon started after fairyfly: found at the next call; no embedded SAP GUI, no hanging GetObject("SAPGUI")
 
 - Live 2026-10-28 (Windows 10, MSIX 2026.10.2800.0; the MSI behaves the same): the link tray started at Windows logon,

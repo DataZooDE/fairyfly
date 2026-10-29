@@ -22,7 +22,7 @@ menu item **Start local MCP server** runs `fairyfly mcp --tray --http` ([LINK.md
 shell console would show them (started from the Start menu, the autostart or the link tray). Started from a
 console, the process relaunches itself detached (no window, `FAIRYFLY_TRAY_CHILD=1` marks the child),
 prints the child pid and exits with 0. The child frees its console, logs to
-`%LOCALAPPDATA%\fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start (named mutex
+`%USERPROFILE%\.fairyfly\logs\mcp.log` (rotating, 3 x 5 MB) and shows the icon. A second start (named mutex
 `Local\fairyfly-tray`) opens the running tray's menu at its icon and exits 0; only when that tray's window cannot be
 found it says "already running" (console or message box).
 
@@ -91,7 +91,7 @@ Screenshots and some controls need a live, unlocked desktop:
 
 ## YAML config
 
-Default path `%LOCALAPPDATA%\fairyfly\mcp.yaml`; override with `-c/--config PATH` or `FAIRYFLY_MCP_CONFIG`.
+Default path `%USERPROFILE%\.fairyfly\mcp.yaml`; override with `-c/--config PATH` or `FAIRYFLY_MCP_CONFIG`.
 Precedence for every key: **flag > environment variable > YAML > default**. Environment variable of a key:
 `FAIRYFLY_MCP_<SECTION>_<KEY>` (for example `FAIRYFLY_MCP_SERVER_PORT`, `FAIRYFLY_MCP_MODE_READ_ONLY`,
 `FAIRYFLY_MCP_DEFAULT_CONNECTION`; lists are comma separated). `FAIRYFLY_READ_ONLY=1` remains a hard cap.

@@ -437,9 +437,9 @@ a refusal has `"isError":true` and text `ERROR SCOPE_DENIED: ...`.
   hashes or secrets).
 - **Certificate**: `fairyfly mcp cert export` writes the public certificate for clients; renew it by running
   `mcp setup` again ([MCP_SETUP.md](MCP_SETUP.md)); `mcp doctor` warns before it expires.
-- **Logs**: `%LOCALAPPDATA%\fairyfly\logs\mcp.log` in tray mode (rotating 3 x 5 MB); in console mode stderr.
+- **Logs**: `%USERPROFILE%\.fairyfly\logs\mcp.log` in tray mode (rotating 3 x 5 MB); in console mode stderr.
   Verbosity: `FFLYLOG_LEVEL` or `--log-level`.
-- **Audit**: `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (override with `FAIRYFLY_AUDIT_FILE`, require with
+- **Audit**: `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` (override with `FAIRYFLY_AUDIT_FILE`, require with
   `FAIRYFLY_AUDIT=required`). Records of HTTP calls carry `principal`, `transport`, `remote_addr` and `era`:
 
   ~~~powershell

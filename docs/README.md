@@ -26,6 +26,7 @@ New to fairyfly? Start with the [project README](../README.md): what fairyfly is
 |---|---|
 | [SECURITY.md](SECURITY.md) | Security principles and layers, credentials, data handling, prompt injection, threat model, production recommendations, release integrity |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Components, how screens are read, the MCP server, threading, http.sys, storage |
+| [DATA_DIR.md](DATA_DIR.md) | The per-user data folder `%USERPROFILE%\.fairyfly`, what is in it, and the move from `%LOCALAPPDATA%\fairyfly` |
 
 ## Develop fairyfly
 
