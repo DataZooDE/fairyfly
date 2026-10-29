@@ -138,7 +138,7 @@ std::vector<KeySpec> build_specs() {
 
     add(make("audit.enabled", ValueType::Bool, Value{true}, "Write the audit trail (--no-audit / FAIRYFLY_AUDIT override)"));
     add(make("audit.required", ValueType::Bool, Value{false}, "Fail calls when the audit trail cannot be written"));
-    add(make("audit.file", ValueType::String, std::nullopt, "Audit file (unset = %LOCALAPPDATA%\\fairyfly\\audit\\YYYY-MM.jsonl)"));
+    add(make("audit.file", ValueType::String, std::nullopt, "Audit file (unset = %USERPROFILE%\\.fairyfly\\audit\\YYYY-MM.jsonl)"));
 
     return s;
 }
@@ -578,7 +578,8 @@ ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& en
         out.path = text::utf8_path(from_env); out.source = Source::Env; out.explicit_request = true;
         return out;
     }
-    out.path = Environment(env).data_dir() / "mcp.yaml";
+    // no data directory: no default file (never a relative "mcp.yaml" in the current directory)
+    if (const auto data = Environment(env).data_dir(); !data.empty()) out.path = data / "mcp.yaml";
     out.source = Source::Default;
     return out;
 }
@@ -590,7 +591,7 @@ std::string config_template() {
            "# Precedence for every key: command-line flag > environment variable > this file > default.\n"
            "# Environment variable of a key: FAIRYFLY_MCP_<SECTION>_<KEY>, e.g. FAIRYFLY_MCP_SERVER_PORT.\n"
            "# The config file path itself: -c/--config PATH, FAIRYFLY_MCP_CONFIG, or\n"
-           "# %LOCALAPPDATA%\\fairyfly\\mcp.yaml.\n"
+           "# %USERPROFILE%\\.fairyfly\\mcp.yaml.\n"
            "#\n"
            "# NO SECRETS here. Bearer tokens are created with 'fairyfly mcp token create' (shown once) and\n"
            "# live in the Windows Credential Manager. Keys named password/secret/token* and secret-looking\n"

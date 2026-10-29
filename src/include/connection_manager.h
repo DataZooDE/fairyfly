@@ -1,4 +1,5 @@
 #pragma once
+#include "include/config/environment.h"
 
 #include "core.h"
 #include <functional>
@@ -70,6 +71,9 @@ private:
 public:
     /// Get default isolated cache directory for connection files
     static std::string get_default_cache_directory();
+    /// FAIRYFLY_CACHE_DIR, else <data dir>/sessions (created). Throws SystemError without a data directory or when
+    /// the folder cannot be created: never the temp directory or the current directory.
+    static std::string default_cache_directory(const config::Environment& env);
 
     /// Get current working directory used by this connection manager
     const std::string& get_working_directory() const { return working_directory_; }

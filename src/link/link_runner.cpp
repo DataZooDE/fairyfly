@@ -30,6 +30,7 @@
 #include "include/link/link_console.h"
 #include "include/link/link_call.h"
 #include "include/link/link_control.h"
+#include "include/config/data_dir.h"
 #include "include/config/mcp_config.h"
 #include "include/link/main_thread_tools.h"
 #include "include/link/trail_recorder.h"
@@ -167,16 +168,12 @@ bool guard_on() {
     return config::Environment::process().flag(config::env::kLinkForbidDefaultState);
 }
 
-/// The pairing directories to protect: from LOCALAPPDATA (what default_state_path uses) and, on Windows, from the
-/// Local AppData known folder (a test may have redirected LOCALAPPDATA; the real pairing stays protected).
+/// The pairing directories to protect: the data directory's (what default_state_path uses) and the real user's, from
+/// the known folders, now and up to 2026.10.28 (a test may have redirected USERPROFILE or FAIRYFLY_DATA_DIR; the real
+/// pairing stays protected).
 std::vector<std::string> protected_dirs() {
     std::vector<std::string> dirs{std::filesystem::path(default_state_path()).parent_path().string()};
-#ifdef _WIN32
-    PWSTR known = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &known)) && known)
-        dirs.push_back((std::filesystem::path(known) / "fairyfly" / "link").string());
-    if (known) CoTaskMemFree(known);
-#endif
+    for (const auto& data : config::known_user_data_dirs()) dirs.push_back((data / "link").string());
     return dirs;
 }
 
@@ -293,17 +290,16 @@ std::optional<Result> claim_link_run(const std::string& path, std::unique_ptr<tr
 }
 
 std::string default_state_path() {
-#ifdef _WIN32
-    std::string base = config::Environment::process().get(config::env::kLocalAppData);
-    if (base.empty()) base = ".";
-#else
-    std::string base = config::Environment::process().get(config::env::kXdgConfigHome);
-    if (base.empty()) {
-        const std::string home = config::Environment::process().get(config::env::kHome);
-        base = (home.empty() ? std::string(".") : home) + "/.config";
+    const auto migration = config::last_migration();
+    const auto path = config::default_pairing_file(config::Environment::process(), migration);
+    if (migration && !migration->ok() && !path.empty() && path.parent_path().parent_path() != config::Environment::process().data_dir()) {
+        static std::once_flag logged;
+        std::call_once(logged, [&] {
+            spdlog::warn("the data directory could not be moved ({}); the pairing is used from {} for this run", migration->error,
+                         text::path_utf8(path));
+        });
     }
-#endif
-    return (text::utf8_path(base) / "fairyfly" / "link" / "state.json").string();
+    return path.string();
 }
 
 Result link_pair(const LinkOptions& options, const PairIo& io) {
@@ -383,6 +379,19 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     }
 }
 
+/// The data directory move found two different pairings (docs/DATA_DIR.md): say which one is used and where the other
+/// one is, never silently.
+static void add_pairing_conflicts(Result& r) {
+    json listed = json::array();
+    for (const auto& c : config::recorded_conflicts(config::Environment::process().data_dir()))
+        if (c.path.rfind("link/", 0) == 0) listed.push_back(config::to_json(c));
+    if (listed.empty()) return;
+    r.data["data_dir_conflicts"] = listed;
+    r.data["warning"] = "two different pairings were found when the data directory was moved; " +
+                        listed[0]["path"].get<std::string>() + " from " + listed[0]["kept"].get<std::string>() + " is used (" +
+                        listed[0]["reason"].get<std::string>() + "), the other one is still in " + listed[0]["other"].get<std::string>();
+}
+
 Result link_status(const LinkOptions& o) {
     if (auto refused = state_guard(o)) return *refused;
     try {
@@ -404,11 +413,13 @@ Result link_status(const LinkOptions& o) {
         // the audit trail this desktop runs under, as the running link last wrote it
         const bool running = live.link != state::kNotRunning;
         r.data["audit_trail"] = running && status.contains("trail") ? trail::status_text(status["trail"]) : std::string("off");
+        add_pairing_conflicts(r);
         return r;
     } catch (const std::exception&) {
         Result r;
         r.status = Result::Status::Success;
         r.data = {{"paired", false}, {"state", state_path(o)}, {"next", "fairyfly link pair"}};
+        add_pairing_conflicts(r);
         return r;
     }
 }

@@ -45,6 +45,27 @@ Check judge_desktop(const std::string& window_station, const std::string& deskto
             "Ensure the process is running in the active user console session (WinSta0\\Default)."};
 }
 
+Check judge_data_dir(const std::string& dir, const std::string& migration_error,
+                     const std::vector<config::MigrationConflict>& conflicts) {
+    if (dir.empty())
+        return {"data_dir", "fail", "No data directory: neither FAIRYFLY_DATA_DIR nor USERPROFILE is set",
+                "The audit trail, logs, mcp.yaml and the cloud link pairing live there (docs/DATA_DIR.md).",
+                "Run fairyfly in a normal user session, or set FAIRYFLY_DATA_DIR.", "DATA_DIR_UNAVAILABLE"};
+    if (!migration_error.empty())
+        return {"data_dir", "fail", "Data directory " + dir + ": the old %LOCALAPPDATA%\\fairyfly could not be moved there",
+                migration_error, "Check that " + dir + " can be written; fairyfly tries again at the next start.",
+                "DATA_DIR_UNAVAILABLE"};
+    if (!conflicts.empty()) {
+        std::string details;
+        for (const auto& c : conflicts)
+            details += (details.empty() ? "" : "; ") + c.path + ": " + c.reason + " (kept " + c.kept + ", other copy in " + c.other + ")";
+        return {"data_dir", "warn", "Data directory " + dir + ": " + std::to_string(conflicts.size()) +
+                                        " file(s) differed between the old folders when they were moved",
+                details, "Compare the files named here and keep the right one; the other copy is still in the old folder."};
+    }
+    return {"data_dir", "pass", "Data directory " + dir};
+}
+
 Check judge_processes(const ProcessScan& scan) {
     if (scan.matched > 0) {
         const char* which = scan.logon && scan.gui ? "saplogon.exe and sapgui.exe"

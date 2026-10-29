@@ -134,11 +134,14 @@ try {
         $ids = @($xml.SelectNodes('/f:Package/f:Applications/f:Application', $ns) | ForEach-Object { $_.Id })
         Check ($ids.Count -eq 2 -and ($ids | Select-Object -Unique).Count -eq 2) "two applications with distinct ids ($($ids -join ', '))"
 
-        $excluded = @($xml.SelectNodes('//virtualization:ExcludedDirectory', $ns) | ForEach-Object { $_.InnerText })
-        Check ($excluded -contains '$(KnownFolder:LocalAppData)\fairyfly') '%LOCALAPPDATA%\fairyfly is excluded from file system virtualization'
-        Check ($null -ne (One "/f:Package/f:Capabilities/rescap:Capability[@Name='unvirtualizedResources']")) 'unvirtualizedResources, which the exclusion needs'
+        # the data directory is %USERPROFILE%\.fairyfly (docs/DATA_DIR.md), which is not virtualized on any Windows
+        # version: no exclusion under AppData (it only worked on Windows 11) and no restricted capability for it
+        Check ($xml.SelectNodes('//virtualization:ExcludedDirectory', $ns).Count -eq 0) 'no file system virtualization exclusion (the data lives in %USERPROFILE%\.fairyfly)'
+        Check ($null -eq (One "/f:Package/f:Capabilities/rescap:Capability[@Name='unvirtualizedResources']")) 'no unvirtualizedResources (a restricted capability the Store would have to approve)'
+        $caps = @($xml.SelectNodes('/f:Package/f:Capabilities/*', $ns) | ForEach-Object { $_.Name })
+        Check ($caps.Count -eq 1 -and $caps[0] -eq 'runFullTrust') "runFullTrust is the only capability ($($caps -join ', '))"
         $ignorable = $xml.DocumentElement.IgnorableNamespaces -split ' '
-        foreach ($prefix in 'uap', 'uap5', 'desktop', 'desktop4', 'com', 'rescap', 'virtualization') {
+        foreach ($prefix in 'uap', 'uap5', 'desktop', 'desktop4', 'com', 'rescap') {
             Check ($ignorable -contains $prefix) "namespace $prefix is ignorable (older Windows skips what it does not know)"
         }
     }

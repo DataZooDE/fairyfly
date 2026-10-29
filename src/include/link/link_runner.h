@@ -30,7 +30,7 @@ namespace fairyfly::link {
 std::shared_ptr<approval::Standing> saved_standing(std::shared_ptr<tray::TraySettings> settings,
                                                    std::string name = tray::kLinkAllowChangesSetting);
 
-/// %LOCALAPPDATA%\fairyfly\link\state.json (the device key inside is DPAPI-protected).
+/// %USERPROFILE%\.fairyfly\link\state.json (the device key inside is DPAPI-protected).
 std::string default_state_path();
 
 struct LinkOptions {
@@ -121,7 +121,7 @@ Result link_pause(const LinkOptions& options);
 Result link_resume(const LinkOptions& options);
 
 /// FAIRYFLY_LINK_FORBID_DEFAULT_STATE=1: STATE_GUARD when the options' state lies in the default pairing directory
-/// (from LOCALAPPDATA and, on Windows, the real Local AppData known folder). nullopt when allowed.
+/// (the data directory's and, on Windows, the real user's from the known folders, now and up to 2026.10.28). nullopt when allowed.
 std::optional<Result> link_state_guard(const LinkOptions& options);
 
 /// The tray's view of the link (pairing state + the running link's status file) and its pause switch.

@@ -84,7 +84,7 @@ struct AuditFileSettings {
 };
 
 /// Resolve mode and file, flag > environment > mcp.yaml > default.
-/// File: FAIRYFLY_AUDIT_FILE > audit.file > %LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl (temp dir fallback).
+/// File: FAIRYFLY_AUDIT_FILE > audit.file > %USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl (none without a profile: fail closed).
 /// Mode: audit.enabled/required, then FAIRYFLY_AUDIT (0|false|no|off -> Disabled, required -> Required,
 /// 1|true|yes|on -> Enabled), then --no-audit; --audit-required wins over every disable (fail safe).
 AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cli_required,

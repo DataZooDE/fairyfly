@@ -54,7 +54,7 @@ std::string exe_path() {
     }
 }
 
-std::string local_app_data_dir() { return text::path_utf8(config::Environment::process().local_app_data()); }
+std::string data_dir() { return text::path_utf8(config::Environment::process().data_dir()); }
 
 class RealElevator : public Elevator {
 public:
@@ -116,8 +116,13 @@ public:
     ElevatedRun run_elevated(const ElevatedRequest& request) override {
         ElevatedRun run;
         namespace fs = std::filesystem;
-        // %LOCALAPPDATA% is per user. The files are named randomly by this (unelevated) process.
-        const fs::path dir = win::to_path(local_app_data_dir()) / "fairyfly" / "run";
+        // the data directory is per user (and outside AppData, so a Store fairyfly's elevated child finds the plan on
+        // Windows 10 too). The files are named randomly by this (unelevated) process.
+        if (data_dir().empty()) {
+            run.error = "no data directory for the plan file: neither FAIRYFLY_DATA_DIR nor USERPROFILE is set";
+            return run;
+        }
+        const fs::path dir = win::to_path(data_dir()) / "run";
         std::error_code ec;
         fs::create_directories(dir, ec);
         const std::string stem = auth::random_hex(auth::random_bytes, 16);

@@ -18,6 +18,7 @@ inline constexpr const char* kAudit = "FAIRYFLY_AUDIT";                 // 0|off
 inline constexpr const char* kAuditFile = "FAIRYFLY_AUDIT_FILE";
 inline constexpr const char* kLogLevel = "FFLYLOG_LEVEL";
 inline constexpr const char* kCacheDir = "FAIRYFLY_CACHE_DIR";
+inline constexpr const char* kDataDir = "FAIRYFLY_DATA_DIR";          // the per-user data directory (data_dir())
 inline constexpr const char* kDiag = "FAIRYFLY_DIAG";                   // live diagnostics (a flag)
 inline constexpr const char* kBulkFault = "FAIRYFLY_BULK_FAULT";        // with kDiag: simulated GetObjectTree faults
 inline constexpr const char* kProbeAll = "FAIRYFLY_PROBE_ALL";          // a flag
@@ -34,6 +35,7 @@ inline constexpr const char* kAuthHeader = "FAIRYFLY_AUTH_HEADER";      // clien
 inline constexpr const char* kLinkGateway = "FAIRYFLY_LINK_GATEWAY";
 inline constexpr const char* kLinkForbidDefaultState = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE";
 inline constexpr const char* kLocalAppData = "LOCALAPPDATA";
+inline constexpr const char* kUserProfile = "USERPROFILE";
 inline constexpr const char* kXdgConfigHome = "XDG_CONFIG_HOME";
 inline constexpr const char* kComputerName = "COMPUTERNAME";
 inline constexpr const char* kHostName = "HOSTNAME";
@@ -62,8 +64,14 @@ public:
     bool read_only_cap() const { return flag(env::kReadOnly); }
     /// LOCALAPPDATA, or the temp directory when it is unset (an empty path when that cannot be resolved; never throws).
     std::filesystem::path local_app_data() const;
-    /// local_app_data() / "fairyfly": where fairyfly keeps its config, logs, audit trail and state.
-    std::filesystem::path data_dir() const { return local_app_data() / "fairyfly"; }
+    /// Where fairyfly keeps its config, logs, audit trail and state (docs/DATA_DIR.md): FAIRYFLY_DATA_DIR, else
+    /// %USERPROFILE%\.fairyfly, else $HOME/.fairyfly, else <temp>/fairyfly. The one root every per-user path derives from.
+    std::filesystem::path data_dir() const;
+    /// True when FAIRYFLY_DATA_DIR names the data directory (then nothing is migrated).
+    bool data_dir_overridden() const;
+    /// The data directory up to 2026.10.28: local_app_data() / "fairyfly", only from LOCALAPPDATA (empty when it is
+    /// unset). Read only to migrate from it (config/data_dir.h).
+    std::filesystem::path legacy_data_dir() const;
     const EnvLookup& lookup() const { return lookup_; }
 
 private:

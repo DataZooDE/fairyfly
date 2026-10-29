@@ -20,7 +20,7 @@ namespace {
 
 const char* const kSetupKeys[] = {"server.tls", "server.host", "server.port", "server.allowed_hosts", "server.allow_ip"};
 
-std::string data_dir(SystemProbe& sys) { return join_path(sys.local_app_data(), "fairyfly"); }
+std::string data_dir(SystemProbe& sys) { return sys.data_dir(); }
 
 bool sid_ok(const std::string& sid) {
     static const std::regex re(R"(^S-1-\d+(-\d+)+$)");

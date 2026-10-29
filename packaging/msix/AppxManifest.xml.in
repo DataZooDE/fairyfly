@@ -16,10 +16,10 @@
   - The approval notifications: the toast activator COM class (src/link/desktop_approval_win32.cpp,
     src/include/tray/tray_contract.h) is declared here, because HKCU registrations made at run time stay in the
     package's private registry hive.
-  - %LOCALAPPDATA%\fairyfly (audit trail, logs, mcp.yaml, link state, `mcp setup` plan files) is excluded from file
-    system virtualization (Windows 11): other programs (Explorer, editors, the elevated `mcp setup` step, an admin
-    collecting the audit trail) see it, and it survives an uninstall like the MSI's. This needs the restricted
-    capability unvirtualizedResources (justified in the Store submission, docs/MSIX.md).
+  - fairyfly's data (audit trail, logs, mcp.yaml, link state, `mcp setup` plan files) is in %USERPROFILE%\.fairyfly
+    (docs/DATA_DIR.md), outside AppData, so it is not virtualized on any Windows version: other programs (Explorer,
+    editors, the elevated `mcp setup` step, an admin collecting the audit trail) see it, and it survives an uninstall
+    like the MSI's. No ExcludedDirectories (Windows 11 only) and no restricted capability unvirtualizedResources.
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -29,8 +29,7 @@
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  xmlns:virtualization="http://schemas.microsoft.com/appx/manifest/virtualization/windows10"
-  IgnorableNamespaces="uap uap5 desktop desktop4 com rescap virtualization">
+  IgnorableNamespaces="uap uap5 desktop desktop4 com rescap">
 
   <Identity
     Name="@FAIRYFLY_MSIX_IDENTITY_NAME@"
@@ -43,11 +42,6 @@
     <PublisherDisplayName>@FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME@</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>SAP GUI automation for AI agents: CLI, local MCP server and the fairyfly cloud link</Description>
-    <virtualization:FileSystemWriteVirtualization>
-      <virtualization:ExcludedDirectories>
-        <virtualization:ExcludedDirectory>$(KnownFolder:LocalAppData)\fairyfly</virtualization:ExcludedDirectory>
-      </virtualization:ExcludedDirectories>
-    </virtualization:FileSystemWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -106,6 +100,5 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>

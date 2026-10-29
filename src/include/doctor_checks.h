@@ -3,6 +3,8 @@
 // judge (what that means; pure, unit-tested). CommandHandler::handle_doctor runs the probes and collects the judges.
 #include <nlohmann/json.hpp>
 
+#include "include/config/data_dir.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -26,6 +28,11 @@ std::string overall_health(const std::vector<Check>& checks);
 
 // ---- judges ----
 Check judge_desktop(const std::string& window_station, const std::string& desktop);
+
+/// The data directory (docs/DATA_DIR.md): fail (DATA_DIR_UNAVAILABLE) without one or when this start could not move
+/// the old folder there (`migration_error`); warn for the conflicts recorded when the old folders were merged.
+Check judge_data_dir(const std::string& dir, const std::string& migration_error,
+                     const std::vector<config::MigrationConflict>& conflicts);
 
 struct ProcessScan {
     bool logon = false;  ///< saplogon.exe

@@ -306,53 +306,20 @@ void migrate_legacy_id_collisions(const std::string& cache_dir) {
     }
 }
 
-std::string get_env(const char* name) { return config::Environment::process().get(name); }
 }
 
-std::string ConnectionManager::get_default_cache_directory() {
+std::string ConnectionManager::get_default_cache_directory() { return default_cache_directory(config::Environment::process()); }
+
+std::string ConnectionManager::default_cache_directory(const config::Environment& env) {
+    // FAIRYFLY_CACHE_DIR, else the data directory (%USERPROFILE%\.fairyfly\sessions, docs/DATA_DIR.md); never the temp
+    // directory or the current one: saved connections there would be another user's or a stray folder's
+    fs::path p;
+    if (const std::string own = env.get(config::env::kCacheDir); !own.empty()) p = text::utf8_path(own);
+    else if (const fs::path data = env.data_dir(); !data.empty()) p = data / "sessions";
+    else throw SystemError("No data directory for saved connections: neither FAIRYFLY_DATA_DIR, USERPROFILE nor FAIRYFLY_CACHE_DIR is set");
     std::error_code ec;
-
-    // 1. FAIRYFLY_CACHE_DIR environment variable override
-    std::string env_dir = get_env(config::env::kCacheDir);
-    if (!env_dir.empty()) {
-        const fs::path p = text::utf8_path(env_dir);
-        fs::create_directories(p, ec);
-        if (!ec && fs::exists(p)) {
-            return p.string();
-        }
-    }
-
-    // 2. User local app data on Windows, ~/.cache on POSIX
-#ifdef _WIN32
-    std::string local_app_data = get_env(config::env::kLocalAppData);
-    if (!local_app_data.empty()) {
-        fs::path p = text::utf8_path(local_app_data) / "fairyfly" / "sessions";
-        fs::create_directories(p, ec);
-        if (!ec && fs::exists(p)) {
-            return p.string();
-        }
-    }
-#else
-    std::string home = get_env(config::env::kHome);
-    if (!home.empty()) {
-        fs::path p = text::utf8_path(home) / ".cache" / "fairyfly" / "sessions";
-        fs::create_directories(p, ec);
-        if (!ec && fs::exists(p)) {
-            return p.string();
-        }
-    }
-#endif
-
-    // 3. System temp directory fallback
-    fs::path temp_p = fs::temp_directory_path() / "fairyfly" / "sessions";
-    fs::create_directories(temp_p, ec);
-    if (!ec && fs::exists(temp_p)) {
-        return temp_p.string();
-    }
-
-    // 4. Fallback: .fairyfly/sessions in current directory
-    fs::path p = fs::path(".fairyfly") / "sessions";
     fs::create_directories(p, ec);
+    if (ec || !fs::is_directory(p)) throw SystemError("Cannot create the saved-connections folder " + text::path_utf8(p) + ": " + ec.message());
     return p.string();
 }
 

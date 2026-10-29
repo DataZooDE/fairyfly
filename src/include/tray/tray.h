@@ -155,7 +155,7 @@ std::vector<std::string> mcp_tray_args();
 /// `console_processes` = the processes attached to this console (GetConsoleProcessList), 0 without one.
 bool startup_error_needs_dialog(bool is_tray_child, bool has_console, unsigned console_processes);
 
-/// %LOCALAPPDATA%\fairyfly\logs (fallback: temp dir), used for mcp.log.
+/// %USERPROFILE%\.fairyfly\logs (empty without a profile: no log file), used for mcp.log.
 std::filesystem::path log_directory(const std::function<std::string(const char*)>& env);
 
 // ---- OS interfaces (fakes in tests) ---------------------------------------------------------------

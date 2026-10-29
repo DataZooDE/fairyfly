@@ -62,8 +62,8 @@ the same result and that each version is higher than the one before.
   approval toast's COM activator (`{DAAF1065-…}`, `-Embedding`) as `com:ExeServer` + `desktop:ToastNotificationActivation`.
 - **Cli** (`fairyfly.exe`, `AppListEntry="none"`, console subsystem): `uap5:AppExecutionAlias` `fairyfly.exe`. This puts
   it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not needed.
-- `runFullTrust`, and `unvirtualizedResources` with `virtualization:ExcludedDirectories` for
-  `$(KnownFolder:LocalAppData)\fairyfly` (see the recommendation below).
+- `runFullTrust` only. No `unvirtualizedResources` and no `virtualization:ExcludedDirectories`: fairyfly's data is in
+  `%USERPROFILE%\.fairyfly`, outside AppData (see [the decision below](#decision-the-data-directory-outside-appdata)).
 - `Assets\Square44x44Logo.png` (44x44), `Square150x150Logo.png` (150x150), `Wide310x150Logo.png` (310x150, the tray's
   `DefaultTile`) and `StoreLogo.png` (50x50) are [packaging/msix/Assets](../packaging/msix/Assets): the app icon's look
   (the fairyfly mark on the light tile), drawn from the logo geometry by
@@ -126,7 +126,7 @@ for a clean test uninstall it first.
    - An MCP client (stdio, `"command": "fairyfly"`) starts `fairyfly mcp`.
    - The approval toast's Approve/Deny buttons reach the tray (open: needs the code change in the table below).
    - `fairyfly mcp setup` works (Windows 10 and 11, see the table).
-   - `%LOCALAPPDATA%\fairyfly\audit` and `logs` show up in Explorer (Windows 11) and stay after removal.
+   - `%USERPROFILE%\.fairyfly\audit` and `logs` show up in Explorer (Windows 10 and 11) and stay after removal.
 5. Remove: `Get-AppxPackage DataZoo.fairyfly | Remove-AppxPackage`, and the certificate from
    `Cert:\LocalMachine\TrustedPeople` (`Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq
    'CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC' | Remove-Item`).
@@ -136,8 +136,8 @@ for a clean test uninstall it first.
 Partner Center > fairyfly (9N5TSPSX6Q0V) > a submission > Packages: upload the **unsigned** `fairyfly-<msixversion>.msix`
 from the `fairyfly-msix` artifact, never the test-signed one. The Store checks that its identity matches the reserved
 one and signs it with the Store's certificate; the version must be higher than the last submitted one (the calendar
-version scheme above guarantees that). The submission also needs the justifications for the restricted capabilities
-`runFullTrust` and `unvirtualizedResources` (see the recommendation below) and the listing.
+version scheme above guarantees that). The submission also needs the justification for the restricted capability
+`runFullTrust` and the listing.
 
 ## What fairyfly writes at run time, and what MSIX does with it
 
@@ -165,12 +165,13 @@ without the package identity does not see that view: Explorer, Notepad, an admin
 | Link tray autostart | `HKCU\…\CurrentVersion\Run` `fairyfly-link` (and `fairyfly-mcp` for `mcp --tray --install-autostart`) | `src/tray/tray_win32.cpp` `Win32RunKey`, `settle_autostart`, `decide_tray_entry` | **breaks**: lands in the private hive, Explorer never sees it, so no autostart | **done**: no Run value in the msix build. `StartupTask` in the manifest. `--install-autostart` → `TRAY_AUTOSTART_PACKAGED`. Open: the MCP tray has no StartupTask (one more Application + task if it is wanted) |
 | Tray settings (`link_allow_changes`, `link-autostart-defaulted`) | `HKCU\Software\DataZoo\fairyfly\tray` | `Win32TraySettings` | private hive. Only fairyfly reads it | nothing. It starts empty after a move from the MSI (the standing approval is asked again) |
 | Toast activator / AUMID registration | `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly`, `…\CLSID\{DAAF1065-…}\LocalServer32` | `src/link/desktop_approval_win32.cpp` | **breaks**: private hive, so the notification centre cannot activate the approval toast. A packaged process also has the package's AUMID | template declares the COM server + toast activation. **Open (code)**: in the msix build, skip the HKCU registration and `SetCurrentProcessExplicitAppUserModelID`, and create the notifier with the package AUMID (`<PackageFamilyName>!Tray`). Check the toast on the VM |
-| Audit trail | `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (or `FAIRYFLY_AUDIT_FILE`) | `src/audit_log.cpp` | new folder → private. Invisible to Explorer and admins, and **deleted on uninstall** | exclude `%LOCALAPPDATA%\fairyfly` (template does this). Win10: the tray's "Open audit trail folder" shows the real, empty folder |
-| Logs | `%LOCALAPPDATA%\fairyfly\logs\mcp.log`, `link.log` | `route_logging_to_file` | private | as above. "Open log" through Explorer/Notepad needs the exclusion |
-| MCP config | `%LOCALAPPDATA%\fairyfly\mcp.yaml` | `mcp config init`, `mcp setup` | private | as above ("Open config file", editing it by hand) |
-| `mcp setup` plan/result, manifest, cert export | `%LOCALAPPDATA%\fairyfly\run\plan-*.json`, `result-*.json`, `mcp-setup.json`, `fairyfly-mcp-<host>.cer` | `src/setup/elevator_win.cpp`, `setup_service.cpp`, `cert_store_win.cpp` | **breaks**: the unelevated packaged process writes the plan to the private store, and the elevated child started by path most likely has no package identity (check on the VM), so it cannot find the plan. Its result goes to the real folder (fairyfly can read it back through the read fallback) | the exclusion fixes it on Windows 11. On Windows 10 `mcp setup` needs a test, and probably a plan path outside AppData. http.sys, the certificate store and the firewall are machine-wide and not virtualized |
-| Link pairing state | `%LOCALAPPDATA%\fairyfly\link\state.json` (+ `.status.json`, `.paused`, DPAPI-protected) | `src/link/link_runner.cpp`, `link_control.cpp` | private. Only fairyfly reads it | works without the exclusion. With the exclusion it survives a reinstall, as with the MSI. After a move from the MSI the existing file is used in place |
-| Connection cache | `%LOCALAPPDATA%\fairyfly\sessions` (fallback `%TEMP%\fairyfly\sessions`) | `src/connection_manager.cpp` | private | nothing |
+| Audit trail | `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` (or `FAIRYFLY_AUDIT_FILE`) | `src/audit_log.cpp` | not virtualized (user profile outside AppData): Explorer and admins see it, it stays after an uninstall | **done**: the data directory moved out of AppData ([DATA_DIR.md](DATA_DIR.md)) |
+| Logs | `%USERPROFILE%\.fairyfly\logs\mcp.log`, `link.log` | `route_logging_to_file` | not virtualized | done, as above |
+| MCP config | `%USERPROFILE%\.fairyfly\mcp.yaml` | `mcp config init`, `mcp setup` | not virtualized | done, as above |
+| `mcp setup` plan/result, manifest, cert export | `%USERPROFILE%\.fairyfly\run\plan-*.json`, `result-*.json`, `mcp-setup.json`, `fairyfly-mcp-<host>.cer` | `src/setup/elevator_win.cpp`, `setup_service.cpp`, `cert_store_win.cpp` | not virtualized: the elevated child (started by path, most likely without package identity) finds the plan on Windows 10 too | done, as above. http.sys, the certificate store and the firewall are machine-wide and not virtualized. Check `mcp setup` on the VM |
+| Link pairing state | `%USERPROFILE%\.fairyfly\link\state.json` (+ `.status.json`, `.paused`, DPAPI-protected) | `src/link/link_runner.cpp`, `link_control.cpp` | not virtualized: survives a reinstall, as with the MSI | done, as above |
+| Connection cache | `%USERPROFILE%\.fairyfly\sessions` (no temp fallback) | `src/connection_manager.cpp` | not virtualized | nothing |
+| Up to 2026.10.28: all of the above in `%LOCALAPPDATA%\fairyfly` | `%LOCALAPPDATA%\fairyfly`, and for a Store fairyfly on Windows 10 `%LOCALAPPDATA%\Packages\DataZoo.fairyfly_73q587949tsjt\LocalCache\Local\fairyfly` | `src/config/data_dir.cpp` (read once) | the package copy is reachable by path from the packaged process | **done**: the first start moves both to `%USERPROFILE%\.fairyfly` ([DATA_DIR.md](DATA_DIR.md#the-move-from-localappdatafairyfly)) |
 | MCP tokens, SAP credentials | Windows Credential Manager (`fairyfly-mcp:*`, `fairyfly:*`) | `src/auth/`, `src/credential_store.cpp` | not virtualized | nothing |
 | User-chosen files (`screen capture --output`, `link pair --qr-png`, `mcp cert export --out`) | anywhere | the commands | outside AppData: real. Inside AppData: private | nothing. Document that paths under AppData stay inside the package |
 | Claude Desktop MCP config | `%APPDATA%\Claude\claude_desktop_config.json` (an MSIX-packaged Claude Desktop keeps its own in `%LOCALAPPDATA%\Packages\Claude_…\LocalCache\Roaming\Claude\`) | **nobody in fairyfly**: `mcp client-config` (`src/config/client_config.cpp`) only prints snippets, and the user pastes them | n/a | **nothing to fix, keep it that way.** If fairyfly ever writes it: a new file would land in fairyfly's private store, so Claude would not see it. An existing one would be changed in place. A packaged Claude's file cannot be reached at all. Edit it through Claude's own UI (Settings > Developer > Edit config) instead. The stdio snippet's `"command": "fairyfly"` works through the execution alias. Never print the `WindowsApps\…` path: it changes with every update |
@@ -180,27 +181,32 @@ without the package identity does not see that view: Explorer, Notepad, an admin
 
 1. **Run-key autostart** (fixed in this build option: StartupTask).
 2. **Approval toast activation** through the HKCU COM/AUMID registration (manifest part done, code change open).
-3. **`mcp setup`'s plan hand-over** to the elevated child (needs the exclusion, and a test on Windows 10).
+3. **`mcp setup`'s plan hand-over** to the elevated child (fixed: the plan is in `%USERPROFILE%\.fairyfly\run`; check on
+   Windows 10 and 11).
 4. **Audit trail, logs and `mcp.yaml` seen from outside** (Explorer, editors, admins), and the audit trail **being deleted on
-   uninstall** (needs the exclusion).
+   uninstall** (fixed: `%USERPROFILE%\.fairyfly` is not virtualized).
 5. The Claude Desktop config is **not** affected, because fairyfly does not write it.
 
-### Recommendation: `unvirtualizedResources` with `ExcludedDirectories`
+### Decision: the data directory outside AppData
 
-Yes, for `%LOCALAPPDATA%\fairyfly` only, as the template declares: `rescap:Capability unvirtualizedResources` plus
-`virtualization:FileSystemWriteVirtualization/ExcludedDirectories/$(KnownFolder:LocalAppData)\fairyfly`. The audit trail
-is a record that must stay readable by the user and admins and must outlive the app (point 4). `mcp setup` needs it
-(point 3). And it keeps one data folder for MSI and MSIX installs.
+fairyfly keeps its data in `%USERPROFILE%\.fairyfly` ([DATA_DIR.md](DATA_DIR.md)), for MSI and MSIX alike, on every
+Windows version. The manifest has no `ExcludedDirectories` and no `unvirtualizedResources`.
 
-- Do **not** add `desktop6:FileSystemWriteVirtualization`/`RegistryWriteVirtualization` `disabled`. Those turn
-  virtualization off for all of AppData/HKCU and apply on Windows 10 too. The registry needs no exclusion once the Run
-  value and the toast registration are handled as above.
-- `ExcludedDirectories` works on Windows 11 only. On Windows 10 (MinVersion 10.0.17763) the folder stays virtualized:
-  points 3 and 4 remain there. Either raise MinVersion to Windows 11 (10.0.22000), or accept them and document them for
-  Windows 10.
-- `unvirtualizedResources` is a restricted capability. The Store submission needs a justification (audit trail and
-  config shared with the user's tools and admins, kept on uninstall). If Partner Center refuses it, remove both entries.
-  fairyfly still works then, with points 3 and 4 open.
+Up to 2026.10.28 the data was in `%LOCALAPPDATA%\fairyfly`, and the manifest excluded that folder from virtualization.
+That is not enough: verified live on Windows 10 (19045) on 2026-10-29 with `Invoke-CommandInDesktopPackage`, a new folder
+under `%LOCALAPPDATA%` written by the package (`%LOCALAPPDATA%\ffyprobefresh\new.txt`) landed only in
+`%LOCALAPPDATA%\Packages\DataZoo.fairyfly_73q587949tsjt\LocalCache\Local\…`; writes into an already existing
+`%LOCALAPPDATA%\fairyfly` went to the real folder. `ExcludedDirectories` only works on Windows 11. So a fresh Store
+customer on Windows 10 would have had an audit trail, logs, `mcp.yaml` and link state that no other program sees and that
+an uninstall deletes. The user profile outside AppData is not virtualized on any Windows version.
+
+- Removing `unvirtualizedResources` leaves `runFullTrust` as the only restricted capability: one justification less in
+  the Store submission, and no risk that Partner Center refuses it.
+- Do **not** add `desktop6:FileSystemWriteVirtualization`/`RegistryWriteVirtualization` `disabled` either. The registry
+  needs no exclusion once the Run value and the toast registration are handled as above.
+- Not `Documents`: it is often redirected to OneDrive (synced, sometimes on a network share), which is wrong for an
+  audit trail and a DPAPI-protected device key. A dot folder in the profile is where developer tools keep per-user
+  state on Windows too (`.ssh`, `.aws`, `.docker`, `.vscode`).
 
 ## What is left
 
@@ -209,9 +215,10 @@ is a record that must stay readable by the user and admins and must outlive the 
    attach the MSIX.
 3. **VM sideload test** ([steps](#sideload-test-on-a-test-machine-vm)) (`Add-AppxPackage`): the StartupTask starts the link tray at logon. `fairyfly` from a fresh terminal
    and from an MCP client (stdio) runs through the alias. The approval toast's Approve/Deny buttons activate the tray.
-   `mcp setup` works, on Windows 10 and 11. The audit trail and logs show up in Explorer, and stay after
-   `Remove-AppxPackage`. `update check` answers `UPDATE_MANAGED_BY_STORE`.
+   `mcp setup` works, on Windows 10 and 11. The audit trail and logs show up in Explorer under `%USERPROFILE%\.fairyfly`
+   (also on Windows 10), and stay after `Remove-AppxPackage`. An earlier Store install's data in the package copy is
+   moved there at the first start. `update check` answers `UPDATE_MANAGED_BY_STORE`.
 4. **Code**: the toast AUMID/registration change for packaged processes (table above). Optionally a StartupTask for the
    MCP tray. Optionally switch the StartupTask from the tray menu (WinRT `StartupTask`).
-5. **Store submission**: signing by the Store, the restricted capability justifications (`runFullTrust`,
-   `unvirtualizedResources`), and the listing.
+5. **Store submission**: signing by the Store, the restricted capability justification (`runFullTrust`), and the
+   listing.

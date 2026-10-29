@@ -148,15 +148,19 @@ Process-wide flags and counters of the link (stop requests, abandoned threads, t
 
 ## State and storage
 
-fairyfly has no database and keeps little state:
+fairyfly has no database and keeps little state. Its files are all in the per-user data directory
+`%USERPROFILE%\.fairyfly` ([DATA_DIR.md](DATA_DIR.md); `config::Environment::data_dir()` is the one root they derive
+from, and `config/data_dir.h` moves an older `%LOCALAPPDATA%\fairyfly` there at the first start):
 
 | State | Where | Notes |
 |---|---|---|
-| Saved connections | `%LOCALAPPDATA%\fairyfly\sessions\` | Which SAP GUI session a connection id refers to; validated against the live session before use |
+| Saved connections | `%USERPROFILE%\.fairyfly\sessions\` | Which SAP GUI session a connection id refers to; validated against the live session before use |
 | SAP credentials | Credential Manager `fairyfly:<name>` | Read only by `session login` / `session launch --login` |
 | Access tokens | Credential Manager `fairyfly-mcp:<name>` | SHA-256 hash and restrictions only, never the secret |
-| Audit trail | `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` | Append-only by convention |
-| Configuration | `%LOCALAPPDATA%\fairyfly\mcp.yaml`, `mcp-setup.json` | Server settings; record of what `mcp setup` created |
+| Audit trail | `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` | Append-only by convention |
+| Configuration | `%USERPROFILE%\.fairyfly\mcp.yaml`, `mcp-setup.json` | Server settings; record of what `mcp setup` created |
+| Cloud link pairing | `%USERPROFILE%\.fairyfly\link\` | `state.json` (DPAPI-protected device key), its status and pause marker |
+| Logs | `%USERPROFILE%\.fairyfly\logs\` | `mcp.log`, `link.log` of the trays |
 | Runtime state | Memory | Sticky default connection per principal, leases, rate budgets, T-code allowlist flags; lost on restart |
 
 ## Tests

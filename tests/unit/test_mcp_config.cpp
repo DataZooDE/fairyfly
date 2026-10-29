@@ -364,11 +364,10 @@ TEST_CASE("config: path resolution flag > env > default", "[config][precedence]"
     CHECK(p.path == std::filesystem::path("C:\\x\\a.yaml"));
     p = resolve_config_path("", fake_env({{"FAIRYFLY_MCP_CONFIG", "C:\\y.yaml"}}));
     CHECK(p.source == Source::Env);
-    p = resolve_config_path("", fake_env({{"LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local"}}));
+    p = resolve_config_path("", fake_env({{"USERPROFILE", "C:\\Users\\u"}, {"LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local"}}));
     CHECK(p.source == Source::Default);
     CHECK_FALSE(p.explicit_request);
-    CHECK(p.path.filename() == "mcp.yaml");
-    CHECK(p.path.parent_path().filename() == "fairyfly");
+    CHECK(p.path == std::filesystem::path("C:\\Users\\u") / ".fairyfly" / "mcp.yaml");
 }
 
 TEST_CASE("config: the template validates and equals the defaults", "[config][template]") {

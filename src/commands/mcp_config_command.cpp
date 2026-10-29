@@ -243,7 +243,7 @@ McpConfig flags_layer(const CLI::App& mcp_app, std::vector<ConfigIssue>& issues)
 
 void setup_mcp_extras(CLI::App& mcp, McpExtras& x) {
     x.mcp_app = &mcp;
-    mcp.add_option("-c,--config", x.config_path, "Config file (default: %LOCALAPPDATA%\\fairyfly\\mcp.yaml; also FAIRYFLY_MCP_CONFIG)");
+    mcp.add_option("-c,--config", x.config_path, "Config file (default: %USERPROFILE%\\.fairyfly\\mcp.yaml; also FAIRYFLY_MCP_CONFIG)");
     mcp.add_flag("--tray", x.tray, "Run in the system tray (detached from the console); needs the HTTP transport");
     mcp.add_flag("--install-autostart", x.install_autostart, "With --tray: start the tray at logon (HKCU Run key)");
     mcp.add_flag("--remove-autostart", x.remove_autostart, "With --tray: remove the logon autostart");

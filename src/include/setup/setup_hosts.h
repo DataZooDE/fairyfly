@@ -170,7 +170,7 @@ public:
     virtual bool file_exists(const std::string& path) = 0;
     virtual long long now() = 0;                     ///< unix seconds
     virtual std::string computer_dns_name() = 0;
-    virtual std::string local_app_data() = 0;        ///< %LOCALAPPDATA%
+    virtual std::string data_dir() = 0;              ///< fairyfly's data directory (%USERPROFILE%\.fairyfly)
 };
 
 // ---- verification round trip ----------------------------------------------------------------------

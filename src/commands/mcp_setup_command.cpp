@@ -159,7 +159,7 @@ Exports the public certificate for client trust configuration.
 Example: fairyfly mcp cert export --format pem --out fairyfly.pem
 )HELP");
     s.cert_export->fallthrough();
-    s.cert_export->add_option("--out", s.cert_out, "Target file (default %LOCALAPPDATA%\\fairyfly\\fairyfly-mcp-<host>.cer)");
+    s.cert_export->add_option("--out", s.cert_out, "Target file (default %USERPROFILE%\\.fairyfly\\fairyfly-mcp-<host>.cer)");
     s.cert_export->add_option("--format", s.cert_format, "der (default) or pem")->check(CLI::IsMember({"der", "pem"}));
     s.cert_export->add_option("--hostname", s.cert_hostname, "Host name (default: from the setup manifest)");
     s.cert_export->add_option("--port", s.cert_port, "Port (default: from the setup manifest)")->check(CLI::Range(1, 65535));

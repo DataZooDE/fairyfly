@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 
 #include "include/setup/setup_hosts.h"
 #include "include/setup/http_probe.h"
@@ -111,7 +112,12 @@ public:
         return "localhost";
     }
 
-    std::string local_app_data() override { return text::path_utf8(config::Environment::process().local_app_data()); }
+    std::string data_dir() override {
+        const auto dir = config::Environment::process().data_dir();
+        // never a relative path (join_path("", leaf) is just leaf)
+        if (dir.empty()) throw std::runtime_error("no data directory: neither FAIRYFLY_DATA_DIR nor USERPROFILE is set");
+        return text::path_utf8(dir);
+    }
 };
 
 } // namespace

@@ -115,7 +115,9 @@ log on. [docs/SETUP.md](docs/SETUP.md) has the full checklist.
 - **Single file**: download `fairyfly.exe`, put it in a folder of your choice, for example `C:\Tools\fairyfly\`, and
   add that folder to your `PATH`.
 
-`fairyfly update apply` updates an installed fairyfly in place. You can also
+Every install keeps your data (audit trail, logs, `mcp.yaml`, the cloud link pairing) in `%USERPROFILE%\.fairyfly`;
+uninstalling never deletes it ([docs/DATA_DIR.md](docs/DATA_DIR.md)). `fairyfly update apply` updates an installed
+fairyfly in place. You can also
 [build it from source](docs/BUILDING.md). The examples below assume `fairyfly` is found on the `PATH`; otherwise use
 the full path, e.g. `%LOCALAPPDATA%\Programs\fairyfly\fairyfly.exe`.
 

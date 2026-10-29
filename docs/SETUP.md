@@ -173,14 +173,20 @@ desktop:
 
 ## Where fairyfly keeps its files
 
+Everything per user is in one folder, `%USERPROFILE%\.fairyfly` (e.g. `C:\Users\ada\.fairyfly`; `FAIRYFLY_DATA_DIR`
+moves it). Up to version 2026.10.28 it was `%LOCALAPPDATA%\fairyfly`: the first start of a newer fairyfly copies that
+folder over and leaves a note in the old one, which you can delete afterwards. [DATA_DIR.md](DATA_DIR.md) has the
+details.
+
 | What | Where |
 |---|---|
-| Saved connections | `%LOCALAPPDATA%\fairyfly\sessions\` (override: `FAIRYFLY_CACHE_DIR`) |
+| Saved connections | `%USERPROFILE%\.fairyfly\sessions\` (override: `FAIRYFLY_CACHE_DIR`) |
 | SAP credentials | Windows Credential Manager, `fairyfly:<name>` |
 | MCP access tokens (hashes only) | Windows Credential Manager, `fairyfly-mcp:<name>` |
-| Audit trail | `%LOCALAPPDATA%\fairyfly\audit\YYYY-MM.jsonl` (override: `FAIRYFLY_AUDIT_FILE`) |
-| MCP server configuration | `%LOCALAPPDATA%\fairyfly\mcp.yaml` (override: `-c` or `FAIRYFLY_MCP_CONFIG`) |
-| Tray log | `%LOCALAPPDATA%\fairyfly\logs\mcp.log` |
+| Audit trail | `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` (override: `FAIRYFLY_AUDIT_FILE`) |
+| MCP server configuration | `%USERPROFILE%\.fairyfly\mcp.yaml` (override: `-c` or `FAIRYFLY_MCP_CONFIG`) |
+| Tray logs | `%USERPROFILE%\.fairyfly\logs\mcp.log`, `link.log` |
+| Cloud link pairing | `%USERPROFILE%\.fairyfly\link\state.json` (the device key inside is DPAPI-protected) |
 
 `screen capture` saves a PNG to `--file`, or to a generated file name in the current directory when `--file` is
 omitted (`--file -` writes to stdout, `--format base64` returns text). fairyfly has no telemetry and opens no network
