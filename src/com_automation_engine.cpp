@@ -103,7 +103,6 @@ ComAutomationEngine::ComAutomationEngine(ApplicationSource source) : source_(std
 }
 
 void ComAutomationEngine::refresh_application() {
-    if (app_) return;  // RED: the engine keeps the first SAP GUI application forever (old behaviour)
     ComGuiApplicationPtr fresh;
     try {
         fresh = source_ ? source_() : nullptr;

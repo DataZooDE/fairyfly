@@ -37,6 +37,7 @@ public:
     Result execute_active_command(cli::CommandHandler& handler) {
         for (auto& command : commands_) {
             if (command->was_invoked()) {
+                handler.refresh_sap_gui();  // the SAP Logon running now, not the one this process saw first
                 return command->execute(handler);
             }
         }

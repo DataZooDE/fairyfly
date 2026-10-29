@@ -135,7 +135,7 @@ ComGuiApplicationPtr ComGuiApplication::create(const SapLogonLocator& locate) {
         IDispatchPtr sap_gui;
         if (locate) sap_gui = locate();
         if (!sap_gui) {
-            throw ComException(  // RED: old behaviour (a generic error)
+            throw SapLogonNotRunningException(
                 "SAP Logon (saplogon.exe) is not running on this desktop (no SAPGUI entry in the running object "
                 "table). Start SAP Logon in the interactive session, then retry; fairyfly never starts a SAP GUI "
                 "scripting engine of its own.", MK_E_UNAVAILABLE);

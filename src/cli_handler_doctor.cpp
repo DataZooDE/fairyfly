@@ -23,8 +23,10 @@ Result CommandHandler::handle_doctor()
     checks.push_back({"sapgui_processes", "info", "Non-Windows environment, process check skipped"});
     checks.push_back({"client_registry", "info", "Non-Windows environment, registry check skipped"});
 #endif
-    checks.push_back(doctor::judge_engine(engine_ != nullptr));  // RED: old behaviour
-    if (engine_) {
+    if (engine_) engine_->refresh_application();  // what SAP Logon is running now, not at this process's start
+    const EngineStatus engine = engine_ ? engine_->engine_status() : EngineStatus{false, true, "no automation engine"};
+    checks.push_back(doctor::judge_engine(engine.available, engine.sap_logon_running, engine.detail));
+    if (engine_ && engine.available) {
         try {
             checks.push_back(doctor::judge_sessions(engine_->get_application_info()));
         } catch (const std::exception& e) {

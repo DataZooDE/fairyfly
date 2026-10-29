@@ -2303,7 +2303,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
 }
 
 ToolResult CommandDispatcher::call_tool(const std::string& name, const json& args, const CallContext& ctx) {
-    if (false && before_call_) {  // RED: not called yet
+    if (before_call_) {
         try {
             before_call_();
         } catch (const std::exception& e) {
