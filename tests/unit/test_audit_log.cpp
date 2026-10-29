@@ -194,9 +194,11 @@ TEST_CASE("monthly_file_name uses the UTC month", "[audit]") {
 TEST_CASE("resolve_config applies env and flag precedence", "[audit]") {
     const auto now = utc(2026, 9, 29, 12, 0, 0);
 
-    auto def = resolve_config(env_of({{"LOCALAPPDATA", "C:\\Users\\x\\AppData\\Local"}}), false, false, now);
+    auto def = resolve_config(env_of({{"USERPROFILE", "C:\\Users\\x"}, {"LOCALAPPDATA", "C:\\Users\\x\\AppData\\Local"}}), false, false, now);
     REQUIRE(def.mode == Mode::Enabled);
-    REQUIRE(def.file == fs::path("C:\\Users\\x\\AppData\\Local") / "fairyfly" / "audit" / "2026-09.jsonl");
+    REQUIRE(def.file == fs::path("C:\\Users\\x") / ".fairyfly" / "audit" / "2026-09.jsonl");
+    auto over = resolve_config(env_of({{"USERPROFILE", "C:\\Users\\x"}, {"FAIRYFLY_DATA_DIR", "E:\\ffy"}}), false, false, now);
+    REQUIRE(over.file == fs::path("E:\\ffy") / "audit" / "2026-09.jsonl");
 
     auto file = resolve_config(env_of({{"LOCALAPPDATA", "C:\\L"}, {"FAIRYFLY_AUDIT_FILE", "D:\\a\\b.jsonl"}}),
                                false, false, now);

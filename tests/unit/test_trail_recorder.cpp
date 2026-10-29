@@ -919,14 +919,10 @@ TEST_CASE("link state guard: with FAIRYFLY_LINK_FORBID_DEFAULT_STATE the real pa
     CHECK(in_default_state_dir(upper, dir));
 #endif
 
-    // The default location is redirected into a temporary profile first (LOCALAPPDATA / XDG_CONFIG_HOME): even a
-    // broken guard could only touch that, never the pairing of the person at this desktop.
+    // The default location is redirected into a temporary profile first (USERPROFILE, the data directory's root):
+    // even a broken guard could only touch that, never the pairing of the person at this desktop.
     const fairyfly::test::TempDir tmp("trail-guard");
-#ifdef _WIN32
-    const char* profile_var = "LOCALAPPDATA";
-#else
-    const char* profile_var = "XDG_CONFIG_HOME";
-#endif
+    const char* profile_var = "USERPROFILE";
     struct EnvRestore {  // also when a REQUIRE below fails
         const char* name;
         std::optional<std::string> old;

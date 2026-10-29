@@ -295,8 +295,8 @@ TEST_CASE("tray: autostart, console and log path builders", "[tray][args]") {
     CHECK(console_command_line("C:\\Program Files\\f.exe", {"mcp", "token", "list"}) ==
           "cmd.exe /k \"\"C:\\Program Files\\f.exe\" mcp token list\"");
     CHECK(console_command_line("C:\\f.exe", {"mcp", "token", "create"}) == "cmd.exe /k \"C:\\f.exe mcp token create\"");
-    const auto dir = log_directory([](const char* n) { return std::string(n) == "LOCALAPPDATA" ? "C:\\Users\\u\\AppData\\Local" : ""; });
-    CHECK(dir == std::filesystem::path("C:\\Users\\u\\AppData\\Local") / "fairyfly" / "logs");
+    const auto dir = log_directory([](const char* n) { return std::string(n) == "USERPROFILE" ? "C:\\Users\\u" : ""; });
+    CHECK(dir == std::filesystem::path("C:\\Users\\u") / ".fairyfly" / "logs");
 }
 
 // ================= controller =================

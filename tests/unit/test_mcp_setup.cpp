@@ -18,10 +18,10 @@ namespace {
 const std::string kHost = "sapbox.corp.example";
 const std::string kSid = "S-1-5-21-1-2-3-1001";
 const std::string kPrefix = "https://+:8443/mcp/";
-const std::string kLad = "C:\\Users\\jr\\AppData\\Local";
-const std::string kManifestPath = kLad + "\\fairyfly\\mcp-setup.json";
-const std::string kConfigPath = kLad + "\\fairyfly\\mcp.yaml";
-const std::string kCerPath = kLad + "\\fairyfly\\fairyfly-mcp-" + kHost + ".cer";
+const std::string kDataDir = "C:\\Users\\jr\\.fairyfly";
+const std::string kManifestPath = kDataDir + "\\mcp-setup.json";
+const std::string kConfigPath = kDataDir + "\\mcp.yaml";
+const std::string kCerPath = kDataDir + "\\fairyfly-mcp-" + kHost + ".cer";
 
 ApplyArgs args_of(const ElevatedRequest& req) {
     ApplyArgs a;
@@ -1477,7 +1477,7 @@ TEST_CASE("teardown deletes the exported .cer only at the derived path and only 
         manifest["hostname"] = "..\\..\\evil";
         manifest["cer_path"] = "";
         r.m.sys.files[kManifestPath] = manifest.dump();
-        const std::string other = "C:\\Users\\jr\\AppData\\Local\\fairyfly\\fairyfly-mcp-..\\..\\evil.cer";
+        const std::string other = "C:\\Users\\jr\\.fairyfly\\fairyfly-mcp-..\\..\\evil.cer";
         r.m.sys.files[other] = "cer:" + thumb;
         REQUIRE(r.teardown(t) == 0);
         CHECK(r.m.sys.files.count(other) == 1);
