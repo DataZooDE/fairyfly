@@ -51,6 +51,10 @@ void write_status(const std::string& state_path, const std::string& state, const
     static std::mutex mu;  // the supervisor and a final write after Ctrl+C share the temporary file
     std::lock_guard<std::mutex> l(mu);
     json status{{"state", state}, {"pid", static_cast<std::int64_t>(FFY_GETPID())}, {"updated", now_s()}};
+    // who wrote it: a reader can tell this process from another that later got the same pid
+    const auto& me = system::current_process_identity();
+    if (!me.image.empty()) status["image"] = me.image;
+    if (me.started_unix > 0) status["started"] = me.started_unix;
     if (extra.is_object())
         for (auto it = extra.begin(); it != extra.end(); ++it)
             if (!status.contains(it.key())) status[it.key()] = it.value();
@@ -83,10 +87,41 @@ std::string describe(const json& status, std::int64_t now_unix) {
     return s;
 }
 
-std::string describe(const json& status, std::int64_t now_unix, system::ProcessProbe&) { return describe(status, now_unix); }
+namespace {
+/// The process that wrote `status` still runs and is still that process. A status without a pid (none written yet)
+/// leaves the decision to the heartbeat; without image or start time (an older link) the pid alone decides.
+bool writer_alive(const json& status, system::ProcessProbe& probe) {
+    if (!status.contains("pid") || !status["pid"].is_number_integer()) return true;
+    const auto pid = status["pid"].get<std::int64_t>();
+    if (pid <= 0 || pid > std::int64_t{0xFFFFFFFF}) return false;
+    const auto found = probe.find(static_cast<std::uint32_t>(pid));
+    if (!found) return false;   // ended (killed, crashed, the installer removed it)
+    // the pid was handed to another program, or to fairyfly started again
+    const std::string image = status.contains("image") && status["image"].is_string() ? status["image"].get<std::string>() : "";
+    if (!image.empty() && !found->image.empty() && !system::same_executable(image, found->image)) return false;
+    const std::int64_t started = status.contains("started") && status["started"].is_number_integer() ? status["started"].get<std::int64_t>() : 0;
+    if (started > 0 && found->started_unix > 0) {
+        const auto d = started - found->started_unix;
+        if (d > system::kStartTimeToleranceSeconds || -d > system::kStartTimeToleranceSeconds) return false;
+    }
+    return true;
+}
+}  // namespace
+
+std::string describe(const json& status, std::int64_t now_unix, system::ProcessProbe& probe) {
+    const std::string s = describe(status, now_unix);
+    if (s == state::kNotRunning) return s;
+    return writer_alive(status, probe) ? s : std::string(state::kNotRunning);
+}
 
 LinkLiveness link_liveness(const json& status, std::int64_t now_unix, system::ProcessProbe& probe) {
-    return {describe(status, now_unix, probe), nullptr};
+    LinkLiveness out{describe(status, now_unix, probe), nullptr};
+    if (out.link == state::kNotRunning && status.is_object()) {
+        out.last_seen = json::object();
+        for (const char* key : {"state", "updated", "pid"})
+            if (status.contains(key)) out.last_seen[key] = status[key];
+    }
+    return out;
 }
 
 void supervise(const std::string& state_path, const std::function<void(const std::atomic<bool>&)>& agent, const std::atomic<bool>& stop,

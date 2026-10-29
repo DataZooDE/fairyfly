@@ -171,6 +171,10 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     tray_services.launcher = launcher.get();
     auto link_control = link::make_link_control();
     tray_services.link = link_control.get();
+    // a tray left running by a removed installation is asked to quit, another installation's is named
+    auto instances = tray::make_win32_tray_instances(tray::TrayKind::Mcp);
+    tray_services.claim.instances = instances.get();
+    tray_services.claim.exists = tray::file_not_missing;
     // the update channel (GitHub releases), once in the background; FAIRYFLY_UPDATE_CHECK=0|false|no|off turns it off,
     // an MSIX build never asks (the Store updates it)
     if (packaging::self_updates(packaging::kPackage) && config::Environment::process().enabled(config::env::kUpdateCheck))

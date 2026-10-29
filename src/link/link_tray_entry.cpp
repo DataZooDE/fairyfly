@@ -71,6 +71,11 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     if (entry.run_key_autostart) tray_services.run_key = registry.get();
     tray_services.self_update = packaging::self_updates(packaging::kPackage);
     tray_services.autostart = autostart;
+    // a tray left running by a removed installation (an uninstalled MSI) is asked to quit, another installation's
+    // (MSI beside the Microsoft Store package) is named instead of this start ending without a word
+    auto instances = tray::make_win32_tray_instances(tray::TrayKind::Link);
+    tray_services.claim.instances = instances.get();
+    tray_services.claim.exists = tray::file_not_missing;
     tray_services.link_busy = [lock = link_run_lock_name(o.state_path.empty() ? default_state_path() : o.state_path)] {
         return tray::make_win32_single_instance(lock)->exists();
     };

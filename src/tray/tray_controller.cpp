@@ -5,6 +5,9 @@
 #include <mutex>
 #include <thread>
 
+#include <spdlog/spdlog.h>
+
+#include "include/system/process_probe.h"
 #include "include/tray/mcp_tray.h"
 
 namespace fairyfly::tray {
@@ -240,11 +243,7 @@ UiThread::~UiThread() {
 int run_with_tray(IServerRunner& runner, TrayServices services, SingleInstance& guard, TrayPaths paths,
                   TrayState state) {
     if (!services.host) return 1;
-    if (!guard.acquire()) {
-        if (!services.host->show_running_instance())
-            services.host->message_box("fairyfly MCP", "The fairyfly MCP tray is already running.");
-        return 0;
-    }
+    if (!claim_tray(guard, *services.host, services.claim, paths.exe, "fairyfly MCP", "fairyfly MCP tray")) return 0;
 
     const std::string log_file = paths.log_file.string();
     TrayController controller(runner.control(), &runner, services, std::move(paths), std::move(state));
@@ -308,14 +307,69 @@ int report_startup_error(const std::string& title, const std::string& code, cons
 }
 
 // ---- A held single-instance guard ------------------------------------------------------------------
-HeldTray decide_held_tray(const std::vector<RunningTray>&, const std::string&, const std::function<bool(const std::filesystem::path&)>&,
-                          const std::string&) {
-    return {};
+HeldTray decide_held_tray(const std::vector<RunningTray>& running, const std::string& own_exe,
+                          const std::function<bool(const std::filesystem::path&)>& exists, const std::string& tray_name) {
+    HeldTray d;
+    if (running.empty()) return d;   // no window to tell by: as before
+    std::vector<const RunningTray*> removed, other;
+    for (const auto& t : running) {
+        if (t.image.empty() || system::same_executable(t.image, own_exe)) return d;   // this installation's, or unknown
+        // the image is UTF-8 (a user name with umlauts): not the ANSI code page std::string paths use on Windows
+        const bool present = exists ? exists(std::filesystem::path(std::u8string(t.image.begin(), t.image.end()))) : true;
+        (present ? other : removed).push_back(&t);
+    }
+    const auto describe = [](const std::vector<const RunningTray*>& trays) {
+        std::string out;
+        for (const auto* t : trays) out += (out.empty() ? "" : ", ") + std::string("pid ") + std::to_string(t->pid) + ": " + t->image;
+        return out;
+    };
+    if (other.empty()) {
+        // an uninstalled MSI left it running from its deleted files: nothing else will ever end it
+        d.action = HeldTrayAction::TakeOver;
+        for (const auto* t : removed) d.pids.push_back(t->pid);
+        d.message = "the running " + tray_name + " belongs to a fairyfly whose files were removed (" + describe(removed) +
+                    "); asking it to quit";
+        return d;
+    }
+    d.action = HeldTrayAction::Explain;
+    for (const auto* t : other) d.pids.push_back(t->pid);
+    d.message = "The " + tray_name + " of another fairyfly installation is already running (" + describe(other) +
+                "). Quit it from its icon in the notification area (or uninstall that fairyfly), then start this one again.";
+    return d;
 }
 
-bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim&, const std::string&, const std::string& title,
+bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, const std::string& own_exe, const std::string& title,
                 const std::string& tray_name) {
     if (guard.acquire()) return true;
+    const HeldTray held = claim.instances ? decide_held_tray(claim.instances->running(), own_exe, claim.exists, tray_name) : HeldTray{};
+    if (held.action == HeldTrayAction::Explain) {
+        spdlog::warn("tray: {}", held.message);
+        spdlog::default_logger()->flush();
+        host.message_box(title, held.message);
+        return false;
+    }
+    if (held.action == HeldTrayAction::TakeOver) {
+        spdlog::warn("tray: {}", held.message);
+        for (const auto pid : held.pids) claim.instances->ask_to_quit(pid);
+        const auto deadline = std::chrono::steady_clock::now() + claim.takeover_wait;
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (guard.acquire()) {
+                spdlog::info("tray: the {} of the removed installation has quit; this one runs now", tray_name);
+                return true;
+            }
+            std::this_thread::sleep_for(claim.poll);
+        }
+        if (guard.acquire()) return true;
+        std::string pids;
+        for (const auto pid : held.pids) pids += (pids.empty() ? "" : ", ") + std::to_string(pid);
+        const std::string text = "The " + tray_name + " of a fairyfly whose files were removed is still running and did not quit "
+                                 "when asked (fairyfly.exe, PID " + pids + "). End it in Task Manager (Details), then start "
+                                 "fairyfly again.";
+        spdlog::warn("tray: {}", text);
+        spdlog::default_logger()->flush();
+        host.message_box(title, text);
+        return false;
+    }
     if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
     return false;
 }

@@ -36,9 +36,10 @@ inline std::wstring comparable_path(std::wstring path) {
 
 inline StarterCommand parse_starter_command(std::vector<std::wstring> args, const std::wstring& own_folder) {
     StarterCommand command;
-    if (!args.empty() && (args[0] == L"--close" || args[0] == L"--uninstall")) {
+    if (!args.empty() && args.size() <= 2 && (args[0] == L"--close" || args[0] == L"--uninstall")) {
         command.mode = args[0] == L"--close" ? StarterMode::Close : StarterMode::Uninstall;
-        command.folder = own_folder;
+        command.folder = args.size() == 2 ? args[1] : own_folder;
+        while (command.folder.size() > 1 && (command.folder.back() == L'\\' || command.folder.back() == L'/')) command.folder.pop_back();
         return command;
     }
     command.args = std::move(args);
@@ -46,7 +47,14 @@ inline StarterCommand parse_starter_command(std::vector<std::wstring> args, cons
 }
 
 /// fairyfly.exe or fairyfly-tray.exe directly in `folder`: what the installer replaces.
-inline bool is_installed_program(const std::wstring&, const std::wstring&) { return true; }
+inline bool is_installed_program(const std::wstring& image, const std::wstring& folder) {
+    if (image.empty() || folder.empty()) return false;
+    const std::wstring path = comparable_path(image);
+    const std::wstring dir = comparable_path(folder);
+    for (const wchar_t* name : {L"fairyfly.exe", L"fairyfly-tray.exe"})
+        if (path == dir + L"\\" + name) return true;
+    return false;
+}
 
 struct ProcessEntry {
     std::uint32_t pid = 0;
