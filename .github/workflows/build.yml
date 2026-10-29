@@ -279,5 +279,6 @@ jobs:
       run: ./packaging/msix/tests/Test-AppxManifest.ps1
       shell: pwsh
     - name: MSIX layout checks (payload = the MSI's, logo assets)
+      if: success() || failure()
       run: ./packaging/msix/tests/Test-MsixLayout.ps1
       shell: pwsh
