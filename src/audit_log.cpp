@@ -184,8 +184,9 @@ AuditConfig resolve_config(const GetEnvFn& getenv_fn, bool cli_no_audit, bool cl
     } else if (file_settings.file && !file_settings.file->empty()) {
         config.file = text::utf8_path(*file_settings.file);
     } else {
-        const std::filesystem::path data = env.data_dir();
-        config.file = (data.has_parent_path() ? data : std::filesystem::path(".fairyfly")) / "audit" / monthly_file_name(now);
+        // no data directory (no profile): no file, so appending fails and a required trail fails closed
+        if (const std::filesystem::path data = env.data_dir(); !data.empty())
+            config.file = data / "audit" / monthly_file_name(now);
     }
     return config;
 }

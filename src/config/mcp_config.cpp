@@ -578,7 +578,8 @@ ConfigPath resolve_config_path(const std::string& flag_path, const EnvLookup& en
         out.path = text::utf8_path(from_env); out.source = Source::Env; out.explicit_request = true;
         return out;
     }
-    out.path = Environment(env).data_dir() / "mcp.yaml";
+    // no data directory: no default file (never a relative "mcp.yaml" in the current directory)
+    if (const auto data = Environment(env).data_dir(); !data.empty()) out.path = data / "mcp.yaml";
     out.source = Source::Default;
     return out;
 }

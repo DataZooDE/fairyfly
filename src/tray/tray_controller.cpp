@@ -75,7 +75,8 @@ std::string console_command_line(const std::string& exe, const std::vector<std::
 }
 
 std::filesystem::path log_directory(const std::function<std::string(const char*)>& env) {
-    return config::Environment(env).data_dir() / "logs";
+    const auto data = config::Environment(env).data_dir();
+    return data.empty() ? std::filesystem::path() : data / "logs";   // no profile: no log file (never a relative one)
 }
 
 // ---- Controller ----------------------------------------------------------------------------------

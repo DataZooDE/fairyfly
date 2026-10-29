@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 
 #include "include/com/utf8.h"
+#include "include/config/data_dir.h"
 #include "include/config/mcp_config.h"
 #include "include/packaging.h"
 #include "include/system/process_probe.h"
@@ -678,6 +679,7 @@ void clear_tray_child_marker() {
 
 std::string route_logging_to_file(const std::string& file_name) {
     const auto dir = log_directory(config::process_env());
+    if (dir.empty()) return {};   // no data directory: the logger stays as it is
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     const auto file = dir / file_name;
@@ -687,6 +689,9 @@ std::string route_logging_to_file(const std::string& file_name) {
         logger->set_level(spdlog::level::info);
         logger->flush_on(spdlog::level::warn);
         spdlog::set_default_logger(logger);
+        // the start's data directory move (stderr has nobody reading it in a tray): failures and every conflict
+        if (const auto moved = config::last_migration())
+            for (const auto& warning : config::migration_warnings(*moved)) spdlog::warn("{}", warning);
     } catch (const std::exception&) {
     }
     return file.string();

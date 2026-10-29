@@ -3,6 +3,12 @@
 #include "include/text/utf8.h"
 
 #include <cstdlib>
+#include <string_view>
+#ifdef _WIN32
+#include <windows.h>
+#include <objbase.h>
+#include <shlobj.h>
+#endif
 #include <system_error>
 #include <utility>
 
@@ -29,6 +35,26 @@ std::string read_process_variable(const char* name) {
 #endif
 }
 
+/// The Profile known folder: what a process started without USERPROFILE (a service's child, a stripped environment)
+/// uses for the data directory instead of a temporary or relative one.
+std::string known_profile_folder() {
+#ifdef _WIN32
+    PWSTR path = nullptr;
+    std::string out;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Profile, 0, nullptr, &path)) && path) {
+        try {
+            out = text::wide_to_utf8(path);
+        } catch (const std::exception&) {
+            out.clear();
+        }
+    }
+    if (path) CoTaskMemFree(path);
+    return out;
+#else
+    return {};
+#endif
+}
+
 }  // namespace
 
 std::string normalized(std::string_view value) { return utils::lower_ascii(utils::trim(value)); }
@@ -46,7 +72,11 @@ bool parse_off(std::string_view value) {
 Environment::Environment(EnvLookup lookup) : lookup_(std::move(lookup)) {}
 
 const Environment& Environment::process() {
-    static const Environment instance(read_process_variable);
+    static const Environment instance([](const char* name) {
+        std::string value = read_process_variable(name);
+        if (value.empty() && std::string_view(name) == env::kUserProfile) value = known_profile_folder();
+        return value;
+    });
     return instance;
 }
 
@@ -65,9 +95,8 @@ std::filesystem::path Environment::data_dir() const {
     // the user profile: not virtualized for a Microsoft Store fairyfly on any Windows version (AppData is on 10)
     for (const char* home : {env::kUserProfile, env::kHome})
         if (const std::string dir = get(home); !dir.empty()) return text::utf8_path(dir) / ".fairyfly";
-    std::error_code ec;
-    auto tmp = std::filesystem::temp_directory_path(ec);
-    return ec ? std::filesystem::path(".fairyfly") : tmp / "fairyfly";
+    // never the temp directory or a relative path: without a profile there is no data directory (fail closed)
+    return {};
 }
 
 bool Environment::data_dir_overridden() const { return !get(env::kDataDir).empty(); }

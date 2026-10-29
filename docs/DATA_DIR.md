@@ -23,7 +23,11 @@ Not in it: SAP credentials and MCP access tokens (Windows Credential Manager, `f
 the trays' settings (`HKCU\Software\DataZoo\fairyfly\tray`).
 
 `FAIRYFLY_DATA_DIR` moves the whole folder (tests, a shared machine with a different layout). With it set, nothing is
-moved from the old location. Without `USERPROFILE`, `HOME\.fairyfly` is used, and without either `%TEMP%\fairyfly`.
+moved from the old location. A process started without `USERPROFILE` (a stripped environment) reads the profile from
+Windows (the Profile known folder); elsewhere `$HOME/.fairyfly` is used. fairyfly never falls back to the temp folder
+or the current directory: without a profile there is no data directory, the audit trail, the logs, saved connections
+and the pairing are not written, `--audit-required` fails with `AUDIT_UNAVAILABLE` and `fairyfly doctor` reports
+`data_dir` as failed (`DATA_DIR_UNAVAILABLE`).
 In code, `config::Environment::data_dir()` is the one root every path derives from (`src/include/config/environment.h`).
 
 ## Why not %LOCALAPPDATA%
@@ -47,33 +51,57 @@ fairyfly sets no permissions of its own, then and now.
 The first start of a fairyfly that has this change (any command, the tray, `fairyfly mcp`) moves the old data before it
 opens anything in the folder (`config::migrate_process_data_dir`, `src/config/data_dir.cpp`):
 
-1. When `%USERPROFILE%\.fairyfly\.data-dir.json` exists, there is nothing to do. This is every start after the first.
+The old folders are `%LOCALAPPDATA%\fairyfly` and, for the Store package, also its private copy
+`%LOCALAPPDATA%\Packages\<family>\LocalCache\Local\fairyfly` (a Store fairyfly on Windows 10 that ran before had its
+data there; only a packaged fairyfly can see it). An old folder is *pending* while it exists and has no note
+`MOVED-TO-USERPROFILE-.fairyfly.txt`. The note is written only after the folder was merged completely.
+
+1. When `%USERPROFILE%\.fairyfly\.data-dir.json` exists and no old folder is pending, there is nothing to do. This is
+   every start after the first. When an MSI fairyfly moved `%LOCALAPPDATA%\fairyfly` first and the Store package's
+   private copy is still pending, the Store fairyfly's first start merges it then (and the other way round).
 2. Otherwise it takes a per-user lock (the tray and the CLI often start together; the others wait up to 30 s, then go
-   on with the new folder and print a warning) and checks again.
-3. The old folders: `%LOCALAPPDATA%\fairyfly`, and for the Store package also its private copy
-   `%LOCALAPPDATA%\Packages\<family>\LocalCache\Local\fairyfly` (a Store fairyfly on Windows 10 that ran before had its
-   data there). A folder with the note `MOVED-TO-USERPROFILE-.fairyfly.txt` was moved already and is skipped.
-4. No old folder: the new folder is created with its marker.
-5. The new folder does not exist: the old folders are copied into `%USERPROFILE%\.fairyfly.migrating`, the marker is
-   written, and that folder is renamed to `.fairyfly`. A leftover `.fairyfly.migrating` from an interrupted move is
-   deleted first, so an interrupted move simply starts over. Then the old folders are merged once more, for records an
-   older fairyfly appended while they were copied.
-6. The new folder exists without the marker (made by hand, or by another program): the old folders are merged into it.
-7. Each old folder gets the note `MOVED-TO-USERPROFILE-.fairyfly.txt`. fairyfly never deletes the old data; delete it
-   yourself once you have checked the new folder.
+   on and print a warning) and checks again.
+3. Nothing pending: the new folder is created with its marker.
+4. The new folder does not exist: the pending folders are copied into `%USERPROFILE%\.fairyfly.migrating`, and that
+   folder is renamed to `.fairyfly`. A leftover `.fairyfly.migrating` from an interrupted move is deleted first, so an
+   interrupted move simply starts over. Then the old folders are merged once more, for records an older fairyfly
+   appended while they were copied.
+5. The new folder exists: the pending folders are merged into it.
+6. The marker records each merged folder and every conflict, then each merged folder gets the note. fairyfly never
+   deletes the old data; delete it yourself once you have checked the new folder.
 
-Merging never overwrites anything. A file the new folder lacks is copied (to a temporary name, then renamed). An audit
-trail file (`*.jsonl`) that exists on both sides gets the records it lacks appended: no record is lost and none is
-duplicated, also when the same folder is seen twice (a Store process sees `%LOCALAPPDATA%\fairyfly` merged with its
-private copy) or when a move is repeated. A last line without a line end (a record still being written) is not copied.
-Any other file that differs keeps the copy found first (`%LOCALAPPDATA%\fairyfly` before the package copy).
+A failure at any step leaves the old folders without the note, so the next start tries again; merging twice changes
+nothing.
 
-When the new folder cannot be written, the old folders stay untouched, fairyfly prints a warning to stderr and tries
-again at the next start. With a required audit trail (`--audit-required`, `FAIRYFLY_AUDIT=required`,
-`audit.required: true`) the command then fails closed with `AUDIT_UNAVAILABLE`, naming the folder and the reason.
+**Merging** never overwrites, with one exception, the pairing:
 
-An older fairyfly that still runs (another installation) keeps writing to `%LOCALAPPDATA%\fairyfly`. Records it writes
-after the move are not moved; update or remove it.
+- A file the new folder lacks is copied with its modification time (to a temporary name first, then published
+  without replacing anything).
+- An audit trail file (`*.jsonl`) gets the complete records it lacks appended, one append-only write per record. A
+  fairyfly writing to the same file at that moment loses nothing, no record is duplicated (also when the same folder
+  is seen twice: a Store process sees `%LOCALAPPDATA%\fairyfly` merged with its private copy), and a last line without
+  a line end in an old folder (a record still being written) is not copied. When the file in the new folder ends in a
+  cut-off line, the records go to `<month>.migrated.jsonl` next to it instead: fairyfly never writes after a line it
+  did not write.
+- `link\state.json` (the pairing): when the old folders hold two different ones, the most recently modified one is
+  used. The other stays where it was.
+- Any other file that differs keeps the copy found first (`%LOCALAPPDATA%\fairyfly` before the package copy, the new
+  folder before both).
+
+Every conflict is printed as a warning (stderr, or the tray's log), recorded in `.data-dir.json`, and shown by
+`fairyfly doctor` (check `data_dir`, warn, with the file names and both folders). `fairyfly link status` adds
+`data_dir_conflicts` and a `warning` when it concerns the pairing.
+
+**When the move fails** (the new folder cannot be written) or another fairyfly holds the lock for longer than 30 s,
+the old folders stay untouched, fairyfly prints a warning and tries again at the next start. For that run the link
+uses the pairing from `%LOCALAPPDATA%\fairyfly\link\state.json` when the new folder has none, so it does not look
+unpaired; it logs that. With a required audit trail (`--audit-required`, `FAIRYFLY_AUDIT=required`,
+`audit.required: true`) the command fails closed with `AUDIT_UNAVAILABLE`, naming the folder and the reason.
+
+**An older fairyfly still running** (another installation that was not updated) keeps writing to
+`%LOCALAPPDATA%\fairyfly`. Records it writes after the old folder got its note are not moved; update or remove it.
+An MSI upgrade closes this installation's trays before it replaces the files (#127,
+`fairyfly-tray.exe --close`), so this concerns a second installation only.
 
 ## Uninstall
 

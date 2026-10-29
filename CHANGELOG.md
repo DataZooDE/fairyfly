@@ -19,6 +19,13 @@
   interrupted move starts over, an existing `%USERPROFILE%\.fairyfly` is never overwritten. A Store fairyfly also
   moves its package's private copy of the old folder. If the new folder cannot be written, the old data stays as it
   is and `--audit-required` fails closed with `AUDIT_UNAVAILABLE`. Details: [docs/DATA_DIR.md](docs/DATA_DIR.md).
+- The move is retried until every old folder is merged (a Store package's private copy is merged at its first
+  packaged start even when an MSI fairyfly moved first). The newest `link\state.json` wins when the old folders hold
+  two pairings. Conflicts are printed, logged by the trays, recorded in `.data-dir.json`, and shown by `fairyfly doctor`
+  (`data_dir`) and `link status` (`data_dir_conflicts`). After a failed move the link uses the old pairing for that run.
+- No temp-folder or current-directory fallback for the data directory or the saved connections any more: without a
+  profile (and, on Windows, without the Profile known folder) they fail closed (`DATA_DIR_UNAVAILABLE`,
+  `AUDIT_UNAVAILABLE` when the audit trail is required).
 - MSIX manifest: `virtualization:ExcludedDirectories` and the restricted capability `unvirtualizedResources` are
   removed (nothing fairyfly writes is under AppData any more); `runFullTrust` is the only capability left.
 - The MSI's uninstall cleanup (`fairyfly-tray.exe --uninstall`) still removes registry values only, never the data

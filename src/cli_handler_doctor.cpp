@@ -2,6 +2,8 @@
 #include "include/cli_handler.h"
 #include "include/doctor_checks.h"
 #include "include/automation_engine.h"
+#include "include/config/data_dir.h"
+#include "include/text/utf8.h"
 
 #include <spdlog/spdlog.h>
 
@@ -23,6 +25,12 @@ Result CommandHandler::handle_doctor()
     checks.push_back({"sapgui_processes", "info", "Non-Windows environment, process check skipped"});
     checks.push_back({"client_registry", "info", "Non-Windows environment, registry check skipped"});
 #endif
+    {
+        const auto data = config::Environment::process().data_dir();
+        const auto migration = config::last_migration();
+        checks.push_back(doctor::judge_data_dir(text::path_utf8(data), migration && !migration->ok() ? migration->error : std::string(),
+                                                config::recorded_conflicts(data)));
+    }
     refresh_sap_gui();  // what SAP Logon is running now (no second lookup inside an MCP call that did it)
     const EngineStatus engine = engine_ ? engine_->engine_status() : EngineStatus{false, true, "no automation engine"};
     checks.push_back(doctor::judge_engine(engine.available, engine.sap_logon_running, engine.detail));

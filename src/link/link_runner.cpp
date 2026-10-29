@@ -290,7 +290,16 @@ std::optional<Result> claim_link_run(const std::string& path, std::unique_ptr<tr
 }
 
 std::string default_state_path() {
-    return (config::Environment::process().data_dir() / "link" / "state.json").string();
+    const auto migration = config::last_migration();
+    const auto path = config::default_pairing_file(config::Environment::process(), migration);
+    if (migration && !migration->ok() && !path.empty() && path.parent_path().parent_path() != config::Environment::process().data_dir()) {
+        static std::once_flag logged;
+        std::call_once(logged, [&] {
+            spdlog::warn("the data directory could not be moved ({}); the pairing is used from {} for this run", migration->error,
+                         text::path_utf8(path));
+        });
+    }
+    return path.string();
 }
 
 Result link_pair(const LinkOptions& options, const PairIo& io) {
@@ -370,6 +379,19 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     }
 }
 
+/// The data directory move found two different pairings (docs/DATA_DIR.md): say which one is used and where the other
+/// one is, never silently.
+static void add_pairing_conflicts(Result& r) {
+    json listed = json::array();
+    for (const auto& c : config::recorded_conflicts(config::Environment::process().data_dir()))
+        if (c.path.rfind("link/", 0) == 0) listed.push_back(config::to_json(c));
+    if (listed.empty()) return;
+    r.data["data_dir_conflicts"] = listed;
+    r.data["warning"] = "two different pairings were found when the data directory was moved; " +
+                        listed[0]["path"].get<std::string>() + " from " + listed[0]["kept"].get<std::string>() + " is used (" +
+                        listed[0]["reason"].get<std::string>() + "), the other one is still in " + listed[0]["other"].get<std::string>();
+}
+
 Result link_status(const LinkOptions& o) {
     if (auto refused = state_guard(o)) return *refused;
     try {
@@ -391,6 +413,7 @@ Result link_status(const LinkOptions& o) {
         // the audit trail this desktop runs under, as the running link last wrote it
         const bool running = live.link != state::kNotRunning;
         r.data["audit_trail"] = running && status.contains("trail") ? trail::status_text(status["trail"]) : std::string("off");
+        add_pairing_conflicts(r);
         return r;
     } catch (const std::exception&) {
         Result r;

@@ -118,6 +118,10 @@ public:
         namespace fs = std::filesystem;
         // the data directory is per user (and outside AppData, so a Store fairyfly's elevated child finds the plan on
         // Windows 10 too). The files are named randomly by this (unelevated) process.
+        if (data_dir().empty()) {
+            run.error = "no data directory for the plan file: neither FAIRYFLY_DATA_DIR nor USERPROFILE is set";
+            return run;
+        }
         const fs::path dir = win::to_path(data_dir()) / "run";
         std::error_code ec;
         fs::create_directories(dir, ec);

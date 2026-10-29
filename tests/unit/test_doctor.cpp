@@ -45,6 +45,7 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
             if (name == "client_registry") has_registry = true;
             if (name == "com_engine") has_com = true;
             if (name == "active_sessions") sessions = check;
+            if (name == "data_dir") CHECK(check["status"] == "pass");   // the test run's own data directory
         }
 
         REQUIRE(has_desktop);

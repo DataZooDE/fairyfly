@@ -448,7 +448,7 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
     // there, before anything (the audit trail first) opens it. A failure leaves the old folder alone; the next start
     // tries again (docs/DATA_DIR.md).
     const config::MigrationResult moved = config::migrate_process_data_dir();
-    if (!moved.ok()) std::cerr << "fairyfly: warning: " << moved.error << std::endl;
+    for (const auto& warning : config::migration_warnings(moved)) std::cerr << "fairyfly: warning: " << warning << std::endl;
 
     // Audit trail: flags are pre-scanned so the sink exists before parsing (parse errors are audited too).
     bool cli_no_audit = false, cli_required = false;
