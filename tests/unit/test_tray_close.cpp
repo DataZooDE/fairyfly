@@ -3,6 +3,9 @@
 // Store tray. Pure: no process is started or ended here.
 #include <catch2/catch_test_macros.hpp>
 
+#include <map>
+#include <optional>
+
 #include "include/tray/tray_close.h"
 
 using namespace fairyfly::tray::closing;
@@ -40,15 +43,55 @@ TEST_CASE("tray starter: only this installation's fairyfly.exe and fairyfly-tray
     CHECK_FALSE(is_installed_program(kFolder + L"2\\fairyfly.exe", kFolder));
     CHECK_FALSE(is_installed_program(L"", kFolder));
     CHECK_FALSE(is_installed_program(kFolder + L"\\fairyfly.exe", L""));
+}
 
-    const std::vector<ProcessEntry> processes = {
+namespace {
+/// A process as the close step holds it: the pid it was opened by, the program it really is, and which open it was.
+struct FakeProcess {
+    std::uint32_t pid = 0;
+    std::wstring image;
+    int handle = 0;
+};
+const std::wstring kStore = L"C:\\Program Files\\WindowsApps\\DataZoo.fairyfly_2026.1029.0.0_x64__73q587949tsjt\\fairyfly.exe";
+}  // namespace
+
+TEST_CASE("tray starter: the processes kept are the ones opened and checked, never reopened by pid", "[tray][close]") {
+    // what the processes are when they are opened (a moment after the enumeration)
+    std::map<std::uint32_t, std::wstring> now = {
         {2892, kFolder + L"\\fairyfly.exe"},        // the link tray
         {3100, kFolder + L"\\fairyfly.exe"},        // `fairyfly mcp` for a desktop assistant
         {3200, kFolder + L"\\fairyfly-tray.exe"},   // the installed starter itself (an older MSI's close step)
-        {4711, L"C:\\Program Files\\WindowsApps\\DataZoo.fairyfly_2026.1029.0.0_x64__73q587949tsjt\\fairyfly.exe"},
-        {5000, L""},                                 // not readable: not ours to end
+        {4711, kStore},
         {6000, L"C:\\Windows\\explorer.exe"},
     };
-    CHECK(processes_to_close(processes, kFolder, 3200) == std::vector<std::uint32_t>{2892, 3100});
-    CHECK(processes_to_close(processes, kFolder, 1) == std::vector<std::uint32_t>{2892, 3100, 3200});
+    int opened = 0;
+    std::vector<std::uint32_t> opens;
+    const auto open = [&](std::uint32_t pid) -> std::optional<FakeProcess> {
+        opens.push_back(pid);
+        const auto it = now.find(pid);
+        if (it == now.end()) return std::nullopt;   // ended, or not ours to open
+        return FakeProcess{pid, it->second, ++opened};
+    };
+    const auto image_of = [](const FakeProcess& p) { return p.image; };
+    const std::vector<ProcessEntry> enumerated = {{2892, L""}, {3100, L""}, {3200, L""}, {4711, L""}, {5000, L""}, {6000, L""}};
+    const auto kept = open_installed<FakeProcess>(enumerated, kFolder, 3200, open, image_of);
+    REQUIRE(kept.size() == 2);
+    CHECK(kept[0].pid == 2892);
+    CHECK(kept[1].pid == 3100);
+    // every pid is opened once, and what is kept is that open process (its handle), not a pid to open again
+    CHECK(opens == std::vector<std::uint32_t>{2892, 3100, 4711, 5000, 6000});
+    CHECK(kept[0].handle == 1);
+    CHECK(kept[1].handle == 2);
+}
+
+TEST_CASE("tray starter: a pid reused by another program after the enumeration is not closed", "[tray][close]") {
+    // enumerated as this installation's fairyfly.exe; by the time it is opened the pid belongs to notepad
+    const std::vector<ProcessEntry> enumerated = {{2892, kFolder + L"\\fairyfly.exe"}, {3100, kFolder + L"\\fairyfly.exe"}};
+    const auto open = [](std::uint32_t pid) -> std::optional<FakeProcess> {
+        if (pid == 2892) return FakeProcess{pid, L"C:\\Windows\\notepad.exe", 1};
+        return FakeProcess{pid, kFolder + L"\\fairyfly.exe", 2};
+    };
+    const auto kept = open_installed<FakeProcess>(enumerated, kFolder, 1, open, [](const FakeProcess& p) { return p.image; });
+    REQUIRE(kept.size() == 1);
+    CHECK(kept[0].pid == 3100);
 }

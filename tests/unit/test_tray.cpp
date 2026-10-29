@@ -1835,3 +1835,34 @@ TEST_CASE("run_with_tray: the MCP tray takes over from a removed installation's 
     CHECK(f.runner.ran);
     CHECK(instances.asked == std::vector<std::uint32_t>{2892});
 }
+
+TEST_CASE("run_link_with_tray: two trays taking over at once: the one that loses opens the winner's menu", "[tray][link_tray][held]") {
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    f.link.current = paired("connected");
+    FakeGuard guard;
+    guard.other_running = true;
+    // the orphan quits when asked, but another tray of this installation started at the same moment wins the guard
+    struct RacingInstances : FakeInstances {
+        bool ask_to_quit(std::uint32_t pid) override {
+            asked.push_back(pid);
+            trays = {{5120, kMsixExe}};   // the winner's window; the guard stays held (by it)
+            return true;
+        }
+    } instances;
+    instances.trays = {{2892, kMsiExe}};
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsixExe});
+    services.claim.takeover_wait = std::chrono::milliseconds(200);
+    services.claim.poll = std::chrono::milliseconds(1);
+    bool ran = false;
+    const int code = run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths);
+    CHECK(code == 0);
+    CHECK_FALSE(ran);
+    REQUIRE(f.host.boxes.size() == 1);   // the fake host cannot open a menu: the "already running" fallback
+    CHECK(f.host.boxes[0].find("already running") != std::string::npos);
+    CHECK(f.host.boxes[0].find("Task Manager") == std::string::npos);
+}

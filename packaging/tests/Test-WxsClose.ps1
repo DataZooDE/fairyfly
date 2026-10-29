@@ -10,8 +10,9 @@
     installed starter is the old version's, so a fix in the starter would only help one release later;
   - name the install folder ([INSTALLFOLDER]): the temporary copy of the starter does not run from it, and only
     fairyfly.exe and fairyfly-tray.exe from that folder are ended (a Microsoft Store fairyfly.exe keeps running);
-  - run before InstallValidate on install and upgrade (--close) and on uninstall (--uninstall), never on the removal
-    of the old product inside an upgrade (its files are already closed).
+  - run before InstallValidate on install and upgrade (--close, `NOT Installed`) and on uninstall (--uninstall), never
+    on a repair or modify (no file of the same version is replaced, and a silent repair would not start the trays
+    again) nor on the removal of the old product inside an upgrade (its files are already closed).
   util:CloseApplication is not used: it finds processes by file name only and would also end the Store package's
   fairyfly.exe (the migration from the MSI to the Store is the case this protects).
 #>
@@ -52,7 +53,9 @@ $uninstall = Scheduled 'UninstallCleanup'
 Check ($close -and $close.GetAttribute('Before') -eq 'InstallValidate') 'CloseTrays is scheduled before InstallValidate'
 Check ($uninstall -and $uninstall.GetAttribute('Before') -eq 'InstallValidate') 'UninstallCleanup is scheduled before InstallValidate'
 if ($close) {
-    Check ($close.GetAttribute('Condition') -eq 'NOT (REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE)') "CloseTrays runs on install, upgrade and repair: '$($close.GetAttribute('Condition'))'"
+    # a first install or a major upgrade (the new product is not installed yet); not a repair or modify, which replaces
+    # no file of the same version and would leave the trays closed (a silent repair never starts them again)
+    Check ($close.GetAttribute('Condition') -eq 'NOT Installed') "CloseTrays runs on install and upgrade only: '$($close.GetAttribute('Condition'))'"
 }
 if ($uninstall) {
     Check ($uninstall.GetAttribute('Condition') -eq 'REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE') "UninstallCleanup runs on an uninstall only: '$($uninstall.GetAttribute('Condition'))'"

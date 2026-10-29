@@ -58,11 +58,26 @@ inline bool is_installed_program(const std::wstring& image, const std::wstring& 
 
 struct ProcessEntry {
     std::uint32_t pid = 0;
-    std::wstring image;   ///< full path; empty when it could not be read
+    std::wstring image;   ///< as enumerated (may be empty or stale: a pid can be reused at any moment)
 };
 
 /// The processes to close before `folder`'s files are replaced: this installation's fairyfly.exe and fairyfly-tray.exe,
-/// never `self`.
+/// never `self`. Each enumerated pid is opened ONCE (`open(pid)` -> optional<Process>), its executable is read from that
+/// open process (`image_of(process)`), and the processes kept are the ones the caller then waits on and terminates:
+/// nothing is reopened by pid, so a pid reused by another program between enumeration and termination is never
+/// touched (an open handle keeps its process, not its pid).
+template <class Process, class Open, class ImageOf>
+std::vector<Process> open_installed(const std::vector<ProcessEntry>& enumerated, const std::wstring& folder, std::uint32_t self,
+                                    Open open, ImageOf image_of) {
+    std::vector<Process> out;
+    for (const auto& e : enumerated) {
+        if (e.pid == self || !is_installed_program(e.image, folder)) continue;
+        if (auto p = open(e.pid)) out.push_back(std::move(*p));
+    }
+    (void)image_of;
+    return out;
+}
+
 inline std::vector<std::uint32_t> processes_to_close(const std::vector<ProcessEntry>& processes, const std::wstring& folder,
                                                      std::uint32_t self) {
     std::vector<std::uint32_t> out;

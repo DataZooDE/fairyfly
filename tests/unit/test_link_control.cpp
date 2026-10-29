@@ -239,3 +239,18 @@ TEST_CASE("link control: the status names the process that wrote it", "[link][li
     // this test process runs, so the status it wrote reads as written
     CHECK(describe(s, s["updated"].get<std::int64_t>() + 1, fairyfly::system::os_process_probe()) == "connected");
 }
+
+TEST_CASE("link control: the start time decides who the process is; the executable only when a start time is missing", "[link][liveness]") {
+    const std::int64_t now = 1761750000;
+    FakeProbe probe;
+    // the same process (same start time) whose exe was renamed or replaced in place (`update apply`): still the link
+    probe.running[2892] = {"C:\\Users\\ada\\AppData\\Local\\Programs\\fairyfly\\fairyfly.exe.old", 1761700000};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
+    // no start time on one side: the executable decides
+    probe.running[2892] = {"C:\\Windows\\System32\\notepad.exe", 0};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "not running");
+    probe.running[2892] = {"C:\\Windows\\System32\\notepad.exe", 1761740000};
+    CHECK(describe(written_status("connected", now - 5, 2892, kLinkExe, 0), now, probe) == "not running");
+    probe.running[2892] = {kLinkExe, 0};
+    CHECK(describe(written_status("connected", now - 5), now, probe) == "connected");
+}
