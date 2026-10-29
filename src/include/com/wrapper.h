@@ -404,12 +404,17 @@ public:
     IDispatch* get_com_object() const { return dispatch_; }
 };
 
-/// COM-based SAP GUI application wrapper (root object)
+/// Enter this thread's single-threaded apartment once; it is left only when the thread ends. ComGuiApplication::create
+/// calls it; nothing in fairyfly leaves (CoUninitialize) the apartment of a SAP GUI thread. Throws
+/// ComInitializationException when the thread already is in the multithreaded apartment.
+void ensure_thread_apartment();
+/// Tests: how often this thread entered its apartment through ensure_thread_apartment (0 or 1).
+int thread_apartment_entries();
+
+/// COM-based SAP GUI application wrapper (root object). Does not own the thread's COM apartment.
 class ComGuiApplication : public SapGuiObject {
-    int com_uninit_count_ = 0;
 public:
-    explicit ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count = 0);
-    explicit ComGuiApplication(IDispatchPtr sap_gui_app, bool owns_com_apartment);
+    explicit ComGuiApplication(IDispatchPtr sap_gui_app);
     ComGuiApplication(const ComGuiApplication&) = delete;
     ComGuiApplication& operator=(const ComGuiApplication&) = delete;
 
@@ -467,7 +472,6 @@ public:
     /// Get raw COM application object - deprecated, use get_dispatch()
     IDispatch* get_app_object() const { return dispatch_; }
 
-    ~ComGuiApplication() override;
 };
 
 /// COM identity of two interface pointers (equal IUnknown); null equals only null.

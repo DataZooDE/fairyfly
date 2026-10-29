@@ -55,10 +55,12 @@ public:
     /// Without a provider every call of a token that has a system allowlist is denied SYSTEM_UNKNOWN.
     using SapFactsProvider = std::function<std::optional<audit::SapFacts>(std::optional<int> connection)>;
     void set_sap_facts_provider(SapFactsProvider provider) { facts_provider_ = std::move(provider); }
-    /// Runs first in every call_tool, before any check that reads SAP: wire it to CommandHandler::refresh_sap_gui so
-    /// the checks see the SAP Logon running now (it may have started or restarted since the last call). Throwing is
+    /// Runs first in every call_tool, before any check that reads SAP: wire it to
+    /// CommandHandler::refresh_sap_gui_for_call so the checks see the SAP Logon running now (it may have started or
+    /// restarted since the last call). The returned token is held until the call (a whole gui_batch included) ends;
+    /// while it is held the command registry does not look SAP Logon up again: one lookup per call. Throwing is
     /// logged and ignored.
-    using BeforeCall = std::function<void()>;
+    using BeforeCall = std::function<std::shared_ptr<void>()>;
     void set_before_call(BeforeCall hook) { before_call_ = std::move(hook); }
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }

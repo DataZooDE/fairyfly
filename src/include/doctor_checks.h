@@ -17,6 +17,7 @@ struct Check {
     std::string message;
     std::string details;
     std::string remediation;
+    std::string code;  ///< the error code a command would answer for the same cause (e.g. SAP_LOGON_NOT_RUNNING)
 };
 
 nlohmann::json to_json(const Check& check);

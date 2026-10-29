@@ -38,6 +38,7 @@ private:
     ApplicationSource source_;
     ComGuiApplicationPtr app_;
     EngineStatus status_{false, false, "SAP Logon has not been looked up yet"};
+    std::uint64_t generation_ = 0;  ///< ++ at every adopted SAP Logon
     ComGuiConnectionPtr current_connection_;
     ComGuiSessionPtr current_session_;
 
@@ -98,6 +99,7 @@ public:
 
     void refresh_application() override;
     EngineStatus engine_status() const override { return status_; }
+    std::uint64_t application_generation() const override { return generation_; }
 
     ~ComAutomationEngine() override = default;
 

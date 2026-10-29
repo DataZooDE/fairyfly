@@ -1446,7 +1446,7 @@ TEST_CASE("Dispatcher: SESSION_CHANGED from an action is reported, never retried
     CHECK(f.calls.size() == 1);   // the key was sent once; no session list, no attach, no second send
 }
 
-TEST_CASE("Dispatcher: SAP Logon is looked up again before each call, a failed lookup does not stop it",
+TEST_CASE("Dispatcher: SAP Logon is looked up once per call and per gui_batch, a failed lookup does not stop it",
           "[mcp][dispatcher][sap-logon]") {
     Fixture f;
     std::vector<std::string> order;
@@ -1456,12 +1456,23 @@ TEST_CASE("Dispatcher: SAP Logon is looked up again before each call, a failed l
     };
     auto d = f.make();
     int lookups = 0;
-    d.set_before_call([&] {
+    d.set_before_call([&]() -> std::shared_ptr<void> {
         order.push_back("lookup");
         if (++lookups == 2) throw std::runtime_error("COM said no");
+        return std::shared_ptr<int>(new int(0), [&order](int* token) {
+            delete token;
+            order.push_back("released");
+        });
     });
     d.call_tool("gui_doctor", json::object(), ctx_with_id(1));
     const auto second = d.call_tool("gui_doctor", json::object(), ctx_with_id(2));
-    CHECK(order == std::vector<std::string>{"lookup", "call", "lookup", "call"});
     CHECK_FALSE(second.is_error);
+    CHECK(order == std::vector<std::string>{"lookup", "call", "released", "lookup", "call"});
+
+    order.clear();
+    const auto batch = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}},
+                                                                          {{"tool", "gui_screen_read"}}})},
+                                                 {"stop_on_error", false}}, ctx_with_id(3));
+    INFO(text_of(batch));
+    CHECK(order == std::vector<std::string>{"lookup", "call", "call", "released"});
 }

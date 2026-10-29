@@ -125,13 +125,17 @@ void ComAutomationEngine::refresh_application() {
     }
     status_ = {true, true, ""};
     if (app_ && app_->same_object(*fresh)) return;  // the same SAP Logon: keep the bound session (fresh is released)
-    if (app_) spdlog::info("SAP Logon's scripting engine changed (SAP Logon was restarted); dropping the old one");
+    if (app_)
+        spdlog::info("SAP GUI scripting engine changed (SAP Logon was restarted); dropping the old one and its session");
+    else
+        spdlog::info("SAP GUI scripting engine found (SAP Logon is running)");
     drop_application();
     adopt_application(std::move(fresh));
 }
 
 void ComAutomationEngine::adopt_application(ComGuiApplicationPtr app) {
     app_ = std::move(app);
+    ++generation_;
     connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
     try {
         // Bind the first session when there is one (as a new process would).

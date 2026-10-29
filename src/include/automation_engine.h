@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include "selection_input_guard.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,6 +35,9 @@ public:
     /// restarted since). Engines without SAP GUI do nothing.
     virtual void refresh_application() {}
     virtual EngineStatus engine_status() const { return {}; }
+    /// Counts the SAP Logon instances this engine has used: it changes when SAP Logon is replaced (restarted, or
+    /// closed and started again) and never during one SAP Logon's life. Engines without SAP GUI: 0.
+    virtual std::uint64_t application_generation() const { return 0; }
 
     // Connection management - two modes supported
     /// Attach to existing SAP GUI window via mouse click

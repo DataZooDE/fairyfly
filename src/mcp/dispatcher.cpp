@@ -126,7 +126,7 @@ void add_assistant_hint(Result& result, const Policy& policy, bool principal_rea
     else if (code == "INVALID_CONNECTION")
         hint = "the attached SAP session was closed: call gui_session_list and gui_session_attach, or ask the person at the "
                "desktop to log on again";
-    else if (code == "NO_SESSIONS")
+    else if (code == "NO_SESSIONS" || code == "SAP_LOGON_NOT_RUNNING")
         hint = "ask the person at the desktop to start SAP Logon and log on, then call the tool again";
     else if (code == "MULTIPLE_SESSIONS")
         hint = "call gui_session_attach with one session_id; if that tool is not available to you, ask the person at the "
@@ -2303,9 +2303,10 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
 }
 
 ToolResult CommandDispatcher::call_tool(const std::string& name, const json& args, const CallContext& ctx) {
+    std::shared_ptr<void> looked_up;  // held for the whole call (gui_batch: all its steps)
     if (before_call_) {
         try {
-            before_call_();
+            looked_up = before_call_();
         } catch (const std::exception& e) {
             spdlog::warn("Looking up SAP Logon before {} failed: {}", name, e.what());
         }

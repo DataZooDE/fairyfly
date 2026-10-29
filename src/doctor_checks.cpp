@@ -23,6 +23,7 @@ nlohmann::json to_json(const Check& check) {
     c["message"] = check.message;
     if (!check.details.empty()) c["details"] = check.details;
     if (!check.remediation.empty()) c["remediation"] = check.remediation;
+    if (!check.code.empty()) c["code"] = check.code;
     return c;
 }
 
@@ -81,7 +82,8 @@ Check judge_engine(bool available, bool sap_logon_running, const std::string& de
     if (!sap_logon_running)
         return {"com_engine", "fail", "SAP Logon is not running", detail,
                 "Start SAP Logon (saplogon.exe) in this Windows session and log on; fairyfly finds it at the next call "
-                "without a restart."};
+                "without a restart.",
+                "SAP_LOGON_NOT_RUNNING"};
     return {"com_engine", "fail", "SAP Logon is running, but its scripting engine is not available",
             detail.empty() ? "AutomationEngine returned null" : detail,
             "Enable scripting in the SAP GUI options and verify the SAP GUI Scripting component is installed via SAP "

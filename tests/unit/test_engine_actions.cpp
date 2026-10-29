@@ -71,7 +71,7 @@ struct SapScene {
     }
     std::unique_ptr<ComAutomationEngine> engine() {
         app->AddRef();   // the application wrapper owns one reference
-        return std::make_unique<ComAutomationEngine>(std::make_shared<ComGuiApplication>(IDispatchPtr(app, false), 0));
+        return std::make_unique<ComAutomationEngine>(std::make_shared<ComGuiApplication>(IDispatchPtr(app, false)));
     }
 };
 

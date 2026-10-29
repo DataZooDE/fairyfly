@@ -18,24 +18,40 @@ namespace sap {
 // ComGuiApplication Implementation
 // ============================================================================
 
-ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count)
-    : SapGuiObject(sap_gui_app), com_uninit_count_(com_uninit_count) {
+namespace {
+
+/// This thread's single-threaded apartment: entered at the first SAP GUI call and left only when the thread ends
+/// (thread_local destructor). One apartment per COM thread for its whole life: no SAP GUI object (and no
+/// IUIAutomation cached for the thread, html_viewer_reader.cpp) ever outlives the apartment it was made in, however
+/// often SAP Logon comes and goes.
+struct ThreadApartment {
+    bool entered = false;
+    int entries = 0;
+    ~ThreadApartment() {
+        if (entered) CoUninitialize();
+    }
+};
+thread_local ThreadApartment t_apartment;
+
+}  // namespace
+
+void ensure_thread_apartment() {
+    if (t_apartment.entered) return;
+    const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr))  // RPC_E_CHANGED_MODE: the thread is in the multithreaded apartment; SAP GUI needs an STA
+        throw ComInitializationException("Failed to initialize COM library", hr);
+    t_apartment.entered = true;  // S_OK or S_FALSE: one reference, released when the thread ends
+    ++t_apartment.entries;
+    spdlog::debug("COM apartment (STA) entered for this thread");
+}
+
+int thread_apartment_entries() { return t_apartment.entries; }
+
+ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app) : SapGuiObject(sap_gui_app) {
     if (!sap_gui_app) {
         throw ComException("Invalid SAP GUI application pointer");
     }
     spdlog::debug("ComGuiApplication initialized");
-}
-
-ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, bool owns_com_apartment)
-    : ComGuiApplication(sap_gui_app, owns_com_apartment ? 1 : 0) {}
-
-ComGuiApplication::~ComGuiApplication() {
-    // Release COM interfaces before tearing down this thread's apartment.
-    dispatch_ = nullptr;
-    while (com_uninit_count_ > 0) {
-        CoUninitialize();
-        --com_uninit_count_;
-    }
 }
 
 namespace {
@@ -122,11 +138,7 @@ IDispatchPtr ComGuiApplication::running_sap_logon() {
 ComGuiApplicationPtr ComGuiApplication::create() { return create(&ComGuiApplication::running_sap_logon); }
 
 ComGuiApplicationPtr ComGuiApplication::create(const SapLogonLocator& locate) {
-    // SAP GUI scripting needs a single-threaded apartment; S_FALSE: this thread already has one (still counted).
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr) && hr != S_FALSE) {
-        throw ComInitializationException("Failed to initialize COM library", hr);
-    }
+    ensure_thread_apartment();  // this thread's apartment for its whole life; never left here
 
     try {
         // Only ever SAP Logon's own scripting engine. fairyfly never creates one (no SapGui.ScriptingCtrl): an
@@ -146,12 +158,10 @@ ComGuiApplicationPtr ComGuiApplication::create(const SapLogonLocator& locate) {
             throw ComException("SAP Logon is running, but its scripting engine is not available (is scripting "
                                "enabled in the SAP GUI options?)", E_FAIL);
         }
-        return std::make_shared<ComGuiApplication>(engine, true);
+        return std::make_shared<ComGuiApplication>(engine);
     } catch (const ComException&) {
-        CoUninitialize();
         throw;
     } catch (const std::exception& e) {
-        CoUninitialize();
         throw ComException(std::string("Failed to create ComGuiApplication: ") + e.what());
     }
 }

@@ -7,7 +7,9 @@
 
 #include <exception>
 #include <filesystem>
+#include <cctype>
 #include <fstream>
+#include <sstream>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -109,7 +111,8 @@ TEST_CASE("SAP Logon not running: create() reports it and starts no scripting en
     int lookups = 0;
     bool not_running = false;
     std::string message;
-    HRESULT apartment_after = S_OK;
+    HRESULT apartment_after = E_FAIL;
+    int entries = -1;
     on_new_thread([&] {
         try {
             ComGuiApplication::create([&] {
@@ -125,12 +128,14 @@ TEST_CASE("SAP Logon not running: create() reports it and starts no scripting en
         APTTYPE type;
         APTTYPEQUALIFIER qualifier;
         apartment_after = CoGetApartmentType(&type, &qualifier);
+        entries = thread_apartment_entries();
     });
     INFO(message);
     CHECK(lookups == 1);
     CHECK(not_running);
     CHECK(message.find("SAP Logon (saplogon.exe) is not running") != std::string::npos);
-    CHECK(apartment_after == CO_E_NOTINITIALIZED);   // the failed lookup leaves the thread's COM as it found it
+    CHECK(apartment_after == S_OK);   // the thread keeps its apartment (entered once, left when the thread ends)
+    CHECK(entries == 1);
 }
 
 TEST_CASE("SAP Logon running: create() wraps its own GuiApplication", "[com][sap-logon]") {
@@ -152,10 +157,29 @@ TEST_CASE("No source file creates a SAP GUI scripting engine or registers in the
         if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h")) continue;
         std::ifstream in(e.path(), std::ios::binary);
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        for (const char* forbidden : {"L\"SapGui.ScriptingCtrl", "RegisterActiveObject(", "IRunningObjectTable"}) {
-            if (text.find(forbidden) != std::string::npos)
-                offenders.push_back(fs::relative(e.path(), fs::path(FAIRYFLY_SOURCE_DIR)).generic_string() + ": " +
-                                    forbidden);
+        const auto rel = fs::relative(e.path(), fs::path(FAIRYFLY_SOURCE_DIR)).generic_string();
+        std::string lower = text;
+        for (auto& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        // the ProgID as a wide or narrow string literal, any case; registering anything in the ROT
+        for (const char* forbidden : {"\"sapgui.scriptingctrl", "registeractiveobject", "irunningobjecttable",
+                                      "getrunningobjecttable"}) {
+            if (lower.find(forbidden) != std::string::npos) offenders.push_back(rel + ": " + forbidden);
+        }
+        // creation by CLSID (its GUID is registered per installation): every CoCreateInstance/CoGetClassObject/
+        // CLSIDFromProgID in src/ must name one of the known, harmless classes on the same line
+        std::istringstream lines(text);
+        std::string line;
+        for (int number = 1; std::getline(lines, line); ++number) {
+            const bool creates = line.find("CoCreateInstance") != std::string::npos ||
+                                 line.find("CoGetClassObject") != std::string::npos ||
+                                 line.find("CLSIDFromProgID") != std::string::npos ||
+                                 line.find("CoGetObject(") != std::string::npos;
+            if (!creates || line.find("//") < line.find("Co")) continue;
+            const bool allowed = line.find("SapROTWr.SapROTWrapper") != std::string::npos ||  // ROT lookup helper
+                                 line.find("clsid_rot") != std::string::npos ||
+                                 line.find("CLSID_CUIAutomation") != std::string::npos ||   // UI Automation
+                                 line.find("L\"SAPGUI\"") != std::string::npos;            // ROT lookup only
+            if (!allowed) offenders.push_back(rel + ":" + std::to_string(number) + ": " + line);
         }
     }
     CAPTURE(offenders);
@@ -240,6 +264,130 @@ TEST_CASE("engine: an engine that held no SAP Logon looks it up when a call need
     CHECK(second_session == "/app/con[0]/ses[0]");
 }
 
+TEST_CASE("engine: one COM apartment for the thread however often SAP Logon comes and goes", "[engine][sap-logon]") {
+    FakeSapLogon logon;
+    logon.add_connection(L"A4H");
+    const FakeSapLogon* current = nullptr;
+    int entries = -1;
+    HRESULT apartment = E_FAIL;
+    APTTYPE type = APTTYPE_MTA;
+    on_new_thread([&] {
+        ComAutomationEngine engine(running(current));
+        for (int i = 0; i < 4; ++i) {
+            current = (i % 2) ? nullptr : &logon;   // present, absent, present, absent
+            engine.refresh_application();
+        }
+        APTTYPEQUALIFIER qualifier;
+        apartment = CoGetApartmentType(&type, &qualifier);   // still in the apartment after SAP Logon was dropped
+        entries = thread_apartment_entries();
+    });
+    CHECK(apartment == S_OK);
+    CHECK(type == APTTYPE_STA);
+    CHECK(entries == 1);
+}
+
+namespace {
+/// Current COM reference count of a fake object.
+ULONG references(FakeNode* node) {
+    node->AddRef();
+    return node->Release();
+}
+}  // namespace
+
+TEST_CASE("engine: dropping SAP Logon releases every COM reference into it", "[engine][sap-logon]") {
+    FakeSapLogon logon;
+    logon.add_connection(L"A4H");
+    std::vector<ULONG> baseline, held, after;
+    for (auto* node : logon.nodes) baseline.push_back(references(node));
+    const FakeSapLogon* current = &logon;
+    on_new_thread([&] {
+        ComAutomationEngine engine(running(current));
+        (void)engine.get_application_info();
+        for (auto* node : logon.nodes) held.push_back(references(node));
+        current = nullptr;   // SAP Logon closed
+        engine.refresh_application();
+        for (auto* node : logon.nodes) after.push_back(references(node));
+    });
+    CHECK(held != baseline);   // the engine held SAP Logon (application, bound session)
+    CHECK(after == baseline);
+}
+
+TEST_CASE("handler: without SAP Logon every SAP command answers SAP_LOGON_NOT_RUNNING and keeps saved connections",
+          "[cli][sap-logon]") {
+    TempDir dir{"handler_logon"};
+    auto fake = std::make_unique<FakeEngine>();
+    FakeEngine* engine = fake.get();
+    engine->status = EngineStatus{false, false, "SAP Logon (saplogon.exe) is not running on this desktop"};
+    auto connections = std::make_unique<cli::ConnectionManager>(dir.path().string());
+    cli::ConnectionManager* saved = connections.get();
+    saved->create_or_update_connection("/app/con[0]/ses[0]", "/app/con[0]", "A4H", "route", "SAP");
+    cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake), std::move(connections));
+    const auto code = [](const Result& r) { return r.error.is_object() ? r.error.value("code", std::string()) : ""; };
+
+    const Result listed = handler.handle_list_all();                              // session list
+    const Result attached = handler.handle_attach(5, std::string("/app/con[0]/ses[0]"));  // session attach
+    const Result screen = handler.handle_screen_read(false, std::nullopt);        // screen read (saved connection)
+    const Result filled = handler.handle_fill("wnd[0]/usr/txtA", "x", 0);         // element fill
+    CHECK(code(listed) == "SAP_LOGON_NOT_RUNNING");
+    CHECK(code(attached) == "SAP_LOGON_NOT_RUNNING");
+    CHECK(code(screen) == "SAP_LOGON_NOT_RUNNING");
+    CHECK(code(filled) == "SAP_LOGON_NOT_RUNNING");
+    CHECK(filled.error.value("hint", "").find("Start SAP Logon") != std::string::npos);
+    CHECK(engine->count("attach_by_session_id") == 0);
+    CHECK(engine->count("fill_field") == 0);
+    CHECK(saved->list_connections().size() == 1);   // not forgotten: the session may come back with SAP Logon
+}
+
+TEST_CASE("handler: a keyless saved connection is not re-bound by position after SAP Logon was replaced",
+          "[cli][sap-logon]") {
+    constexpr const char* kPath = "/app/con[0]/ses[0]";
+    TempDir dir{"handler_keyless"};
+    auto fake = std::make_unique<FakeEngine>();
+    FakeEngine* engine = fake.get();
+    FakeScripting scripting;
+    engine->scripting_fake = &scripting;
+    engine->live_sessions[kPath] = true;
+    auto connections = std::make_unique<cli::ConnectionManager>(dir.path().string());
+    cli::ConnectionManager* saved = connections.get();
+    SECTION("unknown identity: refused, nothing runs, the entry stays") {
+        saved->create_or_update_connection(kPath, "/app/con[0]", "A4H", "route", "SAP");   // no key, no identity
+        cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
+                                    std::move(connections));
+        REQUIRE(handler.handle_fill("wnd[0]/usr/txtA", "one", 0).status == Result::Status::Success);
+        engine->generation = 2;   // SAP Logon restarted inside this long-lived process
+        const Result r = handler.handle_fill("wnd[0]/usr/txtA", "two", 0);
+        CHECK(r.error.value("code", "") == "SESSION_TARGET_CHANGED");
+        CHECK(r.error.value("hint", "").find("attach the SAP session again") != std::string::npos);
+        CHECK(engine->count("fill_field wnd[0]/usr/txtA=two") == 0);
+        CHECK(saved->list_connections().size() == 1);
+    }
+    SECTION("same system, client and user: accepted") {
+        saved->create_or_update_connection(kPath, "/app/con[0]", "A4H", "route", "SAP", "",
+                                           cli::ConnectionIdentity{"A4H", "001", "DEVELOPER"});
+        scripting.facts.system = "A4H";
+        scripting.facts.client = "001";
+        scripting.facts.user = "DEVELOPER";
+        cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
+                                    std::move(connections));
+        REQUIRE(handler.handle_fill("wnd[0]/usr/txtA", "one", 0).status == Result::Status::Success);
+        engine->generation = 2;
+        CHECK(handler.handle_fill("wnd[0]/usr/txtA", "two", 0).status == Result::Status::Success);
+        CHECK(engine->count("fill_field wnd[0]/usr/txtA=two") == 1);
+    }
+    SECTION("another user at that position: refused") {
+        saved->create_or_update_connection(kPath, "/app/con[0]", "A4H", "route", "SAP", "",
+                                           cli::ConnectionIdentity{"A4H", "001", "DEVELOPER"});
+        scripting.facts.system = "A4H";
+        scripting.facts.client = "001";
+        scripting.facts.user = "ALICE";
+        cli::CommandHandler handler(std::make_unique<cred::InMemoryCredentialStore>(), std::move(fake),
+                                    std::move(connections));
+        REQUIRE(handler.handle_fill("wnd[0]/usr/txtA", "one", 0).status == Result::Status::Success);
+        engine->generation = 2;
+        CHECK(handler.handle_fill("wnd[0]/usr/txtA", "two", 0).error.value("code", "") == "SESSION_TARGET_CHANGED");
+    }
+}
+
 TEST_CASE("doctor: SAP Logon not running is reported as such, not as an initialized engine", "[cli][doctor][sap-logon]") {
     CHECK(cli::doctor::judge_engine(false, false, "no SAPGUI entry").message == "SAP Logon is not running");
     CHECK(cli::doctor::judge_engine(false, false, "no SAPGUI entry").status == "fail");
@@ -262,6 +410,7 @@ TEST_CASE("doctor: SAP Logon not running is reported as such, not as an initiali
     REQUIRE(com.is_object());
     CHECK(com["status"] == "fail");
     CHECK(com["message"] == "SAP Logon is not running");
+    CHECK(com["code"] == "SAP_LOGON_NOT_RUNNING");
     CHECK(result.data["overall_health"] == "error");
 }
 
@@ -276,4 +425,15 @@ TEST_CASE("Every command looks SAP Logon up again before it runs", "[cli][sap-lo
     CHECK(engine->refreshes == 1);
     invoke({"connection", "list"});
     CHECK(engine->refreshes == 2);
+
+    // inside one MCP call (gui_batch included) the dispatcher already looked SAP Logon up: no second lookup
+    {
+        const auto held = handler.refresh_sap_gui_for_call();
+        CHECK(engine->refreshes == 3);
+        invoke({"connection", "list"});
+        invoke({"connection", "list"});
+        CHECK(engine->refreshes == 3);
+    }
+    invoke({"connection", "list"});
+    CHECK(engine->refreshes == 4);
 }
