@@ -1,5 +1,6 @@
 #include "include/config/environment.h"
 #include "include/text/command_line.h"
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -351,15 +352,26 @@ bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, c
     if (held.action == HeldTrayAction::TakeOver) {
         spdlog::warn("tray: {}", held.message);
         for (const auto pid : held.pids) claim.instances->ask_to_quit(pid);
+        // another tray of this installation may win the guard first (two started at once): then it is the running one
+        const auto won_by_ours = [&] {
+            const auto now_running = claim.instances->running();
+            return std::any_of(now_running.begin(), now_running.end(),
+                               [&](const RunningTray& t) { return !t.image.empty() && system::same_executable(t.image, own_exe); });
+        };
         const auto deadline = std::chrono::steady_clock::now() + claim.takeover_wait;
-        while (std::chrono::steady_clock::now() < deadline) {
+        for (;;) {
             if (guard.acquire()) {
                 spdlog::info("tray: the {} of the removed installation has quit; this one runs now", tray_name);
                 return true;
             }
+            if (won_by_ours()) {
+                spdlog::info("tray: another {} of this installation took over first", tray_name);
+                if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
+                return false;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) break;
             std::this_thread::sleep_for(claim.poll);
         }
-        if (guard.acquire()) return true;
         std::string pids;
         for (const auto pid : held.pids) pids += (pids.empty() ? "" : ", ") + std::to_string(pid);
         const std::string text = "The " + tray_name + " of a fairyfly whose files were removed is still running and did not quit "

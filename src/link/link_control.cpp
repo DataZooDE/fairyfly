@@ -96,14 +96,15 @@ bool writer_alive(const json& status, system::ProcessProbe& probe) {
     if (pid <= 0 || pid > std::int64_t{0xFFFFFFFF}) return false;
     const auto found = probe.find(static_cast<std::uint32_t>(pid));
     if (!found) return false;   // ended (killed, crashed, the installer removed it)
-    // the pid was handed to another program, or to fairyfly started again
-    const std::string image = status.contains("image") && status["image"].is_string() ? status["image"].get<std::string>() : "";
-    if (!image.empty() && !found->image.empty() && !system::same_executable(image, found->image)) return false;
+    // the pid was handed to another program, or to fairyfly started again: the start time tells (it survives the exe
+    // being renamed or replaced in place by `update apply`); the executable only when a start time is missing
     const std::int64_t started = status.contains("started") && status["started"].is_number_integer() ? status["started"].get<std::int64_t>() : 0;
     if (started > 0 && found->started_unix > 0) {
         const auto d = started - found->started_unix;
-        if (d > system::kStartTimeToleranceSeconds || -d > system::kStartTimeToleranceSeconds) return false;
+        return d <= system::kStartTimeToleranceSeconds && -d <= system::kStartTimeToleranceSeconds;
     }
+    const std::string image = status.contains("image") && status["image"].is_string() ? status["image"].get<std::string>() : "";
+    if (!image.empty() && !found->image.empty() && !system::same_executable(image, found->image)) return false;
     return true;
 }
 }  // namespace

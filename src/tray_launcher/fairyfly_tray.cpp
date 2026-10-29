@@ -25,7 +25,9 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 
+#include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -87,41 +89,61 @@ int start(const std::wstring& dir, std::vector<std::wstring> args) {
 namespace closing = fairyfly::tray::closing;
 constexpr DWORD kTerminateWaitMs = 3000;
 
-/// The processes running now, with their executables (empty when not readable: another user's, elevated).
+/// The process ids running now (the snapshot's names are not trusted: a pid can be reused at any moment).
 std::vector<closing::ProcessEntry> running_processes() {
     std::vector<closing::ProcessEntry> out;
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return out;
     PROCESSENTRY32W entry{};
     entry.dwSize = sizeof(entry);
-    for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry)) {
-        closing::ProcessEntry p;
-        p.pid = entry.th32ProcessID;
-        if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, p.pid)) {
-            wchar_t image[32768];
-            DWORD size = ARRAYSIZE(image);
-            if (QueryFullProcessImageNameW(h, 0, image, &size)) p.image.assign(image, size);
-            CloseHandle(h);
-        }
-        out.push_back(std::move(p));
-    }
+    for (BOOL ok = Process32FirstW(snapshot, &entry); ok; ok = Process32NextW(snapshot, &entry))
+        out.push_back({entry.th32ProcessID, entry.szExeFile});
     CloseHandle(snapshot);
     return out;
 }
 
-struct Target {
-    DWORD pid = 0;
-    HANDLE process = nullptr;
-    bool asked = false;   ///< it has a tray window, which got the quit message
+/// A process opened once, for reading its executable, waiting on it and terminating it: the handle keeps the process,
+/// so nothing done through it can reach another program that later gets the same pid.
+class OpenedProcess {
+public:
+    OpenedProcess(DWORD pid, HANDLE handle) : pid_(pid), handle_(handle) {}
+    OpenedProcess(OpenedProcess&& other) noexcept : pid_(other.pid_), handle_(other.handle_), asked_(other.asked_) { other.handle_ = nullptr; }
+    OpenedProcess& operator=(OpenedProcess&&) = delete;
+    OpenedProcess(const OpenedProcess&) = delete;
+    OpenedProcess& operator=(const OpenedProcess&) = delete;
+    ~OpenedProcess() {
+        if (handle_) CloseHandle(handle_);
+    }
+    static std::optional<OpenedProcess> open(std::uint32_t pid) {
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pid);
+        if (!h) return std::nullopt;
+        return OpenedProcess(pid, h);
+    }
+    std::wstring image() const {
+        wchar_t buffer[32768];
+        DWORD size = ARRAYSIZE(buffer);
+        if (!QueryFullProcessImageNameW(handle_, 0, buffer, &size)) return {};
+        return std::wstring(buffer, size);
+    }
+    DWORD pid() const { return pid_; }
+    HANDLE handle() const { return handle_; }
+    bool asked() const { return asked_; }
+    void set_asked() { asked_ = true; }
+
+private:
+    DWORD pid_;
+    HANDLE handle_;
+    bool asked_ = false;   ///< it has a tray window, which got the quit message
 };
 
 struct QuitRequest {
-    std::vector<Target>* targets = nullptr;
+    std::vector<OpenedProcess>* targets = nullptr;
     UINT quit = 0;
 };
 
 /// The tray windows of the processes to close get the quit message, as from their menu Quit (older trays do not
-/// handle WM_CLOSE: it only destroyed their window while the link ran on).
+/// handle WM_CLOSE: it only destroyed their window while the link ran on). A window found by pid is only asked while
+/// that process, held open, still runs: the pid cannot have been reused.
 BOOL CALLBACK ask_to_quit(HWND hwnd, LPARAM param) {
     auto* request = reinterpret_cast<QuitRequest*>(param);
     wchar_t cls[64] = {};
@@ -129,33 +151,32 @@ BOOL CALLBACK ask_to_quit(HWND hwnd, LPARAM param) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     for (auto& t : *request->targets)
-        if (t.pid == pid && PostMessageW(hwnd, request->quit, 0, 0)) t.asked = true;
+        if (t.pid() == pid && WaitForSingleObject(t.handle(), 0) == WAIT_TIMEOUT && PostMessageW(hwnd, request->quit, 0, 0))
+            t.set_asked();
     return TRUE;
 }
 
-/// Ends this installation's fairyfly (closing::processes_to_close): the trays quit as from their menu and get up to
+/// Ends this installation's fairyfly (closing::open_installed): the trays quit as from their menu and get up to
 /// kCloseWaitMs; what still runs then (a link stuck in a SAP call, a tray that ignores the request, `fairyfly mcp` for
-/// an assistant, which has no window to ask) is terminated, so the installer never leaves fairyfly running from
-/// removed files. A Microsoft Store fairyfly.exe or another copy is not touched.
+/// an assistant, which has no window to ask) is terminated, through the same handle its executable was read from, so
+/// the installer never leaves fairyfly running from removed files. A Microsoft Store fairyfly.exe or another copy is
+/// not touched.
 void close_installed(const std::wstring& folder) {
-    std::vector<Target> targets;
-    for (const auto pid : closing::processes_to_close(running_processes(), folder, GetCurrentProcessId()))
-        if (HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pid)) targets.push_back({pid, h, false});
+    auto targets = closing::open_installed<OpenedProcess>(running_processes(), folder, GetCurrentProcessId(), &OpenedProcess::open,
+                                                          [](const OpenedProcess& p) { return p.image(); });
     if (targets.empty()) return;
     QuitRequest request{&targets, RegisterWindowMessageW(contract::kQuitMessage)};
     EnumWindows(&ask_to_quit, reinterpret_cast<LPARAM>(&request));
     const DWORD deadline = GetTickCount() + kCloseWaitMs;
     for (const auto& t : targets) {
-        if (!t.asked) continue;
+        if (!t.asked()) continue;
         const DWORD now = GetTickCount();
-        WaitForSingleObject(t.process, now < deadline ? deadline - now : 0);
+        WaitForSingleObject(t.handle(), now < deadline ? deadline - now : 0);
     }
     for (const auto& t : targets) {
-        if (WaitForSingleObject(t.process, 0) != WAIT_OBJECT_0) {
-            TerminateProcess(t.process, 1);
-            WaitForSingleObject(t.process, kTerminateWaitMs);
-        }
-        CloseHandle(t.process);
+        if (WaitForSingleObject(t.handle(), 0) == WAIT_OBJECT_0) continue;
+        TerminateProcess(t.handle(), 1);
+        WaitForSingleObject(t.handle(), kTerminateWaitMs);
     }
 }
 
@@ -197,6 +218,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (command.mode == closing::StarterMode::Uninstall) {
         close_installed(command.folder);
         remove_run_values(command.folder);
+        // the real HKCU hive only: a Microsoft Store fairyfly writes its settings to its package's private hive (HKCU is
+        // copy-on-write virtualized for packaged apps, docs/MSIX.md), which this does not reach
         RegDeleteTreeW(HKEY_CURRENT_USER, contract::kSettingsKey);
         // what the link registers for its approval notifications
         RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kAppUserModelIdKeyPrefix) + contract::kAppUserModelId).c_str());

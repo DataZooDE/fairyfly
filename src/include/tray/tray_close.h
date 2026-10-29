@@ -10,6 +10,8 @@
 // the starter's own folder is meant. Only processes started from that folder are closed: a Microsoft Store (MSIX)
 // fairyfly.exe, or another copy, keeps running.
 #include <cstdint>
+#include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -58,7 +60,7 @@ inline bool is_installed_program(const std::wstring& image, const std::wstring& 
 
 struct ProcessEntry {
     std::uint32_t pid = 0;
-    std::wstring image;   ///< as enumerated (may be empty or stale: a pid can be reused at any moment)
+    std::wstring image;   ///< as enumerated: informational only (a pid can be reused at any moment)
 };
 
 /// The processes to close before `folder`'s files are replaced: this installation's fairyfly.exe and fairyfly-tray.exe,
@@ -71,18 +73,10 @@ std::vector<Process> open_installed(const std::vector<ProcessEntry>& enumerated,
                                     Open open, ImageOf image_of) {
     std::vector<Process> out;
     for (const auto& e : enumerated) {
-        if (e.pid == self || !is_installed_program(e.image, folder)) continue;
-        if (auto p = open(e.pid)) out.push_back(std::move(*p));
+        if (e.pid == self) continue;
+        auto p = open(e.pid);
+        if (p && is_installed_program(image_of(*p), folder)) out.push_back(std::move(*p));
     }
-    (void)image_of;
-    return out;
-}
-
-inline std::vector<std::uint32_t> processes_to_close(const std::vector<ProcessEntry>& processes, const std::wstring& folder,
-                                                     std::uint32_t self) {
-    std::vector<std::uint32_t> out;
-    for (const auto& p : processes)
-        if (p.pid != self && is_installed_program(p.image, folder)) out.push_back(p.pid);
     return out;
 }
 

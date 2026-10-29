@@ -34,7 +34,8 @@ std::string describe(const nlohmann::json& status, std::int64_t now_unix);
 inline constexpr std::int64_t kStatusStaleSeconds = 60;
 /// describe() that also asks whether the process that wrote the status still runs: "not running" at once when it has
 /// ended, or when its pid now belongs to another program (other executable or start time), not only after the
-/// heartbeat has gone stale. A live process keeps the heartbeat rule (a hung link reads "not running" when stale).
+/// heartbeat has gone stale. The start time decides; the executable only when a start time is missing (a renamed or
+/// updated exe is still the same process). A live process keeps the heartbeat rule (a hung link reads "not running").
 std::string describe(const nlohmann::json& status, std::int64_t now_unix, system::ProcessProbe& probe);
 
 /// What `fairyfly link status` reports about the running link: `link` (describe with the probe) and, while that is

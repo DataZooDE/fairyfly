@@ -51,7 +51,9 @@
     <CustomAction Id="LaunchTray" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]fairyfly-tray.exe&quot;"
                   Execute="immediate" Return="asyncNoWait" />
     <InstallExecuteSequence>
-      <Custom Action="CloseTrays" Before="InstallValidate" Condition="NOT (REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE)" />
+      <!-- install and major upgrade (the new product is not installed yet); not a repair or modify, which replaces no
+         file of the same version and, silent, would leave the trays closed -->
+      <Custom Action="CloseTrays" Before="InstallValidate" Condition="NOT Installed" />
       <Custom Action="UninstallCleanup" Before="InstallValidate" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="LaunchTray" After="InstallFinalize" Condition="NOT REMOVE AND LAUNCHAPP=&quot;1&quot; AND UILevel &gt;= 3" />
     </InstallExecuteSequence>
