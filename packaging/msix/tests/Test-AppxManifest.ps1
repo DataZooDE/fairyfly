@@ -4,6 +4,9 @@
   what configuring with -DFAIRYFLY_PACKAGE=msix runs). Any pwsh 7 with cmake on PATH, Windows or Linux (CI: build.yml,
   job msix-manifest).
 .DESCRIPTION
+  Without identity values (the defaults of the CMake cache variables) the manifest must carry exactly fairyfly's
+  Partner Center identity: Name DataZoo.fairyfly, Publisher CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC,
+  PublisherDisplayName DataZoo; CMakeLists.txt must take its cache defaults from cmake/msix_manifest.cmake.
   With identity values set the rendered manifest must be well-formed XML with no placeholder left, carry the identity
   (XML-escaped) and the MSIX version of packaging/msix_version.ps1, declare runFullTrust, the tray's StartupTask (instead
   of the MSI's HKCU Run value), the fairyfly.exe execution alias for terminals, and the toast activator. Rendering must
@@ -23,7 +26,18 @@ function Check([bool]$cond, [string]$msg) {
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ffy-msix-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
-function Render([string]$tpl, [string]$name, [string]$publisher, [string]$display, [string]$version = '2026.10.24.1') {
+# fairyfly's product identity in Partner Center (public: it is part of every installed package's full name)
+$storeName = 'DataZoo.fairyfly'
+$storePublisher = 'CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC'
+$storeDisplay = 'DataZoo'
+
+function RenderDefaults([string]$version = '2026.10.24.1') {
+    $out = Join-Path $tmp ("AppxManifest-" + [guid]::NewGuid() + ".xml")
+    $log = & cmake "-DVERSION=$version" "-DTEMPLATE=$template" "-DOUT=$out" -P $cmakeScript 2>&1 | Out-String
+    [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); File = $out; Log = $log.Trim() }
+}
+
+function Render([string]$tpl,[string]$name, [string]$publisher, [string]$display, [string]$version = '2026.10.24.1') {
     $out = Join-Path $tmp ("AppxManifest-" + [guid]::NewGuid() + ".xml")
     $log = & cmake "-DVERSION=$version" "-DTEMPLATE=$tpl" "-DOUT=$out" "-DIDENTITY_NAME=$name" "-DPUBLISHER=$publisher" `
                    "-DPUBLISHER_DISPLAY_NAME=$display" -P $cmakeScript 2>&1 | Out-String
@@ -31,7 +45,31 @@ function Render([string]$tpl, [string]$name, [string]$publisher, [string]$displa
 }
 
 try {
-    Write-Host '=== rendered with identity values ==='
+    Write-Host '=== rendered with the defaults: the Partner Center identity ==='
+    $r = RenderDefaults
+    Check $r.Ok "cmake renders the template without identity values$(if (-not $r.Ok) { ": $($r.Log)" })"
+    $d = $null
+    try { if (Test-Path $r.File) { $d = [xml](Get-Content $r.File -Raw) } } catch { Write-Host "  XML error: $($_.Exception.Message)" }
+    $did = $null; $ddisplay = $null
+    if ($d -and $d.DocumentElement) {
+        $dns = New-Object Xml.XmlNamespaceManager($d.NameTable)
+        $dns.AddNamespace('f', 'http://schemas.microsoft.com/appx/manifest/foundation/windows10')
+        $did = $d.SelectSingleNode('/f:Package/f:Identity', $dns)
+        $ddisplay = $d.SelectSingleNode('/f:Package/f:Properties/f:PublisherDisplayName', $dns)
+    }
+    Check ($did -and $did.Name -ceq $storeName) "default Identity Name '$($did.Name)' is exactly '$storeName'"
+    Check ($did -and $did.Publisher -ceq $storePublisher) "default Identity Publisher '$($did.Publisher)' is exactly '$storePublisher'"
+    Check ($ddisplay -and $ddisplay.InnerText -ceq $storeDisplay) "default PublisherDisplayName '$($ddisplay.InnerText)' is exactly '$storeDisplay'"
+    $defaultText = if (Test-Path $r.File) { Get-Content $r.File -Raw } else { '' }
+    Check ($defaultText -and $defaultText -cnotmatch 'PLACEHOLDER') 'no PLACEHOLDER in the default manifest'
+    $cmakeLists = Get-Content (Join-Path $repo 'CMakeLists.txt') -Raw
+    foreach ($v in 'IDENTITY_NAME', 'PUBLISHER', 'PUBLISHER_DISPLAY_NAME') {
+        $pattern = 'set\(FAIRYFLY_MSIX_' + $v + ' "\$\{FAIRYFLY_MSIX_DEFAULT_' + $v + '\}" CACHE STRING'
+        Check ($cmakeLists -match $pattern) "CMakeLists.txt: the cache variable FAIRYFLY_MSIX_$v defaults to FAIRYFLY_MSIX_DEFAULT_$v"
+    }
+    Check ($cmakeLists -cnotmatch 'PLACEHOLDER') 'CMakeLists.txt has no PLACEHOLDER identity left'
+
+    Write-Host "`n=== rendered with other identity values (the cache variables stay overridable) ==="
     $name = 'DataZoo.fairyfly'
     $publisher = 'CN=1A2B3C4D-0000-4000-8000-ABCDEF012345, O=Data & Zoo'
     $display = 'DataZoo <GmbH> & Co'
@@ -63,6 +101,8 @@ try {
         $expectedVersion = (& $msixVersion -Version '2026.10.24.1' | Out-String).Trim()
         Check ($id -and $id.Version -eq $expectedVersion -and $expectedVersion -eq '2026.10.2401.0') "Identity Version '$($id.Version)' = msix_version.ps1 '$expectedVersion'"
         Check ($id -and $id.ProcessorArchitecture -eq 'x64') 'x64 package'
+        $tile = One "/f:Package/f:Applications/f:Application[@Id='Tray']/uap:VisualElements/uap:DefaultTile"
+        Check ($null -ne $tile -and $tile.Wide310x150Logo -eq 'Assets\Wide310x150Logo.png') 'the tray tile has the wide logo (Assets\Wide310x150Logo.png)'
         Check ((One '/f:Package/f:Properties/f:PublisherDisplayName').InnerText -eq $display) 'PublisherDisplayName (XML-escaped and read back)'
         Check ($null -ne (One "/f:Package/f:Capabilities/rescap:Capability[@Name='runFullTrust']")) 'runFullTrust'
 
