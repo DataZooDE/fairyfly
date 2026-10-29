@@ -295,6 +295,9 @@ public:
     // Diagnostic and enumeration
     Result handle_list_all();
     Result handle_doctor();
+    /// Before every call: look up the running SAP Logon again and drop what is cached from an earlier one
+    /// (AutomationEngine::refresh_application). CommandRegistry::execute_active_command and the MCP dispatcher call it.
+    void refresh_sap_gui() { if (engine_) engine_->refresh_application(); }
 
     // Getters
     const SessionId& get_current_session() const { return current_session_; }

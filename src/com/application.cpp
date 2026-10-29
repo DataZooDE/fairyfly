@@ -7,7 +7,6 @@
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
-#include <atomic>
 #include <iostream>
 #include <chrono>
 #include <windows.h>
@@ -15,17 +14,9 @@
 namespace fairyfly {
 namespace sap {
 
-namespace {
-std::atomic<bool> g_embedded_fallback_allowed{true};
-}
-
 // ============================================================================
 // ComGuiApplication Implementation
 // ============================================================================
-
-void ComGuiApplication::set_embedded_fallback_allowed(bool allowed) { g_embedded_fallback_allowed = allowed; }
-
-bool ComGuiApplication::embedded_fallback_allowed() { return g_embedded_fallback_allowed; }
 
 ComGuiApplication::ComGuiApplication(IDispatchPtr sap_gui_app, int com_uninit_count)
     : SapGuiObject(sap_gui_app), com_uninit_count_(com_uninit_count) {
@@ -114,116 +105,48 @@ IDispatchPtr scripting_engine_of(IDispatch* sap_gui) {
     return nullptr;
 }
 
-/// The embedded fallback: a new SapGui.ScriptingCtrl.1 instance in this process and its GuiApplication (or the
-/// control itself when it implements OpenConnection); null when that fails, with `hr` the last HRESULT.
-ComGuiApplicationPtr create_embedded_application(HRESULT& hr) {
+}  // namespace
+
+IDispatchPtr ComGuiApplication::running_sap_logon() {
+    // SapROTWr.SapROTWrapper (SAP's official entry point), then CoGetObject("SAPGUI"). Both only look the SAPGUI
+    // entry up in the running object table; neither starts anything.
+    if (IDispatch* entry = sapgui_rot_entry()) return IDispatchPtr(entry, false);  // adopts the AddRef'd entry
     IDispatch* sap_gui = nullptr;
-    CLSID clsid;
-    hr = CLSIDFromProgID(L"SapGui.ScriptingCtrl.1", &clsid);
-
-    if (SUCCEEDED(hr)) {
-        spdlog::debug("CLSID found for SapGui.ScriptingCtrl.1, attempting CoCreateInstance...");
-        // Try CLSCTX_ALL to allow in-process, local, and remote servers
-        hr = CoCreateInstance(clsid, nullptr, CLSCTX_ALL, IID_IDispatch,
-                             (void**)&sap_gui);
-
-        if (SUCCEEDED(hr) && sap_gui) {
-            spdlog::info("Created SAP GUI COM object via CoCreateInstance (SapGui.ScriptingCtrl.1)");
-
-            // SapGui.ScriptingCtrl.1 provides GetScriptingEngine() which returns GuiApplication
-            DISPID ge_id = -1;
-            HRESULT ge_hr = get_dispid_via_typeinfo(sap_gui, L"GetScriptingEngine", &ge_id);
-            if (FAILED(ge_hr)) {
-                _bstr_t ge_name(L"GetScriptingEngine");
-                ge_hr = sap_gui->GetIDsOfNames(IID_NULL, (LPOLESTR*)&ge_name, 1, LOCALE_USER_DEFAULT, &ge_id);
-            }
-
-            if (SUCCEEDED(ge_hr)) {
-                _variant_t vr;
-                HRESULT hr_meth = invoke(sap_gui, ge_id, DISPATCH_METHOD | DISPATCH_PROPERTYGET, {}, &vr);
-                if (SUCCEEDED(hr_meth) && vr.vt == VT_DISPATCH && vr.pdispVal) {
-                    spdlog::info("Got GuiApplication via SapGui.ScriptingCtrl.1 GetScriptingEngine");
-                    sap_gui->Release();
-                    return std::make_shared<ComGuiApplication>(IDispatchPtr(vr.pdispVal), 2);
-                }
-            }
-
-            // If GetScriptingEngine wasn't available, check if sap_gui itself implements OpenConnection
-            DISPID test_dispid = -1;
-            HRESULT test_hr = get_dispid_via_typeinfo(sap_gui, L"OpenConnection", &test_dispid);
-            if (SUCCEEDED(test_hr)) {
-                return std::make_shared<ComGuiApplication>(IDispatchPtr(sap_gui, false), 2);  // adopts CoCreateInstance's reference
-            }
-
-            sap_gui->Release();
-            sap_gui = nullptr;
-            // SapGui.ScriptingCtrl.1 (sapfewse.ocx) incremented COM apartment count during
-            // CoCreateInstance. Balance it here since creation did not produce an application.
-            CoUninitialize();
-        }
-
-        spdlog::debug("CoCreateInstance failed (hr={})", hresult_hex(hr));
-    }
+    spdlog::debug("Attempting to get SAPGUI ROT entry via CoGetObject...");
+    const HRESULT hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
+    if (SUCCEEDED(hr) && sap_gui) return IDispatchPtr(sap_gui, false);
+    spdlog::debug("No SAPGUI entry in the running object table (hr={})", hresult_hex(hr));
     return nullptr;
 }
 
-}  // namespace
+ComGuiApplicationPtr ComGuiApplication::create() { return create(&ComGuiApplication::running_sap_logon); }
 
-ComGuiApplicationPtr ComGuiApplication::create() {
-    // Initialize COM library for STA (Single-Threaded Apartment) mode
-    // This is required for SAP GUI scripting API
+ComGuiApplicationPtr ComGuiApplication::create(const SapLogonLocator& locate) {
+    // SAP GUI scripting needs a single-threaded apartment; S_FALSE: this thread already has one (still counted).
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr) && hr != S_FALSE) {  // S_FALSE means already initialized
+    if (FAILED(hr) && hr != S_FALSE) {
         throw ComInitializationException("Failed to initialize COM library", hr);
     }
 
-    spdlog::debug("COM library initialized");
-
     try {
-        // Method 1: Try SapROTWr.SapROTWrapper (Official SAP GUI Scripting entrypoint)
-        IDispatch* sap_gui = sapgui_rot_entry();
-
-        // Fallback to CoGetObject("SAPGUI")
+        // Only ever SAP Logon's own scripting engine. fairyfly never creates one (no SapGui.ScriptingCtrl): an
+        // engine started inside this process before SAP Logon ran had no connections forever, and its SAPGUI entry
+        // in the running object table made every other process's GetObject("SAPGUI") hang (live 2026-10-28).
+        IDispatchPtr sap_gui;
+        if (locate) sap_gui = locate();
         if (!sap_gui) {
-            spdlog::debug("Attempting to get SAPGUI ROT entry via CoGetObject...");
-            hr = CoGetObject(L"SAPGUI", nullptr, IID_IDispatch, (void**)&sap_gui);
+            throw ComException(  // RED: old behaviour (a generic error)
+                "SAP Logon (saplogon.exe) is not running on this desktop (no SAPGUI entry in the running object "
+                "table). Start SAP Logon in the interactive session, then retry; fairyfly never starts a SAP GUI "
+                "scripting engine of its own.", MK_E_UNAVAILABLE);
         }
-
-        const bool sap_logon_found = sap_gui != nullptr;
-        if (sap_gui) {
-            spdlog::debug("SAPGUI ROT entry obtained successfully - SAP GUI is running");
-            IDispatchPtr engine = scripting_engine_of(sap_gui);
-            sap_gui->Release();
-            if (engine) return std::make_shared<ComGuiApplication>(engine, true);
+        spdlog::debug("SAPGUI ROT entry obtained successfully - SAP Logon is running");
+        IDispatchPtr engine = scripting_engine_of(sap_gui);
+        if (!engine) {
+            throw ComException("SAP Logon is running, but its scripting engine is not available (is scripting "
+                               "enabled in the SAP GUI options?)", E_FAIL);
         }
-
-        if (!embedded_fallback_allowed()) {
-            // The embedded control would host the SAP GUI windows inside this process, where the owner-mode
-            // session workers (which attach through the running object table) can never reach them.
-            if (sap_logon_found)
-                throw ComException("SAP Logon is running, but its scripting engine is not available (is scripting "
-                                   "enabled in the SAP GUI options?); this server does not fall back to an embedded "
-                                   "SAP GUI.", hr);
-            throw SapLogonNotRunningException(
-                "SAP Logon (saplogon.exe) is not running on this desktop, and this server does not fall back to an "
-                "embedded SAP GUI. Start SAP Logon in the interactive session, then retry.", hr);
-        }
-
-        spdlog::debug("Method 1 (GetObject + GetScriptingEngine) failed, trying CreateObject as fallback");
-
-        // Method 2: Try CreateObject as fallback
-        // This creates a new SAP GUI instance rather than connecting to running one
-        // Only use this if Method 1 fails
-        if (auto embedded = create_embedded_application(hr)) return embedded;
-
-        // All methods failed
-        std::string error_msg = fmt::format(
-            "SAP GUI Scripting API not available (final hr={}). "
-            "Possible causes: (1) SAP GUI not running, (2) SAP GUI scripting not enabled in SAP GUI options, "
-            "(3) COM registration issue. Ensure SAP GUI is running and has an active transaction window open.",
-            hresult_hex(hr));
-        throw ComException(error_msg, hr);
-
+        return std::make_shared<ComGuiApplication>(engine, true);
     } catch (const ComException&) {
         CoUninitialize();
         throw;
@@ -231,6 +154,21 @@ ComGuiApplicationPtr ComGuiApplication::create() {
         CoUninitialize();
         throw ComException(std::string("Failed to create ComGuiApplication: ") + e.what());
     }
+}
+
+bool ComGuiApplication::same_object(const ComGuiApplication& other) const {
+    return same_com_object(dispatch_, other.dispatch_);
+}
+
+bool same_com_object(IDispatch* a, IDispatch* b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    // COM identity: two interface pointers are the same object when their IUnknown pointers are equal. For SAP
+    // Logon's objects these are proxies; one apartment always gets the same proxy for the same remote object.
+    IUnknownPtr ua, ub;
+    if (FAILED(a->QueryInterface(IID_IUnknown, (void**)&ua)) || FAILED(b->QueryInterface(IID_IUnknown, (void**)&ub)))
+        return false;
+    return ua.GetInterfacePtr() == ub.GetInterfacePtr();
 }
 
 int ComGuiApplication::get_connection_count() const {

@@ -115,7 +115,7 @@ the open connections. It changes nothing. Every warning or failure comes with a 
 
 | Finding | Fix |
 |---|---|
-| SAP GUI is not running | Start SAP Logon |
+| SAP Logon is not running (`com_engine`) | Start SAP Logon. A fairyfly that is already running (link tray, MCP server) finds it at its next call; no restart needed |
 | Client scripting disabled, or notification popups enabled | [In SAP GUI](#in-sap-gui-each-windows-machine) |
 | Scripting disabled on the server (`sapgui/user_scripting`) | [On the SAP system](#on-the-sap-system-administrator) |
 | No active SAP connections | Log on in SAP Logon, or use `fairyfly session launch` (step 4) |

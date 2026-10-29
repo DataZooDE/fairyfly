@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### SAP Logon started after fairyfly: found at the next call; no embedded SAP GUI, no hanging GetObject("SAPGUI")
+
+- Live 2026-10-28 (Windows 10, MSIX 2026.10.2800.0; the MSI behaves the same): the link tray started at Windows logon,
+  before SAP Logon. Its first call found no SAPGUI entry in the running object table and fell back to creating an
+  embedded `SapGui.ScriptingCtrl.1` inside the tray (`gui_doctor`: com_engine "initialized successfully"), and kept
+  that engine for the life of the process: after SAP Logon was started and logged on, `gui_session_list` still saw
+  0 connections, and every other process that asked for SAP GUI scripting (`fairyfly session list`, a VBScript
+  `GetObject("SAPGUI")`) hung until the tray was killed; restarting SAP Logon did not help.
+- fairyfly never starts a SAP GUI scripting engine of its own any more: the `SapGui.ScriptingCtrl` fallback is gone
+  for every mode (CLI, stdio, HTTP, link). Without SAP Logon a call fails with `SAP_LOGON_NOT_RUNNING` (launch) or
+  "SAP Logon (saplogon.exe) is not running on this desktop". `ComGuiApplication::set_embedded_fallback_allowed` and
+  `mcp/sap_gui_hosting.h` are removed.
+- SAP Logon is looked up again before every call (`AutomationEngine::refresh_application`, from
+  `CommandRegistry::execute_active_command` and, before its checks, `CommandDispatcher::call_tool`): a tray or server
+  started before SAP Logon finds it at the next call, and after SAP Logon was restarted the old GuiApplication and the
+  session bound to it are released (COM identity of the GuiApplication changed) instead of being used forever.
+- `doctor`/`gui_doctor` check `com_engine` now reports what is there at that moment: "SAP Logon is not running" (fail)
+  when there is no SAPGUI entry, "SAP Logon is running, but its scripting engine is not available" when scripting
+  does not answer, and passes only with SAP Logon's own scripting engine ("Connected to SAP Logon's scripting
+  engine"). `active_sessions` is checked only then.
+
 ### Microsoft Store (MSIX): the package is built in CI, with the Partner Center identity
 
 - The MSIX identity defaults to fairyfly's Partner Center product identity: `DataZoo.fairyfly`,

@@ -87,18 +87,55 @@ static std::optional<Result> inactive_tab_error(const ComGuiSessionPtr& session,
     }
 }
 
-ComAutomationEngine::ComAutomationEngine() : ComAutomationEngine(nullptr) {}
+ComAutomationEngine::ComAutomationEngine()
+    : ComAutomationEngine(ApplicationSource([] { return ComGuiApplication::create(); })) {}
 
-ComAutomationEngine::ComAutomationEngine(ComGuiApplicationPtr app) {
+ComAutomationEngine::ComAutomationEngine(ComGuiApplicationPtr app)
+    : ComAutomationEngine(ApplicationSource([app]() -> ComGuiApplicationPtr {
+          if (!app) throw SapLogonNotRunningException("No SAP GUI application was given");
+          return app;
+      })) {}
+
+ComAutomationEngine::ComAutomationEngine(ApplicationSource source) : source_(std::move(source)) {
+    // SAP Logon not running yet is not an error: every call looks it up again (refresh_application).
+    refresh_application();
+    spdlog::debug("ComAutomationEngine initialized ({})", status_.available ? "SAP Logon found" : status_.detail);
+}
+
+void ComAutomationEngine::refresh_application() {
+    if (app_) return;  // RED: the engine keeps the first SAP GUI application forever (old behaviour)
+    ComGuiApplicationPtr fresh;
     try {
-        // Initialize COM and get SAP GUI application (the running SAP GUI unless one is given)
-        app_ = app ? std::move(app) : ComGuiApplication::create();
-        spdlog::debug("ComAutomationEngine initialized successfully");
+        fresh = source_ ? source_() : nullptr;
+        if (!fresh) throw SapLogonNotRunningException("SAP Logon (saplogon.exe) is not running on this desktop");
+    } catch (const ComInitializationException&) {
+        throw;  // a broken apartment cannot recover
+    } catch (const SapLogonNotRunningException& e) {
+        status_ = {false, false, e.what()};
+    } catch (const ComException& e) {
+        status_ = {false, true, e.what()};
+    }
+    if (!fresh) {
+        if (app_) {
+            spdlog::info("SAP Logon is no longer reachable; dropping its scripting objects ({})", status_.detail);
+            drop_application();
+        } else {
+            spdlog::debug("SAP GUI not available: {}", status_.detail);
+        }
+        return;
+    }
+    status_ = {true, true, ""};
+    if (app_ && app_->same_object(*fresh)) return;  // the same SAP Logon: keep the bound session (fresh is released)
+    if (app_) spdlog::info("SAP Logon's scripting engine changed (SAP Logon was restarted); dropping the old one");
+    drop_application();
+    adopt_application(std::move(fresh));
+}
 
-        // Initialize connection launcher
-        connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
-
-        // Check if any connections exist
+void ComAutomationEngine::adopt_application(ComGuiApplicationPtr app) {
+    app_ = std::move(app);
+    connection_launcher_ = std::make_unique<ConnectionLauncher>(app_);
+    try {
+        // Bind the first session when there is one (as a new process would).
         if (app_->get_connection_count() > 0) {
             auto connection = app_->get_connection(0);
             if (connection && connection->get_session_count() > 0) {
@@ -111,9 +148,27 @@ ComAutomationEngine::ComAutomationEngine(ComGuiApplicationPtr app) {
     } catch (const ComInitializationException&) {
         throw;
     } catch (const ComException& e) {
-        spdlog::warn("SAP GUI not available: {}", e.what());
-        // Non-fatal - can still be initialized, just not connected
+        spdlog::warn("SAP GUI connections not readable: {}", e.what());
     }
+}
+
+void ComAutomationEngine::drop_application() {
+    // Dependents first: every one of them holds proxies into the old SAP Logon.
+    screenshot_handler_.reset();
+    screen_reader_.reset();
+    current_session_ = nullptr;
+    current_connection_ = nullptr;
+    connection_launcher_.reset();
+    app_.reset();
+}
+
+const ComGuiApplicationPtr& ComAutomationEngine::require_application() {
+    if (!app_) refresh_application();
+    if (!app_) {
+        if (!status_.sap_logon_running) throw SapLogonNotRunningException(status_.detail);
+        throw ComException(status_.detail);
+    }
+    return app_;
 }
 
 void ComAutomationEngine::initialize_services() {
@@ -182,9 +237,7 @@ Result ComAutomationEngine::attach_by_click(int timeout_seconds) {
     Result result;
 
     try {
-        if (!app_) {
-            app_ = ComGuiApplication::create();
-        }
+        require_application();
 
         spdlog::info("Starting window selection (timeout: {}s)", timeout_seconds);
 
@@ -249,9 +302,7 @@ Result ComAutomationEngine::attach_by_session_id(const std::string& session_id) 
 ComAutomationEngine::NativeOpen ComAutomationEngine::open_native_connection(const std::string& connection_name, json& trace) {
     NativeOpen out;
     try {
-        if (!app_) {
-            app_ = ComGuiApplication::create();
-        }
+        require_application();
         if (app_) {
             spdlog::info("Attempting native COM OpenConnection('{}')", connection_name);
             auto conn = app_->open_connection(connection_name, true, false);
@@ -1606,7 +1657,8 @@ nlohmann::json ComAutomationEngine::get_application_info() const
     info["session_enumeration_errors"] = 0;
     
     if (!app_) {
-        info["error"] = "No SAP GUI application available. Is SAP Logon running?";
+        info["error"] = status_.detail.empty() ? "No SAP GUI application available. Is SAP Logon running?" : status_.detail;
+        info["sap_logon_running"] = status_.sap_logon_running;
         return info;
     }
     
