@@ -150,7 +150,7 @@ void CommandHandler::set_attach_owner_identities(std::vector<std::string> identi
 
 std::optional<Result> CommandHandler::sap_logon_missing() const
 {
-    if (engine_) return std::nullopt;  // RED: not checked yet
+    if (!engine_) return std::nullopt;
     const EngineStatus status = engine_->engine_status();
     if (status.sap_logon_running) return std::nullopt;
     Result missing = Result::fail("SAP_LOGON_NOT_RUNNING",
@@ -246,7 +246,7 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     // the session at that position may be another one: keep it only when it is provably the same SAP system, client
     // and user (as the automatic re-attach requires), otherwise ask for a new attach. Nothing is deleted.
     const std::uint64_t generation = engine_->application_generation();
-    if (false && conn.server_session_key.empty()) {  // RED: not checked yet
+    if (conn.server_session_key.empty()) {
         const auto seen = validated_generation_.find(conn.id);
         if (seen != validated_generation_.end() && seen->second != generation) {
             const auto* com = engine_->scripting();

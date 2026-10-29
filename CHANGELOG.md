@@ -22,6 +22,19 @@
   when there is no SAPGUI entry, "SAP Logon is running, but its scripting engine is not available" when scripting
   does not answer, and passes only with SAP Logon's own scripting engine ("Connected to SAP Logon's scripting
   engine"). `active_sessions` is checked only then.
+- COM apartment: each SAP GUI thread enters its single-threaded apartment once (`ensure_thread_apartment`, at the
+  first SAP GUI call) and leaves it only when the thread ends. `ComGuiApplication` no longer calls
+  `CoInitializeEx`/`CoUninitialize`, so dropping SAP Logon's objects never ends the apartment that other objects of
+  the thread (the cached UI Automation instance of the HTML viewer reader) live in.
+- Without SAP Logon, `session list`, `session attach` and every command on a saved connection answer
+  `SAP_LOGON_NOT_RUNNING` (with a hint), and saved connections are kept instead of being pruned as dead; the doctor's
+  `com_engine` check carries `code: SAP_LOGON_NOT_RUNNING`.
+- A saved connection without a SAP server session key is no longer re-bound by its position (`/app/con[0]/ses[0]`)
+  after SAP Logon was replaced inside a running tray or server: it is used only when the session there has the same
+  SAP system, client and user as recorded, otherwise the call answers `SESSION_TARGET_CHANGED` ("attach the SAP
+  session again").
+- One SAP Logon lookup per MCP call, also for a whole `gui_batch` (link, stdio and HTTP dispatchers); the log says
+  "SAP GUI scripting engine changed" only when SAP Logon was really replaced.
 
 ### Uninstalling the MSI ends the running fairyfly; `link status` follows the link process
 
