@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Microsoft Store (MSIX): the package is built in CI, with the Partner Center identity
+
+- The MSIX identity defaults to fairyfly's Partner Center product identity: `DataZoo.fairyfly`,
+  `CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC`, PublisherDisplayName `DataZoo` (package family name
+  `DataZoo.fairyfly_73q587949tsjt`, Store ID 9N5TSPSX6Q0V). The three CMake cache variables stay overridable; the
+  placeholders and their warning are gone.
+- Logos for the package (`packaging/msix/Assets`: Square44x44, Square150x150, Wide310x150, StoreLogo), drawn by
+  `assets/generate_icons.py` like the app icon.
+- `packaging/msix/New-MsixLayout.ps1` stages the package layout from the MSI's own file list (`packaging/fairyfly.wxs`),
+  so both installers ship the same files; it refuses a manifest executable the MSI does not ship, a missing build
+  output and a missing logo (`packaging/msix/tests/Test-MsixLayout.ps1`).
+- CI (`build-windows-msix`) packs `fairyfly-<msixversion>.msix` with `MakeAppx` (unsigned, for the Store submission;
+  artifact `fairyfly-msix`) and a copy signed with a self-signed certificate made fresh per run whose Subject is the
+  Publisher (artifact `fairyfly-msix-testsigned`, with the public `.cer`; for sideload tests only). It installs the
+  test-signed package with `Add-AppxPackage`, runs `fairyfly` through the execution alias and removes it.
+  [docs/MSIX.md](docs/MSIX.md) describes the sideload test on a VM and the later Store submission. Nothing is submitted
+  to the Store, and the MSI and the release workflow are unchanged.
+
 ## 2026.10.28 (2026-10-28)
 
 ### Screen read: `only` says which read-only fields it left out; actions notice a replaced SAP session

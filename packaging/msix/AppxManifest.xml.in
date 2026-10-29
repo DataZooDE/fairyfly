@@ -3,10 +3,11 @@
   fairyfly's MSIX package manifest (Microsoft Store), rendered by CMake for FAIRYFLY_PACKAGE=msix into
   <build>/msix/AppxManifest.xml (cmake/msix_manifest.cmake; checked by packaging/msix/tests/Test-AppxManifest.ps1).
   The identity (Identity Name, Publisher, PublisherDisplayName) comes from Partner Center, "Product identity", through
-  the CMake cache variables FAIRYFLY_MSIX_IDENTITY_NAME, FAIRYFLY_MSIX_PUBLISHER and FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME;
-  until then CMake fills in clearly marked placeholder values. The version is the calendar version as
+  the CMake cache variables FAIRYFLY_MSIX_IDENTITY_NAME, FAIRYFLY_MSIX_PUBLISHER and FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME,
+  whose defaults are fairyfly's identity (cmake/msix_manifest.cmake). The version is the calendar version as
   YYYY.MM.(DD*100+N).0.
-  The Assets\ images are not in the repository yet: the MakeAppx step has to provide them (docs/MSIX.md).
+  The Assets\ images are packaging/msix/Assets (assets/generate_icons.py); packaging/msix/New-MsixLayout.ps1 stages
+  them with the MSI's files (packaging/fairyfly.wxs) for MakeAppx (packaging/msix/tests/Test-MsixLayout.ps1).
 
   - Tray: fairyfly-tray.exe without arguments starts "fairyfly link run" in its tray, as the MSI's Start-menu entry does.
     Its StartupTask replaces the MSI's HKCU Run value "fairyfly-link" (the MSIX build writes no Run value).
@@ -64,7 +65,9 @@
         Description="fairyfly cloud link in the system tray (pairing, local MCP server from its menu)"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png" />
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
       <Extensions>
         <desktop:Extension Category="windows.startupTask" Executable="fairyfly-tray.exe" EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="fairyflyLinkTray" Enabled="true" DisplayName="fairyfly cloud link" />

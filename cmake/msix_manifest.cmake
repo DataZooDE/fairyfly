@@ -12,9 +12,18 @@
 #
 # Script mode, for packaging/msix/tests/Test-AppxManifest.ps1 and packaging/tests/Test-VersionScripts.ps1:
 #   cmake -DVERSION=2026.10.24.1 -P cmake/msix_manifest.cmake                  prints "msix version 2026.10.2401.0"
-#   cmake -DVERSION=... -DTEMPLATE=<in> -DOUT=<xml> -DIDENTITY_NAME=... -DPUBLISHER=CN=... -DPUBLISHER_DISPLAY_NAME=...
-#         -P cmake/msix_manifest.cmake                                          renders the manifest
+#   cmake -DVERSION=... -DTEMPLATE=<in> -DOUT=<xml> [-DIDENTITY_NAME=... -DPUBLISHER=CN=... -DPUBLISHER_DISPLAY_NAME=...]
+#         -P cmake/msix_manifest.cmake                                          renders the manifest (identity values
+#                                                                               left out: the defaults below)
 include(${CMAKE_CURRENT_LIST_DIR}/calendar_version.cmake)
+
+# fairyfly's product identity in Partner Center (Product management > Product identity; Store ID 9N5TSPSX6Q0V, package
+# family name DataZoo.fairyfly_73q587949tsjt). Public, not secret: it is part of every installed package's full name.
+# The defaults of the cache variables FAIRYFLY_MSIX_IDENTITY_NAME, FAIRYFLY_MSIX_PUBLISHER and
+# FAIRYFLY_MSIX_PUBLISHER_DISPLAY_NAME (CMakeLists.txt), which stay overridable (-D...).
+set(FAIRYFLY_MSIX_DEFAULT_IDENTITY_NAME "DataZoo.fairyfly")
+set(FAIRYFLY_MSIX_DEFAULT_PUBLISHER "CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC")
+set(FAIRYFLY_MSIX_DEFAULT_PUBLISHER_DISPLAY_NAME "DataZoo")
 
 function(fairyfly_msix_version out version)
     fairyfly_check_calendar_version("${version}")
@@ -85,6 +94,11 @@ endfunction()
 if(CMAKE_SCRIPT_MODE_FILE AND CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST_FILE)
     fairyfly_msix_version(msix_version "${VERSION}")
     if(DEFINED TEMPLATE)
+        foreach(v IDENTITY_NAME PUBLISHER PUBLISHER_DISPLAY_NAME)
+            if(NOT DEFINED ${v})
+                set(${v} "${FAIRYFLY_MSIX_DEFAULT_${v}}")
+            endif()
+        endforeach()
         fairyfly_render_msix_manifest("${TEMPLATE}" "${OUT}" "${msix_version}" "${IDENTITY_NAME}" "${PUBLISHER}"
                                       "${PUBLISHER_DISPLAY_NAME}")
     endif()
