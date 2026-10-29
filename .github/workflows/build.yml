@@ -154,11 +154,39 @@ jobs:
         & $exe update check
         Write-Host "installed OK: $exe $v"
 
+        # also running at uninstall: `fairyfly mcp` of this installation for a desktop assistant (stdin held open, no
+        # window to ask), and a fairyfly.exe of another installation (a stand-in for the Microsoft Store package)
+        function Start-Stdio([string]$program) {
+          $si = New-Object System.Diagnostics.ProcessStartInfo $program, 'mcp'
+          $si.UseShellExecute = $false
+          $si.RedirectStandardInput = $true
+          $si.RedirectStandardOutput = $true
+          $si.CreateNoWindow = $true
+          $si.EnvironmentVariables['FAIRYFLY_AUDIT'] = '0'
+          [System.Diagnostics.Process]::Start($si)
+        }
+        $installDir = Split-Path $exe
+        $otherDir = Join-Path $env:RUNNER_TEMP 'ffy-other-install'
+        New-Item -ItemType Directory -Force $otherDir | Out-Null
+        Copy-Item build/Release/fairyfly.exe $otherDir
+        $mcp = Start-Stdio $exe
+        $other = Start-Stdio (Join-Path $otherDir 'fairyfly.exe')
+        Start-Sleep -Seconds 3
+        if ($mcp.HasExited -or $other.HasExited) { Write-Error "fairyfly mcp ended by itself (exit $($mcp.ExitCode) / $($other.ExitCode))"; exit 1 }
+
         $p = Start-Process msiexec.exe -ArgumentList @('/x', "$PWD\build\fairyfly.msi", '/qn', '/l*v', "$PWD\build\msi-uninstall.log") -Wait -PassThru
         if ($p.ExitCode -ne 0) { Write-Error "uninstall failed: $($p.ExitCode)"; exit 1 }
         if (Test-Path $exe) { Write-Error "still present after uninstall"; exit 1 }
         if (Test-Path $lnk) { Write-Error "shortcut still present after uninstall"; exit 1 }
         if (Get-Process -Id $trays[0].ProcessId -ErrorAction SilentlyContinue) { Write-Error "the uninstall did not close the tray"; exit 1 }
+        # the tray quit as from its menu (asked first), not only terminated
+        $linkLog = Join-Path $env:LOCALAPPDATA 'fairyfly\logs\link.log'
+        if (-not (Select-String -Path $linkLog -Pattern 'asked to quit by another process' -Quiet)) { Get-Content $linkLog -Tail 20; Write-Error "the tray was not asked to quit"; exit 1 }
+        if (-not $mcp.WaitForExit(5000)) { Write-Error "the uninstall left fairyfly mcp (pid $($mcp.Id)) running from the removed files"; exit 1 }
+        $left = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith("$installDir\", [StringComparison]::OrdinalIgnoreCase) })
+        if ($left.Count -ne 0) { $left | Format-Table ProcessId, ExecutablePath | Out-String | Write-Host; Write-Error "processes of the removed installation still run"; exit 1 }
+        if ($other.HasExited) { Write-Error "the uninstall ended the fairyfly of another installation"; exit 1 }
+        $other.Kill(); $other.WaitForExit(5000) | Out-Null
         if (Get-ItemProperty $runKey -Name fairyfly-link -ErrorAction SilentlyContinue) { Write-Error "Run value fairyfly-link left behind"; exit 1 }
         if ([Environment]::GetEnvironmentVariable('PATH', 'User') -like "*Programs\fairyfly*") { Write-Error "PATH entry not removed"; exit 1 }
         Write-Host "uninstalled OK"
@@ -376,8 +404,9 @@ jobs:
         path: build-msix/test-results.xml
         retention-days: 30
 
-  # The MSIX manifest template as CMake renders it (packaging/msix/tests/Test-AppxManifest.ps1) and the layout staging
-  # with the MSI payload and the logo assets (packaging/msix/tests/Test-MsixLayout.ps1): pwsh and cmake only.
+  # The MSIX manifest template as CMake renders it (packaging/msix/tests/Test-AppxManifest.ps1), the layout staging
+  # with the MSI payload and the logo assets (packaging/msix/tests/Test-MsixLayout.ps1) and the MSI's close step
+  # (packaging/tests/Test-WxsClose.ps1): pwsh and cmake only.
   msix-manifest:
     timeout-minutes: 10
     runs-on: ubuntu-latest
@@ -390,4 +419,8 @@ jobs:
     - name: MSIX layout checks (payload = the MSI's, logo assets)
       if: success() || failure()
       run: ./packaging/msix/tests/Test-MsixLayout.ps1
+      shell: pwsh
+    - name: MSI close step checks (the MSI's own starter ends this installation's fairyfly before files change)
+      if: success() || failure()
+      run: ./packaging/tests/Test-WxsClose.ps1
       shell: pwsh

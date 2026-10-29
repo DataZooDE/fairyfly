@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <deque>
@@ -16,6 +17,7 @@
 #include "include/com/utf8.h"
 #include "include/config/mcp_config.h"
 #include "include/packaging.h"
+#include "include/system/process_probe.h"
 #include "tray_resource.h"
 
 namespace fairyfly::tray {
@@ -283,6 +285,13 @@ private:
             for (const auto& b : pending) show_balloon(b.first, b.second);
             return 0;
         }
+        case WM_CLOSE:
+            // `taskkill` without /f and other tools that close a program politely: the same as the menu's Quit. The
+            // default (DestroyWindow) only ended this UI thread, and the link ran on without a tray (live 2026-10-29).
+            spdlog::info("tray: asked to close (WM_CLOSE)");
+            EndMenu();
+            listener_->on_action(TrayAction::Quit);
+            return 0;
         case kMsgQuit: DestroyWindow(hwnd); return 0;
         case WM_DESTROY:
             KillTimer(hwnd, kTimerId);
@@ -560,6 +569,55 @@ private:
 
 } // namespace
 
+namespace {
+/// The tray windows of one kind (class and title, as show_running_instance finds them), any process.
+std::vector<std::pair<HWND, DWORD>> tray_windows(TrayKind kind) {
+    struct Search {
+        const wchar_t* title;
+        std::vector<std::pair<HWND, DWORD>> found;
+    } search{window_title(kind), {}};
+    EnumWindows(
+        [](HWND hwnd, LPARAM param) -> BOOL {
+            auto* s = reinterpret_cast<Search*>(param);
+            wchar_t cls[64] = {}, title[64] = {};
+            if (!GetClassNameW(hwnd, cls, 64) || wcscmp(cls, kWindowClass) != 0) return TRUE;
+            if (!GetWindowTextW(hwnd, title, 64) || wcscmp(title, s->title) != 0) return TRUE;
+            DWORD pid = 0;
+            if (GetWindowThreadProcessId(hwnd, &pid) && pid) s->found.emplace_back(hwnd, pid);
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&search));
+    return search.found;
+}
+
+class Win32TrayInstances : public TrayInstances {
+public:
+    explicit Win32TrayInstances(TrayKind kind) : kind_(kind) {}
+    std::vector<RunningTray> running() override {
+        std::vector<RunningTray> out;
+        for (const auto& [hwnd, pid] : tray_windows(kind_)) {
+            if (std::any_of(out.begin(), out.end(), [pid = pid](const RunningTray& t) { return t.pid == pid; })) continue;
+            RunningTray t;
+            t.pid = pid;
+            if (const auto found = system::os_process_probe().find(pid)) t.image = found->image;
+            out.push_back(std::move(t));
+        }
+        return out;
+    }
+    bool ask_to_quit(std::uint32_t pid) override {
+        const UINT quit = RegisterWindowMessageW(kQuitMessage);
+        bool asked = false;
+        for (const auto& [hwnd, owner] : tray_windows(kind_))
+            if (owner == pid && PostMessageW(hwnd, quit, 0, 0)) asked = true;
+        return asked;
+    }
+
+private:
+    TrayKind kind_;
+};
+}  // namespace
+
+std::unique_ptr<TrayInstances> make_win32_tray_instances(TrayKind kind) { return std::make_unique<Win32TrayInstances>(kind); }
 std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind) { return std::make_unique<Win32TrayHost>(kind); }
 std::unique_ptr<TraySettings> make_win32_tray_settings() { return std::make_unique<Win32TraySettings>(); }
 std::unique_ptr<FileOpener> make_win32_file_opener() { return std::make_unique<Win32FileOpener>(); }
@@ -603,6 +661,12 @@ bool is_tray_launched_process() { return is_tray_child_process() && config::proc
 bool path_exists(const std::filesystem::path& path) {
     std::error_code ec;
     return std::filesystem::is_regular_file(path, ec);
+}
+
+bool file_not_missing(const std::filesystem::path& path) {
+    if (GetFileAttributesW(path.wstring().c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    const DWORD error = GetLastError();
+    return error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND;
 }
 
 void detach_console() { FreeConsole(); }

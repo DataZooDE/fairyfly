@@ -23,6 +23,36 @@
   does not answer, and passes only with SAP Logon's own scripting engine ("Connected to SAP Logon's scripting
   engine"). `active_sessions` is checked only then.
 
+### Uninstalling the MSI ends the running fairyfly; `link status` follows the link process
+
+- Live 2026-10-29 (Windows 10 19045): `msiexec /x` of the per-user MSI 2026.10.28 exited 0 and removed the files and
+  the Run value, but the link tray (pid 2892) kept running from the deleted fairyfly.exe; `taskkill /im fairyfly.exe`
+  without `/f` did not end it either. The Microsoft Store tray then started and ended by itself, because the orphan held
+  the single-instance guard. The MSI's close step now runs the starter carried in the MSI itself (a Binary-table copy
+  of fairyfly-tray.exe, so an upgrade does not depend on the old installed one) with the install folder: it asks the
+  trays of that folder to quit as from their menu, waits up to 10 s and then terminates whatever of that folder still
+  runs (fairyfly.exe and fairyfly-tray.exe, also `fairyfly mcp` for an assistant). A fairyfly.exe of another folder,
+  such as the Store package, is not touched (not `util:CloseApplication`, which matches by file name only;
+  `packaging/tests/Test-WxsClose.ps1`). CI installs the MSI, starts the tray and `fairyfly mcp`, uninstalls and checks
+  that the tray was asked to quit, nothing of the folder still runs and a copy elsewhere still does. Each process is
+  opened once; its executable is read from that handle and the same handle is waited on and terminated, so a pid
+  reused in between is never touched. The close step runs on install and upgrade, not on a repair or modify.
+- The trays treat `WM_CLOSE` (`taskkill` without `/f`) like their menu's Quit. It used to destroy only the hidden
+  window, and the link ran on without a tray.
+- A tray start that finds its single-instance guard held looks at the holder (its window, its executable): this
+  installation's tray opens its menu as before; a tray whose fairyfly.exe no longer exists (an uninstalled MSI up to
+  2026.10.28 left it running) is asked to quit and this start takes over, or names the PID to end in Task Manager when
+  it does not quit within 10 s (when another tray of this installation wins the race, its menu opens); another
+  installation's tray (MSI beside the Store package) is named in a message box
+  and the log instead of the start ending without a word.
+- Live 2026-10-29: with no fairyfly process alive, `fairyfly link status` printed `"link": "connected"`: it trusted the
+  status file until its heartbeat was 60 s old (up to 75 s after the link died). The status file now also records the
+  link's executable and start time, and `link status`, `link pause|resume` and the trays check that process: ended, or
+  its pid taken by another program (another start time; the executable only decides when a start time is missing,
+  so a renamed or updated exe still counts), means `"link": "not running"` at once, and `link status` adds `last_seen` (the
+  state, time and pid the link last wrote). A live link whose heartbeat is stale (hung) still reads "not running" as
+  before.
+
 ### Microsoft Store (MSIX): the package is built in CI, with the Partner Center identity
 
 - The MSIX identity defaults to fairyfly's Partner Center product identity: `DataZoo.fairyfly`,
