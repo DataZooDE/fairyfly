@@ -1657,7 +1657,7 @@ TEST_CASE("SAP application wrapper keeps one COM apartment for the thread's life
     });
     worker.join();
     REQUIRE(apartment_after == S_OK);
-    CHECK(type_after == APTTYPE_STA);
+    CHECK((type_after == APTTYPE_STA || type_after == APTTYPE_MAINSTA));   // MAINSTA: the first STA of the process
     CHECK(entries == 1);
 }
 

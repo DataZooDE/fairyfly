@@ -282,7 +282,7 @@ TEST_CASE("engine: one COM apartment for the thread however often SAP Logon come
         entries = thread_apartment_entries();
     });
     CHECK(apartment == S_OK);
-    CHECK(type == APTTYPE_STA);
+    CHECK((type == APTTYPE_STA || type == APTTYPE_MAINSTA));   // MAINSTA: the first STA of the process
     CHECK(entries == 1);
 }
 
