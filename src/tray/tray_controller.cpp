@@ -307,6 +307,19 @@ int report_startup_error(const std::string& title, const std::string& code, cons
     return exit_code;
 }
 
+// ---- A held single-instance guard ------------------------------------------------------------------
+HeldTray decide_held_tray(const std::vector<RunningTray>&, const std::string&, const std::function<bool(const std::filesystem::path&)>&,
+                          const std::string&) {
+    return {};
+}
+
+bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim&, const std::string&, const std::string& title,
+                const std::string& tray_name) {
+    if (guard.acquire()) return true;
+    if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
+    return false;
+}
+
 // ---- Entry decision ------------------------------------------------------------------------------
 TrayEntryResult decide_tray_entry(const TrayEntry& entry, const TrayEntryServices& services) {
     TrayEntryResult result;

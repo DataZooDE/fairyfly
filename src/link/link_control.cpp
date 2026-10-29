@@ -83,6 +83,12 @@ std::string describe(const json& status, std::int64_t now_unix) {
     return s;
 }
 
+std::string describe(const json& status, std::int64_t now_unix, system::ProcessProbe&) { return describe(status, now_unix); }
+
+LinkLiveness link_liveness(const json& status, std::int64_t now_unix, system::ProcessProbe& probe) {
+    return {describe(status, now_unix, probe), nullptr};
+}
+
 void supervise(const std::string& state_path, const std::function<void(const std::atomic<bool>&)>& agent, const std::atomic<bool>& stop,
                const SupervisorOptions& o) {
     struct Running {

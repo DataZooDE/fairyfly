@@ -1680,3 +1680,158 @@ TEST_CASE("link tray controller: one balloon when a call hangs, back to normal w
     CHECK(controller.view().icon == IconState::Running);
     CHECK(f.host.balloons.size() == before + 1);
 }
+
+// ================= a single-instance guard held by another installation's tray =================
+// Live 2026-10-29 (Windows 10): the MSI was uninstalled, its link tray (pid 2892) kept running from the deleted
+// fairyfly.exe and held the guard; the Microsoft Store tray then opened that orphan's menu and ended without a word.
+namespace {
+const std::string kMsiExe = "C:\\Users\\ada\\AppData\\Local\\Programs\\fairyfly\\fairyfly.exe";
+const std::string kMsixExe = "C:\\Program Files\\WindowsApps\\DataZoo.fairyfly_2026.1029.0.0_x64__73q587949tsjt\\fairyfly.exe";
+
+/// The trays a held guard belongs to; a quit request frees the guard unless the tray ignores it.
+struct FakeInstances : TrayInstances {
+    std::vector<RunningTray> trays;
+    std::vector<std::uint32_t> asked;
+    FakeGuard* guard = nullptr;
+    bool quits = true;
+    std::vector<RunningTray> running() override { return trays; }
+    bool ask_to_quit(std::uint32_t pid) override {
+        asked.push_back(pid);
+        if (quits && guard) guard->other_running = false;
+        return true;
+    }
+};
+std::function<bool(const std::filesystem::path&)> files(std::vector<std::string> present) {
+    return [present](const std::filesystem::path& p) {
+        return std::find(present.begin(), present.end(), p.string()) != present.end();
+    };
+}
+}  // namespace
+
+TEST_CASE("held tray: this installation's running tray opens its menu, as before", "[tray][held]") {
+    const auto d = decide_held_tray({{2892, kMsiExe}}, kMsiExe, files({kMsiExe}), "fairyfly link tray");
+    CHECK(d.action == HeldTrayAction::ShowRunning);
+    // spelled differently by the process probe: still the same file
+    const auto spelled = decide_held_tray({{2892, "\\\\?\\c:\\users\\ada\\appdata\\local\\programs\\fairyfly\\FAIRYFLY.exe"}}, kMsiExe,
+                                          files({kMsiExe}), "fairyfly link tray");
+    CHECK(spelled.action == HeldTrayAction::ShowRunning);
+    // nothing to tell (no window found, or its executable could not be read): as before
+    CHECK(decide_held_tray({}, kMsixExe, files({kMsixExe}), "fairyfly link tray").action == HeldTrayAction::ShowRunning);
+    CHECK(decide_held_tray({{2892, ""}}, kMsixExe, files({kMsixExe}), "fairyfly link tray").action == HeldTrayAction::ShowRunning);
+}
+
+TEST_CASE("held tray: a tray whose fairyfly.exe was removed (uninstalled MSI) is asked to quit", "[tray][held]") {
+    const auto d = decide_held_tray({{2892, kMsiExe}}, kMsixExe, files({kMsixExe}), "fairyfly link tray");
+    CHECK(d.action == HeldTrayAction::TakeOver);
+    CHECK(d.pids == std::vector<std::uint32_t>{2892});
+    CHECK(d.message.find("2892") != std::string::npos);
+    CHECK(d.message.find(kMsiExe) != std::string::npos);
+    // one of them still this installation's: its menu, nothing is taken over
+    CHECK(decide_held_tray({{2892, kMsiExe}, {4711, kMsixExe}}, kMsixExe, files({kMsixExe}), "fairyfly link tray").action ==
+          HeldTrayAction::ShowRunning);
+}
+
+TEST_CASE("held tray: another installation's tray (MSI vs Microsoft Store) is named, not silently obeyed", "[tray][held]") {
+    const auto d = decide_held_tray({{2892, kMsiExe}}, kMsixExe, files({kMsiExe, kMsixExe}), "fairyfly link tray");
+    CHECK(d.action == HeldTrayAction::Explain);
+    CHECK(d.pids == std::vector<std::uint32_t>{2892});
+    CHECK(d.message.find("fairyfly link tray") != std::string::npos);
+    CHECK(d.message.find(kMsiExe) != std::string::npos);
+    CHECK(d.message.find("2892") != std::string::npos);
+    CHECK(d.message.find("Quit") != std::string::npos);
+}
+
+TEST_CASE("run_link_with_tray: the tray of a removed installation is asked to quit and this tray runs", "[tray][link_tray][held]") {
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    f.link.current = paired("connected");
+    FakeGuard guard;
+    guard.other_running = true;
+    FakeInstances instances;
+    instances.trays = {{2892, kMsiExe}};
+    instances.guard = &guard;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsixExe});
+    services.claim.poll = std::chrono::milliseconds(1);
+    bool ran = false;
+    const int code = run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths);
+    CHECK(code == 0);
+    CHECK(ran);
+    CHECK(guard.held);
+    CHECK(instances.asked == std::vector<std::uint32_t>{2892});
+    CHECK(f.host.boxes.empty());
+}
+
+TEST_CASE("run_link_with_tray: a removed installation's tray that does not quit is named in a message box", "[tray][link_tray][held]") {
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    f.link.current = paired("connected");
+    FakeGuard guard;
+    guard.other_running = true;
+    FakeInstances instances;
+    instances.trays = {{2892, kMsiExe}};
+    instances.guard = &guard;
+    instances.quits = false;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsixExe});
+    services.claim.takeover_wait = std::chrono::milliseconds(20);
+    services.claim.poll = std::chrono::milliseconds(1);
+    bool ran = false;
+    const int code = run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths);
+    CHECK(code == 0);
+    CHECK_FALSE(ran);
+    CHECK(instances.asked == std::vector<std::uint32_t>{2892});
+    REQUIRE(f.host.boxes.size() == 1);
+    CHECK(f.host.boxes[0].find("2892") != std::string::npos);
+    CHECK(f.host.boxes[0].find("Task Manager") != std::string::npos);
+}
+
+TEST_CASE("run_link_with_tray: another installation's running tray is named and left alone", "[tray][link_tray][held]") {
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    f.link.current = paired("connected");
+    FakeGuard guard;
+    guard.other_running = true;
+    FakeInstances instances;
+    instances.trays = {{2892, kMsiExe}};
+    instances.guard = &guard;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.link = &f.link;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsiExe, kMsixExe});
+    bool ran = false;
+    const int code = run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths);
+    CHECK(code == 0);
+    CHECK_FALSE(ran);
+    CHECK(instances.asked.empty());
+    REQUIRE(f.host.boxes.size() == 1);
+    CHECK(f.host.boxes[0].find(kMsiExe) != std::string::npos);
+}
+
+TEST_CASE("run_with_tray: the MCP tray takes over from a removed installation's tray as well", "[tray][run][held]") {
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    FakeGuard guard;
+    guard.other_running = true;
+    FakeInstances instances;
+    instances.trays = {{2892, kMsiExe}};
+    instances.guard = &guard;
+    TrayServices services;
+    services.host = &f.host;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsixExe});
+    services.claim.poll = std::chrono::milliseconds(1);
+    auto driver = drive(f.host, [&](TrayListener& l) { l.on_action(TrayAction::Quit); });
+    const int code = run_with_tray(f.runner, services, guard, f.paths);
+    driver.join();
+    CHECK(code == 0);
+    CHECK(f.runner.ran);
+    CHECK(instances.asked == std::vector<std::uint32_t>{2892});
+}

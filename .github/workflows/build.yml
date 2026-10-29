@@ -376,8 +376,9 @@ jobs:
         path: build-msix/test-results.xml
         retention-days: 30
 
-  # The MSIX manifest template as CMake renders it (packaging/msix/tests/Test-AppxManifest.ps1) and the layout staging
-  # with the MSI payload and the logo assets (packaging/msix/tests/Test-MsixLayout.ps1): pwsh and cmake only.
+  # The MSIX manifest template as CMake renders it (packaging/msix/tests/Test-AppxManifest.ps1), the layout staging
+  # with the MSI payload and the logo assets (packaging/msix/tests/Test-MsixLayout.ps1) and the MSI's close step
+  # (packaging/tests/Test-WxsClose.ps1): pwsh and cmake only.
   msix-manifest:
     timeout-minutes: 10
     runs-on: ubuntu-latest
@@ -390,4 +391,8 @@ jobs:
     - name: MSIX layout checks (payload = the MSI's, logo assets)
       if: success() || failure()
       run: ./packaging/msix/tests/Test-MsixLayout.ps1
+      shell: pwsh
+    - name: MSI close step checks (the MSI's own starter ends this installation's fairyfly before files change)
+      if: success() || failure()
+      run: ./packaging/tests/Test-WxsClose.ps1
       shell: pwsh

@@ -560,6 +560,12 @@ private:
 
 } // namespace
 
+class NoTrayInstances : public TrayInstances {
+public:
+    std::vector<RunningTray> running() override { return {}; }
+    bool ask_to_quit(std::uint32_t) override { return false; }
+};
+std::unique_ptr<TrayInstances> make_win32_tray_instances(TrayKind) { return std::make_unique<NoTrayInstances>(); }
 std::unique_ptr<TrayHost> make_win32_tray_host(TrayKind kind) { return std::make_unique<Win32TrayHost>(kind); }
 std::unique_ptr<TraySettings> make_win32_tray_settings() { return std::make_unique<Win32TraySettings>(); }
 std::unique_ptr<FileOpener> make_win32_file_opener() { return std::make_unique<Win32FileOpener>(); }

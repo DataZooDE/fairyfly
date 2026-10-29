@@ -17,6 +17,8 @@ std::unique_ptr<FileOpener> make_win32_file_opener();
 std::unique_ptr<ProcessLauncher> make_win32_process_launcher();
 std::unique_ptr<RegistryRunKey> make_win32_run_key();
 std::unique_ptr<SingleInstance> make_win32_single_instance(const std::string& name = kTrayMutexName);
+/// The running trays of `kind` (their windows, any installation) and their quit message.
+std::unique_ptr<TrayInstances> make_win32_tray_instances(TrayKind kind);
 
 /// Full path of the running fairyfly.exe.
 std::string current_exe_path();

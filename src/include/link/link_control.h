@@ -4,6 +4,7 @@
 // process) agree without any IPC.
 //   <state>.paused       exists while the person at the desktop has paused the link
 //   <state>.status.json  written by the running link: {"state": connected|paused|stopped, "pid", "updated",
+//                        "image", "started": the writing process's executable and start time (Unix s),
 //                        "trail"?: the audit-trail policy it runs under (proto::TrailPolicy JSON), for the tray}
 #include <atomic>
 #include <chrono>
@@ -13,6 +14,8 @@
 #include <string>
 
 #include <nlohmann/json.hpp>
+
+#include "include/system/process_probe.h"
 
 namespace fairyfly::link {
 
@@ -29,6 +32,18 @@ nlohmann::json read_status(const std::string& state_path);
 /// kStatusStaleSeconds (the process ended without writing "stopped").
 std::string describe(const nlohmann::json& status, std::int64_t now_unix);
 inline constexpr std::int64_t kStatusStaleSeconds = 60;
+/// describe() that also asks whether the process that wrote the status still runs: "not running" at once when it has
+/// ended, or when its pid now belongs to another program (other executable or start time), not only after the
+/// heartbeat has gone stale. A live process keeps the heartbeat rule (a hung link reads "not running" when stale).
+std::string describe(const nlohmann::json& status, std::int64_t now_unix, system::ProcessProbe& probe);
+
+/// What `fairyfly link status` reports about the running link: `link` (describe with the probe) and, while that is
+/// "not running" but a status file exists, `last_seen` = {"state", "updated", "pid"} as the link last wrote them.
+struct LinkLiveness {
+    std::string link;
+    nlohmann::json last_seen;   ///< null when there is nothing to add
+};
+LinkLiveness link_liveness(const nlohmann::json& status, std::int64_t now_unix, system::ProcessProbe& probe);
 
 struct SupervisorOptions {
     std::chrono::milliseconds poll{500};            ///< how often the marker is checked
