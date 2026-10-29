@@ -42,7 +42,7 @@ public:
             {fairyfly::config::env::kXdgConfigHome, "home/.config"},
         };
         for (const auto& v : vars) {
-            const fs::path dir = root_ / v.dir;
+            fs::path dir = root_ / v.dir;
             std::error_code ec;
             fs::create_directories(dir, ec);
             fairyfly::config::set_process_env(v.name, dir.make_preferred().string());
