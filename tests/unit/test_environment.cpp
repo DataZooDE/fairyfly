@@ -95,11 +95,11 @@ TEST_CASE("environment: LOCALAPPDATA, or the temp directory when it is unset", "
     CHECK(config::Environment(env_of({})).local_app_data() == std::filesystem::temp_directory_path());
 }
 
-TEST_CASE("environment: fairyfly's data directory is USERPROFILE/.fairyfly (temp/fairyfly when unset)", "[config][env]") {
+TEST_CASE("environment: fairyfly's data directory is USERPROFILE/.fairyfly (none when unset)", "[config][env]") {
     CHECK(config::Environment(env_of({{config::env::kUserProfile, R"(C:\U)"}, {config::env::kLocalAppData, R"(C:\L)"}})).data_dir() ==
           std::filesystem::path(R"(C:\U)") / ".fairyfly");
     CHECK(config::Environment(env_of({{config::env::kLocalAppData, R"(C:\L)"}})).legacy_data_dir() == std::filesystem::path(R"(C:\L\fairyfly)"));
-    CHECK(config::Environment(env_of({})).data_dir() == std::filesystem::temp_directory_path() / "fairyfly");
+    CHECK(config::Environment(env_of({})).data_dir().empty());   // never the temp directory (fail closed)
 }
 
 namespace {

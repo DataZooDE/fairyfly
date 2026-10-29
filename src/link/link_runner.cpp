@@ -419,6 +419,7 @@ Result link_status(const LinkOptions& o) {
         Result r;
         r.status = Result::Status::Success;
         r.data = {{"paired", false}, {"state", state_path(o)}, {"next", "fairyfly link pair"}};
+        add_pairing_conflicts(r);
         return r;
     }
 }

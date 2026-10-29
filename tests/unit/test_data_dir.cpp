@@ -142,7 +142,12 @@ TEST_CASE("data dir: falls back to HOME, never to the temp directory or a relati
 TEST_CASE("data dir: a process without USERPROFILE takes the Profile known folder", "[config][datadir]") {
     const auto known = config::known_user_data_dirs();
     REQUIRE_FALSE(known.empty());
-    const test::EnvGuard no_profile(config::env::kUserProfile, "");
+    // not test::EnvGuard: it checks that the variable reads back empty, which is exactly what no longer happens
+    struct Restore {
+        std::string old = config::Environment::process().get(config::env::kUserProfile);
+        ~Restore() { config::set_process_env(config::env::kUserProfile, old); }
+    } restore;
+    config::unset_process_env(config::env::kUserProfile);
     CHECK(text::utf8_path(config::Environment::process().get(config::env::kUserProfile)) == known[0].parent_path());
 }
 #endif
