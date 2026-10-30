@@ -18,6 +18,19 @@
   `kToastActivatorClsidMsi`, and checks that the two differ; unit tests check both parse and differ, and the quiet COM
   start. Clicking toasts with both packages installed is a VM check ([docs/MSIX.md](docs/MSIX.md)).
 
+### MCP tray: Restart right after Stop is no longer lost
+
+- In `fairyfly mcp --tray --http`, a Restart chosen while a Stop was still shutting the server down went to a server
+  that no longer listened for it, and the tray stayed stopped. The runner now starts the server again once the stopped
+  run has returned, as it already did for Start (`src/mcp/http_tray_runner.cpp`).
+- Tests: the flaky "restart while stopped" unit test (failed once in CI on PR #131) waited for a flag that turns false
+  before the server has returned; it now waits for the runner to hold no server, and a new test holds the server in
+  its shutdown to cover the Restart in that window deterministically.
+- The tray no longer reaches a destroyed server: `run_mcp_http` destroyed the server before the runner dropped its
+  reference, so a status poll, Stop, Restart or "Allow changes" from the tray in that window used freed memory. The
+  server now calls `HttpRunHooks::on_control_end` before it is destroyed and the runner drops it there, under its lock
+  (crew review of #135; unit test with a fake that counts calls after the end).
+
 ## 2026.10.30.1
 
 - Add compact references, guarded summary batches, and timing diagnostics for faster SAP workflows.

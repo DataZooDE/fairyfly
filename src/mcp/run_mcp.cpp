@@ -317,7 +317,10 @@ int serve_http(const ServeContext& context) {
         return refuse("WORKER_UNAVAILABLE", "parallel SAP session workers require Windows");
 #endif
     }
-    if (hooks) http_args.on_control = hooks->on_control;
+    if (hooks) {
+        http_args.on_control = hooks->on_control;
+        http_args.on_control_end = hooks->on_control_end;
+    }
     return serve_audited(sink, read_only, [&] {
         return run_mcp_http(std::move(http_args), hooks ? hooks->restart_requested : nullptr);
     });

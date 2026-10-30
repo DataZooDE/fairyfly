@@ -124,6 +124,8 @@ struct HttpRunArgs {
     std::function<void(McpHttpServer&)> configure_session_routing;
     /// Phase 4 (tray) hook: receives the running server's IServerControl before the loop starts.
     std::function<void(IServerControl&)> on_control;
+    /// After the loop has returned, before the server (the IServerControl above) is destroyed (HttpRunHooks).
+    std::function<void()> on_control_end;
     /// Overrides the authenticator (tests); default make_http_authenticator(options.insecure_no_auth).
     std::unique_ptr<IAuthenticator> authenticator;
     /// Banner sink; default: std::cerr.

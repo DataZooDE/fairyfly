@@ -46,9 +46,16 @@ public:
                 inner_ = &control;
                 if (!want_run_ || quit_) control.request_stop();  // stop arrived before the server was up
             };
+            // the server is destroyed right after this, before run_fn_ returns: the tray must not reach it any more
+            hooks.on_control_end = [this] {
+                std::lock_guard<std::mutex> guard(mutex_);
+                inner_ = nullptr;
+            };
+            in_run_ = true;
             lock.unlock();
             exit_code = run_fn_(opts, get_handler_, global_, sink_, peek_, &hooks);
             lock.lock();
+            in_run_ = false;
             inner_ = nullptr;
             if (exit_code != 0 && !quit_) {
                 // could not start (port in use, invalid option): stay in the tray, idle, so the user sees the state
@@ -103,13 +110,15 @@ public:
         std::lock_guard<std::mutex> guard(mutex_);
         if (inner_ && want_run_) return;  // already running
         // stopped, or a Stop is still shutting the server down: run (again) once it has returned
-        if (inner_) start_after_stop_ = true;
+        if (in_run_ && !want_run_) start_after_stop_ = true;
         want_run_ = true;
         cv_.notify_all();
     }
 
     void request_restart() override {
         std::lock_guard<std::mutex> guard(mutex_);
+        // a Stop is still shutting the server down: it may no longer see the restart, so run again once it returned
+        if (in_run_ && !want_run_) start_after_stop_ = true;
         want_run_ = true;
         if (inner_) inner_->request_restart();
         else cv_.notify_all();
@@ -125,9 +134,10 @@ private:
 
     mutable std::mutex mutex_;
     std::condition_variable cv_;
-    IServerControl* inner_ = nullptr;
+    IServerControl* inner_ = nullptr;   // the running server, from on_control until on_control_end
+    bool in_run_ = false;               // run_fn_ has not returned yet (inner_ may already be gone)
     bool want_run_ = true;
-    bool start_after_stop_ = false;  // Start after a Stop whose server run has not returned yet
+    bool start_after_stop_ = false;  // Start/Restart after a Stop whose server run has not returned yet
     bool quit_ = false;
     std::string last_error_;
     std::atomic<bool> read_only_{true};
