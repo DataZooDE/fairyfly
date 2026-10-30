@@ -5,6 +5,8 @@
 //
 //   fairyfly-tray.exe --close [<folder>]       close fairyfly in <folder> before its files are replaced or removed
 //   fairyfly-tray.exe --uninstall [<folder>]   --close, then remove the Run values, settings and registrations
+//   fairyfly-tray.exe -Embedding               COM starts the toast activator's server: the link tray, as without
+//                                              arguments (it registers the activator once it runs)
 //
 // The MSI runs the starter from its own Binary table (a temporary copy), so it names the install folder; without one
 // the starter's own folder is meant. Only processes started from that folder are closed: a Microsoft Store (MSIX)
@@ -14,6 +16,8 @@
 #include <utility>
 #include <string>
 #include <vector>
+
+#include "include/tray/tray_contract.h"
 
 namespace fairyfly::tray::closing {
 
@@ -36,8 +40,18 @@ inline std::wstring comparable_path(std::wstring path) {
     return path;
 }
 
+/// COM's start of the toast activator's server: only kComServerArgument (or its /Embedding spelling), possibly more
+/// than once (LocalServer32 appends it for the MSI; the MSIX manifest's com:ExeServer Arguments names it).
+inline bool is_com_server_start(const std::vector<std::wstring>& args) {
+    if (args.empty()) return false;
+    for (const auto& a : args)
+        if (a != contract::kComServerArgument && a != L"/Embedding") return false;
+    return true;
+}
+
 inline StarterCommand parse_starter_command(std::vector<std::wstring> args, const std::wstring& own_folder) {
     StarterCommand command;
+    if (is_com_server_start(args)) return command;  // the link tray, as from the Start menu (no arguments)
     if (!args.empty() && args.size() <= 2 && (args[0] == L"--close" || args[0] == L"--uninstall")) {
         command.mode = args[0] == L"--close" ? StarterMode::Close : StarterMode::Uninstall;
         command.folder = args.size() == 2 ? args[1] : own_folder;

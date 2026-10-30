@@ -9,9 +9,13 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "include/link/desktop_approval_win32.h"
 #include "include/link/link_runner.h"
+#include "include/link/toast_identity.h"
+#include "include/packaging.h"
 #include "include/tray/tray_contract.h"
 #include "include/tray/tray_win32.h"
 
@@ -72,6 +76,66 @@ TEST_CASE("desktop approval window: \"Don't ask again\" turns on Allow changes i
     r.offer_standing = false;
     CHECK(dont_ask_text(r).empty());  // no checkbox
     CHECK(contains(window_text(r), L"Approval is required by your administrator"));
+}
+
+TEST_CASE("toast identity: the MSI registers DataZoo.fairyfly in HKCU and sets it on the process", "[link][approval][toast]") {
+    using fairyfly::packaging::Package;
+    const auto msi = toast_identity(Package::Msi, L"", L"");
+    CHECK(msi.app_id == L"DataZoo.fairyfly");
+    CHECK(msi.register_in_hkcu);
+    CHECK(msi.set_process_app_id);
+    // an MSI fairyfly is never packaged, and should one be started by a package its own registration still applies
+    CHECK(toast_identity(Package::Msi, L"DataZoo.fairyfly_73q587949tsjt!Tray", L"DataZoo.fairyfly_73q587949tsjt").app_id == L"DataZoo.fairyfly");
+}
+
+TEST_CASE("toast identity: the Store package's tray application, nothing written to HKCU", "[link][approval][toast]") {
+    using fairyfly::packaging::Package;
+    const std::wstring family = L"DataZoo.fairyfly_73q587949tsjt";
+    // the link tray (fairyfly-tray.exe, its fairyfly.exe child inherits the identity)
+    auto t = toast_identity(Package::Msix, family + L"!Tray", family);
+    CHECK(t.app_id == L"DataZoo.fairyfly_73q587949tsjt!Tray");
+    CHECK_FALSE(t.register_in_hkcu);    // the private hive: the notification centre would never see it
+    CHECK_FALSE(t.set_process_app_id);  // the process keeps the AUMID Windows gave it
+    // `fairyfly link run` through the execution alias runs as the Cli application, which declares no activator
+    CHECK(toast_identity(Package::Msix, family + L"!Cli", family).app_id == family + L"!Tray");
+    // a package identity without an application id: the family alone
+    CHECK(toast_identity(Package::Msix, L"", family).app_id == family + L"!Tray");
+    // the AUMID's family wins over a differing family probe (it is the process's own)
+    CHECK(toast_identity(Package::Msix, L"Other.app_abc!Tray", family).app_id == L"Other.app_abc!Tray");
+    // without a package identity (an unpackaged copy of the Store exe): no toast, no registration, the window asks
+    for (const auto& [aumid, fam] : std::vector<std::pair<std::wstring, std::wstring>>{{L"", L""}, {L"!Tray", L""}}) {
+        const auto none = toast_identity(Package::Msix, aumid, fam);
+        CHECK(none.app_id.empty());
+        CHECK_FALSE(none.register_in_hkcu);
+        CHECK_FALSE(none.set_process_app_id);
+    }
+}
+
+TEST_CASE("toast identity: this unpackaged test process follows its build", "[link][approval][toast][msix-build]") {
+    using fairyfly::packaging::Package;
+    const auto id = this_process_toast_identity();
+    if (fairyfly::packaging::kPackage == Package::Msi) {
+        CHECK(id.app_id == L"DataZoo.fairyfly");
+        CHECK(id.register_in_hkcu);
+        return;
+    }
+    // a Store build run outside its package (CI's msix job): no notifications, and nothing written to HKCU
+    CHECK(id.app_id.empty());
+    CHECK_FALSE(id.register_in_hkcu);
+    auto key_exists = [](const std::wstring& path) {
+        HKEY k = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return false;
+        RegCloseKey(k);
+        return true;
+    };
+    const std::wstring aumid_key = std::wstring(fairyfly::tray::contract::kAppUserModelIdKeyPrefix) + fairyfly::tray::contract::kAppUserModelId;
+    const std::wstring clsid_key = std::wstring(fairyfly::tray::contract::kClsidKeyPrefix) + fairyfly::tray::contract::kToastActivatorClsid;
+    const bool aumid_before = key_exists(aumid_key), clsid_before = key_exists(clsid_key);
+    auto ui = make_win32_ui([](const std::string&) {});
+    CHECK_FALSE(ui->notify(sample()));  // no toast: the broker opens the approval window
+    ui->withdraw(sample());
+    CHECK(key_exists(aumid_key) == aumid_before);
+    CHECK(key_exists(clsid_key) == clsid_before);
 }
 
 TEST_CASE("standing approval: saved in the real tray settings (HKCU) and read back by a new process' Standing", "[link][approval][win32]") {

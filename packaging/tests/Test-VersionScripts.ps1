@@ -2,7 +2,8 @@
 .SYNOPSIS
   Checks the version handling of the packaging scripts (CI: .github/workflows/winget.yml; any pwsh 7, no install):
   packaging/msi_version.ps1 (calendar version -> MSI ProductVersion), packaging/msix_version.ps1 and
-  cmake/msix_manifest.cmake (-> MSIX package version), packaging/set_version.ps1 (on a copy of the
+  cmake/msix_manifest.cmake (-> MSIX package version), packaging/check_msix_version.ps1 (release.yml's MSIX version
+  check), packaging/set_version.ps1 (on a copy of the
   version files) and the version check of packaging/winget/New-WingetManifest.ps1.
 .DESCRIPTION
   Versions are YYYY.MM.DD or YYYY.MM.DD.N (N = 1..99) for a further release on the same day. Windows Installer
@@ -84,7 +85,14 @@ $goodMsix = [ordered]@{
     '2026.10.05'    = '2026.10.500.0'
     '2026.9.30'     = '2026.9.3000.0'
     '2026.10.24.1'  = '2026.10.2401.0'
+    '2026.10.24.2'  = '2026.10.2402.0'
+    '2026.10.31'    = '2026.10.3100.0'
     '2026.10.31.99' = '2026.10.3199.0'
+    'v2026.11.01'   = '2026.11.100.0'
+    '2026.11.01.1'  = '2026.11.101.0'
+    '2026.12.31.99' = '2026.12.3199.0'
+    'v2027.01.01'   = '2027.1.100.0'
+    '2028.02.29'    = '2028.2.2900.0'
     '2255.12.31'    = '2255.12.3100.0'
 }
 foreach ($k in $goodMsix.Keys) {
@@ -101,13 +109,62 @@ foreach ($bad in '2026.10.24.0', '2026.10.24.100', '2026.02.30', '2026.10', 'V20
 }
 # the package version must rise with every release, the same-day ones included (the Store refuses a lower one)
 $prev = $null
-foreach ($v in '2026.10.24', '2026.10.24.1', '2026.10.24.99', '2026.10.25', '2026.10.31.99', '2026.11.01', '2027.01.01') {
+foreach ($v in '2026.10.24', '2026.10.24.1', '2026.10.24.2', '2026.10.24.99', '2026.10.25', '2026.10.28', '2026.10.28.1', '2026.10.31',
+               '2026.10.31.99', '2026.11.01', '2026.11.01.1', '2026.11.30.99', '2026.12.01', '2026.12.31.99', '2027.01.01', '2027.02.28.99',
+               '2027.03.01') {
     $cur = [version](Try-Run { & $msixVersion -Version $v }).Out
     if ($prev) { Check ($cur -gt $prev.Msix) "MSIX $cur ($v) is above $($prev.Msix) ($($prev.V))" }
     $prev = [pscustomobject]@{ V = $v; Msix = $cur }
 }
 $r = Try-Run { & $msixVersion }
 Check ($r.Out -ne '' -and $r.Out -eq (Try-Run { & $msixVersion -Version $fromHeader }).Out) "msix_version without -Version reads version.h ($fromHeader -> $($r.Out))"
+
+Write-Host "`n=== check_msix_version.ps1 (release.yml: the packed MSIX version against the tag and the previous releases) ==="
+# release.yml (job build-msix) and build.yml (build-windows-msix, release dry run): the package version must be
+# msix_version(<tag>) and strictly above the MSIX version of every earlier release (Partner Center refuses a package
+# whose version is not higher than the last one submitted)
+$msixCheck = Join-Path $packaging 'check_msix_version.ps1'
+$released = @('v2026.10.05', 'v2026.10.23', 'v2026.10.24', 'v2026.10.24.1', 'v2026.10.24.2', 'v2026.10.25', 'v2026.10.25.1',
+              'v2026.10.25.2', 'v2026.10.27', 'v2026.10.28')
+function Invoke-MsixCheck([string]$tag, [string]$msix, [string[]]$prev) {
+    Try-Run { & $msixCheck -Tag $tag -MsixVersion $msix -PreviousTags $prev }
+}
+foreach ($case in @(
+        @('v2026.10.29', '2026.10.2900.0', $released, 'next day'),
+        @('v2026.10.28.1', '2026.10.2801.0', $released, 'same day .1 after the plain day'),
+        @('v2026.10.28.2', '2026.10.2802.0', ($released + 'v2026.10.28.1'), 'same day .2 after .1'),
+        @('v2026.10.28.10', '2026.10.2810.0', ($released + 'v2026.10.28.9'), 'same day .10 after .9 (numeric, not text order)'),
+        @('v2026.11.01', '2026.11.100.0', ($released + 'v2026.10.31.99'), 'month boundary after the last same-day release'),
+        @('v2027.01.01', '2027.1.100.0', ($released + 'v2026.12.31.99'), 'year boundary'),
+        @('v2026.10.28', '2026.10.2800.0', $released, 'a re-run on a released tag compares with the releases before it'),
+        @('v2026.10.29', '2026.10.2900.0', @(), 'no earlier release'),
+        @('v2026.10.29', '2026.10.2900.0', ($released + 'nightly' + 'v1.0.0' + ''), 'tags that are no calendar version are ignored'))) {
+    $r = Invoke-MsixCheck $case[0] $case[1] $case[2]
+    Check ($r.Error -eq '') "check_msix_version accepts $($case[0]) = $($case[1]): $($case[3])$(if ($r.Error) { " error: $($r.Error)" })"
+}
+foreach ($case in @(
+        @('v2026.10.29', '2026.10.2901.0', $released, 'package version is not the tag''s'),
+        @('v2026.10.29.1', '2026.10.2900.0', $released, 'same-day N missing in the package version'),
+        @('v2026.10.29', '2026.10.29.0', $released, 'old-style version'),
+        @('v2026.10.29', '2026.10.2900', $released, 'three fields'),
+        @('v2026.10.29', '2026.10.2900.1', $released, 'fourth field not 0'),
+        @('v2026.10.29', '', $released, 'empty package version'),
+        @('V2026.10.29', '2026.10.2900.0', $released, 'uppercase V'),
+        @('2026.10.29', '2026.10.2900.0', $released, 'no v'),
+        @('v2026.10.29.0', '2026.10.2900.0', $released, 'N = 0'),
+        @('v2026.10.27.1', '2026.10.2701.0', $released, 'below the latest release v2026.10.28'),
+        @('v2026.10.28.1', '2026.10.2801.0', ($released + 'v2026.10.28.2'), 'same day .1 after .2'),
+        @('v2026.10.28.9', '2026.10.2809.0', ($released + 'v2026.10.28.10'), 'same day .9 after .10'),
+        @('v2026.10.31.99', '2026.10.3199.0', ($released + 'v2026.11.01'), 'last day of a month after the first of the next'),
+        @('v2026.12.31', '2026.12.3100.0', ($released + 'v2027.01.01'), 'year boundary backwards'),
+        @('v2026.10.09', '2026.10.900.0', @('v2026.10.05', 'v2026.10.9'), 'equal to an earlier release (not strictly above)'))) {
+    $r = Invoke-MsixCheck $case[0] $case[1] $case[2]
+    Check ($r.Error -ne '') "check_msix_version refuses $($case[0]) = '$($case[1])': $($case[3]) ($($r.Error))"
+}
+$r = Invoke-MsixCheck 'v2026.10.27.1' '2026.10.2701.0' $released
+Check ($r.Error -match 'v2026\.10\.28' -and $r.Error -match '2026\.10\.2800\.0') "the refusal names the newer release and its MSIX version ($($r.Error))"
+$r = Invoke-MsixCheck 'v2026.10.29' '2026.10.2900.0' $released
+Check ($r.Out -match '2026\.10\.2900\.0' -and $r.Out -match 'v2026\.10\.28') "the check prints the version and the previous release ($($r.Out))"
 
 Write-Host "`n=== set_version.ps1 (on a copy) ==="
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ffy-setversion-" + [guid]::NewGuid())

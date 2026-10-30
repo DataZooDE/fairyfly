@@ -2,7 +2,8 @@
 
 Status: the package is built. The build option, the manifest with fairyfly's Partner Center identity, the logos and
 the packaging step are in the repository, and CI (`build-windows-msix`) packs an unsigned MSIX for the Store and a
-test-signed copy for sideloading, which it installs and removes once. The VM sideload test and the Store submission are
+test-signed copy for sideloading, which it installs and removes once. Every release attaches the unsigned MSIX
+([Store submission](#store-submission)). The VM sideload test and the Store submission are
 not done yet (see [What is left](#what-is-left)). The per-user MSI ([packaging/fairyfly.wxs](../packaging/fairyfly.wxs))
 is unchanged and stays the default.
 
@@ -60,6 +61,7 @@ the same result and that each version is higher than the one before.
 - **Tray** (`fairyfly-tray.exe`): the Start-menu tile. Without arguments it starts `fairyfly link run --tray`, like the
   MSI's shortcut. Its `desktop:StartupTask` (`fairyflyLinkTray`) replaces the Run value. It also declares the
   approval toast's COM activator (`{DAAF1065-…}`, `-Embedding`) as `com:ExeServer` + `desktop:ToastNotificationActivation`.
+  Its AUMID `DataZoo.fairyfly_73q587949tsjt!Tray` is the approval toasts' (see [Approval notifications](#approval-notifications)).
 - **Cli** (`fairyfly.exe`, `AppListEntry="none"`, console subsystem): `uap5:AppExecutionAlias` `fairyfly.exe`. This puts
   it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not needed.
 - `runFullTrust` only. No `unvirtualizedResources` and no `virtualization:ExcludedDirectories`: fairyfly's data is in
@@ -87,14 +89,23 @@ unit tests, on the same runner:
    that neither installer carries.
 2. **`MakeAppx pack`** (Windows SDK on the runner) builds `fairyfly-<msixversion>.msix`, for example
    `fairyfly-2026.10.2800.0.msix`. Packing validates the manifest against the AppxManifest schema and fails on any
-   error. An unpack round trip checks that the package holds exactly the layout.
+   error. An unpack round trip checks that the package holds exactly the layout. Steps 1 and 2 are
+   [packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1), which the release runs too.
+   **Release dry run:** the job then runs the release's MSIX version check
+   ([packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1), see
+   [Store submission](#store-submission)) with the tag `v<fairyfly --version>`: the version mapping and the
+   unsigned package must pass; "above every published release" is only a warning there (a branch cut before the
+   latest release is fine), the release enforces it. The workflow's token is read-only.
 3. **Test-signed copy.** A self-signed code-signing certificate is made fresh in each run with Subject exactly the
    manifest's Publisher (`CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC`, which Windows requires for a sideload). `signtool`
    signs a copy, `fairyfly-<msixversion>-testsigned.msix`; the public certificate is exported as
    `fairyfly-<msixversion>-testsigned.cer` and the private key is deleted from the runner. No secret is involved.
 4. **Install check.** The runner imports the `.cer` into `LocalMachine\TrustedPeople`, installs the test-signed package
    with `Add-AppxPackage`, checks the package family name `DataZoo.fairyfly_73q587949tsjt` and the version, runs
-   `fairyfly.exe --version` and `update check` through the execution alias and removes the package again.
+   `fairyfly.exe --version` and `update check` through the execution alias, checks that `Get-StartApps` lists the
+   tray's AUMID `DataZoo.fairyfly_73q587949tsjt!Tray` and that `fairyfly doctor` through the alias reports
+   `Approval notifications as DataZoo.fairyfly_73q587949tsjt!Tray`, and removes the package again. A toast itself
+   cannot be shown or clicked on a runner (no interactive desktop): that is the VM check below.
 
 Artifacts of each run (Actions > the run > Artifacts, or `gh run download <run id> -R DataZooDE/fairyfly -n <name>`):
 
@@ -152,20 +163,53 @@ for a clean test uninstall it first.
    - A **new** terminal: `fairyfly --version` and `fairyfly update check` (`UPDATE_MANAGED_BY_STORE`) run through the
      alias; `Get-Command fairyfly` shows `%LOCALAPPDATA%\Microsoft\WindowsApps\fairyfly.exe`.
    - An MCP client (stdio, `"command": "fairyfly"`) starts `fairyfly mcp`.
-   - The approval toast's Approve/Deny buttons reach the tray (open: needs the code change in the table below).
+   - `fairyfly doctor` (new terminal) reports `approval_notifications` pass, `Approval notifications as
+     DataZoo.fairyfly_73q587949tsjt!Tray`.
+   - The approval toast, with the link paired and "Allow changes in SAP" **off** in the link tray: from the connected
+     assistant, call a write tool (for example `gui_key_send` Enter in an open SAP session). A toast "<assistant> wants
+     to change SAP" appears with Approve / Deny / Details. Click **Approve**: the change runs and the assistant gets the
+     result. Again with **Deny**: nothing changes and the assistant gets the denial. Again, let the banner go to the
+     notification centre and click Approve there: it still reaches the tray. **Details** opens the approval window.
+     `%USERPROFILE%\.fairyfly\logs\link.log` shows `approval: notifications as DataZoo.fairyfly_73q587949tsjt!Tray`
+     and no `CoRegisterClassObject` warning; Settings > System > Notifications lists "fairyfly".
+   - `reg query HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly` finds nothing (from a normal terminal, with no
+     MSI installed): the Store build registers nothing in HKCU.
    - `fairyfly mcp setup` works (Windows 10 and 11, see the table).
    - `%USERPROFILE%\.fairyfly\audit` and `logs` show up in Explorer (Windows 10 and 11) and stay after removal.
 5. Remove: `Get-AppxPackage DataZoo.fairyfly | Remove-AppxPackage`, and the certificate from
    `Cert:\LocalMachine\TrustedPeople` (`Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq
    'CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC' | Remove-Item`).
 
-## Store submission (later)
+## Store submission
 
-Partner Center > fairyfly (9N5TSPSX6Q0V) > a submission > Packages: upload the **unsigned** `fairyfly-<msixversion>.msix`
-from the `fairyfly-msix` artifact, never the test-signed one. The Store checks that its identity matches the reserved
-one and signs it with the Store's certificate; the version must be higher than the last submitted one (the calendar
-version scheme above guarantees that). The submission also needs the justification for the restricted capability
-`runFullTrust` and the listing.
+**What to upload.** Each GitHub release has the asset `fairyfly-<msixversion>.msix`, for example
+`fairyfly-2026.10.2900.0.msix` for the tag `v2026.10.29`, next to `fairyfly.msi` and listed in `SHA256SUMS`. That
+file is the Store package: Partner Center > fairyfly (9N5TSPSX6Q0V) > a new submission > Packages: upload it as it is.
+It is **unsigned** on purpose: the Store checks that its identity matches the reserved one and signs it with the
+Store's certificate. It is not the MSI's Authenticode signature (Artifact Signing signs `fairyfly.exe` and
+`fairyfly.msi` only), and it does not install by double-click. Never upload or publish a test-signed package or a
+test `.cer` (CI artifact `fairyfly-msix-testsigned`): a release never contains them. Before uploading, compare
+`Get-FileHash fairyfly-<msixversion>.msix` with `SHA256SUMS`.
+
+**Built by the release.** The job `build-msix` of [.github/workflows/release.yml](../.github/workflows/release.yml)
+builds the msix configuration from the tagged commit (the same ref guard and `github.sha` checkout as the MSI build),
+runs the unit tests, checks `fairyfly --version` against the tag (`check_release_tag.ps1`), packs with
+[packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1) and checks that the package is not signed.
+It has no environment, no Azure login and no secret. The release is only published when this job succeeds, and
+the release job checks the attached file against the SHA-256 that `build-msix` took of the checked package.
+
+**Version check.** The Store refuses a package whose version is not higher than the last submitted one, so
+[packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1) fails the release unless the packed
+`Package/Identity/Version` is exactly [packaging/msix_version.ps1](../packaging/msix_version.ps1) of the tag,
+`vYYYY.MM.DD[.N]` -> `YYYY.MM.(DD*100+N).0` (`v2026.10.29` -> `2026.10.2900.0`, `v2026.10.29.1` -> `2026.10.2901.0`,
+`v2026.11.01` -> `2026.11.100.0`), and strictly above the MSIX version of every other published release (computed
+from their tags the same way, so releases from before the MSIX count too; non-calendar tags are ignored). A tag
+below an existing release, or a same-day `.N` below one already released, fails before anything is published. Two
+tags pushed at the same time are not checked against each other (neither release exists yet); release one at a time.
+Submit the releases in order: uploading an older release's MSIX after a newer one was submitted is refused by the
+Store.
+
+The submission also needs the justification for the restricted capability `runFullTrust` and the listing.
 
 ## What fairyfly writes at run time, and what MSIX does with it
 
@@ -192,7 +236,7 @@ without the package identity does not see that view: Explorer, Notepad, an admin
 | Self-update (`fairyfly.exe.new`/`.old`, rename of the running exe) | install folder | `src/update/updater.cpp` `apply()` | impossible: read-only | **done**: the msix build does not update itself (`UPDATE_MANAGED_BY_STORE`, also in `apply()`). The tray has no update item and no background check |
 | Link tray autostart | `HKCU\…\CurrentVersion\Run` `fairyfly-link` (and `fairyfly-mcp` for `mcp --tray --install-autostart`) | `src/tray/tray_win32.cpp` `Win32RunKey`, `settle_autostart`, `decide_tray_entry` | **breaks**: lands in the private hive, Explorer never sees it, so no autostart | **done**: no Run value in the msix build. `StartupTask` in the manifest. `--install-autostart` → `TRAY_AUTOSTART_PACKAGED`. Open: the MCP tray has no StartupTask (one more Application + task if it is wanted) |
 | Tray settings (`link_allow_changes`, `link-autostart-defaulted`) | `HKCU\Software\DataZoo\fairyfly\tray` | `Win32TraySettings` | private hive. Only fairyfly reads it | nothing. It starts empty after a move from the MSI (the standing approval is asked again) |
-| Toast activator / AUMID registration | `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly`, `…\CLSID\{DAAF1065-…}\LocalServer32` | `src/link/desktop_approval_win32.cpp` | **breaks**: private hive, so the notification centre cannot activate the approval toast. A packaged process also has the package's AUMID | template declares the COM server + toast activation. **Open (code)**: in the msix build, skip the HKCU registration and `SetCurrentProcessExplicitAppUserModelID`, and create the notifier with the package AUMID (`<PackageFamilyName>!Tray`). Check the toast on the VM |
+| Toast activator / AUMID registration | `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly`, `…\CLSID\{DAAF1065-…}\LocalServer32` | `src/link/desktop_approval_win32.cpp` | **breaks**: private hive, so the notification centre cannot activate the approval toast. A packaged process also has the package's AUMID | **done**: the manifest declares the COM server + toast activation; the msix build writes nothing to HKCU, does not call `SetCurrentProcessExplicitAppUserModelID` and shows its toasts as `<PackageFamilyName>!Tray` ([Approval notifications](#approval-notifications)). Check the toast on the VM |
 | Audit trail | `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` (or `FAIRYFLY_AUDIT_FILE`) | `src/audit_log.cpp` | not virtualized (user profile outside AppData): Explorer and admins see it, it stays after an uninstall | **done**: the data directory moved out of AppData ([DATA_DIR.md](DATA_DIR.md)) |
 | Logs | `%USERPROFILE%\.fairyfly\logs\mcp.log`, `link.log` | `route_logging_to_file` | not virtualized | done, as above |
 | MCP config | `%USERPROFILE%\.fairyfly\mcp.yaml` | `mcp config init`, `mcp setup` | not virtualized | done, as above |
@@ -208,12 +252,36 @@ without the package identity does not see that view: Explorer, Notepad, an admin
 ### Cross-app visibility: what breaks
 
 1. **Run-key autostart** (fixed in this build option: StartupTask).
-2. **Approval toast activation** through the HKCU COM/AUMID registration (manifest part done, code change open).
+2. **Approval toast activation** through the HKCU COM/AUMID registration (fixed: the manifest declares it, the code uses
+   the package's AUMID; check the click on the VM).
 3. **`mcp setup`'s plan hand-over** to the elevated child (fixed: the plan is in `%USERPROFILE%\.fairyfly\run`; check on
    Windows 10 and 11).
 4. **Audit trail, logs and `mcp.yaml` seen from outside** (Explorer, editors, admins), and the audit trail **being deleted on
    uninstall** (fixed: `%USERPROFILE%\.fairyfly` is not virtualized).
 5. The Claude Desktop config is **not** affected, because fairyfly does not write it.
+
+### Approval notifications
+
+The cloud link asks at the desktop before a change in SAP: a toast with Approve / Deny / Details
+([src/link/desktop_approval_win32.cpp](../src/link/desktop_approval_win32.cpp)). Which AppUserModelID (AUMID) it uses
+and what it registers is decided in [src/include/link/toast_identity.h](../src/include/link/toast_identity.h):
+
+| Build | AUMID of the toasts | Registration | Activator's server |
+|---|---|---|---|
+| `msi` | `DataZoo.fairyfly` (the Start-menu shortcut's) | the link writes `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly` (`CustomActivator`) and `…\CLSID\{DAAF1065-…}\LocalServer32` = `fairyfly-tray.exe`, and sets the AUMID on its process | COM appends `-Embedding` |
+| `msix` | `<PackageFamilyName>!Tray`, i.e. `DataZoo.fairyfly_73q587949tsjt!Tray`: the family part of `GetCurrentApplicationUserModelId` (`GetCurrentPackageFamilyName` as fallback) | none at run time: the manifest's `com:ExeServer` and `desktop:ToastNotificationActivation` on the `Tray` application. No HKCU value, no `SetCurrentProcessExplicitAppUserModelID` | the manifest's `Arguments="-Embedding"` |
+| `msix` run outside its package | none: no toast, the approval window asks; `fairyfly doctor` warns | none | - |
+
+`fairyfly link run` through the execution alias runs as the `Cli` application; its toasts are still the `Tray`
+application's, which declares the activator. In both builds the running link registers the activator's class object
+(`CoRegisterClassObject`, in a multithreaded apartment kept for the process) as it starts, so a click on the toast or
+in the notification centre reaches the running tray. When no tray runs, COM starts `fairyfly-tray.exe -Embedding`,
+which starts the link tray like the Start menu; once paired, that link registers the class and receives the click and
+drops it, because the question belonged to the process that ended (and was denied with it).
+`fairyfly doctor` reports the AUMID as the check `approval_notifications`.
+[packaging/msix/tests/Test-AppxManifest.ps1](../packaging/msix/tests/Test-AppxManifest.ps1) checks that the manifest's
+CLSID, server argument and application id are the code's
+([src/include/tray/tray_contract.h](../src/include/tray/tray_contract.h)).
 
 ### Decision: the data directory outside AppData
 
@@ -239,14 +307,14 @@ an uninstall deletes. The user profile outside AppData is not virtualized on any
 ## What is left
 
 1. **Identity**: done (Partner Center values are the CMake defaults; [Identity](#identity)).
-2. **Packaging**: done in CI ([Packaging (CI)](#packaging-ci)). Not in the release workflow yet: a release does not
-   attach the MSIX.
+2. **Packaging**: done in CI ([Packaging (CI)](#packaging-ci)) and in the release: every release attaches the
+   unsigned `fairyfly-<msixversion>.msix` ([Store submission](#store-submission)).
 3. **VM sideload test** ([steps](#sideload-test-on-a-test-machine-vm)) (`Add-AppxPackage`): the StartupTask starts the link tray at logon. `fairyfly` from a fresh terminal
-   and from an MCP client (stdio) runs through the alias. The approval toast's Approve/Deny buttons activate the tray.
+   and from an MCP client (stdio) runs through the alias. The approval toast's Approve/Deny buttons activate the tray (the code is done; the click needs the VM).
    `mcp setup` works, on Windows 10 and 11. The audit trail and logs show up in Explorer under `%USERPROFILE%\.fairyfly`
    (also on Windows 10), and stay after `Remove-AppxPackage`. An earlier Store install's data in the package copy is
    moved there at the first start. `update check` answers `UPDATE_MANAGED_BY_STORE`.
-4. **Code**: the toast AUMID/registration change for packaged processes (table above). Optionally a StartupTask for the
-   MCP tray. Optionally switch the StartupTask from the tray menu (WinRT `StartupTask`).
-5. **Store submission**: signing by the Store, the restricted capability justification (`runFullTrust`), and the
-   listing.
+4. **Code**: the toast AUMID/registration for packaged processes is done ([Approval notifications](#approval-notifications)).
+   Optionally a StartupTask for the MCP tray. Optionally switch the StartupTask from the tray menu (WinRT `StartupTask`).
+5. **Store submission**: upload a release's `fairyfly-<msixversion>.msix` (signed by the Store), the restricted
+   capability justification (`runFullTrust`), and the listing.

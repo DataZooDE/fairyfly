@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+### Releases attach the unsigned Microsoft Store package (MSIX)
+
+- `release.yml` has a job `build-msix`: from the tagged commit it builds the Store configuration
+  (`FAIRYFLY_PACKAGE=msix`), runs the unit tests, checks `fairyfly --version` against the tag and packs the
+  **unsigned** `fairyfly-<msixversion>.msix` (for example `fairyfly-2026.10.2900.0.msix` for `v2026.10.29`). The
+  release attaches it next to `fairyfly.msi` and lists it in `SHA256SUMS`. The Store signs what is submitted, so the
+  package is not Authenticode-signed by us (the job has no environment, no Azure login, no signtool and checks the
+  package is `NotSigned`); the test-signed copy and its certificate of `build.yml` never go into a release.
+- The release fails unless the package version is `msix_version.ps1` of the tag (`vYYYY.MM.DD[.N]` ->
+  `YYYY.MM.(DD*100+N).0`) and strictly above the MSIX version of every earlier published release (Partner Center
+  refuses a version that does not rise): `packaging/check_msix_version.ps1`, tested in
+  `packaging/tests/Test-VersionScripts.ps1` with same-day `.N`, month and year boundaries.
+- The packing steps moved into `packaging/msix/New-MsixPackage.ps1`, which `build.yml` (`build-windows-msix`) and the
+  release both run. `build-windows-msix` also runs the release's MSIX version check as a dry run with the tag
+  `v<fairyfly --version>` (the ordering against the published releases is a warning there); `build.yml` now has a
+  read-only token. The release job checks the attached MSIX against the hash `build-msix` took.
+- The MSI, its signing and the winget manifests are unchanged. [docs/MSIX.md](docs/MSIX.md#store-submission) says
+  which release asset to upload in Partner Center.
+
+### Approval notifications in the Microsoft Store package
+
+- The Microsoft Store (MSIX) build shows the cloud link's approval toasts as the package's tray application,
+  `DataZoo.fairyfly_73q587949tsjt!Tray` (from `GetCurrentApplicationUserModelId`), whose manifest declares the toast
+  activator. It no longer writes the MSI's AUMID and COM registration to HKCU (they landed in the package's private
+  hive, so a click on Approve/Deny in the notification centre could not reach the tray) and does not set the MSI's
+  AUMID on its process. A Store build started outside its package shows no toast; the approval window asks. The MSI is
+  unchanged.
+- The link registers the toast activator as it starts, not at its first toast, so a click that makes Windows start the
+  tray (`fairyfly-tray.exe -Embedding`) is delivered instead of waiting for a COM timeout.
+- `fairyfly doctor` has a new check `approval_notifications` with the AUMID the toasts use (warn: a Store build without
+  its package identity).
+- CI: the manifest test compares the manifest's toast activator CLSID, COM server argument and application id with
+  the code's (`src/include/tray/tray_contract.h`); the MSIX install check verifies the tray's AUMID with `Get-StartApps`
+  and `fairyfly doctor`. Clicking a toast is checked by hand on a VM ([docs/MSIX.md](docs/MSIX.md)).
+
 ### Configurable local audit retention (audit.retention_days)
 
 - New key `audit.retention_days` in `mcp.yaml`, with `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` and
@@ -130,7 +165,7 @@
   Publisher (artifact `fairyfly-msix-testsigned`, with the public `.cer`; for sideload tests only). It installs the
   test-signed package with `Add-AppxPackage`, runs `fairyfly` through the execution alias and removes it.
   [docs/MSIX.md](docs/MSIX.md) describes the sideload test on a VM and the later Store submission. Nothing is submitted
-  to the Store, and the MSI and the release workflow are unchanged.
+  to the Store, and the MSI is unchanged.
 
 ## 2026.10.28 (2026-10-28)
 
