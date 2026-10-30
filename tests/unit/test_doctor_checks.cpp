@@ -92,3 +92,20 @@ TEST_CASE("doctor: overall health and the JSON of a check", "[doctor]") {
     CHECK(judge_engine(true).status == "pass");
     CHECK(judge_engine(false).status == "fail");
 }
+
+TEST_CASE("doctor: approval notifications name their AUMID; a Store build outside its package has none", "[doctor][toast]") {
+    using fairyfly::packaging::Package;
+    const auto msi = judge_notifications(Package::Msi, "DataZoo.fairyfly");
+    CHECK(msi.name == "approval_notifications");
+    CHECK(msi.status == "pass");
+    CHECK(msi.message == "Approval notifications as DataZoo.fairyfly");
+    CHECK(msi.details.find("HKCU") != std::string::npos);
+    const auto msix = judge_notifications(Package::Msix, "DataZoo.fairyfly_73q587949tsjt!Tray");
+    CHECK(msix.status == "pass");
+    CHECK(msix.message == "Approval notifications as DataZoo.fairyfly_73q587949tsjt!Tray");
+    CHECK(msix.details.find("manifest") != std::string::npos);
+    const auto none = judge_notifications(Package::Msix, "");
+    CHECK(none.status == "warn");
+    CHECK(none.message.find("package identity") != std::string::npos);
+    CHECK_FALSE(none.remediation.empty());
+}

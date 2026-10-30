@@ -447,6 +447,25 @@ jobs:
         $out = (& $alias --no-audit update check 2>&1 | Out-String)
         if ($out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "the installed package does not leave updates to the Store: $out"; exit 1 }
         Write-Host "alias OK: fairyfly $v, update check -> UPDATE_MANAGED_BY_STORE"
+        # the approval toasts' AUMID (src/include/link/toast_identity.h, docs/MSIX.md): the package's tray application
+        # <family>!Tray is registered for this user, and the packaged fairyfly (here through the alias, i.e. as the Cli
+        # application) resolves its notifications to it (not the MSI's DataZoo.fairyfly). A toast itself needs an interactive
+        # desktop, which a runner does not have: clicking Approve/Deny is checked on the VM (docs/MSIX.md).
+        $trayAumid = "$($pkg.PackageFamilyName)!Tray"
+        if (Get-Command Get-StartApps -ErrorAction SilentlyContinue) {
+          $apps = @()
+          for ($i = 0; $i -lt 15 -and $apps.AppID -notcontains $trayAumid; $i++) {
+            $apps = @(Get-StartApps | Where-Object AppID -like 'DataZoo.fairyfly*!Tray')
+            if ($apps.AppID -notcontains $trayAumid) { Start-Sleep -Seconds 2 }
+          }
+          if ($apps.AppID -notcontains $trayAumid) { Write-Error "Get-StartApps does not list $trayAumid (found: $($apps.AppID -join ', '))"; exit 1 }
+          Write-Host "Start apps: $($apps.Name) = $($apps.AppID)"
+        } else {
+          Write-Warning 'Get-StartApps is not available on this runner; the AUMID is checked through fairyfly doctor only'
+        }
+        $doctor = (& $alias --no-audit doctor 2>&1 | Out-String)
+        if ($doctor -notmatch [regex]::Escape("Approval notifications as $trayAumid")) { Write-Error "the packaged fairyfly does not show its approval notifications as ${trayAumid}: $doctor"; exit 1 }
+        Write-Host "toast AUMID OK: $trayAumid (doctor approval_notifications)"
         Remove-AppxPackage -Package $pkg.PackageFullName
         if (Get-AppxPackage -Name DataZoo.fairyfly) { Write-Error 'still installed after Remove-AppxPackage'; exit 1 }
         if (-not (Test-Path (Join-Path $data '.data-dir.json'))) { Write-Error "removing the package deleted $data"; exit 1 }

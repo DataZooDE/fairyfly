@@ -21,6 +21,22 @@
 - The MSI, its signing and the winget manifests are unchanged. [docs/MSIX.md](docs/MSIX.md#store-submission) says
   which release asset to upload in Partner Center.
 
+### Approval notifications in the Microsoft Store package
+
+- The Microsoft Store (MSIX) build shows the cloud link's approval toasts as the package's tray application,
+  `DataZoo.fairyfly_73q587949tsjt!Tray` (from `GetCurrentApplicationUserModelId`), whose manifest declares the toast
+  activator. It no longer writes the MSI's AUMID and COM registration to HKCU (they landed in the package's private
+  hive, so a click on Approve/Deny in the notification centre could not reach the tray) and does not set the MSI's
+  AUMID on its process. A Store build started outside its package shows no toast; the approval window asks. The MSI is
+  unchanged.
+- The link registers the toast activator as it starts, not at its first toast, so a click that makes Windows start the
+  tray (`fairyfly-tray.exe -Embedding`) is delivered instead of waiting for a COM timeout.
+- `fairyfly doctor` has a new check `approval_notifications` with the AUMID the toasts use (warn: a Store build without
+  its package identity).
+- CI: the manifest test compares the manifest's toast activator CLSID, COM server argument and application id with
+  the code's (`src/include/tray/tray_contract.h`); the MSIX install check verifies the tray's AUMID with `Get-StartApps`
+  and `fairyfly doctor`. Clicking a toast is checked by hand on a VM ([docs/MSIX.md](docs/MSIX.md)).
+
 ### Configurable local audit retention (audit.retention_days)
 
 - New key `audit.retention_days` in `mcp.yaml`, with `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` and

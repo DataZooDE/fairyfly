@@ -206,11 +206,9 @@ void remove_run_values(const std::wstring& dir) {
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    auto args = arguments();
-    // COM starts the toast activator's server with -Embedding: the link tray registers it once it runs (a running tray
-    // answers itself; a second start only opens its menu)
-    if (args.size() == 1 && (args[0] == L"-Embedding" || args[0] == L"/Embedding")) args.clear();
-    const auto command = closing::parse_starter_command(std::move(args), module_dir());
+    // COM starts the toast activator's server with -Embedding (closing::is_com_server_start): the link tray, which
+    // registers the activator as it starts (a running tray answers itself; a second start only opens its menu)
+    const auto command = closing::parse_starter_command(arguments(), module_dir());
     if (command.mode == closing::StarterMode::Close) {
         close_installed(command.folder);
         return 0;
