@@ -135,7 +135,9 @@ self-signed certificate, a missing time stamp and wrong `O=`/`C=` are refused, a
    tag on a GitHub-hosted runner, runs the unit tests, checks that the tag equals `fairyfly --version` and the
    executable's `ProductVersion` (and that `ProductName` is `fairyfly`), signs and verifies the exes and the MSI when the
    variable `AZURE_SIGNING_ACCOUNT` is set (see above), and creates the GitHub release with `fairyfly.exe`,
-   `fairyfly.msi`, the winget manifests and `SHA256SUMS`. Without `AZURE_SIGNING_ACCOUNT` the release is published
+   `fairyfly.msi`, the winget manifests, the unsigned Microsoft Store package `fairyfly-<msixversion>.msix` (not
+   signed by us: the Store signs it; its version must rise with every release, [MSIX.md](MSIX.md#store-submission))
+   and `SHA256SUMS`. Without `AZURE_SIGNING_ACCOUNT` the release is published
    unsigned (a notice in the run says so), or fails when `REQUIRE_SIGNING` is `true`. A same-day release
    `YYYY.MM.DD.N` is a normal update: `fairyfly update` takes it over `YYYY.MM.DD`, and its MSI (`26.10.2401` for
    `2026.10.24.1`, `(YYYY-2000).MM.(DD*100+N)`) replaces the installed `26.10.2400`, as the next day's MSI

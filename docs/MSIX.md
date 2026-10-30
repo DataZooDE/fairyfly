@@ -2,7 +2,8 @@
 
 Status: the package is built. The build option, the manifest with fairyfly's Partner Center identity, the logos and
 the packaging step are in the repository, and CI (`build-windows-msix`) packs an unsigned MSIX for the Store and a
-test-signed copy for sideloading, which it installs and removes once. The VM sideload test and the Store submission are
+test-signed copy for sideloading, which it installs and removes once. Every release attaches the unsigned MSIX
+([Store submission](#store-submission)). The VM sideload test and the Store submission are
 not done yet (see [What is left](#what-is-left)). The per-user MSI ([packaging/fairyfly.wxs](../packaging/fairyfly.wxs))
 is unchanged and stays the default.
 
@@ -87,7 +88,12 @@ unit tests, on the same runner:
    that neither installer carries.
 2. **`MakeAppx pack`** (Windows SDK on the runner) builds `fairyfly-<msixversion>.msix`, for example
    `fairyfly-2026.10.2800.0.msix`. Packing validates the manifest against the AppxManifest schema and fails on any
-   error. An unpack round trip checks that the package holds exactly the layout.
+   error. An unpack round trip checks that the package holds exactly the layout. Steps 1 and 2 are
+   [packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1), which the release runs too.
+   **Release dry run:** the job then runs the release's MSIX version check
+   ([packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1), see
+   [Store submission](#store-submission)) with the tag `v<fairyfly --version>` against the published releases, and
+   checks that the package is unsigned.
 3. **Test-signed copy.** A self-signed code-signing certificate is made fresh in each run with Subject exactly the
    manifest's Publisher (`CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC`, which Windows requires for a sideload). `signtool`
    signs a copy, `fairyfly-<msixversion>-testsigned.msix`; the public certificate is exported as
@@ -131,13 +137,35 @@ for a clean test uninstall it first.
    `Cert:\LocalMachine\TrustedPeople` (`Get-ChildItem Cert:\LocalMachine\TrustedPeople | Where-Object Subject -eq
    'CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC' | Remove-Item`).
 
-## Store submission (later)
+## Store submission
 
-Partner Center > fairyfly (9N5TSPSX6Q0V) > a submission > Packages: upload the **unsigned** `fairyfly-<msixversion>.msix`
-from the `fairyfly-msix` artifact, never the test-signed one. The Store checks that its identity matches the reserved
-one and signs it with the Store's certificate; the version must be higher than the last submitted one (the calendar
-version scheme above guarantees that). The submission also needs the justification for the restricted capability
-`runFullTrust` and the listing.
+**What to upload.** Each GitHub release has the asset `fairyfly-<msixversion>.msix`, for example
+`fairyfly-2026.10.2900.0.msix` for the tag `v2026.10.29`, next to `fairyfly.msi` and listed in `SHA256SUMS`. That
+file is the Store package: Partner Center > fairyfly (9N5TSPSX6Q0V) > a new submission > Packages: upload it as it is.
+It is **unsigned** on purpose: the Store checks that its identity matches the reserved one and signs it with the
+Store's certificate. It is not the MSI's Authenticode signature (Artifact Signing signs `fairyfly.exe` and
+`fairyfly.msi` only), and it does not install by double-click. Never upload or publish a test-signed package or a
+test `.cer` (CI artifact `fairyfly-msix-testsigned`): a release never contains them. Before uploading, compare
+`Get-FileHash fairyfly-<msixversion>.msix` with `SHA256SUMS`.
+
+**Built by the release.** The job `build-msix` of [.github/workflows/release.yml](../.github/workflows/release.yml)
+builds the msix configuration from the tagged commit (the same ref guard and `github.sha` checkout as the MSI build),
+runs the unit tests, checks `fairyfly --version` against the tag (`check_release_tag.ps1`), packs with
+[packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1) and checks that the package is not signed.
+It has no environment, no Azure login and no secret. The release is only published when this job succeeds.
+
+**Version check.** The Store refuses a package whose version is not higher than the last submitted one, so
+[packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1) fails the release unless the packed
+`Package/Identity/Version` is exactly [packaging/msix_version.ps1](../packaging/msix_version.ps1) of the tag,
+`vYYYY.MM.DD[.N]` -> `YYYY.MM.(DD*100+N).0` (`v2026.10.29` -> `2026.10.2900.0`, `v2026.10.29.1` -> `2026.10.2901.0`,
+`v2026.11.01` -> `2026.11.100.0`), and strictly above the MSIX version of every other published release (computed
+from their tags the same way, so releases from before the MSIX count too; non-calendar tags are ignored). A tag
+below an existing release, or a same-day `.N` below one already released, fails before anything is published. Two
+tags pushed at the same time are not checked against each other (neither release exists yet); release one at a time.
+Submit the releases in order: uploading an older release's MSIX after a newer one was submitted is refused by the
+Store.
+
+The submission also needs the justification for the restricted capability `runFullTrust` and the listing.
 
 ## What fairyfly writes at run time, and what MSIX does with it
 
@@ -211,8 +239,8 @@ an uninstall deletes. The user profile outside AppData is not virtualized on any
 ## What is left
 
 1. **Identity**: done (Partner Center values are the CMake defaults; [Identity](#identity)).
-2. **Packaging**: done in CI ([Packaging (CI)](#packaging-ci)). Not in the release workflow yet: a release does not
-   attach the MSIX.
+2. **Packaging**: done in CI ([Packaging (CI)](#packaging-ci)) and in the release: every release attaches the
+   unsigned `fairyfly-<msixversion>.msix` ([Store submission](#store-submission)).
 3. **VM sideload test** ([steps](#sideload-test-on-a-test-machine-vm)) (`Add-AppxPackage`): the StartupTask starts the link tray at logon. `fairyfly` from a fresh terminal
    and from an MCP client (stdio) runs through the alias. The approval toast's Approve/Deny buttons activate the tray.
    `mcp setup` works, on Windows 10 and 11. The audit trail and logs show up in Explorer under `%USERPROFILE%\.fairyfly`
@@ -220,5 +248,5 @@ an uninstall deletes. The user profile outside AppData is not virtualized on any
    moved there at the first start. `update check` answers `UPDATE_MANAGED_BY_STORE`.
 4. **Code**: the toast AUMID/registration change for packaged processes (table above). Optionally a StartupTask for the
    MCP tray. Optionally switch the StartupTask from the tray menu (WinRT `StartupTask`).
-5. **Store submission**: signing by the Store, the restricted capability justification (`runFullTrust`), and the
-   listing.
+5. **Store submission**: upload a release's `fairyfly-<msixversion>.msix` (signed by the Store), the restricted
+   capability justification (`runFullTrust`), and the listing.
