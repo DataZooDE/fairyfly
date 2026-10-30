@@ -2,7 +2,8 @@ name: Release fairyfly
 
 # Builds fairyfly.exe from the tagged source on a GitHub-hosted runner, signs it with Microsoft Artifact Signing when
 # that is configured (docs/SIGNING.md) and publishes it with the per-user MSI, the winget manifests of DataZoo.fairyfly
-# (packaging/winget/) and SHA256SUMS.
+# (packaging/winget/), the unsigned Microsoft Store package fairyfly-<msixversion>.msix (job build-msix, FAIRYFLY_PACKAGE=msix;
+# the Store signs it, docs/MSIX.md) and SHA256SUMS.
 # Tag format: vYYYY.MM.DD, or vYYYY.MM.DD.N (N >= 1) for a further release on the same day, e.g. v2026.10.24.1
 # (calendar version = ProductVersion of fairyfly.exe = `fairyfly --version`).
 # Signing is configured when the repository variable AZURE_SIGNING_ACCOUNT is set (all AZURE_SIGNING_* variables are
@@ -128,6 +129,111 @@ jobs:
         path: |
           build/Release/fairyfly.exe
           build/Release/fairyfly-tray.exe
+        retention-days: 30
+        if-no-files-found: error
+
+  build-msix:
+    # The Microsoft Store package (FAIRYFLY_PACKAGE=msix, docs/MSIX.md) from the tagged commit: build, unit tests, the
+    # version checks (fairyfly.exe --version = the tag; the package version = msix_version.ps1 of the tag and above the
+    # MSIX version of every earlier release, packaging/check_msix_version.ps1), then the UNSIGNED
+    # fairyfly-<msixversion>.msix (packaging/msix/New-MsixPackage.ps1, as build.yml). The Store signs what is submitted:
+    # no environment, no Azure login, no signtool, never a test-signed copy or a certificate.
+    timeout-minutes: 90
+    runs-on: windows-2022
+    outputs:
+      msix-version: ${{ steps.pack.outputs.version }}
+      msix-sha256: ${{ steps.msix-hash.outputs.sha256 }}
+    steps:
+    - name: Release ref guard
+      # only a tag run releases: github.ref must be refs/tags/<RELEASE_TAG> (also for workflow_dispatch)
+      env:
+        REF: ${{ github.ref }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        if ($env:REF_TYPE -ne 'tag' -or $env:REF -cne "refs/tags/$env:RELEASE_TAG" -or $env:RELEASE_TAG -cnotmatch '^v\d{4}\.\d{2}\.\d{2}(\.[1-9]\d{0,4})?$') {
+          Write-Error "release.yml runs only on a release tag vYYYY.MM.DD[.N]; github.ref is '$env:REF' ($env:REF_TYPE)"; exit 1
+        }
+      shell: pwsh
+
+    - name: Checkout the tagged source
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      with:
+        ref: ${{ github.sha }}
+        persist-credentials: false
+
+    - name: Setup vcpkg
+      run: |
+        git clone https://github.com/microsoft/vcpkg.git
+        cd vcpkg
+        git checkout ${{ env.VCPKG_COMMIT }}
+        .\bootstrap-vcpkg.bat
+      shell: pwsh
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
+      with:
+        arch: x64
+
+    - name: Build (Release, static, FAIRYFLY_PACKAGE=msix)
+      run: |
+        $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        cmake -B build-msix -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DFAIRYFLY_PACKAGE=msix
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        cmake --build build-msix --config Release --target fairyfly unit_tests --parallel
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+      shell: pwsh
+
+    - name: Unit tests (SAP-free, msix build)
+      run: |
+        & "build-msix/Release/unit_tests.exe" "~[!mayfail]"
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+      shell: pwsh
+
+    - name: Check the msix fairyfly.exe against the tag
+      run: |
+        $reported = (& "build-msix/Release/fairyfly.exe" --version | Out-String).Trim()
+        try { & ./packaging/check_release_tag.ps1 -Tag $env:RELEASE_TAG -Version $reported } catch { Write-Error $_.Exception.Message; exit 1 }
+        $out = (& build-msix/Release/fairyfly.exe --no-audit update check 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -or $out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "the msix fairyfly.exe does not leave updates to the Store: $out"; exit 1 }
+        Write-Host "msix fairyfly.exe $reported OK"
+        exit 0   # not the exit code of `update check` above (the expected refusal)
+      shell: pwsh
+
+    - name: Pack the unsigned MSIX (packaging/msix/New-MsixPackage.ps1)
+      id: pack
+      run: |
+        $pkg = ./packaging/msix/New-MsixPackage.ps1 -BinDir build-msix/Release -Manifest build-msix/msix/AppxManifest.xml -WorkDir build-msix
+        "version=$($pkg.Version)" >> $env:GITHUB_OUTPUT
+        "MSIX_PATH=$($pkg.Path)" >> $env:GITHUB_ENV
+      shell: pwsh
+
+    - name: Check the MSIX version against the tag and the earlier releases; the package is unsigned
+      # the Store refuses a package version that is not above the last submitted one: the release fails here instead
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $previous = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft | not) | .tag_name')
+        if ($LASTEXITCODE -ne 0) { Write-Error "listing the releases failed ($LASTEXITCODE)"; exit 1 }
+        Write-Host "published releases: $($previous -join ', ')"
+        $packed = ([xml](Get-Content build-msix/unpacked/AppxManifest.xml -Raw)).Package.Identity.Version
+        try { & ./packaging/check_msix_version.ps1 -Tag $env:RELEASE_TAG -MsixVersion $packed -PreviousTags $previous } catch { Write-Error $_.Exception.Message; exit 1 }
+        if ((Split-Path $env:MSIX_PATH -Leaf) -cne "fairyfly-$packed.msix") { Write-Error "unexpected package name $env:MSIX_PATH"; exit 1 }
+        $sig = Get-AuthenticodeSignature $env:MSIX_PATH
+        if ($sig.Status -ne 'NotSigned') { Write-Error "$env:MSIX_PATH is not unsigned: $($sig.Status)"; exit 1 }
+      shell: pwsh
+
+    - name: Hash of the checked MSIX (the release job checks the attached file against it)
+      id: msix-hash
+      run: |
+        "sha256=$((Get-FileHash $env:MSIX_PATH -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      shell: pwsh
+
+    - name: Upload the unsigned MSIX
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+      with:
+        name: fairyfly-msix
+        path: build-msix/out/fairyfly-${{ steps.pack.outputs.version }}.msix
         retention-days: 30
         if-no-files-found: error
 
@@ -338,9 +444,10 @@ jobs:
         if-no-files-found: error
 
   release:
-    needs: [ build, sign, package ]
-    # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed
-    if: ${{ always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') && needs.package.result == 'success' }}
+    needs: [ build, build-msix, sign, package ]
+    # run when signing succeeded or was not configured (unsigned release); never when signing was requested and failed,
+    # nor without the MSIX
+    if: ${{ always() && needs.build.result == 'success' && needs.build-msix.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') && needs.package.result == 'success' }}
     timeout-minutes: 90
     runs-on: ubuntu-latest
     permissions:
@@ -364,6 +471,21 @@ jobs:
         name: fairyfly-winget
         path: dist
 
+    - name: Download the unsigned MSIX (the Store signs it)
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      with:
+        name: fairyfly-msix
+        path: dist
+
+    - name: The released MSIX is the one build-msix checked
+      env:
+        MSIX: fairyfly-${{ needs.build-msix.outputs.msix-version }}.msix
+        MSIX_SHA256: ${{ needs.build-msix.outputs.msix-sha256 }}
+      run: |
+        cd dist
+        [ -n "$MSIX_SHA256" ] || { echo "build-msix gave no MSIX hash"; exit 1; }
+        echo "$MSIX_SHA256  $MSIX" | sha256sum -c -
+
     - name: The released files are the verified signed ones
       if: needs.sign.result == 'success'
       env:
@@ -379,13 +501,18 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         SIGNED: ${{ needs.sign.result == 'success' }}
+        MSIX: fairyfly-${{ needs.build-msix.outputs.msix-version }}.msix
       run: |
         cd dist
-        sha256sum fairyfly.exe fairyfly.msi DataZoo.fairyfly*.yaml > SHA256SUMS
+        # exactly the unsigned Store package of build-msix: one .msix, named after its version, nothing else of it
+        shopt -s nullglob; packages=( ./*.msix ); shopt -u nullglob
+        echo "MSIX packages: ${packages[*]}"
+        [ "${#packages[@]}" = "1" ] && [ -f "$MSIX" ] || { echo "expected exactly $MSIX in the release files"; exit 1; }
+        sha256sum fairyfly.exe fairyfly.msi "$MSIX" DataZoo.fairyfly*.yaml > SHA256SUMS
         cat SHA256SUMS
-        if [ "$SIGNED" = "true" ]; then SIGNNOTE="Authenticode-signed by DataZoo GmbH (Microsoft Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
-        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable), fairyfly.msi (per-user installer, no admin rights) and the winget manifests DataZoo.fairyfly*.yaml (put the three files in one folder, then: winget install --manifest <folder>). ${SIGNNOTE} See the README (Install, Code signing policy)."
-        gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi DataZoo.fairyfly.yaml DataZoo.fairyfly.installer.yaml DataZoo.fairyfly.locale.en-US.yaml SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
+        if [ "$SIGNED" = "true" ]; then SIGNNOTE="fairyfly.exe and fairyfly.msi are Authenticode-signed by DataZoo GmbH (Microsoft Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
+        NOTES="fairyfly ${RELEASE_TAG#v} - Windows x64: fairyfly.exe (portable), fairyfly.msi (per-user installer, no admin rights) and the winget manifests DataZoo.fairyfly*.yaml (put the three files in one folder, then: winget install --manifest <folder>). ${SIGNNOTE} ${MSIX} is the unsigned Microsoft Store package (the Store signs it; it does not install by double-click). See the README (Install, Code signing policy)."
+        gh release create "$RELEASE_TAG" fairyfly.exe fairyfly.msi "$MSIX" DataZoo.fairyfly.yaml DataZoo.fairyfly.installer.yaml DataZoo.fairyfly.locale.en-US.yaml SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "fairyfly ${RELEASE_TAG#v}" --notes "$NOTES"
 
   winget-pkgs:
     # OFF by default. Opens a pull request for DataZoo.fairyfly in microsoft/winget-pkgs from the published release.

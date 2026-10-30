@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Releases attach the unsigned Microsoft Store package (MSIX)
+
+- `release.yml` has a job `build-msix`: from the tagged commit it builds the Store configuration
+  (`FAIRYFLY_PACKAGE=msix`), runs the unit tests, checks `fairyfly --version` against the tag and packs the
+  **unsigned** `fairyfly-<msixversion>.msix` (for example `fairyfly-2026.10.2900.0.msix` for `v2026.10.29`). The
+  release attaches it next to `fairyfly.msi` and lists it in `SHA256SUMS`. The Store signs what is submitted, so the
+  package is not Authenticode-signed by us (the job has no environment, no Azure login, no signtool and checks the
+  package is `NotSigned`); the test-signed copy and its certificate of `build.yml` never go into a release.
+- The release fails unless the package version is `msix_version.ps1` of the tag (`vYYYY.MM.DD[.N]` ->
+  `YYYY.MM.(DD*100+N).0`) and strictly above the MSIX version of every earlier published release (Partner Center
+  refuses a version that does not rise): `packaging/check_msix_version.ps1`, tested in
+  `packaging/tests/Test-VersionScripts.ps1` with same-day `.N`, month and year boundaries.
+- The packing steps moved into `packaging/msix/New-MsixPackage.ps1`, which `build.yml` (`build-windows-msix`) and the
+  release both run. `build-windows-msix` also runs the release's MSIX version check as a dry run with the tag
+  `v<fairyfly --version>` (the ordering against the published releases is a warning there); `build.yml` now has a
+  read-only token. The release job checks the attached MSIX against the hash `build-msix` took.
+- The MSI, its signing and the winget manifests are unchanged. [docs/MSIX.md](docs/MSIX.md#store-submission) says
+  which release asset to upload in Partner Center.
+
 ### Approval notifications in the Microsoft Store package
 
 - The Microsoft Store (MSIX) build shows the cloud link's approval toasts as the package's tray application,
@@ -146,7 +165,7 @@
   Publisher (artifact `fairyfly-msix-testsigned`, with the public `.cer`; for sideload tests only). It installs the
   test-signed package with `Add-AppxPackage`, runs `fairyfly` through the execution alias and removes it.
   [docs/MSIX.md](docs/MSIX.md) describes the sideload test on a VM and the later Store submission. Nothing is submitted
-  to the Store, and the MSI and the release workflow are unchanged.
+  to the Store, and the MSI is unchanged.
 
 ## 2026.10.28 (2026-10-28)
 

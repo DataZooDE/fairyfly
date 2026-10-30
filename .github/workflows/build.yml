@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Allow manual triggering
 
+# read-only token: the release dry run below runs the PR-built fairyfly.exe while GH_TOKEN is set
+permissions:
+  contents: read
+
 env:
   VCPKG_COMMIT: 29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c
 
@@ -352,42 +356,35 @@ jobs:
       shell: pwsh
 
     - name: MSIX package - stage the MSI payload, MakeAppx pack and unpack (unsigned, for the Store)
+      # packaging/msix/New-MsixPackage.ps1: the same packing as the release (release.yml, job build-msix)
       run: |
-        $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\makeappx.exe' |
-          Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
-        if (-not $makeappx) { Write-Error 'MakeAppx.exe not found in the Windows SDK'; exit 1 }
-        $sdkBin = $makeappx.DirectoryName
-        Write-Host "Windows SDK tools: $sdkBin"
-        "WINSDK_BIN=$sdkBin" >> $env:GITHUB_ENV
+        $pkg = ./packaging/msix/New-MsixPackage.ps1 -BinDir build-msix/Release -Manifest build-msix/msix/AppxManifest.xml -WorkDir build-msix
+        "WINSDK_BIN=$($pkg.SdkBin)" >> $env:GITHUB_ENV
+        "MSIX_VERSION=$($pkg.Version)" >> $env:GITHUB_ENV
+      shell: pwsh
 
-        # the MSI ships the two exes alone: they must not need a runtime DLL that neither installer carries
-        foreach ($exe in 'fairyfly.exe', 'fairyfly-tray.exe') {
-          $deps = @(& dumpbin.exe /nologo /dependents "build-msix/Release/$exe" | ForEach-Object {
-            if ($_ -match '^\s+(\S+\.dll)\s*$') { $Matches[1] } })
-          Write-Host "$exe imports: $($deps -join ', ')"
-          $bad = @($deps | Where-Object { $_ -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbased)' -or (Test-Path "build-msix/Release/$_") })
-          if (-not $deps -or $bad) { Write-Error "$exe needs $($bad -join ', '), which the MSI (packaging/fairyfly.wxs) does not ship"; exit 1 }
-        }
-
-        $manifest = [xml](Get-Content build-msix/msix/AppxManifest.xml -Raw)
-        $version = $manifest.Package.Identity.Version
-        "MSIX_VERSION=$version" >> $env:GITHUB_ENV
-        $files = ./packaging/msix/New-MsixLayout.ps1 -BinDir build-msix/Release -Manifest build-msix/msix/AppxManifest.xml -Layout build-msix/layout
-        Write-Host "layout: $($files -join ', ')"
-        New-Item -ItemType Directory -Force build-msix/out | Out-Null
-        $msix = "build-msix/out/fairyfly-$version.msix"
-        & "$sdkBin\makeappx.exe" pack /d build-msix/layout /p $msix /o
-        if ($LASTEXITCODE -ne 0) { Write-Error "MakeAppx pack failed ($LASTEXITCODE)"; exit 1 }
-
-        # round trip: the package holds exactly the layout (plus MakeAppx's block map and content types)
-        & "$sdkBin\makeappx.exe" unpack /p $msix /d build-msix/unpacked /o
-        if ($LASTEXITCODE -ne 0) { Write-Error "MakeAppx unpack failed ($LASTEXITCODE)"; exit 1 }
-        $rel = { param($root) @(Get-ChildItem $root -Recurse -File | ForEach-Object { [IO.Path]::GetRelativePath((Resolve-Path $root).Path, $_.FullName) } | Sort-Object) }
-        $packed = @(& $rel build-msix/unpacked | Where-Object { $_ -notin 'AppxBlockMap.xml', '[Content_Types].xml' })
-        $staged = & $rel build-msix/layout
-        if (($packed -join '|') -ne ($staged -join '|')) { Write-Error "package content '$($packed -join ', ')' differs from the layout '$($staged -join ', ')'"; exit 1 }
-        $id = ([xml](Get-Content build-msix/unpacked/AppxManifest.xml -Raw)).Package.Identity
-        Write-Host "packed $msix ($([math]::Round((Get-Item $msix).Length / 1MB, 2)) MB): $($id.Name) $($id.Version) $($id.Publisher)"
+    - name: Release dry run - the MSIX version checks of release.yml (tag v<--version>, the published releases)
+      # what release.yml (job build-msix) runs on a tag, here with the tag v<fairyfly --version> of this build: the
+      # tag matches the msix fairyfly.exe, the packed version is msix_version.ps1 of the tag (packaging/
+      # check_msix_version.ps1) and the package is unsigned. "Above every published release" is only a warning here
+      # (a branch cut before the latest release is fine); release.yml enforces it.
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $version = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        $tag = "v$version"
+        try { & ./packaging/check_release_tag.ps1 -Tag $tag -Version $version } catch { Write-Error $_.Exception.Message; exit 1 }
+        $previous = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft | not) | .tag_name')
+        if ($LASTEXITCODE -ne 0) { Write-Error "listing the releases failed ($LASTEXITCODE)"; exit 1 }
+        Write-Host "published releases: $($previous -join ', ')"
+        $msix = "build-msix/out/fairyfly-$env:MSIX_VERSION.msix"
+        $packed = ([xml](Get-Content build-msix/unpacked/AppxManifest.xml -Raw)).Package.Identity.Version
+        try { & ./packaging/check_msix_version.ps1 -Tag $tag -MsixVersion $packed } catch { Write-Error $_.Exception.Message; exit 1 }
+        try { & ./packaging/check_msix_version.ps1 -Tag $tag -MsixVersion $packed -PreviousTags $previous }
+        catch { Write-Host "::warning::release.yml would refuse this version: $($_.Exception.Message)" }
+        $sig = Get-AuthenticodeSignature $msix
+        if ($sig.Status -ne 'NotSigned') { Write-Error "$msix is not unsigned: $($sig.Status)"; exit 1 }
+        Write-Host "release dry run OK: $tag would attach $(Split-Path $msix -Leaf) (unsigned)"
       shell: pwsh
 
     - name: MSIX package - test-signed copy for sideloading (fresh self-signed certificate, Subject = Publisher)
