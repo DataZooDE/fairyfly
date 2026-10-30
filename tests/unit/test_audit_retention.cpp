@@ -296,7 +296,7 @@ TEST_CASE("audit retention: never during or after a failed data directory migrat
 
     SECTION("this process's migration failed or timed out: the old folder is still pending") {
         for (const auto outcome : {config::MigrationOutcome::Failed, config::MigrationOutcome::LockTimeout}) {
-            RetentionRun run = run_for(data, 1, *lock);
+            RetentionRun run = run_for(data, 7, *lock);
             run.migration = config::MigrationResult{};
             run.migration->outcome = outcome;
             CHECK_FALSE(apply_retention(sink, run).skipped.empty());
@@ -304,21 +304,21 @@ TEST_CASE("audit retention: never during or after a failed data directory migrat
     }
     SECTION("a staging folder of a move in progress") {
         fs::create_directories(data.path().string() + config::kStagingSuffix);
-        CHECK_FALSE(apply_retention(sink, run_for(data, 1, *lock)).skipped.empty());
+        CHECK_FALSE(apply_retention(sink, run_for(data, 7, *lock)).skipped.empty());
     }
     SECTION("another fairyfly holds the migration lock") {
         auto other = config::make_migration_lock("fairyfly-retention-test", data.path());
         REQUIRE(other->acquire(std::chrono::milliseconds(1000)));
         std::atomic<bool> skipped{false};
         // a lock of this process would be reentrant on Windows: try from another thread like another process would
-        std::thread([&] { skipped = !apply_retention(sink, run_for(data, 1, *lock)).skipped.empty(); }).join();
+        std::thread([&] { skipped = !apply_retention(sink, run_for(data, 7, *lock)).skipped.empty(); }).join();
         other->release();
         CHECK(skipped);
     }
     CHECK(names_in(audit) == before);
 
     SECTION("a successful migration does not stop it") {
-        RetentionRun run = run_for(data, 1, *lock);
+        RetentionRun run = run_for(data, 7, *lock);
         run.migration = config::MigrationResult{};
         run.migration->outcome = config::MigrationOutcome::Migrated;
         CHECK(apply_retention(sink, run).skipped.empty());
@@ -333,7 +333,7 @@ TEST_CASE("audit retention: a custom audit file is never pruned around", "[audit
     seed_year(elsewhere.path());
     auto lock = config::make_migration_lock("fairyfly-retention-test", data.path());
     AuditSink sink(AuditConfig{Mode::Enabled, elsewhere / "trail.jsonl"});
-    const RetentionOutcome out = apply_retention(sink, run_for(data, 1, *lock));
+    const RetentionOutcome out = apply_retention(sink, run_for(data, 7, *lock));
     CHECK_FALSE(out.skipped.empty());
     CHECK(fs::exists(elsewhere / "2026-01.jsonl"));
     CHECK(fs::exists(data / "audit" / "2026-01.jsonl"));
@@ -348,7 +348,7 @@ TEST_CASE("audit retention: a required trail honours the retention, but only whi
 
     SECTION("writable: pruned and recorded") {
         AuditSink sink = sink_for(data, Mode::Required);
-        const RetentionOutcome out = apply_retention(sink, run_for(data, 1, *lock));
+        const RetentionOutcome out = apply_retention(sink, run_for(data, 7, *lock));
         CHECK(out.skipped.empty());
         CHECK(out.recorded);
         CHECK_FALSE(fs::exists(audit / "2026-09.jsonl"));
@@ -357,14 +357,14 @@ TEST_CASE("audit retention: a required trail honours the retention, but only whi
         fs::remove(audit / "2026-10.jsonl");
         fs::create_directories(audit / "2026-10.jsonl");
         AuditSink sink = sink_for(data, Mode::Required);
-        const RetentionOutcome out = apply_retention(sink, run_for(data, 1, *lock));
+        const RetentionOutcome out = apply_retention(sink, run_for(data, 7, *lock));
         CHECK_FALSE(out.skipped.empty());
         CHECK(fs::exists(audit / "2026-09.jsonl"));
     }
     SECTION("audit off: the retention still applies, without a record") {
         AuditSink sink = sink_for(data, Mode::Disabled);
         const auto count = records(audit / "2026-10.jsonl").size();
-        const RetentionOutcome out = apply_retention(sink, run_for(data, 1, *lock));
+        const RetentionOutcome out = apply_retention(sink, run_for(data, 7, *lock));
         CHECK(out.skipped.empty());
         CHECK_FALSE(out.recorded);
         CHECK_FALSE(fs::exists(audit / "2026-09.jsonl"));
@@ -395,6 +395,7 @@ TEST_CASE("audit retention: start_retention prunes this process's data directory
     const fs::path audit = data / "audit";
     trail(audit, "2001-01.jsonl", month_last_second(2001, 1));
     AuditSink sink(AuditConfig{Mode::Enabled, audit / monthly_file_name(Clock::now())});
+    REQUIRE(sink.probe());   // a trail in use this month (else the clock check sees only a 2001 trail)
     auto scheduler = start_retention(sink, 30);
     CHECK(scheduler != nullptr);
     CHECK_FALSE(fs::exists(audit / "2001-01.jsonl"));
@@ -436,7 +437,7 @@ TEST_CASE("audit retention: audit.retention_days is a key of mcp.yaml with its e
 }
 
 TEST_CASE("audit retention: invalid values are refused like every other key", "[audit][retention][config]") {
-    for (const char* bad : {"-1", "36501", "ninety", "1.5", "[30]", "30d"}) {
+    for (const char* bad : {"-1", "1", "6", "36501", "ninety", "1.5", "[30]", "30d"}) {
         CAPTURE(bad);
         const auto r = config::parse_yaml(std::string("audit:\n  retention_days: ") + bad + "\n");
         CHECK_FALSE(r.ok());
@@ -444,6 +445,8 @@ TEST_CASE("audit retention: invalid values are refused like every other key", "[
         CHECK_FALSE(r.config.has("audit.retention_days"));
     }
     CHECK(config::parse_yaml("audit:\n  retention_days: 0\n").ok());
+    CHECK(config::parse_yaml("audit:\n  retention_days: 7\n").ok());   // the minimum (kMinRetentionDays)
+    CHECK(kMinRetentionDays == 7);
     CHECK(config::parse_yaml("audit:\n  retention_days: 36500\n").ok());
 
     // the environment: ignored with a warning (CONFIG_ENV_INVALID), as for every key
@@ -502,4 +505,99 @@ TEST_CASE("audit retention: `link run` reads it from mcp.yaml and FAIRYFLY_MCP_A
     issues.clear();
     CHECK_FALSE(config::configured_audit_retention(lookup, &issues).has_value());
     CHECK_FALSE(issues.empty());
+}
+
+// ---- crew review of #130 --------------------------------------------------------------------------------------------
+
+TEST_CASE("audit retention: the intent is recorded before anything is deleted", "[audit][retention]") {
+    TempDir data("retention");
+    const fs::path audit = data / "audit";
+    seed_year(audit);
+    auto lock = config::make_migration_lock("fairyfly-retention-test", data.path());
+
+    SECTION("intent first, then the outcome") {
+        AuditSink sink = sink_for(data);
+        const auto before = records(sink.file()).size();
+        const RetentionOutcome out = apply_retention(sink, run_for(data, 200, *lock));
+        REQUIRE(out.recorded);
+        const auto all = records(sink.file());
+        REQUIRE(all.size() == before + 2);
+        const nlohmann::json& intent = all[before];
+        CHECK(intent["cmd"] == kPruneIntentCommand);
+        CHECK(intent["audit_source"] == kRetentionSource);
+        CHECK(intent["retention_days"] == 200);
+        CHECK(intent["prune_candidates"] == nlohmann::json(out.result.pruned));
+        CHECK(all[before + 1]["cmd"] == kPrunedCommand);
+    }
+    SECTION("the intent cannot be written (not required): nothing is deleted") {
+        fs::remove(audit / "2026-10.jsonl");
+        fs::create_directories(audit / "2026-10.jsonl");   // the active file is a folder: every append fails
+        AuditSink sink = sink_for(data, Mode::Enabled);
+        const auto before = names_in(audit);
+        const RetentionOutcome out = apply_retention(sink, run_for(data, 7, *lock));
+        CHECK_FALSE(out.skipped.empty());
+        CHECK(out.result.pruned.empty());
+        CHECK_FALSE(out.recorded);
+        CHECK(names_in(audit) == before);
+    }
+}
+
+TEST_CASE("audit retention: links and reparse points are never followed or deleted", "[audit][retention]") {
+    TempDir data("retention");
+    TempDir outside("retention-target");
+    const fs::path audit = data / "audit";
+    seed_year(audit);
+
+    SECTION("the seam: an entry reported as a link is skipped") {
+        const PruneResult r = prune_expired(audit, 90, kNow, audit / "2026-10.jsonl", remove_if_unused,
+                                            [](const fs::path& p) { return p.filename() == "2026-03.jsonl"; });
+        CHECK(fs::exists(audit / "2026-03.jsonl"));
+        CHECK(std::count(r.pruned.begin(), r.pruned.end(), std::string("2026-03.jsonl")) == 0);
+        CHECK_FALSE(fs::exists(audit / "2026-04.jsonl"));
+    }
+    SECTION("a real symbolic link named like an expired month") {
+        trail(outside.path(), "evidence.jsonl", utc(2020, 1, 1));
+        std::error_code ec;
+        fs::create_symlink(outside / "evidence.jsonl", audit / "2020-01.jsonl", ec);
+        if (ec) SKIP("symbolic links need a privilege here: " << ec.message());
+        CHECK(is_link_or_reparse_point(audit / "2020-01.jsonl"));
+        CHECK_FALSE(is_link_or_reparse_point(audit / "2026-01.jsonl"));
+        prune_expired(audit, 90, kNow, audit / "2026-10.jsonl");
+        CHECK(fs::is_symlink(audit / "2020-01.jsonl"));
+        CHECK(fs::exists(outside / "evidence.jsonl"));
+    }
+}
+
+TEST_CASE("audit retention: a clock that jumped far beyond the trail prunes nothing", "[audit][retention]") {
+    TempDir data("retention");
+    const fs::path audit = data / "audit";
+    seed_year(audit);
+    auto lock = config::make_migration_lock("fairyfly-retention-test", data.path());
+    AuditSink sink = sink_for(data);
+    const auto before = names_in(audit);
+    const auto count = records(sink.file()).size();
+
+    // the newest trail file was written at kNow; a clock 41 days ahead would let a 7-day retention delete it all
+    RetentionRun run = run_for(data, 7, *lock);
+    run.now = kNow + std::chrono::hours(24) * (kClockJumpDays + 1);
+    const RetentionOutcome out = apply_retention(sink, run);
+    CHECK_FALSE(out.skipped.empty());
+    CHECK(out.result.pruned.empty());
+    CHECK(names_in(audit) == before);
+    CHECK(records(sink.file()).size() == count);   // no record either
+
+    // within the window it runs
+    run.now = kNow + std::chrono::hours(24) * (kClockJumpDays - 1);
+    CHECK(apply_retention(sink, run).skipped.empty());
+}
+
+TEST_CASE("audit retention: apply_retention refuses values below the minimum itself", "[audit][retention]") {
+    TempDir data("retention");
+    const fs::path audit = data / "audit";
+    seed_year(audit);
+    auto lock = config::make_migration_lock("fairyfly-retention-test", data.path());
+    AuditSink sink = sink_for(data);
+    const auto before = names_in(audit);
+    CHECK_FALSE(apply_retention(sink, run_for(data, kMinRetentionDays - 1, *lock)).skipped.empty());
+    CHECK(names_in(audit) == before);
 }

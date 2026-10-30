@@ -29,6 +29,12 @@ namespace fairyfly::audit {
 
 /// The largest audit.retention_days (100 years).
 inline constexpr long long kMaxRetentionDays = 36500;
+/// The smallest retention other than 0 (keep forever): a typo like 1 must not empty the trail.
+inline constexpr long long kMinRetentionDays = 7;
+/// A run is skipped when the clock is this many days past the newest trail file (a clock that jumped forward).
+inline constexpr long long kClockJumpDays = 40;
+/// The record written BEFORE anything is deleted (prune_candidates); nothing is deleted when it cannot be written.
+inline constexpr const char* kPruneIntentCommand = "audit.prune_intent";
 /// The record that lists the pruned files.
 inline constexpr const char* kPrunedCommand = "audit.pruned";
 inline constexpr const char* kRetentionSource = "retention";
@@ -42,6 +48,9 @@ using RemoveFn = std::function<bool(const std::filesystem::path&)>;
 /// The real one. Windows: opened for DELETE without sharing and FILE_FLAG_DELETE_ON_CLOSE, so a file another process
 /// has open (an appender, an editor, a log shipper) is refused instead of left behind as a pending delete.
 bool remove_if_unused(const std::filesystem::path& file) noexcept;
+/// True for a symbolic link, junction or any other reparse point (never followed, never deleted).
+using LinkFn = std::function<bool(const std::filesystem::path&)>;
+bool is_link_or_reparse_point(const std::filesystem::path& path) noexcept;
 
 struct PruneResult {
     std::vector<std::string> pruned;   ///< file names, sorted
@@ -52,7 +61,7 @@ struct PruneResult {
 /// retention_days <= 0 deletes nothing. Never throws.
 PruneResult prune_expired(const std::filesystem::path& audit_dir, long long retention_days,
                           std::chrono::system_clock::time_point now, const std::filesystem::path& active_file,
-                          const RemoveFn& remove = remove_if_unused);
+                          const RemoveFn& remove = remove_if_unused, const LinkFn& is_link = is_link_or_reparse_point);
 
 /// One retention run of a process.
 struct RetentionRun {

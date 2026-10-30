@@ -62,6 +62,7 @@ struct AuditRecord {
     std::optional<long long> retention_days;  ///< audit.pruned: the retention that was applied (emitted only when set)
     std::vector<std::string> pruned;          ///< audit.pruned: deleted trail file names, never content (emitted when non-empty)
     std::vector<std::string> prune_failed;    ///< audit.pruned: file names whose delete was refused (emitted when non-empty)
+    std::vector<std::string> prune_candidates;  ///< audit.prune_intent: the files about to be deleted (emitted when non-empty)
 };
 
 enum class Mode { Enabled, Disabled, Required };
