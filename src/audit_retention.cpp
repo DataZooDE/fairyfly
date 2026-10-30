@@ -96,12 +96,13 @@ bool remove_if_unused(const fs::path& file) noexcept {
         HANDLE h = CreateFileW(file.c_str(), DELETE, 0, nullptr, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (h == INVALID_HANDLE_VALUE) {
-            std::error_code ec;
-            return !fs::exists(fs::symlink_status(file, ec)) && !ec;
+            // gone already counts; anything else (sharing violation, access denied) is a refusal
+            const DWORD error = GetLastError();
+            return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
         }
-        CloseHandle(h);
-        std::error_code ec;
-        return !fs::exists(fs::symlink_status(file, ec)) && !ec;
+        // the only handle, opened without sharing and with FILE_FLAG_DELETE_ON_CLOSE: closing it deletes the file
+        // (asking the file system right afterwards may still see it as delete-pending)
+        return CloseHandle(h) != 0;
 #else
         std::error_code ec;
         fs::remove(file, ec);   // removes a link itself, never its target
