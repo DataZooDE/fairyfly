@@ -259,6 +259,11 @@ struct TrayClaim {
     std::function<bool(const std::filesystem::path&)> exists;   ///< file probe for decide_held_tray
     std::chrono::milliseconds takeover_wait{10000};   ///< how long a removed installation's tray gets to quit
     std::chrono::milliseconds poll{250};
+    /// COM started this tray for the toast activator (fairyfly-tray.exe -Embedding): this installation's running tray
+    /// is left alone instead of opening its menu. COM starts the server only while no process holds the activator
+    /// class, i.e. the running tray's link does not run (paused, unpaired, waiting for a console link), so there is
+    /// no question this click could still answer (include/link/desktop_approval_win32.h).
+    bool com_start = false;
 };
 /// Acquires `guard`. When another process holds it: opens that tray's menu, takes over from a tray whose files were
 /// removed (asks it to quit and waits up to takeover_wait), or explains in a message box (and the log) that another

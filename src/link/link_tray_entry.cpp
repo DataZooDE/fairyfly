@@ -76,6 +76,7 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     auto instances = tray::make_win32_tray_instances(tray::TrayKind::Link);
     tray_services.claim.instances = instances.get();
     tray_services.claim.exists = tray::file_not_missing;
+    tray_services.claim.com_start = start.com_start;   // -Embedding: a running link tray keeps its menu closed
     tray_services.link_busy = [lock = link_run_lock_name(o.state_path.empty() ? default_state_path() : o.state_path)] {
         return tray::make_win32_single_instance(lock)->exists();
     };

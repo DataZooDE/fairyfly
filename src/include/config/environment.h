@@ -29,6 +29,7 @@ inline constexpr const char* kMcpConfig = "FAIRYFLY_MCP_CONFIG";
 inline constexpr const char* kMcpPrefix = "FAIRYFLY_MCP_";             // FAIRYFLY_MCP_<KEY> config layer
 inline constexpr const char* kTrayChild = "FAIRYFLY_TRAY_CHILD";
 inline constexpr const char* kTrayLaunched = "FAIRYFLY_TRAY_LAUNCHED";
+inline constexpr const char* kTrayComStart = "FAIRYFLY_TRAY_COM_START";  // fairyfly-tray.exe -Embedding (toast activator)
 inline constexpr const char* kPsParams = "FAIRYFLY_PS_PARAMS";          // parameters handed to a PowerShell script
 inline constexpr const char* kToken = "FAIRYFLY_TOKEN";                 // client side: the bearer token (client-config)
 inline constexpr const char* kAuthHeader = "FAIRYFLY_AUTH_HEADER";      // client side: "Bearer <token>" (client-config)

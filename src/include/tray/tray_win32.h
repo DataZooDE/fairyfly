@@ -34,12 +34,15 @@ bool startup_error_needs_dialog_here();
 bool is_tray_child_process();
 /// True when fairyfly-tray.exe started this tray (FAIRYFLY_TRAY_LAUNCHED=1 with FAIRYFLY_TRAY_CHILD=1).
 bool is_tray_launched_process();
+/// True when fairyfly-tray.exe started this tray for COM, the toast activator (FAIRYFLY_TRAY_COM_START=1 with
+/// FAIRYFLY_TRAY_CHILD=1).
+bool is_tray_com_start_process();
 /// True when `path` is an existing file.
 bool path_exists(const std::filesystem::path& path);
 /// False only when `path` is known not to exist (file or folder not found); true also when it cannot be checked, so
 /// a tray is never taken for a removed installation's by mistake (TrayClaim::exists).
 bool file_not_missing(const std::filesystem::path& path);
-/// Removes FAIRYFLY_TRAY_CHILD and FAIRYFLY_TRAY_LAUNCHED from this process's environment, so the processes it starts
+/// Removes FAIRYFLY_TRAY_CHILD, FAIRYFLY_TRAY_LAUNCHED and FAIRYFLY_TRAY_COM_START from this process's environment, so the processes it starts
 /// do not inherit them.
 void clear_tray_child_marker();
 /// Detaches from the console (tray child; no-op without one).
@@ -56,6 +59,7 @@ struct TrayStart {
     std::unique_ptr<ProcessLauncher> launcher;
     std::unique_ptr<SingleInstance> guard;
     bool launched = false;          ///< after settle_tray_start: the Start menu, the autostart or the installer started it
+    bool com_start = false;         ///< after settle_tray_start: COM started it for the toast activator (TrayClaim::com_start)
 };
 TrayStart prepare_tray_start(const std::string& mutex_name);
 

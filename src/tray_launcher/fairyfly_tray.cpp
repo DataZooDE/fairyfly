@@ -14,7 +14,8 @@
 //                                         the trays' settings and the notification registration (the installer, on
 //                                         uninstall)
 //   fairyfly-tray.exe -Embedding          the notification centre starts the link tray to answer an approval
-//                                         (COM, the toast activator; src/link/desktop_approval_win32.cpp)
+//                                         (COM, the toast activator; src/link/desktop_approval_win32.cpp); a link
+//                                         tray that already runs is left alone (no menu)
 //
 // It links nothing of fairyfly's own; the window class and message names match src/tray/tray_win32.cpp.
 #include <windows.h>
@@ -59,7 +60,7 @@ std::vector<std::wstring> arguments() {
 
 void error_box(const std::wstring& text) { MessageBoxW(nullptr, text.c_str(), L"fairyfly", MB_OK | MB_ICONERROR | MB_SETFOREGROUND); }
 
-int start(const std::wstring& dir, std::vector<std::wstring> args) {
+int start(const std::wstring& dir, std::vector<std::wstring> args, bool com_server) {
     if (args.empty()) args = {L"link", L"run", L"--tray"};
     const std::wstring exe = dir + L"\\fairyfly.exe";
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -71,6 +72,8 @@ int start(const std::wstring& dir, std::vector<std::wstring> args) {
     // this small starter has no fairyfly_core (config::set_process_env); the names are config's
     for (const char* name : {fairyfly::config::env::kTrayChild, fairyfly::config::env::kTrayLaunched})
         SetEnvironmentVariableW(ascii_wide(name).c_str(), L"1");
+    // COM's start for the toast activator: a link tray that already runs keeps its menu closed (TrayClaim::com_start)
+    if (com_server) SetEnvironmentVariableW(ascii_wide(fairyfly::config::env::kTrayComStart).c_str(), L"1");
     // the person started this from the Start menu: a tray that is already running may open its menu in front
     AllowSetForegroundWindow(ASFW_ANY);
     STARTUPINFOW si{};
@@ -207,7 +210,8 @@ void remove_run_values(const std::wstring& dir) {
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     // COM starts the toast activator's server with -Embedding (closing::is_com_server_start): the link tray, which
-    // registers the activator as it starts (a running tray answers itself; a second start only opens its menu)
+    // registers the activator as its link starts. COM only does so while no process holds the class, so a link tray
+    // that already runs has no link running and nothing to answer: it is left alone (TrayClaim::com_start)
     const auto command = closing::parse_starter_command(arguments(), module_dir());
     if (command.mode == closing::StarterMode::Close) {
         close_installed(command.folder);
@@ -221,8 +225,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         RegDeleteTreeW(HKEY_CURRENT_USER, contract::kSettingsKey);
         // what the link registers for its approval notifications
         RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kAppUserModelIdKeyPrefix) + contract::kAppUserModelId).c_str());
-        RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kClsidKeyPrefix) + contract::kToastActivatorClsid).c_str());
+        // (the MSI's activator: only the MSI runs this, the Store package's is declared by its manifest)
+        RegDeleteTreeW(HKEY_CURRENT_USER, (std::wstring(contract::kClsidKeyPrefix) + contract::kToastActivatorClsidMsi).c_str());
         return 0;
     }
-    return start(module_dir(), command.args);
+    return start(module_dir(), command.args, command.com_server);
 }

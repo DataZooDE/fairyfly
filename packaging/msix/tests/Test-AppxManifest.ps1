@@ -125,7 +125,7 @@ try {
         Check ($null -ne $task -and $task.TaskId -and $task.Enabled -eq 'true') "StartupTask '$($task.TaskId)' enabled"
         $toast = One "//desktop:ToastNotificationActivation"
         $class = One "//com:ExeServer[@Executable='fairyfly-tray.exe' and @Arguments='-Embedding']/com:Class"
-        Check ($toast -and $class -and $toast.ToastActivatorCLSID -eq $class.Id -and $class.Id -eq 'DAAF1065-EF17-4CFF-B3D2-EFAF70594959') 'toast activator CLSID declared as COM server and toast activation (tray_contract.h)'
+        Check ($toast -and $class -and $toast.ToastActivatorCLSID -eq $class.Id -and $class.Id -eq '17C79966-EDD0-4906-9F80-49A822C45334') 'toast activator CLSID declared as COM server and toast activation (tray_contract.h)'
 
         # the code's side of the toast activation (src/include/tray/tray_contract.h): the CLSID the link registers its
         # class object under, the argument the tray starter takes as COM's start, and the application whose AUMID
@@ -134,13 +134,23 @@ try {
         function ContractValue([string]$name) {
             if ($contract -match ('inline constexpr wchar_t ' + $name + '\[\] = L"([^"]*)";')) { $Matches[1] } else { $null }
         }
-        $codeClsid = ContractValue 'kToastActivatorClsid'
+        $codeClsid = ContractValue 'kToastActivatorClsidMsix'
+        $msiClsid = ContractValue 'kToastActivatorClsidMsi'
         $codeArg = ContractValue 'kComServerArgument'
         $codeApp = ContractValue 'kPackageTrayApplicationId'
-        Check ($null -ne $codeClsid -and $codeClsid -match '^\{[0-9A-Fa-f-]{36}\}$') "tray_contract.h kToastActivatorClsid '$codeClsid'"
+        Check ($null -ne $codeClsid -and $codeClsid -match '^\{[0-9A-Fa-f-]{36}\}$') "tray_contract.h kToastActivatorClsidMsix '$codeClsid'"
         $bare = if ($codeClsid) { $codeClsid.Trim('{', '}') } else { '' }
-        Check ($class -and $class.Id -eq $bare) "manifest com:Class Id '$($class.Id)' = the code's kToastActivatorClsid '$codeClsid'"
-        Check ($toast -and $toast.ToastActivatorCLSID -eq $bare) "manifest ToastActivatorCLSID '$($toast.ToastActivatorCLSID)' = the code's kToastActivatorClsid"
+        Check ($class -and $class.Id -eq $bare) "manifest com:Class Id '$($class.Id)' = the code's kToastActivatorClsidMsix '$codeClsid'"
+        Check ($toast -and $toast.ToastActivatorCLSID -eq $bare) "manifest ToastActivatorCLSID '$($toast.ToastActivatorCLSID)' = the code's kToastActivatorClsidMsix"
+        # review of #132: one CLSID for the MSI and the Store package let COM hand one's Action Center click to the other
+        # (installed side by side), which dropped it (another nonce) and the approval timed out
+        Check ($null -ne $msiClsid -and $msiClsid -match '^\{[0-9A-Fa-f-]{36}\}$') "tray_contract.h kToastActivatorClsidMsi '$msiClsid'"
+        Check ($msiClsid -and $codeClsid -and $msiClsid.Trim('{', '}') -ne $bare) "the MSI's activator '$msiClsid' is not the MSIX package's '$codeClsid'"
+        Check ($class -and $msiClsid -and $class.Id -ne $msiClsid.Trim('{', '}')) "the manifest does not declare the MSI's activator '$msiClsid'"
+        # the MSI's side: its Start-menu shortcut names the MSI's activator (packaging/fairyfly.wxs)
+        $wxs = Get-Content (Join-Path $repo (Join-Path 'packaging' 'fairyfly.wxs')) -Raw
+        $shortcutClsid = if ($wxs -match 'Key="System\.AppUserModel\.ToastActivatorCLSID" Value="([^"]*)"') { $Matches[1] } else { $null }
+        Check ($shortcutClsid -and $msiClsid -and $shortcutClsid -eq $msiClsid) "fairyfly.wxs shortcut ToastActivatorCLSID '$shortcutClsid' = the code's kToastActivatorClsidMsi '$msiClsid'"
         $server = One "//com:ExeServer[com:Class]"
         Check ($server -and $codeArg -and $server.Arguments -ceq $codeArg) "manifest com:ExeServer Arguments '$($server.Arguments)' = the code's kComServerArgument '$codeArg' (fairyfly-tray.exe starts the link tray for it)"
         $toastApp = One "/f:Package/f:Applications/f:Application[f:Extensions/desktop:Extension/desktop:ToastNotificationActivation]"

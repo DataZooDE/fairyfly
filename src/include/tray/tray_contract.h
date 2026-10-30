@@ -19,7 +19,13 @@ inline constexpr wchar_t kSettingsKey[] = L"Software\\DataZoo\\fairyfly\\tray";
 
 /// The approval notifications: the app user model id and the COM activator the link registers (per user).
 inline constexpr wchar_t kAppUserModelId[] = L"DataZoo.fairyfly";
-inline constexpr wchar_t kToastActivatorClsid[] = L"{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}";
+/// One activator per installer (include/link/toast_identity.h picks this build's): an MSI and a Microsoft Store
+/// fairyfly installed side by side each answer their own Action Center clicks. With one CLSID for both, COM handed a
+/// click to either link, and the other one dropped it (its nonce did not match): the approval timed out (denied).
+/// The MSI's is named by its Start-menu shortcut (packaging/fairyfly.wxs) and registered in HKCU by the link; the
+/// MSIX package's is declared by its manifest (packaging/msix/AppxManifest.xml.in; Test-AppxManifest.ps1 compares).
+inline constexpr wchar_t kToastActivatorClsidMsi[] = L"{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}";
+inline constexpr wchar_t kToastActivatorClsidMsix[] = L"{17C79966-EDD0-4906-9F80-49A822C45334}";
 inline constexpr wchar_t kAppUserModelIdKeyPrefix[] = L"Software\\Classes\\AppUserModelId\\";
 inline constexpr wchar_t kClsidKeyPrefix[] = L"Software\\Classes\\CLSID\\";
 /// The argument COM starts the activator's server (fairyfly-tray.exe) with: LocalServer32 appends it (MSI), the MSIX

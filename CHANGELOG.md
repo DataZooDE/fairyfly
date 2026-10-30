@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Approval notifications: one toast activator per package
+
+- The MSI and the Microsoft Store (MSIX) package now answer the notification centre through different COM classes:
+  the MSI keeps `{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}` (its Start-menu shortcut and HKCU registration), the Store
+  package's manifest declares `{17C79966-EDD0-4906-9F80-49A822C45334}`. With one class for both, an MSI and a Store
+  fairyfly installed side by side (or the MSI's tray and the Store's `fairyfly link run`) both registered it, COM gave
+  an Approve/Deny click in the notification centre to either link, the other one dropped it (its nonce did not match)
+  and the approval timed out (denied). Both values live in `src/include/tray/tray_contract.h`; `toast_identity()`
+  picks the build's.
+- `fairyfly-tray.exe -Embedding` (COM starting the activator's server) no longer opens the menu of a link tray that is
+  already running. COM only starts it while no process holds the class, i.e. that tray's link has not run yet and has
+  no question to answer.
+- CI: the manifest test compares the manifest's CLSID with `kToastActivatorClsidMsix`, the MSI shortcut's with
+  `kToastActivatorClsidMsi`, and checks that the two differ; unit tests check both parse and differ, and the quiet COM
+  start. Clicking toasts with both packages installed is a VM check ([docs/MSIX.md](docs/MSIX.md)).
+
 ### MCP tray: Restart right after Stop is no longer lost
 
 - In `fairyfly mcp --tray --http`, a Restart chosen while a Stop was still shutting the server down went to a server

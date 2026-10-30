@@ -16,8 +16,6 @@ namespace fairyfly::link::approval {
 /// The AppUserModelID of the MSI's notifications: the Start-menu entry's (packaging/fairyfly.wxs) and this process's.
 /// A Store build uses its package's tray application instead (this_process_toast_identity).
 using tray::contract::kAppUserModelId;
-/// The COM class the notification centre starts or calls for an answer (the shortcut's ToastActivatorCLSID).
-using tray::contract::kToastActivatorClsid;
 
 /// This process's toast identity (include/link/toast_identity.h): the build's package and, in a Store build, the
 /// package identity Windows gave the process (GetCurrentApplicationUserModelId, GetCurrentPackageFamilyName).

@@ -84,6 +84,7 @@ TEST_CASE("toast identity: the MSI registers DataZoo.fairyfly in HKCU and sets i
     CHECK(msi.app_id == L"DataZoo.fairyfly");
     CHECK(msi.register_in_hkcu);
     CHECK(msi.set_process_app_id);
+    CHECK(msi.activator_clsid == fairyfly::tray::contract::kToastActivatorClsidMsi);
     // an MSI fairyfly is never packaged, and should one be started by a package its own registration still applies
     CHECK(toast_identity(Package::Msi, L"DataZoo.fairyfly_73q587949tsjt!Tray", L"DataZoo.fairyfly_73q587949tsjt").app_id == L"DataZoo.fairyfly");
 }
@@ -96,6 +97,9 @@ TEST_CASE("toast identity: the Store package's tray application, nothing written
     CHECK(t.app_id == L"DataZoo.fairyfly_73q587949tsjt!Tray");
     CHECK_FALSE(t.register_in_hkcu);    // the private hive: the notification centre would never see it
     CHECK_FALSE(t.set_process_app_id);  // the process keeps the AUMID Windows gave it
+    // the manifest's activator, not the MSI's: side by side, COM gives each package's clicks to its own link
+    CHECK(t.activator_clsid == fairyfly::tray::contract::kToastActivatorClsidMsix);
+    CHECK(t.activator_clsid != fairyfly::tray::contract::kToastActivatorClsidMsi);
     // `fairyfly link run` through the execution alias runs as the Cli application, which declares no activator
     CHECK(toast_identity(Package::Msix, family + L"!Cli", family).app_id == family + L"!Tray");
     // a package identity without an application id: the family alone
@@ -129,7 +133,7 @@ TEST_CASE("toast identity: this unpackaged test process follows its build", "[li
         return true;
     };
     const std::wstring aumid_key = std::wstring(fairyfly::tray::contract::kAppUserModelIdKeyPrefix) + fairyfly::tray::contract::kAppUserModelId;
-    const std::wstring clsid_key = std::wstring(fairyfly::tray::contract::kClsidKeyPrefix) + fairyfly::tray::contract::kToastActivatorClsid;
+    const std::wstring clsid_key = std::wstring(fairyfly::tray::contract::kClsidKeyPrefix) + fairyfly::tray::contract::kToastActivatorClsidMsi;
     const bool aumid_before = key_exists(aumid_key), clsid_before = key_exists(clsid_key);
     auto ui = make_win32_ui([](const std::string&) {});
     CHECK_FALSE(ui->notify(sample()));  // no toast: the broker opens the approval window
