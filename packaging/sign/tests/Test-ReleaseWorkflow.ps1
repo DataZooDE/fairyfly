@@ -10,6 +10,10 @@
   - every action is pinned to a full commit SHA with a version comment;
   - in the sign job, the ref guard and the verified WiX install (packaging/sign/Install-Wix.ps1, SHA-512 pinned)
     come before azure/login, and no tool is installed unverified anywhere in the workflow.
+  - the MSIX (job build-msix): built with FAIRYFLY_PACKAGE=msix from the tagged commit, its version checked against
+    the tag and the earlier releases (packaging/check_msix_version.ps1) before it is uploaded, packed UNSIGNED (the
+    Store signs it): no environment, no OIDC token, no signtool, no test certificate; the release attaches
+    fairyfly-<msixversion>.msix and lists it in SHA256SUMS, and never a test-signed package or a certificate.
   Also runs Install-Wix.ps1 with a wrong pin, which must refuse (with -Install it installs WiX for real).
 #>
 param([switch]$Install)
@@ -35,7 +39,7 @@ Check ($jobs.Contains('build') -and $jobs.Contains('sign')) "release.yml has the
 Write-Host '=== the release tag cannot be chosen ==='
 Check ($text -notmatch 'inputs\.tag' -and $text -notmatch 'github\.event\.inputs') 'no workflow_dispatch input feeds the tag or a checkout'
 Check ($text -match "(?m)^\s+RELEASE_TAG:\s*\$\{\{\s*github\.ref_name\s*\}\}\s*$") 'RELEASE_TAG is github.ref_name'
-foreach ($job in 'build', 'sign') {
+foreach ($job in 'build', 'sign', 'build-msix') {
     $body = $jobs[$job] -join "`n"
     Check ($body -match 'name: Release ref guard' -and $body -match 'refs/tags/') "job $job has the release ref guard (github.ref must be refs/tags/<tag>)"
 }
@@ -64,6 +68,32 @@ Check ($login -ge 0) 'the sign job logs in with azure/login'
 Check ($guard -ge 0 -and $guard -lt $login) 'the ref guard runs before azure/login'
 Check ($wix -ge 0 -and $wix -lt $login) 'WiX is installed (verified) before azure/login'
 Check ($text -notmatch 'dotnet tool install') 'no unverified dotnet tool install in release.yml (packaging/sign/Install-Wix.ps1 instead)'
+
+Write-Host '=== the MSIX: built from the tag, version-checked, unsigned, attached ==='
+Check ($jobs.Contains('build-msix')) 'release.yml has the job build-msix'
+# its steps without the comment lines (which name what the job does not do)
+$msixJob = @($jobs['build-msix'] | Where-Object { $_ -notmatch '^\s*#' })
+$msixBody = $msixJob -join "`n"
+Check ($msixBody -match '-DFAIRYFLY_PACKAGE=msix') 'build-msix configures FAIRYFLY_PACKAGE=msix'
+$check = IndexOf $msixJob '&\s*\./packaging/check_msix_version\.ps1\s+-Tag'
+$pack = IndexOf $msixJob '\./packaging/msix/New-MsixPackage\.ps1\s+-BinDir'
+$upload = IndexOf $msixJob 'uses:\s*actions/upload-artifact@'
+Check ($pack -ge 0 -and $check -gt $pack -and $upload -gt $check) 'build-msix packs (New-MsixPackage.ps1), then checks the packed version (check_msix_version.ps1), then uploads'
+Check ($msixBody -match 'check_release_tag\.ps1') 'build-msix checks the msix fairyfly.exe --version against the tag (check_release_tag.ps1)'
+Check ($msixBody -match 'releases' -and $msixBody -match 'PreviousTags') 'build-msix compares with the published releases (-PreviousTags)'
+Check ($msixBody -match 'NotSigned') 'build-msix checks that the package it uploads is not signed'
+Check ($msixBody -notmatch '(?m)^\s+environment:' -and $msixBody -notmatch 'id-token' -and $msixBody -notmatch 'azure/' -and
+       $msixBody -notmatch '(?i)signtool|New-SelfSignedCertificate|testsigned|\.cer\b') 'build-msix signs nothing: no environment, no OIDC, no signtool, no test certificate'
+Check ($text -notmatch '(?i)testsigned' -and $text -notmatch '(?i)\.cer\b' -and $text -notmatch 'fairyfly-msix-testsigned') 'release.yml never touches the test-signed package or its certificate'
+$release = @($jobs['release']) -join "`n"
+Check ($release -match 'needs:\s*\[[^\]]*build-msix' -and $release -match "needs\.build-msix\.result == 'success'") 'the release job needs build-msix to have succeeded'
+Check ($release -match 'name:\s*fairyfly-msix\s*$' -or $release -match '(?m)name:\s*fairyfly-msix\s*$') 'the release job downloads the artifact fairyfly-msix'
+$sums = ($jobs['release'] | Where-Object { $_ -match 'sha256sum .*> SHA256SUMS' }) -join ''
+Check ($sums -match '\$MSIX\b' -and $sums -match 'fairyfly\.msi\b') "SHA256SUMS lists the MSIX next to the MSI ($($sums.Trim()))"
+$create = ($jobs['release'] | Where-Object { $_ -match 'gh release create' }) -join ''
+Check ($create -match '"\$MSIX"' -and $create -match 'fairyfly\.msi\b') 'gh release create attaches the MSIX next to the MSI'
+$sign = $jobs['sign']
+Check (($sign -join "`n") -notmatch '(?i)msix') 'the sign job (Artifact Signing) does not sign the MSIX'
 
 Write-Host '=== Install-Wix.ps1 ==='
 $installer = Join-Path $root 'packaging/sign/Install-Wix.ps1'
