@@ -1440,6 +1440,32 @@ TEST_CASE("link tray menu: Start with Windows, checkable, switches the Run value
     CHECK(f.host.balloons.back().find("Start with Windows") != std::string::npos);
 }
 
+TEST_CASE("a start by COM for the toast activator leaves this installation's running tray alone", "[tray][run][starter][toast]") {
+    // review of #132: COM starts `fairyfly-tray.exe -Embedding` only while no process holds the activator class, so a
+    // running link tray then has no link running (paused, unpaired, waiting for a console link) and no question this
+    // click could answer; opening its menu would only pop up a menu nobody asked for
+    ShowingHost host;
+    FakeGuard guard;
+    guard.other_running = true;
+    LinkTrayServices services;
+    services.host = &host;
+    services.claim.com_start = true;
+    TrayPaths paths;
+    bool ran = false;
+    CHECK(run_link_with_tray([&] { ran = true; return 0; }, services, guard, paths) == 0);
+    CHECK_FALSE(ran);
+    CHECK(host.shown == 0);
+    CHECK(host.boxes.empty());
+    // no tray runs yet: COM's start is the link tray, as from the Start menu (it registers the activator)
+    FakeGuard free_guard;
+    Fixture f;
+    f.link.current = paired("connected");
+    services.link = &f.link;
+    CHECK(run_link_with_tray([&] { ran = true; return 0; }, services, free_guard, paths) == 0);
+    CHECK(ran);
+    CHECK(free_guard.held);
+}
+
 TEST_CASE("a second start opens the running tray's menu instead of a message box", "[tray][run][starter]") {
     {
         ShowingHost host;
@@ -1528,7 +1554,7 @@ TEST_CASE("tray contract: the names other processes rely on are spelled once", "
     namespace fs = std::filesystem;
     const fs::path src = FAIRYFLY_SOURCE_DIR;
     const std::vector<std::string> names = {"fairyfly_tray_window", "fairyfly-tray-quit", "fairyfly-tray-show-menu",
-                                            "DAAF1065", "DataZoo.fairyfly", "DataZoo\\fairyfly\\tray",
+                                            "DAAF1065", "17C79966", "DataZoo.fairyfly", "DataZoo\\fairyfly\\tray",
                                             "CurrentVersion\\Run\"", "L\"fairyfly-link\"", "L\"fairyfly-mcp\"",
                                             "ValueName = \""};  // the Run values (not the link's client label)
     std::vector<std::string> offenders;
@@ -1546,10 +1572,21 @@ TEST_CASE("tray contract: the names other processes rely on are spelled once", "
     CHECK(offenders.empty());
 }
 
-TEST_CASE("tray contract: the toast activator CLSID parses as a GUID", "[tray][contract]") {
-    GUID clsid{};
-    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsid, &clsid)));
-    CHECK(clsid.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
+TEST_CASE("tray contract: the toast activator CLSIDs parse as GUIDs", "[tray][contract]") {
+    GUID msi{}, msix{};
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsidMsi, &msi)));
+    CHECK(msi.Data1 == 0xDAAF1065u);  // the CLSID the Start-menu shortcut (packaging/fairyfly.wxs) names
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsidMsix, &msix)));
+    CHECK(msix.Data1 == 0x17C79966u);  // the CLSID the MSIX manifest declares (packaging/msix/AppxManifest.xml.in)
+}
+
+TEST_CASE("tray contract: the MSI and the Microsoft Store package have their own toast activator", "[tray][contract]") {
+    // review of #132: with one CLSID for both, an MSI and a Store fairyfly installed side by side both registered it,
+    // COM handed an Action Center click to either, and the wrong one dropped it (another nonce): the approval timed out
+    GUID msi{}, msix{};
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsidMsi, &msi)));
+    REQUIRE(SUCCEEDED(CLSIDFromString(fairyfly::tray::contract::kToastActivatorClsidMsix, &msix)));
+    CHECK_FALSE(IsEqualGUID(msi, msix));
 }
 
 TEST_CASE("tray actions: open, console and detached start, shared by both trays", "[tray][actions]") {

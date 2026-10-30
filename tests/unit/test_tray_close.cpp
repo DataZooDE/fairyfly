@@ -41,7 +41,11 @@ TEST_CASE("tray starter: COM's start of the toast activator's server starts the 
         const auto c = parse_starter_command(args, kFolder);
         CHECK(c.mode == StarterMode::Start);
         CHECK(c.args.empty());  // fairyfly.exe link run --tray, as from the Start menu
+        CHECK(c.com_server);    // ... marked as COM's start: a running tray is left alone (no menu)
     }
+    CHECK_FALSE(parse_starter_command({}, kFolder).com_server);   // the Start menu
+    CHECK_FALSE(parse_starter_command({L"link", L"run", L"--tray"}, kFolder).com_server);   // the Run value
+    CHECK_FALSE(parse_starter_command({L"mcp", L"-Embedding"}, kFolder).com_server);
     CHECK(std::wstring(fairyfly::tray::contract::kComServerArgument) == L"-Embedding");
     CHECK_FALSE(is_com_server_start({}));
     CHECK_FALSE(is_com_server_start({L"-Embedding", L"mcp"}));
