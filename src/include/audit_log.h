@@ -59,6 +59,9 @@ struct AuditRecord {
     long long facts_pre_ms = 0;        ///< MCP: duration of the pre-call SAP facts lookup (emitted only when > 0)
     long long invoke_ms = 0;           ///< MCP: duration of the invocation itself (emitted only when > 0)
     long long facts_post_ms = 0;       ///< MCP: duration of the post-call facts re-check (emitted only when > 0)
+    std::optional<long long> retention_days;  ///< audit.pruned: the retention that was applied (emitted only when set)
+    std::vector<std::string> pruned;          ///< audit.pruned: deleted trail file names, never content (emitted when non-empty)
+    std::vector<std::string> prune_failed;    ///< audit.pruned: file names whose delete was refused (emitted when non-empty)
 };
 
 enum class Mode { Enabled, Disabled, Required };
@@ -81,6 +84,7 @@ struct AuditFileSettings {
     std::optional<bool> enabled;
     std::optional<bool> required;
     std::optional<std::string> file;
+    std::optional<long long> retention_days;   ///< audit.retention_days (unset or 0 = keep forever; audit_retention.h)
 };
 
 /// Resolve mode and file, flag > environment > mcp.yaml > default.
