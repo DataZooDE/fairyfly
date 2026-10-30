@@ -92,6 +92,8 @@ $sums = ($jobs['release'] | Where-Object { $_ -match 'sha256sum .*> SHA256SUMS' 
 Check ($sums -match '\$MSIX\b' -and $sums -match 'fairyfly\.msi\b') "SHA256SUMS lists the MSIX next to the MSI ($($sums.Trim()))"
 $create = ($jobs['release'] | Where-Object { $_ -match 'gh release create' }) -join ''
 Check ($create -match '"\$MSIX"' -and $create -match 'fairyfly\.msi\b') 'gh release create attaches the MSIX next to the MSI'
+Check ($msixBody -match 'msix-sha256:' -and $release -match 'MSIX_SHA256:\s*\$\{\{\s*needs\.build-msix\.outputs\.msix-sha256' -and
+       $release -match 'sha256sum -c') 'the release job checks the MSIX against the hash build-msix took (msix-sha256)'
 $sign = $jobs['sign']
 Check (($sign -join "`n") -notmatch '(?i)msix') 'the sign job (Artifact Signing) does not sign the MSIX'
 

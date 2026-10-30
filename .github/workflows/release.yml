@@ -142,6 +142,7 @@ jobs:
     runs-on: windows-2022
     outputs:
       msix-version: ${{ steps.pack.outputs.version }}
+      msix-sha256: ${{ steps.msix-hash.outputs.sha256 }}
     steps:
     - name: Release ref guard
       # only a tag run releases: github.ref must be refs/tags/<RELEASE_TAG> (also for workflow_dispatch)
@@ -220,6 +221,12 @@ jobs:
         if ((Split-Path $env:MSIX_PATH -Leaf) -cne "fairyfly-$packed.msix") { Write-Error "unexpected package name $env:MSIX_PATH"; exit 1 }
         $sig = Get-AuthenticodeSignature $env:MSIX_PATH
         if ($sig.Status -ne 'NotSigned') { Write-Error "$env:MSIX_PATH is not unsigned: $($sig.Status)"; exit 1 }
+      shell: pwsh
+
+    - name: Hash of the checked MSIX (the release job checks the attached file against it)
+      id: msix-hash
+      run: |
+        "sha256=$((Get-FileHash $env:MSIX_PATH -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       shell: pwsh
 
     - name: Upload the unsigned MSIX
@@ -469,6 +476,15 @@ jobs:
       with:
         name: fairyfly-msix
         path: dist
+
+    - name: The released MSIX is the one build-msix checked
+      env:
+        MSIX: fairyfly-${{ needs.build-msix.outputs.msix-version }}.msix
+        MSIX_SHA256: ${{ needs.build-msix.outputs.msix-sha256 }}
+      run: |
+        cd dist
+        [ -n "$MSIX_SHA256" ] || { echo "build-msix gave no MSIX hash"; exit 1; }
+        echo "$MSIX_SHA256  $MSIX" | sha256sum -c -
 
     - name: The released files are the verified signed ones
       if: needs.sign.result == 'success'

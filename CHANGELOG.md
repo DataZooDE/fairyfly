@@ -16,7 +16,8 @@
   `packaging/tests/Test-VersionScripts.ps1` with same-day `.N`, month and year boundaries.
 - The packing steps moved into `packaging/msix/New-MsixPackage.ps1`, which `build.yml` (`build-windows-msix`) and the
   release both run. `build-windows-msix` also runs the release's MSIX version check as a dry run with the tag
-  `v<fairyfly --version>` against the published releases.
+  `v<fairyfly --version>` (the ordering against the published releases is a warning there); `build.yml` now has a
+  read-only token. The release job checks the attached MSIX against the hash `build-msix` took.
 - The MSI, its signing and the winget manifests are unchanged. [docs/MSIX.md](docs/MSIX.md#store-submission) says
   which release asset to upload in Partner Center.
 

@@ -92,8 +92,9 @@ unit tests, on the same runner:
    [packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1), which the release runs too.
    **Release dry run:** the job then runs the release's MSIX version check
    ([packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1), see
-   [Store submission](#store-submission)) with the tag `v<fairyfly --version>` against the published releases, and
-   checks that the package is unsigned.
+   [Store submission](#store-submission)) with the tag `v<fairyfly --version>`: the version mapping and the
+   unsigned package must pass; "above every published release" is only a warning there (a branch cut before the
+   latest release is fine), the release enforces it. The workflow's token is read-only.
 3. **Test-signed copy.** A self-signed code-signing certificate is made fresh in each run with Subject exactly the
    manifest's Publisher (`CN=05AB657A-5AC7-43BC-A7F1-92AAD620BCCC`, which Windows requires for a sideload). `signtool`
    signs a copy, `fairyfly-<msixversion>-testsigned.msix`; the public certificate is exported as
@@ -152,7 +153,8 @@ test `.cer` (CI artifact `fairyfly-msix-testsigned`): a release never contains t
 builds the msix configuration from the tagged commit (the same ref guard and `github.sha` checkout as the MSI build),
 runs the unit tests, checks `fairyfly --version` against the tag (`check_release_tag.ps1`), packs with
 [packaging/msix/New-MsixPackage.ps1](../packaging/msix/New-MsixPackage.ps1) and checks that the package is not signed.
-It has no environment, no Azure login and no secret. The release is only published when this job succeeds.
+It has no environment, no Azure login and no secret. The release is only published when this job succeeds, and
+the release job checks the attached file against the SHA-256 that `build-msix` took of the checked package.
 
 **Version check.** The Store refuses a package whose version is not higher than the last submitted one, so
 [packaging/check_msix_version.ps1](../packaging/check_msix_version.ps1) fails the release unless the packed
