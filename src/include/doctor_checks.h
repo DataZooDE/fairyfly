@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include "include/config/data_dir.h"
+#include "include/packaging.h"
 
 #include <cstddef>
 #include <optional>
@@ -33,6 +34,10 @@ Check judge_desktop(const std::string& window_station, const std::string& deskto
 /// the old folder there (`migration_error`); warn for the conflicts recorded when the old folders were merged.
 Check judge_data_dir(const std::string& dir, const std::string& migration_error,
                      const std::vector<config::MigrationConflict>& conflicts);
+
+/// The cloud link's approval notifications (include/link/toast_identity.h): pass with the AUMID they are shown under
+/// (`app_id`, UTF-8); a Store build without its package identity (empty `app_id`) has none: warn.
+Check judge_notifications(packaging::Package build, const std::string& app_id);
 
 struct ProcessScan {
     bool logon = false;  ///< saplogon.exe

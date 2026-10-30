@@ -32,6 +32,22 @@ TEST_CASE("tray starter: the installer names the install folder it closes", "[tr
     CHECK(start.args == std::vector<std::wstring>{L"link", L"run", L"--tray"});
 }
 
+TEST_CASE("tray starter: COM's start of the toast activator's server starts the link tray", "[tray][close][toast]") {
+    // MSI: LocalServer32 appends -Embedding; MSIX: the manifest's com:ExeServer Arguments="-Embedding" (and should Windows
+    // append its own as well, the doubled argument still is the activator's start)
+    for (const auto& args : {std::vector<std::wstring>{L"-Embedding"}, std::vector<std::wstring>{L"/Embedding"},
+                             std::vector<std::wstring>{L"-Embedding", L"-Embedding"}}) {
+        CHECK(is_com_server_start(args));
+        const auto c = parse_starter_command(args, kFolder);
+        CHECK(c.mode == StarterMode::Start);
+        CHECK(c.args.empty());  // fairyfly.exe link run --tray, as from the Start menu
+    }
+    CHECK(std::wstring(fairyfly::tray::contract::kComServerArgument) == L"-Embedding");
+    CHECK_FALSE(is_com_server_start({}));
+    CHECK_FALSE(is_com_server_start({L"-Embedding", L"mcp"}));
+    CHECK(parse_starter_command({L"mcp", L"-Embedding"}, kFolder).args == std::vector<std::wstring>{L"mcp", L"-Embedding"});
+}
+
 TEST_CASE("tray starter: only this installation's fairyfly.exe and fairyfly-tray.exe are closed", "[tray][close]") {
     CHECK(is_installed_program(kFolder + L"\\fairyfly.exe", kFolder));
     CHECK(is_installed_program(L"\\\\?\\c:/users/ada/appdata/local/programs/FAIRYFLY/Fairyfly-Tray.exe", kFolder + L"\\"));

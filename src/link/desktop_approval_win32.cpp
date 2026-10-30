@@ -9,6 +9,7 @@
 #include <shobjidl_core.h>
 #include <wtsapi32.h>
 #include <NotificationActivationCallback.h>
+#include <appmodel.h>
 
 #include <roapi.h>
 #include <windows.data.xml.dom.h>
@@ -37,6 +38,20 @@
 #pragma comment(lib, "runtimeobject.lib")
 
 namespace fairyfly::link::approval {
+
+ToastIdentity this_process_toast_identity() {
+    // the package's identity, as Windows gave it to this process (the tray, its fairyfly.exe child, or the alias);
+    // none for the MSI, whose decision does not use it
+    std::wstring app_id(APPLICATION_USER_MODEL_ID_MAX_LENGTH, L'\0');
+    UINT32 length = UINT32(app_id.size());
+    if (GetCurrentApplicationUserModelId(&length, app_id.data()) == ERROR_SUCCESS && length > 0) app_id.resize(length - 1);
+    else app_id.clear();
+    std::wstring family(PACKAGE_FAMILY_NAME_MAX_LENGTH + 1, L'\0');
+    length = UINT32(family.size());
+    if (GetCurrentPackageFamilyName(&length, family.data()) == ERROR_SUCCESS && length > 0) family.resize(length - 1);
+    else family.clear();
+    return toast_identity(packaging::kPackage, app_id, family);
+}
 
 namespace {
 
@@ -113,9 +128,10 @@ fs::path module_dir() {
     return fs::path(path).parent_path();
 }
 
-// Registers fairyfly for notifications (once per process): the AppUserModelID with its activator (also without the
-// Start-menu entry, e.g. a portable copy), the activator's server (the tray starter; COM appends -Embedding) and the
-// activator itself on a thread that keeps the multithreaded apartment alive for the toasts.
+// Registers fairyfly for notifications (once per process) as toast_identity() says. MSI: the AppUserModelID with its
+// activator (also without the Start-menu entry, e.g. a portable copy) and the activator's server (the tray starter; COM
+// appends -Embedding) in HKCU. MSIX: nothing, the package manifest declares both. Then the activator itself, on a thread
+// that keeps the multithreaded apartment alive for the toasts.
 class ToastService {
 public:
     static ToastService& get() {
@@ -126,18 +142,28 @@ public:
         std::call_once(once_, [this] { start(); });
         return ready_;
     }
+    /// The notifier's AUMID (empty: no toasts in this process). Valid once ready() returned.
+    const std::wstring& app_id() const { return identity_.app_id; }
 
 private:
     void start() {
-        const std::wstring aumid_key = std::wstring(tray::contract::kAppUserModelIdKeyPrefix) + kAppUserModelId;
-        set_value(HKEY_CURRENT_USER, aumid_key, L"DisplayName", L"fairyfly");
-        set_value(HKEY_CURRENT_USER, aumid_key, L"CustomActivator", kToastActivatorClsid);
-        const fs::path starter = module_dir() / L"fairyfly-tray.exe";
-        std::error_code ec;
-        if (fs::exists(starter, ec))
-            set_value(HKEY_CURRENT_USER, std::wstring(tray::contract::kClsidKeyPrefix) + kToastActivatorClsid + L"\\LocalServer32", nullptr,
-                      L"\"" + starter.wstring() + L"\"");
-        SetCurrentProcessExplicitAppUserModelID(kAppUserModelId);
+        identity_ = this_process_toast_identity();
+        if (identity_.app_id.empty()) {
+            spdlog::info("approval: this Microsoft Store build runs without its package identity; no notifications, the approval window asks");
+            return;
+        }
+        if (identity_.register_in_hkcu) {
+            const std::wstring aumid_key = std::wstring(tray::contract::kAppUserModelIdKeyPrefix) + identity_.app_id;
+            set_value(HKEY_CURRENT_USER, aumid_key, L"DisplayName", L"fairyfly");
+            set_value(HKEY_CURRENT_USER, aumid_key, L"CustomActivator", kToastActivatorClsid);
+            const fs::path starter = module_dir() / L"fairyfly-tray.exe";
+            std::error_code ec;
+            if (fs::exists(starter, ec))
+                set_value(HKEY_CURRENT_USER, std::wstring(tray::contract::kClsidKeyPrefix) + kToastActivatorClsid + L"\\LocalServer32", nullptr,
+                          L"\"" + starter.wstring() + L"\"");
+        }
+        if (identity_.set_process_app_id) SetCurrentProcessExplicitAppUserModelID(identity_.app_id.c_str());
+        spdlog::info("approval: notifications as {}", com::wide_to_utf8(identity_.app_id));
 
         std::promise<bool> registered;
         auto result = registered.get_future();
@@ -160,6 +186,7 @@ private:
     }
     std::once_flag once_;
     bool ready_ = false;
+    ToastIdentity identity_;
 };
 
 // COM on this thread for WinRT calls; the service thread keeps the multithreaded apartment alive.
@@ -329,7 +356,8 @@ public:
                                             IID_PPV_ARGS(&manager));
         if (FAILED(hr)) return failed("manager", hr);
         ComPtr<wn::IToastNotifier> notifier;
-        if (FAILED(hr = manager->CreateToastNotifierWithId(HStringReference(kAppUserModelId).Get(), &notifier))) return failed("notifier", hr);
+        const std::wstring& app_id = ToastService::get().app_id();
+        if (FAILED(hr = manager->CreateToastNotifierWithId(HStringReference(app_id.c_str()).Get(), &notifier))) return failed("notifier", hr);
         wn::NotificationSetting setting = wn::NotificationSetting_Enabled;
         if (SUCCEEDED(notifier->get_Setting(&setting)) && setting != wn::NotificationSetting_Enabled) {
             spdlog::info("approval {}: notifications are off for fairyfly; the approval window opens", r.id);
@@ -386,6 +414,7 @@ public:
     }
 
     void withdraw(const Request& r) override {
+        if (!ToastService::get().ready()) return;  // no toast was shown
         Apartment apartment;
         Shown s;
         {
@@ -403,7 +432,8 @@ public:
         const std::wstring tag = std::to_wstring(r.id);
         if (SUCCEEDED(RoGetActivationFactory(HStringReference(RuntimeClass_Windows_UI_Notifications_ToastNotificationManager).Get(), IID_PPV_ARGS(&manager))) &&
             SUCCEEDED(manager.As(&manager2)) && SUCCEEDED(manager2->get_History(&history)))
-            history->RemoveGroupedTagWithId(HStringReference(tag.c_str()).Get(), HStringReference(kGroup).Get(), HStringReference(kAppUserModelId).Get());
+            history->RemoveGroupedTagWithId(HStringReference(tag.c_str()).Get(), HStringReference(kGroup).Get(),
+                                            HStringReference(ToastService::get().app_id().c_str()).Get());
     }
 
     Answer ask(const Request& r, const std::function<bool()>& stop, bool& remember) override {
@@ -508,6 +538,10 @@ std::shared_ptr<ffy::link::Approver> make_desktop_approver(Desk desk, Options op
         g_sink = on_answer;  // the COM activator (the notification centre)
     }
     desk.can_ask = desktop_can_ask;
+    // the activator is registered as the link starts, not at the first toast: when the notification centre started this
+    // tray to deliver a click (-Embedding), COM waits for the class (the answer to a question of an ended process is
+    // dropped by the broker; Broker::answer_text)
+    ToastService::get().ready();
     auto broker = std::make_shared<Broker>(make_win32_ui(on_answer), std::move(desk), options);
     *link = broker;
     return make_approver(broker);

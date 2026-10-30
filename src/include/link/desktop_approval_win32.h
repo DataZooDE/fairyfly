@@ -8,14 +8,20 @@
 #include <string>
 
 #include "include/link/desktop_approval.h"
+#include "include/link/toast_identity.h"
 #include "include/tray/tray_contract.h"
 
 namespace fairyfly::link::approval {
 
-/// The AppUserModelID of fairyfly's notifications: the Start-menu entry's (packaging/fairyfly.wxs) and this process's.
+/// The AppUserModelID of the MSI's notifications: the Start-menu entry's (packaging/fairyfly.wxs) and this process's.
+/// A Store build uses its package's tray application instead (this_process_toast_identity).
 using tray::contract::kAppUserModelId;
 /// The COM class the notification centre starts or calls for an answer (the shortcut's ToastActivatorCLSID).
 using tray::contract::kToastActivatorClsid;
+
+/// This process's toast identity (include/link/toast_identity.h): the build's package and, in a Store build, the
+/// package identity Windows gave the process (GetCurrentApplicationUserModelId, GetCurrentPackageFamilyName).
+ToastIdentity this_process_toast_identity();
 
 /// True while a person can answer here: an interactive window station, the session active and not locked.
 bool desktop_can_ask();
