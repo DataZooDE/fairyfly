@@ -1903,3 +1903,25 @@ TEST_CASE("run_link_with_tray: two trays taking over at once: the one that loses
     CHECK(f.host.boxes[0].find("already running") != std::string::npos);
     CHECK(f.host.boxes[0].find("Task Manager") == std::string::npos);
 }
+
+TEST_CASE("a start by COM for the toast activator names no other installation's tray in a message box", "[tray][run][starter][toast][held]") {
+    // crew review of #134: the click came from the notification centre, nobody asked for a window; the log says why
+    Fixture f;
+    f.paths.exe = kMsixExe;
+    FakeGuard guard;
+    guard.other_running = true;
+    FakeInstances instances;
+    instances.trays = {{2892, kMsiExe}};
+    instances.guard = &guard;
+    LinkTrayServices services;
+    services.host = &f.host;
+    services.claim.instances = &instances;
+    services.claim.exists = files({kMsiExe, kMsixExe});   // another installation's tray (decide_held_tray: Explain)
+    services.claim.com_start = true;
+    bool ran = false;
+    CHECK(run_link_with_tray([&] { ran = true; return 0; }, services, guard, f.paths) == 0);
+    CHECK_FALSE(ran);
+    CHECK(instances.asked.empty());
+    CHECK(f.host.boxes.empty());
+}
+

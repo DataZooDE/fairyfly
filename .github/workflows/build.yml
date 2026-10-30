@@ -198,7 +198,11 @@ jobs:
         $activator = "$($item.ExtendedProperty('System.AppUserModel.ToastActivatorCLSID'))"
         Write-Host "shortcut AppUserModelID '$aumid', ToastActivatorCLSID '$activator'"
         if ($aumid -ne 'DataZoo.fairyfly') { Write-Error "shortcut AppUserModelID '$aumid', expected DataZoo.fairyfly"; exit 1 }
-        if ($activator -notmatch 'DAAF1065-EF17-4CFF-B3D2-EFAF70594959') { Write-Error "shortcut ToastActivatorCLSID '$activator'"; exit 1 }
+        # the MSI's activator as the code spells it (src/include/tray/tray_contract.h, the one source)
+        $contract = Get-Content src/include/tray/tray_contract.h -Raw
+        if ($contract -notmatch 'kToastActivatorClsidMsi\[\] = L"\{([0-9A-Fa-f-]{36})\}"') { Write-Error "kToastActivatorClsidMsi not found in tray_contract.h"; exit 1 }
+        $msiClsid = $Matches[1]
+        if ($activator -notmatch [regex]::Escape($msiClsid)) { Write-Error "shortcut ToastActivatorCLSID '$activator', expected the code's kToastActivatorClsidMsi $msiClsid"; exit 1 }
 
         # the Start-menu entry: no console, the tray stays up, "Start with Windows" is on, uninstall closes it
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
