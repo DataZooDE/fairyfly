@@ -39,6 +39,7 @@ private:
     int default_connection_ = -1;
     bool http_flag_ = false;
     std::string tools_filter_;
+    std::string audit_retention_days_;   ///< read through the key table (flags_layer -> audit.retention_days)
     bool tools_markdown_ = false;
     McpExtras extras_;
 };

@@ -132,6 +132,7 @@ Read-only and never elevated. The http.sys checks follow `tokens`; `fairyfly mcp
 | `port` | free, or served (by the tray) | |
 | `tls_handshake` | only when something listens: pinned handshake, protocol, thumbprint match; WARN on mismatch or below TLS 1.2 | rebind / Schannel policy |
 | `legacy_proxy_secret` | WARN when the retired credential `fairyfly:fairyfly-mcp-proxy` still exists | `cmdkey /delete:fairyfly:fairyfly-mcp-proxy` |
+| `audit_retention` | the local audit retention (`audit.retention_days`); WARN when the audit trail is required and a retention prunes it (a user-level setting: there is no managed layer) | collect the trail centrally, or remove `audit.retention_days` / `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` |
 
 ## Teardown
 

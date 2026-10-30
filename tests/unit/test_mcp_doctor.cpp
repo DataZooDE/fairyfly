@@ -74,7 +74,7 @@ const DoctorCheck& get(const std::vector<DoctorCheck>& checks, const std::string
 TEST_CASE("mcp doctor: healthy http setup passes", "[mcp_doctor]") {
     FakeProbes probes;
     const auto checks = run_mcp_doctor(http_input(), probes);
-    CHECK(checks.size() == 17);
+    CHECK(checks.size() == 18);
     // the setup checks skip when nothing was collected
     for (const char* id : {"setup_manifest", "urlacl", "sslcert", "certificate", "firewall", "tls_handshake"}) CHECK(get(checks, id).status == CheckStatus::Skip);
     CHECK(get(checks, "legacy_proxy_secret").status == CheckStatus::Pass);
@@ -458,7 +458,8 @@ TEST_CASE("mcp doctor: the checks come in their documented order and the setup q
     for (const auto& c : checks) ids.push_back(c.id);
     CHECK(ids == std::vector<std::string>{"config", "port", "sap_scripting", "sap_session", "desktop", "session_lock",
                                           "tokens", "elevation", "setup_manifest", "urlacl", "sslcert", "certificate",
-                                          "firewall", "tls_handshake", "legacy_proxy_secret", "autostart", "tray"});
+                                          "firewall", "tls_handshake", "legacy_proxy_secret", "autostart", "tray",
+                                          "audit_retention"});
     REQUIRE(probes.setup_query.has_value());
     CHECK(probes.setup_query->tls);
     CHECK(probes.setup_query->hostname == "sapbox");
@@ -475,4 +476,23 @@ TEST_CASE("mcp doctor: a recorded plain-HTTP setup wins over a requested TLS ser
     CHECK(get(checks, "certificate").message == "plain HTTP mode: no certificate");
     CHECK(get(checks, "tls_handshake").message == "plain HTTP mode");
     CHECK(get(checks, "setup_manifest").message == "setup for sapbox:8443 (http)");
+}
+
+TEST_CASE("mcp doctor: audit retention, and a warning when it prunes a required trail", "[mcp_doctor][audit]") {
+    FakeProbes probes;
+    DoctorInput in = http_input();
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").status == CheckStatus::Pass);   // unset: kept forever
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").message.find("forever") != std::string::npos);
+    in.audit_retention_days = 0;
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").status == CheckStatus::Pass);
+    in.audit_retention_days = 90;
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").status == CheckStatus::Pass);
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").message.find("90") != std::string::npos);
+    in.audit_required = true;
+    const auto warned = get(run_mcp_doctor(in, probes), "audit_retention");
+    CHECK(warned.status == CheckStatus::Warn);
+    CHECK(warned.message.find("required") != std::string::npos);
+    CHECK_FALSE(warned.remediation.empty());
+    in.audit_retention_days.reset();
+    CHECK(get(run_mcp_doctor(in, probes), "audit_retention").status == CheckStatus::Pass);   // required, kept forever
 }

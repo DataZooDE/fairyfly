@@ -131,6 +131,10 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     if (r.facts_pre_ms > 0) j["facts_pre_ms"] = r.facts_pre_ms;
     if (r.invoke_ms > 0) j["invoke_ms"] = r.invoke_ms;
     if (r.facts_post_ms > 0) j["facts_post_ms"] = r.facts_post_ms;
+    if (r.retention_days) j["retention_days"] = *r.retention_days;
+    if (!r.pruned.empty()) j["pruned"] = r.pruned;
+    if (!r.prune_failed.empty()) j["prune_failed"] = r.prune_failed;
+    if (!r.prune_candidates.empty()) j["prune_candidates"] = r.prune_candidates;
     return j;
 }
 

@@ -733,6 +733,11 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     so.allow_write = !o.read_only && !config::read_only_cap();
     so.read_only = o.read_only;
     so.families = o.families;
+    // the local audit retention (audit.retention_days of mcp.yaml / FAIRYFLY_MCP_AUDIT_RETENTION_DAYS); run_mcp prunes
+    std::vector<config::ConfigIssue> retention_issues;
+    so.audit_file.retention_days = config::configured_audit_retention(config::process_env(), &retention_issues);
+    for (const auto& issue : retention_issues)
+        spdlog::warn("audit retention off: {}", config::format_issue(issue));
     mcp::HttpRunHooks hooks;
     hooks.keep_logging = true;  // the logger above; run_mcp would replace it
     hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>&) -> int {

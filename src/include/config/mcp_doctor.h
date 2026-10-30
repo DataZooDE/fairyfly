@@ -124,6 +124,8 @@ struct DoctorInput {
     std::string exe_path;              ///< current fairyfly.exe (autostart comparison)
     bool tls = false;                  ///< effective server.tls (https listener)
     std::string hostname;              ///< host name clients use; empty = unknown
+    std::optional<long long> audit_retention_days;   ///< effective audit.retention_days (unset = kept forever)
+    bool audit_required = false;       ///< the audit trail is required (audit.required, FAIRYFLY_AUDIT=required)
 };
 
 std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& input, DoctorProbes& probes);

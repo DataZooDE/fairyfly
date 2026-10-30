@@ -124,6 +124,10 @@ void apply_config(const McpConfig& layers, mcp::ServeOptions& options);
 audit::AuditFileSettings audit_settings(const McpConfig& layers);
 /// The same from the three layers: enabled and file flag > env > yaml, required from ANY layer (monotonic, fail safe).
 audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& env, const McpConfig& flags);
+/// audit.retention_days for a process that does not read the rest of mcp.yaml (`link run`): the default config file
+/// (or FAIRYFLY_MCP_CONFIG) below FAIRYFLY_MCP_AUDIT_RETENTION_DAYS. An unreadable or invalid file or value adds an
+/// issue and keeps the trail (nullopt): a broken setting never deletes anything.
+std::optional<long long> configured_audit_retention(const EnvLookup& env, std::vector<ConfigIssue>* issues = nullptr);
 
 // ---- Paths and text -----------------------------------------------------------------------------
 /// Config file path: explicit (-c) > FAIRYFLY_MCP_CONFIG > %USERPROFILE%\.fairyfly\mcp.yaml.
