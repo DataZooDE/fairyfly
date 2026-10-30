@@ -110,6 +110,8 @@ public:
 
     void request_restart() override {
         std::lock_guard<std::mutex> guard(mutex_);
+        // a Stop is still shutting the server down: it may no longer see the restart, so run again once it returned
+        if (inner_ && !want_run_) start_after_stop_ = true;
         want_run_ = true;
         if (inner_) inner_->request_restart();
         else cv_.notify_all();
@@ -127,7 +129,7 @@ private:
     std::condition_variable cv_;
     IServerControl* inner_ = nullptr;
     bool want_run_ = true;
-    bool start_after_stop_ = false;  // Start after a Stop whose server run has not returned yet
+    bool start_after_stop_ = false;  // Start/Restart after a Stop whose server run has not returned yet
     bool quit_ = false;
     std::string last_error_;
     std::atomic<bool> read_only_{true};

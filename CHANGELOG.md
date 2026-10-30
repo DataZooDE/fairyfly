@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### MCP tray: Restart right after Stop is no longer lost
+
+- In `fairyfly mcp --tray --http`, a Restart chosen while a Stop was still shutting the server down went to a server
+  that no longer listened for it, and the tray stayed stopped. The runner now starts the server again once the stopped
+  run has returned, as it already did for Start (`src/mcp/http_tray_runner.cpp`).
+- Tests: the flaky "restart while stopped" unit test (failed once in CI on PR #131) waited for a flag that turns false
+  before the server has returned; it now waits for the runner to hold no server, and a new test holds the server in
+  its shutdown to cover the Restart in that window deterministically.
+
 ## 2026.10.30.1
 
 - Add compact references, guarded summary batches, and timing diagnostics for faster SAP workflows.
