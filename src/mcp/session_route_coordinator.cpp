@@ -51,6 +51,8 @@ SessionRouteFacts facts_from_worker_probe(const json& result) {
         facts.sap.program = data["program"].get<std::string>();
     if (data.contains("screen_number") && data["screen_number"].is_string())
         facts.sap.screen_number = data["screen_number"].get<std::string>();
+    if (data.contains("window_title") && data["window_title"].is_string())
+        facts.sap.window_title = data["window_title"].get<std::string>();
     return facts;
 }
 

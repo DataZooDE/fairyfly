@@ -16,6 +16,20 @@ using Argv = std::vector<std::string>;
 
 using fairyfly::test::spec_of;
 
+TEST_CASE("MCP guidance teaches bounded form operations", "[mcp][guidance]") {
+    const auto& read = spec_of("gui_screen_read");
+    const auto description = describe_for(read, {"gui_screen_read", "gui_element_fill"});
+    CHECK(description.find("skip_trees=true") != std::string::npos);
+    CHECK(description.find("no_tabs=true") != std::string::npos);
+    CHECK(description.find("requested fields") != std::string::npos);
+    CHECK(description.find("fill them ALL") == std::string::npos);
+    const auto read_only = describe_for(read, {"gui_screen_read"});
+    CHECK(read_only.find("gui_element_fill") == std::string::npos);
+    const auto batch = describe_for(spec_of("gui_batch"), {"gui_batch", "gui_element_fill"});
+    CHECK(batch.find("uncertain write") != std::string::npos);
+    CHECK(batch.find("include_result") != std::string::npos);
+}
+
 namespace {
 
 struct Sample {
@@ -150,6 +164,8 @@ TEST_CASE("MCP catalog: navigation is read-only for clients; what can change dat
 TEST_CASE("MCP catalog: batch annotations and destructive flags", "[mcp][tools]") {
     const auto specs = read_tool_specs();
     const auto& batch = spec_of(specs, "gui_batch");
+    CHECK(batch.def.input_schema["properties"]["result_mode"]["enum"] == json::array({"full", "summary"}));
+    CHECK(batch.def.input_schema["properties"]["items"]["items"]["properties"].contains("include_result"));
     CHECK(batch.def.annotations["destructiveHint"] == true);
     CHECK(batch.def.annotations["readOnlyHint"] == false);
     CHECK(spec_of(specs, "gui_element_click").def.annotations["destructiveHint"] == true);

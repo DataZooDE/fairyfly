@@ -584,7 +584,8 @@ namespace {
 /// A plain JSON answer: waits for the job (polling the client connection and the server's stop), 499 when the client
 /// went away and 503 when the server stops first; the job is cancelled in both cases.
 HttpResponse wait_for_answer(const HttpRequest& request, const json& id, Waiter& waiter, std::chrono::milliseconds poll,
-                             const std::function<void()>& cancel, const std::function<bool()>& stopping) {
+                             const std::function<void()>& cancel, const std::function<bool()>& stopping,
+                             long long* serialize_ms = nullptr) {
     std::unique_lock<std::mutex> lock(waiter.m);
     while (!waiter.done) {
         waiter.cv.wait_for(lock, poll);
@@ -600,7 +601,11 @@ HttpResponse wait_for_answer(const HttpRequest& request, const json& id, Waiter&
         cancel();
         return json_response(503, make_error(id, kServerBusy, "server shutting down", json{{"retry", true}}));
     }
-    return json_response(200, waiter.final_message);
+    const auto serialize_started = std::chrono::steady_clock::now();
+    HttpResponse response = json_response(200, waiter.final_message);
+    if (serialize_ms) *serialize_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - serialize_started).count();
+    return response;
 }
 
 /// An SSE answer (HTTP 200): the job's progress frames as they come, keep-alive comments while it runs, then its final
@@ -783,6 +788,7 @@ json HttpEndpoint::run_tool_job(const ToolJob& job, CallState& state) {
 }
 
 HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal& principal) {
+    const auto request_started = std::chrono::steady_clock::now();
     json parse_error;
     Message message = parse_message(request.body, parse_error);
     switch (message.kind) {
@@ -872,6 +878,13 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const std::string route_identity = session_route.identity;
     const std::string route_lane_key = session_route.lane_key.empty() ? route_identity : session_route.lane_key;
     std::shared_ptr<ToolProvider> route_provider = std::move(session_route.provider);
+    const auto admitted_at = std::chrono::steady_clock::now();
+
+    struct Timing {
+        std::atomic<long long> queue_ms{0};
+        std::atomic<long long> exec_ms{0};
+    };
+    auto timing = std::make_shared<Timing>();
 
     auto waiter = std::make_shared<Waiter>();
     ExecJob job;
@@ -888,10 +901,16 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     }
     Pending pending{message.id, method, params};
     const bool want_progress = sse && !progress_token.is_null();
-    job.run = [this, tool_job = ToolJob{pending, admission_principal, execution_auth, era, stateless, server_info,
+    const auto submitted_at = std::chrono::steady_clock::now();
+    job.run = [this, timing, submitted_at, tool_job = ToolJob{pending, admission_principal, execution_auth, era, stateless, server_info,
                                          client_info, progress_token, want_progress, route_provider, route_identity,
                                          route_lane_key, routed, waiter}](CallState& state) -> json {
-        return run_tool_job(tool_job, state);
+        const auto started = std::chrono::steady_clock::now();
+        timing->queue_ms = std::chrono::duration_cast<std::chrono::milliseconds>(started - submitted_at).count();
+        json result = run_tool_job(tool_job, state);
+        timing->exec_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - started).count();
+        return result;
     };
 
     std::shared_ptr<CallState> state;
@@ -920,7 +939,24 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     const auto route_stopping = [this, routed] {
         return executor_.stopping() || (routed && session_pool_->stopping());
     };
-    if (!sse) return wait_for_answer(request, message.id, *waiter, poll, route_cancel, route_stopping);
+    if (!sse) {
+        long long serialize_ms = 0;
+        HttpResponse response = wait_for_answer(request, message.id, *waiter, poll, route_cancel,
+                                                route_stopping, &serialize_ms);
+        if (is_call && response.status == 200) {
+            const auto ms = [](auto duration) {
+                return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+            };
+            const auto total = ms(std::chrono::steady_clock::now() - request_started);
+            response.set_header("Server-Timing", "ff_admit;dur=" + std::to_string(ms(admitted_at - request_started)) +
+                ", ff_queue;dur=" + std::to_string(timing->queue_ms.load()) +
+                ", ff_exec;dur=" + std::to_string(timing->exec_ms.load()) +
+                ", ff_serialize;dur=" + std::to_string(serialize_ms) +
+                ", ff_total;dur=" + std::to_string(total));
+            response.set_header("X-Fairyfly-Response-Bytes", std::to_string(response.body.size()));
+        }
+        return response;
+    }
     return sse_answer(waiter, state, route_cancel, route_stopping, poll, options_.keepalive_ms);
 }
 

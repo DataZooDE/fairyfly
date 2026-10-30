@@ -125,7 +125,8 @@ void configure_session_worker_routing(McpHttpServer& server, SessionWorkerRuntim
         };
     }
     auto coordinator_slot = std::make_shared<std::weak_ptr<SessionRouteCoordinator>>();
-    auto provider_factory = [shared, mode, generation, coordinator_slot](const std::string& identity, int connection)
+    auto screen_refs = std::make_shared<ScreenRefStore>();
+    auto provider_factory = [shared, mode, generation, coordinator_slot, screen_refs](const std::string& identity, int connection)
         -> std::shared_ptr<ToolProvider> {
         SessionWorkerProviderConfig provider;
         provider.policy = shared->policy;
@@ -156,7 +157,9 @@ void configure_session_worker_routing(McpHttpServer& server, SessionWorkerRuntim
             };
             return shared->invoke(call, guarded);
         };
-        return make_session_worker_provider(std::move(provider));
+        auto dispatcher = make_session_worker_provider(std::move(provider));
+        dispatcher->set_screen_ref_store(screen_refs);
+        return dispatcher;
     };
     auto coordinator = std::make_shared<SessionRouteCoordinator>(*admission, shared->policy,
         shared->routing, shared->specs,

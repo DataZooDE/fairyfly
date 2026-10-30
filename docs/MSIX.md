@@ -109,6 +109,34 @@ distribute the test-signed package or ask users to import the `.cer`.
 
 ## Sideload test on a test machine (VM)
 
+### Local update script
+
+Run `packaging/msix/Update-Msix.ps1` as your normal Windows user:
+
+```powershell
+./packaging/msix/Update-Msix.ps1 `
+  -PackagePath ./fairyfly-2026.10.3000.0-testsigned.msix `
+  -CertificatePath ./fairyfly-2026.10.3000.0-testsigned.cer
+```
+
+Add `-WhatIf` to validate and preview; `-NoStartTray` leaves the tray stopped. For an already
+trusted package, omit `-CertificatePath`. Supplying the matching public test certificate
+authorizes importing it into `LocalMachine/TrustedPeople`; that step requests Windows UAC
+approval if needed. The install itself runs as the current user.
+
+The script validates the package identity, publisher, x64 architecture, version and signature,
+stops only processes belonging to the installed Fairyfly package, performs an in-place update,
+checks the installed executable through its package alias, and restarts the tray using Windows'
+packaged-app launcher. It never uninstalls Fairyfly or deletes its data. Identical installed
+contents are verified/restarted without reinstalling. For a different build with the same or
+an older version, increment the package version first. A failed update attempts to restart the
+version still registered, and preserves the original error.
+
+Keep `Update-Msix.Common.ps1` beside the updater if you copy it elsewhere. The offline contract
+checks are in `packaging/msix/tests/Test-UpdateMsix.ps1` (Windows PowerShell 5.1 or PowerShell 7).
+
+### Manual installation
+
 Windows 10 1809 (17763) or later, x64, with sideloading allowed (the default on Windows 10 2004+ and Windows 11; else
 Settings > For developers > Install apps from any source / Sideload apps). An MSI installation of fairyfly may stay;
 for a clean test uninstall it first.

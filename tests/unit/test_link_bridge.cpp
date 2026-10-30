@@ -19,6 +19,29 @@
 using fairyfly::link::MainThreadTools;
 using nlohmann::json;
 
+TEST_CASE("link bridge: reports queue and execution without exposing call arguments", "[link][latency]") {
+    MainThreadTools tools;
+    tools.set_handlers([] { return json::array(); }, [](const std::string&, const json&, const ffy::link::CallInfo&) {
+        return json{{"content", json::array()}, {"isError", true}, {"_meta", {{"existing", true}}}};
+    });
+    json result;
+    std::thread worker([&] {
+        result = tools.rpc("tools/call", {{"name", "gui_screen_read"}, {"arguments", {{"secret", "do-not-copy"}}}},
+            3000, {"tenant", "user", "client", "request-123", false});
+    });
+    tools.pump_once(std::chrono::milliseconds(2000));
+    worker.join();
+    CHECK(result["result"]["isError"] == true);
+    CHECK(result["result"]["_meta"]["existing"] == true);
+    const auto timing = result["result"]["_meta"]["fairyfly/desktop_timing"];
+    REQUIRE(timing.is_object());
+    CHECK(timing["request_id"] == "request-123");
+    CHECK(timing["queue_ms"].get<int64_t>() >= 0);
+    CHECK(timing["execute_ms"].get<int64_t>() >= 0);
+    CHECK(timing.dump().find("do-not-copy") == std::string::npos);
+    CHECK(timing.size() == 3);
+}
+
 TEST_CASE("link bridge: worker-thread calls run on the pumping thread, one at a time", "[link]") {
     MainThreadTools tools;
     const auto main_id = std::this_thread::get_id();

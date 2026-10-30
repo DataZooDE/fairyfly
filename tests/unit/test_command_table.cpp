@@ -286,6 +286,27 @@ TEST_CASE("run_mcp rejects an unknown family with exit code 99", "[command_table
     CHECK_FALSE(handler_requested);
 }
 
+TEST_CASE("run_mcp link wires live SAP facts before a scoped action", "[mcp][link][latency]") {
+    mcp::ServeOptions options;
+    options.transport = "link";
+    bool facts_requested = false;
+    mcp::HttpRunHooks hooks;
+    hooks.link_loop = [&](mcp::ToolProvider& provider, const std::function<bool(bool)>&) {
+        mcp::CallContext ctx;
+        ctx.principal.name = "link:test/user";
+        ctx.principal.authenticated = true;
+        ctx.principal.sap_systems = {"A4H/001"};
+        const auto result = provider.call_tool("gui_element_get", {{"connection", 4}, {"element", "wnd[0]/usr/field"}}, ctx);
+        CHECK(result.is_error); // unavailable facts still fail closed
+        return 0;
+    };
+    CHECK(mcp::run_mcp(options, [&]() -> cli::CommandHandler& {
+        facts_requested = true;
+        throw std::runtime_error("facts unavailable in fixture");
+    }, commands::GlobalOptions{}, nullptr, {}, &hooks) == 0);
+    CHECK(facts_requested);
+}
+
 TEST_CASE("run_mcp: mcp.yaml's audit.required reaches the audit sink and refuses to start when it cannot write", "[command_table][mcp][audit]") {
     // review 2026-10-25: the sink was reconfigured before mcp.yaml was applied, so audit.required did nothing
     namespace fs = std::filesystem;

@@ -17,6 +17,7 @@
 #include "include/mcp/session_policy_state.h"
 #include "include/mcp/session_routing_state.h"
 #include "include/mcp/session_worker_protocol.h"
+#include "include/mcp/screen_refs.h"
 #include "include/mcp/types.h"
 
 namespace fairyfly::mcp {
@@ -129,6 +130,7 @@ public:
     void set_session_leases(std::shared_ptr<SessionLeases> leases) { session_leases_ = std::move(leases); }
     void set_routing_state(std::shared_ptr<SessionRoutingState> routing) { routing_state_ = std::move(routing); }
     void set_session_policy_state(std::shared_ptr<SessionPolicyState> state) { session_policy_state_ = std::move(state); }
+    void set_screen_ref_store(std::shared_ptr<ScreenRefStore> store) { if (store) screen_refs_ = std::move(store); }
     /// Reports a step (facts_pre, invoke, facts_post) that took longer than the slow-step threshold (default 2000 ms). The
     /// default logs one spdlog warning; tests replace it.
     using SlowStepReporter = std::function<void(const std::string& step, const std::string& tool,
@@ -149,6 +151,7 @@ public:
     }
 
 private:
+    std::shared_ptr<ScreenRefStore> screen_refs_ = std::make_shared<ScreenRefStore>();
     /// Owner mode: an HTTP call on an endpoint that is limited to exact SAP identities (--owner-identity).
     bool owner_mode(const CallContext& ctx) const { return ctx.http && !policy_.owner_sap_identities.empty(); }
     /// After a call of a token with a T-code allowlist: the transaction the session ended in. Outside the allowlist the
@@ -276,12 +279,12 @@ private:
     std::atomic<long long> last_single_fill_ms_{0};
 
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
-                          std::string* code_out = nullptr);
+                          std::string* code_out = nullptr, McpCallRecord* record_out = nullptr);
     ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,
                             const CallContext& ctx);
     ToolResult run_batch(const json& args, const CallContext& ctx);
     ToolResult audited(const std::string& tool, const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
-                       const CallContext& ctx, std::string* code_out);
+                       const CallContext& ctx, std::string* code_out, McpCallRecord* record_out = nullptr);
     Result invoke(const std::vector<std::string>& argv);
     const ToolSpec* find_spec(const std::string& name) const;
     /// Names of the tools a caller can call (server policy and, when given, the principal's scopes / read-only flag).

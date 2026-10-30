@@ -105,6 +105,7 @@ private:
         nlohmann::json result;
         std::string error;
         bool done = false, abandoned = false, running = false;
+        std::chrono::steady_clock::time_point queued_at;
     };
     nlohmann::json run(Job& job);
     InFlightCall in_flight_locked(const Job& job) const;

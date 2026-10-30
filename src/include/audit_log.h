@@ -25,6 +25,7 @@ struct SapFacts {
     /// Identity of the live session behind that connection (session path + server session key + cache generation; empty
     /// when unknown); used to bind the selection-input record to one session, never audited or shown.
     std::string session_identity;
+    std::string window_title; ///< active SAP window title, only for screen-scoped checks; never audited
 
     bool any() const {
         return !system.empty() || !client.empty() || !user.empty() || !transaction.empty();

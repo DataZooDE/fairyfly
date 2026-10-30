@@ -113,7 +113,7 @@ ToolSpec make_fill_spec() {
     spec.family = command_table::find_by_tool(spec.def.name)->family;
     spec.def.title = "Fill SAP field";
     spec.def.description =
-        "Changes values in the live SAP GUI. Fill a WHOLE SCREEN IN ONE CALL: pass `fields` = [{element, value}, ...] "
+        "Changes values in the live SAP GUI. Fill the requested fields of a WHOLE SCREEN IN ONE CALL: pass `fields` = [{element, value}, ...] "
         "(up to 50{?gui_screen_read:; get the ids from gui_screen_read with only=editable}) and optionally `then_key` enter or f8, pressed once "
         "after every field succeeded. Prefer this to one call per field: it is faster and needs one approval. "
         "Single field: enters text into an input field, clears it, or edits a "
