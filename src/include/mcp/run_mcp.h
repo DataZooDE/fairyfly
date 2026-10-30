@@ -11,6 +11,9 @@ namespace fairyfly::mcp {
 /// ended because of request_restart(), and keep the caller's logging setup.
 struct HttpRunHooks {
     std::function<void(IServerControl&)> on_control;
+    /// Called once the server's loop has returned and before the IServerControl handed to on_control is destroyed:
+    /// whoever kept that reference drops it here (the tray runner, under its lock).
+    std::function<void()> on_control_end;
     bool* restart_requested = nullptr;
     bool keep_logging = false;
     /// `fairyfly link run` (transport "link", D10): instead of a transport loop, run_mcp hands the configured

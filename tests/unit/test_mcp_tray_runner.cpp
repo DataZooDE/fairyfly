@@ -24,20 +24,33 @@ using namespace std::chrono_literals;
 // Simulates one running server: blocks until request_stop/request_restart.
 class FakeServer final : public IServerControl {
 public:
+    /// Set once the server is gone for the runner (after on_control_end; the real one is destroyed then): every call
+    /// after that counts in *touched_after_end, a use after free in the real server.
+    std::atomic<bool> ended{false};
+    std::atomic<int>* touched_after_end = nullptr;
+    void touch() const {
+        if (ended && touched_after_end) ++*touched_after_end;
+    }
     ServerStatus status() const override {
+        touch();
         ServerStatus st;
         st.running = true;
         st.endpoint = "fake";
         st.read_only = read_only.load();
         return st;
     }
-    void set_read_only(bool ro) override { read_only = ro; }
+    void set_read_only(bool ro) override {
+        touch();
+        read_only = ro;
+    }
     void request_stop() override {
+        touch();
         std::lock_guard<std::mutex> g(m);
         stop = true;
         cv.notify_all();
     }
     void request_restart() override {
+        touch();
         std::lock_guard<std::mutex> g(m);
         restart = true;
         cv.notify_all();
@@ -61,6 +74,7 @@ struct FakeRunLog {
     // hold the fake server between "down" and returning, where the runner still holds its control
     std::atomic<bool> hold_exit{false};
     std::atomic<bool> exiting{false};
+    std::atomic<int> touched_after_end{0};   // calls on a server after on_control_end (FakeServer::ended)
 };
 
 template <class Pred>
@@ -99,6 +113,7 @@ struct Harness {
             }
             FakeServer server;
             server.read_only = o.read_only;
+            server.touched_after_end = &lg->touched_after_end;
             lg->current = &server;
             lg->up = true;
             if (hooks && hooks->on_control) hooks->on_control(server);
@@ -108,6 +123,9 @@ struct Harness {
                 if (server.restart && hooks && hooks->restart_requested) *hooks->restart_requested = true;
             }
             lg->up = false;
+            // as run_mcp_http: the hook, then the server object is destroyed (here: marked as ended)
+            if (hooks && hooks->on_control_end) hooks->on_control_end();
+            server.ended = true;
             lg->exiting = true;
             while (lg->hold_exit && !lg->released) std::this_thread::sleep_for(1ms);
             lg->exiting = false;
@@ -225,6 +243,30 @@ TEST_CASE("tray runner: a Restart right after Stop, while the server is still sh
     CHECK(wait_until([&] { return h.log->runs == 2 && h.log->up.load(); }));
     h.runner->request_quit();
     CHECK(h.join() == 0);
+}
+
+TEST_CASE("tray runner: the tray never reaches a server whose run has ended", "[mcp][tray_runner]") {
+    // crew review of #135: run_mcp_http destroyed the server before the runner cleared inner_, so a status poll,
+    // Stop, Restart or mode switch from the tray in that window used a destroyed object
+    Harness h;
+    h.start_loop();
+    REQUIRE(wait_until([&] { return h.log->up.load(); }));
+
+    h.log->hold_exit = true;
+    h.runner->control().request_stop();
+    REQUIRE(wait_until([&] { return h.log->exiting.load(); }));  // the server is gone, run_mcp has not returned yet
+    CHECK_FALSE(h.runner->control().status().running);
+    h.runner->control().set_read_only(false);
+    h.runner->control().request_stop();
+    h.runner->control().request_restart();
+    CHECK(h.log->touched_after_end == 0);
+    h.log->hold_exit = false;
+
+    // the Restart is still not lost
+    CHECK(wait_until([&] { return h.log->runs == 2 && h.log->up.load(); }));
+    h.runner->request_quit();
+    CHECK(h.join() == 0);
+    CHECK(h.log->touched_after_end == 0);
 }
 
 TEST_CASE("tray runner: quit while idle", "[mcp][tray_runner]") {
