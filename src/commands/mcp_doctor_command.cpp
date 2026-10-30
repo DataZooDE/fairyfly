@@ -5,10 +5,12 @@
 #include <wtsapi32.h>
 #include <wchar.h>
 
+#include <chrono>
 #include <iostream>
 
 #include <spdlog/spdlog.h>
 
+#include "include/audit_log.h"
 #include "include/auth/secret_backend.h"
 #include "include/auth/token_store.h"
 #include "include/commands/mcp_extras.h"
@@ -203,6 +205,13 @@ int run_mcp_doctor_command(McpExtras& x, const HandlerProvider& get_handler) {
     std::vector<std::string> owner_identities;
     if (const auto it = effective.find("owner.sap_identities"); it != effective.end())
         if (const auto* list = std::get_if<std::vector<std::string>>(&it->second.value)) owner_identities = *list;
+    // audit.retention_days against a required trail (doctor warns: the retention also prunes it)
+    std::vector<ConfigIssue> reported_above;   // the flag issues are already in input.config.issues
+    const McpConfig flags = flags_layer(*x.mcp_app, reported_above);
+    const audit::AuditFileSettings audit_file = audit_settings(loaded.parsed.config, env_layer(env), flags);
+    input.audit_retention_days = audit_file.retention_days;
+    input.audit_required = audit::resolve_config(env, false, false, std::chrono::system_clock::now(), audit_file).mode ==
+                           audit::Mode::Required;
     RealProbes probes(get_handler, std::move(owner_identities));
     const auto checks = run_mcp_doctor(input, probes);
     if (x.output == "json") {

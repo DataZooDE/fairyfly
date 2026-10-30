@@ -73,56 +73,110 @@ std::optional<std::pair<int, int>> trail_file_month(const std::string& name) {
     return std::make_pair(y, m);
 }
 
-bool remove_if_unused(const fs::path& file) noexcept {
-#ifdef _WIN32
-    // No sharing: the open fails (ERROR_SHARING_VIOLATION) while any other handle is open, an appender's included
-    // (AuditSink opens with FILE_SHARE_DELETE, so a plain DeleteFile would only mark the file for deletion under it).
-    HANDLE h = CreateFileW(file.c_str(), DELETE, 0, nullptr, OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
+bool is_link_or_reparse_point(const fs::path& path) noexcept {
+    try {
         std::error_code ec;
-        return !fs::exists(file, ec) && !ec;
-    }
-    CloseHandle(h);
-    std::error_code ec;
-    return !fs::exists(file, ec) && !ec;
-#else
-    std::error_code ec;
-    fs::remove(file, ec);
-    return !ec && !fs::exists(file, ec);
+        if (fs::is_symlink(fs::symlink_status(path, ec))) return true;
+#ifdef _WIN32
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
 #endif
+        return false;
+    } catch (...) {
+        return true;   // unknown: treat it as a link, i.e. leave it alone
+    }
 }
 
-PruneResult prune_expired(const fs::path& audit_dir, long long retention_days, Clock::time_point now,
-                          const fs::path& active_file, const RemoveFn& remove) {
-    PruneResult out;
-    if (retention_days <= 0) return out;
+bool remove_if_unused(const fs::path& file) noexcept {
     try {
-        const Clock::time_point cutoff = now - std::chrono::hours(24) * retention_days;
-        const std::string current = monthly_file_name(now);
-        const std::string current_migrated = current.substr(0, 7) + kMigratedSuffix;
-        std::error_code ec;
-        fs::directory_iterator it(audit_dir, ec), end;
-        for (; !ec && it != end; it.increment(ec)) {
-            const fs::path path = it->path();
-            const std::string name = text::path_utf8(path.filename());
-            const auto month = trail_file_month(name);
-            if (!month) continue;
-            std::error_code type_ec;
-            if (!it->is_regular_file(type_ec) || type_ec) continue;
-            if (name == current || name == current_migrated) continue;   // the current month, never
-            if (same_file_name(path, active_file)) continue;              // this process appends to it
-            if (month_end(month->first, month->second) > cutoff) continue;
-            const auto written = last_written(path);
-            if (!written || *written > cutoff) continue;                  // appended later (or unknown): keep
-            const bool gone = remove ? remove(path) : remove_if_unused(path);
-            (gone ? out.pruned : out.failed).push_back(name);
+#ifdef _WIN32
+        // No sharing: the open fails (ERROR_SHARING_VIOLATION) while any other handle is open, an appender's included
+        // (AuditSink opens with FILE_SHARE_DELETE, so a plain DeleteFile would only mark the file for deletion under
+        // it). FILE_FLAG_OPEN_REPARSE_POINT: a link that appeared since the scan is opened itself, never its target.
+        HANDLE h = CreateFileW(file.c_str(), DELETE, 0, nullptr, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (h == INVALID_HANDLE_VALUE) {
+            std::error_code ec;
+            return !fs::exists(fs::symlink_status(file, ec)) && !ec;
         }
+        CloseHandle(h);
+        std::error_code ec;
+        return !fs::exists(fs::symlink_status(file, ec)) && !ec;
+#else
+        std::error_code ec;
+        fs::remove(file, ec);   // removes a link itself, never its target
+        return !ec && !fs::exists(fs::symlink_status(file, ec));
+#endif
     } catch (...) {
+        return false;
+    }
+}
+
+namespace {
+
+struct Scan {
+    std::vector<fs::path> expired;                 ///< sorted by name
+    std::optional<Clock::time_point> newest_write; ///< newest last write of any trail file (clock sanity)
+};
+
+Scan scan_trail(const fs::path& audit_dir, long long retention_days, Clock::time_point now, const fs::path& active_file,
+                const LinkFn& is_link) {
+    Scan out;
+    if (retention_days <= 0) return out;
+    const Clock::time_point cutoff = now - std::chrono::hours(24) * retention_days;
+    const std::string current = monthly_file_name(now);
+    const std::string current_migrated = current.substr(0, 7) + kMigratedSuffix;
+    std::error_code ec;
+    fs::directory_iterator it(audit_dir, ec), end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const fs::path path = it->path();
+        const std::string name = text::path_utf8(path.filename());
+        const auto month = trail_file_month(name);
+        if (!month) continue;
+        if (is_link ? is_link(path) : is_link_or_reparse_point(path)) continue;   // never followed, never deleted
+        std::error_code type_ec;
+        if (!fs::is_regular_file(fs::symlink_status(path, type_ec)) || type_ec) continue;
+        const auto written = last_written(path);
+        if (written && (!out.newest_write || *written > *out.newest_write)) out.newest_write = written;
+        if (name == current || name == current_migrated) continue;   // the current month, never
+        if (same_file_name(path, active_file)) continue;              // this process appends to it
+        if (month_end(month->first, month->second) > cutoff) continue;
+        if (!written || *written > cutoff) continue;                  // appended later (or unknown): keep
+        out.expired.push_back(path);
+    }
+    std::sort(out.expired.begin(), out.expired.end());
+    return out;
+}
+
+PruneResult delete_all(const std::vector<fs::path>& files, const RemoveFn& remove) {
+    PruneResult out;
+    for (const auto& path : files) {
+        const bool gone = remove ? remove(path) : remove_if_unused(path);
+        (gone ? out.pruned : out.failed).push_back(text::path_utf8(path.filename()));
     }
     std::sort(out.pruned.begin(), out.pruned.end());
     std::sort(out.failed.begin(), out.failed.end());
     return out;
+}
+
+AuditRecord retention_record(const char* command, long long days) {
+    AuditRecord record;
+    record.ts = Clock::now();
+    record.command = command;
+    record.source = kRetentionSource;
+    record.retention_days = days;
+    return record;
+}
+
+}  // namespace
+
+PruneResult prune_expired(const fs::path& audit_dir, long long retention_days, Clock::time_point now,
+                          const fs::path& active_file, const RemoveFn& remove, const LinkFn& is_link) {
+    try {
+        return delete_all(scan_trail(audit_dir, retention_days, now, active_file, is_link).expired, remove);
+    } catch (...) {
+        return {};
+    }
 }
 
 RetentionOutcome apply_retention(AuditSink& sink, const RetentionRun& run) {
@@ -137,6 +191,9 @@ RetentionOutcome apply_retention(AuditSink& sink, const RetentionRun& run) {
             out.skipped = "retention off";
             return out;
         }
+        if (*run.retention_days < kMinRetentionDays)
+            return skip("audit.retention_days " + std::to_string(*run.retention_days) + " is below the minimum of " +
+                        std::to_string(kMinRetentionDays));
         if (run.data_dir.empty()) return skip("no data directory");
         const fs::path audit_dir = run.data_dir / "audit";
         if (!same_file_name(sink.file().parent_path(), audit_dir))
@@ -160,18 +217,26 @@ RetentionOutcome apply_retention(AuditSink& sink, const RetentionRun& run) {
         } release{lock};
 
         const Clock::time_point now = run.now == Clock::time_point{} ? Clock::now() : run.now;
-        out.result = prune_expired(audit_dir, *run.retention_days, now, sink.file(), run.remove);
-        if (out.result.pruned.empty() && out.result.failed.empty()) return out;
+        const Scan scan = scan_trail(audit_dir, *run.retention_days, now, sink.file(), {});
+        if (scan.expired.empty()) return out;
+        // a clock far ahead of the newest record (a wrong date, a restored VM) would make everything look expired
+        if (scan.newest_write && now - *scan.newest_write > std::chrono::hours(24) * kClockJumpDays)
+            return skip("the clock is more than " + std::to_string(kClockJumpDays) +
+                        " days past the newest audit record; check the system date");
 
+        // write-before-delete: the intent is in the trail before the first file goes, or nothing goes
+        if (sink.enabled()) {
+            AuditRecord intent = retention_record(kPruneIntentCommand, *run.retention_days);
+            for (const auto& path : scan.expired) intent.prune_candidates.push_back(text::path_utf8(path.filename()));
+            if (!sink.append(intent)) return skip("the audit.prune_intent record could not be written");
+        }
+
+        out.result = delete_all(scan.expired, run.remove);
         for (const auto& name : out.result.pruned) spdlog::info("audit retention: pruned {}", name);
         for (const auto& name : out.result.failed)
             spdlog::warn("audit retention: {} is in use and was kept; the next run tries again", name);
         if (!sink.enabled()) return out;
-        AuditRecord record;
-        record.ts = Clock::now();
-        record.command = kPrunedCommand;
-        record.source = kRetentionSource;
-        record.retention_days = *run.retention_days;
+        AuditRecord record = retention_record(kPrunedCommand, *run.retention_days);
         record.pruned = out.result.pruned;
         record.prune_failed = out.result.failed;
         if (!out.result.failed.empty()) {
@@ -179,8 +244,8 @@ RetentionOutcome apply_retention(AuditSink& sink, const RetentionRun& run) {
             record.error_code = "AUDIT_PRUNE_INCOMPLETE";
         }
         out.recorded = sink.append(record);
-        if (!out.recorded && sink.mode() == Mode::Required)
-            spdlog::error("AUDIT_UNAVAILABLE: audit files were pruned but the audit.pruned record could not be written");
+        if (!out.recorded)
+            spdlog::error("audit retention: the audit.pruned record could not be written (the intent record lists the files)");
     } catch (...) {
     }
     return out;

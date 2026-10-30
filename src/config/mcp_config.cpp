@@ -142,7 +142,7 @@ std::vector<KeySpec> build_specs() {
     add(make("audit.file", ValueType::String, std::nullopt, "Audit file (unset = %USERPROFILE%\\.fairyfly\\audit\\YYYY-MM.jsonl)"));
     k = make("audit.retention_days", ValueType::Int, std::nullopt,
              "Delete whole monthly audit files of the data directory once their month ended this many days ago "
-             "(unset or 0 = keep forever; never the current month)");
+             "(unset or 0 = keep forever, else at least 7; never the current month)");
     k.min = 0; k.max = audit::kMaxRetentionDays;
     add(with(k, {"--audit-retention-days"}, nullptr));
 
@@ -160,6 +160,8 @@ bool validate_value(const KeySpec& spec, const Value& value, std::string* error)
         if ((spec.min && n < *spec.min) || (spec.max && n > *spec.max))
             return fail("must be between " + std::to_string(spec.min.value_or(0)) + " and " +
                         std::to_string(spec.max.value_or(0)));
+        if (spec.key == "audit.retention_days" && n > 0 && n < audit::kMinRetentionDays)
+            return fail("must be 0 (keep forever) or at least " + std::to_string(audit::kMinRetentionDays) + " days");
     } else if (spec.type == ValueType::String) {
         const auto& text = std::get<std::string>(value);
         if (!spec.allowed.empty() && std::find(spec.allowed.begin(), spec.allowed.end(), text) == spec.allowed.end()) {

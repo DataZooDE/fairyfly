@@ -332,6 +332,26 @@ void doctor_setup(std::vector<DoctorCheck>& out, const DoctorInput& in, DoctorPr
 
 }  // namespace
 
+namespace {
+/// audit_retention: the local audit retention; a warning when it prunes a required trail (there is no managed layer:
+/// any user-level setting also applies to a trail the organisation requires).
+void doctor_audit_retention(std::vector<DoctorCheck>& out, const DoctorInput& in) {
+    const long long days = in.audit_retention_days.value_or(0);
+    if (days <= 0) {
+        out.push_back(check("audit_retention", CheckStatus::Pass, "the local audit trail is kept forever (audit.retention_days unset)"));
+    } else if (in.audit_required) {
+        out.push_back(check("audit_retention", CheckStatus::Warn,
+                            "the audit trail is required, and audit.retention_days deletes its monthly files after " +
+                                std::to_string(days) + " days",
+                            "Make sure the trail is collected centrally before it is pruned, or remove audit.retention_days "
+                            "(mcp.yaml / FAIRYFLY_MCP_AUDIT_RETENTION_DAYS) to keep it."));
+    } else {
+        out.push_back(check("audit_retention", CheckStatus::Pass,
+                            "monthly audit files are deleted " + std::to_string(days) + " days after their month ended"));
+    }
+}
+}  // namespace
+
 std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& probes) {
     std::vector<DoctorCheck> out;
     const bool http = in.transport == "http";
@@ -344,6 +364,7 @@ std::vector<DoctorCheck> run_mcp_doctor(const DoctorInput& in, DoctorProbes& pro
     doctor_setup(out, in, probes, http);
     doctor_autostart(out, in, probes, http);
     doctor_tray(out, in, probes, http);
+    doctor_audit_retention(out, in);
     return out;
 }
 

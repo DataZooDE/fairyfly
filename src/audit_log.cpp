@@ -134,6 +134,7 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     if (r.retention_days) j["retention_days"] = *r.retention_days;
     if (!r.pruned.empty()) j["pruned"] = r.pruned;
     if (!r.prune_failed.empty()) j["prune_failed"] = r.prune_failed;
+    if (!r.prune_candidates.empty()) j["prune_candidates"] = r.prune_candidates;
     return j;
 }
 

@@ -248,7 +248,7 @@ Every command, and every line of a `batch`, adds one JSON record to `%USERPROFIL
 
 By default fairyfly never deletes its audit trail. `audit.retention_days: N` in `mcp.yaml` (or
 `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS=N`, or `fairyfly mcp --audit-retention-days N`; flag > environment > `mcp.yaml`,
-`0` or unset = keep forever, at most 36500) deletes whole monthly files of
+`0` or unset = keep forever, otherwise 7 to 36500: smaller values are refused so a typo cannot empty the trail) deletes whole monthly files of
 `%USERPROFILE%\.fairyfly\audit\` once their newest possible record is older than N days:
 
 - a file `YYYY-MM.jsonl` (and the migration's `YYYY-MM.migrated.jsonl`) goes when its UTC month ended more than N days
@@ -259,19 +259,26 @@ By default fairyfly never deletes its audit trail. `audit.retention_days: N` in 
   custom audit file (`FAIRYFLY_AUDIT_FILE`, `audit.file`: rotate that one yourself).
 - never while the data directory move is pending, failed or running (its lock and staging folder,
   [DATA_DIR.md](DATA_DIR.md)); the next run tries again.
+- never a symbolic link, junction or other reparse point (never followed, so its target is never deleted).
+- never when the clock is more than 40 days past the newest trail file (a wrong system date or a restored VM would make
+  everything look expired); the run logs why and writes no record.
 - never a file another process has open: on Windows the delete needs exclusive access, so a file an older fairyfly,
   an editor or a log shipper holds open is kept, logged and retried at the next run.
 - who prunes: the long-running processes, at their start and then once a day: `fairyfly mcp` (stdio, `--http`,
   `--tray`) and `fairyfly link run` (also `--tray`). The link reads only `audit.retention_days` from `mcp.yaml`
   (or `FAIRYFLY_MCP_CONFIG`) and `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS`; when the file or the value is invalid it keeps
   everything and logs why. One-shot CLI commands never delete anything.
-- every run that deleted (or failed to delete) a file adds one record to the trail itself: `cmd: "audit.pruned"`,
+- write before delete: before the first file goes, an `audit.prune_intent` record lists `prune_candidates`; when it
+  cannot be written, nothing is deleted.
+- every run that deleted (or failed to delete) a file then adds one record to the trail itself: `cmd: "audit.pruned"`,
   `audit_source: "retention"`, `retention_days`, `pruned` (the file names, never their content) and, when a delete
   was refused, `prune_failed` with `status: "error"`, `error_code: "AUDIT_PRUNE_INCOMPLETE"`. With the audit trail
   switched off the retention still applies and the file names go to the log only.
 - a required audit trail (`--audit-required`, `FAIRYFLY_AUDIT=required`, `audit.required: true`) honours an explicit
   retention too (the decision belongs to the customer's IT), but prunes only while the trail can be written, so every
-  deletion is recorded.
+  deletion is recorded. **There is no managed (machine/policy) configuration layer**: `mcp.yaml` and the environment
+  are the user's own, so a retention the user sets also prunes a trail the organisation requires. `fairyfly mcp
+  doctor` warns (`audit_retention`) when both are set; collect the trail centrally if it must outlive the desktop.
 - invalid values are refused like any other key: `CONFIG_INVALID_VALUE` in `mcp.yaml` (the server does not start),
   `CONFIG_FLAG_INVALID` for the flag, `CONFIG_ENV_INVALID` (a warning, the variable is ignored) for the environment.
 
