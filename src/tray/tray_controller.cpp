@@ -344,6 +344,12 @@ bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, c
                 const std::string& tray_name) {
     if (guard.acquire()) return true;
     const HeldTray held = claim.instances ? decide_held_tray(claim.instances->running(), own_exe, claim.exists, tray_name) : HeldTray{};
+    // COM started this for a notification (TrayClaim::com_start): nobody asked for a window, so neither the running
+    // tray's menu nor a message box about another installation's tray; a removed installation's tray is still taken over
+    if (claim.com_start && held.action != HeldTrayAction::TakeOver) {
+        spdlog::info("tray: started by COM for a notification while a {} runs; leaving it alone", tray_name);
+        return false;
+    }
     if (held.action == HeldTrayAction::Explain) {
         spdlog::warn("tray: {}", held.message);
         spdlog::default_logger()->flush();
@@ -367,6 +373,7 @@ bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, c
             }
             if (won_by_ours()) {
                 spdlog::info("tray: another {} of this installation took over first", tray_name);
+                if (claim.com_start) return false;
                 if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
                 return false;
             }
@@ -381,10 +388,6 @@ bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, c
         spdlog::warn("tray: {}", text);
         spdlog::default_logger()->flush();
         host.message_box(title, text);
-        return false;
-    }
-    if (claim.com_start) {
-        spdlog::info("tray: started by COM for a notification while the {} runs; leaving it alone", tray_name);
         return false;
     }
     if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
