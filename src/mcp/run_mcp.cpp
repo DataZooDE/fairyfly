@@ -1,4 +1,5 @@
 #include "include/mcp/run_mcp.h"
+#include "include/audit_retention.h"
 #include "include/config/environment.h"
 
 #include <algorithm>
@@ -337,6 +338,10 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     if (sink)
         sink->reconfigure(audit::resolve_config(config::process_env(), global.no_audit, global.audit_required,
                                                 std::chrono::system_clock::now(), options.audit_file));
+
+    // audit.retention_days: prune expired monthly audit files now and once a day while this server runs
+    std::unique_ptr<audit::RetentionScheduler> retention;
+    if (sink) retention = audit::start_retention(*sink, options.audit_file.retention_days);
 
     const bool http = options.http || options.transport == "http";
     const bool link = !http && options.transport == "link";  // fairyfly link run: calls from the cloud gateway

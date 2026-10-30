@@ -78,6 +78,9 @@ Examples:
                                       for (const auto& family : command_table::families()) out += (out.empty() ? "" : ", ") + family;
                                       return out;
                                   }(), "tools.families"));
+    cmd_->add_option("--audit-retention-days", audit_retention_days_,
+                     "Delete whole monthly audit files of the data directory once their month ended this many days ago "
+                     "(0 = keep forever; never the current month; also audit.retention_days)");
 
     tools_cmd_ = add_leaf(app, {"mcp", "tools"});
     tools_cmd_->footer(R"HELP(Usage notes:

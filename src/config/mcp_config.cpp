@@ -17,6 +17,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "include/audit_retention.h"
 #include "include/command_table.h"
 
 #ifdef _WIN32
@@ -139,6 +140,11 @@ std::vector<KeySpec> build_specs() {
     add(make("audit.enabled", ValueType::Bool, Value{true}, "Write the audit trail (--no-audit / FAIRYFLY_AUDIT override)"));
     add(make("audit.required", ValueType::Bool, Value{false}, "Fail calls when the audit trail cannot be written"));
     add(make("audit.file", ValueType::String, std::nullopt, "Audit file (unset = %USERPROFILE%\\.fairyfly\\audit\\YYYY-MM.jsonl)"));
+    k = make("audit.retention_days", ValueType::Int, std::nullopt,
+             "Delete whole monthly audit files of the data directory once their month ended this many days ago "
+             "(unset or 0 = keep forever; never the current month)");
+    k.min = 0; k.max = audit::kMaxRetentionDays;
+    add(with(k, {"--audit-retention-days"}, nullptr));
 
     return s;
 }
@@ -545,6 +551,7 @@ audit::AuditFileSettings audit_settings(const McpConfig& c) {
     s.enabled = c.get_bool("audit.enabled");
     s.required = c.get_bool("audit.required");
     s.file = c.get_string("audit.file");
+    s.retention_days = c.get_int("audit.retention_days");
     return s;
 }
 
@@ -554,6 +561,36 @@ audit::AuditFileSettings audit_settings(const McpConfig& yaml, const McpConfig& 
     for (const McpConfig* layer : {&yaml, &env, &flags})
         if (layer->get_bool("audit.required") == true) s.required = true;
     return s;
+}
+
+std::optional<long long> configured_audit_retention(const EnvLookup& env, std::vector<ConfigIssue>* issues) {
+    auto add = [&](ConfigIssue issue) {
+        if (issues) issues->push_back(std::move(issue));
+    };
+    McpConfig yaml;
+    const ConfigPath path = resolve_config_path({}, env);
+    std::error_code ec;
+    if (!path.path.empty() && std::filesystem::is_regular_file(path.path, ec)) {
+        const auto text = read_text_file(path.path);
+        if (!text) {
+            add({Severity::Error, "CONFIG_READ_FAILED", "cannot read " + text::path_utf8(path.path), 0, "audit.retention_days"});
+            return std::nullopt;
+        }
+        ParseResult parsed = parse_yaml(*text);
+        if (!parsed.ok()) {
+            for (auto& issue : parsed.issues) add(std::move(issue));
+            return std::nullopt;   // a broken file never deletes anything
+        }
+        yaml = std::move(parsed.config);
+    }
+    std::vector<ConfigIssue> env_issues;
+    const McpConfig envs = env_layer(env, &env_issues);
+    for (auto& issue : env_issues) {
+        if (issue.key != "audit.retention_days") continue;
+        add(std::move(issue));
+        return std::nullopt;       // nor does a broken environment value
+    }
+    return audit_settings(yaml, envs, McpConfig{}).retention_days;
 }
 
 void apply_config(const McpConfig& c, mcp::ServeOptions& o) {

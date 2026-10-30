@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Configurable local audit retention (audit.retention_days)
+
+- New key `audit.retention_days` in `mcp.yaml`, with `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` and
+  `fairyfly mcp --audit-retention-days` (flag > environment > `mcp.yaml`). Unset or `0` keeps the audit trail
+  forever, as before; values outside 0..36500 are refused (`CONFIG_INVALID_VALUE`, `CONFIG_FLAG_INVALID`,
+  `CONFIG_ENV_INVALID`).
+- With N set, `fairyfly mcp` (every transport and the tray) and `fairyfly link run` delete whole monthly files
+  `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl` (and `YYYY-MM.migrated.jsonl`) whose month ended and that were last
+  written more than N days ago, at their start and once a day. Never the current month, the file being appended to,
+  a custom audit file, a file another process has open (retried the next day), or during a pending data directory
+  move. A required audit trail honours the retention too, but only while it can record it.
+- Every deletion is recorded in the trail itself: `cmd: "audit.pruned"`, `audit_source: "retention"`, the file names
+  (never their content), `retention_days`, and `prune_failed` / `AUDIT_PRUNE_INCOMPLETE` for refused deletes.
+  Recommendation for IT and details: [docs/CLI.md](docs/CLI.md#audit-retention).
+
 ### Data directory moved to %USERPROFILE%\.fairyfly (Microsoft Store on Windows 10)
 
 - fairyfly keeps its per-user data in `%USERPROFILE%\.fairyfly` instead of `%LOCALAPPDATA%\fairyfly`: the audit trail

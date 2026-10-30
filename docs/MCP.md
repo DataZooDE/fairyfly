@@ -168,6 +168,7 @@ All tools take an optional `connection` (saved connection id) except the ones th
 | `FAIRYFLY_READ_ONLY=1` | Hard cap: forces read-only and ignores `--allow-write` |
 | `FAIRYFLY_AUDIT=0\|off\|required` | Disable the audit trail, or fail calls that cannot be recorded |
 | `FAIRYFLY_AUDIT_FILE` | Audit file path (default `%USERPROFILE%\.fairyfly\audit\YYYY-MM.jsonl`) |
+| `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` | Local audit retention in days (`audit.retention_days`, `--audit-retention-days`; unset or 0 = keep forever; [CLI.md](CLI.md#audit-retention)) |
 | `FFLYLOG_LEVEL` | Log level on stderr (`error` default; `info`, `debug`) |
 
 ## Safety model

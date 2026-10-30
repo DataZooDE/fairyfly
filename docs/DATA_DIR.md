@@ -11,7 +11,7 @@ Uninstalling fairyfly never deletes it.
 
 | What | Where in it | Own override |
 |---|---|---|
-| Audit trail | `audit\YYYY-MM.jsonl` | `FAIRYFLY_AUDIT_FILE`, `audit.file` in `mcp.yaml` |
+| Audit trail | `audit\YYYY-MM.jsonl` (kept forever unless `audit.retention_days` is set, [CLI.md](CLI.md#audit-retention)) | `FAIRYFLY_AUDIT_FILE`, `audit.file` in `mcp.yaml` |
 | Logs of the trays | `logs\mcp.log`, `logs\link.log` | |
 | MCP server configuration | `mcp.yaml` | `-c`, `FAIRYFLY_MCP_CONFIG` |
 | Cloud link pairing | `link\state.json` (device key DPAPI-protected), `state.json.status.json`, `state.json.paused` | `link ... --state` |
@@ -102,6 +102,16 @@ unpaired; it logs that. With a required audit trail (`--audit-required`, `FAIRYF
 `%LOCALAPPDATA%\fairyfly`. Records it writes after the old folder got its note are not moved; update or remove it.
 An MSI upgrade closes this installation's trays before it replaces the files (#127,
 `fairyfly-tray.exe --close`), so this concerns a second installation only.
+
+## Audit retention and the move
+
+With `audit.retention_days` set ([CLI.md](CLI.md#audit-retention)), `fairyfly mcp` and `fairyfly link run` delete
+expired monthly files of `audit\` at their start and once a day. They do it under the same per-user lock as the move
+and not at all while a move is pending, failed in this process, or left its `.migrating` staging folder behind: a
+pending old folder would bring the deleted months back with its next merge. Only `audit\YYYY-MM.jsonl` and
+`audit\YYYY-MM.migrated.jsonl` are ever deleted; the old folders are never touched. The screenshot audit trail of the
+cloud link is not stored here: the gateway keeps it, with the retention your administrator sets there
+([LINK.md](LINK.md)).
 
 ## Uninstall
 

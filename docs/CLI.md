@@ -242,6 +242,46 @@ Every command, and every line of a `batch`, adds one JSON record to `%USERPROFIL
   command ran: `AUDIT_UNAVAILABLE` does not mean the action did not happen, so do not retry it blindly.
 - A write failure prints one warning and never breaks a command, unless audit is required.
 - The file is append-only by convention, not tamper-proof: any process of the same Windows user can edit it.
+- Retention: kept forever unless `audit.retention_days` is set (see below).
+
+### Audit retention
+
+By default fairyfly never deletes its audit trail. `audit.retention_days: N` in `mcp.yaml` (or
+`FAIRYFLY_MCP_AUDIT_RETENTION_DAYS=N`, or `fairyfly mcp --audit-retention-days N`; flag > environment > `mcp.yaml`,
+`0` or unset = keep forever, at most 36500) deletes whole monthly files of
+`%USERPROFILE%\.fairyfly\audit\` once their newest possible record is older than N days:
+
+- a file `YYYY-MM.jsonl` (and the migration's `YYYY-MM.migrated.jsonl`) goes when its UTC month ended more than N days
+  ago **and** it was last written more than N days ago (a long-running process started in that month may still have
+  appended to it). Records are never removed from a file, a file is deleted whole or not at all, so a record can be
+  kept up to a month longer than N days.
+- never the current month, never the file the process itself appends to, never other files in the folder, never a
+  custom audit file (`FAIRYFLY_AUDIT_FILE`, `audit.file`: rotate that one yourself).
+- never while the data directory move is pending, failed or running (its lock and staging folder,
+  [DATA_DIR.md](DATA_DIR.md)); the next run tries again.
+- never a file another process has open: on Windows the delete needs exclusive access, so a file an older fairyfly,
+  an editor or a log shipper holds open is kept, logged and retried at the next run.
+- who prunes: the long-running processes, at their start and then once a day: `fairyfly mcp` (stdio, `--http`,
+  `--tray`) and `fairyfly link run` (also `--tray`). The link reads only `audit.retention_days` from `mcp.yaml`
+  (or `FAIRYFLY_MCP_CONFIG`) and `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS`; when the file or the value is invalid it keeps
+  everything and logs why. One-shot CLI commands never delete anything.
+- every run that deleted (or failed to delete) a file adds one record to the trail itself: `cmd: "audit.pruned"`,
+  `audit_source: "retention"`, `retention_days`, `pruned` (the file names, never their content) and, when a delete
+  was refused, `prune_failed` with `status: "error"`, `error_code: "AUDIT_PRUNE_INCOMPLETE"`. With the audit trail
+  switched off the retention still applies and the file names go to the log only.
+- a required audit trail (`--audit-required`, `FAIRYFLY_AUDIT=required`, `audit.required: true`) honours an explicit
+  retention too (the decision belongs to the customer's IT), but prunes only while the trail can be written, so every
+  deletion is recorded.
+- invalid values are refused like any other key: `CONFIG_INVALID_VALUE` in `mcp.yaml` (the server does not start),
+  `CONFIG_FLAG_INVALID` for the flag, `CONFIG_ENV_INVALID` (a warning, the variable is ignored) for the environment.
+
+Recommendation for IT: leave it unset when the desktop trail is collected centrally and a central system keeps it
+(the copy there is the evidence, the local one is only a buffer: then a short local retention such as `90` is fine
+once forwarding is verified). Without central collection, set it to the retention your audit or works-council
+agreement requires for activity logs (for example `400` for "one year plus the annual review"); it is personal data
+of the SAP user (who did what, when), so "forever" needs a reason. Set it per machine with Group Policy or Intune
+through `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` (user environment) or a managed `mcp.yaml`, and check it with
+`fairyfly mcp config show`.
 
 ~~~powershell
 Get-Content $env:LOCALAPPDATA\fairyfly\audit\2026-10.jsonl | ConvertFrom-Json |
@@ -260,6 +300,7 @@ them the same way.
 |---|---|
 | `FAIRYFLY_READ_ONLY=1` | Read-only guard for every command; hard cap for the MCP server |
 | `FAIRYFLY_AUDIT`, `FAIRYFLY_AUDIT_FILE` | Audit trail on/off/required and its path |
+| `FAIRYFLY_MCP_AUDIT_RETENTION_DAYS` | Delete monthly audit files older than this many days (`mcp`, `link run`; [Audit retention](#audit-retention)) |
 | `FAIRYFLY_SCREEN_READER=auto\|bulk\|legacy` | How `screen read` gathers the screen |
 | `FAIRYFLY_PROBE_ALL=1` | Exhaustive control probing (as `--probe-all`) |
 | `FAIRYFLY_MCP_*` | MCP server configuration ([MCP_TRAY.md](MCP_TRAY.md#yaml-config)) |

@@ -89,7 +89,9 @@ passwords or tokens, the Windows user name or the host name. The file is append-
 tamper-proof: any process of the same Windows user can change it. Forward it to a central log system if you need
 tamper evidence. The audit trail is on by default but can be switched off (`--no-audit`, `FAIRYFLY_AUDIT=0`). The
 record is written after the action: with `FAIRYFLY_AUDIT=required`, a call whose record cannot be written returns
-`AUDIT_UNAVAILABLE`, but the action has already run, so it must not be retried automatically.
+`AUDIT_UNAVAILABLE`, but the action has already run, so it must not be retried automatically. It is kept forever
+unless `audit.retention_days` deletes whole expired months (each deletion is itself recorded as `audit.pruned`;
+[CLI.md](CLI.md#audit-retention)).
 
 **Logs.** Logs go to stderr (console) or `%USERPROFILE%\.fairyfly\logs\mcp.log` (tray). They contain operational
 messages, never tokens or passwords.
