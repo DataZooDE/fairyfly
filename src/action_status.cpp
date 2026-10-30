@@ -88,6 +88,11 @@ std::string f4_dialog_path(int active_window_index) {
 
 namespace {
 
+bool generation_notice(const ActionStatus& status) {
+    return status.type == "S" && utils::trim(status.message_id) == "E4" &&
+           utils::trim(status.message_number) == "035";
+}
+
 bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStatus& out) {
     try {
         auto bar = session->find_element_by_id(id);
@@ -103,6 +108,14 @@ bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStat
             try { out.message_id = bar->get_property_string(L"MessageId"); } catch (const std::exception&) {}
             try { out.message_number = bar->get_property_string(L"MessageNumber"); } catch (const std::exception&) {}
         }
+        // This notice can survive successful generation/navigation. Probe only this
+        // exact message; ordinary actions incur no extra SAP property reads.
+        if (generation_notice(out)) {
+            try {
+                out.generated_selection_screen = is_se16_generated_selection_screen(
+                    session->get_transaction_code(), session->get_program(), session->get_screen_number());
+            } catch (const std::exception&) {} // unavailable evidence keeps the existing refusal
+        }
         return true;
     } catch (const std::exception&) {
         // Some screens and modal dialogs do not expose a status bar.
@@ -111,6 +124,13 @@ bool read_bar(const ComGuiSessionPtr& session, const std::string& id, ActionStat
 }
 
 } // namespace
+
+bool is_se16_generated_selection_screen(const std::string& transaction,
+                                        const std::string& program, const std::string& screen_number) {
+    const std::string prefix = "/1BCDWB/DB";
+    return transaction == "SE16" && program.rfind(prefix, 0) == 0 && program.size() > prefix.size() &&
+           screen_number == "1000";
+}
 
 ActionStatus read_action_status(const ComGuiSessionPtr& session) {
     // Prefer the active window's status bar (dialogs can have their own), then
@@ -157,6 +177,8 @@ void attach_status_message(json& data, const ActionStatus& before, const ActionS
     if (after.text.empty()) return;
     if (!data.is_object()) data = json::object();
     data["status_message"] = {{"type", after.type}, {"text", after.text}};
+    if (generation_notice(after) && after.generated_selection_screen)
+        data["status_message"]["verification"] = "se16_generated_selection_screen";
     // A repeated message may be left over from an earlier action: only a new warning is flagged.
     if (after.type == "W" && (after.text != before.text || after.type != before.type)) data["warning"] = true;
 }
@@ -268,6 +290,8 @@ std::optional<Result> classify_action_status(const ActionStatus& before,
                                              bool submitting_action) {
     if (after.text.empty())
         return std::nullopt;
+
+    if (generation_notice(after) && after.generated_selection_screen) return std::nullopt;
 
     const bool repeated = after.text == before.text && after.type == before.type;
     std::string lower = after.text;

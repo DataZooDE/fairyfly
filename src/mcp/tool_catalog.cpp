@@ -375,7 +375,7 @@ std::vector<ToolSpec> read_tool_specs() {
         "element IDs in Markdown; pass compact=false when you need element IDs to click or fill (or use "
         "gui_screen_find). To enter data, read with only=editable: it lists every changeable field with its id, empty ones "
         "included{?gui_element_fill:, then fill the requested fields in ONE gui_element_fill call with `fields` (and `then_key` enter or f8 when required)}. "
-        "For form-only work use no_tabs=true and skip_trees=true unless the task needs other tabs or trees. "
+        "Prefer the current tab (no_tabs=true) or one named tab (tab) for known tasks; expand all tabs only when needed. For form-only work also use skip_trees=true unless the task needs trees. "
         "Use projection=refs with only=editable for compact screen-scoped field references. Reuse a recent observation while its screen remains valid. "
         "Owner-mode HTTP results include a screen_guard in structuredContent. Pass it as "
         "expected_screen_guard on a later session action to reject navigation after the session or SAP dynpro changes. "
@@ -387,7 +387,7 @@ std::vector<ToolSpec> read_tool_specs() {
                           "Elements an `only` value drops (grids with `fields`) are listed under `suppressed`.")},
                      {"text_contains", str_min("Only elements whose text/tooltip contains this (case-insensitive). "
                                               "Grids/table controls keep only the rows with a matching cell "
-                                              "(`rows_matched` of `rows_total`).")},
+                                              "within the fetched page only (`rows_matched` of `rows_total`); this is not a whole-table search. `returned` counts matching rows, `rows_fetched` counts rows examined. Follow `next_offset` to search subsequent pages.")},
                      {"id_contains", str_min("Only elements whose ID contains this.")},
                      {"type", str_min("Only elements of this exact SAP type, e.g. GuiCTextField.")},
                      {"first", boolean("Return only the first matching element.")},
