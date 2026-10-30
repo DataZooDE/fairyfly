@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -277,6 +278,8 @@ TEST_CASE("audit retention: Windows refuses to delete a trail file another proce
     CHECK(WriteFile(h, "x\n", 2, &written, nullptr));   // the appender is not disturbed
     CloseHandle(h);
     CHECK(fs::exists(audit / "2026-01.jsonl"));
+    // that write made it recent (kept by the last-write rule); as if it had been the month's last record
+    set_mtime(audit / "2026-01.jsonl", month_last_second(2026, 1));
     const PruneResult later = prune_expired(audit, 30, kNow, audit / "2026-10.jsonl");
     CHECK(later.pruned == std::vector<std::string>{"2026-01.jsonl"});
     CHECK_FALSE(fs::exists(audit / "2026-01.jsonl"));
