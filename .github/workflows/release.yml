@@ -489,8 +489,9 @@ jobs:
       run: |
         cd dist
         # exactly the unsigned Store package of build-msix: one .msix, named after its version, nothing else of it
-        ls -1 ./*.msix
-        [ "$(ls -1 ./*.msix | wc -l)" = "1" ] && [ -f "$MSIX" ] || { echo "expected exactly $MSIX in the release files"; exit 1; }
+        shopt -s nullglob; packages=( ./*.msix ); shopt -u nullglob
+        echo "MSIX packages: ${packages[*]}"
+        [ "${#packages[@]}" = "1" ] && [ -f "$MSIX" ] || { echo "expected exactly $MSIX in the release files"; exit 1; }
         sha256sum fairyfly.exe fairyfly.msi "$MSIX" DataZoo.fairyfly*.yaml > SHA256SUMS
         cat SHA256SUMS
         if [ "$SIGNED" = "true" ]; then SIGNNOTE="fairyfly.exe and fairyfly.msi are Authenticode-signed by DataZoo GmbH (Microsoft Artifact Signing)."; else SIGNNOTE="Not code-signed."; fi
