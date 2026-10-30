@@ -200,9 +200,29 @@ TEST_CASE("tray runner: restart while stopped starts the server", "[mcp][tray_ru
     h.start_loop();
     REQUIRE(wait_until([&] { return h.runner->control().status().running; }));
     h.runner->control().request_stop();
-    REQUIRE(wait_until([&] { return !h.log->up.load(); }));
+    // stopped = run_mcp has returned (the runner holds no server). `up` alone turns false while the server is still
+    // shutting down; a Restart then is the case below (it failed here 1 in many CI runs, PR #131)
+    REQUIRE(wait_until([&] { return !h.runner->control().status().running; }));
+    REQUIRE(h.log->current.load() == nullptr);
     h.runner->control().request_restart();
     REQUIRE(wait_until([&] { return h.log->runs == 2 && h.log->up.load(); }));
+    h.runner->request_quit();
+    CHECK(h.join() == 0);
+}
+
+TEST_CASE("tray runner: a Restart right after Stop, while the server is still shutting down, is not lost",
+          "[mcp][tray_runner]") {
+    Harness h;
+    h.start_loop();
+    REQUIRE(wait_until([&] { return h.log->up.load(); }));
+
+    h.log->hold_exit = true;
+    h.runner->control().request_stop();
+    REQUIRE(wait_until([&] { return h.log->exiting.load(); }));  // down, but run_mcp has not returned yet
+    h.runner->control().request_restart();  // reaches a server that no longer listens for it
+    h.log->hold_exit = false;
+
+    CHECK(wait_until([&] { return h.log->runs == 2 && h.log->up.load(); }));
     h.runner->request_quit();
     CHECK(h.join() == 0);
 }
