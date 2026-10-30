@@ -17,6 +17,7 @@
 #endif
 
 #include "include/auth/authorize.h"
+#include "include/auth/crypto.h"
 #include "include/command_table.h"
 #include "include/commands/cli_app.h"
 #include "include/commands/command_registry.h"
@@ -188,6 +189,13 @@ std::string text_of(const ToolResult& r) {
     return {};
 }
 
+bool screen_condition_matches(const json& condition, const json& observation) {
+    if (!observation.is_object()) return false;
+    for (const char* key : {"title", "transaction"})
+        if (condition.contains(key) && (!observation.contains(key) || observation[key] != condition[key])) return false;
+    return true;
+}
+
 std::string scale_text(double v) {
     if (std::floor(v) == v) return std::to_string(static_cast<long long>(v));
     std::string s = std::to_string(v);
@@ -299,7 +307,7 @@ Result CommandDispatcher::invoke(const std::vector<std::string>& argv) {
 
 ToolResult CommandDispatcher::audited(const std::string& tool,
                                       const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
-                                      const CallContext& ctx, std::string* code_out) {
+                                      const CallContext& ctx, std::string* code_out, McpCallRecord* record_out) {
     const auto started = std::chrono::steady_clock::now();
     McpCallRecord record;
     record.tool = tool;
@@ -354,13 +362,14 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
         }
     }
     if (code_out) *code_out = result.is_error ? code : std::string();
+    if (record_out) *record_out = record;
     return result;
 }
 
 ToolResult CommandDispatcher::run_single(const std::string& name, const json& args, const CallContext& ctx,
-                                         std::string* code_out) {
+                                         std::string* code_out, McpCallRecord* record_out) {
     return audited(name, [&](McpCallRecord& record, std::string& code) { return execute_call(name, args, record, code, ctx); },
-                   ctx, code_out);
+                   ctx, code_out, record_out);
 }
 
 std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::admission_refusal(
@@ -1306,6 +1315,7 @@ constexpr const char* kReattachAgainHint =
 /// the re-attach outcome, the policy keys, the owner and login facts, and what must stay held for the whole call (the
 /// probe gate, the login lane).
 struct CommandDispatcher::CallState {
+    std::chrono::steady_clock::time_point started;
     const ToolSpec* spec = nullptr;
     json args;
     bool accepts_connection = false;
@@ -1597,7 +1607,68 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
     if (name == "gui_element_fill" && result.status == Result::Status::Success && !state.args.contains("fields") &&
         result.data.is_object())
         hint_single_fills(result);
+    const bool projected_refs = name == "gui_screen_read" && state.args.is_object() &&
+        state.args.value("projection", std::string("full")) == "refs";
+    if (projected_refs && result.status == Result::Status::Success) {
+        if (state.args.value("only", std::string()) != "editable" || !result.data.is_object() ||
+            !result.data.contains("elements") || !result.data["elements"].is_array()) {
+            code = "INVALID_ARGUMENT";
+            return error_result(code, "projection=refs requires only=editable and an editable screen result");
+        }
+        std::optional<audit::SapFacts> facts;
+        if (facts_provider_) {
+            try { facts = facts_provider_(record.connection); } catch (...) {}
+        }
+        const std::string guard = facts ? screen_guard_for(*facts) : std::string();
+        const std::string read_title = result.data.value("title", std::string());
+        if (!facts || guard.empty() || facts->session_identity.empty() || read_title.empty() ||
+            facts->window_title != read_title ||
+            (state.owner_pre_facts && screen_guard_for(*state.owner_pre_facts) != guard)) {
+            code = "SCREEN_IDENTITY_UNAVAILABLE";
+            return error_result(code, "screen-scoped references require a verified SAP session and dynpro");
+        }
+        json fields = json::array();
+        for (const auto& element : result.data["elements"]) {
+            if (!element.is_object() || !element.value("changeable", false) ||
+                !element.contains("id") || !element["id"].is_string()) continue;
+            const std::string id = element["id"].get<std::string>();
+            if (id.empty()) continue;
+            std::string ref;
+            {
+                std::lock_guard lock(screen_refs_->mutex);
+                if (screen_refs_->refs.size() >= 500) screen_refs_->refs.clear();
+                do {
+                    ref = "@e" + auth::random_hex(
+                        [](unsigned char* bytes, std::size_t count) { auth::random_bytes(bytes, count); }, 6);
+                } while (screen_refs_->refs.contains(ref));
+                screen_refs_->refs[ref] = ScreenRef{id, principal_key(principal), guard,
+                                              facts->session_identity, read_title, facts->connection_id};
+            }
+            json field = {{"ref", ref}};
+            for (const char* key : {"name", "label", "type"})
+                if (element.contains(key) && element[key].is_string()) field[key] = element[key];
+            std::string value = element.contains("text") && element["text"].is_string()
+                ? element["text"].get<std::string>() : std::string();
+            if (value.size() > 200) {
+                std::size_t cut = 200;
+                while (cut > 0 && (static_cast<unsigned char>(value[cut]) & 0xC0) == 0x80) --cut;
+                value.resize(cut);
+            }
+            field["value"] = value;
+            fields.push_back(std::move(field));
+        }
+        json projected = {{"title", result.data.value("title", std::string())},
+                          {"transaction", result.data.value("transaction", std::string())},
+                          {"field_count", fields.size()}, {"fields", std::move(fields)}};
+        if (result.data.contains("status_bar")) projected["status_bar"] = result.data["status_bar"];
+        if (projected.dump().size() > policy_.max_result_chars) {
+            code = "SCREEN_PROJECTION_TOO_LARGE";
+            return error_result(code, "the editable screen projection exceeds the result limit; narrow the read");
+        }
+        result.data = std::move(projected);
+    }
     ToolSpec shaped_spec = *state.spec;
+    if (projected_refs) shaped_spec.output = ToolOutput::Json;
     if (state.spec->output == ToolOutput::Markdown) {
         std::string format = policy_.default_format;
         if (state.args.contains("format") && state.args["format"].is_string()) format = state.args["format"].get<std::string>();
@@ -1607,7 +1678,11 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
     const std::string header =
         command_table::tool_has(name, command_table::Trait::ScreenData) ? make_untrusted_header(result, connection) : std::string();
     const std::set<std::string> visible_now = visible_tool_names(&principal);
+    const auto format_started = std::chrono::steady_clock::now();
     ToolResult shaped = shape_result(result, shaped_spec, policy_, header, &visible_now);
+    record.format_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - format_started).count();
+    if (projected_refs && result.status == Result::Status::Success) shaped.structured = result.data;
     if (!state.reattach_note.empty()) shaped.content.push_back(json{{"type", "text"}, {"text", state.reattach_note}});
     if (owner_mode(ctx) && name == "gui_screen_read" &&
         result.status == Result::Status::Success && state.owner_pre_facts && facts_provider_)
@@ -1882,6 +1957,8 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
+    const auto invoke_finished = std::chrono::steady_clock::now();
+    record.sap_action_ms = std::max<long long>(0, result.duration.count());
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && owner_pre_facts)
         retire_disconnected_session(result, args, *owner_pre_facts);
     if (name == "gui_session_disconnect" && result.status == Result::Status::Success && prelogin_close_facts)
@@ -1893,7 +1970,11 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
     const auto owner_unchanged = [&]() {
         return !owner_pre_facts || name == "gui_session_disconnect" || owner_session_unchanged(*owner_pre_facts, record);
     };
-    if (!owner_unchanged())
+    const auto owner_postcheck_started = std::chrono::steady_clock::now();
+    const bool owner_still_same = owner_unchanged();
+    record.owner_postcheck_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - owner_postcheck_started).count();
+    if (!owner_still_same)
         return fail("OUTCOME_UNKNOWN", "the SAP session changed while the call was running; its result is withheld");
 
     // the owner listings verify row by row within one budget; a cancelled call stops too
@@ -1947,7 +2028,10 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
                                              owner_unchanged))
             return fail(refused->code, refused->message, refused->hint);
 
-    return shape_call(name, result, record, code, ctx, state, tcode_left);
+    ToolResult shaped = shape_call(name, result, record, code, ctx, state, tcode_left);
+    record.post_invoke_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - invoke_finished).count();
+    return shaped;
 }
 
 ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code,
@@ -1968,6 +2052,8 @@ ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCall
     // 5. invoke
     if (selection_input) record.input_allowed = true;  // authorized above; the typed value is never recorded
     const auto invoke_started = std::chrono::steady_clock::now();
+    record.pre_invoke_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        invoke_started - state.started).count();
     const bool worker_mode = (session_invoker_ || session_invoker_with_gate_) && owner_pre_facts;
     const bool worker_bound = worker_mode && worker_command_allowed(argv);
     if (worker_mode && !worker_bound)
@@ -2040,6 +2126,7 @@ ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCall
 
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                            std::string& code, const CallContext& ctx) {
+    const auto execution_started = std::chrono::steady_clock::now();
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
         if (owner_mode(ctx) &&
             (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
@@ -2053,8 +2140,53 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
         return error_result(c, message, hint);
     };
 
+    json prepared_args = raw_args;
+    if (name == "gui_element_click" || name == "gui_element_get" ||
+        name == "gui_element_f4" || name == "gui_element_fill") {
+        if (prepared_args.is_object()) {
+            const auto resolve = [&](json& value) -> std::string {
+                if (!value.is_string()) return {};
+                const std::string ref = value.get<std::string>();
+                if (ref.rfind("@e", 0) != 0) return {};
+                ScreenRef saved;
+                {
+                    std::lock_guard lock(screen_refs_->mutex);
+                    const auto it = screen_refs_->refs.find(ref);
+                    if (it == screen_refs_->refs.end()) return "REF_INVALID";
+                    saved = it->second;
+                }
+                if (saved.principal != principal_key(ctx.principal)) return "REF_INVALID";
+                std::optional<audit::SapFacts> current;
+                if (facts_provider_) {
+                    try { current = facts_provider_(prepared_args.contains("connection")
+                        ? std::optional<int>(prepared_args["connection"].get<int>()) : std::nullopt); } catch (...) {}
+                }
+                if (!current || current->connection_id != saved.connection ||
+                    current->session_identity != saved.session || current->window_title != saved.window_title ||
+                    screen_guard_for(*current) != saved.guard)
+                    return "SCREEN_CHANGED";
+                value = saved.element_id;
+                if (owner_mode(ctx)) {
+                    if (prepared_args.contains("expected_screen_guard") &&
+                        prepared_args["expected_screen_guard"] != saved.guard) return "SCREEN_CHANGED";
+                    prepared_args["expected_screen_guard"] = saved.guard;
+                }
+                return {};
+            };
+            for (const char* key : {"element", "id", "element_id"})
+                if (prepared_args.contains(key))
+                    if (const std::string error = resolve(prepared_args[key]); !error.empty())
+                        return fail(error, "the short field reference is invalid or its SAP screen changed");
+            if (prepared_args.contains("fields") && prepared_args["fields"].is_array())
+                for (auto& field : prepared_args["fields"])
+                    if (field.is_object() && field.contains("element"))
+                        if (const std::string error = resolve(field["element"]); !error.empty())
+                            return fail(error, "the short field reference is invalid or its SAP screen changed");
+        }
+    }
     CallState state;
-    if (auto refused = admit_call(name, raw_args, record, ctx, state, fail)) return *refused;
+    state.started = execution_started;
+    if (auto refused = admit_call(name, prepared_args, record, ctx, state, fail)) return *refused;
     const ToolSpec* spec = state.spec;
     json& args = state.args;
     const bool selection_input = state.selection_input;
@@ -2199,8 +2331,36 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     std::string problem;
     try {
         validate_tool_arguments(args, spec->def.input_schema);
-        for (const auto& item : args["items"])
+        std::set<std::string> binding_names;
+        std::string previous_tool;
+        for (const auto& item : args["items"]) {
             if (item["tool"] == "gui_batch") throw std::invalid_argument("gui_batch cannot be nested inside gui_batch");
+            const std::string tool = item["tool"].get<std::string>();
+            if (item.contains("expect") && tool != "gui_screen_find")
+                throw std::invalid_argument("expect requires gui_screen_find");
+            if (item.contains("when") && previous_tool != "gui_screen_find")
+                throw std::invalid_argument("when requires an immediately preceding gui_screen_find");
+            for (const char* key : {"expect", "when"})
+                if (item.contains(key) && item[key].empty())
+                    throw std::invalid_argument(std::string(key) + " requires title or transaction");
+            if (item.contains("bind")) {
+                if (tool != "gui_screen_find") throw std::invalid_argument("bind requires gui_screen_find");
+                const std::string name = item["bind"].get<std::string>();
+                if (!binding_names.insert(name).second) throw std::invalid_argument("duplicate batch binding name");
+            }
+            if (item.contains("ref")) {
+                if (tool != "gui_element_click" && tool != "gui_element_get" &&
+                    tool != "gui_element_fill" && tool != "gui_element_f4")
+                    throw std::invalid_argument("ref requires an element tool");
+                if (!binding_names.contains(item["ref"].get<std::string>()))
+                    throw std::invalid_argument("ref must name an earlier binding");
+                const json values = item.value("arguments", json::object());
+                if (values.contains("element") || values.contains("id") || values.contains("element_id") ||
+                    values.contains("fields"))
+                    throw std::invalid_argument("ref cannot be combined with an explicit element or fields");
+            }
+            previous_tool = tool;
+        }
     } catch (const std::exception& e) {
         problem = e.what();
     }
@@ -2247,6 +2407,22 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     }
 
     const bool stop_on_error = args.value("stop_on_error", true);
+    const bool summary_mode = args.value("result_mode", std::string("full")) == "summary";
+    struct BoundElement {
+        std::string id;
+        std::string guard;
+        std::string session;
+        std::string window_title;
+        std::optional<int> connection;
+        std::string error;
+    };
+    std::map<std::string, BoundElement> bindings;
+    json last_observation;
+    std::string last_observation_guard, last_observation_session;
+    std::string last_observation_title;
+    std::optional<int> last_observation_connection;
+    const std::optional<int> batch_connection = args.contains("connection")
+        ? std::optional<int>(args["connection"].get<int>()) : std::nullopt;
     json summary = json::array();
     std::string body;
     json images = json::array();
@@ -2266,22 +2442,167 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
             }
             continue;
         }
+        if (item.contains("when") && !screen_condition_matches(item["when"], last_observation)) {
+            summary.push_back({{"tool", tool}, {"ok", true}, {"skipped", true}});
+            if (ctx.report_progress) {
+                try { ctx.report_progress(static_cast<double>(index), static_cast<double>(total), "batch condition skipped item"); }
+                catch (...) {}
+            }
+            continue;
+        }
         std::string code;
-        ToolResult r = run_single(tool, item.contains("arguments") ? item["arguments"] : json::object(), item_ctx, &code);
+        const auto item_started = std::chrono::steady_clock::now();
+        McpCallRecord item_record;
+        json resolved_args = item.contains("arguments") ? item["arguments"] : json::object();
+        ToolResult r;
+        std::string condition_refusal;
+        if (item.contains("when")) {
+            std::optional<audit::SapFacts> current;
+            if (facts_provider_) {
+                try { current = facts_provider_(batch_connection); } catch (...) {}
+            }
+            if (!current || last_observation_guard.empty() ||
+                current->session_identity != last_observation_session ||
+                current->connection_id != last_observation_connection ||
+                current->window_title != last_observation_title ||
+                screen_guard_for(*current) != last_observation_guard)
+                condition_refusal = "SCREEN_CHANGED";
+            else if (owner_mode(item_ctx)) {
+                const ToolSpec* target = find_spec(tool);
+                if (target && target->def.input_schema.value("properties", json::object()).contains("expected_screen_guard"))
+                    resolved_args["expected_screen_guard"] = last_observation_guard;
+            }
+        }
+        if (!condition_refusal.empty()) {
+            r = audited(tool, [&](McpCallRecord&, std::string& out_code) {
+                out_code = condition_refusal;
+                return error_result(out_code, "the SAP session or dynpro changed since the batch condition was observed");
+            }, item_ctx, &code, &item_record);
+        } else if (item.contains("ref")) {
+            const BoundElement& binding = bindings.at(item["ref"].get<std::string>());
+            std::string refusal = binding.error;
+            if (refusal.empty()) {
+                std::optional<audit::SapFacts> current;
+                if (facts_provider_) {
+                    try { current = facts_provider_(batch_connection); } catch (...) {}
+                }
+                if (!current || current->session_identity != binding.session ||
+                    current->connection_id != binding.connection ||
+                    current->window_title != binding.window_title ||
+                    screen_guard_for(*current) != binding.guard)
+                    refusal = "SCREEN_CHANGED";
+            }
+            if (!refusal.empty()) {
+                r = audited(tool, [&](McpCallRecord&, std::string& out_code) {
+                    out_code = refusal;
+                    return error_result(refusal, "the bound element is ambiguous, unavailable, or its SAP screen changed");
+                }, item_ctx, &code, &item_record);
+            } else {
+                resolved_args["element"] = binding.id;
+                if (owner_mode(item_ctx)) resolved_args["expected_screen_guard"] = binding.guard;
+                r = run_single(tool, resolved_args, item_ctx, &code, &item_record);
+            }
+        } else {
+            if (item.contains("expect")) {
+                r = audited(tool, [&](McpCallRecord& record, std::string& out_code) {
+                    ToolResult observed = execute_call(tool, resolved_args, record, out_code, item_ctx);
+                    if (!observed.is_error && (!observed.structured ||
+                        !observed.structured->contains("data") ||
+                        !screen_condition_matches(item["expect"], (*observed.structured)["data"]))) {
+                        out_code = "SCREEN_ASSERTION_FAILED";
+                        return error_result(out_code, "the SAP screen did not match the declared title or transaction");
+                    }
+                    return observed;
+                }, item_ctx, &code, &item_record);
+            } else {
+                r = run_single(tool, resolved_args, item_ctx, &code, &item_record);
+            }
+        }
+        last_observation = json();
+        last_observation_guard.clear();
+        last_observation_session.clear();
+        last_observation_title.clear();
+        last_observation_connection.reset();
+        if (tool == "gui_screen_find" && !r.is_error && r.structured && r.structured->contains("data")) {
+            last_observation = (*r.structured)["data"];
+            if (facts_provider_) {
+                try {
+                    if (const auto observed = facts_provider_(batch_connection)) {
+                        last_observation_guard = screen_guard_for(*observed);
+                        last_observation_session = observed->session_identity;
+                        last_observation_title = last_observation.value("title", std::string());
+                        last_observation_connection = observed->connection_id;
+                    }
+                } catch (...) {}
+            }
+        }
+        if (item.contains("bind")) {
+            BoundElement binding;
+            binding.error = "BIND_RESULT_UNAVAILABLE";
+            if (!r.is_error && r.structured && r.structured->is_object() &&
+                r.structured->contains("data") && (*r.structured)["data"].is_object()) {
+                const json& data = (*r.structured)["data"];
+                if (data.value("element_count", 0) != 1 || data.value("match_limit_reached", true) ||
+                    data.value("scan_limit_reached", true)) {
+                    binding.error = "BIND_NOT_UNIQUE";
+                } else if (data.contains("elements") && data["elements"].is_array() && data["elements"].size() == 1 &&
+                           data["elements"][0].contains("id") && data["elements"][0]["id"].is_string()) {
+                    binding.id = data["elements"][0]["id"].get<std::string>();
+                    std::optional<audit::SapFacts> facts;
+                    if (facts_provider_) {
+                        try { facts = facts_provider_(batch_connection); } catch (...) {}
+                    }
+                    if (facts) {
+                        binding.guard = screen_guard_for(*facts);
+                        binding.session = facts->session_identity;
+                        binding.window_title = data.value("title", std::string());
+                        binding.connection = facts->connection_id;
+                        if (!binding.id.empty() && !binding.guard.empty() && !binding.session.empty() &&
+                            !binding.window_title.empty() && binding.window_title == facts->window_title)
+                            binding.error.clear();
+                    }
+                }
+            }
+            bindings.emplace(item["bind"].get<std::string>(), std::move(binding));
+        }
         json entry = {{"tool", tool}, {"ok", !r.is_error}};
+        if (summary_mode) {
+            entry["duration_ms"] = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - item_started).count();
+            entry["text_bytes"] = text_of(r).size();
+            entry["phases"] = {{"facts_pre_ms", item_record.facts_pre_ms},
+                                {"invoke_ms", item_record.invoke_ms},
+                                {"facts_post_ms", item_record.facts_post_ms},
+                                {"format_ms", item_record.format_ms},
+                                {"sap_action_ms", item_record.sap_action_ms},
+                                {"pre_invoke_ms", item_record.pre_invoke_ms},
+                                {"post_invoke_ms", item_record.post_invoke_ms}};
+            entry["phases"]["owner_postcheck_ms"] = item_record.owner_postcheck_ms;
+        }
         if (r.structured && r.structured->is_object() && r.structured->contains("tcode_left_allowlist")) {
             entry["tcode_left_allowlist"] = true;
             left_allowlist = true;
         }
         if (r.is_error) {
             entry["error_code"] = code;
+            if (summary_mode) {
+                std::string message = text_of(r);
+                const auto colon = message.find(": ");
+                if (message.rfind("ERROR ", 0) == 0 && colon != std::string::npos)
+                    message.erase(0, colon + 2);
+                message.resize(std::min<std::size_t>(message.find('\n'), 240));
+                entry["message"] = message;
+            }
             any_failed = true;
             if (stop_on_error) stopped = true;
         }
+        const bool include_result = item.value("include_result", false);
+        if (summary_mode && include_result) entry["result"] = text_of(r);
         summary.push_back(entry);
-        body += "\n--- [" + std::to_string(index) + "/" + std::to_string(total) + "] " + tool + " ---\n" + text_of(r);
+        if (!summary_mode)
+            body += "\n--- [" + std::to_string(index) + "/" + std::to_string(total) + "] " + tool + " ---\n" + text_of(r);
         for (const auto& block : r.content)
-            if (block.is_object() && block.value("type", "") == "image") images.push_back(block);
+            if (block.is_object() && block.value("type", "") == "image" && (!summary_mode || include_result)) images.push_back(block);
         if (ctx.report_progress) {
             try { ctx.report_progress(static_cast<double>(index), static_cast<double>(total), "batch item completed"); }
             catch (...) {}
@@ -2290,8 +2611,12 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
 
     ToolResult out;
     out.is_error = any_failed;
-    out.content.push_back(json{{"type", "text"}, {"text", dump_compact(summary) + body}});
+    json text_summary = summary;
+    if (summary_mode)
+        for (auto& entry : text_summary) entry.erase("result");
+    out.content.push_back(json{{"type", "text"}, {"text", dump_compact(text_summary) + body}});
     for (const auto& image : images) out.content.push_back(image);
+    if (summary_mode) out.structured = json{{"items", summary}};
     if (left_allowlist) out.structured = json{{"tcode_left_allowlist", true}};
     if (cancelled) {
         // the caller cancelled (over the link: the gateway's time limit): it reports exactly which steps ran

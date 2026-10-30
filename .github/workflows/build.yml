@@ -341,6 +341,10 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit 1 }
       shell: pwsh
 
+    - name: MSIX updater contract checks
+      run: ./packaging/msix/tests/Test-UpdateMsix.ps1
+      shell: pwsh
+
     - name: The msix fairyfly.exe leaves updates to the Store; its manifest parses
       run: |
         $out = (& build-msix/Release/fairyfly.exe --no-audit update check 2>&1 | Out-String)

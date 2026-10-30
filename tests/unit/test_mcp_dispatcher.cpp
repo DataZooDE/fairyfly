@@ -633,6 +633,260 @@ TEST_CASE("Dispatcher: gui_batch runs items through the full pipeline", "[mcp][d
     CHECK(progress == std::vector<double>{1.0, 2.0});
 }
 
+TEST_CASE("Dispatcher: gui_batch summary omits unrequested item payloads", "[mcp][dispatcher][batch]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "transaction start") {
+            Result result = Result::ok({{"transaction", "BP"}, {"marker", "private-large-payload"}});
+            result.duration = std::chrono::milliseconds(23);
+            return result;
+        }
+        return err("FIND_FAILED", "field was not found");
+    };
+    auto d = f.make();
+    const json items = json::array({{{"tool", "gui_transaction_start"}, {"arguments", {{"code", "BP"}}}},
+                                    {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "x"}}}}});
+    const auto r = d.call_tool("gui_batch", {{"items", items}, {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE(r.is_error);
+    REQUIRE(r.structured);
+    REQUIRE((*r.structured).contains("items"));
+    CHECK((*r.structured)["items"][0]["ok"] == true);
+    CHECK((*r.structured)["items"][1]["error_code"] == "FIND_FAILED");
+    CHECK((*r.structured)["items"][1]["message"] == "field was not found");
+    CHECK((*r.structured)["items"][0]["duration_ms"].is_number_integer());
+    CHECK((*r.structured)["items"][0]["duration_ms"].get<std::int64_t>() >= 0);
+    CHECK((*r.structured)["items"][0]["text_bytes"].get<std::size_t>() > 0);
+    CHECK((*r.structured)["items"][0]["phases"]["sap_action_ms"] == 23);
+    CHECK((*r.structured)["items"][0]["phases"]["format_ms"].is_number_integer());
+    CHECK((*r.structured)["items"][0]["phases"]["pre_invoke_ms"].is_number_integer());
+    CHECK((*r.structured)["items"][0]["phases"]["post_invoke_ms"].is_number_integer());
+    CHECK((*r.structured)["items"][0]["phases"]["owner_postcheck_ms"].is_number_integer());
+    CHECK(text_of(r).find("private-large-payload") == std::string::npos);
+    CHECK(r.content.size() == 1);
+    CHECK(f.records.size() == 2);
+
+    const auto selected = d.call_tool("gui_batch",
+        {{"items", json::array({{{"tool", "gui_transaction_start"}, {"arguments", {{"code", "BP"}}}, {"include_result", true}}})},
+         {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE_FALSE(selected.is_error);
+    REQUIRE(selected.structured);
+    CHECK((*selected.structured)["items"][0]["result"].get<std::string>().find("private-large-payload") != std::string::npos);
+    CHECK(text_of(selected).find("private-large-payload") == std::string::npos);
+}
+
+TEST_CASE("Dispatcher: gui_batch binds a unique found element to its screen", "[mcp][dispatcher][batch]") {
+    Fixture f;
+    fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "BP"};
+    facts.program = "SAPLBUPA";
+    facts.screen_number = "1100";
+    facts.connection_id = 4;
+    facts.session_identity = "test-session";
+    facts.window_title = "Create Organization";
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "screen find")
+            return Result::ok({{"title", "Create Organization"},
+                               {"elements", json::array({{{"id", "wnd[0]/usr/txtEMAIL"}, {"name", "EMAIL"}}})},
+                               {"element_count", 1}, {"match_limit_reached", false}, {"scan_limit_reached", false}});
+        return Result::ok(json::object());
+    };
+    Policy write;
+    write.read_only = false;
+    write.allow_write = true;
+    auto d = f.make(write);
+    d.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    const json items = json::array({{{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "EMAIL"}}}, {"bind", "email"}},
+                                    {{"tool", "gui_element_fill"}, {"arguments", {{"value", "probe@example.invalid"}}}, {"ref", "email"}}});
+    const auto good = d.call_tool("gui_batch", {{"items", items}, {"connection", 4}, {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE_FALSE(good.is_error);
+    REQUIRE(f.calls.size() == 2);
+    const bool used_found_id = std::find(f.calls[1].begin(), f.calls[1].end(), "wnd[0]/usr/txtEMAIL") != f.calls[1].end();
+    CHECK(used_found_id);
+    CHECK(f.records.size() == 2);
+
+    f.calls.clear();
+    f.records.clear();
+    facts.screen_number = "1100";
+    f.handler = [&](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "screen find") {
+            return Result::ok({{"title", "Create Organization"},
+                               {"elements", json::array({{{"id", "wnd[0]/usr/txtEMAIL"}}})},
+                               {"element_count", 1}, {"match_limit_reached", false}, {"scan_limit_reached", false}});
+        }
+        return Result::ok(json::object());
+    };
+    auto ctx = ctx_with_id();
+    ctx.report_progress = [&](double done, std::optional<double>, const std::string&) {
+        if (done == 1.0) facts.screen_number = "1200";
+    };
+    const auto stale = d.call_tool("gui_batch", {{"items", items}, {"connection", 4}, {"result_mode", "summary"}}, ctx);
+    REQUIRE(stale.is_error);
+    CHECK(f.calls.size() == 1);
+    REQUIRE(stale.structured);
+    CHECK((*stale.structured)["items"][1]["error_code"] == "SCREEN_CHANGED");
+}
+
+TEST_CASE("Dispatcher: batch binding rejects ambiguous matches and invalid references", "[mcp][dispatcher][batch]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "screen find")
+            return Result::ok({{"elements", json::array({{{"id", "wnd[0]/usr/txtA"}}, {{"id", "wnd[0]/usr/txtB"}}})},
+                               {"element_count", 2}, {"match_limit_reached", false}, {"scan_limit_reached", false}});
+        return Result::ok(json::object());
+    };
+    Policy write;
+    write.read_only = false;
+    write.allow_write = true;
+    auto d = f.make(write);
+    fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "BP"};
+    facts.program = "SAPLBUPA";
+    facts.screen_number = "1100";
+    facts.connection_id = 4;
+    facts.session_identity = "test-session";
+    facts.window_title = "Maintain Business Partner";
+    d.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    const json find = {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "EMAIL"}}}, {"bind", "email"}};
+    const json fill = {{"tool", "gui_element_fill"}, {"arguments", {{"value", "probe@example.invalid"}}}, {"ref", "email"}};
+    const auto ambiguous = d.call_tool("gui_batch", {{"items", json::array({find, fill})}, {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE(ambiguous.is_error);
+    REQUIRE(ambiguous.structured);
+    CHECK((*ambiguous.structured)["items"][1]["error_code"] == "BIND_NOT_UNIQUE");
+    CHECK(f.calls.size() == 1);
+    CHECK(f.records.size() == 2);
+
+    f.calls.clear();
+    f.records.clear();
+    const auto forward = d.call_tool("gui_batch", {{"items", json::array({fill, find})}}, ctx_with_id());
+    CHECK(forward.is_error);
+    CHECK(f.calls.empty());
+    CHECK(f.records.size() == 1);
+    CHECK(f.records[0].tool == "gui_batch");
+
+    f.records.clear();
+    const json wrong_tool = {{"tool", "gui_transaction_start"}, {"arguments", {{"code", "BP"}}}, {"ref", "email"}};
+    const auto injected = d.call_tool("gui_batch", {{"items", json::array({find, wrong_tool})}}, ctx_with_id());
+    CHECK(injected.is_error);
+    CHECK(f.calls.empty());
+    CHECK(f.records.size() == 1);
+}
+
+TEST_CASE("Dispatcher: batch screen assertions stop before mutation and conditions skip declared steps", "[mcp][dispatcher][batch]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "screen find")
+            return Result::ok({{"title", "Maintain Business Partner"}, {"transaction", "BP"},
+                               {"screen_id", "wnd[0]"}, {"elements", json::array()}, {"element_count", 0}});
+        return Result::ok(json::object());
+    };
+    Policy write;
+    write.read_only = false;
+    write.allow_write = true;
+    auto d = f.make(write);
+    const json find = {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "email"}}},
+                       {"expect", {{"title", "Create Organization"}, {"transaction", "BP"}}}};
+    const json fill = {{"tool", "gui_element_fill"},
+                       {"arguments", {{"element", "wnd[0]/usr/txtEMAIL"}, {"value", "probe@example.invalid"}}}};
+    const auto refused = d.call_tool("gui_batch", {{"items", json::array({find, fill})}, {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE(refused.is_error);
+    REQUIRE(refused.structured);
+    CHECK((*refused.structured)["items"][0]["error_code"] == "SCREEN_ASSERTION_FAILED");
+    CHECK((*refused.structured)["items"][1]["skipped"] == true);
+    CHECK(f.calls.size() == 1);
+    REQUIRE(f.records.size() == 1);
+    CHECK(f.records[0].error_code == "SCREEN_ASSERTION_FAILED");
+
+    f.calls.clear();
+    f.records.clear();
+    const json observe = {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "email"}}}};
+    const json conditional = {{"tool", "gui_element_fill"},
+                              {"arguments", {{"element", "wnd[0]/usr/txtEMAIL"}, {"value", "probe@example.invalid"}}},
+                              {"when", {{"title", "Create Organization"}}}};
+    const auto skipped = d.call_tool("gui_batch", {{"items", json::array({observe, conditional})},
+                                                  {"result_mode", "summary"}}, ctx_with_id());
+    REQUIRE_FALSE(skipped.is_error);
+    REQUIRE(skipped.structured);
+    CHECK((*skipped.structured)["items"][1]["skipped"] == true);
+    CHECK(f.calls.size() == 1);
+    CHECK(f.records.size() == 1);
+
+    f.calls.clear();
+    f.records.clear();
+    fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "BP"};
+    facts.program = "SAPLBUPA";
+    facts.screen_number = "1100";
+    facts.connection_id = 4;
+    facts.session_identity = "test-session";
+    facts.window_title = "Maintain Business Partner";
+    d.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    const json on_bp = {{"tool", "gui_element_fill"},
+                        {"arguments", {{"element", "wnd[0]/usr/txtEMAIL"}, {"value", "probe@example.invalid"}}},
+                        {"when", {{"title", "Maintain Business Partner"}}}};
+    auto ctx = ctx_with_id();
+    ctx.report_progress = [&](double done, std::optional<double>, const std::string&) {
+        if (done == 1.0) facts.screen_number = "1200";
+    };
+    const auto stale = d.call_tool("gui_batch", {{"items", json::array({observe, on_bp})},
+                                                {"result_mode", "summary"}}, ctx);
+    REQUIRE(stale.is_error);
+    REQUIRE(stale.structured);
+    CHECK((*stale.structured)["items"][1]["error_code"] == "SCREEN_CHANGED");
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("Dispatcher: projected editable screen yields short guarded field references", "[mcp][dispatcher][screen-ref]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (fairyfly::command_table::command_of_argv(argv) == "screen read")
+            return Result::ok({{"title", "Create Organization"}, {"transaction", "BP"},
+                               {"elements", json::array({{{"id", "wnd[0]/usr/txtEMAIL"}, {"name", "EMAIL"},
+                                                           {"label", "E-Mail"}, {"text", ""}, {"type", "GuiTextField"},
+                                                           {"changeable", true}}})}, {"hierarchy", json::object()}});
+        return Result::ok(json::object());
+    };
+    Policy write;
+    write.read_only = false;
+    write.allow_write = true;
+    auto d = f.make(write);
+    auto shared_refs = std::make_shared<ScreenRefStore>();
+    d.set_screen_ref_store(shared_refs);
+    fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "BP"};
+    facts.program = "SAPLBUPA";
+    facts.screen_number = "1100";
+    facts.connection_id = 4;
+    facts.session_identity = "test-session";
+    facts.window_title = "Create Organization";
+    d.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    auto next_dispatcher = f.make(write);
+    next_dispatcher.set_screen_ref_store(shared_refs);
+    next_dispatcher.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    const auto projected = d.call_tool("gui_screen_read", {{"only", "editable"}, {"no_tabs", true},
+                                                        {"projection", "refs"}, {"connection", 4}}, ctx_with_id());
+    REQUIRE_FALSE(projected.is_error);
+    REQUIRE(projected.structured);
+    const std::string ref = (*projected.structured)["fields"][0]["ref"].get<std::string>();
+    CHECK(ref.size() <= 20);
+    CHECK(text_of(projected).find("wnd[0]/usr/txtEMAIL") == std::string::npos);
+    CHECK((*projected.structured)["fields"][0]["name"] == "EMAIL");
+    CHECK((*projected.structured)["fields"][0]["value"] == "");
+    const auto filled = next_dispatcher.call_tool("gui_element_fill", {{"element", ref}, {"value", "probe@example.invalid"},
+                                                         {"connection", 4}}, ctx_with_id());
+    REQUIRE_FALSE(filled.is_error);
+    REQUIRE(f.calls.size() == 2);
+    CHECK(std::find(f.calls[1].begin(), f.calls[1].end(), "wnd[0]/usr/txtEMAIL") != f.calls[1].end());
+    auto other_ctx = ctx_with_id();
+    other_ctx.principal.id = "other-principal";
+    const auto foreign = next_dispatcher.call_tool("gui_element_fill", {{"element", ref}, {"value", "probe@example.invalid"},
+                                                              {"connection", 4}}, other_ctx);
+    CHECK(foreign.is_error);
+    CHECK(text_of(foreign).find("REF_INVALID") != std::string::npos);
+    CHECK(f.calls.size() == 2);
+    facts.window_title = "Maintain Business Partner";
+    const auto stale = next_dispatcher.call_tool("gui_element_fill", {{"element", ref}, {"value", "probe@example.invalid"},
+                                                        {"connection", 4}}, ctx_with_id());
+    CHECK(stale.is_error);
+    CHECK(text_of(stale).find("SCREEN_CHANGED") != std::string::npos);
+    CHECK(f.calls.size() == 2);
+}
+
 TEST_CASE("Dispatcher: gui_batch stop_on_error, nesting and validation", "[mcp][dispatcher][batch]") {
     Fixture f;
     f.handler = [](const Argv& argv) { return fairyfly::command_table::command_of_argv(argv) == "transaction start" ? err("TCODE_FAILED", "bad") : Result::ok(json::object()); };

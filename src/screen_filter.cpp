@@ -71,8 +71,11 @@ static void narrow_table_rows(json& elem, const std::string& needle)
         if (json_strings_contain(row, needle)) kept.push_back(row);
     }
     if (kept.empty()) return;  // the element matched elsewhere: its rows stay untouched
+    (*table)["rows_fetched"] = table->value("rows_fetched", rows.size());
     (*table)["rows_total"] = rows.size();
     (*table)["rows_matched"] = kept.size();
+    (*table)["returned"] = kept.size();
+    (*table)["text_filter_scope"] = "fetched_rows";
     (*table)["rows"] = std::move(kept);
 }
 
@@ -433,6 +436,7 @@ void apply_screen_filters(json& screen_data, const ScreenFilterOptions& filters)
 {
     const json coverage = filters.text_contains.has_value() ? describe_tab_coverage(screen_data) : json::object();
     apply_screen_filters_impl(screen_data, filters);
+    if (filters.text_contains.has_value()) screen_data["table_text_filter_scope"] = "fetched_rows";
     // capped only now: the tabs' full lists were needed to count each id once across the result
     cap_read_only_ids(screen_data);
     if (screen_data.contains("tabs_content") && screen_data["tabs_content"].is_array())

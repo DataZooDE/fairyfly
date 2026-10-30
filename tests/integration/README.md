@@ -1,5 +1,35 @@
 # SAP GUI integration scripts
 
+## BP MCP batch latency and guarded-flow probe
+
+With a logged-in Bigfox A4H/001/DEVELOPER SAP GUI session at Easy Access,
+attach it with `fairyfly session attach --session-id <live-session-id>` and pass
+the returned saved connection ID. The probe starts its own temporary owner-mode
+HTTP endpoint, creates a short-lived token and lease, and removes them afterward.
+It compares the same three BP operations as individual MCP calls, a legacy
+`gui_batch`, and a summary `gui_batch`. `-Pairs 3` provides repeated paired
+timings and response byte counts. `-BindingProbe` exercises an unsaved Create
+Organization field binding; `-GuardProbe` performs the full guarded cancel and
+discard workflow in one batch. `-RefProbe` reads the real 46-field form with
+short field references, fills and reads back an E-mail field by reference,
+then confirms that the reference is stale after discard. `-CreateProbe` creates and saves a disposable organization;
+record its returned BP ID for cleanup. `-ChangeProbe -PartnerId <id>` changes that BP's email, verifies it after
+reopening, restores the original, and verifies the restore. The lease is renewed or reacquired during long runs.
+The probe reports only timings, sizes, status, BP ID, and pass flags; it does not print email values or bearer tokens.
+The default and unsaved probe modes create no persistent BP data. The script returns the SAP session to Easy Access.
+
+~~~powershell
+powershell -NoProfile -File tests/integration/mcp_live_batch_summary.ps1 -Connection <saved-id> -Pairs 3
+powershell -NoProfile -File tests/integration/mcp_live_batch_summary.ps1 -Connection <saved-id> -GuardProbe
+powershell -NoProfile -File tests/integration/mcp_live_batch_summary.ps1 -Connection <saved-id> -RefProbe
+powershell -NoProfile -File tests/integration/mcp_live_batch_summary.ps1 -Connection <saved-id> -CreateProbe
+powershell -NoProfile -File tests/integration/mcp_live_batch_summary.ps1 -Connection <saved-id> -ChangeProbe -PartnerId <test-bp-id>
+~~~
+
+It requires a free local port (default 8397), a Release Fairyfly executable,
+SAP GUI scripting, and an interactive Windows desktop. It is not registered
+with CTest because it acts on the live SAP session.
+
 ## Owner-filtered discovery through the tray
 
 `mcp_live_owner_discovery.ps1` starts a temporary owner-mode tray endpoint and

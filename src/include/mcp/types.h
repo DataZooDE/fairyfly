@@ -224,6 +224,11 @@ struct McpCallRecord {
     long long facts_pre_ms = 0;
     long long invoke_ms = 0;
     long long facts_post_ms = 0;
+    long long format_ms = 0;         ///< Result rendering in the dispatcher (0 when not reached)
+    long long sap_action_ms = 0;     ///< worker/CLI Result.duration, when supplied (not a queue measurement)
+    long long pre_invoke_ms = 0;     ///< dispatcher checks and preparation before worker/CLI invocation
+    long long post_invoke_ms = 0;    ///< dispatcher checks and shaping after worker/CLI invocation
+    long long owner_postcheck_ms = 0; ///< owner session identity verification after invocation
 };
 
 /// Receives one record per tools/call. Never throws.

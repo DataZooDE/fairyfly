@@ -193,6 +193,28 @@ TEST_CASE("gui_screen_read passes offset and only=tables to the CLI", "[mcp][too
 
 // ---- Item 3: --text-contains filters grid rows ------------------------------------------------
 
+TEST_CASE("Filtered page counts distinguish fetched and returned rows", "[screen][filters][rows][demo]") {
+    json data = {{"elements", json::array({{{"id", "grid"}, {"type", "GuiGridView"},
+        {"table_data", {{"columns", json::array({"Code"})},
+         {"rows", json::array({json::array({"SE91"}), json::array({"SE93"})})},
+         {"offset", 5}, {"returned", 2}, {"next_offset", 7}, {"total_row_count", 50}}}}})}, {"element_count", 1}};
+    cli::ScreenFilterOptions filter;
+    filter.text_contains = "SE91";
+    cli::apply_screen_filters(data, filter);
+    const auto& table = data.at("elements").at(0).at("table_data");
+    CHECK(table.value("rows_fetched", -1) == 2);
+    CHECK(table.value("returned", -1) == 1);
+    CHECK(table.at("next_offset") == 7);
+    CHECK(table.at("total_row_count") == 50);
+    CHECK(data.value("table_text_filter_scope", "") == "fetched_rows");
+    const auto md = cli::ScreenMarkdownFormatter::format(data);
+    CHECK(md.find("Fetched rows 5-6") != std::string::npos);
+    filter.text_contains = "not-in-this-page";
+    cli::apply_screen_filters(data, filter);
+    CHECK(data.at("elements").empty());
+    CHECK(data.value("table_text_filter_scope", "") == "fetched_rows");
+}
+
 TEST_CASE("text_contains keeps only matching grid rows", "[screen][filters][rows]") {
     const json grid = {{"id", "wnd[0]/usr/grid"}, {"type", "GuiShell"}, {"subtype", "GridView"},
                        {"table_data", {{"columns", json::array({"USER", "STATUS"})},

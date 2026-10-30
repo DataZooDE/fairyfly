@@ -13,6 +13,7 @@ struct ActionStatus {
     std::string type;
     std::string message_id;
     std::string message_number;
+    bool generated_selection_screen = false; // live SE16 generated report, selection dynpro 1000
 };
 
 /// JSON view of a status bar message: {text, message_type, changed}.
@@ -88,6 +89,9 @@ std::optional<Result> classify_f4_target_window(const std::string& active_window
 std::string f4_dialog_path(int active_window_index);
 
 ActionStatus read_action_status(const ComGuiSessionPtr& session);
+
+bool is_se16_generated_selection_screen(const std::string& transaction,
+                                        const std::string& program, const std::string& screen_number);
 
 /// Same as above for a caller that already holds the id of the active window (skips the
 /// ActiveWindow and Id reads). The id must belong to the window that is active right now.

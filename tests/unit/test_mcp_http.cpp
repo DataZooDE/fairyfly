@@ -11,6 +11,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <set>
 #include <string>
 #include <thread>
@@ -208,6 +209,23 @@ struct Fixture {
 };
 
 json body_of(const HttpResponse& r) { return json::parse(r.body); }
+
+TEST_CASE("HTTP tool response reports bounded request phase timings", "[mcp][http][timing]") {
+    Fixture f;
+    const auto response = f.endpoint.handle(f.post(Fixture::rpc("tools/call",
+        {{"name", "gui_slow"}, {"arguments", {{"ms", 1}}}}, 42)));
+    REQUIRE(response.status == 200);
+    const std::string timing = response.header("Server-Timing");
+    for (const char* phase : {"ff_admit", "ff_queue", "ff_exec", "ff_serialize", "ff_total"}) {
+        const std::regex entry(std::string(phase) + R"(;dur=(\d+))");
+        std::smatch match;
+        REQUIRE(std::regex_search(timing, match, entry));
+        CHECK(std::stoll(match[1].str()) >= 0);
+    }
+    CHECK(response.header("X-Fairyfly-Response-Bytes") == std::to_string(response.body.size()));
+    CHECK(timing.find("gui_slow") == std::string::npos);
+    CHECK(body_of(response)["id"] == 42);
+}
 
 class VectorSink : public SseSink {
 public:

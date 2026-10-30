@@ -200,7 +200,7 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   `gui_session_attach` then have to be granted there; the desktop's read-only mode only hides `gui_element_fill`.
 - The link offers this desktop's tool list on every connect. The gateway keeps it only from an account in its
   `catalog_publishers` list; otherwise it describes the tools from its own built-in catalog.
-- Data entry goes screen by screen: the assistant reads the screen with `only=editable` and fills all its fields in
+- Data entry goes screen by screen: the assistant reads the screen with `only=editable` and fills the requested fields in
   one `gui_element_fill` call with `fields`, optionally pressing Enter or F8 afterwards. That is one call and one
   approval per screen (none while **Allow changes in SAP** is on). The gateway must allow writes for you.
 

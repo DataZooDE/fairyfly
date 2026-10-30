@@ -6,6 +6,7 @@
 #include <spdlog/spdlog.h>
 
 #include "util.hpp"  // libffl: ffy::Error
+#include <spdlog/spdlog.h>
 
 namespace fairyfly::link {
 
@@ -145,6 +146,7 @@ json MainThreadTools::rpc(const std::string& method, const json& params, int tim
     if (method == "tools/call" && running_ && now_() - running_->started >= kStuckCallAfter)
         throw ffy::Error("fairyfly is busy: the call did not start; " + not_responding_text(in_flight_locked(*running_)) + ". " +
                          kNotRespondingHint);
+    job->queued_at = std::chrono::steady_clock::now();
     queue_.push_back(job);
     work_cv_.notify_one();
     const auto finished = [&] { return job->done || shutdown_; };
@@ -238,8 +240,20 @@ bool MainThreadTools::pump_once(std::chrono::milliseconds wait) {
     }
     json result;
     std::string error;
+    const auto execution_started = std::chrono::steady_clock::now();
     try {
         result = run(*job);  // on this (the main, COM) thread, outside the lock
+        if (job->method == "tools/call" && result.contains("result") && result["result"].is_object()) {
+            const auto finished = std::chrono::steady_clock::now();
+            result["result"]["_meta"]["fairyfly/desktop_timing"] = {
+                {"request_id", job->info.request_id},
+                {"queue_ms", std::chrono::duration_cast<std::chrono::milliseconds>(execution_started - job->queued_at).count()},
+                {"execute_ms", std::chrono::duration_cast<std::chrono::milliseconds>(finished - execution_started).count()}};
+            // Some MCP clients omit _meta from model-visible output. Keep the same value-free trace locally.
+            const auto& timing = result["result"]["_meta"]["fairyfly/desktop_timing"];
+            spdlog::info("desktop timing: request_id={} queue_ms={} execute_ms={}",
+                job->info.request_id, timing["queue_ms"].get<int64_t>(), timing["execute_ms"].get<int64_t>());
+        }
     } catch (const std::exception& e) {
         error = e.what();
     }

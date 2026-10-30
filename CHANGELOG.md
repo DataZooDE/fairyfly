@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 2026.10.30.1
+
+- Add compact references, guarded summary batches, and timing diagnostics for faster SAP workflows.
+- Prefer bounded current/named-tab reads; document guarded F4 searches and page-only table filtering.
+- Verify SE16 generated selection screens before accepting E4/035 notices; correct filtered row counts.
+- Add an MSIX replacement helper and live SAP acceptance runners.
+
 
 ### Releases attach the unsigned Microsoft Store package (MSIX)
 

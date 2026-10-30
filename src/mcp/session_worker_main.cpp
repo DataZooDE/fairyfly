@@ -107,7 +107,8 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
             result.data = {{"connection_id", *facts.connection_id}, {"session_identity", facts.session_identity},
                            {"system", facts.system}, {"client", facts.client}, {"user", facts.user},
                            {"transaction", facts.transaction}, {"program", facts.program},
-                           {"screen_number", facts.screen_number}, {"connection_name", target.connection_name}};
+                           {"screen_number", facts.screen_number}, {"window_title", facts.window_title},
+                           {"connection_name", target.connection_name}};
             return result;
         }
         // a mismatch and the read-only cap are refused before the handler (SAP) is touched

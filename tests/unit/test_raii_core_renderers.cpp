@@ -16,6 +16,26 @@ using json = nlohmann::json;
 using namespace fairyfly;
 using namespace fairyfly::sap;
 
+TEST_CASE("SE16 generation notice needs verified selection screen", "[status][actions][demo]") {
+    CHECK(is_se16_generated_selection_screen("SE16", "/1BCDWB/DBTSTCT", "1000"));
+    CHECK_FALSE(is_se16_generated_selection_screen("SE16", "SAPLSETB", "1000"));
+    CHECK_FALSE(is_se16_generated_selection_screen("SE16", "/1BCDWB/DBTSTCT", "0100"));
+    CHECK_FALSE(is_se16_generated_selection_screen("SE38", "/1BCDWB/DBTSTCT", "1000"));
+    CHECK_FALSE(is_se16_generated_selection_screen("SE16", "/1BCDWB/DB", "1000"));
+    CHECK_FALSE(is_se16_generated_selection_screen("", "", ""));
+    ActionStatus notice{"Program /1BCDWB/DBTSTCT does not exist yet in library", "S", "E4                  ", "035"};
+    REQUIRE(classify_action_status({}, notice, "wnd[0]", true).has_value());
+    notice.generated_selection_screen = true;
+    CHECK_FALSE(classify_action_status({}, notice, "wnd[0]", true).has_value());
+    notice.type = "E";
+    CHECK(classify_action_status({}, notice, "wnd[0]", true).has_value());
+    notice.type = "S";
+    notice.message_id = "S#";
+    notice.message_number = "343";
+    CHECK(classify_action_status({}, notice, "wnd[0]", true).has_value());
+    CHECK(classify_action_status({}, {"Not authorized", "S"}, "wnd[0]", true).has_value());
+}
+
 TEST_CASE("Action status classifies SAP rejections", "[status][actions]") {
     const ActionStatus before{"", ""};
     const ActionStatus readonly{"Action not possible in read-only mode", "S"};
