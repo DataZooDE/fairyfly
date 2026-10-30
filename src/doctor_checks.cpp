@@ -66,6 +66,19 @@ Check judge_data_dir(const std::string& dir, const std::string& migration_error,
     return {"data_dir", "pass", "Data directory " + dir};
 }
 
+Check judge_notifications(packaging::Package build, const std::string& app_id) {
+    if (app_id.empty())
+        return {"approval_notifications", "warn",
+                "No approval notifications: this Microsoft Store build runs without its package identity",
+                "Approval questions of the cloud link open the approval window instead of a notification.",
+                "Start fairyfly from the installed package: the Start menu, or `fairyfly` through its alias in a new terminal."};
+    if (build == packaging::Package::Msix)
+        return {"approval_notifications", "pass", "Approval notifications as " + app_id,
+                "The package's tray application; its manifest declares the toast activator (nothing is registered in HKCU)."};
+    return {"approval_notifications", "pass", "Approval notifications as " + app_id,
+            "Registered in HKCU (AppUserModelId and the toast activator's LocalServer32) when the cloud link starts."};
+}
+
 Check judge_processes(const ProcessScan& scan) {
     if (scan.matched > 0) {
         const char* which = scan.logon && scan.gui ? "saplogon.exe and sapgui.exe"

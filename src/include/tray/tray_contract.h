@@ -22,5 +22,11 @@ inline constexpr wchar_t kAppUserModelId[] = L"DataZoo.fairyfly";
 inline constexpr wchar_t kToastActivatorClsid[] = L"{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}";
 inline constexpr wchar_t kAppUserModelIdKeyPrefix[] = L"Software\\Classes\\AppUserModelId\\";
 inline constexpr wchar_t kClsidKeyPrefix[] = L"Software\\Classes\\CLSID\\";
+/// The argument COM starts the activator's server (fairyfly-tray.exe) with: LocalServer32 appends it (MSI), the MSIX
+/// manifest's com:ExeServer Arguments names it (packaging/msix/tests/Test-AppxManifest.ps1 compares them).
+inline constexpr wchar_t kComServerArgument[] = L"-Embedding";
+/// The MSIX package's tray application (the manifest's Application Id): <PackageFamilyName>!Tray is the AUMID of the
+/// approval toasts in a Store build (include/link/toast_identity.h); it declares the toast activator.
+inline constexpr wchar_t kPackageTrayApplicationId[] = L"Tray";
 
 }  // namespace fairyfly::tray::contract

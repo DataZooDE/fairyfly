@@ -9,7 +9,8 @@
   PublisherDisplayName DataZoo; CMakeLists.txt must take its cache defaults from cmake/msix_manifest.cmake.
   With identity values set the rendered manifest must be well-formed XML with no placeholder left, carry the identity
   (XML-escaped) and the MSIX version of packaging/msix_version.ps1, declare runFullTrust, the tray's StartupTask (instead
-  of the MSI's HKCU Run value), the fairyfly.exe execution alias for terminals, and the toast activator. Rendering must
+  of the MSI's HKCU Run value), the fairyfly.exe execution alias for terminals, and the toast activator with the
+  CLSID, COM server argument and application id the code uses (src/include/tray/tray_contract.h). Rendering must
   fail for a placeholder the template does not get a value for, an empty value, an identity name MSIX does not allow
   and a publisher that is no distinguished name.
 #>
@@ -125,6 +126,26 @@ try {
         $toast = One "//desktop:ToastNotificationActivation"
         $class = One "//com:ExeServer[@Executable='fairyfly-tray.exe' and @Arguments='-Embedding']/com:Class"
         Check ($toast -and $class -and $toast.ToastActivatorCLSID -eq $class.Id -and $class.Id -eq 'DAAF1065-EF17-4CFF-B3D2-EFAF70594959') 'toast activator CLSID declared as COM server and toast activation (tray_contract.h)'
+
+        # the code's side of the toast activation (src/include/tray/tray_contract.h): the CLSID the link registers its
+        # class object under, the argument the tray starter takes as COM's start, and the application whose AUMID
+        # (<PackageFamilyName>!Tray) the Store build's toasts use (src/include/link/toast_identity.h)
+        $contract = Get-Content (Join-Path $repo (Join-Path 'src' (Join-Path 'include' (Join-Path 'tray' 'tray_contract.h')))) -Raw
+        function ContractValue([string]$name) {
+            if ($contract -match ('inline constexpr wchar_t ' + $name + '\[\] = L"([^"]*)";')) { $Matches[1] } else { $null }
+        }
+        $codeClsid = ContractValue 'kToastActivatorClsid'
+        $codeArg = ContractValue 'kComServerArgument'
+        $codeApp = ContractValue 'kPackageTrayApplicationId'
+        Check ($null -ne $codeClsid -and $codeClsid -match '^\{[0-9A-Fa-f-]{36}\}$') "tray_contract.h kToastActivatorClsid '$codeClsid'"
+        $bare = if ($codeClsid) { $codeClsid.Trim('{', '}') } else { '' }
+        Check ($class -and $class.Id -eq $bare) "manifest com:Class Id '$($class.Id)' = the code's kToastActivatorClsid '$codeClsid'"
+        Check ($toast -and $toast.ToastActivatorCLSID -eq $bare) "manifest ToastActivatorCLSID '$($toast.ToastActivatorCLSID)' = the code's kToastActivatorClsid"
+        $server = One "//com:ExeServer[com:Class]"
+        Check ($server -and $codeArg -and $server.Arguments -ceq $codeArg) "manifest com:ExeServer Arguments '$($server.Arguments)' = the code's kComServerArgument '$codeArg' (fairyfly-tray.exe starts the link tray for it)"
+        $toastApp = One "/f:Package/f:Applications/f:Application[f:Extensions/desktop:Extension/desktop:ToastNotificationActivation]"
+        Check ($toastApp -and $codeApp -and $toastApp.Id -ceq $codeApp) "the application declaring the toast activation, '$($toastApp.Id)', is the code's kPackageTrayApplicationId '$codeApp' (AUMID <PackageFamilyName>!$codeApp)"
+        Check ($toastApp -and $toastApp.Executable -eq $server.Executable -and $toastApp.Id -eq ($xml.SelectSingleNode("/f:Package/f:Applications/f:Application[f:Extensions/com:Extension/com:ComServer]", $ns)).Id) 'the COM server is declared by the same application (fairyfly-tray.exe)'
 
         $cli = One "/f:Package/f:Applications/f:Application[@Executable='fairyfly.exe']"
         Check ($null -ne $cli) 'Application for the CLI (fairyfly.exe)'

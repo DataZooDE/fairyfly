@@ -140,7 +140,7 @@ thread parses, waits, talks to the network or draws the tray, and hands work to 
 | Update check | MCP tray | one background check, owns only a shared slot (a late answer after Quit goes nowhere) | detached |
 | Link supervisor | `link run` | pause marker, status file, (re)starts the agent thread | `LinkRuntime::stop` |
 | Link agent | `link run` | the outbound WebSocket (libffl); tool calls go to the main thread's pump | pause, reconnect, stop |
-| Notification activator | `link run` | an STA kept for the toast activator (`CoRegisterClassObject`) | the process |
+| Notification activator | `link run` | a multithreaded apartment kept for the toast activator (`CoRegisterClassObject`), registered as the link starts; under the AUMID `DataZoo.fairyfly` (MSI, registered in HKCU) or the package's `<family>!Tray` (MSIX, declared in the manifest; `include/link/toast_identity.h`) | the process |
 | Pairing helpers | `link pair` | a blocking network step that Ctrl+C may abandon; counted by `LinkRuntime::background_thread()` | finishes; `main()` exits with `_Exit` while any are left |
 
 Process-wide flags and counters of the link (stop requests, abandoned threads, the standing approval) live in one

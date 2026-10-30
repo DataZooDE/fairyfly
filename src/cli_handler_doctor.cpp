@@ -4,6 +4,9 @@
 #include "include/automation_engine.h"
 #include "include/config/data_dir.h"
 #include "include/text/utf8.h"
+#ifdef _WIN32
+#include "include/link/desktop_approval_win32.h"
+#endif
 
 #include <spdlog/spdlog.h>
 
@@ -20,6 +23,7 @@ Result CommandHandler::handle_doctor()
     checks.push_back(doctor::judge_desktop(station, desktop));
     checks.push_back(doctor::judge_processes(doctor::probe_processes()));
     checks.push_back(doctor::judge_client_security(doctor::probe_client_security()));
+    checks.push_back(doctor::judge_notifications(packaging::kPackage, text::wide_to_utf8_lossy(link::approval::this_process_toast_identity().app_id)));
 #else
     checks.push_back({"desktop_context", "info", "Non-Windows environment, desktop check skipped"});
     checks.push_back({"sapgui_processes", "info", "Non-Windows environment, process check skipped"});
