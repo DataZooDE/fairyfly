@@ -383,6 +383,10 @@ bool claim_tray(SingleInstance& guard, TrayHost& host, const TrayClaim& claim, c
         host.message_box(title, text);
         return false;
     }
+    if (claim.com_start) {
+        spdlog::info("tray: started by COM for a notification while the {} runs; leaving it alone", tray_name);
+        return false;
+    }
     if (!host.show_running_instance()) host.message_box(title, "The " + tray_name + " is already running.");
     return false;
 }

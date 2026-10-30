@@ -659,6 +659,8 @@ bool is_tray_child_process() { return config::process_env()(config::env::kTrayCh
 
 bool is_tray_launched_process() { return is_tray_child_process() && config::process_env()(config::env::kTrayLaunched) == "1"; }
 
+bool is_tray_com_start_process() { return is_tray_child_process() && config::process_env()(config::env::kTrayComStart) == "1"; }
+
 bool path_exists(const std::filesystem::path& path) {
     std::error_code ec;
     return std::filesystem::is_regular_file(path, ec);
@@ -675,6 +677,7 @@ void detach_console() { FreeConsole(); }
 void clear_tray_child_marker() {
     config::unset_process_env(config::env::kTrayChild);
     config::unset_process_env(config::env::kTrayLaunched);
+    config::unset_process_env(config::env::kTrayComStart);
 }
 
 std::string route_logging_to_file(const std::string& file_name) {
@@ -731,6 +734,7 @@ std::optional<int> settle_tray_start(TrayStart& start, TrayKind kind, const std:
     // From here on this process is the tray: no console, logs to a file.
     if (start.entry.is_child) detach_console();
     start.launched = is_tray_launched_process();
+    start.com_start = is_tray_com_start_process();
     clear_tray_child_marker();   // consoles and processes started from the tray are not tray children
     return std::nullopt;
 }

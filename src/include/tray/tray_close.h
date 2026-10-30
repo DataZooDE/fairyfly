@@ -6,7 +6,8 @@
 //   fairyfly-tray.exe --close [<folder>]       close fairyfly in <folder> before its files are replaced or removed
 //   fairyfly-tray.exe --uninstall [<folder>]   --close, then remove the Run values, settings and registrations
 //   fairyfly-tray.exe -Embedding               COM starts the toast activator's server: the link tray, as without
-//                                              arguments (it registers the activator once it runs)
+//                                              arguments (it registers the activator once it runs); a link tray
+//                                              that already runs is left alone (TrayClaim::com_start)
 //
 // The MSI runs the starter from its own Binary table (a temporary copy), so it names the install folder; without one
 // the starter's own folder is meant. Only processes started from that folder are closed: a Microsoft Store (MSIX)
@@ -27,6 +28,7 @@ struct StarterCommand {
     StarterMode mode = StarterMode::Start;
     std::wstring folder;              ///< Close/Uninstall: the install folder (no trailing separator)
     std::vector<std::wstring> args;   ///< Start: the arguments for fairyfly.exe
+    bool com_server = false;          ///< Start: COM started the toast activator's server (-Embedding)
 };
 
 /// A path compared by Windows rules: "\\?\" prefix dropped, '/' as '\', ASCII case folded, no trailing '\'.
@@ -51,7 +53,10 @@ inline bool is_com_server_start(const std::vector<std::wstring>& args) {
 
 inline StarterCommand parse_starter_command(std::vector<std::wstring> args, const std::wstring& own_folder) {
     StarterCommand command;
-    if (is_com_server_start(args)) return command;  // the link tray, as from the Start menu (no arguments)
+    if (is_com_server_start(args)) {  // the link tray, as from the Start menu (no arguments), marked as COM's start
+        command.com_server = true;
+        return command;
+    }
     if (!args.empty() && args.size() <= 2 && (args[0] == L"--close" || args[0] == L"--uninstall")) {
         command.mode = args[0] == L"--close" ? StarterMode::Close : StarterMode::Uninstall;
         command.folder = args.size() == 2 ? args[1] : own_folder;

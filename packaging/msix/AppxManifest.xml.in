@@ -69,12 +69,12 @@
         <com:Extension Category="windows.comServer">
           <com:ComServer>
             <com:ExeServer Executable="fairyfly-tray.exe" Arguments="-Embedding" DisplayName="fairyfly approvals">
-              <com:Class Id="DAAF1065-EF17-4CFF-B3D2-EFAF70594959" DisplayName="fairyfly approval notifications" />
+              <com:Class Id="17C79966-EDD0-4906-9F80-49A822C45334" DisplayName="fairyfly approval notifications" />
             </com:ExeServer>
           </com:ComServer>
         </com:Extension>
         <desktop:Extension Category="windows.toastNotificationActivation">
-          <desktop:ToastNotificationActivation ToastActivatorCLSID="DAAF1065-EF17-4CFF-B3D2-EFAF70594959" />
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="17C79966-EDD0-4906-9F80-49A822C45334" />
         </desktop:Extension>
       </Extensions>
     </Application>

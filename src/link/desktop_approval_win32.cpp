@@ -65,10 +65,10 @@ namespace wf = ABI::Windows::Foundation;
 namespace fs = std::filesystem;
 
 constexpr wchar_t kGroup[] = L"approval";
-/// The activator's CLSID as COM wants it, parsed from the one spelling (tray::contract::kToastActivatorClsid).
-GUID activator_clsid() {
+/// The activator's CLSID as COM wants it, parsed from this build's spelling (ToastIdentity::activator_clsid).
+GUID activator_clsid(const std::wstring& text) {
     GUID clsid{};
-    CLSIDFromString(kToastActivatorClsid, &clsid);
+    CLSIDFromString(text.c_str(), &clsid);
     return clsid;
 }
 
@@ -155,11 +155,11 @@ private:
         if (identity_.register_in_hkcu) {
             const std::wstring aumid_key = std::wstring(tray::contract::kAppUserModelIdKeyPrefix) + identity_.app_id;
             set_value(HKEY_CURRENT_USER, aumid_key, L"DisplayName", L"fairyfly");
-            set_value(HKEY_CURRENT_USER, aumid_key, L"CustomActivator", kToastActivatorClsid);
+            set_value(HKEY_CURRENT_USER, aumid_key, L"CustomActivator", identity_.activator_clsid);
             const fs::path starter = module_dir() / L"fairyfly-tray.exe";
             std::error_code ec;
             if (fs::exists(starter, ec))
-                set_value(HKEY_CURRENT_USER, std::wstring(tray::contract::kClsidKeyPrefix) + kToastActivatorClsid + L"\\LocalServer32", nullptr,
+                set_value(HKEY_CURRENT_USER, std::wstring(tray::contract::kClsidKeyPrefix) + identity_.activator_clsid + L"\\LocalServer32", nullptr,
                           L"\"" + starter.wstring() + L"\"");
         }
         if (identity_.set_process_app_id) SetCurrentProcessExplicitAppUserModelID(identity_.app_id.c_str());
@@ -167,7 +167,7 @@ private:
 
         std::promise<bool> registered;
         auto result = registered.get_future();
-        std::thread([p = std::move(registered)]() mutable {
+        std::thread([p = std::move(registered), clsid = activator_clsid(identity_.activator_clsid)]() mutable {
             if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
                 p.set_value(false);
                 return;
@@ -175,7 +175,7 @@ private:
             DWORD cookie = 0;
             HRESULT hr = E_FAIL;
             if (auto factory = Microsoft::WRL::Make<ActivatorFactory>())
-                hr = CoRegisterClassObject(activator_clsid(), factory.Get(), CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
+                hr = CoRegisterClassObject(clsid, factory.Get(), CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &cookie);
             if (FAILED(hr)) spdlog::warn("approval: the notification centre cannot answer (CoRegisterClassObject {})", hresult_hex(hr));
             p.set_value(true);  // the toast's own Activated event still answers while it is on screen
             // keeps the apartment (and the activator) for the life of the process

@@ -60,7 +60,7 @@ the same result and that each version is higher than the one before.
 
 - **Tray** (`fairyfly-tray.exe`): the Start-menu tile. Without arguments it starts `fairyfly link run --tray`, like the
   MSI's shortcut. Its `desktop:StartupTask` (`fairyflyLinkTray`) replaces the Run value. It also declares the
-  approval toast's COM activator (`{DAAF1065-…}`, `-Embedding`) as `com:ExeServer` + `desktop:ToastNotificationActivation`.
+  approval toast's COM activator (`{17C79966-…}`, the Store package's own, `-Embedding`) as `com:ExeServer` + `desktop:ToastNotificationActivation`.
   Its AUMID `DataZoo.fairyfly_73q587949tsjt!Tray` is the approval toasts' (see [Approval notifications](#approval-notifications)).
 - **Cli** (`fairyfly.exe`, `AppListEntry="none"`, console subsystem): `uap5:AppExecutionAlias` `fairyfly.exe`. This puts
   it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not needed.
@@ -172,6 +172,13 @@ for a clean test uninstall it first.
      notification centre and click Approve there: it still reaches the tray. **Details** opens the approval window.
      `%USERPROFILE%\.fairyfly\logs\link.log` shows `approval: notifications as DataZoo.fairyfly_73q587949tsjt!Tray`
      and no `CoRegisterClassObject` warning; Settings > System > Notifications lists "fairyfly".
+   - Side by side with the MSI (both installed, the MSI's link tray quit, the Store link tray running): the toast's
+     Approve in the notification centre still reaches the Store tray; with the MSI's link tray running and
+     `fairyfly link run` of the Store package in a terminal (another pairing, `--state`), each one's notification centre
+     clicks reach its own link.
+   - With the Store link tray running but its link not started yet (while `fairyfly link run` of the same pairing runs
+     in a terminal), let that console's approval toast go to the notification centre, end the console (Ctrl+C) before
+     the tray's link starts, then click Approve there: the tray's menu does not open (`link.log`: `started by COM`).
    - `reg query HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly` finds nothing (from a normal terminal, with no
      MSI installed): the Store build registers nothing in HKCU.
    - `fairyfly mcp setup` works (Windows 10 and 11, see the table).
@@ -268,8 +275,8 @@ and what it registers is decided in [src/include/link/toast_identity.h](../src/i
 
 | Build | AUMID of the toasts | Registration | Activator's server |
 |---|---|---|---|
-| `msi` | `DataZoo.fairyfly` (the Start-menu shortcut's) | the link writes `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly` (`CustomActivator`) and `…\CLSID\{DAAF1065-…}\LocalServer32` = `fairyfly-tray.exe`, and sets the AUMID on its process | COM appends `-Embedding` |
-| `msix` | `<PackageFamilyName>!Tray`, i.e. `DataZoo.fairyfly_73q587949tsjt!Tray`: the family part of `GetCurrentApplicationUserModelId` (`GetCurrentPackageFamilyName` as fallback) | none at run time: the manifest's `com:ExeServer` and `desktop:ToastNotificationActivation` on the `Tray` application. No HKCU value, no `SetCurrentProcessExplicitAppUserModelID` | the manifest's `Arguments="-Embedding"` |
+| `msi` | `DataZoo.fairyfly` (the Start-menu shortcut's) | the link writes `HKCU\Software\Classes\AppUserModelId\DataZoo.fairyfly` (`CustomActivator`) and `…\CLSID\{DAAF1065-…}\LocalServer32` (`kToastActivatorClsidMsi`) = `fairyfly-tray.exe`, and sets the AUMID on its process | COM appends `-Embedding` |
+| `msix` | `<PackageFamilyName>!Tray`, i.e. `DataZoo.fairyfly_73q587949tsjt!Tray`: the family part of `GetCurrentApplicationUserModelId` (`GetCurrentPackageFamilyName` as fallback) | none at run time: the manifest's `com:ExeServer` and `desktop:ToastNotificationActivation` on the `Tray` application, class `{17C79966-…}` (`kToastActivatorClsidMsix`). No HKCU value, no `SetCurrentProcessExplicitAppUserModelID` | the manifest's `Arguments="-Embedding"` |
 | `msix` run outside its package | none: no toast, the approval window asks; `fairyfly doctor` warns | none | - |
 
 `fairyfly link run` through the execution alias runs as the `Cli` application; its toasts are still the `Tray`
@@ -278,6 +285,25 @@ application's, which declares the activator. In both builds the running link reg
 in the notification centre reaches the running tray. When no tray runs, COM starts `fairyfly-tray.exe -Embedding`,
 which starts the link tray like the Start menu; once paired, that link registers the class and receives the click and
 drops it, because the question belonged to the process that ended (and was denied with it).
+
+**One activator per package.** The MSI and the Store package have different CLSIDs
+([tray_contract.h](../src/include/tray/tray_contract.h): `kToastActivatorClsidMsi` `{DAAF1065-EF17-4CFF-B3D2-EFAF70594959}`,
+`kToastActivatorClsidMsix` `{17C79966-EDD0-4906-9F80-49A822C45334}`; `toast_identity()` picks the build's). Up to
+2026.10.30.1 both used `{DAAF1065-…}`: with an MSI and the Store package installed side by side (for example the MSI's
+link tray and `fairyfly link run` through the Store alias), both links registered the same class, COM handed a click in
+the notification centre to either of them, and the one that had not asked dropped it (its nonce did not match), so the
+approval timed out and was denied. Now each package's clicks reach its own link. Two links of the **same** package
+(the tray and a console `fairyfly link run --state <other pairing>`) still share their package's class; the toast's own
+`Activated` event answers while the banner is on screen, only a click in the notification centre can reach the other
+one (and is then dropped). One link per pairing (`LINK_ALREADY_RUNNING`) keeps that rare.
+
+**`-Embedding` while the link tray runs.** COM starts the server only while no process holds the class. The link
+registers it as it starts and keeps it for the life of the process, so with the link tray running this happens only
+when its link has not run yet (unpaired, or waiting for a console link of the same pairing): there is no question
+this tray could answer, and the click's question was asked by a process that has ended. The second start
+(`FAIRYFLY_TRAY_COM_START`, set by `fairyfly-tray.exe -Embedding`) therefore leaves the running tray alone instead of
+opening its menu (`TrayClaim::com_start`); COM's activation then times out quietly. The link runs inside the tray
+process, so there is no link child to forward the click to.
 `fairyfly doctor` reports the AUMID as the check `approval_notifications`.
 [packaging/msix/tests/Test-AppxManifest.ps1](../packaging/msix/tests/Test-AppxManifest.ps1) checks that the manifest's
 CLSID, server argument and application id are the code's
