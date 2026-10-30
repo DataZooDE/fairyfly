@@ -10,6 +10,10 @@
 - Tests: the flaky "restart while stopped" unit test (failed once in CI on PR #131) waited for a flag that turns false
   before the server has returned; it now waits for the runner to hold no server, and a new test holds the server in
   its shutdown to cover the Restart in that window deterministically.
+- The tray no longer reaches a destroyed server: `run_mcp_http` destroyed the server before the runner dropped its
+  reference, so a status poll, Stop, Restart or "Allow changes" from the tray in that window used freed memory. The
+  server now calls `HttpRunHooks::on_control_end` before it is destroyed and the runner drops it there, under its lock
+  (crew review of #135; unit test with a fake that counts calls after the end).
 
 ## 2026.10.30.1
 

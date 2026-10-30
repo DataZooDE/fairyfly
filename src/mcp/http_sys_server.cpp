@@ -773,7 +773,18 @@ int run_mcp_http(HttpRunArgs args, bool* restart_requested) {
         return 2;
     }
     for (const auto& line : server.posture_lines()) log(line);
-    if (args.on_control) args.on_control(server);
+    // whoever got the server's control (the tray runner) drops it before `server` is destroyed, on every way out
+    struct ControlEnd {
+        const std::function<void()>& end;
+        bool armed = false;
+        ~ControlEnd() {
+            if (armed && end) end();
+        }
+    } control_end{args.on_control_end};
+    if (args.on_control) {
+        control_end.armed = true;
+        args.on_control(server);
+    }
 
     g_console_target = &server;
     SetConsoleCtrlHandler(console_ctrl, TRUE);
