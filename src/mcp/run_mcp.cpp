@@ -175,6 +175,9 @@ void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::
     dispatcher.set_launch_target_guard_override([lazy_handler](CommandDispatcher::LaunchTargetGuard guard) {
         lazy_handler().set_launch_target_guard(std::move(guard));
     });
+    dispatcher.set_startup_adoption_override([lazy_handler](const std::string& session_id) {
+        lazy_handler().set_startup_adoption_session(session_id);
+    });
     dispatcher.set_launch_rollback_override([lazy_handler](int id) {
         return lazy_handler().rollback_owner_launch(id);
     });

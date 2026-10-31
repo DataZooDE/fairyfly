@@ -69,15 +69,26 @@ Result LoginAttempts::begin(const std::string& connection) {
         return Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login cannot safely record its attempt. Log in to SAP manually.");
     }
 }
+Result LoginAttempts::begin_launch(const std::string& connection) {
+    const auto result = LoginAttempts(root_ / "startup-launch-attempts").begin(connection);
+    if (result.status == Result::Status::Success) return result;
+    return Result::fail("SAP_STARTUP_REQUIRES_ATTENTION",
+        "An earlier automatic SAP launch is incomplete or cannot be recorded safely; no additional window was opened.",
+        json::array({"Inspect SAP Logon and the local default connection. Start the intended session and log in manually, then retry the original task."}));
+}
 bool LoginAttempts::pending(const std::string& connection) const {
     if (root_.empty() || !root_.is_absolute() || connection.empty()) return false;
     std::error_code error;
-    return std::filesystem::exists(attempt_path(root_, connection), error) && !error;
+    const bool login = std::filesystem::exists(attempt_path(root_, connection), error) && !error;
+    error.clear();
+    const bool launch = std::filesystem::exists(attempt_path(root_ / "startup-launch-attempts", connection), error) && !error;
+    return login || launch;
 }
 bool LoginAttempts::clear(const std::string& connection) {
     if (root_.empty() || !root_.is_absolute() || connection.empty()) return false;
     try {
         std::filesystem::remove(attempt_path(root_, connection));
+        std::filesystem::remove(attempt_path(root_ / "startup-launch-attempts", connection));
         return true;
     } catch (...) { return false; }
 }

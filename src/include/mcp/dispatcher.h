@@ -115,6 +115,10 @@ public:
     void set_login_recovery_guard_override(LoginTargetGuardOverride hook) {
         login_recovery_guard_override_ = std::move(hook);
     }
+    using StartupAdoptionOverride = std::function<void(const std::string&)>;
+    void set_startup_adoption_override(StartupAdoptionOverride hook) {
+        startup_adoption_override_ = std::move(hook);
+    }
     using LaunchTargetGuard = std::function<bool(const audit::SapFacts&, const std::string& connection_name)>;
     using LaunchTargetGuardOverride = std::function<void(LaunchTargetGuard)>;
     void set_launch_target_guard_override(LaunchTargetGuardOverride hook) {
@@ -355,6 +359,8 @@ private:
     LoginTargetGuardOverride login_target_guard_override_;
     LoginTargetGuardOverride login_recovery_guard_override_;
     LaunchTargetGuardOverride launch_target_guard_override_;
+    StartupAdoptionOverride startup_adoption_override_;
+    std::string startup_adoption_session_;
     LaunchRollbackOverride launch_rollback_override_;
     AttachFinalizeOverride attach_finalize_override_;
     LoginLaneReserver login_lane_reserver_;

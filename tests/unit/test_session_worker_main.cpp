@@ -153,3 +153,29 @@ TEST_CASE("session worker: a call's handler settings are put back, also when the
         CHECK(handler.read_only());
     }
 }
+
+TEST_CASE("Worker discovery verifies prelogin rows for private startup selection", "[mcp][worker-main][startup][startup-prelogin]") {
+    fairyfly::test::TempDir dir("worker-prelogin-discovery");
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H";
+    scripting.facts.client = "000";
+    scripting.facts.transaction = "S000";
+    scripting.connection_description = "Bigfox";
+    const WorkerInvoker invoke = make_session_worker_invoker([&] {
+        auto engine = std::make_unique<fairyfly::test::FakeEngine>();
+        engine->scripting_fake = &scripting;
+        engine->application_info = {{"total_connections", 1}, {"total_sessions", 1}, {"connections", json::array({{{"id", "/app/con[0]"},
+            {"description", "Bigfox"}, {"sessions", json::array({{{"id", "/app/con[0]/ses[0]"}, {"user", ""}}})}}})}};
+        return std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(engine),
+            std::make_unique<cli::ConnectionManager>(dir.path().string()));
+    });
+    WorkerCall call;
+    call.enumerate = true;
+    const auto result = invoke(call);
+    REQUIRE(result.status == Result::Status::Success);
+    const auto& row = result.data.at("connections").at(0).at("sessions").at(0);
+    REQUIRE(row.contains("verified_target"));
+    CHECK(row["verified_target"]["user"] == "");
+    CHECK(row["verified_target"]["system"] == "A4H/000");
+    CHECK(row["verified_target"]["connection_name"] == "Bigfox");
+}

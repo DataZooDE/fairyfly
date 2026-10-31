@@ -91,8 +91,10 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
                     if (!session.is_object() || !session.contains("id") || !session["id"].is_string()) continue;
                     try {
                         const auto target = handler.peek_session_target("", session["id"].get<std::string>(), std::nullopt);
-                        if (target.ambiguous || target.facts.system.empty() || target.facts.client.empty() ||
-                            target.facts.user.empty()) continue;
+                        // Login windows are verified facts too. The broker does
+                        // not authorize them; the dispatcher hides them from public
+                        // listings and applies startup/owner guards before reuse.
+                        if (target.ambiguous || target.facts.system.empty() || target.facts.client.empty()) continue;
                         session["verified_target"] = {{"system", target.facts.system + "/" + target.facts.client},
                                                       {"user", target.facts.user},
                                                       {"connection_name", target.connection_name}};

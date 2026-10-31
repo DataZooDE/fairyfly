@@ -24,6 +24,8 @@
 #include "include/mcp/tool_catalog.h"
 
 #include "support/tool_specs.h"
+#include "support/temp_dir.h"
+#include "include/startup_coordination.h"
 using namespace fairyfly;
 using namespace fairyfly::mcp;
 using fairyfly::auth::authorize_call;
@@ -1811,6 +1813,65 @@ TEST_CASE("Owner startup reuses a verified session without exposing discovery id
     INFO(text_of(read));
     CHECK_FALSE(read.is_error);
     CHECK(f.attach_finalizations == std::vector<bool>{true});
+}
+
+TEST_CASE("Owner startup adopts a matching prelogin window through fresh launch guards", "[auth][startup][startup-prelogin]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    p.connections = {"Bigfox"};
+    p.sap_systems = {"A4H/001"};
+    std::string adopted;
+    bool ready = false;
+    int adoptions = 0;
+    d->set_startup_adoption_override([&](const std::string& id) { adopted = id; });
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = ready ? "A4H/001" : "A4H/000";
+        target.user = ready ? "OWNER" : "";
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions",
+                json::array({{{"id", "session-one"}, {"user", ""}}})}}})}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            REQUIRE(adopted == "session-one");
+            ++adoptions;
+            audit::SapFacts pre{"A4H", "000", "", "S000"};
+            REQUIRE(f.launch_guard);
+            REQUIRE(f.launch_guard(pre, "Bigfox"));
+            // SSO completes during adoption; no password needs submitting.
+            ready = true;
+            f.facts = audit::SapFacts{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+            f.facts->connection_id = 7;
+            f.facts->session_identity = "session-one|key|generation";
+            return Result::ok({{"connection_file_id", 7}, {"session_id", "session-one"}});
+        }
+        REQUIRE(argv[0] == "screen");
+        return Result::ok({{"screen", "SAP Easy Access"}});
+    };
+    SECTION("direct verified discovery") {}
+    SECTION("production broker listing callback") {
+        d->set_owner_session_listing_provider([](std::chrono::milliseconds, const std::function<bool()>&) {
+            return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", json::array({
+                {{"id", "session-one"}, {"user", ""}, {"verified_target", {{"system", "A4H/000"},
+                    {"user", ""}, {"connection_name", "Bigfox"}}}}})}}})}});
+        });
+    }
+    const auto public_list = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    REQUIRE_FALSE(public_list.is_error);
+    CHECK(text_of(public_list).find("session-one") == std::string::npos);
+    const auto result = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    INFO(text_of(result));
+    CHECK_FALSE(result.is_error);
+    CHECK(adoptions == 1);
+    CHECK(adopted.empty());
 }
 
 TEST_CASE("Owner startup preserves redaction after an inner login admission refusal", "[auth][startup][startup-owner-redaction]") {
@@ -3643,4 +3704,150 @@ TEST_CASE("dispatcher: lease acquisition is withheld if its SAP session disappea
     const auto result = d->call_tool("gui_session_lease", {{"action", "acquire"}, {"connection", 1}}, ctx_for(p));
     CHECK(result.is_error);
     CHECK_FALSE(leases->permits_write("ses-1|key|generation", p.id, "lease-A", SessionLeases::Clock::now()));
+}
+
+TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "[auth][startup][startup-prelogin][prelogin]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER", "A4H/001/OTHER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    p.id = "owner-token";
+    p.sap_identities = {"A4H/001/OWNER"};
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"Bigfox"};
+    auto routing = std::make_shared<SessionRoutingState>();
+    bool owned = true, stale = false, expired = false, missing = false, duplicate = false, foreign_extra = false;
+    std::string claim_token = p.id;
+    SECTION("own claim can complete login") {}
+    SECTION("own claim remains selectable beside a foreign window") { foreign_extra = true; }
+    SECTION("another token claim stays private") { owned = false; claim_token = "other-token"; }
+    SECTION("changed saved generation retires the stale claim and starts fresh") { owned = false; stale = true; }
+    SECTION("expired claim is not reused") { owned = false; expired = true; }
+    SECTION("unclaimed window stays private") { owned = false; missing = true; }
+    SECTION("two owned receipts for a raw session are ambiguous") { owned = false; duplicate = true; }
+    if (!missing) REQUIRE(routing->bind_prelogin(claim_token, 7, "session-one|key|generation",
+        SessionRoutingState::Clock::now() - (expired ? std::chrono::minutes(20) : std::chrono::minutes(0))));
+    if (duplicate) REQUIRE(routing->bind_prelogin(p.id, 8, "session-one|other-key|other-generation"));
+    d->set_routing_state(routing);
+    audit::SapFacts current{"A4H", "000", "", "S000"};
+    current.connection_id = 7;
+    current.session_identity = stale ? "session-one|key|replacement" : "session-one|key|generation";
+    f.facts_for = [&](std::optional<int> id) -> std::optional<audit::SapFacts> {
+        return id == current.connection_id ? std::optional<audit::SapFacts>(current) : std::nullopt;
+    };
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = current.system + "/" + current.client;
+        target.user = current.user;
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d->set_login_submit_guard_override([](std::function<Result()>) {});
+    d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> {
+        return std::make_shared<int>(1);
+    });
+    int logins = 0, reads = 0, launches = 0;
+    const bool fresh = !owned;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") {
+            auto sessions = json::array({{{"id", "session-one"}, {"user", ""}}});
+            if (foreign_extra) sessions.push_back({{"id", "foreign-session"}, {"user", ""}});
+            return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions", sessions}}})}});
+        }
+        if (argv[0] == "session" && argv[1] == "launch") {
+            REQUIRE(fresh);
+            REQUIRE(f.launch_guard);
+            audit::SapFacts launched{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+            launched.connection_id = 9;
+            launched.session_identity = "fresh-session|key|new-generation";
+            REQUIRE(f.launch_guard(launched, "Bigfox"));
+            current = launched;
+            ++launches;
+            return Result::ok({{"connection_file_id", 9}, {"session_id", "fresh-session"}});
+        }
+        if (argv[0] == "session" && argv[1] == "login") {
+            REQUIRE(owned);
+            audit::SapFacts anticipated = current;
+            anticipated.client = "001";
+            anticipated.user = "OWNER";
+            REQUIRE(f.login_guard);
+            REQUIRE(f.login_guard(anticipated, "Bigfox"));
+            current = anticipated;
+            current.transaction = "SESSION_MANAGER";
+            ++logins;
+            return Result::ok({{"connection_id", 7}, {"session_id", "session-one"}});
+        }
+        REQUIRE(argv[0] == "screen"); // no launch or attach: retain the owned receipt
+        ++reads;
+        return Result::ok({{"screen", "SAP Easy Access"}});
+    };
+    const auto result = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    INFO(text_of(result));
+    CHECK_FALSE(result.is_error);
+    CHECK(launches == (fresh ? 1 : 0));
+    CHECK(logins == (owned ? 1 : 0));
+    CHECK(reads == 1);
+    if (stale) CHECK_FALSE(routing->owns_prelogin(p.id, 7, "session-one|key|generation"));
+}
+
+TEST_CASE("Failed automatic launches cannot accumulate unclaimed windows", "[auth][startup][startup-launch-retry]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER", "A4H/001/OTHER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    p.id = "owner-token";
+    p.sap_identities = {"A4H/001/OWNER"};
+    p.sap_systems = {"A4H/001"};
+    p.connections = {"Bigfox"};
+    fairyfly::test::TempDir dir{"failed-startup-launch"};
+    auto attempts = std::make_shared<startup::LoginAttempts>(dir.path());
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); }, attempts);
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    int launches = 0;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}});
+        REQUIRE(argv[0] == "session");
+        REQUIRE(argv[1] == "launch");
+        ++launches;
+        return Result::fail("OWNER_SESSION_UNAVAILABLE", "Fresh window failed verification.");
+    };
+    const auto first = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    INFO(text_of(first));
+    CHECK(first.is_error);
+    const auto second = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    CHECK(second.is_error);
+    CHECK(text_of(second).find("SAP_STARTUP_REQUIRES_ATTENTION") != std::string::npos);
+    CHECK(launches == 1);
+    // The guard must survive an endpoint rebuild/process restart too.
+    auto restarted = std::make_shared<startup::LoginAttempts>(dir.path());
+    CHECK(restarted->pending("Bigfox\nprincipal:" + p.id));
+    // A different owner's normal work must not reset this caller's retry guard.
+    Principal other = p;
+    other.id = "other-owner-token";
+    other.sap_identities = {"A4H/001/OTHER"};
+    f.facts = audit::SapFacts{"A4H", "001", "OTHER", "SESSION_MANAGER"};
+    f.facts->connection_id = 9;
+    f.facts->session_identity = "other-session|key|generation";
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001";
+        target.user = "OTHER";
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    f.handler = [](const Argv&) { return Result::ok({{"screen", "SAP Easy Access"}}); };
+    const auto read = d->call_tool("gui_screen_read", {{"connection", 9}, {"no_tabs", true}}, ctx_for(other));
+    INFO(text_of(read));
+    REQUIRE_FALSE(read.is_error);
+    CHECK(restarted->pending("Bigfox\nprincipal:" + p.id));
 }

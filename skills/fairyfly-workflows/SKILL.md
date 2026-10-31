@@ -13,7 +13,7 @@ With on-demand startup available, begin an unfamiliar session with `gui_screen_r
 
 Relay startup errors with their corrective action: `SAP_AUTOSTART_DISABLED` needs the local **Allow automatic SAP startup** checkbox (tray) or `--allow-sap-startup` (headless); `SAP_AUTOSTART_ADMIN_DISABLED` needs the gateway administrator; `SAP_AUTOSTART_DEFAULT_MISSING` needs local `fairyfly session default "<SAP Logon entry>"` configuration. Do not repeatedly call tools to bypass these settings. An existing authenticated session can still be used without startup permission.
 
-For `SAP_LOGIN_REQUIRED`, stop automatic login attempts and ask the person at the desktop to complete SAP login/SSO. Follow missing-credential instructions locally; never ask for a password in chat. After cancellation or an uncertain startup outcome, inspect the reported connection before opening another. If a response says a session was prepared but the action did not run, observe its screen before continuing the already authorized task.
+For `SAP_LOGIN_REQUIRED` or `SAP_STARTUP_REQUIRES_ATTENTION`, stop automatic startup/login attempts and ask the person at the desktop to complete SAP login/SSO. Follow missing-credential instructions locally; never ask for a password in chat. After cancellation or an uncertain startup outcome, inspect the reported connection before opening another. If a response says a session was prepared but the action did not run, observe its screen before continuing the already authorized task.
 
 For known tasks prefer the current tab (`no_tabs=true`) or one named tab (`tab`); expand all tabs only when needed.
 

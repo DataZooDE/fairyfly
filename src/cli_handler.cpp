@@ -446,6 +446,10 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
             if (current.default_connection != policy.default_connection)
                 return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
             if (auto denied = startup::check(current)) return *denied;
+            if (startup_attempts_) {
+                const auto attempt = startup_attempts_->begin_launch(policy.default_connection);
+                if (attempt.status != Result::Status::Success) return attempt;
+            }
             return handle_launch(args.at("name").get<std::string>(), false, false);
         }
         if (name == "gui_session_login") {
@@ -628,10 +632,14 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 {
     pending_owner_launch_.reset();
     spdlog::info("Launching SAP connection: {}", connection_name);
-    auto result = engine_->launch_connection(connection_name, allow_sapshcut);
+    const bool adopting = !startup_adoption_session_.empty();
+    if (adopting && (attach_owner_identities_.empty() || !launch_target_guard_))
+        return Result::fail("SAP_STARTUP_UNAVAILABLE", "Existing-window startup requires a verified owner guard.");
+    auto result = adopting ? engine_->attach_by_session_id(startup_adoption_session_)
+                           : engine_->launch_connection(connection_name, allow_sapshcut);
 
     if (result.status == Result::Status::Success) {
-        spdlog::info("Successfully launched SAP connection: {}", connection_name);
+        spdlog::info("Successfully {} SAP connection: {}", adopting ? "selected existing" : "launched", connection_name);
 
         // Extract connection info from result
         std::string session_id = result.data.value("session_id", "");
@@ -649,6 +657,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
                             {"message", "the requested SAP connection is unavailable"}};
             return result;
         };
+        if (adopting && session_id != startup_adoption_session_) return owner_launch_unavailable();
         std::string checked_server_key;
         std::string checked_description;
         if (!attach_owner_identities_.empty()) {
@@ -689,7 +698,9 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         }
 
         // Create or update connection file
-        Connection conn = attach_owner_identities_.empty() ? conn_mgr_->create_or_update_connection(
+        // Adoption updates the existing saved receipt for this exact path;
+        // opening a new owner window still always creates a fresh receipt.
+        Connection conn = (attach_owner_identities_.empty() || adopting) ? conn_mgr_->create_or_update_connection(
             session_id,
             connection_id,
             description,
@@ -703,7 +714,9 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
-        result.data["message"] = fmt::format("Launched SAP connection '{}' (connection: {})", connection_name, conn.id);
+        result.data["message"] = fmt::format("{} SAP connection '{}' (connection: {})",
+            adopting ? "Reused" : "Launched", connection_name, conn.id);
+        if (adopting) result.data["adopted_existing_session"] = true;
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
 

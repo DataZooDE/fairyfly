@@ -52,6 +52,19 @@ Result prepare(const Policy& policy, const Operations& operations) {
             for (const auto& session : connection["sessions"]) candidates.push_back(session);
         }
     }
+    // A matching authenticated session already satisfies the task. Unrelated
+    // login windows must not force a new login or make that session ambiguous.
+    json authenticated = json::array();
+    bool readable = true;
+    for (const auto& candidate : candidates) {
+        if (!candidate.is_object() || !candidate.contains("user") || !candidate["user"].is_string() ||
+            !candidate.contains("id") || !candidate["id"].is_string() || candidate["id"].get<std::string>().empty()) {
+            readable = false;
+            break;
+        }
+        if (!candidate["user"].get<std::string>().empty()) authenticated.push_back(candidate);
+    }
+    if (readable && !authenticated.empty()) candidates = std::move(authenticated);
     if (candidates.size() > 1)
         return Result::fail("MULTIPLE_SESSIONS", "Several matching SAP sessions are open.",
             json::array({"Select the intended session explicitly with gui_session_attach or fairyfly session attach, then retry."}));

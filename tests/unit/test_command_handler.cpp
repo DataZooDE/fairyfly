@@ -387,3 +387,27 @@ TEST_CASE("command handler: fill with fields checks the session once per call", 
         CHECK(rig.engine->key_reads == 1);
     }
 }
+
+TEST_CASE("Native startup adoption never opens a new connection when its owner guard is unavailable", "[handler][startup][startup-prelogin]") {
+    Rig rig(false);
+    rig.handler->set_startup_adoption_session(kSession);
+    SECTION("no owner identities") {}
+    SECTION("no live target guard") { rig.handler->set_attach_owner_identities({"A4H/001/OWNER"}); }
+    const auto result = rig.handler->handle_launch("Bigfox");
+    CHECK(code_of(result) == "SAP_STARTUP_UNAVAILABLE");
+    CHECK(rig.engine->count("launch_connection") == 0);
+    CHECK(rig.engine->count("attach_by_session_id") == 0);
+}
+
+TEST_CASE("Native startup adoption rejects a different attached session before writing a receipt", "[handler][startup][startup-prelogin]") {
+    Rig rig(false);
+    rig.handler->set_startup_adoption_session(kSession);
+    rig.handler->set_attach_owner_identities({"A4H/001/OWNER"});
+    rig.handler->set_launch_target_guard([](const audit::SapFacts&, const std::string&) { return true; });
+    rig.engine->next = Result::ok({{"session_id", "/app/con[1]/ses[0]"}, {"connection_id", "/app/con[1]"}});
+    const auto result = rig.handler->handle_launch("Bigfox");
+    CHECK(code_of(result) == "OWNER_SESSION_UNAVAILABLE");
+    CHECK(rig.engine->count("attach_by_session_id") == 1);
+    CHECK(rig.engine->count("launch_connection") == 0);
+    CHECK(cli::ConnectionManager(rig.dir.path().string()).list_connections().empty());
+}

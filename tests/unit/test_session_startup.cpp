@@ -317,3 +317,30 @@ TEST_CASE("Gateway startup policy can be explicitly granted", "[startup][link]")
     const auto policy = ffy::policy::Engine::load("default:\n  allow_sap_startup: true\n");
     CHECK(policy.grants({"user@example.com", "chatgpt", {}}).to_json().value("allow_sap_startup", false));
 }
+
+TEST_CASE("Session preparation prefers an authenticated session over a stray login window", "[startup][startup-prelogin]") {
+    Preparation fixture;
+    fixture.session("DEVELOPER");
+    fixture.ready = true;
+    fixture.listed.data["connections"][0]["sessions"].push_back({{"id", "/app/con[1]/ses[0]"},
+        {"user", ""}, {"system", "A4H"}, {"client", "000"}});
+    const auto result = fairyfly::startup::prepare({false, false, false, "Bigfox"}, fixture.operations());
+    INFO(result.to_json().dump());
+    CHECK(result.status == fairyfly::Result::Status::Success);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach"});
+}
+
+TEST_CASE("Launch retry guards persist independently of credential submission", "[startup][startup-coordination]") {
+    fairyfly::test::TempDir temp{"startup-launch-attempts"};
+    fairyfly::startup::LoginAttempts first(temp.path()), next(temp.path());
+    REQUIRE(first.begin_launch("Bigfox").status == fairyfly::Result::Status::Success);
+    CHECK(next.pending("Bigfox"));
+    CHECK(next.begin_launch("Bigfox").error.value("code", "") == "SAP_STARTUP_REQUIRES_ATTENTION");
+    CHECK(next.begin("Bigfox").status == fairyfly::Result::Status::Success);
+    CHECK(next.begin("Bigfox").error.value("code", "") == "SAP_LOGIN_REQUIRED");
+    REQUIRE(next.clear("Bigfox"));
+    CHECK_FALSE(first.pending("Bigfox"));
+    CHECK(first.begin_launch("Bigfox").status == fairyfly::Result::Status::Success);
+    fairyfly::startup::LoginAttempts missing({});
+    CHECK(missing.begin_launch("Bigfox").status == fairyfly::Result::Status::Error);
+}

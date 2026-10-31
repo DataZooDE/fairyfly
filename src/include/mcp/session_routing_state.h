@@ -68,6 +68,26 @@ public:
         return true;
     }
 
+    struct PreloginTarget {
+        int connection;
+        std::string session_identity;
+    };
+    // Selection only: callers must recheck the exact saved generation and live
+    // SAP facts before using this receipt. Never disclose another token's claim.
+    std::optional<PreloginTarget> owned_prelogin_target(const std::string& token_id,
+            const std::string& session_id, Clock::time_point now = Clock::now()) const {
+        if (token_id.empty() || session_id.empty()) return std::nullopt;
+        std::lock_guard<std::mutex> lock(mu_);
+        std::optional<PreloginTarget> result;
+        for (const auto& [id, claim] : prelogin_) {
+            if (claim.token_id != token_id || claim.expires_at <= now ||
+                claim.session_identity.rfind(session_id + "|", 0) != 0) continue;
+            if (result) return std::nullopt; // stale generations are ambiguous
+            result = PreloginTarget{id, claim.session_identity};
+        }
+        return result;
+    }
+
     bool owns_prelogin(const std::string& token_id, int connection, const std::string& session_identity,
                        Clock::time_point now = Clock::now()) const {
         std::lock_guard<std::mutex> lock(mu_);

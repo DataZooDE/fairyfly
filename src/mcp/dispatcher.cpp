@@ -47,6 +47,13 @@ bool owner_boundary_error(const std::string& code) {
            code == "CONNECTION_DENIED" || code == "SESSION_TARGET_CHANGED";
 }
 
+// Multi-owner retry state belongs to the authenticated principal. Another
+// owner's successful screen read must never authorize a repeated attempt.
+std::string startup_attempt_key(const Policy& policy, const CallContext& ctx, const std::string& connection) {
+    return ctx.http && policy.owner_sap_identities.size() > 1
+        ? connection + "\nprincipal:" + ctx.principal.id : connection;
+}
+
 bool startup_identity_matches(const std::string& expected, const std::string& actual) {
     const auto split = expected.rfind('/');
     const auto other = actual.rfind('/');
@@ -574,8 +581,27 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::filter_owner_se
             }
             if (listing_interrupted())
                 return CallRefusal{"OWNER_IDENTITY_UNKNOWN", "the session list could not be verified in time"};
-            if (target.ambiguous || target.system.empty() || target.user.empty()) continue;
-            if (!owner_target_visible(principal, target)) continue;
+            const bool startup_prelogin = preparing_startup_ && target.user.empty() &&
+                !preparing_startup_->default_connection.empty() &&
+                sap::ConnectionLauncher::matches_connection_name(preparing_startup_->default_connection, target.connection_name);
+            if (target.ambiguous || target.system.empty() || (target.user.empty() && !startup_prelogin)) continue;
+            if (!startup_prelogin && !owner_target_visible(principal, target)) continue;
+            // A foreign, expired or unclaimed login window must not prevent
+            // this token from launching its own authorized session. Recheck
+            // the exact live generation when using any retained claim below.
+            if (startup_prelogin && policy_.owner_sap_identities.size() > 1) {
+                const auto claim = routing_state_->owned_prelogin_target(principal.id, query.session_id);
+                if (!claim) continue;
+                std::optional<audit::SapFacts> live;
+                try { if (facts_provider_) live = facts_provider_(claim->connection); } catch (...) {}
+                // Prune only a proven replacement. Unknown facts retain the
+                // fail-closed selection; never adopt a reused raw SAP id.
+                if (live && live->connection_id == claim->connection && !live->session_identity.empty() &&
+                    live->session_identity != claim->session_identity) {
+                    routing_state_->finish_prelogin(principal.id, claim->connection, claim->session_identity);
+                    continue;
+                }
+            }
             // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
             // Only return the ID that was resolved and metadata from that live resolution.
             if (!groups.count(target.connection_name)) groups[target.connection_name] = json::array();
@@ -1157,6 +1183,13 @@ std::optional<PolicyDecision> CommandDispatcher::session_target_refusal(const st
                                                                         const CallContext& ctx, const Principal& principal,
                                                                         std::optional<int> connection, bool prelogin_close) {
     if (prelogin_close) return std::nullopt; // exact live claim and name were checked above
+    // Internal startup uses the launch handler's fresh system/name/owner guard
+    // before any cache write, followed by the authenticated identity check.
+    // Other windows for this entry (including client 000 login screens) cannot
+    // authorize or deny the newly launched window. Preparation runs on the
+    // serialized dispatcher executor; these private flags are never client input.
+    if (owner_mode(ctx) && name == "gui_session_launch" && preparing_startup_)
+        return std::nullopt;
     const bool owner_target = owner_mode(ctx) && name == "gui_session_attach";
     if (owner_mode(ctx) && name == "gui_session_login")
         return std::nullopt; // the handler checks the stored credential and live connection before typing
@@ -1518,9 +1551,9 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
         return current;
     };
     if (startup_attempts_) {
-        operations.login_ready = [this, &policy, &ready_facts, &expected_identity] {
+        operations.login_ready = [this, &ctx, &policy, &ready_facts, &expected_identity] {
             if (!expected_identity.empty() && (!ready_facts || !startup_identity_matches(expected_identity, sap_identity(*ready_facts)))) return;
-            if (!startup_attempts_->clear(policy.default_connection))
+            if (!startup_attempts_->clear(startup_attempt_key(policy_, ctx, policy.default_connection)))
                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
         };
     }
@@ -1552,16 +1585,70 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
                 if (current.default_connection != policy.default_connection)
                     return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
                 if (auto denied = startup::check(current)) return *denied;
-                return startup_attempts_ ? startup_attempts_->begin(policy.default_connection)
+                return startup_attempts_ ? startup_attempts_->begin(startup_attempt_key(policy_, ctx, policy.default_connection))
                     : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
             });
             reset.installed = true;
+        }
+        std::string invoked_tool = tool;
+        json invoked_args = args;
+        struct ResetAdoption {
+            CommandDispatcher& dispatcher;
+            bool installed = false;
+            ~ResetAdoption() {
+                if (!installed) return;
+                dispatcher.startup_adoption_session_.clear();
+                try { dispatcher.startup_adoption_override_(""); } catch (...) {}
+            }
+        } adoption{*this};
+        if (tool == "gui_session_attach" && owner_mode(ctx) && target_resolver_) {
+            auth::SessionTarget target;
+            try { target = target_resolver_(TargetQuery{"", args.at("session_id").get<std::string>(), {}}); }
+            catch (...) { target.ambiguous = true; }
+            if (!target.ambiguous && target.user.empty() && !target.system.empty() &&
+                sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name)) {
+                if (!auth::scope_allows(ctx.principal, "session", "gui_session_attach"))
+                    return Result::fail("SCOPE_DENIED", "The token cannot attach the existing SAP login window.");
+                // A multi-owner endpoint may reuse only this token's exact
+                // existing receipt; do not attach or reassign an unclaimed one.
+                if (policy_.owner_sap_identities.size() > 1) {
+                    const auto claim = routing_state_->owned_prelogin_target(ctx.principal.id,
+                        args.at("session_id").get<std::string>());
+                    std::optional<audit::SapFacts> live;
+                    auth::SessionTarget saved;
+                    saved.ambiguous = true;
+                    if (claim) {
+                        try {
+                            if (facts_provider_) live = facts_provider_(claim->connection);
+                            saved = target_resolver_(TargetQuery{"", "", claim->connection});
+                        } catch (...) { live.reset(); }
+                    }
+                    std::optional<audit::SapFacts> checked;
+                    const json launch_args = {{"name", policy.default_connection}};
+                    if (!claim || !live || live->connection_id != claim->connection ||
+                        live->session_identity != claim->session_identity || saved.ambiguous ||
+                        !routing_state_->owns_prelogin(ctx.principal.id, claim->connection, live->session_identity) ||
+                        !sap::ConnectionLauncher::matches_connection_name(policy.default_connection, saved.connection_name) ||
+                        !owner_launch_target_allowed(*live, saved.connection_name, ctx.principal, launch_args, ctx, checked))
+                        return Result::fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+                    return Result::ok({{"connection_file_id", claim->connection}, {"session_id", args.at("session_id")},
+                        {"adopted_existing_session", true}});
+                }
+                if (!startup_adoption_override_)
+                    return Result::fail("SAP_STARTUP_UNAVAILABLE", "This endpoint cannot reuse an existing SAP login window.",
+                        json::array({"Complete login locally, then retry the task."}));
+                startup_adoption_session_ = args.at("session_id").get<std::string>();
+                adoption.installed = true;
+                startup_adoption_override_(startup_adoption_session_);
+                invoked_tool = "gui_session_launch";
+                invoked_args = {{"name", policy.default_connection}, {"login", false}};
+            }
         }
         std::string code;
         // These bounded internal steps belong to the already-admitted task.
         // Keep scope, target, owner and login checks, without billing a second
         // external call for discovery/launch/login.
-        const auto answer = run_single(tool, args, ctx, &code, nullptr, true);
+        const auto answer = run_single(invoked_tool, invoked_args, ctx, &code, nullptr, true);
         if (answer.structured && answer.structured->is_object()) {
             const auto& doc = *answer.structured;
             if (!answer.is_error && doc.value("status", "") == "success")
@@ -1795,7 +1882,7 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
     if (result.status == Result::Status::Success && !preparing_startup_ && startup_policy_ && startup_attempts_ &&
         facts_provider_ && target_resolver_ && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
         const auto startup_policy = startup_policy_();
-        if (startup_attempts_->pending(startup_policy.default_connection)) {
+        if (startup_attempts_->pending(startup_attempt_key(policy_, ctx, startup_policy.default_connection))) {
             // A manual login can make preparation unnecessary. Clear its block
             // only after an authorized successful call and fresh matching facts.
             // Never queue an ordinary read behind another process's startup.
@@ -1809,7 +1896,7 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
                         if (!target.ambiguous && target.system == live->system + "/" + live->client &&
                             target.user == live->user && sap::ConnectionLauncher::matches_connection_name(
                                 startup_policy.default_connection, target.connection_name))
-                            if (!startup_attempts_->clear(startup_policy.default_connection))
+                            if (!startup_attempts_->clear(startup_attempt_key(policy_, ctx, startup_policy.default_connection)))
                                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified manual login");
                     }
                 } catch (...) {} // Unknown identity leaves the block intact.
@@ -2175,6 +2262,17 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
                 return fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
             if (auto denied = startup::check(after_wait))
                 return fail(denied->error.value("code", "SAP_AUTOSTART_DISABLED"), denied->error.value("message", "SAP startup is disabled."));
+        }
+        // Record only after lifecycle admission, current policy and process
+        // readiness. Adoption never opens a new window and needs no marker.
+        if (name == "gui_session_launch" && preparing_startup_ &&
+            startup_adoption_session_.empty() && startup_attempts_) {
+            if (ctx.cancelled && ctx.cancelled()) return fail("CANCELLED", "SAP startup was cancelled before opening a session.");
+            const auto attempt = startup_attempts_->begin_launch(startup_attempt_key(policy_, ctx, preparing_startup_->default_connection));
+            if (attempt.status != Result::Status::Success)
+                return fail(attempt.error.value("code", "SAP_STARTUP_REQUIRES_ATTENTION"),
+                    attempt.error.value("message", "Inspect SAP and log in manually before retrying."),
+                    "Start the intended SAP session and log in manually, then retry the original task.");
         }
         result = invoke_selected(argv);
         // 5b. auto-attach (stdio, link)

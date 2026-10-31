@@ -18,6 +18,9 @@ class LoginAttempts {
 public:
     explicit LoginAttempts(std::filesystem::path root) : root_(std::move(root)) {}
     Result begin(const std::string& connection);
+    // Separate durable launch guard: a failed/uncertain launch must not create
+    // another invisible window on every task. Verified login clears both.
+    Result begin_launch(const std::string& connection);
     bool pending(const std::string& connection) const;
     bool clear(const std::string& connection);
 private:
