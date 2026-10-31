@@ -211,7 +211,9 @@ inline constexpr const char* kSapDefaultConnectionSetting = "sap_default_connect
 inline constexpr const char* kTraySettingNames[] = {kAutostartDefaultedSetting, kLinkAllowChangesSetting,
                                                  kAllowSapStartupSetting, kSapDefaultConnectionSetting};
 void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings);
-bool toggle_sap_startup(TraySettings* settings);
+class TrayHost;
+// Cancellation leaves the setting unchanged and is not a storage error.
+bool toggle_sap_startup(TraySettings* settings, TrayHost* host, const std::string& title);
 /// At the start of a tray that fairyfly-tray.exe started (`launched`): the very first time it turns "Start with Windows"
 /// on (and notes that, so turning it off in the menu stays off); a Run value of an older version that starts fairyfly.exe
 /// (a console at every logon) starts `program` instead, its options kept. Started any other way it changes nothing.

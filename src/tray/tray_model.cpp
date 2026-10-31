@@ -22,9 +22,13 @@ void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings) {
     menu.items.insert(position, std::move(entry));
 }
 
-bool toggle_sap_startup(TraySettings* settings) {
+bool toggle_sap_startup(TraySettings* settings, TrayHost* host, const std::string& title) {
     if (!settings) return false;
     const bool enabled = settings->get(kAllowSapStartupSetting).value_or("0") == "1";
+    if (!enabled && (!host || !host->confirm(title,
+        "Allow Fairyfly to start your local default SAP connection when a task needs a session and sign in using locally stored credentials or SSO?\n\n"
+        "This setting applies to both tray modes. Startup through the cloud link also needs your organisation's permission. "
+        "It does not allow changes to SAP data."))) return true;
     return settings->set(kAllowSapStartupSetting, enabled ? "0" : "1");
 }
 
