@@ -168,6 +168,15 @@ void TableFormatter::format_table_data(
 
     oss << "\n";
 
+    // --compact left out the columns that are empty in every returned row (formatters::hide_empty_columns)
+    if (table_data.contains("hidden_empty_columns") && table_data["hidden_empty_columns"].is_array() &&
+        !table_data["hidden_empty_columns"].empty()) {
+        std::string names;
+        for (const auto& name : table_data["hidden_empty_columns"])
+            if (name.is_string()) names += (names.empty() ? "" : ", ") + escape_markdown(name.get<std::string>());
+        oss << "_Columns empty in all rows hidden: " << names << "_\n\n";
+    }
+
     // Say what part of the control the rows above are.
     int total_rows = table_data.value("total_row_count", 0);
     if (table_data.contains("returned")) {

@@ -48,7 +48,7 @@ fairyfly transaction start SM37                  # open a transaction
 fairyfly screen read --output markdown           # read the screen
 fairyfly element fill "wnd[0]/usr/ctxtJOBNAME" "Z*" # type into a field (not allowed with --read-only)
 fairyfly key send f8                             # execute
-fairyfly screen read --only-tables                # read the result list
+fairyfly screen read --only tables                # read the result list
 ~~~
 
 Element ids such as `wnd[0]/usr/ctxtJOBNAME` come from `screen read` or `screen find`.
@@ -80,11 +80,11 @@ Make reads smaller and faster:
 
 | Option | Effect |
 |---|---|
-| `--only-fields`, `--only-buttons`, `--only-editable`, `--only-f4-fields`, `--only-tables` | Only one kind of element. Grids that an `--only-*` option drops are reported as `suppressed`. |
+| `--only buttons\|fields\|editable\|f4_fields\|tables` | Only one kind of element, with the values and meaning of the MCP tool's `only`. Grids and trees it drops are reported as `suppressed`. `--only editable` lists every changeable field with its id, empty ones included (read without `--compact`, as MCP does). The older flags `--only-fields`, `--only-buttons`, `--only-editable`, `--only-f4-fields`, `--only-tables` still work. |
 | `--text-contains TEXT`, `--id-contains ID`, `--type TYPE` | Filter elements (and grid rows) by text, id or type. With tabs, the result lists `tabs_searched`, `tabs_skipped` and a `text_filter_note`. |
 | `--tab ID`, `--no-tabs` | Read one tab only, or skip the other tabs. Reading all tabs selects each one in turn. |
 | `--max-rows N`, `--offset N` | Grid and table rows: 20 by default, up to 200. The result reports `next_offset` for paging. |
-| `--compact`, `--first` | Shorter Markdown (no ids, empty fields collapsed); only the first matching element. |
+| `--compact`, `--first` | Shorter Markdown (no ids, empty fields collapsed; grid and table columns that are empty in every returned row are left out unless the read is paged (`--offset` > 0 or `next_offset`; every page keeps the same columns), named in one line `_Columns empty in all rows hidden: ..._`, and in JSON/TOON under `hidden_empty_columns`); only the first matching element. |
 | `--skip-trees`, `--no-children` | Skip tree extraction or child elements, for slow or problematic screens. |
 
 Grid results report `Total Rows` (the control's row count), `Visible Rows (viewport)` (what SAP shows),
@@ -160,7 +160,7 @@ failed. `fairyfly --read-only batch` applies the read-only guard to every line.
 ~~~powershell
 @'
 transaction start SM37
-screen read --only-fields
+screen read --only fields
 '@ | fairyfly batch
 ~~~
 

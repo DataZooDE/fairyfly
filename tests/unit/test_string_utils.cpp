@@ -69,3 +69,12 @@ TEST_CASE("a check value with a vertical tab is not a check value, as before the
     CHECK_FALSE(fairyfly::sap::ComGuiElement::parse_check_value("\vtrue").has_value());
     CHECK(fairyfly::sap::ComGuiElement::parse_check_value(" true\r\n") == std::optional<bool>(true));
 }
+
+TEST_CASE("string utils: SAP's no-break and zero-width spaces become plain", "[utils][string][console]") {
+    CHECK(normalize_spaces("Work\xC2\xA0process") == "Work process");
+    CHECK(normalize_spaces("a\xE2\x80\xAF" "b\xE2\x80\x87" "c") == "a b c");
+    CHECK(normalize_spaces("\xEF\xBB\xBFli\xE2\x80\x8Bne") == "line");
+    CHECK(normalize_spaces("Gr\xC3\xBC\xC3\x9F" "e \xE2\x82\xAC") == "Gr\xC3\xBC\xC3\x9F" "e \xE2\x82\xAC");  // other UTF-8 kept
+    CHECK(normalize_spaces(std::string("x\xC2", 2)) == std::string("x\xC2", 2));                    // a cut sequence kept
+    CHECK(normalize_spaces("") == "");
+}

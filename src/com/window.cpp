@@ -4,6 +4,7 @@
 #include "include/com/wrapper_helpers.h"
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
+#include "include/text/utf8.h"
 
 namespace fairyfly {
 namespace sap {
@@ -50,6 +51,15 @@ int ComGuiWindow::get_child_count() const {
 ComGuiElementPtr ComGuiWindow::get_child(int index) const {
     auto children_col = children();
     return children_col.item(index);
+}
+
+ComGuiElementPtr ComGuiWindow::find_by_name(const std::string& name, const std::string& type) const {
+    if (!dispatch_ || name.empty() || type.empty()) return nullptr;
+    _variant_t result;
+    const std::wstring wide_name = text::utf8_to_wide_lossy(name), wide_type = text::utf8_to_wide_lossy(type);
+    const HRESULT hr = call_method(L"FindByName", {_variant_t(wide_name.c_str()), _variant_t(wide_type.c_str())}, result);
+    if (FAILED(hr) || result.vt != VT_DISPATCH || !result.pdispVal) return nullptr;  // not on this window
+    return ComGuiElement::create(IDispatchPtr(result.pdispVal));
 }
 
 SapGuiCollection<ComGuiElement> ComGuiWindow::children() const {

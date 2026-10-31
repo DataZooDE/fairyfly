@@ -283,6 +283,10 @@ public:
     /// Get children collection (modern STL-compatible API)
     SapGuiCollection<ComGuiElement> children() const;
 
+    /// GuiContainer.FindByName(name, type): the first element of this window with that name and type (e.g.
+    /// "DATABROWSE-TABLENAME", "GuiCTextField"), nullptr when there is none. Never throws.
+    ComGuiElementPtr find_by_name(const std::string& name, const std::string& type) const;
+
     /// Send virtual key to window (F3, F8, Enter, etc.)
     /// Common keys: 0=Enter, 1=F1, 4=F4, 8=F8, 3=F3, 12=F12, etc.
     /// Throws ComException if operation fails
