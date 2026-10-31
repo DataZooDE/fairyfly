@@ -55,11 +55,52 @@ TEST_CASE("SAP Logon startup requires opt in before process creation", "[handler
     CHECK(rig.engine->count("start_sap_logon") == 0);
 }
 
+TEST_CASE("CLI task reports disabled startup before touching SAP", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "Bigfox"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+    CHECK(rig.engine->count("execute_transaction") == 0);
+}
+
+TEST_CASE("CLI session preparation reuses logged-on default without launching", "[handler][startup]") {
+    Rig rig(false);
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H";
+    scripting.facts.client = "001";
+    scripting.facts.user = "DEVELOPER";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->application_info = {{"total_connections", 1}, {"total_sessions", 1},
+        {"connections", json::array({{{"id", "/app/con[0]"}, {"description", "Bigfox"},
+            {"sessions", json::array({{{"id", kSession}, {"user", "DEVELOPER"}}})}}})}};
+    rig.engine->next = Result::ok({{"session_id", kSession}, {"connection_id", "/app/con[0]"}});
+    const auto result = rig.handler->prepare_default_session({false, false, false, "Bigfox"});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("attach_by_session_id") == 1);
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
 TEST_CASE("Running SAP Logon never needs startup permission", "[handler][startup]") {
     Rig rig(false);
     const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});
     CHECK(result.status == Result::Status::Success);
     CHECK(rig.engine->count("start_sap_logon") == 0);
+}
+
+TEST_CASE("SAP Logon already starting is awaited even when automatic startup is disabled", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, true, "starting"};
+    rig.engine->on_call = [&](const std::string& call) {
+        if (call == "start_sap_logon") rig.engine->status = {true, true, "ready"};
+    };
+    const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("start_sap_logon") == 1);
+    CHECK_FALSE(rig.engine->startup_may_create_process);
 }
 
 TEST_CASE("SAP Logon startup reports engine failures", "[handler][startup]") {

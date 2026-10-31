@@ -3,6 +3,7 @@
 #include "include/constants.h"
 #include "include/com/wrapper.h"
 #include "include/com/utf8.h"
+#include "include/config/environment.h"
 #include <spdlog/spdlog.h>
 #include <fstream>
 #include <thread>
@@ -69,11 +70,10 @@ Result ConnectionLauncher::launch_sap_logon() {
                 candidates.emplace_back(path);
         }
     }
-    for (const wchar_t* variable : {L"ProgramW6432", L"ProgramFiles", L"ProgramFiles(x86)"}) {
-        wchar_t base[32768]{};
-        const DWORD count = GetEnvironmentVariableW(variable, base, 32768);
-        if (count > 0 && count < 32768)
-            candidates.push_back(std::wstring(base) + L"\\SAP\\FrontEnd\\SAPgui\\saplogon.exe");
+    for (const char* variable : {"ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"}) {
+        const auto base = config::Environment::process().get(variable);
+        if (!base.empty())
+            candidates.push_back(com::utf8_to_wide(base) + L"\\SAP\\FrontEnd\\SAPgui\\saplogon.exe");
     }
     std::wstring executable;
     for (const auto& path : candidates) {

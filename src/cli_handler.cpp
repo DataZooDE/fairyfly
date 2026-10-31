@@ -13,6 +13,7 @@
 #include "include/action_argument_checks.h"
 #include "include/login_flow.h"
 #include "include/credential_resolver.h"
+#include "include/session_preparation.h"
 #include "include/table_data_extractor.h"
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
@@ -198,6 +199,21 @@ std::vector<int> CommandHandler::prune_dead_entries()
 ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id,
                                                                     bool update_cache)
 {
+    if (!explicit_conn_id && automatic_startup_ && !preparing_session_) {
+        const auto existing = conn_mgr_->resolve_connection(std::nullopt);
+        if (sap_logon_missing() ||
+            (existing.status != ResultT<Connection>::Status::Success &&
+             existing.error.value("code", "") == "NO_CONNECTIONS")) {
+            const auto prepared = prepare_default_session(automatic_startup_());
+            if (prepared.status != Result::Status::Success) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = prepared.error;
+                return refused;
+            }
+            explicit_conn_id = prepared.data.at("connection_file_id").get<int>();
+        }
+    }
     if (auto missing = sap_logon_missing()) {
         ResultT<Connection> refused;
         refused.status = ResultT<Connection>::Status::Error;
@@ -357,21 +373,59 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
     return result;
 }
 
-Result CommandHandler::ensure_sap_logon(const startup::Policy& policy) {
+Result CommandHandler::ensure_sap_logon(const startup::Policy& policy, const std::function<bool()>& cancelled) {
+    if (cancelled && cancelled()) return Result::fail("CANCELLED", "SAP startup was cancelled.");
     engine_->refresh_application();
     const auto status = engine_->engine_status();
     if (status.available) return Result::ok();
-    if (status.sap_logon_running)
-        return Result::fail("SAP_SCRIPTING_UNAVAILABLE", "SAP Logon is running but its scripting interface is unavailable.",
-            json::array({"Enable SAP GUI scripting and resolve any SAP GUI Security prompt, then retry."}));
-    if (auto denied = startup::check(policy)) return *denied;
-    auto started = engine_->start_sap_logon();
+    if (!status.sap_logon_running)
+        if (auto denied = startup::check(policy)) return *denied;
+    // Waiting for an existing process is allowed without startup permission.
+    // The engine must not create a replacement if that process disappears.
+    auto started = engine_->start_sap_logon(!status.sap_logon_running, cancelled);
     if (started.status != Result::Status::Success) return started;
     engine_->refresh_application();
     if (!engine_->engine_status().available)
         return Result::fail("SAP_STARTUP_NOT_READY", "SAP Logon started but its scripting interface is not ready.",
             json::array({"Check the local SAP Logon window and any SAP GUI Security prompt, then retry."}));
     return Result::ok();
+}
+
+Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
+    if (preparing_session_)
+        return Result::fail("SAP_STARTUP_IN_PROGRESS", "SAP session preparation is already in progress.");
+    struct PreparationGuard {
+        bool& active;
+        explicit PreparationGuard(bool& value) : active(value) { active = true; }
+        ~PreparationGuard() { active = false; }
+    } guard(preparing_session_);
+    startup::Operations operations;
+    operations.current_policy = automatic_startup_;
+    if (startup_attempts_) {
+        operations.begin_login = [this, &policy] { return startup_attempts_->begin(policy.default_connection); };
+        operations.login_ready = [this, &policy] { startup_attempts_->clear(policy.default_connection); };
+    }
+    operations.invoke = [this, &policy](const std::string& name, const json& args) {
+        if (name == "gui_session_list") {
+            engine_->refresh_application();
+            return handle_list_all();
+        }
+        if (name == "gui_session_attach")
+            return handle_attach(0, args.at("session_id").get<std::string>());
+        if (name == "gui_session_launch") {
+            const auto ready = ensure_sap_logon(policy);
+            if (ready.status != Result::Status::Success) return ready;
+            return handle_launch(args.at("name").get<std::string>(), false, false);
+        }
+        if (name == "gui_session_login")
+            return handle_login("", args.at("connection").get<int>(), false, "", "fail");
+        return Result::fail("SAP_STARTUP_UNAVAILABLE", "Unsupported session preparation operation.");
+    };
+    operations.authenticated = [this](int id) {
+        const auto facts = audit_facts_for_connection(id);
+        return !facts.system.empty() && !facts.client.empty() && !facts.user.empty();
+    };
+    return startup::prepare(policy, operations);
 }
 
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)

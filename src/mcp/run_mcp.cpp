@@ -1,6 +1,7 @@
 #include "include/mcp/run_mcp.h"
 #include "include/audit_retention.h"
 #include "include/config/environment.h"
+#include "include/startup_settings.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -116,8 +117,12 @@ int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<in
 /// Each transport's view of the shared handler: SAP facts and targets for token authorization, the per-call
 /// read-only and selection-input overrides, the connection snapshot and the owner-mode guards, all through the
 /// handler that is configured on first use.
-void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler) {
+void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler,
+                        CommandDispatcher::StartupPolicyProvider startup_policy) {
     dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
+    dispatcher.set_session_startup(std::move(startup_policy),
+        [lazy_handler](const startup::Policy& policy) { return lazy_handler().ensure_sap_logon(policy); },
+        std::make_shared<startup::LoginAttempts>(config::Environment::process().data_dir()));
     // Token authorization needs the target SAP system and a per-call read-only override.
     dispatcher.set_sap_facts_provider([lazy_handler](std::optional<int> connection) -> std::optional<audit::SapFacts> {
         // Facts of the connection THIS call will use (never the merely attached session).
@@ -198,6 +203,7 @@ struct ServeContext {
     std::shared_ptr<std::function<void(int)>> on_connection_changed;
     std::shared_ptr<std::function<std::shared_ptr<void>(const std::string&, const std::function<bool()>&)>> on_login_lane_reserve;
     std::shared_ptr<std::shared_timed_mutex> control_probe_gate;
+    CommandDispatcher::StartupPolicyProvider startup_policy;
 };
 
 /// The remote transport (http.sys; TLS in the kernel with --tls): bearer tokens, the dispatcher per read-only mode,
@@ -232,6 +238,7 @@ int serve_http(const ServeContext& context) {
     http_args.read_only = read_only;
     http_args.read_only_cap = config::read_only_cap();
     const auto families = options.families;
+    const auto startup_policy = context.startup_policy;
     // Token mutations run in a separate CLI process. On a competing lease
     // acquire, read the current Credential Manager record before retaining
     // the old holder; a revoked/rotated/expired token cannot occupy the
@@ -247,7 +254,7 @@ int serve_http(const ServeContext& context) {
     auto shared_rate_limiter = std::make_shared<KeyedRateLimiter>();
     http_args.make_provider = [policy, hook, lazy_handler, families, session_leases, routing_state,
                                session_policy_state, shared_rate_limiter, on_login_lane_reserve,
-                               control_probe_gate, owner_listing](bool ro) mutable -> std::unique_ptr<ToolProvider> {
+                               control_probe_gate, owner_listing, startup_policy](bool ro) mutable -> std::unique_ptr<ToolProvider> {
         Policy p = policy;
         p.read_only = ro;
         p.allow_write = !ro;
@@ -257,7 +264,7 @@ int serve_http(const ServeContext& context) {
         dispatcher->set_routing_state(routing_state);
         dispatcher->set_session_policy_state(session_policy_state);
         dispatcher->set_shared_rate_limiter(shared_rate_limiter);
-        connect_to_handler(*dispatcher, lazy_handler);
+        connect_to_handler(*dispatcher, lazy_handler, startup_policy);
         if (*owner_listing) dispatcher->set_owner_session_listing_provider(*owner_listing);
         dispatcher->set_login_lane_reserver([on_login_lane_reserve](
             const std::string& key, const std::function<bool()>& cancelled) -> std::shared_ptr<void> {
@@ -424,15 +431,18 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     server_options.version = fairyfly::FAIRYFLY_VERSION;
     server_options.instructions = kInstructions;
     server_options.call_timeout_ms = options.call_timeout_ms;
+    CommandDispatcher::StartupPolicyProvider startup_policy = [tray_mode = options.startup_tray_mode, enabled = global.allow_sap_startup] {
+        return startup::read_local(tray_mode, enabled);
+    };
 
     if (http)
         return serve_http(ServeContext{options, policy, hook, lazy_handler, server_options, sink, read_only, hooks,
-                                       on_connection_changed, on_login_lane_reserve, control_probe_gate});
+                                       on_connection_changed, on_login_lane_reserve, control_probe_gate, startup_policy});
     if (link) {
         if (!hooks || !hooks->link_loop) return refuse("INVALID_ARGUMENT", "transport 'link' is started by `fairyfly link run`");
         CommandDispatcher link_dispatcher(make_registry_invoker(lazy_handler), policy, hook,
                                           retain_families(all_tool_specs(), options.families));
-        connect_to_handler(link_dispatcher, lazy_handler);
+        connect_to_handler(link_dispatcher, lazy_handler, startup_policy);
         // a call the gateway granted read-only runs with the handler's read-only guard on, even when this
         // desktop allows writes (--allow-write); the server value is restored after the call
         link_dispatcher.set_read_only_override([lazy_handler](bool ro) { lazy_handler().set_read_only(ro); });
@@ -453,7 +463,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
 
     CommandDispatcher dispatcher(make_registry_invoker(lazy_handler), policy, hook,
                                  retain_families(all_tool_specs(), options.families));
-    connect_to_handler(dispatcher, lazy_handler);
+    connect_to_handler(dispatcher, lazy_handler, startup_policy);
     StdioTransport transport;
 
     McpServer server(transport, dispatcher, server_options);

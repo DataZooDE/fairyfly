@@ -36,7 +36,7 @@ public:
     virtual void refresh_application() {}
     virtual EngineStatus engine_status() const { return {}; }
     /// Explicitly authorized on-demand startup; must return only after scripting is ready.
-    virtual Result start_sap_logon() {
+    virtual Result start_sap_logon(bool allow_process_start = true, const std::function<bool()>& cancelled = {}) {
         return Result::fail("SAP_STARTUP_UNSUPPORTED", "This automation engine cannot start SAP Logon.");
     }
     /// Counts the SAP Logon instances this engine has used: it changes when SAP Logon is replaced (restarted, or

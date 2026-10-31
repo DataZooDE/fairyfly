@@ -728,6 +728,7 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
 
     mcp::ServeOptions so;
     so.transport = "link";
+    so.startup_tray_mode = o.tray;
     // changes are possible: each needs the organisation's grant (per call) and the approval at this desktop; only
     // --read-only / FAIRYFLY_READ_ONLY make fairyfly refuse them here
     so.allow_write = !o.read_only && !config::read_only_cap();

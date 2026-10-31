@@ -112,7 +112,7 @@ public:
     Result attach_by_click(int timeout_seconds = 10) override;
     Result attach_by_session_id(const std::string& session_id) override;
     Result launch_connection(const std::string& connection_name, bool allow_sapshcut = false) override;
-    Result start_sap_logon() override;
+    Result start_sap_logon(bool allow_process_start = true, const std::function<bool()>& cancelled = {}) override;
     Result disconnect() override;
     Result close_current_session() override;
     bool is_connected() const override;

@@ -63,6 +63,14 @@ public:
     /// logged and ignored.
     using BeforeCall = std::function<std::shared_ptr<void>()>;
     void set_before_call(BeforeCall hook) { before_call_ = std::move(hook); }
+    using StartupPolicyProvider = std::function<startup::Policy()>;
+    using SapLogonStarter = std::function<Result(const startup::Policy&)>;
+    void set_session_startup(StartupPolicyProvider policy, SapLogonStarter starter,
+                             std::shared_ptr<startup::LoginAttempts> attempts = {}) {
+        startup_policy_ = std::move(policy);
+        sap_logon_starter_ = std::move(starter);
+        startup_attempts_ = std::move(attempts);
+    }
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }
     using OwnerSessionListingProvider = std::function<Result(std::chrono::milliseconds,
@@ -323,6 +331,11 @@ private:
     std::shared_ptr<KeyedRateLimiter> keyed_limiter_ = std::make_shared<KeyedRateLimiter>();
     SapFactsProvider facts_provider_;
     BeforeCall before_call_;
+    StartupPolicyProvider startup_policy_;
+    SapLogonStarter sap_logon_starter_;
+    std::shared_ptr<startup::LoginAttempts> startup_attempts_;
+    std::optional<startup::Policy> preparing_startup_;
+    Result prepare_implicit_session(const CallContext& ctx);
     ConnectionSnapshotProvider connection_snapshot_provider_;
     OwnerSessionListingProvider owner_session_listing_provider_;
     SessionTargetResolver target_resolver_;

@@ -422,7 +422,11 @@ void ComAutomationEngine::no_session_error(Result& result, bool used_sapshcut) c
     }
 }
 
-Result ComAutomationEngine::start_sap_logon() {
+Result ComAutomationEngine::start_sap_logon(bool allow_process_start, const std::function<bool()>& cancelled) {
+    const auto cancelled_result = [] {
+        return Result::fail("CANCELLED", "SAP startup was cancelled; inspect SAP Logon before retrying.");
+    };
+    if (cancelled && cancelled()) return cancelled_result();
     // Serialize startup across CLI, tray and MCP processes in this Windows session.
     HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\fairyfly.sap-logon-startup");
     if (!mutex) return Result::fail("SAP_STARTUP_LOCK_FAILED", "Cannot coordinate SAP Logon startup; retry the task.");
@@ -431,18 +435,27 @@ Result ComAutomationEngine::start_sap_logon() {
         bool acquired = false;
         ~Lock() { if (acquired) ReleaseMutex(handle); CloseHandle(handle); }
     } lock{mutex};
-    const DWORD wait = WaitForSingleObject(mutex, 20000);
-    lock.acquired = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+    const auto lock_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    do {
+        if (cancelled && cancelled()) return cancelled_result();
+        const DWORD wait = WaitForSingleObject(mutex, 50);
+        lock.acquired = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+        if (lock.acquired || wait == WAIT_FAILED) break;
+    } while (std::chrono::steady_clock::now() < lock_deadline);
     if (!lock.acquired)
         return Result::fail("SAP_STARTUP_BUSY", "Another Fairyfly process is starting SAP Logon; retry shortly.");
     refresh_application();
+    if (cancelled && cancelled()) return cancelled_result();
     if (engine_status().available) return Result::ok();
     if (!engine_status().sap_logon_running) {
+        if (!allow_process_start)
+            return Result::fail("SAP_LOGON_NOT_RUNNING", "SAP Logon closed while waiting. Start it manually or enable automatic SAP startup.");
         auto started = sap::ConnectionLauncher::launch_sap_logon();
         if (started.status != Result::Status::Success) return started;
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     do {
+        if (cancelled && cancelled()) return cancelled_result();
         refresh_application();
         if (engine_status().available) return Result::ok();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

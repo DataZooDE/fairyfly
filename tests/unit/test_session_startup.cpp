@@ -2,10 +2,47 @@
 #include "include/session_startup.h"
 #include "policy.hpp"
 #include "include/startup_settings.h"
+#include "include/session_preparation.h"
+#include "include/startup_coordination.h"
+#include "support/temp_dir.h"
+#include <thread>
 #include <map>
 
 using fairyfly::startup::Policy;
 using fairyfly::startup::check;
+
+TEST_CASE("Automatic login attempts survive a new store instance and require manual recovery", "[startup][startup-coordination]") {
+    fairyfly::test::TempDir temp{"startup-attempts"};
+    fairyfly::startup::LoginAttempts first(temp.path());
+    REQUIRE(first.begin("Bigfox").status == fairyfly::Result::Status::Success);
+    fairyfly::startup::LoginAttempts next(temp.path());
+    CHECK(next.begin("Bigfox").error.value("code", "") == "SAP_LOGIN_REQUIRED");
+    CHECK(next.begin("Other").status == fairyfly::Result::Status::Success);
+    REQUIRE(next.clear("Bigfox"));
+    CHECK(first.begin("Bigfox").status == fairyfly::Result::Status::Success);
+}
+
+TEST_CASE("Automatic login refuses if its retry protection cannot be persisted", "[startup][startup-coordination]") {
+    fairyfly::startup::LoginAttempts missing({});
+    CHECK(missing.begin("Bigfox").status == fairyfly::Result::Status::Error);
+}
+
+TEST_CASE("Preparation lock is bounded and observes cancellation", "[startup][startup-coordination]") {
+    auto first = fairyfly::startup::acquire_preparation_guard();
+    REQUIRE(first.token);
+    fairyfly::startup::PreparationGuard second;
+    std::thread contender([&] {
+        second = fairyfly::startup::acquire_preparation_guard({}, std::chrono::milliseconds(20));
+    });
+    contender.join();
+    CHECK_FALSE(second.token);
+    CHECK(second.result.error.value("code", "") == "SAP_STARTUP_BUSY");
+    first.token.reset();
+    CHECK(fairyfly::startup::acquire_preparation_guard().token);
+    const auto cancelled = fairyfly::startup::acquire_preparation_guard([] { return true; });
+    CHECK_FALSE(cancelled.token);
+    CHECK(cancelled.result.error.value("code", "") == "CANCELLED");
+}
 
 namespace {
 struct Settings : fairyfly::tray::TraySettings {
@@ -21,6 +58,133 @@ struct Settings : fairyfly::tray::TraySettings {
         return true;
     }
 };
+}
+
+namespace {
+struct Preparation {
+    fairyfly::Result listed = fairyfly::Result::ok({{"connections", fairyfly::json::array()}});
+    fairyfly::Result login = fairyfly::Result::ok();
+    bool ready = false, cancelled = false, attempted = false;
+    std::vector<std::string> calls;
+    fairyfly::startup::Operations operations() {
+        return {[this](const std::string& tool, const fairyfly::json& args) {
+            calls.push_back(tool);
+            if (tool == "gui_session_list") return listed;
+            if (tool == "gui_session_login") {
+                CHECK(args["multiple_logon"] == "fail");
+                ready = login.status == fairyfly::Result::Status::Success;
+                return login;
+            }
+            if (tool == "gui_session_launch") {
+                CHECK(args["name"] == "Bigfox");
+                CHECK_FALSE(args.value("login", false));
+            }
+            return fairyfly::Result::ok({{"connection_file_id", 7}});
+        }, [this](int id) { CHECK(id == 7); return ready; }, [this] { return cancelled; }, {},
+        [this] {
+            if (attempted) return fairyfly::Result::fail("SAP_LOGIN_REQUIRED", "Complete login manually.");
+            attempted = true;
+            return fairyfly::Result::ok();
+        }, [this] { attempted = false; }};
+    }
+    void session(const std::string& user) {
+        listed = fairyfly::Result::ok({{"connections", fairyfly::json::array({
+            {{"description", "Bigfox"}, {"sessions", fairyfly::json::array({
+                {{"id", "/app/con[0]/ses[0]"}, {"user", user}, {"system", "A4H"}, {"client", "001"}}})}}})}});
+    }
+};
+}
+
+TEST_CASE("Session preparation reuses an authenticated session without startup permission", "[startup]") {
+    Preparation fixture;
+    fixture.session("DEVELOPER");
+    fixture.ready = true;
+    const auto result = fairyfly::startup::prepare({false, true, false, "Bigfox"}, fixture.operations());
+    CHECK(result.status == fairyfly::Result::Status::Success);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach"});
+}
+
+TEST_CASE("Session preparation opens and logs in once then verifies readiness", "[startup]") {
+    Preparation fixture;
+    const auto result = fairyfly::startup::prepare({true, true, true, "Bigfox"}, fixture.operations());
+    CHECK(result.status == fairyfly::Result::Status::Success);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_launch", "gui_session_login"});
+    CHECK(result.data["connection_file_id"] == 7);
+}
+
+TEST_CASE("Session preparation allows SSO without looking up credentials", "[startup]") {
+    Preparation fixture;
+    fixture.ready = true; // the newly opened connection authenticated through SSO
+    CHECK(fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations()).status == fairyfly::Result::Status::Success);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_launch"});
+}
+
+TEST_CASE("Session preparation resumes a logged-out session without another launch", "[startup]") {
+    Preparation fixture;
+    fixture.session("");
+    CHECK(fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations()).status == fairyfly::Result::Status::Success);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach", "gui_session_login"});
+}
+
+TEST_CASE("Session preparation refuses before launch when either permission is missing", "[startup]") {
+    for (const auto policy : {Policy{false, false, false, "Bigfox"}, Policy{true, true, false, "Bigfox"}}) {
+        Preparation fixture;
+        CHECK(fairyfly::startup::prepare(policy, fixture.operations()).status == fairyfly::Result::Status::Error);
+        CHECK(fixture.calls == std::vector<std::string>{"gui_session_list"});
+    }
+}
+
+TEST_CASE("Session preparation preserves login failure and never retries it", "[startup]") {
+    Preparation fixture;
+    fixture.login = fairyfly::Result::fail("LOGIN_FAILED", "Check credentials locally.");
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations());
+    CHECK(result.error["code"] == "LOGIN_FAILED");
+    CHECK(result.error["connection_open"] == true);
+    CHECK(fixture.calls.size() == 3);
+}
+
+TEST_CASE("Cancelled session preparation performs no operations", "[startup]") {
+    Preparation fixture;
+    fixture.cancelled = true;
+    CHECK(fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations()).status == fairyfly::Result::Status::Error);
+    CHECK(fixture.calls.empty());
+}
+
+TEST_CASE("Later requests do not retry a failed automatic login", "[startup]") {
+    Preparation fixture;
+    fixture.session("");
+    fixture.login = fairyfly::Result::fail("LOGIN_FAILED", "Check credentials locally.");
+    const Policy policy{true, false, false, "Bigfox"};
+    REQUIRE(fairyfly::startup::prepare(policy, fixture.operations()).status == fairyfly::Result::Status::Error);
+    fixture.calls.clear();
+    const auto again = fairyfly::startup::prepare(policy, fixture.operations());
+    CHECK(again.error.value("code", "") == "SAP_LOGIN_REQUIRED");
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach"});
+}
+
+TEST_CASE("Cancellation after launch retains the opened connection and never logs in", "[startup]") {
+    Preparation fixture;
+    auto operations = fixture.operations();
+    const auto invoke = operations.invoke;
+    operations.invoke = [&](const std::string& name, const fairyfly::json& args) {
+        const auto result = invoke(name, args);
+        if (name == "gui_session_launch") fixture.cancelled = true;
+        return result;
+    };
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, operations);
+    CHECK(result.error.value("code", "") == "CANCELLED");
+    CHECK(result.error.value("connection_open", false));
+    CHECK(result.error.value("connection_file_id", -1) == 7);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_launch"});
+}
+
+TEST_CASE("Startup checks the current local setting before mutation", "[startup]") {
+    Preparation fixture;
+    auto operations = fixture.operations();
+    operations.current_policy = [] { return Policy{false, false, false, "Bigfox"}; };
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, operations);
+    CHECK(result.status == fairyfly::Result::Status::Error);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list"});
 }
 
 TEST_CASE("Startup settings use checkbox for trays and explicit flag for headless runs", "[startup]") {

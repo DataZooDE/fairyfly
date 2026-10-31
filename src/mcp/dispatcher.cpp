@@ -1,6 +1,7 @@
 #include "include/mcp/dispatcher.h"
 
 #include "include/sap_identity.h"
+#include "include/session_preparation.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -1462,6 +1463,55 @@ std::optional<ToolResult> CommandDispatcher::admit_live_session(const std::strin
     return std::nullopt;
 }
 
+Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
+    auto policy = startup_policy_();
+    policy.link_request = ctx.link_request;
+    policy.gateway_allowed = ctx.sap_startup_granted;
+    preparing_startup_ = policy;
+    struct Reset {
+        std::optional<startup::Policy>& policy;
+        ~Reset() { policy.reset(); }
+    } reset{preparing_startup_};
+    startup::Operations operations;
+    operations.cancelled = ctx.cancelled;
+    operations.current_policy = [this, &ctx] {
+        auto current = startup_policy_();
+        current.link_request = ctx.link_request;
+        current.gateway_allowed = ctx.sap_startup_granted;
+        return current;
+    };
+    if (startup_attempts_) {
+        operations.begin_login = [this, &policy] { return startup_attempts_->begin(policy.default_connection); };
+        operations.login_ready = [this, &policy] { startup_attempts_->clear(policy.default_connection); };
+    }
+    operations.authenticated = [this](int id) {
+        const auto facts = facts_provider_ ? facts_provider_(id) : std::nullopt;
+        return facts && facts->connection_id == id && !facts->system.empty() &&
+            !facts->client.empty() && !facts->user.empty();
+    };
+    operations.invoke = [this, &ctx](const std::string& tool, const json& args) {
+        std::string code;
+        const auto answer = run_single(tool, args, ctx, &code);
+        if (answer.structured && answer.structured->is_object()) {
+            const auto& doc = *answer.structured;
+            if (!answer.is_error && doc.value("status", "") == "success")
+                return Result::ok(doc.value("data", json()));
+            if (answer.is_error && doc.contains("error") && doc["error"].is_object()) {
+                Result failure;
+                failure.error = doc["error"];
+                return failure;
+            }
+        }
+        std::string message;
+        for (const auto& content : answer.content)
+            if (content.is_object() && content.value("type", "") == "text")
+                message += content.value("text", "");
+        return Result::fail(code.empty() ? "SAP_STARTUP_UNAVAILABLE" : code,
+            message.empty() ? "SAP session preparation returned no usable result." : message);
+    };
+    return startup::prepare(policy, operations);
+}
+
 std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
                                                         const CallContext& ctx, CallState& state, const RefuseCall& refuse) {
     const auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
@@ -1496,6 +1546,23 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     selection_input = auth::selection_input_path(ctx.principal, name, policy_);
     if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
         return fail(refused->code, refused->message, refused->hint);
+    if (startup_policy_ && !preparing_startup_ && accepts_connection && !record.connection &&
+        !args.contains("connection") && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
+        const auto live = facts_provider_ ? facts_provider_(std::nullopt) : std::nullopt;
+        if (!live || live->system.empty() || live->client.empty() || live->user.empty()) {
+            const auto prepared = prepare_implicit_session(ctx);
+            if (prepared.status != Result::Status::Success)
+                return fail(prepared.error.value("code", "SAP_STARTUP_UNAVAILABLE"),
+                    prepared.error.value("message", "SAP session preparation failed."),
+                    prepared.error.contains("suggestions") ? prepared.error["suggestions"].dump() : "");
+            record.connection = prepared.data.at("connection_file_id").get<int>();
+            // Continue through original target authorization and owner/lease checks.
+            // Internal lifecycle calls have independently passed their own admission.
+            args["connection"] = *record.connection;
+            implicit_sticky = false;
+            sticky_target.reset();
+        }
+    }
     const Principal& principal = ctx.principal;
     // stdio and link (auto_attach): the default connection's session is gone. Attach to the only open SAP GUI session
     // when its system/client/user is `recorded` ("SYS/CLIENT/USER"), make it the default bound to that session and
@@ -1940,6 +2007,20 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
         try { result = owner_session_listing_provider_(owner_listing_budget_, ctx.cancelled); }
         catch (...) { return fail("OWNER_IDENTITY_UNKNOWN", "the session list cannot be verified"); }
     } else {
+        if (name == "gui_session_launch" && preparing_startup_) {
+            if (ctx.cancelled && ctx.cancelled()) return fail("CANCELLED", "SAP startup was cancelled.");
+            auto current = startup_policy_();
+            current.link_request = ctx.link_request;
+            current.gateway_allowed = ctx.sap_startup_granted;
+            if (auto denied = startup::check(current))
+                return fail(denied->error.value("code", "SAP_AUTOSTART_DISABLED"),
+                    denied->error.value("message", "SAP startup is disabled."));
+            if (!sap_logon_starter_) return fail("SAP_STARTUP_UNAVAILABLE", "SAP startup is unavailable on this endpoint.");
+            const auto ready = sap_logon_starter_(current);
+            if (ready.status != Result::Status::Success)
+                return fail(ready.error.value("code", "SAP_STARTUP_UNAVAILABLE"),
+                    ready.error.value("message", "SAP Logon could not be prepared."));
+        }
         result = invoke_selected(argv);
         // 5b. auto-attach (stdio, link)
         if (policy_.auto_attach && !ctx.http && !worker_bound && accepts_connection && !record.connection &&

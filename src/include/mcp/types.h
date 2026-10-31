@@ -147,6 +147,7 @@ struct Policy {
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).
 struct ServeOptions {
+    bool startup_tray_mode = false; ///< internal: use shared local startup checkbox instead of headless CLI opt-in
     bool read_only = false;
     bool allow_write = false;
     std::optional<int> default_connection;

@@ -10,6 +10,7 @@
 #include "screen_snapshot.h"
 #include "login_flow.h"
 #include "session_startup.h"
+#include "startup_coordination.h"
 #include <string>
 #include <cstdint>
 #include <map>
@@ -108,6 +109,9 @@ private:
     std::optional<Connection> pending_owner_attach_;
     std::string expected_mcp_session_, expected_mcp_owner_;  ///< one MCP call, checked after selecting the live session
     std::unique_ptr<cred::CredentialStore> credential_store_;
+    std::function<startup::Policy()> automatic_startup_;
+    std::shared_ptr<startup::LoginAttempts> startup_attempts_;
+    bool preparing_session_ = false;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
     // the parts of handle_login (cli_handler.cpp)
@@ -239,7 +243,13 @@ public:
                                           std::optional<int> connection) const noexcept;
 
     // Connection management - two modes
-    Result ensure_sap_logon(const startup::Policy& policy);
+    Result ensure_sap_logon(const startup::Policy& policy, const std::function<bool()>& cancelled = {});
+    Result prepare_default_session(const startup::Policy& policy);
+    void set_automatic_startup(std::function<startup::Policy()> policy,
+                              std::shared_ptr<startup::LoginAttempts> attempts = {}) {
+        automatic_startup_ = std::move(policy);
+        startup_attempts_ = std::move(attempts);
+    }
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded
     /// (credential_name empty = Credential Manager entry keyed by the connection name).
