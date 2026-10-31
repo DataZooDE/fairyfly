@@ -162,7 +162,7 @@ void LinkTrayController::on_tick() {
 
 void LinkTrayController::on_action(TrayAction action) {
     if (action == TrayAction::ToggleSapStartup) {
-        if (!toggle_sap_startup(services_.settings)) notify("Could not save the automatic SAP startup setting.");
+        if (!toggle_sap_startup(services_.settings, services_.host, "fairyfly link")) notify("Could not save the automatic SAP startup setting.");
         return;
     }
     const TrayActions actions{services_.opener, services_.launcher, paths_.exe,

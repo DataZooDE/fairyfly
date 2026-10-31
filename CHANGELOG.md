@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.31.3
+
+- Both tray modes ask for confirmation before enabling automatic SAP startup. Declining preserves the setting; disabling remains immediate, consistent with SAP writes.
+
 ## 2026.10.31.2
 
 - Place **Allow automatic SAP startup** directly below the SAP permissions checkbox in both tray modes, with normal checkbox styling. The status line remains first and bold.
