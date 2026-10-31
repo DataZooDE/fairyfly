@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2026.10.31
+
+- Microsoft Store package requires Windows 10 22H2 (10.0.19045) or later.
+- MSI and Store package use separate toast activators, so approvals work with both installed.
+- MCP tray: Restart right after Stop is no longer lost; the tray never reaches a destroyed server.
+
 
 ### Microsoft Store: Windows 10 22H2 or later
 
