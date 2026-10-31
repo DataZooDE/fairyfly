@@ -112,6 +112,10 @@ try {
         $expectedVersion = (& $msixVersion -Version '2026.10.24.1' | Out-String).Trim()
         Check ($id -and $id.Version -eq $expectedVersion -and $expectedVersion -eq '2026.10.2401.0') "Identity Version '$($id.Version)' = msix_version.ps1 '$expectedVersion'"
         Check ($id -and $id.ProcessorArchitecture -eq 'x64') 'x64 package'
+        # the Store offers fairyfly only on the Windows versions it is tested on: Windows 10 22H2 (19045) and later
+        $family = One "/f:Package/f:Dependencies/f:TargetDeviceFamily[@Name='Windows.Desktop']"
+        Check ($null -ne $family -and $family.MinVersion -eq '10.0.19045.0') "TargetDeviceFamily MinVersion '$($family.MinVersion)' = 10.0.19045.0 (Windows 10 22H2)"
+        Check ($null -ne $family -and [version]$family.MaxVersionTested -ge [version]$family.MinVersion) "MaxVersionTested '$($family.MaxVersionTested)' >= MinVersion"
         $tile = One "/f:Package/f:Applications/f:Application[@Id='Tray']/uap:VisualElements/uap:DefaultTile"
         Check ($null -ne $tile -and $tile.Wide310x150Logo -eq 'Assets\Wide310x150Logo.png') 'the tray tile has the wide logo (Assets\Wide310x150Logo.png)'
         Check ((One '/f:Package/f:Properties/f:PublisherDisplayName').InnerText -eq $display) 'PublisherDisplayName (XML-escaped and read back)'
