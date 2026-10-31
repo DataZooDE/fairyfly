@@ -1774,7 +1774,7 @@ TEST_CASE("Owner startup reuses a verified session without exposing discovery id
     Policy policy;
     policy.owner_sap_identities = {"A4H/001/OWNER"};
     auto d = f.make(policy);
-    Principal p = token("agent", {"screen", "session"});
+    Principal p = token("agent", {"screen", "session", "batch"});
     f.handler = [&](const Argv& argv) {
         if (argv[0] == "session" && argv[1] == "list")
             return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions",
@@ -1802,7 +1802,12 @@ TEST_CASE("Owner startup reuses a verified session without exposing discovery id
     REQUIRE_FALSE(external.is_error);
     CHECK(text_of(external).find("UNTRUSTED") == std::string::npos);
     CHECK(text_of(external).find("OWNER") == std::string::npos);
-    const auto read = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    bool batch = false;
+    SECTION("single read") {}
+    SECTION("implicit read batch") { batch = true; }
+    const auto read = batch
+        ? d->call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}}})}}, ctx_for(p))
+        : d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
     INFO(text_of(read));
     CHECK_FALSE(read.is_error);
     CHECK(f.attach_finalizations == std::vector<bool>{true});
@@ -3496,6 +3501,96 @@ TEST_CASE("dispatcher: owner batch binds one connection and one lease", "[auth][
     mixed[1]["arguments"]["connection"] = 2;
     const auto denied = d->call_tool("gui_batch", {{"connection", 1}, {"lease_id", "lease-A"}, {"items", mixed}}, ctx_for(p));
     CHECK(denied.is_error);
+    CHECK(f.calls.empty());
+}
+
+TEST_CASE("dispatcher: startup checks every batch action for a fresh observation", "[auth][startup][batch][batch-review]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    int actions = 0;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            audit::SapFacts ready{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+            ready.connection_id = 7;
+            ready.session_identity = "session-seven|key|generation";
+            REQUIRE(f.launch_guard);
+            REQUIRE(f.launch_guard(ready, "Bigfox"));
+            f.facts = ready;
+            return Result::ok({{"connection_file_id", 7}, {"session_id", "session-seven"}});
+        }
+        ++actions;
+        return Result::ok();
+    };
+    Principal p = token("agent", {"batch", "screen", "key", "session"});
+    p.id = "token-A";
+    p.connections = {"Bigfox"};
+    const json items = json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}},
+        {{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}}});
+    const auto result = d->call_tool("gui_batch", {{"items", items}}, ctx_for(p));
+    INFO(text_of(result));
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 7);
+    CHECK((*result.structured)["error"]["original_operation_run"] == false);
+    CHECK(actions == 0);
+}
+
+TEST_CASE("dispatcher: implicit batch charges each read once", "[auth][startup][batch][batch-review]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one|key|generation";
+    Principal p = token("agent", {"batch", "screen"});
+    p.id = "token-A";
+    p.rate_per_minute = 1;
+    const json items = json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}}});
+    const auto result = d->call_tool("gui_batch", {{"items", items}}, ctx_for(p));
+    INFO(text_of(result));
+    CHECK_FALSE(result.is_error);
+    CHECK(f.calls.size() == 1);
+    const auto exhausted = d->call_tool("gui_screen_read", {{"connection", 1}}, ctx_for(p));
+    CHECK(exhausted.is_error);
+    CHECK(text_of(exhausted).find("RATE_LIMITED") != std::string::npos);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("dispatcher: implicit owner batch never bypasses the write lease", "[auth][startup][lease][batch]") {
+    Fixture f;
+    Policy policy = write_mode();
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    d->set_session_startup([] { return startup::Policy{false, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { FAIL("Existing session must be reused"); return Result::ok(); });
+    f.facts = audit::SapFacts{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+    f.facts->connection_id = 1;
+    f.facts->session_identity = "session-one|key|generation";
+    Principal p = token("agent", {"batch", "screen", "element"});
+    p.id = "token-A";
+    const json items = json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}},
+        {{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/usr/btnX"}}}}});
+    const auto result = d->call_tool("gui_batch", {{"items", items}}, ctx_for(p));
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("LEASE_REQUIRED") != std::string::npos);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 1);
+    CHECK((*result.structured)["error"]["original_operation_run"] == false);
     CHECK(f.calls.empty());
 }
 

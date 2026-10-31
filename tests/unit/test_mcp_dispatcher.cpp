@@ -178,6 +178,13 @@ TEST_CASE("MCP implicit startup completes SSO before the original screen request
     ctx.link_request = true;
     ctx.sap_startup_granted = true;
     ctx.cancelled = [] { return false; };
+    bool limited = false;
+    SECTION("normal budget") {}
+    SECTION("one requested operation uses one allowance including preparation") {
+        ctx.principal.rate_per_minute = 1;
+        ctx.principal.rate_families = {{"screen", 1}, {"session", 1}};
+        limited = true;
+    }
     const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
     INFO(text_of(result));
     CHECK_FALSE(result.is_error);
@@ -186,6 +193,14 @@ TEST_CASE("MCP implicit startup completes SSO before the original screen request
     CHECK(f.calls[0][1] == "list");
     CHECK(f.calls[1][1] == "launch");
     CHECK(f.calls[2][1] == "read");
+    if (limited) {
+        ready = false;
+        const auto denied = d.call_tool("gui_screen_read", json::object(), ctx);
+        CHECK(denied.is_error);
+        CHECK(text_of(denied).find("RATE_LIMITED") != std::string::npos);
+        CHECK(f.calls.size() == 3);
+        CHECK(starts == 1);
+    }
 }
 
 TEST_CASE("MCP explicit targets never trigger implicit startup", "[mcp][startup]") {
@@ -256,6 +271,49 @@ TEST_CASE("MCP prepares a fresh session before asking to observe it for a screen
     CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
     REQUIRE(result.structured);
     CHECK((*result.structured)["error"]["connection_file_id"] == 7);
+}
+
+TEST_CASE("All MCP transports stop blind batch actions after implicit startup", "[mcp][startup][batch][startup-observation]") {
+    for (const bool link : {false, true}) {
+        for (const bool read_first : {false, true}) {
+            INFO("link=" << link << " read_first=" << read_first);
+            Fixture f;
+            bool ready = false;
+            int actions = 0;
+            f.handler = [&](const Argv& argv) {
+                if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+                if (argv[0] == "session" && argv[1] == "launch") {
+                    ready = true;
+                    return Result::ok({{"connection_file_id", 7}});
+                }
+                ++actions;
+                return Result::ok();
+            };
+            Policy policy; policy.read_only = false; policy.allow_write = true;
+            auto d = f.make(policy);
+            d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+                [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+            d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+                if (!ready) return std::nullopt;
+                fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "SESSION_MANAGER"};
+                facts.connection_id = 7;
+                facts.session_identity = "session-seven|key|generation";
+                return facts;
+            });
+            auto context = ctx_with_id();
+            context.link_request = link;
+            context.sap_startup_granted = link;
+            const json action = {{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}};
+            const json first = read_first ? json{{"tool", "gui_screen_read"}} : action;
+            const auto result = d.call_tool("gui_batch", {{"items", json::array({first, action})},
+                {"stop_on_error", false}}, context);
+            INFO(text_of(result));
+            CHECK(ready);
+            CHECK(result.is_error);
+            CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
+            CHECK(actions == 0);
+        }
+    }
 }
 
 TEST_CASE("MCP recovers its implicit startup default after the session closes", "[mcp][startup][startup-recovery]") {

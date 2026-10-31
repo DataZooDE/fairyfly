@@ -58,7 +58,7 @@ SessionRoutePlan plan_session_route(const Principal& principal, const std::strin
     if (args.is_object() && args.contains("connection")) {
         if (!args["connection"].is_number_integer()) return refused("INVALID_ARGUMENT");
         plan.connection = args["connection"].get<int>();
-    } else if (batch) {
+    } else if (batch && !policy.prepare_missing_session) {
         return refused("BATCH_SESSION_REQUIRED");
     } else if (policy.default_connection) {
         plan.connection = policy.default_connection;

@@ -286,15 +286,16 @@ private:
     std::optional<CallRefusal> admit_prelogin_close(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                     const McpCallRecord& record, std::optional<std::string>& current_system);
     std::optional<CallRefusal> admission_refusal(const ToolSpec* spec, const std::string& name, const json& args,
-                                                 const CallContext& ctx, bool selection_input);
+                                                 const CallContext& ctx, bool selection_input, bool rate_prepaid = false);
     /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a
     /// hint to use `fields`.
     std::atomic<long long> last_single_fill_ms_{0};
 
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
-                          std::string* code_out = nullptr, McpCallRecord* record_out = nullptr);
+                          std::string* code_out = nullptr, McpCallRecord* record_out = nullptr, bool rate_prepaid = false,
+                          bool batch_observation_required = false);
     ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,
-                            const CallContext& ctx);
+                            const CallContext& ctx, bool rate_prepaid = false, bool batch_observation_required = false);
     ToolResult run_batch(const json& args, const CallContext& ctx);
     ToolResult audited(const std::string& tool, const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
                        const CallContext& ctx, std::string* code_out, McpCallRecord* record_out = nullptr);

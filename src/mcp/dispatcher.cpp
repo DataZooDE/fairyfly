@@ -383,13 +383,13 @@ ToolResult CommandDispatcher::audited(const std::string& tool,
 }
 
 ToolResult CommandDispatcher::run_single(const std::string& name, const json& args, const CallContext& ctx,
-                                         std::string* code_out, McpCallRecord* record_out) {
-    return audited(name, [&](McpCallRecord& record, std::string& code) { return execute_call(name, args, record, code, ctx); },
+                                         std::string* code_out, McpCallRecord* record_out, bool rate_prepaid, bool batch_observation_required) {
+    return audited(name, [&](McpCallRecord& record, std::string& code) { return execute_call(name, args, record, code, ctx, rate_prepaid, batch_observation_required); },
                    ctx, code_out, record_out);
 }
 
 std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::admission_refusal(
-    const ToolSpec* spec, const std::string& name, const json& args, const CallContext& ctx, bool selection_input) {
+    const ToolSpec* spec, const std::string& name, const json& args, const CallContext& ctx, bool selection_input, bool rate_prepaid) {
     const Principal& principal = ctx.principal;
     const PolicyDecision decision = selection_input ? PolicyDecision{} : check_call(*spec, args, policy_);
     if (!decision.allowed)
@@ -402,20 +402,24 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::admission_refus
     if (owner_mode(ctx) && !owner_token_bound(policy_, principal))
         return CallRefusal{"OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable"};
     // Refuse exhausted tokens before doing a potentially slow SAP COM lookup.
-    const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
-    const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
-    const bool rate_ok = per_principal ? keyed_limiter_->allow(principal_key(principal), budget, std::chrono::steady_clock::now())
-                                       : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
-    if (!rate_ok)
-        return CallRefusal{"RATE_LIMITED",
-                    "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
-                        " per minute)",
-                    "wait a few seconds and retry, or combine steps with gui_batch"};
-    if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
-        if (!keyed_limiter_->allow(principal_key(principal) + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+    // The implicit batch preparation already paid for its first item.
+    // Only that private execution path may reuse the allowance.
+    if (!rate_prepaid) {
+        const bool per_principal = principal.rate_per_minute > 0 || principal.name != "stdio";
+        const int budget = principal.rate_per_minute > 0 ? principal.rate_per_minute : policy_.max_calls_per_minute;
+        const bool rate_ok = per_principal ? keyed_limiter_->allow(principal_key(principal), budget, std::chrono::steady_clock::now())
+                                           : (!rate_gate_ || rate_gate_(std::chrono::steady_clock::now()));
+        if (!rate_ok)
             return CallRefusal{"RATE_LIMITED",
-                        "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
-                        "wait a few seconds and retry"};
+                        "too many tool calls (limit " + std::to_string(per_principal ? budget : policy_.max_calls_per_minute) +
+                            " per minute)",
+                        "wait a few seconds and retry, or combine steps with gui_batch"};
+        if (const int family_limit = auth::rate_family_limit(principal, spec->family); family_limit > 0) {
+            if (!keyed_limiter_->allow(principal_key(principal) + "|family:" + spec->family, family_limit, std::chrono::steady_clock::now()))
+                return CallRefusal{"RATE_LIMITED",
+                            "too many '" + spec->family + "' tool calls (family limit " + std::to_string(family_limit) + " per minute)",
+                            "wait a few seconds and retry"};
+        }
     }
     // These discovery responses contain other sessions/credentials and cannot be vouched for by the currently
     // selected session. Connection and session listings are verified row by row after execution.
@@ -1347,6 +1351,9 @@ struct CommandDispatcher::CallState {
     const ToolSpec* spec = nullptr;
     json args;
     bool accepts_connection = false;
+    bool rate_prepaid = false;
+    bool startup_changed_screen = false;
+    bool batch_observation_required = false;
     bool implicit_sticky = false;
     std::optional<SessionRoutingState::StickyTarget> sticky_target;
     bool selection_input = false;
@@ -1551,7 +1558,10 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
             reset.installed = true;
         }
         std::string code;
-        const auto answer = run_single(tool, args, ctx, &code);
+        // These bounded internal steps belong to the already-admitted task.
+        // Keep scope, target, owner and login checks, without billing a second
+        // external call for discovery/launch/login.
+        const auto answer = run_single(tool, args, ctx, &code, nullptr, true);
         if (answer.structured && answer.structured->is_object()) {
             const auto& doc = *answer.structured;
             if (!answer.is_error && doc.value("status", "") == "success")
@@ -1608,7 +1618,7 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     // gui_element_fill of a principal with allow_selection_input is decided by auth::authorize_call (INPUT_* rules) instead of
     // the blanket read-only refusal; every other tool keeps check_call.
     selection_input = auth::selection_input_path(ctx.principal, name, policy_);
-    if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
+    if (auto refused = admission_refusal(spec, name, args, ctx, selection_input, state.rate_prepaid))
         return fail(refused->code, refused->message, refused->hint);
     std::optional<int> prepared_action_connection;
     std::optional<audit::SapFacts> prepared_facts;
@@ -1656,7 +1666,8 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
             }
             record.connection = prepared.data.at("connection_file_id").get<int>();
             prepared_default = prepared.data.value("startup_default", std::string());
-            if (prepared.data.value("startup_changed_screen", false) && !command_table::can_continue_after_startup(name))
+            state.startup_changed_screen = prepared.data.value("startup_changed_screen", false);
+            if (state.startup_changed_screen && (state.batch_observation_required || !command_table::can_continue_after_startup(name)))
                 prepared_action_connection = record.connection;
             // Continue through original target authorization and owner/lease checks.
             // Internal lifecycle calls have independently passed their own admission.
@@ -2355,7 +2366,7 @@ ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCall
 }
 
 ToolResult CommandDispatcher::execute_call(const std::string& name, const json& raw_args, McpCallRecord& record,
-                                           std::string& code, const CallContext& ctx) {
+                                           std::string& code, const CallContext& ctx, bool rate_prepaid, bool batch_observation_required) {
     const auto execution_started = std::chrono::steady_clock::now();
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
         if (owner_mode(ctx) && owner_boundary_error(c)) {
@@ -2413,6 +2424,8 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     }
     CallState state;
     state.started = execution_started;
+    state.rate_prepaid = rate_prepaid;
+    state.batch_observation_required = batch_observation_required;
     if (auto refused = admit_call(name, prepared_args, record, ctx, state, fail)) return *refused;
     const ToolSpec* spec = state.spec;
     json& args = state.args;
@@ -2613,13 +2626,59 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         }
     } pin;
     CallContext item_ctx = ctx;
+    bool prepared_implicit = false;
     if (owner_mode(ctx)) {
+        if (!args.contains("connection") && (startup_policy_ || policy_.prepare_missing_session)) {
+            // Resolve one target before pinning the batch. This admits the first
+            // operation but does not execute it or acquire a lease on its behalf.
+            for (const auto& item : items) {
+                const auto tool = item["tool"].get<std::string>();
+                if (!command_table::tool_has(tool, command_table::Trait::ScreenBound) ||
+                    item.value("arguments", json::object()).contains("connection"))
+                    return batch_fail("BATCH_SESSION_REQUIRED", "Specify one batch connection; implicit startup cannot retarget named connections or lifecycle operations.");
+            }
+            const auto first_tool = items[0]["tool"].get<std::string>();
+            const auto first_args = items[0].value("arguments", json::object());
+            const auto* first_spec = find_spec(first_tool);
+            if (!first_spec) return batch_fail("TOOL_NOT_FOUND", "The first batch tool is unavailable.");
+            try { validate_tool_arguments(first_args, first_spec->def.input_schema); }
+            catch (const std::exception& e) { return batch_fail("INVALID_ARGUMENT", e.what()); }
+            McpCallRecord preparation;
+            CallState preparation_state;
+            const RefuseCall refuse_preparation = [&](const std::string& code, const std::string& message, const std::string& hint) {
+                if (owner_boundary_error(code)) return batch_fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+                return batch_fail(code, message + (hint.empty() ? "" : " " + hint));
+            };
+            if (auto refused = admit_call(first_tool, first_args, preparation, ctx, preparation_state, refuse_preparation))
+                return *refused;
+            if (!preparation_state.owner_pre_facts || !preparation_state.owner_pre_facts->connection_id)
+                return batch_fail("OWNER_SESSION_UNAVAILABLE", "the requested SAP session is unavailable");
+            args["connection"] = *preparation_state.owner_pre_facts->connection_id;
+            prepared_implicit = true;
+            if (preparation_state.startup_changed_screen && std::any_of(items.begin(), items.end(), [](const json& item) {
+                    return !command_table::can_continue_after_startup(item["tool"].get<std::string>());
+                })) {
+                const auto detail = startup::observation_required(args["connection"].get<int>());
+                auto failure = batch_fail("SESSION_PREPARED", detail.error.at("message").get<std::string>());
+                failure.structured = detail.to_json();
+                return failure;
+            }
+        }
         int connection = 0;
         std::string lease_id;
         bool needs_lease = false;
         std::optional<audit::SapFacts> facts;
-        if (auto refused = prepare_owner_batch(args, ctx, items, connection, lease_id, needs_lease, facts))
-            return batch_fail(refused->code, refused->message);
+        if (auto refused = prepare_owner_batch(args, ctx, items, connection, lease_id, needs_lease, facts)) {
+            auto failure = batch_fail(refused->code, refused->message);
+            if (prepared_implicit && (refused->code == "LEASE_REQUIRED" || refused->code == "LEASE_UNAVAILABLE")) {
+                auto detail = Result::fail(refused->code, refused->message,
+                    json::array({"Acquire a lease for the reported connection and retry the batch. No batch item ran."}));
+                detail.error["connection_file_id"] = connection;
+                detail.error["original_operation_run"] = false;
+                failure.structured = detail.to_json();
+            }
+            return failure;
+        }
         if (needs_lease) {
             if (!session_leases_ || ctx.principal.id.empty())
                 return batch_fail("LEASE_UNAVAILABLE", "the session lease cannot be verified");
@@ -2634,6 +2693,9 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     }
 
     const bool stop_on_error = args.value("stop_on_error", true);
+    const bool batch_observation_required = std::any_of(items.begin(), items.end(), [](const json& item) {
+        return !command_table::can_continue_after_startup(item["tool"].get<std::string>());
+    });
     const bool summary_mode = args.value("result_mode", std::string("full")) == "summary";
     struct BoundElement {
         std::string id;
@@ -2727,12 +2789,12 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
             } else {
                 resolved_args["element"] = binding.id;
                 if (owner_mode(item_ctx)) resolved_args["expected_screen_guard"] = binding.guard;
-                r = run_single(tool, resolved_args, item_ctx, &code, &item_record);
+                r = run_single(tool, resolved_args, item_ctx, &code, &item_record, prepared_implicit && index == 1, batch_observation_required);
             }
         } else {
             if (item.contains("expect")) {
                 r = audited(tool, [&](McpCallRecord& record, std::string& out_code) {
-                    ToolResult observed = execute_call(tool, resolved_args, record, out_code, item_ctx);
+                    ToolResult observed = execute_call(tool, resolved_args, record, out_code, item_ctx, prepared_implicit && index == 1, batch_observation_required);
                     if (!observed.is_error && (!observed.structured ||
                         !observed.structured->contains("data") ||
                         !screen_condition_matches(item["expect"], (*observed.structured)["data"]))) {
@@ -2742,7 +2804,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
                     return observed;
                 }, item_ctx, &code, &item_record);
             } else {
-                r = run_single(tool, resolved_args, item_ctx, &code, &item_record);
+                r = run_single(tool, resolved_args, item_ctx, &code, &item_record, prepared_implicit && index == 1, batch_observation_required);
             }
         }
         last_observation = json();
@@ -2821,7 +2883,7 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
                 entry["message"] = message;
             }
             any_failed = true;
-            if (stop_on_error) stopped = true;
+            if (stop_on_error || code == "SESSION_PREPARED") stopped = true;
         }
         const bool include_result = item.value("include_result", false);
         if (summary_mode && include_result) entry["result"] = text_of(r);

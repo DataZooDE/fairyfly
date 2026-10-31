@@ -74,7 +74,12 @@ HttpEndpoint::SessionRoute SessionRouteCoordinator::route(const Principal& princ
 
 HttpEndpoint::SessionRoute SessionRouteCoordinator::route_cached(const Principal& principal,
                                                                   const std::string& tool, const json& args) {
-    return route_impl(principal, tool, args, true);
+    // An implicit task may need to start or recover SAP. A cached route to a
+    // closed window would enqueue it on the wrong executor and reject recovery
+    // at dequeue. Explicit/default targets keep their pinned cached route.
+    const bool may_prepare = policy_.prepare_missing_session && !policy_.default_connection &&
+        !args.contains("connection");
+    return route_impl(principal, tool, args, !may_prepare);
 }
 
 HttpEndpoint::SessionRoute SessionRouteCoordinator::route_impl(const Principal& principal,
