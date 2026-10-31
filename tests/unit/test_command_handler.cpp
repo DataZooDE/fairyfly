@@ -129,6 +129,22 @@ TEST_CASE("CLI session preparation reuses logged-on default without launching", 
     CHECK(rig.engine->count("launch_connection") == 0);
 }
 
+TEST_CASE("CLI does not click an unobserved screen after automatic startup", "[handler][startup][startup-observation]") {
+    Rig rig(false);
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H"; scripting.facts.client = "001"; scripting.facts.user = "DEVELOPER";
+    scripting.connection_description = "Bigfox";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->application_info = {{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}};
+    rig.engine->next = Result::ok({{"session_id", kSession}, {"connection_id", "/app/con[0]"}, {"description", "Bigfox"}});
+    rig.handler->set_automatic_startup([] { return startup::Policy{true, false, false, "Bigfox"}; });
+    const auto result = rig.handler->handle_click("@active/tbar[0]/btn[0]", std::nullopt);
+    CHECK(code_of(result) == "SESSION_PREPARED");
+    CHECK(result.error.value("connection_open", false));
+    CHECK(rig.engine->count("click_element") == 0);
+}
+
 TEST_CASE("Running SAP Logon never needs startup permission", "[handler][startup]") {
     Rig rig(false);
     const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});

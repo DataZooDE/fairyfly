@@ -1596,6 +1596,7 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     selection_input = auth::selection_input_path(ctx.principal, name, policy_);
     if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
         return fail(refused->code, refused->message, refused->hint);
+    std::optional<int> prepared_action_connection;
     if (startup_policy_ && !preparing_startup_ && accepts_connection && !record.connection &&
         !args.contains("connection") && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
         std::optional<audit::SapFacts> live;
@@ -1620,6 +1621,8 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
                 return refused;
             }
             record.connection = prepared.data.at("connection_file_id").get<int>();
+            if (prepared.data.value("startup_changed_screen", false) && !command_table::can_continue_after_startup(name))
+                prepared_action_connection = record.connection;
             // Continue through original target authorization and owner/lease checks.
             // Internal lifecycle calls have independently passed their own admission.
             args["connection"] = *record.connection;
@@ -1649,6 +1652,13 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     policy_state_key = session_policy_key(principal, "", record.connection);
     policy_fallback_key = policy_state_key;
     if (auto refused = admit_live_session(name, record, ctx, state, refuse)) return refused;
+    if (prepared_action_connection) {
+        const auto prepared = startup::observation_required(*prepared_action_connection);
+        auto refused = fail("SESSION_PREPARED", prepared.error.at("message").get<std::string>(),
+            "Read the current SAP screen, then retry the intended action using the observed controls.");
+        refused.structured = prepared.to_json();
+        return refused;
+    }
 
     return std::nullopt;
 }

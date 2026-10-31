@@ -110,6 +110,7 @@ TEST_CASE("Session preparation opens and logs in once then verifies readiness", 
     CHECK(result.status == fairyfly::Result::Status::Success);
     CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_launch", "gui_session_login"});
     CHECK(result.data["connection_file_id"] == 7);
+    CHECK(result.data.value("startup_changed_screen", false));
 }
 
 TEST_CASE("Session preparation allows SSO without looking up credentials", "[startup]") {

@@ -110,6 +110,7 @@ private:
     std::string expected_mcp_session_, expected_mcp_owner_;  ///< one MCP call, checked after selecting the live session
     std::unique_ptr<cred::CredentialStore> credential_store_;
     std::function<startup::Policy()> automatic_startup_;
+    bool continue_after_startup_ = false;
     std::shared_ptr<startup::LoginAttempts> startup_attempts_;
     std::function<Result()> login_submit_guard_;
     bool preparing_session_ = false;
@@ -248,9 +249,10 @@ public:
     void set_login_submit_guard(std::function<Result()> guard) { login_submit_guard_ = std::move(guard); }
     Result prepare_default_session(const startup::Policy& policy);
     void set_automatic_startup(std::function<startup::Policy()> policy,
-                              std::shared_ptr<startup::LoginAttempts> attempts = {}) {
+                              std::shared_ptr<startup::LoginAttempts> attempts = {}, bool continue_after_startup = false) {
         automatic_startup_ = std::move(policy);
         startup_attempts_ = std::move(attempts);
+        continue_after_startup_ = continue_after_startup;
     }
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded

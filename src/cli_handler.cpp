@@ -223,6 +223,12 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
                 return refused;
             }
             explicit_conn_id = prepared.data.at("connection_file_id").get<int>();
+            if (prepared.data.value("startup_changed_screen", false) && !continue_after_startup_) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = startup::observation_required(*explicit_conn_id).error;
+                return refused;
+            }
         }
     }
     if (auto missing = sap_logon_missing()) {

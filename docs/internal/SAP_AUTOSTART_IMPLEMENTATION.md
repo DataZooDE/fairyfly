@@ -282,3 +282,11 @@ HTTP owner routing needs explicit coverage. `third_party/libffl/src/policy.*` in
 copy of gateway policy code, not a git submodule; keep protocol/grant behavior synchronized.
 
 Gateway deployment must use the repository's GitOps promotion workflow (docs/DEPLOY.md).
+
+## 2026-10-31 03:35 checkpoint: observation guard and policy push
+- Desktop fresh-screen action guard RED: 2 cases / 5 failing assertions in scratch/startup-observation-red-tests.log. GREEN: [startup] 54 cases / 296 assertions in startup-observation-green-tests.log. Reads/capture/named transaction may continue; other screen actions return SESSION_PREPARED after authorization.
+- Real CLI check: closed verified test Easy Access session, started from new scratch/startup-live-observation-state, requested key send enter with startup enabled. Returned SESSION_PREPARED, connection 0, original_operation_run false. Follow-up screen read confirmed Bigfox A4H/001/DEVELOPER Easy Access. Evidence startup-live-observation-action.json and startup-live-observation-after.json. Current live connection is 0 in that isolated state; older MCP cache is stale.
+- Full suite startup-observation-full-tests.log overlapped this live call and hit the shared startup mutex: INVALID full-suite run; rerun sequentially after it completes. Do not report it green.
+- Gateway policy push RED CI41159331236: 352 cases, 3 failed, 8 failing assertions. Implementation f0ee314 adds LinkPolicy field, ready/push org cap and Agent accessor; mutation patterns updated through 65c4322. All 375 patterns pass locally; CI41160446118 pending.
+- Claude review 4 completed: scratch/claude-startup-review-4.txt. No high severity. Follow up startup failure metadata before final target admission, sticky assignment before admission, malformed org verified boolean, authorization-denial and allowed-continuation regression tests. Vendor sync and tray status still planned, not done. Distinguish pushed admin availability from per-call grant.
+- Remaining broad scope from previous checkpoint still applies. No release/deployment yet.

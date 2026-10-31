@@ -63,6 +63,7 @@ const CommandSpec* find_by_path(const std::vector<std::string>& path);
 const CommandSpec* find_by_tool(const std::string& tool_name);
 /// The tool / the CLI command has the trait (false for unknown names).
 bool tool_has(const std::string& tool_name, Trait trait);
+bool can_continue_after_startup(const std::string& tool_name);
 bool path_has(const std::vector<std::string>& path, Trait trait);
 /// The render of the tool / the CLI command (Generic for unknown names).
 Render render_of_tool(const std::string& tool_name);

@@ -298,10 +298,12 @@ namespace {
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
         handler.set_batch_mode(batch_mode);  // credentials set/import-env cannot prompt inside `batch`
-        if (command_table::path_has(invoked_command_words(app), command_table::Trait::ScreenBound)) {
+        const auto* active_spec = command_table::find_by_path(invoked_command_words(app));
+        if (active_spec && active_spec->has(command_table::Trait::ScreenBound)) {
             handler.set_automatic_startup([enabled = global_opts.allow_sap_startup] {
                 return startup::read_local(false, enabled);
-            }, std::make_shared<startup::LoginAttempts>(config::Environment::process().data_dir()));
+            }, std::make_shared<startup::LoginAttempts>(config::Environment::process().data_dir()),
+                command_table::can_continue_after_startup(active_spec->tool_name));
         } else {
             handler.set_automatic_startup({});
         }

@@ -5,6 +5,16 @@
 
 namespace fairyfly::startup {
 
+inline Result observation_required(int connection) {
+    auto result = Result::fail("SESSION_PREPARED",
+        "SAP is ready in a newly prepared session. The requested action has not run.",
+        json::array({"Read the current SAP screen, then retry the intended action using the observed controls."}));
+    result.error["connection_open"] = true;
+    result.error["connection_file_id"] = connection;
+    result.error["original_operation_run"] = false;
+    return result;
+}
+
 // Startup is independent of business-write approval. A gateway request must
 // carry an explicit grant; older gateways therefore cannot enable startup.
 struct Policy {

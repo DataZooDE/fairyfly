@@ -70,6 +70,7 @@ Result prepare(const Policy& policy, const Operations& operations) {
         session_id = session["id"].get<std::string>();
     }
     if (!logged_on) if (auto refused = permission()) return *refused;
+    bool changed_screen = !logged_on;
     if (cancelled()) return cancel_result();
     Result selected = session_id.empty()
         ? operations.invoke("gui_session_launch", {{"name", policy.default_connection}, {"login", false}})
@@ -82,6 +83,7 @@ Result prepare(const Policy& policy, const Operations& operations) {
     connection = id;
     if (cancelled()) return cancel_result();
     if (!operations.authenticated(id)) {
+        changed_screen = true;
         // SSO may already have authenticated the newly opened connection. Only
         // resolve credentials when the live session still needs login.
         if (auto refused = permission()) return with_connection(*refused);
@@ -97,6 +99,7 @@ Result prepare(const Policy& policy, const Operations& operations) {
     }
     if (operations.login_ready) operations.login_ready();
     selected.data["session_ready"] = true;
+    selected.data["startup_changed_screen"] = changed_screen;
     return selected;
 }
 } // namespace fairyfly::startup

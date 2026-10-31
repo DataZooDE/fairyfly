@@ -99,6 +99,11 @@ std::vector<CommandSpec> build_commands() {
 
 std::string CommandSpec::path_string() const { return join(path, " "); }
 
+bool can_continue_after_startup(const std::string& tool_name) {
+    return tool_has(tool_name, Trait::ScreenData) || tool_name == "gui_screen_capture" ||
+        tool_name == "gui_transaction_start";
+}
+
 bool tool_has(const std::string& tool_name, Trait trait) {
     const CommandSpec* spec = find_by_tool(tool_name);
     return spec && spec->has(trait);

@@ -202,6 +202,39 @@ TEST_CASE("MCP explicit targets never trigger implicit startup", "[mcp][startup]
     CHECK(f.calls.size() == 1);
 }
 
+TEST_CASE("MCP prepares a fresh session before asking to observe it for a screen action", "[mcp][startup][startup-observation]") {
+    Fixture f;
+    bool ready = false;
+    int actions = 0;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            ready = true;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        ++actions;
+        return Result::ok();
+    };
+    Policy policy; policy.read_only = false; policy.allow_write = true;
+    auto d = f.make(policy);
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!ready) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = "DEVELOPER";
+        facts.session_identity = "session-seven|key|generation";
+        return facts;
+    });
+    const auto result = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_with_id());
+    CHECK(ready);
+    CHECK(actions == 0);
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 7);
+}
+
 TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][startup][startup-submit]") {
     fairyfly::test::TempDir dir{"mcp-startup-submit"};
     auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
