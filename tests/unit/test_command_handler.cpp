@@ -120,7 +120,7 @@ TEST_CASE("CLI session preparation reuses logged-on default without launching", 
     rig.engine->live_sessions[kSession] = true;
     rig.engine->application_info = {{"total_connections", 1}, {"total_sessions", 1},
         {"connections", json::array({{{"id", "/app/con[0]"}, {"description", "Bigfox"},
-            {"sessions", json::array({{{"id", kSession}, {"user", "DEVELOPER"}}})}}})}};
+            {"sessions", json::array({{{"id", kSession}, {"user", "DEVELOPER"}, {"system", "A4H"}, {"client", "001"}}})}}})}};
     rig.engine->next = Result::ok({{"session_id", kSession}, {"connection_id", "/app/con[0]"}});
     const auto result = rig.handler->prepare_default_session({false, false, false, "Bigfox"});
     CHECK(result.status == Result::Status::Success);

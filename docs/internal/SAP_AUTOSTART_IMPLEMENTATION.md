@@ -49,6 +49,54 @@
 
 ## Next work
 
+### HTTP live acceptance and review checkpoint (2026-10-31, 03:02 local)
+
+- Previous goal turn made progress: desktop ce14560 committed/pushed the login-guard/recovery fixes,
+  gateway ddbd947 committed/pushed the organisation cap, and desktop full regression and live reuse passed.
+- Real stdio MCP with the test SAP session closed: startup disabled returned structured
+  `SAP_AUTOSTART_DISABLED` in 31ms; startup enabled opened/logged into Bigfox A4H/001/DEVELOPER and
+  completed the original screen read in 4718ms. Evidence: `scratch/startup-live-mcp-closed-{disabled,enabled}.json`.
+- HTTP live reuse exposed `SAP_SESSION_NOT_READY`: owner-filtered listings intentionally contained only session
+  IDs. Regression `startup-owner-reuse` failed with two assertions. Internal preparation now retains only
+  freshly verified owner target metadata, while ordinary client listings still omit identities. The outer
+  call still goes through target/owner authorization. Live reuse passed in 1250ms after this fix.
+- Real HTTP owner endpoint with its test session closed: disabled startup gave structured actionable refusal
+  in 188ms; enabled startup launched/logged in and completed the original read in 6485ms. Temporary tokens
+  were deleted and HTTP processes stopped by the harness. Evidence: `scratch/startup-live-http-closed-*.json`
+  and `scratch/startup-live-http-reuse-fixed.json`; harness `scratch/startup_live_http.py`.
+- SAP remains at Easy Access / SESSION_MANAGER; HTTP isolated cache connection 0 is current. Other isolated
+  caches may contain stale IDs. Reobserve before any close. No business data changed.
+- Incomplete discovery red: one case, 9 failed assertions (partial enumeration ignored, malformed fields
+  could throw). Now reject partial enumeration, malformed counters/names and incomplete logged-on identities.
+  Added ambiguity, default filtering, post-login readiness and post-launch permission/default-change tests.
+- Combined startup/owner suite passes 86 cases / 582 assertions. Full regression passed with exit 0:
+  1573 cases, 1572 passed, one skipped, 26448 assertions passed, in
+  `scratch/startup-discovery-owner-full-tests.log`.
+- Stopped-process HTTP live test then exposed a second bug: worker discovery mapped confirmed process absence
+  to OWNER_IDENTITY_UNKNOWN, preventing startup. Red worker regression failed one assertion. The worker now
+  reports an empty listing only for confirmed SAP_LOGON_NOT_RUNNING; malformed/failed enumeration still refuses.
+  Combined startup/owner/worker tests pass 91 cases / 609 assertions in
+  `scratch/startup-process-owner-green-tests.log` (full suite above predates this last worker correction).
+- Real process test: verified the only session was this task's Easy Access session, closed it, confirmed zero
+  sessions, then stopped saplogon PID 7856. HTTP startup disabled now returns SAP_AUTOSTART_DISABLED (406ms).
+  With startup enabled, the same original read starts SAP Logon, logs in and returns Easy Access in 5735ms.
+  Evidence: `scratch/startup-live-http-process-stopped-{disabled,enabled}-fixed.json`; red evidence retained too.
+  SAP is running/logged on again, isolated HTTP connection 0. No business data changed.
+- Claude review 3 completed: `scratch/claude-startup-review-3.txt`. It found no latch bypass or repeated-login
+  path. Accepted remaining items: preserve the org cap through old-version saves and enforce it at runtime;
+  redact already-mapped OWNER_SESSION_UNAVAILABLE metadata; MCP ordinary-call latch clearing. Add a final
+  review after those and the outstanding startup integrations are fixed.
+- Gateway ddbd947 CI 41157165534 completed green. New red commit 7ccee01 adds runtime signed-grant and
+  old-version-save regression tests for Claude's cap findings; CI 41157950331 is running. Do not merge it red.
+- Review disposition: the startup grant intentionally authorizes local stored-credential login, as requested;
+  it does not require separately exposing a login tool to the assistant. Document this in the org UI too.
+  The password-change finding is not currently reachable through automatic startup: both adapters use
+  `LoginSource` with no file/stdin, and `StoredCredential` contains no new-password field. Add a regression
+  for the password-change-required result rather than assuming the review's stored-new-password path exists.
+
+Remaining scope is unchanged. In addition to the earlier gates, preserve the new HTTP owner-listing regression
+in future routing changes. This checkpoint is not release/deployment evidence.
+
 ### Review follow-up checkpoint (2026-10-31, 02:51 local)
 
 This checkpoint supersedes the pending status in older entries below. The feature is not released.

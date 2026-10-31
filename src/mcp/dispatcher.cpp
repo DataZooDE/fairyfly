@@ -566,7 +566,17 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::filter_owner_se
             // Enumeration metadata may describe an earlier occupant of a reused SAP session ID.
             // Only return the ID that was resolved and metadata from that live resolution.
             if (!groups.count(target.connection_name)) groups[target.connection_name] = json::array();
-            groups[target.connection_name].push_back({{"id", query.session_id}});
+            json visible_session = {{"id", query.session_id}};
+            // Internal preparation needs authenticated readiness metadata. Use only
+            // the just-verified target; keep ordinary client listings minimal.
+            if (preparing_startup_) {
+                const auto separator = target.system.find('/');
+                if (separator == std::string::npos) continue;
+                visible_session["system"] = target.system.substr(0, separator);
+                visible_session["client"] = target.system.substr(separator + 1);
+                visible_session["user"] = target.user;
+            }
+            groups[target.connection_name].push_back(std::move(visible_session));
             ++total_sessions;
         }
         for (auto& [connection_name, sessions] : groups) {

@@ -38,8 +38,14 @@ Result prepare(const Policy& policy, const Operations& operations) {
     if (listed.status == Result::Status::Success) {
         if (!listed.data.is_object() || !listed.data.contains("connections") || !listed.data["connections"].is_array())
             return Result::fail("SAP_STARTUP_DISCOVERY_FAILED", "SAP session discovery returned an incomplete result; inspect SAP Logon and retry.");
+        for (const auto* field : {"connection_enumeration_errors", "session_enumeration_errors"})
+            if (listed.data.contains(field) &&
+                (!listed.data[field].is_number_integer() || listed.data[field] != 0))
+                return Result::fail("SAP_STARTUP_DISCOVERY_FAILED", "Some SAP sessions could not be inspected; wait for SAP and retry. No new session was opened.");
         for (const auto& connection : listed.data["connections"]) {
-            if (!connection.is_object() || !connection.contains("sessions") || !connection["sessions"].is_array())
+            if (!connection.is_object() || !connection.contains("sessions") || !connection["sessions"].is_array() ||
+                !connection.contains("description") || !connection["description"].is_string() ||
+                connection["description"].get<std::string>().empty())
                 return Result::fail("SAP_STARTUP_DISCOVERY_FAILED", "SAP session discovery was incomplete; no new session was opened.");
             if (!policy.default_connection.empty() && !sap::ConnectionLauncher::matches_connection_name(
                     policy.default_connection, connection.value("description", ""))) continue;
@@ -57,6 +63,10 @@ Result prepare(const Policy& policy, const Operations& operations) {
             !session.contains("id") || !session["id"].is_string() || session["id"].get<std::string>().empty())
             return Result::fail("SAP_SESSION_NOT_READY", "The matching SAP session is busy or its identity is unavailable; wait for SAP and retry.");
         logged_on = !session["user"].get<std::string>().empty();
+        if (logged_on &&
+            (!session.contains("system") || !session["system"].is_string() || session["system"].get<std::string>().empty() ||
+             !session.contains("client") || !session["client"].is_string() || session["client"].get<std::string>().empty()))
+            return Result::fail("SAP_SESSION_NOT_READY", "The matching SAP session's authenticated identity is incomplete; wait for SAP and retry.");
         session_id = session["id"].get<std::string>();
     }
     if (!logged_on) if (auto refused = permission()) return *refused;

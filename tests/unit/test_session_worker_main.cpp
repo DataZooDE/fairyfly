@@ -75,6 +75,28 @@ TEST_CASE("session worker: the first matching call binds it; a mismatch later is
     CHECK(handlers == 1);
 }
 
+TEST_CASE("Worker discovery distinguishes a stopped SAP process from failed enumeration", "[mcp][worker-main][startup][startup-process-owner]") {
+    fairyfly::test::TempDir dir("worker-startup-discovery");
+    bool stopped = true;
+    SECTION("confirmed stopped process is an empty listing") {}
+    SECTION("enumeration failure is not an empty listing") { stopped = false; }
+    const WorkerInvoker invoke = make_session_worker_invoker([&] {
+        auto engine = std::make_unique<fairyfly::test::FakeEngine>();
+        if (stopped) engine->status = {false, false, "not running"};
+        else engine->application_info = nullptr;
+        return std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(engine),
+            std::make_unique<cli::ConnectionManager>(dir.path().string()));
+    });
+    WorkerCall call;
+    call.enumerate = true;
+    const auto result = invoke(call);
+    if (stopped) {
+        REQUIRE(result.status == Result::Status::Success);
+        CHECK(result.data["connections"] == json::array());
+        CHECK(result.data["total_sessions"] == 0);
+    } else CHECK(code(result) == "OWNER_IDENTITY_UNKNOWN");
+}
+
 TEST_CASE("session worker: the live session must be the call's, with its owner", "[mcp][worker-main]") {
     const std::optional<WorkerBinding> unbound;
     const auto call = call_for(3, "ses-A", "S4H/100/ALICE");

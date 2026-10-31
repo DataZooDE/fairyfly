@@ -188,6 +188,68 @@ TEST_CASE("Startup checks the current local setting before mutation", "[startup]
     CHECK(fixture.calls == std::vector<std::string>{"gui_session_list"});
 }
 
+TEST_CASE("Incomplete discovery never starts or attaches a SAP session", "[startup][startup-discovery]") {
+    Preparation fixture;
+    fixture.session("DEVELOPER");
+    fixture.ready = true;
+    SECTION("connection enumeration failed") { fixture.listed.data["connection_enumeration_errors"] = 1; }
+    SECTION("session enumeration failed") { fixture.listed.data["session_enumeration_errors"] = 1; }
+    SECTION("malformed error count") { fixture.listed.data["session_enumeration_errors"] = "unknown"; }
+    SECTION("unknown connection name") { fixture.listed.data["connections"][0]["description"] = nullptr; }
+    SECTION("missing system on a reportedly logged-on session") {
+        fixture.listed.data["connections"][0]["sessions"][0].erase("system");
+    }
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations());
+    CHECK(result.status == fairyfly::Result::Status::Error);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list"});
+}
+
+TEST_CASE("Discovery preserves default selection and refuses ambiguity", "[startup][startup-discovery]") {
+    Preparation fixture;
+    fixture.session("DEVELOPER");
+    fixture.ready = true;
+    auto another = fixture.listed.data["connections"][0];
+    SECTION("another matching session is ambiguous") {
+        fixture.listed.data["connections"].push_back(another);
+        const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, fixture.operations());
+        CHECK(result.error.value("code", "") == "MULTIPLE_SESSIONS");
+        CHECK(fixture.calls == std::vector<std::string>{"gui_session_list"});
+    }
+    SECTION("a different connection does not override the default") {
+        another["description"] = "Other";
+        fixture.listed.data["connections"].push_back(another);
+        CHECK(fairyfly::startup::prepare({false, false, false, "Bigfox"}, fixture.operations()).status == fairyfly::Result::Status::Success);
+        CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach"});
+    }
+}
+
+TEST_CASE("A successful login command must still prove authenticated readiness", "[startup][startup-discovery]") {
+    Preparation fixture;
+    auto operations = fixture.operations();
+    operations.authenticated = [](int) { return false; };
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, operations);
+    CHECK(result.error.value("code", "") == "SAP_LOGIN_REQUIRED");
+    CHECK(result.error.value("connection_file_id", -1) == 7);
+    CHECK(fixture.submissions == 1);
+    CHECK(fixture.attempted);
+}
+
+TEST_CASE("Changes after launch prevent automatic login", "[startup][startup-discovery]") {
+    Preparation fixture;
+    auto operations = fixture.operations();
+    bool changed_default = false;
+    SECTION("startup disabled") {}
+    SECTION("default changed") { changed_default = true; }
+    operations.current_policy = [&] {
+        const bool opened = fixture.calls.size() > 1;
+        return Policy{!opened || changed_default, false, false, opened && changed_default ? "Other" : "Bigfox"};
+    };
+    const auto result = fairyfly::startup::prepare({true, false, false, "Bigfox"}, operations);
+    CHECK(result.error.value("code", "") == (changed_default ? "SAP_STARTUP_CONFIG_CHANGED" : "SAP_AUTOSTART_DISABLED"));
+    CHECK(result.error.value("connection_file_id", -1) == 7);
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_launch"});
+}
+
 TEST_CASE("Startup settings use checkbox for trays and explicit flag for headless runs", "[startup]") {
     using namespace fairyfly;
     Settings settings;

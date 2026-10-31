@@ -71,6 +71,12 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
             if (state->bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
             cli::CommandHandler& handler = ensure_handler();
             Result result = handler.handle_list_all();
+            // Confirmed process absence means there cannot be an owner session.
+            // Keep every other enumeration failure closed; the global dispatcher
+            // will separately authorize any on-demand launch after an empty list.
+            if (result.status == Result::Status::Error && result.error.is_object() &&
+                result.error.value("code", "") == "SAP_LOGON_NOT_RUNNING")
+                return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
             if (result.status != Result::Status::Success || !result.data.is_object() ||
                 !result.data.contains("connections") || !result.data["connections"].is_array())
                 return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");

@@ -1769,6 +1769,45 @@ TEST_CASE("dispatcher: T-code block survives a missing session identity", "[auth
     CHECK(f.calls.size() == 1);
 }
 
+TEST_CASE("Owner startup reuses a verified session without exposing discovery identity", "[auth][startup][startup-owner-reuse]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array({{{"description", "Bigfox"}, {"sessions",
+                json::array({{{"id", "session-one"}, {"user", "UNTRUSTED"}}})}}})}});
+        if (argv[0] == "session" && argv[1] == "attach") {
+            f.facts = audit::SapFacts{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+            f.facts->connection_id = 1;
+            f.facts->session_identity = "session-one|key|generation";
+            return Result::ok({{"connection_file_id", 1}, {"session_id", "session-one"}});
+        }
+        if (argv[0] == "screen") return Result::ok({{"screen", "SAP Easy Access"}});
+        FAIL("Unexpected lifecycle operation");
+        return Result::fail("UNEXPECTED", "Unexpected lifecycle operation");
+    };
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.system = "A4H/001"; target.user = "OWNER"; target.connection_name = "Bigfox";
+        return target;
+    });
+    d->set_session_startup([] { return fairyfly::startup::Policy{false, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) {
+            FAIL("An existing authenticated session must not launch SAP"); return Result::ok();
+        });
+    const auto external = d->call_tool("gui_session_list", json::object(), ctx_for(p));
+    REQUIRE_FALSE(external.is_error);
+    CHECK(text_of(external).find("UNTRUSTED") == std::string::npos);
+    CHECK(text_of(external).find("OWNER") == std::string::npos);
+    const auto read = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    INFO(text_of(read));
+    CHECK_FALSE(read.is_error);
+    CHECK(f.attach_finalizations == std::vector<bool>{true});
+}
+
 TEST_CASE("dispatcher: owner SAP identity limits established session calls", "[auth][dispatch][owner-identity]") {
     Fixture f;
     Policy policy = write_mode();
