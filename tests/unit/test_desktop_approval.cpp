@@ -905,8 +905,10 @@ TEST_CASE("desktop approval: without a label the field name, never the full id o
 }
 
 TEST_CASE("desktop approval: the names to look up are the filled fields", "[link][approval][labels]") {
-    CHECK(fill_field_names("run 2 steps: 1. fill fields ctxtA, txtB, then press enter; 2. fill field wnd[0]/usr/txtC; 3. press 11") ==
-          std::vector<std::string>{"ctxtA", "txtB", "txtC"});
+    CHECK(fill_field_names("run 2 steps: 1. fill fields ctxtA, txtB, then press enter; 2. fill field wnd[1]/usr/txtC; 3. press 11") ==
+          std::vector<std::string>{"ctxtA", "txtB", "wnd[1]/txtC"});  // a single fill keeps its window
+    CHECK(field_lookup("wnd[1]/ctxtWERKS") == FieldLookup{"WERKS", "GuiCTextField", 1});
+    CHECK(field_lookup("wnd[0]/txtX") == FieldLookup{"X", "GuiTextField", 0});
     CHECK(fill_field_names("click wnd[0]/tbar[0]/btn[11]").empty());
     CHECK(field_lookup("ctxtDATABROWSE-TABLENAME") == FieldLookup{"DATABROWSE-TABLENAME", "GuiCTextField"});
     CHECK(field_lookup("txtX") == FieldLookup{"X", "GuiTextField"});
@@ -932,7 +934,8 @@ TEST_CASE("desktop approval: the notification and the window name fields by the 
     REQUIRE(ui->windows.size() == 1);
     CHECK(asked == std::vector<std::string>{"ctxtDATABROWSE-TABLENAME"});
     CHECK(ui->windows[0].summary == "fill Table Name, then press Enter");
-    CHECK(ui->windows[0].steps == std::vector<std::string>{"fill Table Name, then press Enter"});
+    // the window's steps keep the field's technical name next to the label
+    CHECK(ui->windows[0].steps == std::vector<std::string>{"fill Table Name (DATABROWSE-TABLENAME), then press Enter"});
 
     // a desk that cannot read labels (SAP busy, no session): the field name
     auto failing = desk();
@@ -944,4 +947,43 @@ TEST_CASE("desktop approval: the notification and the window name fields by the 
     b2.decide(prompt("fill fields ctxtDATABROWSE-TABLENAME, then press enter"));
     REQUIRE(ui2->windows.size() == 1);
     CHECK(ui2->windows[0].summary == "fill DATABROWSE-TABLENAME, then press Enter");
+}
+
+TEST_CASE("desktop approval: labels from SAP are cleaned before they are shown", "[link][approval][labels]") {
+    const FieldLabels labels{{"txtNL", "Table\r\nName\t:"},
+                             {"txtBIDI", "\xE2\x80\xAE" "eman elbaT\xE2\x80\xAC"},       // U+202E ... U+202C
+                             {"txtZW", "Ta\xE2\x80\x8B" "ble\xE2\x81\xA6 Name\xE2\x80\x8E"},  // U+200B, U+2066, U+200E
+                             {"txtLONG", std::string(200, 'x')},
+                             {"txtUMLAUT", [] { std::string s; for (int i = 0; i < 60; ++i) s += "\xC3\x84"; return s; }()},
+                             {"txtCTRL", std::string("\x01\x1B[31mRed\x7F", 10)}};
+    CHECK(readable_step("fill fields txtNL", labels) == "fill Table Name");
+    CHECK(readable_step("fill fields txtBIDI", labels) == "fill eman elbaT");
+    CHECK(readable_step("fill fields txtZW", labels) == "fill Table Name");
+    CHECK(readable_step("fill fields txtCTRL", labels) == "fill [31mRed");
+    const std::string long_label = readable_step("fill fields txtLONG", labels).substr(5);
+    CHECK(long_label.size() <= 40);
+    CHECK(long_label.ends_with("..."));
+    const std::string umlauts = readable_step("fill fields txtUMLAUT", labels).substr(5);
+    CHECK(umlauts.size() <= 40);
+    REQUIRE(umlauts.ends_with("..."));
+    const std::string body = umlauts.substr(0, umlauts.size() - 3);
+    CHECK(body.size() % 2 == 0);  // only whole two-byte characters
+    for (char c : readable_step("fill fields txtNL, txtBIDI, txtZW, txtCTRL, txtLONG", labels))
+        CHECK(static_cast<unsigned char>(c) >= 0x20);
+}
+
+TEST_CASE("desktop approval: two fields with the same label are told apart by their names", "[link][approval][labels]") {
+    const FieldLabels labels{{"txtKNA1-NAME1", "Name"}, {"txtKNA1-NAME2", "Name"}, {"txtKNA1-ORT01", "City"}};
+    CHECK(readable_step("fill fields txtKNA1-NAME1, txtKNA1-NAME2, txtKNA1-ORT01", labels) ==
+          "fill 3 fields (Name (KNA1-NAME1), Name (KNA1-NAME2), City)");
+}
+
+TEST_CASE("desktop approval: the window's steps name the technical field next to its label", "[link][approval][labels]") {
+    const FieldLabels labels{{"ctxtDATABROWSE-TABLENAME", "Table Name"}, {"wnd[1]/ctxtWERKS", "Plant"}};
+    CHECK(readable_step("fill fields ctxtDATABROWSE-TABLENAME, ctxtOTHER, then press enter", labels, true) ==
+          "fill 2 fields (Table Name (DATABROWSE-TABLENAME), OTHER), then press Enter");
+    CHECK(readable_step("fill fields ctxtOTHER", labels, true) == "fill OTHER");  // no label: the name once
+    // a single fill is looked up in its own window
+    CHECK(readable_step("fill field wnd[1]/usr/ctxtWERKS", labels) == "fill Plant");
+    CHECK(readable_step("fill field wnd[1]/usr/ctxtWERKS", labels, true) == "fill Plant (WERKS)");
 }

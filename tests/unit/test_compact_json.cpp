@@ -4,6 +4,7 @@
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/cli_handler.h"
 #include "include/core.h"
+#include "include/mcp/tool_catalog.h"
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string>
@@ -239,6 +240,34 @@ TEST_CASE("compact: no rows, or every column empty, hides nothing", "[compact][c
     const json before_all = data;
     fairyfly::formatters::hide_empty_columns(data);
     CHECK(data == before_all);
+}
+
+TEST_CASE("compact: a paged grid keeps all its columns, so every page has the same columns", "[compact][columns][window]") {
+    for (const json& window : {json{{"offset", 0}, {"returned", 3}, {"next_offset", 3}},
+                               json{{"offset", 3}, {"returned", 3}},
+                               json{{"offset", 3}, {"returned", 3}, {"next_offset", 6}}}) {
+        json grid = sm50_grid();
+        grid["table_data"].update(window);
+        json data = screen_with(grid);
+        fairyfly::formatters::hide_empty_columns(data);
+        CHECK(data["elements"][0]["table_data"]["columns"].size() == 4);
+        CHECK_FALSE(data["elements"][0]["table_data"].contains("hidden_empty_columns"));
+    }
+    // the whole table in one read (offset 0, no next_offset): hidden
+    json grid = sm50_grid();
+    grid["table_data"].update(json{{"offset", 0}, {"returned", 3}});
+    json data = screen_with(grid);
+    fairyfly::formatters::hide_empty_columns(data);
+    CHECK(data["elements"][0]["table_data"]["columns"].size() == 2);
+}
+
+TEST_CASE("gui_screen_read says that compact hides empty grid columns", "[compact][columns][mcp]") {
+    for (const auto& spec : fairyfly::mcp::read_tool_specs())
+        if (spec.def.name == "gui_screen_read") {
+            CHECK(spec.def.description.find("hidden_empty_columns") != std::string::npos);
+            CHECK(spec.def.input_schema.at("properties").at("compact").at("description").get<std::string>().find(
+                      "empty in every row") != std::string::npos);
+        }
 }
 
 TEST_CASE("compact Markdown hides empty grid columns and says so; non-compact is unchanged", "[compact][columns][markdown]") {
