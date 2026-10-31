@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.31.2
+
+- Place **Allow automatic SAP startup** directly below the SAP permissions checkbox in both tray modes, with normal checkbox styling. The status line remains first and bold.
+
 ## 2026.10.31.1
 
 - CLI, MCP and link tasks can start the local default SAP session on demand using stored credentials or SSO.

@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "include/link/link_state_names.h"
 #include "include/tray/mcp_tray.h"
 #include "include/version.h"
@@ -8,7 +10,16 @@ void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings) {
     auto entry = item("Allow automatic SAP startup", TrayAction::ToggleSapStartup);
     entry.checkable = true;
     entry.checked = settings->get(kAllowSapStartupSetting).value_or("0") == "1";
-    menu.items.insert(menu.items.begin(), std::move(entry));
+    const auto permissions = std::find_if(menu.items.begin(), menu.items.end(), [](const MenuItem& candidate) {
+        return candidate.action == TrayAction::LinkToggleWrites || candidate.action == TrayAction::ToggleReadOnly;
+    });
+    // The first line is the native menu's bold status. Keep permission switches together;
+    // an unpaired link has no write switch yet, so place startup before its utility actions.
+    const auto position = permissions != menu.items.end() ? permissions + 1
+        : std::find_if(menu.items.begin(), menu.items.end(), [](const MenuItem& candidate) {
+            return candidate.action == TrayAction::OpenLog;
+        });
+    menu.items.insert(position, std::move(entry));
 }
 
 bool toggle_sap_startup(TraySettings* settings) {
