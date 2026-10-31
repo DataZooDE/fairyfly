@@ -148,8 +148,10 @@ checks are in `packaging/msix/tests/Test-UpdateMsix.ps1` (Windows PowerShell 5.1
 
 ### Manual installation
 
-Windows 10 1809 (17763) or later, x64, with sideloading allowed (the default on Windows 10 2004+ and Windows 11; else
-Settings > For developers > Install apps from any source / Sideload apps). An MSI installation of fairyfly may stay;
+Windows 10 22H2 (19045) or Windows 11, x64: the package's `TargetDeviceFamily` `MinVersion` is 10.0.19045.0, so the
+Store offers fairyfly only on the Windows versions it is tested on (`MaxVersionTested` 10.0.26100.0, Windows 11 24H2).
+Sideloading must be allowed (the default on these versions; else Settings > For developers > Install apps from any
+source / Sideload apps). An MSI installation of fairyfly may stay;
 for a clean test uninstall it first.
 
 1. Download `fairyfly-msix-testsigned` from the CI run and unpack it.
