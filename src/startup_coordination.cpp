@@ -69,6 +69,11 @@ Result LoginAttempts::begin(const std::string& connection) {
         return Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login cannot safely record its attempt. Log in to SAP manually.");
     }
 }
+bool LoginAttempts::pending(const std::string& connection) const {
+    if (root_.empty() || !root_.is_absolute() || connection.empty()) return false;
+    std::error_code error;
+    return std::filesystem::exists(attempt_path(root_, connection), error) && !error;
+}
 bool LoginAttempts::clear(const std::string& connection) {
     if (root_.empty() || !root_.is_absolute() || connection.empty()) return false;
     try {

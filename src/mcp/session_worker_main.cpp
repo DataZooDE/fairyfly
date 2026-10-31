@@ -80,6 +80,10 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
             if (result.status != Result::Status::Success || !result.data.is_object() ||
                 !result.data.contains("connections") || !result.data["connections"].is_array())
                 return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");
+            for (const auto* field : {"connection_enumeration_errors", "session_enumeration_errors"})
+                if (result.data.contains(field) &&
+                    (!result.data[field].is_number_integer() || result.data[field] != 0))
+                    return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP session enumeration was incomplete");
             for (auto& connection : result.data["connections"]) {
                 if (!connection.is_object() || !connection.contains("sessions") ||
                     !connection["sessions"].is_array()) continue;

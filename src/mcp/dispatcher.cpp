@@ -2,6 +2,7 @@
 
 #include "include/sap_identity.h"
 #include "include/session_preparation.h"
+#include "include/connection_launcher.h"
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -41,7 +42,7 @@ namespace {
 std::string dump_compact(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
 
 bool owner_boundary_error(const std::string& code) {
-    return code == "OWNER_IDENTITY_UNKNOWN" || code == "OWNER_IDENTITY_DENIED" ||
+    return code == "OWNER_SESSION_UNAVAILABLE" || code == "OWNER_IDENTITY_UNKNOWN" || code == "OWNER_IDENTITY_DENIED" ||
            code == "SESSION_TARGET_UNKNOWN" || code == "SYSTEM_UNKNOWN" || code == "SYSTEM_DENIED" ||
            code == "CONNECTION_DENIED" || code == "SESSION_TARGET_CHANGED";
 }
@@ -1502,11 +1503,14 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
         };
     }
-    operations.authenticated = [this](int id) {
+    std::optional<audit::SapFacts> ready_facts;
+    operations.authenticated = [this, &ready_facts](int id) {
         std::optional<audit::SapFacts> facts;
         try { if (facts_provider_) facts = facts_provider_(id); } catch (...) {}
-        return facts && facts->connection_id == id && !facts->system.empty() &&
+        const bool ready = facts && facts->connection_id == id && !facts->system.empty() &&
             !facts->client.empty() && !facts->user.empty();
+        ready_facts = ready ? facts : std::nullopt;
+        return ready;
     };
     operations.invoke = [this, &ctx, &policy](const std::string& tool, const json& args) {
         struct ResetSubmitGuard {
@@ -1551,7 +1555,11 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
         return Result::fail(code.empty() ? "SAP_STARTUP_UNAVAILABLE" : code,
             message.empty() ? "SAP session preparation returned no usable result." : message);
     };
-    return startup::prepare(policy, operations);
+    auto prepared = startup::prepare(policy, operations);
+    if (prepared.status == Result::Status::Success && ready_facts && ready_facts->connection_id)
+        set_sticky_connection(principal_key(ctx.principal), *ready_facts->connection_id,
+            ready_facts->session_identity, sap_identity(*ready_facts));
+    return prepared;
 }
 
 std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name, const json& raw_args, McpCallRecord& record,
@@ -1724,6 +1732,30 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::enforce_image_c
 ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result, McpCallRecord& record, std::string& code,
                                          const CallContext& ctx, const CallState& state, bool tcode_left) {
     const Principal& principal = ctx.principal;
+    if (result.status == Result::Status::Success && !preparing_startup_ && startup_policy_ && startup_attempts_ &&
+        facts_provider_ && target_resolver_ && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
+        const auto startup_policy = startup_policy_();
+        if (startup_attempts_->pending(startup_policy.default_connection)) {
+            // A manual login can make preparation unnecessary. Clear its block
+            // only after an authorized successful call and fresh matching facts.
+            // Never queue an ordinary read behind another process's startup.
+            const auto guard = startup::acquire_preparation_guard({}, std::chrono::milliseconds(0));
+            if (guard.token) {
+                try {
+                    const auto live = facts_provider_(record.connection);
+                    if (live && live->connection_id && (!record.connection || live->connection_id == record.connection) &&
+                        !live->system.empty() && !live->client.empty() && !live->user.empty()) {
+                        const auto target = target_resolver_(TargetQuery{"", "", live->connection_id});
+                        if (!target.ambiguous && target.system == live->system + "/" + live->client &&
+                            target.user == live->user && sap::ConnectionLauncher::matches_connection_name(
+                                startup_policy.default_connection, target.connection_name))
+                            if (!startup_attempts_->clear(startup_policy.default_connection))
+                                spdlog::warn("Cannot clear the automatic SAP login retry block after verified manual login");
+                    }
+                } catch (...) {} // Unknown identity leaves the block intact.
+            }
+        }
+    }
     const std::string reattach_again_hint = kReattachAgainHint;
     if (result.status != Result::Status::Success) add_assistant_hint(result, policy_, principal.read_only);
     if (state.reattach_refused && result_error_code(result) == "INVALID_CONNECTION") result.error["hint"] = reattach_again_hint;

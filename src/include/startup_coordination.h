@@ -18,6 +18,7 @@ class LoginAttempts {
 public:
     explicit LoginAttempts(std::filesystem::path root) : root_(std::move(root)) {}
     Result begin(const std::string& connection);
+    bool pending(const std::string& connection) const;
     bool clear(const std::string& connection);
 private:
     std::filesystem::path root_;

@@ -78,11 +78,15 @@ TEST_CASE("session worker: the first matching call binds it; a mismatch later is
 TEST_CASE("Worker discovery distinguishes a stopped SAP process from failed enumeration", "[mcp][worker-main][startup][startup-process-owner]") {
     fairyfly::test::TempDir dir("worker-startup-discovery");
     bool stopped = true;
+    bool partial = false;
     SECTION("confirmed stopped process is an empty listing") {}
     SECTION("enumeration failure is not an empty listing") { stopped = false; }
+    SECTION("partial enumeration is not an empty listing") { stopped = false; partial = true; }
     const WorkerInvoker invoke = make_session_worker_invoker([&] {
         auto engine = std::make_unique<fairyfly::test::FakeEngine>();
         if (stopped) engine->status = {false, false, "not running"};
+        else if (partial) engine->application_info = {{"connections", json::array()}, {"total_connections", 0},
+            {"total_sessions", 0}, {"connection_enumeration_errors", 1}};
         else engine->application_info = nullptr;
         return std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(engine),
             std::make_unique<cli::ConnectionManager>(dir.path().string()));

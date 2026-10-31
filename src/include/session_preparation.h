@@ -10,8 +10,8 @@ struct Operations {
     std::function<bool(int)> authenticated;
     std::function<bool()> cancelled;
     std::function<Policy()> current_policy;
-    // The authorized login operation must install its retry guard immediately
-    // before credential submission, after admission and credential resolution.
+    // Called after authenticated readiness to clear the matching retry block.
+    // The invoke adapter installs the submission guard on its login operation.
     std::function<void()> login_ready;
 };
 Result prepare(const Policy& policy, const Operations& operations);

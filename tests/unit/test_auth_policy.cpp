@@ -1808,6 +1808,44 @@ TEST_CASE("Owner startup reuses a verified session without exposing discovery id
     CHECK(f.attach_finalizations == std::vector<bool>{true});
 }
 
+TEST_CASE("Owner startup preserves redaction after an inner login admission refusal", "[auth][startup][startup-owner-redaction]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    p.connections = {"Bigfox"};
+    bool opened = false;
+    d->set_session_target_resolver([](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "Bigfox";
+        return target;
+    });
+    d->set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d->set_login_submit_guard_override([](std::function<Result()>) {});
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        REQUIRE(argv[0] == "session");
+        REQUIRE(argv[1] == "launch");
+        audit::SapFacts pre{"A4H", "000", "", "S000"};
+        REQUIRE(f.launch_guard);
+        REQUIRE(f.launch_guard(pre, "Bigfox"));
+        opened = true;
+        f.facts = pre;
+        f.facts->connection_id = 7;
+        f.facts->session_identity = "session-seven||generation";
+        return Result::ok({{"connection_file_id", 7}, {"session_id", "session-seven"}});
+    };
+    // No login lane reserver: the internal login must fail admission without submitting anything.
+    const auto result = d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p));
+    REQUIRE(opened);
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find("OWNER_SESSION_UNAVAILABLE") != std::string::npos);
+    CHECK_FALSE(result.structured);
+    CHECK(text_of(result).find("connection_file_id") == std::string::npos);
+}
+
 TEST_CASE("dispatcher: owner SAP identity limits established session calls", "[auth][dispatch][owner-identity]") {
     Fixture f;
     Policy policy = write_mode();

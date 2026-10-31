@@ -49,6 +49,52 @@
 
 ## Next work
 
+### Recovery and gateway cap checkpoint (2026-10-31, 03:23 local)
+
+- Gateway runtime/old-version regression commit 7ccee01 failed as intended in CI 41157950331:
+  352 cases, 350 passed, two failed, eight failed assertions. Evidence:
+  `fairyfly-gateway-work/startup-org-runtime-red-ci.log`.
+- Gateway c0264ef now reads the organisation cap when signing each call and persists the cap under the
+  separate `orgstartup:<domain>` key, which old versions do not rewrite. Organisation policy UI explains
+  that startup includes local credentials/SSO. CI 41158666831 completed fully green, including browser e2e.
+- Gateway 29e217f adds the next deliberately red tests: default/malformed startup policy frames, initial
+  ready policy and live updates when tenant startup changes. CI 41159331236 is running. Implement protocol,
+  push/reconnect policy and desktop status after confirming that red result. Do not merge red tests.
+- Desktop manual recovery and partial owner enumeration tests failed red (two assertions). MCP now checks
+  for a pending marker only after a successful authorized screen call. It tries the preparation lock without
+  waiting, verifies the live identity and connection name, then clears only the matching default's marker.
+  Ordinary calls with no marker do not add SAP probes. Worker partial enumeration now refuses instead of
+  pretending the session list is complete. Green: 25 assertions in the two targeted cases.
+- A new consecutive-call test exposed a prelogin session-key transition leaving stale sticky identity
+  (one assertion failed). Successful preparation now remembers its final authenticated identity from the
+  readiness probe, without another COM read. The live Bigfox two-read check already succeeded before this
+  correction (this system's key stayed stable), so the regression covers another supported key lifecycle.
+- Owner redaction regression reproduced the already-mapped OWNER_SESSION_UNAVAILABLE metadata leak.
+  That code is now included in the boundary redaction set; the regression passes. Endpoint instructions
+  now recommend a compact first screen read and explain on-demand startup and local credential management.
+- Targeted startup/owner/worker suite: 94 cases / 647 assertions passed. Full suite on these changes:
+  1577 cases, 1576 passed, one skipped, 26492 assertions passed, exit 0, in
+  `scratch/startup-manual-followup-full-tests.log`.
+- Real manual-recovery marker check: explicit MCP reads of current connection 2 cleared the seeded Bigfox
+  marker but retained an unrelated Other marker (then removed that test marker). Evidence:
+  `scratch/startup-live-mcp-manual-recovery{,-markers}.json`.
+- Real retry/recovery scenario used a seeded isolated marker, never an incorrect password. After closing
+  the test Easy Access session, two separate MCP startup runs refused SAP_LOGIN_REQUIRED with the same
+  open connection 2 (1859ms, then 469ms); session listing confirmed S000/user empty/client 000. Explicit
+  local `session login --connection 2` succeeded. Subsequent MCP explicit reads without startup permission
+  succeeded (312ms first read), and the marker was cleared. Evidence files:
+  `scratch/startup-live-mcp-retry-blocked-{first,second,session}.json`,
+  `scratch/startup-live-mcp-explicit-recovery-login.json`,
+  `scratch/startup-live-mcp-after-explicit-recovery.json`,
+  `scratch/startup-live-mcp-explicit-recovery-marker.json`.
+- Current live SAP is logged on at Easy Access; isolated MCP cache connection 2 is current. The HTTP test
+  cache is now stale. Reobserve before closing. No business data changed.
+
+Remaining: gateway policy push + vendor sync + tray admin status; MCP cached/sticky logged-out recovery
+(same-process stale targets still need integration); owner existing-prelogin path; batch/lease preparation;
+fresh-screen action continuation guard; live link/admin/parallel-startup checks; final Claude review; final
+green PRs, release, production deployment and installed-package verification. Goal remains active.
+
 ### HTTP live acceptance and review checkpoint (2026-10-31, 03:02 local)
 
 - Previous goal turn made progress: desktop ce14560 committed/pushed the login-guard/recovery fixes,

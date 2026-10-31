@@ -252,6 +252,88 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
     CHECK((*result.structured)["error"]["connection_file_id"] == 7);
 }
 
+TEST_CASE("MCP clears only a verified matching manual login retry block", "[mcp][startup][startup-manual-recovery]") {
+    fairyfly::test::TempDir dir{"mcp-manual-login"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    REQUIRE(attempts->begin("Bigfox").status == Result::Status::Success);
+    REQUIRE(attempts->begin("Other").status == Result::Status::Success);
+    Fixture f;
+    auto d = f.make();
+    std::string live_name = "Bigfox";
+    std::string live_user = "DEVELOPER";
+    auto ctx = ctx_with_id();
+    bool should_clear = true;
+    SECTION("verified manually authenticated default") {}
+    SECTION("another connection does not clear the default's block") { live_name = "Other"; should_clear = false; }
+    SECTION("unauthenticated session does not clear the block") { live_user.clear(); should_clear = false; }
+    SECTION("scope denial does not clear the block") { ctx.principal.all_scopes = false; should_clear = false; }
+    d.set_session_startup([] { return fairyfly::startup::Policy{false, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) {
+            FAIL("Manual login recovery must not launch SAP"); return Result::ok();
+        }, attempts);
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = live_user;
+        facts.session_identity = "session-seven|key|generation";
+        return facts;
+    });
+    d.set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        fairyfly::auth::SessionTarget target;
+        target.system = "A4H/001"; target.user = live_user; target.connection_name = live_name;
+        return target;
+    });
+    const auto result = d.call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
+    CHECK(result.is_error == !ctx.principal.all_scopes);
+    CHECK((attempts->begin("Bigfox").status == Result::Status::Success) == should_clear);
+    CHECK(attempts->begin("Other").status == Result::Status::Error);
+}
+
+TEST_CASE("MCP automatic credential login keeps later implicit calls on the authenticated session", "[mcp][startup][startup-followup]") {
+    fairyfly::test::TempDir dir{"mcp-startup-followup"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    Fixture f;
+    bool opened = false, ready = false;
+    int starts = 0, logins = 0;
+    std::function<Result()> submit_guard;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            opened = true;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        if (argv[0] == "session" && argv[1] == "login") {
+            REQUIRE(submit_guard);
+            const auto allowed = submit_guard();
+            REQUIRE(allowed.status == Result::Status::Success);
+            ready = true;
+            ++logins;
+            return Result::ok({{"connection_id", 7}});
+        }
+        REQUIRE(argv[0] == "screen");
+        return Result::ok({{"connection_id", 7}, {"screen", "SAP Easy Access"}});
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { ++starts; return Result::ok(); }, attempts);
+    d.set_login_submit_guard_override([&](std::function<Result()> guard) { submit_guard = std::move(guard); });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!opened) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001";
+        facts.user = ready ? "DEVELOPER" : "";
+        facts.session_identity = ready ? "session-seven|key|generation" : "session-seven||generation";
+        return facts;
+    });
+    const auto first = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+    INFO(text_of(first));
+    REQUIRE_FALSE(first.is_error);
+    const auto second = d.call_tool("gui_screen_read", json::object(), ctx_with_id(2));
+    INFO(text_of(second));
+    CHECK_FALSE(second.is_error);
+    CHECK(starts == 1);
+    CHECK(logins == 1);
+}
+
 TEST_CASE("Dispatcher: a failed audit write in required mode reports AUDIT_UNAVAILABLE", "[mcp][dispatcher][audit]") {
     mcp_audit_reset_failure();
     // The "directory" of the audit file is a regular file, so every append fails.
