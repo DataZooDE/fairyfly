@@ -373,7 +373,8 @@ std::vector<ToolSpec> read_tool_specs() {
         "trees, plus the status bar. ") + kScreenTokenAdvice +
         "Grid/table reads are limited to `max_rows` (default 20, max 200); page with `offset` (the result reports `next_offset`; "
         "trailing empty padding rows are trimmed and counted as `empty_rows_trimmed`). `compact` (default true) hides technical "
-        "element IDs in Markdown; pass compact=false when you need element IDs to click or fill (or use "
+        "element IDs in Markdown and leaves out grid columns that are empty in every returned row of an unpaged read (listed in "
+        "`hidden_empty_columns`); pass compact=false when you need element IDs to click or fill (or use "
         "gui_screen_find). To enter data, read with only=editable: it lists every changeable field with its id, empty ones "
         "included{?gui_element_fill:, then fill the requested fields in ONE gui_element_fill call with `fields` (and `then_key` enter or f8 when required)}. "
         "Prefer the current tab (no_tabs=true) or one named tab (tab) for known tasks; expand all tabs only when needed. For form-only work also use skip_trees=true unless the task needs trees. "
@@ -399,7 +400,8 @@ std::vector<ToolSpec> read_tool_specs() {
                      {"probe_all", boolean("Probe every container exhaustively (slower, most complete).")},
                      {"format", enum_str({"markdown", "json"}, "Output format (default: the server's configured format).")},
                      {"projection", enum_str({"full", "refs"}, "refs: editable fields with short screen-scoped references instead of absolute IDs (requires only=editable).")},
-                     {"compact", boolean("Compact output (default true, but false with only=editable): hides IDs in Markdown, drops empty fields.")},
+                     {"compact", boolean("Compact output (default true, but false with only=editable): hides IDs in Markdown, drops empty fields "
+                                         "and grid columns empty in every row (unless the grid is paged).")},
                      {"connection", conn}}),
         annotations("Read the current SAP screen", true, false, true), ToolOutput::Markdown,
         [](const json& a, const Policy& p) {

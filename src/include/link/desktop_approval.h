@@ -147,15 +147,21 @@ std::string client_name(const std::string& client_id);
 /// the element id: "fill fields ctxtDATABROWSE-TABLENAME, then press enter" -> "fill Table Name, then press Enter",
 /// several "fill 3 fields (Order Type, Sales Organization, VBAK-VTWEG)". A rewrite that would make the text longer than
 /// libffl's summary limit keeps the step as it is.
-std::string readable_step(const std::string& step, const FieldLabels& labels = {});
+/// Labels are cleaned (control and bidi/format characters removed, white space collapsed, at most 40 bytes); two
+/// fields with the same label, and every labelled field when `with_names` (the approval window's steps), also show
+/// their name: "Table Name (DATABROWSE-TABLENAME)".
+std::string readable_step(const std::string& step, const FieldLabels& labels = {}, bool with_names = false);
 
-/// The fields a summary or step fills ("fill fields A, B" and "fill field <id>": the id's last part), in order.
+/// The fields a summary or step fills ("fill fields A, B" and "fill field <id>": the id's last part, after its window,
+/// "wnd[1]/ctxtWERKS"), in order.
 std::vector<std::string> fill_field_names(const std::string& summary);
 
 /// How the desktop finds a filled field on the screen: GuiContainer.FindByName(name, type) from the name in the
-/// summary ("ctxtVBAK-AUART" -> {"VBAK-AUART", "GuiCTextField"}); type empty for a name without a known prefix.
+/// summary ("ctxtVBAK-AUART" -> {"VBAK-AUART", "GuiCTextField"}, "wnd[1]/ctxtWERKS" -> window 1); type empty for a
+/// name without a known prefix.
 struct FieldLookup {
     std::string name, type;
+    int window = -1;  ///< wnd[N] of the field, -1: not known (the active window)
     bool operator==(const FieldLookup&) const = default;
 };
 FieldLookup field_lookup(const std::string& field);

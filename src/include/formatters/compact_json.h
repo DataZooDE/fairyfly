@@ -24,7 +24,8 @@ nlohmann::json compact_screen_json(const nlohmann::json& data);
 /// `--compact` for grids and table controls (every format): in each `table_data` / `grid_data` object anywhere in
 /// `data`, the columns whose cells are empty (or only white space, or missing) in every returned row are removed
 /// from `columns` and every row, and their names are listed in `hidden_empty_columns`. Nothing is hidden without
-/// rows or when every column is empty. Idempotent.
+/// rows, when every column is empty, or for one page of a paged read (offset > 0 or next_offset): every page of a
+/// grid then has the same columns. Idempotent.
 void hide_empty_columns(nlohmann::json& data);
 
 }  // namespace formatters

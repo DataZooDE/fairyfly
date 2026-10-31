@@ -73,20 +73,53 @@ std::string cut(std::string s, std::size_t max) {
     return s.substr(0, at) + "...";
 }
 
-std::string trimmed(const std::string& s) {
-    const auto first = s.find_first_not_of(" \t");
-    if (first == std::string::npos) return "";
-    return s.substr(first, s.find_last_not_of(" \t") - first + 1);
+// a label read from SAP as one plain line: control characters (also CR, LF, tab) become spaces, Unicode format
+// characters that reorder or hide text (U+200B-U+200F, U+202A-U+202E, U+2060-U+2069, U+FEFF) are removed, white space
+// is collapsed, a trailing ':' dropped; then cut to 40 bytes at a character boundary
+std::string clean_label(const std::string& raw) {
+    std::string s;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        const auto b = [&](std::size_t k) { return i + k < raw.size() ? static_cast<unsigned char>(raw[i + k]) : 0u; };
+        const unsigned c = b(0);
+        if (c < 0x20 || c == 0x7F) { s += ' '; continue; }
+        if (c == 0xC2 && b(1) == 0xA0) { s += ' '; ++i; continue; }  // no-break space
+        if (c == 0xE2 && b(1) == 0x80 && ((b(2) >= 0x8B && b(2) <= 0x8F) || (b(2) >= 0xAA && b(2) <= 0xAE))) { i += 2; continue; }
+        if (c == 0xE2 && b(1) == 0x81 && b(2) >= 0xA0 && b(2) <= 0xA9) { i += 2; continue; }
+        if (c == 0xEF && b(1) == 0xBB && b(2) == 0xBF) { i += 2; continue; }
+        s += raw[i];
+    }
+    std::string out;
+    for (char ch : s) {
+        if (ch == ' ' && (out.empty() || out.back() == ' ')) continue;
+        out += ch;
+    }
+    while (!out.empty() && (out.back() == ' ' || out.back() == ':')) out.pop_back();
+    return cut(out, 40);
 }
 
-// the field's name in the summary as people read it: its label, else the name without the type prefix
-std::string field_text(const std::string& field, const FieldLabels& labels) {
-    if (const auto it = labels.find(field); it != labels.end()) {
-        std::string label = trimmed(it->second);
-        while (!label.empty() && (label.back() == ':' || label.back() == ' ')) label.pop_back();
-        if (!label.empty()) return cut(label, 40);
+// the label of a field (its window's key first, then its bare name), cleaned; "" without one
+std::string label_of(const std::string& field, const FieldLabels& labels) {
+    auto it = labels.find(field);
+    if (it == labels.end()) {
+        const auto slash = field.find('/');
+        if (slash != std::string::npos) it = labels.find(field.substr(slash + 1));
     }
-    return field_lookup(field).name;
+    return it == labels.end() ? std::string() : clean_label(it->second);
+}
+
+// the fields of one fill as people read them: the label, else the name without the type prefix; the name is added in
+// brackets when `with_names` (the approval window) or when another field of the fill has the same label
+std::vector<std::string> field_texts(const std::vector<std::string>& fields, const FieldLabels& labels, bool with_names) {
+    std::vector<std::string> shown_labels, out;
+    for (const auto& f : fields) shown_labels.push_back(label_of(f, labels));
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        const std::string name = field_lookup(fields[i]).name;
+        const std::string& label = shown_labels[i];
+        if (label.empty()) { out.push_back(name); continue; }
+        const bool twice = std::count(shown_labels.begin(), shown_labels.end(), label) > 1;
+        out.push_back(with_names || twice ? label + " (" + name + ")" : label);
+    }
+    return out;
 }
 
 // "fill fields A, B, then press K" / "fill field <id>" from `at` (the 'f' of "fill") up to the step's end (';' or the
@@ -117,8 +150,13 @@ std::optional<Fill> parse_fill(const std::string& s, std::size_t at) {
         }
     } else if (s.compare(at, one.size(), one) == 0) {
         std::string id = s.substr(at + one.size(), fill.end - at - one.size());
+        std::string window;  // "wnd[1]/": the label is looked up in the field's own window
+        if (id.rfind("wnd[", 0) == 0) {
+            const auto close = id.find("]/");
+            if (close != std::string::npos && close > 4 && id.find_first_not_of("0123456789", 4) == close) window = id.substr(0, close + 2);
+        }
         if (const auto slash = id.find_last_of('/'); slash != std::string::npos && slash + 1 < id.size()) id = id.substr(slash + 1);
-        if (!id.empty()) fill.names.push_back(id);
+        if (!id.empty()) fill.names.push_back(window + id);
     } else {
         return std::nullopt;
     }
@@ -128,12 +166,21 @@ std::optional<Fill> parse_fill(const std::string& s, std::size_t at) {
 
 }  // namespace
 
-FieldLookup field_lookup(const std::string& field) {
+FieldLookup field_lookup(const std::string& key) {
+    std::string field = key;
+    int window = -1;
+    if (field.rfind("wnd[", 0) == 0) {
+        const auto close = field.find("]/");
+        if (close != std::string::npos && close > 4 && close <= 6 && field.find_first_not_of("0123456789", 4) == close) {
+            window = std::stoi(field.substr(4, close - 4));
+            field = field.substr(close + 2);
+        }
+    }
     for (const auto& p : kFieldPrefixes) {
         const std::string prefix = p.prefix;
-        if (field.size() > prefix.size() && field.compare(0, prefix.size(), prefix) == 0) return {field.substr(prefix.size()), p.type};
+        if (field.size() > prefix.size() && field.compare(0, prefix.size(), prefix) == 0) return {field.substr(prefix.size()), p.type, window};
     }
-    return {field, ""};
+    return {field, "", window};
 }
 
 std::vector<std::string> fill_field_names(const std::string& summary) {
@@ -167,7 +214,7 @@ std::string client_name(const std::string& client_id) {
     return host.empty() ? id : host;
 }
 
-std::string readable_step(const std::string& step, const FieldLabels& labels) {
+std::string readable_step(const std::string& step, const FieldLabels& labels, bool with_names) {
     // SAP GUI's standard toolbar (tbar[0]) is the same on every screen
     static const std::pair<const char*, const char*> buttons[] = {{"tbar[0]/btn[0]", "Enter"}, {"tbar[0]/btn[3]", "Back"},
                                                                   {"tbar[0]/btn[11]", "Save"}, {"tbar[0]/btn[12]", "Cancel"},
@@ -180,12 +227,13 @@ std::string readable_step(const std::string& step, const FieldLabels& labels) {
         for (std::size_t at = out.find("fill field"); at != std::string::npos; at = out.find("fill field", at + 1)) {
             const auto fill = parse_fill(out, at);
             if (!fill) continue;
+            const auto texts = field_texts(fill->names, labels, with_names);
             std::string text = "fill ";
-            if (fill->names.size() == 1) {
-                text += field_text(fill->names[0], labels);
+            if (texts.size() == 1) {
+                text += texts[0];
             } else {
-                text += std::to_string(fill->names.size()) + " fields (";
-                for (std::size_t i = 0; i < fill->names.size(); ++i) text += (i ? ", " : "") + field_text(fill->names[i], labels);
+                text += std::to_string(texts.size()) + " fields (";
+                for (std::size_t i = 0; i < texts.size(); ++i) text += (i ? ", " : "") + texts[i];
                 text += ")";
             }
             named += out.substr(done, at - done) + text + fill->rest;
@@ -308,8 +356,9 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
             }
         }
     }
+    // the notification's summary by label; the window's steps also name the field ("Table Name (DATABROWSE-TABLENAME)")
     r.summary = readable_step(p.summary.empty() ? p.text : p.summary, labels);
-    for (const auto& s : p.steps) r.steps.push_back(readable_step(s, labels));
+    for (const auto& s : p.steps) r.steps.push_back(readable_step(s, labels, true));
     if (r.steps.empty()) r.steps.push_back(r.summary);
     r.offer_standing = desk_.standing && !desk_.standing->enforced() && !p.enforced;
     if (desk_.sap) {

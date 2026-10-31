@@ -85,6 +85,8 @@ void hide_in_table(json& table) {
     json& columns = table["columns"];
     json& rows = table["rows"];
     if (!columns.is_array() || !rows.is_array() || rows.empty() || columns.empty()) return;
+    // a page of a longer read keeps every column: the next page has the same columns, whatever its cells hold
+    if (table.contains("next_offset") || table.value("offset", 0) > 0) return;
     std::vector<bool> keep(columns.size(), false);
     for (std::size_t c = 0; c < columns.size(); ++c)
         for (const auto& row : rows)

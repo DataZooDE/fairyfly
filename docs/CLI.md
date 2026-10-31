@@ -84,7 +84,7 @@ Make reads smaller and faster:
 | `--text-contains TEXT`, `--id-contains ID`, `--type TYPE` | Filter elements (and grid rows) by text, id or type. With tabs, the result lists `tabs_searched`, `tabs_skipped` and a `text_filter_note`. |
 | `--tab ID`, `--no-tabs` | Read one tab only, or skip the other tabs. Reading all tabs selects each one in turn. |
 | `--max-rows N`, `--offset N` | Grid and table rows: 20 by default, up to 200. The result reports `next_offset` for paging. |
-| `--compact`, `--first` | Shorter Markdown (no ids, empty fields collapsed; grid and table columns that are empty in every returned row are left out, named in one line `_Columns empty in all rows hidden: ..._`, and in JSON/TOON under `hidden_empty_columns`); only the first matching element. |
+| `--compact`, `--first` | Shorter Markdown (no ids, empty fields collapsed; grid and table columns that are empty in every returned row are left out unless the read is paged (`--offset` > 0 or `next_offset`; every page keeps the same columns), named in one line `_Columns empty in all rows hidden: ..._`, and in JSON/TOON under `hidden_empty_columns`); only the first matching element. |
 | `--skip-trees`, `--no-children` | Skip tree extraction or child elements, for slow or problematic screens. |
 
 Grid results report `Total Rows` (the control's row count), `Visible Rows (viewport)` (what SAP shows),

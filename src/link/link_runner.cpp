@@ -606,12 +606,20 @@ void configure_approval(ffy::link::AgentConfig& cfg, const LinkOptions& o, LinkR
                 cli::CommandHandler* h = peek ? peek() : nullptr;
                 auto s = h ? h->attached_com_session() : nullptr;
                 if (!s) return;
-                sap::ComGuiWindowPtr window;
-                try { window = s->get_active_window(); } catch (const std::exception&) { return; }
-                if (!window) return;
+                sap::ComGuiWindowPtr active;
+                try { active = s->get_active_window(); } catch (const std::exception&) {}
                 for (const auto& name : names) {
                     try {
                         const auto lookup = approval::field_lookup(name);
+                        // the field's own window when the summary names it (wnd[1]/...), else the active one
+                        sap::ComGuiWindowPtr window = active;
+                        if (lookup.window >= 0) {
+                            try {
+                                const auto element = s->find_element_by_id("wnd[" + std::to_string(lookup.window) + "]");
+                                if (element && element->get_dispatch()) window = sap::ComGuiWindow::create(IDispatchPtr(element->get_dispatch()));
+                            } catch (const std::exception&) {}  // closed meanwhile: the active window
+                        }
+                        if (!window) continue;
                         const auto field = window->find_by_name(lookup.name, lookup.type);
                         if (!field) continue;
                         std::string label = field->get_label();

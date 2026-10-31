@@ -233,7 +233,9 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields (Order Type, Sales Organization,
     Distribution Channel), then press Save (Ctrl+S)" with **Approve**, **Deny** and **Details**; filled fields are
     named by their screen label (read from the active window), else by the field name without its type prefix
-    ("SE16 - fill DATABROWSE-TABLENAME, then press Enter"), never by the element id; it stays on screen until answered
+    ("SE16 - fill DATABROWSE-TABLENAME, then press Enter"), never by the element id (labels are cleaned of control,
+    bidi and zero-width characters and cut to 40 bytes; the window's steps add the name: "Table Name
+    (DATABROWSE-TABLENAME)"); it stays on screen until answered
     and can be answered from the notification centre too;
   - **Details** (or a click on the notification) opens the approval window: the assistant by name ("Claude", the
     client's URL in brackets), the account it acts for, the SAP system, client and transaction, every step numbered
