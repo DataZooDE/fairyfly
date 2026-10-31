@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 2026.10.31
+
+- Microsoft Store package requires Windows 10 22H2 (10.0.19045) or later.
+- MSI and Store package use separate toast activators, so approvals work with both installed.
+- MCP tray: Restart right after Stop is no longer lost; the tray never reaches a destroyed server.
+
+
+### Microsoft Store: Windows 10 22H2 or later
+
+- The MSIX package's `TargetDeviceFamily` `MinVersion` is now 10.0.19045.0 (Windows 10 22H2) instead of 10.0.17763.0
+  (Windows 10 1809): the Store offers fairyfly only on the Windows versions it is tested on. `MaxVersionTested` stays
+  10.0.26100.0. The MSI and winget package are unchanged.
+- CI: the manifest test checks `MinVersion` and that `MaxVersionTested` is not below it
+  ([docs/MSIX.md](docs/MSIX.md)).
 
 ### Approval notifications: one toast activator per package
 
