@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.31.3
 
 - `screen read --compact` leaves out grid and table columns that are empty in every returned row and names them in one
   line (`_Columns empty in all rows hidden: STATE_INFO_DISP, ..._`; JSON/TOON: `hidden_empty_columns`). SM50's work
