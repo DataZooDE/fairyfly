@@ -104,6 +104,7 @@ private:
     std::function<void(int)> connection_changed_hook_;
     std::function<bool(const audit::SapFacts&, const std::string&)> attach_target_guard_;
     std::function<bool(const audit::SapFacts&, const std::string&)> login_target_guard_;
+    bool login_guard_redacts_errors_ = true;
     std::function<bool(const audit::SapFacts&, const std::string&)> launch_target_guard_;
     std::optional<Connection> pending_owner_launch_;
     std::optional<Connection> pending_owner_attach_;
@@ -189,8 +190,10 @@ public:
     void set_attach_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
         attach_target_guard_ = std::move(guard);
     }
-    void set_login_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
+    void set_login_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard,
+                                bool redact_errors = true) {
         login_target_guard_ = std::move(guard);
+        login_guard_redacts_errors_ = redact_errors;
     }
     void set_launch_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
         launch_target_guard_ = std::move(guard);

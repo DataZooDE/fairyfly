@@ -148,6 +148,19 @@ TEST_CASE("Missing credentials do not record an automatic login attempt", "[logi
     CHECK(rig.engine->count("click_element") == 0);
 }
 
+TEST_CASE("Recovery login retains actionable credential and identity errors", "[login][startup][startup-recovery-errors]") {
+    LoginRig rig;
+    rig.handler->set_login_target_guard([](const audit::SapFacts&, const std::string&) { return false; }, false);
+    SECTION("missing local credentials") {
+        const auto result = rig.handler->handle_login("", 0, false, "missing-credentials", "fail");
+        CHECK(code(result) == "CREDENTIALS_NOT_FOUND");
+    }
+    SECTION("wrong credential identity") {
+        CHECK(code(rig.login()) == "SESSION_TARGET_CHANGED");
+    }
+    CHECK(rig.actions().empty());
+}
+
 TEST_CASE("A failed credential submission retains its automatic retry block", "[login][startup][startup-submit]") {
     LoginRig rig;
     startup::LoginAttempts attempts(rig.dir.path());

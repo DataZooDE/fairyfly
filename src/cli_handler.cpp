@@ -800,7 +800,10 @@ Result CommandHandler::refuse_owner_login(Result result, bool password_typed) {
     if (password_typed) {
         try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
     }
-    result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
+    if (login_guard_redacts_errors_)
+        result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
+    else
+        result.set_error("SESSION_TARGET_CHANGED", "The local credentials do not match the saved SAP target. Correct the local credentials or log in manually, then retry.");
     return result;
 }
 
@@ -937,7 +940,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         });
     if (resolved.status != ResultT<cred::ResolvedLogin>::Status::Success) {
         result.status = Result::Status::Error;
-        result.error = login_target_guard_
+        result.error = login_target_guard_ && login_guard_redacts_errors_
             ? json{{"code", "OWNER_SESSION_UNAVAILABLE"},
                    {"message", "the requested SAP logon is unavailable"}}
             : resolved.error;

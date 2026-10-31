@@ -157,9 +157,11 @@ TEST_CASE("Session lane reservation stops promptly when caller cancels", "[mcp][
 
 TEST_CASE("Session executor pool bounds the number of sessions", "[mcp][session-executor]") {
     SessionExecutorPool pool(1, 2, 5000);
+    std::promise<void> release;
+    auto gate = release.get_future().share();
     ExecJob job;
     job.id = 1;
-    job.run = [](CallState&) { return json::object(); };
+    job.run = [gate](CallState&) { gate.wait(); return json::object(); };
     SubmitResult status;
     auto first = pool.submit_future("session-A", job, &status);
     REQUIRE(status == SubmitResult::Queued);
@@ -167,6 +169,7 @@ TEST_CASE("Session executor pool bounds the number of sessions", "[mcp][session-
     CHECK(status == SubmitResult::QueueFull);
     CHECK_FALSE(refused.valid());
     CHECK(first.valid());
+    release.set_value();
     first.get();
     REQUIRE(retire_eventually(pool, "session-A"));
     auto replacement = pool.submit_future("session-B", job, &status);

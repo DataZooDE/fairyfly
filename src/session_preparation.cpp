@@ -100,6 +100,7 @@ Result prepare(const Policy& policy, const Operations& operations) {
     if (operations.login_ready) operations.login_ready();
     selected.data["session_ready"] = true;
     selected.data["startup_changed_screen"] = changed_screen;
+    selected.data["startup_default"] = policy.default_connection;
     return selected;
 }
 } // namespace fairyfly::startup

@@ -112,6 +112,9 @@ public:
     void set_login_target_guard_override(LoginTargetGuardOverride hook) {
         login_target_guard_override_ = std::move(hook);
     }
+    void set_login_recovery_guard_override(LoginTargetGuardOverride hook) {
+        login_recovery_guard_override_ = std::move(hook);
+    }
     using LaunchTargetGuard = std::function<bool(const audit::SapFacts&, const std::string& connection_name)>;
     using LaunchTargetGuardOverride = std::function<void(LaunchTargetGuard)>;
     void set_launch_target_guard_override(LaunchTargetGuardOverride hook) {
@@ -309,8 +312,8 @@ private:
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
     void set_sticky_connection(const std::string& principal_name, int id, std::string session_identity,
-                               std::string sap_identity = "") {
-        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity), std::move(sap_identity));
+                               std::string sap_identity = "", std::string startup_default = "") {
+        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity), std::move(sap_identity), std::move(startup_default));
     }
     std::shared_ptr<SessionRoutingState> routing_state_ = std::make_shared<SessionRoutingState>();
     /// Principals whose last screen-acting call ended outside their T-code allowlist: their next screen-acting
@@ -338,7 +341,9 @@ private:
     LoginSubmitGuardOverride login_submit_guard_override_;
     std::shared_ptr<startup::LoginAttempts> startup_attempts_;
     std::optional<startup::Policy> preparing_startup_;
-    Result prepare_implicit_session(const CallContext& ctx);
+    std::string preparing_identity_;
+    Result prepare_implicit_session(const CallContext& ctx, std::optional<audit::SapFacts>& ready_facts,
+                                    const std::string& expected_identity = "");
     ConnectionSnapshotProvider connection_snapshot_provider_;
     OwnerSessionListingProvider owner_session_listing_provider_;
     SessionTargetResolver target_resolver_;
@@ -347,6 +352,7 @@ private:
     OwnerSessionOverride owner_session_override_;
     AttachTargetGuardOverride attach_target_guard_override_;
     LoginTargetGuardOverride login_target_guard_override_;
+    LoginTargetGuardOverride login_recovery_guard_override_;
     LaunchTargetGuardOverride launch_target_guard_override_;
     LaunchRollbackOverride launch_rollback_override_;
     AttachFinalizeOverride attach_finalize_override_;

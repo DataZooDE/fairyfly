@@ -169,6 +169,9 @@ void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::
     dispatcher.set_login_target_guard_override([lazy_handler](CommandDispatcher::LoginTargetGuard guard) {
         lazy_handler().set_login_target_guard(std::move(guard));
     });
+    dispatcher.set_login_recovery_guard_override([lazy_handler](CommandDispatcher::LoginTargetGuard guard) {
+        lazy_handler().set_login_target_guard(std::move(guard), false);
+    });
     dispatcher.set_launch_target_guard_override([lazy_handler](CommandDispatcher::LaunchTargetGuard guard) {
         lazy_handler().set_launch_target_guard(std::move(guard));
     });

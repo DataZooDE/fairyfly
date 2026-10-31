@@ -258,6 +258,62 @@ TEST_CASE("MCP prepares a fresh session before asking to observe it for a screen
     CHECK((*result.structured)["error"]["connection_file_id"] == 7);
 }
 
+TEST_CASE("MCP recovers its implicit startup default after the session closes", "[mcp][startup][startup-recovery]") {
+    Fixture f;
+    bool ready = false;
+    int launches = 0;
+    std::string saved_name = "Bigfox", live_user = "DEVELOPER";
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            ready = true;
+            ++launches;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        return Result::ok();
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d.set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        fairyfly::auth::SessionTarget target;
+        target.system = "A4H/001"; target.user = "DEVELOPER"; target.connection_name = saved_name;
+        return target;
+    });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!ready) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = live_user;
+        facts.session_identity = "session-seven|key-" + std::to_string(launches) + "|generation";
+        return facts;
+    });
+    json args = {{"no_tabs", true}, {"skip_trees", true}};
+    REQUIRE_FALSE(d.call_tool("gui_screen_read", args, ctx_with_id()).is_error);
+    REQUIRE(launches == 1);
+    ready = false;
+    int expected_launches = 2;
+    bool error = false;
+    SECTION("same default and identity recover") {}
+    SECTION("another saved connection is not replaced") { saved_name = "Other"; expected_launches = 1; error = true; }
+    SECTION("startup origin survives deletion of the saved connection") { saved_name.clear(); }
+    SECTION("SSO returning another SAP user is refused") { live_user = "OTHER"; error = true; }
+    SECTION("SAP usernames compare without case") { live_user = "developer"; }
+    SECTION("an explicit connection is not automatically replaced") { args["connection"] = 7; expected_launches = 1; }
+    const auto recovered = d.call_tool("gui_screen_read", args, ctx_with_id());
+    INFO(text_of(recovered));
+    CHECK(recovered.is_error == error);
+    CHECK(launches == expected_launches);
+    if (live_user == "OTHER") {
+        // Failed recovery must not overwrite the original principal's sticky identity.
+        live_user = "DEVELOPER";
+        ready = false;
+        const auto retry = d.call_tool("gui_screen_read", args, ctx_with_id());
+        INFO(text_of(retry));
+        CHECK_FALSE(retry.is_error);
+        CHECK(launches == 3);
+    }
+}
+
 TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][startup][startup-submit]") {
     fairyfly::test::TempDir dir{"mcp-startup-submit"};
     auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
@@ -1583,6 +1639,8 @@ TEST_CASE("Dispatcher: auto_attach re-attaches a default from gui_session_attach
     };
     // attach explicitly (connection 0, Bigfox/100/LEE), then SAP Logon restarts: connection 0's session is gone
     auto start = [&](Fixture& f, Desk& desk, CommandDispatcher* d) {
+        d->set_session_startup([] { return fairyfly::startup::Policy{false, false, false, "Another default"}; },
+            [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::fail("UNEXPECTED_STARTUP", "Existing-session reattach needs no startup."); });
         f.handler = [&](const Argv& argv) { return desk(argv); };
         desk.live[0] = facts_of(kBigfox, 0, "/app/con[0]/ses[0]|k0|g0");
         d->set_sap_facts_provider([&desk](std::optional<int> c) -> std::optional<SapFacts> {

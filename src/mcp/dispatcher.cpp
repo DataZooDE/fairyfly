@@ -47,6 +47,14 @@ bool owner_boundary_error(const std::string& code) {
            code == "CONNECTION_DENIED" || code == "SESSION_TARGET_CHANGED";
 }
 
+bool startup_identity_matches(const std::string& expected, const std::string& actual) {
+    const auto split = expected.rfind('/');
+    const auto other = actual.rfind('/');
+    return split != std::string::npos && other != std::string::npos &&
+        expected.substr(0, split) == actual.substr(0, other) &&
+        sap_user_matches(expected.substr(split + 1), actual.substr(other + 1));
+}
+
 ToolResult error_result(const std::string& code, const std::string& message, const std::string& hint = "") {
     ToolResult r;
     r.is_error = true;
@@ -1042,6 +1050,8 @@ void CommandDispatcher::mark_tcode_left(ToolResult& shaped) {
 /// owner mode only with a known session identity) and says so.
 void CommandDispatcher::remember_sticky_connection(ToolResult& shaped, const Result& result, McpCallRecord& record,
                                                    const CallContext& ctx) {
+    // Startup binds its final authenticated identity only after the original task is admitted.
+    if (preparing_startup_) return;
     if (auto id = int_from_json(result.data["connection_file_id"])) {
         std::string identity, sap_identity;  // sap_identity: a closed default re-attaches only to this user
         if (facts_provider_) {
@@ -1480,15 +1490,18 @@ std::optional<ToolResult> CommandDispatcher::admit_live_session(const std::strin
     return std::nullopt;
 }
 
-Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
+Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::optional<audit::SapFacts>& ready_facts,
+                                                    const std::string& expected_identity) {
     auto policy = startup_policy_();
     policy.link_request = ctx.link_request;
     policy.gateway_allowed = ctx.sap_startup_granted;
     preparing_startup_ = policy;
+    preparing_identity_ = expected_identity;
     struct Reset {
         std::optional<startup::Policy>& policy;
-        ~Reset() { policy.reset(); }
-    } reset{preparing_startup_};
+        std::string& identity;
+        ~Reset() { policy.reset(); identity.clear(); }
+    } reset{preparing_startup_, preparing_identity_};
     startup::Operations operations;
     operations.cancelled = ctx.cancelled;
     operations.current_policy = [this, &ctx] {
@@ -1498,12 +1511,13 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
         return current;
     };
     if (startup_attempts_) {
-        operations.login_ready = [this, &policy] {
+        operations.login_ready = [this, &policy, &ready_facts, &expected_identity] {
+            if (!expected_identity.empty() && (!ready_facts || !startup_identity_matches(expected_identity, sap_identity(*ready_facts)))) return;
             if (!startup_attempts_->clear(policy.default_connection))
                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
         };
     }
-    std::optional<audit::SapFacts> ready_facts;
+    ready_facts.reset();
     operations.authenticated = [this, &ready_facts](int id) {
         std::optional<audit::SapFacts> facts;
         try { if (facts_provider_) facts = facts_provider_(id); } catch (...) {}
@@ -1556,9 +1570,9 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
             message.empty() ? "SAP session preparation returned no usable result." : message);
     };
     auto prepared = startup::prepare(policy, operations);
-    if (prepared.status == Result::Status::Success && ready_facts && ready_facts->connection_id)
-        set_sticky_connection(principal_key(ctx.principal), *ready_facts->connection_id,
-            ready_facts->session_identity, sap_identity(*ready_facts));
+    if (prepared.status == Result::Status::Success && !expected_identity.empty() &&
+        (!ready_facts || !startup_identity_matches(expected_identity, sap_identity(*ready_facts))))
+        return Result::fail("SESSION_TARGET_CHANGED", "The prepared session does not match the saved SAP identity. Attach the intended session explicitly.");
     return prepared;
 }
 
@@ -1597,12 +1611,32 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     if (auto refused = admission_refusal(spec, name, args, ctx, selection_input))
         return fail(refused->code, refused->message, refused->hint);
     std::optional<int> prepared_action_connection;
-    if (startup_policy_ && !preparing_startup_ && accepts_connection && !record.connection &&
+    std::optional<audit::SapFacts> prepared_facts;
+    std::string prepared_default;
+    if (startup_policy_ && !preparing_startup_ && accepts_connection && !policy_.default_connection &&
         !args.contains("connection") && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
         std::optional<audit::SapFacts> live;
-        try { if (facts_provider_) live = facts_provider_(std::nullopt); } catch (...) {}
+        try { if (facts_provider_) live = facts_provider_(record.connection); } catch (...) {}
         if (!live || live->system.empty() || live->client.empty() || live->user.empty()) {
-            const auto prepared = prepare_implicit_session(ctx);
+            std::string expected_identity;
+            if (record.connection) {
+                auth::SessionTarget saved;
+                try { if (target_resolver_) saved = target_resolver_({{}, {}, record.connection}); } catch (...) {}
+                const auto configured = startup_policy_();
+                const auto saved_name = sticky_target && !sticky_target->startup_default.empty()
+                    ? sticky_target->startup_default : saved.connection_name;
+                if (sticky_target && !sticky_target->sap_identity.empty() && !saved.ambiguous &&
+                    !saved_name.empty() && !configured.default_connection.empty() &&
+                    sap::ConnectionLauncher::matches_connection_name(configured.default_connection, saved_name) &&
+                    (saved.connection_name.empty() || sap::ConnectionLauncher::matches_connection_name(saved_name, saved.connection_name)) &&
+                    (saved.user.empty() || startup_identity_matches(sticky_target->sap_identity, saved.identity())) &&
+                    (!live || !live->connection_id || live->connection_id == record.connection) &&
+                    (!live || live->session_identity.empty() || live->session_identity == sticky_target->session_identity))
+                    expected_identity = sticky_target->sap_identity;
+            }
+            // Other saved targets retain the existing identity-checked reattach path.
+            if (!record.connection || !expected_identity.empty()) {
+            const auto prepared = prepare_implicit_session(ctx, prepared_facts, expected_identity);
             if (prepared.status != Result::Status::Success) {
                 const auto error_code = prepared.error.value("code", "SAP_STARTUP_UNAVAILABLE");
                 std::string hint;
@@ -1621,6 +1655,7 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
                 return refused;
             }
             record.connection = prepared.data.at("connection_file_id").get<int>();
+            prepared_default = prepared.data.value("startup_default", std::string());
             if (prepared.data.value("startup_changed_screen", false) && !command_table::can_continue_after_startup(name))
                 prepared_action_connection = record.connection;
             // Continue through original target authorization and owner/lease checks.
@@ -1628,6 +1663,7 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
             args["connection"] = *record.connection;
             implicit_sticky = false;
             sticky_target.reset();
+            }
         }
     }
     const Principal& principal = ctx.principal;
@@ -1652,6 +1688,9 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
     policy_state_key = session_policy_key(principal, "", record.connection);
     policy_fallback_key = policy_state_key;
     if (auto refused = admit_live_session(name, record, ctx, state, refuse)) return refused;
+    if (prepared_facts && prepared_facts->connection_id)
+        set_sticky_connection(principal_key(ctx.principal), *prepared_facts->connection_id,
+            prepared_facts->session_identity, sap_identity(*prepared_facts), prepared_default);
     if (prepared_action_connection) {
         const auto prepared = startup::observation_required(*prepared_action_connection);
         auto refused = fail("SESSION_PREPARED", prepared.error.at("message").get<std::string>(),
@@ -2288,15 +2327,20 @@ ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCall
         (!launch_target_guard_override_ || !launch_rollback_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the launched SAP window cannot be verified");
     std::optional<audit::SapFacts> anticipated_login;
-    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_target_guard_override_,
-        owner_mode(ctx) &&
+    const auto& login_guard_hook = owner_mode(ctx) ? login_target_guard_override_ : login_recovery_guard_override_;
+    GuardScope<LoginTargetGuardOverride, LoginTargetGuard> login_guard_scope(login_guard_hook,
+        (owner_mode(ctx) || !preparing_identity_.empty()) &&
             (name == "gui_session_login" || (name == "gui_session_launch" && args.is_object() && args.value("login", false)))
             ? LoginTargetGuard([this, &principal, &args, &ctx, &name, &login_pre_facts,
                                 &checked_launch_facts, &anticipated_login]
                 (const audit::SapFacts& facts, const std::string& connection_name) {
+                if (!preparing_identity_.empty() && !startup_identity_matches(preparing_identity_, sap_identity(facts))) return false;
+                if (!owner_mode(ctx)) return true;
                 return owner_login_target_allowed(facts, connection_name, name, principal, args, ctx, login_pre_facts,
                                                   checked_launch_facts, anticipated_login);
             }) : LoginTargetGuard{});
+    if (!preparing_identity_.empty() && name == "gui_session_login" && !login_guard_hook)
+        return fail("SAP_LOGIN_GUARD_UNAVAILABLE", "The saved SAP identity cannot be verified before login. Log in manually, then retry.");
     if (owner_mode(ctx) && name == "gui_session_login" &&
         (!login_pre_facts || !login_target_guard_override_))
         return fail("OWNER_SESSION_UNAVAILABLE", "the SAP login target cannot be verified");
