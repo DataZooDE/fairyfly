@@ -1306,6 +1306,38 @@ struct ShowingHost : FakeHost {
     bool show_running_instance() override { ++shown; return other_tray; }
 };
 
+TEST_CASE("Both trays confirm before enabling automatic SAP startup", "[tray][startup][confirmation]") {
+    FakeSettings settings;
+    FakeHost host;
+    FakeControl control;
+    TrayServices mcp_services;
+    mcp_services.settings = &settings;
+    mcp_services.host = &host;
+    TrayController mcp(control, nullptr, mcp_services, {});
+    LinkTrayServices link_services;
+    link_services.settings = &settings;
+    link_services.host = &host;
+    LinkTrayController link(link_services, {});
+    const auto exercise = [&](auto& controller) {
+        settings.set(kAllowSapStartupSetting, "0");
+        host.confirms.clear();
+        host.confirm_answer = false;
+        controller.on_action(TrayAction::ToggleSapStartup);
+        CHECK(settings.get(kAllowSapStartupSetting) == "0");
+        REQUIRE(host.confirms.size() == 1);
+        CHECK(host.confirms.back().find("stored credentials or SSO") != std::string::npos);
+        host.confirm_answer = true;
+        controller.on_action(TrayAction::ToggleSapStartup);
+        CHECK(settings.get(kAllowSapStartupSetting) == "1");
+        CHECK(host.confirms.size() == 2);
+        controller.on_action(TrayAction::ToggleSapStartup);
+        CHECK(settings.get(kAllowSapStartupSetting) == "0");
+        CHECK(host.confirms.size() == 2);
+    };
+    exercise(mcp);
+    exercise(link);
+}
+
 TEST_CASE("Both trays share a persistent opt-in for SAP startup", "[tray][startup]") {
     FakeSettings settings;
     FakeControl control;
