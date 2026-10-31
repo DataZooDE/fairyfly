@@ -114,7 +114,7 @@ private:
     std::function<startup::Policy()> automatic_startup_;
     bool continue_after_startup_ = false;
     std::shared_ptr<startup::LoginAttempts> startup_attempts_;
-    std::function<Result()> login_submit_guard_;
+    std::function<Result(const std::string&)> login_submit_guard_;
     bool preparing_session_ = false;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
@@ -253,7 +253,7 @@ public:
 
     // Connection management - two modes
     Result ensure_sap_logon(const startup::Policy& policy, const std::function<bool()>& cancelled = {});
-    void set_login_submit_guard(std::function<Result()> guard) { login_submit_guard_ = std::move(guard); }
+    void set_login_submit_guard(std::function<Result(const std::string&)> guard) { login_submit_guard_ = std::move(guard); }
     Result prepare_default_session(const startup::Policy& policy);
     void set_automatic_startup(std::function<startup::Policy()> policy,
                               std::shared_ptr<startup::LoginAttempts> attempts = {}, bool continue_after_startup = false) {

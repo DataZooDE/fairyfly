@@ -378,7 +378,7 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
     Fixture f;
     bool opened = false;
     int submissions = 0;
-    std::function<Result()> submit_guard;
+    std::function<Result(const std::string&)> submit_guard;
     f.handler = [&](const Argv& argv) {
         if (argv.size() > 1 && argv[0] == "session") {
             if (argv[1] == "list") return Result::ok({{"connections", json::array()}});
@@ -388,7 +388,7 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
             }
             if (argv[1] == "login") {
                 REQUIRE(submit_guard);
-                const auto allowed = submit_guard();
+                const auto allowed = submit_guard("A4H/001/DEVELOPER");
                 if (allowed.status != Result::Status::Success) return allowed;
                 ++submissions;
                 return Result::fail("LOGIN_FAILED", "Login needs manual attention.");
@@ -399,7 +399,7 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
     auto d = f.make();
     d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
         [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); }, attempts);
-    d.set_login_submit_guard_override([&](std::function<Result()> guard) { submit_guard = std::move(guard); });
+    d.set_login_submit_guard_override([&](std::function<Result(const std::string&)> guard) { submit_guard = std::move(guard); });
     d.set_sap_facts_provider([&](std::optional<int> id) -> std::optional<fairyfly::audit::SapFacts> {
         if (!opened) return std::nullopt;
         fairyfly::audit::SapFacts facts;
@@ -416,7 +416,7 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
     REQUIRE(result.is_error);
     CHECK(text_of(result).find(login_allowed ? "LOGIN_FAILED" : "SCOPE_DENIED") != std::string::npos);
     CHECK(submissions == (login_allowed ? 1 : 0));
-    CHECK((attempts->begin("Bigfox").status == Result::Status::Error) == login_allowed);
+    CHECK((attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Error) == login_allowed);
     CHECK_FALSE(submit_guard);
     REQUIRE(result.structured);
     CHECK((*result.structured)["error"]["connection_file_id"] == 7);
@@ -425,7 +425,7 @@ TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][s
 TEST_CASE("MCP clears only a verified matching manual login retry block", "[mcp][startup][startup-manual-recovery]") {
     fairyfly::test::TempDir dir{"mcp-manual-login"};
     auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
-    REQUIRE(attempts->begin("Bigfox").status == Result::Status::Success);
+    REQUIRE(attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Success);
     REQUIRE(attempts->begin("Other").status == Result::Status::Success);
     Fixture f;
     auto d = f.make();
@@ -434,6 +434,7 @@ TEST_CASE("MCP clears only a verified matching manual login retry block", "[mcp]
     auto ctx = ctx_with_id();
     bool should_clear = true;
     SECTION("verified manually authenticated default") {}
+    SECTION("another SAP user does not clear this identity block") { live_user = "OTHER"; should_clear = false; }
     SECTION("another connection does not clear the default's block") { live_name = "Other"; should_clear = false; }
     SECTION("unauthenticated session does not clear the block") { live_user.clear(); should_clear = false; }
     SECTION("scope denial does not clear the block") { ctx.principal.all_scopes = false; should_clear = false; }
@@ -454,7 +455,7 @@ TEST_CASE("MCP clears only a verified matching manual login retry block", "[mcp]
     });
     const auto result = d.call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
     CHECK(result.is_error == !ctx.principal.all_scopes);
-    CHECK((attempts->begin("Bigfox").status == Result::Status::Success) == should_clear);
+    CHECK((attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Success) == should_clear);
     CHECK(attempts->begin("Other").status == Result::Status::Error);
 }
 
@@ -464,7 +465,7 @@ TEST_CASE("MCP automatic credential login keeps later implicit calls on the auth
     Fixture f;
     bool opened = false, ready = false;
     int starts = 0, logins = 0;
-    std::function<Result()> submit_guard;
+    std::function<Result(const std::string&)> submit_guard;
     f.handler = [&](const Argv& argv) {
         if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
         if (argv[0] == "session" && argv[1] == "launch") {
@@ -473,7 +474,7 @@ TEST_CASE("MCP automatic credential login keeps later implicit calls on the auth
         }
         if (argv[0] == "session" && argv[1] == "login") {
             REQUIRE(submit_guard);
-            const auto allowed = submit_guard();
+            const auto allowed = submit_guard("A4H/001/DEVELOPER");
             REQUIRE(allowed.status == Result::Status::Success);
             ready = true;
             ++logins;
@@ -485,7 +486,7 @@ TEST_CASE("MCP automatic credential login keeps later implicit calls on the auth
     auto d = f.make();
     d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
         [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { ++starts; return Result::ok(); }, attempts);
-    d.set_login_submit_guard_override([&](std::function<Result()> guard) { submit_guard = std::move(guard); });
+    d.set_login_submit_guard_override([&](std::function<Result(const std::string&)> guard) { submit_guard = std::move(guard); });
     d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
         if (!opened) return std::nullopt;
         fairyfly::audit::SapFacts facts;

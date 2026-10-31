@@ -356,3 +356,18 @@ TEST_CASE("Recovery clears the launch marker even when the login marker cannot b
     CHECK(attempts.begin_launch("Bigfox").status == fairyfly::Result::Status::Success);
     CHECK(attempts.pending("Bigfox"));
 }
+
+TEST_CASE("Credential retry keys reject incomplete identities and share case-insensitive accounts", "[startup][startup-coordination]") {
+    fairyfly::test::TempDir temp{"credential-keys"};
+    fairyfly::startup::LoginAttempts store(temp.path());
+    CHECK_FALSE(store.has_login_attempts());
+    for (const auto* identity : {"", "A4H", "A4H/001/", "/001/USER", "A4H//USER", "A4H/001/USER/extra"}) {
+        CHECK(fairyfly::startup::LoginAttempts::credential_key(identity).empty());
+        CHECK(store.begin(fairyfly::startup::LoginAttempts::credential_key(identity)).status == fairyfly::Result::Status::Error);
+    }
+    const auto key = fairyfly::startup::LoginAttempts::credential_key("A4H/001/USER");
+    REQUIRE(store.begin(key).status == fairyfly::Result::Status::Success);
+    CHECK(store.has_login_attempts());
+    CHECK(store.begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/user")).status == fairyfly::Result::Status::Error);
+    CHECK(store.begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/OTHER")).status == fairyfly::Result::Status::Success);
+}

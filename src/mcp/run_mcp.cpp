@@ -125,7 +125,7 @@ int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<in
 void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler,
                         CommandDispatcher::StartupPolicyProvider startup_policy) {
     dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
-    dispatcher.set_login_submit_guard_override([lazy_handler](std::function<Result()> guard) {
+    dispatcher.set_login_submit_guard_override([lazy_handler](std::function<Result(const std::string&)> guard) {
         lazy_handler().set_login_submit_guard(std::move(guard));
     });
     dispatcher.set_session_startup(std::move(startup_policy),

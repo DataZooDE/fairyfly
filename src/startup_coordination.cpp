@@ -55,6 +55,23 @@ PreparationGuard acquire_preparation_guard(const std::function<bool()>& cancelle
     }
 }
 
+std::string LoginAttempts::credential_key(const std::string& identity) {
+    const auto first = identity.find('/');
+    const auto second = first == std::string::npos ? first : identity.find('/', first + 1);
+    if (first == 0 || first == std::string::npos || second == std::string::npos || second == first + 1 ||
+        second + 1 == identity.size() || identity.find('/', second + 1) != std::string::npos) return {};
+    // Account lockout counts across callers, connection aliases and transports.
+    return "sap-credential-identity\n" + identity;
+}
+bool LoginAttempts::has_login_attempts() const {
+    if (root_.empty() || !root_.is_absolute()) return false;
+    std::error_code error;
+    const auto path = root_ / "startup-login-attempts";
+    const std::filesystem::directory_iterator entries(path, error);
+    if (error) return error != std::errc::no_such_file_or_directory;
+    return entries != std::filesystem::directory_iterator{};
+}
+
 Result LoginAttempts::begin(const std::string& connection) {
     if (root_.empty() || !root_.is_absolute() || connection.empty())
         return Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login cannot safely record its attempt. Log in to SAP manually.");

@@ -123,7 +123,8 @@ TEST_CASE("Automatic login guard runs immediately before submission and can prev
     LoginRig rig;
     rig.authenticate_on_enter();
     int attempts = 0;
-    rig.handler->set_login_submit_guard([&] {
+    rig.handler->set_login_submit_guard([&](const std::string& identity) {
+        CHECK(identity == "S4H/100/ALICE");
         ++attempts;
         const auto actions = rig.actions();
         REQUIRE_FALSE(actions.empty());
@@ -141,7 +142,7 @@ TEST_CASE("Automatic login guard runs immediately before submission and can prev
 TEST_CASE("Missing credentials do not record an automatic login attempt", "[login][startup][startup-submit]") {
     LoginRig rig;
     int attempts = 0;
-    rig.handler->set_login_submit_guard([&] { ++attempts; return Result::ok(); });
+    rig.handler->set_login_submit_guard([&](const std::string& identity) { ++attempts; return Result::ok(); });
     const auto result = rig.handler->handle_login("", 0, false, "missing-credentials", "fail");
     CHECK(result.status == Result::Status::Error);
     CHECK(attempts == 0);
@@ -164,7 +165,7 @@ TEST_CASE("Recovery login retains actionable credential and identity errors", "[
 TEST_CASE("A failed credential submission retains its automatic retry block", "[login][startup][startup-submit]") {
     LoginRig rig;
     startup::LoginAttempts attempts(rig.dir.path());
-    rig.handler->set_login_submit_guard([&] { return attempts.begin("S4H"); });
+    rig.handler->set_login_submit_guard([&](const std::string& identity) { return attempts.begin("S4H"); });
     rig.engine->on_call = [&](const std::string& call) {
         if (call == "click_element @active/tbar[0]/btn[0]")
             rig.engine->next = Result::fail("SUBMIT_FAILED", "Submission outcome is unknown.");

@@ -1553,7 +1553,9 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
     if (startup_attempts_) {
         operations.login_ready = [this, &ctx, &policy, &ready_facts, &expected_identity] {
             if (!expected_identity.empty() && (!ready_facts || !startup_identity_matches(expected_identity, sap_identity(*ready_facts)))) return;
-            if (!startup_attempts_->clear(startup_attempt_key(policy_, ctx, policy.default_connection)))
+            const bool launch_cleared = startup_attempts_->clear(startup_attempt_key(policy_, ctx, policy.default_connection));
+            const bool login_cleared = ready_facts && startup_attempts_->clear(startup::LoginAttempts::credential_key(sap_identity(*ready_facts)));
+            if (!launch_cleared || !login_cleared)
                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
         };
     }
@@ -1575,7 +1577,7 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
         if (tool == "gui_session_login") {
             if (!login_submit_guard_override_)
                 return Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
-            login_submit_guard_override_([this, &ctx, policy] {
+            login_submit_guard_override_([this, &ctx, policy](const std::string& identity) {
                 if (ctx.cancelled && ctx.cancelled()) return Result::fail("CANCELLED", "SAP login was cancelled.");
                 if (ctx.http && (!ctx.reauthorize || !ctx.reauthorize()))
                     return Result::fail("TOKEN_CHANGED", "Authorization changed before SAP login; retry with valid authorization.");
@@ -1585,7 +1587,7 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
                 if (current.default_connection != policy.default_connection)
                     return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
                 if (auto denied = startup::check(current)) return *denied;
-                return startup_attempts_ ? startup_attempts_->begin(startup_attempt_key(policy_, ctx, policy.default_connection))
+                return startup_attempts_ ? startup_attempts_->begin(startup::LoginAttempts::credential_key(identity))
                     : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
             });
             reset.installed = true;
@@ -1882,7 +1884,7 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
     if (result.status == Result::Status::Success && !preparing_startup_ && startup_policy_ && startup_attempts_ &&
         facts_provider_ && target_resolver_ && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
         const auto startup_policy = startup_policy_();
-        if (startup_attempts_->pending(startup_attempt_key(policy_, ctx, startup_policy.default_connection))) {
+        if (startup_attempts_->pending(startup_attempt_key(policy_, ctx, startup_policy.default_connection)) || startup_attempts_->has_login_attempts()) {
             // A manual login can make preparation unnecessary. Clear its block
             // only after an authorized successful call and fresh matching facts.
             // Never queue an ordinary read behind another process's startup.
@@ -1895,9 +1897,13 @@ ToolResult CommandDispatcher::shape_call(const std::string& name, Result& result
                         const auto target = target_resolver_(TargetQuery{"", "", live->connection_id});
                         if (!target.ambiguous && target.system == live->system + "/" + live->client &&
                             target.user == live->user && sap::ConnectionLauncher::matches_connection_name(
-                                startup_policy.default_connection, target.connection_name))
-                            if (!startup_attempts_->clear(startup_attempt_key(policy_, ctx, startup_policy.default_connection)))
+                                startup_policy.default_connection, target.connection_name) &&
+                            (!owner_mode(ctx) || owner_identity_allowed(policy_, principal, sap_identity(*live)))) {
+                            const bool launch_cleared = startup_attempts_->clear(startup_attempt_key(policy_, ctx, startup_policy.default_connection));
+                            const bool login_cleared = startup_attempts_->clear(startup::LoginAttempts::credential_key(sap_identity(*live)));
+                            if (!launch_cleared || !login_cleared)
                                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified manual login");
+                        }
                     }
                 } catch (...) {} // Unknown identity leaves the block intact.
             }

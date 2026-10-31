@@ -94,10 +94,13 @@ TEST_CASE("CLI verified manual login clears the matching retry block", "[handler
     rig.engine->live_sessions[kSession] = true;
     auto attempts = std::make_shared<startup::LoginAttempts>(rig.dir.path());
     REQUIRE(attempts->begin("BIG").status == Result::Status::Success);
+    const auto identity_key = startup::LoginAttempts::credential_key("A4H/001/DEVELOPER");
+    REQUIRE(attempts->begin(identity_key).status == Result::Status::Success);
     REQUIRE(attempts->begin("Other").status == Result::Status::Success);
     rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; }, attempts);
-    bool failed = false, busy = false;
+    bool failed = false, busy = false, read_only_recovery = false;
     SECTION("successful command clears") {}
+    SECTION("successful screen read clears without navigation") { read_only_recovery = true; }
     SECTION("failed command retains retry guard") { failed = true; rig.engine->next = Result::fail("TEST_FAILURE", "test"); }
     SECTION("another preparation retains retry guard") { busy = true; }
     std::promise<void> held, release;
@@ -108,11 +111,14 @@ TEST_CASE("CLI verified manual login clears the matching retry block", "[handler
         released.wait();
     });
     held.get_future().wait();
-    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    const auto result = read_only_recovery
+        ? rig.handler->handle_screen_read(false, std::nullopt, false, {})
+        : rig.handler->handle_transaction("SE11", std::nullopt);
     release.set_value();
     contender.get();
     CHECK((result.status == Result::Status::Error) == failed);
     CHECK(attempts->pending("BIG") == (failed || busy));
+    CHECK(attempts->pending(identity_key) == (failed || busy));
     CHECK(attempts->begin("Other").status == Result::Status::Error);
 }
 

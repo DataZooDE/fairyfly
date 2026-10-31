@@ -370,15 +370,19 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
         if (result.status != Result::Status::Success || !automatic_startup_ || !startup_attempts_ || preparing_session_)
             return result;
         const auto policy = automatic_startup_();
-        if (!startup_attempts_->pending(policy.default_connection)) return result;
+        if (!startup_attempts_->pending(policy.default_connection) && !startup_attempts_->has_login_attempts()) return result;
         // Never clear another process's in-flight attempt or wait behind it.
         const auto guard = startup::acquire_preparation_guard({}, std::chrono::milliseconds(0));
         if (!guard.token) return result;
         const auto target = peek_session_target("", "", conn.id);
         if (!policy.default_connection.empty() && !target.ambiguous &&
             !target.facts.system.empty() && !target.facts.client.empty() && !target.facts.user.empty() &&
-            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name))
-            startup_attempts_->clear(policy.default_connection);
+            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name)) {
+            const bool launch_cleared = startup_attempts_->clear(policy.default_connection);
+            const bool login_cleared = startup_attempts_->clear(startup::LoginAttempts::credential_key(
+                target.facts.system + "/" + target.facts.client + "/" + target.facts.user));
+            if (!launch_cleared || !login_cleared) spdlog::warn("Cannot clear SAP startup retry protection after confirmed recovery");
+        }
         return result;
     };
     if (conn.server_session_key.empty()) return confirmed();   // live positional session; no key to compare
@@ -432,10 +436,13 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
         ~PreparationGuard() { active = false; }
     } guard(preparing_session_);
     startup::Operations operations;
+    std::string ready_identity;
     operations.current_policy = automatic_startup_;
     if (startup_attempts_) {
-        operations.login_ready = [this, &policy] {
-            if (!startup_attempts_->clear(policy.default_connection))
+        operations.login_ready = [this, &policy, &ready_identity] {
+            const bool launch_cleared = startup_attempts_->clear(policy.default_connection);
+            const bool login_cleared = startup_attempts_->clear(startup::LoginAttempts::credential_key(ready_identity));
+            if (!launch_cleared || !login_cleared)
                 spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
         };
     }
@@ -461,25 +468,27 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
         }
         if (name == "gui_session_login") {
             struct RestoreSubmitGuard {
-                std::function<Result()>& slot;
-                std::function<Result()> previous;
+                std::function<Result(const std::string&)>& slot;
+                std::function<Result(const std::string&)> previous;
                 ~RestoreSubmitGuard() { slot = std::move(previous); }
             } restore{login_submit_guard_, std::move(login_submit_guard_)};
-            login_submit_guard_ = [this, policy] {
+            login_submit_guard_ = [this, policy](const std::string& identity) {
                 const auto current = automatic_startup_ ? automatic_startup_() : policy;
                 if (current.default_connection != policy.default_connection)
                     return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
                 if (auto denied = startup::check(current)) return *denied;
-                return startup_attempts_ ? startup_attempts_->begin(policy.default_connection)
+                return startup_attempts_ ? startup_attempts_->begin(startup::LoginAttempts::credential_key(identity))
                     : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
             };
             return handle_login("", args.at("connection").get<int>(), false, "", "fail");
         }
         return Result::fail("SAP_STARTUP_UNAVAILABLE", "Unsupported session preparation operation.");
     };
-    operations.authenticated = [this](int id) {
+    operations.authenticated = [this, &ready_identity](int id) {
         const auto facts = audit_facts_for_connection(id);
-        return !facts.system.empty() && !facts.client.empty() && !facts.user.empty();
+        const bool ready = !facts.system.empty() && !facts.client.empty() && !facts.user.empty();
+        ready_identity = ready ? facts.system + "/" + facts.client + "/" + facts.user : std::string();
+        return ready;
     };
     return startup::prepare(policy, operations);
 }
@@ -1017,7 +1026,10 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     if (!owner_login_allowed()) return deny_owner_login();
     if (login_submit_guard_) {
         Result permission;
-        try { permission = login_submit_guard_(); }
+        try {
+            const auto live = audit_facts_for_connection(selected.value.id);
+            permission = login_submit_guard_(live.system + "/" + credentials.client + "/" + credentials.username);
+        }
         catch (...) { permission = Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection failed. Log in manually."); }
         if (permission.status != Result::Status::Success) {
             engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
@@ -1861,6 +1873,11 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
         }
     }
 
+    // A successful read is enough to confirm manual login recovery. Keep the
+    // ordinary no-marker read path free of additional SAP probes.
+    if (result.status == Result::Status::Success && automatic_startup_ && startup_attempts_ &&
+        (startup_attempts_->pending(automatic_startup_().default_connection) || startup_attempts_->has_login_attempts()))
+        return confirm_session_after_action(conn_result.value, result);
     return result;
 }
 

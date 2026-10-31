@@ -13,10 +13,12 @@ PreparationGuard acquire_preparation_guard(const std::function<bool()>& cancelle
 
 // An attempt is recorded BEFORE submitting credentials. Failure, cancellation,
 // process death and uncertain outcomes all require manual login before retry.
-// This state contains only a hash of the locally configured connection name.
+// State contains hashes of launch scopes or SAP identities, never credentials.
 class LoginAttempts {
 public:
     explicit LoginAttempts(std::filesystem::path root) : root_(std::move(root)) {}
+    static std::string credential_key(const std::string& identity);
+    bool has_login_attempts() const;
     Result begin(const std::string& connection);
     // Separate durable launch guard: a failed/uncertain launch must not create
     // another invisible window on every task. Verified login clears both.

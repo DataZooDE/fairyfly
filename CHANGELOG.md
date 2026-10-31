@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026.10.31.1
+
+- CLI, MCP and link tasks can start the local default SAP session on demand using stored credentials or SSO.
+- Tray modes share an off-by-default **Allow automatic SAP startup** setting; headless modes use `--allow-sap-startup`. Configure the local entry with `fairyfly session default NAME`.
+- Link startup also requires the gateway administrator's signed permission. Disabled or unavailable startup returns instructions for correcting the local or gateway setting.
+- Reuse authenticated sessions and matching login windows; recover closed automatically prepared sessions while preserving explicit targets, identities, scopes and leases.
+- Failed or uncertain credential submissions are blocked per SAP account across callers and transports until verified recovery. Failed launches cannot repeatedly open extra windows.
+- Startup batches stop before actions that require observing the newly prepared screen. Workflow instructions recommend starting with a compact screen read.
+
 ## 2026.10.31
 
 - Microsoft Store package requires Windows 10 22H2 (10.0.19045) or later.

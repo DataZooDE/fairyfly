@@ -292,7 +292,7 @@ The endpoint must expose the session lifecycle tools needed for preparation.
 | `SAP_AUTOSTART_ADMIN_DISABLED` | Ask the gateway administrator to allow automatic SAP startup, or log in manually. |
 | `SAP_AUTOSTART_DEFAULT_MISSING` | Configure the local SAP Logon entry with `fairyfly session default "<name>"`. |
 | `SAP_STARTUP_BUSY` | Another process is preparing SAP. Wait briefly and inspect/retry the task. |
-| `SAP_LOGIN_REQUIRED` | Complete login or SSO locally before retrying; automatic credential submission is blocked after an uncertain or failed attempt. |
+| `SAP_LOGIN_REQUIRED` | Complete login or SSO locally before retrying; automatic credential submission is blocked after an uncertain or failed attempt. The block is per SAP account and shared across tokens, connection aliases and transports. |
 | `SAP_STARTUP_REQUIRES_ATTENTION` | Inspect SAP Logon and the local default, start the intended session and log in manually, then retry. A durable marker prevents another window after an incomplete launch; a verified successful login clears it. |
 
 Credentials stay on the desktop. A login attempt is recorded before submission to prevent repeated automatic

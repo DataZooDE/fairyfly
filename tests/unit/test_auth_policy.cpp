@@ -1889,7 +1889,7 @@ TEST_CASE("Owner startup preserves redaction after an inner login admission refu
     });
     d->set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
         [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
-    d->set_login_submit_guard_override([](std::function<Result()>) {});
+    d->set_login_submit_guard_override([](std::function<Result(const std::string&)>) {});
     f.handler = [&](const Argv& argv) {
         if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
         REQUIRE(argv[0] == "session");
@@ -3746,7 +3746,7 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
     });
     d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
         [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
-    d->set_login_submit_guard_override([](std::function<Result()>) {});
+    d->set_login_submit_guard_override([](std::function<Result(const std::string&)>) {});
     d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> {
         return std::make_shared<int>(1);
     });
@@ -3852,4 +3852,60 @@ TEST_CASE("Failed automatic launches cannot accumulate unclaimed windows", "[aut
     INFO(text_of(read));
     REQUIRE_FALSE(read.is_error);
     CHECK(restarted->pending("Bigfox\nprincipal:" + p.id));
+}
+
+TEST_CASE("Tokens sharing a stored SAP identity share credential retry protection", "[auth][startup][startup-shared-credential]") {
+    Fixture f;
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/OWNER", "A4H/001/OTHER"};
+    auto d = f.make(policy);
+    Principal p = token("agent", {"screen", "session"});
+    p.id = "first-token"; p.sap_identities = {"A4H/001/OWNER"};
+    p.sap_systems = {"A4H/001"}; p.connections = {"Bigfox"};
+    fairyfly::test::TempDir dir{"shared-credential-retry"};
+    auto attempts = std::make_shared<startup::LoginAttempts>(dir.path());
+    d->set_session_startup([] { return startup::Policy{true, false, false, "Bigfox"}; },
+        [](const startup::Policy&, const std::function<bool()>&) { return Result::ok(); }, attempts);
+    std::function<Result(const std::string&)> submit;
+    d->set_login_submit_guard_override([&](std::function<Result(const std::string&)> guard) { submit = std::move(guard); });
+    d->set_login_lane_reserver([](const std::string&, const std::function<bool()>&) -> std::shared_ptr<void> {
+        return std::make_shared<int>(1);
+    });
+    audit::SapFacts current;
+    f.facts_for = [&](std::optional<int> id) -> std::optional<audit::SapFacts> {
+        return id == current.connection_id ? std::optional<audit::SapFacts>(current) : std::nullopt;
+    };
+    d->set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        auth::SessionTarget target;
+        target.connection_name = "Bigfox";
+        if (!current.system.empty()) target.system = current.system + "/" + current.client;
+        target.user = current.user;
+        return target;
+    });
+    int launches = 0, submissions = 0;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            ++launches;
+            current = audit::SapFacts{"A4H", "000", "", "S000"};
+            current.connection_id = launches;
+            current.session_identity = "session-" + std::to_string(launches) + "|key|generation";
+            REQUIRE(f.launch_guard(current, "Bigfox"));
+            return Result::ok({{"connection_file_id", launches}, {"session_id", "session-" + std::to_string(launches)}});
+        }
+        REQUIRE(argv[0] == "session"); REQUIRE(argv[1] == "login");
+        auto anticipated = current; anticipated.client = "001"; anticipated.user = "OWNER";
+        REQUIRE(f.login_guard(anticipated, "Bigfox"));
+        REQUIRE(submit);
+        const auto permitted = submit("A4H/001/OWNER");
+        if (permitted.status != Result::Status::Success) return permitted;
+        ++submissions;
+        return Result::fail("LOGIN_FAILED", "Test credential submission failed.");
+    };
+    CHECK(d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p)).is_error);
+    p.id = "second-token";
+    CHECK(d->call_tool("gui_screen_read", {{"no_tabs", true}}, ctx_for(p)).is_error);
+    CHECK(launches == 2);
+    CHECK(submissions == 1);
 }
