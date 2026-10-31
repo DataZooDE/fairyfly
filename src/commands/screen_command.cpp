@@ -29,7 +29,7 @@ Examples:
   fairyfly screen read --connection 3 --no-tabs --compact
   fairyfly screen read --connection 3 --type GuiShell --no-tabs
   fairyfly screen read --connection 3 --only tables --max-rows 100 --offset 0
-  fairyfly screen read --only editable --no-tabs     # every changeable field with its id, to fill
+  fairyfly screen read --only editable --no-tabs
 )HELP");
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
