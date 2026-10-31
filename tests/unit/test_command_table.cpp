@@ -159,6 +159,21 @@ TEST_CASE("root help lists every registered group and the global flags", "[comma
     }
 }
 
+TEST_CASE("screen read --only accepts exactly the MCP tool's values", "[command_table][cli][only]") {
+    for (const char* value : {"buttons", "fields", "editable", "f4_fields", "tables"}) {
+        const auto parsed = dry_parse({"screen", "read", "--only", value});
+        CHECK(parsed.ok);
+        CHECK(parsed.path == "screen read");
+    }
+    CHECK_FALSE(dry_parse({"screen", "read", "--only", "grids"}).ok);
+    CHECK_FALSE(dry_parse({"screen", "read", "--only"}).ok);
+    // one selector: --only does not combine with the older --only-* flags
+    CHECK_FALSE(dry_parse({"screen", "read", "--only", "tables", "--only-buttons"}).ok);
+    CHECK(dry_parse({"screen", "read", "--only-tables"}).ok);  // still accepted
+    const auto help = dry_parse({"screen", "read", "--help"});
+    CHECK(help.help);
+}
+
 TEST_CASE("global options also work after the noun/verb", "[command_table][cli]") {
     auto parsed = dry_parse({"screen", "read", "--read-only"});
     REQUIRE(parsed.ok);

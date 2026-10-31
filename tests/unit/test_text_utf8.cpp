@@ -47,3 +47,19 @@ TEST_CASE("utf8: an embedded NUL is kept, not taken as the end", "[text][utf8]")
     CHECK(utf8_to_wide_lossy(with_nul) == std::wstring(L"a\0b", 3));
     CHECK(wide_to_utf8(std::wstring(L"a\0b", 3)) == with_nul);
 }
+
+// ---- the console's output code page (console_output.h) ------------------------------------------------------------
+#include "include/console_output.h"
+
+TEST_CASE("console output: a console on code page 437/850/1252 is switched to UTF-8, nothing else", "[text][console]") {
+    using fairyfly::console::needs_utf8_output;
+    CHECK(needs_utf8_output(true, 437));
+    CHECK(needs_utf8_output(true, 850));
+    CHECK(needs_utf8_output(true, 1252));
+    CHECK_FALSE(needs_utf8_output(true, 65001));   // already UTF-8
+    CHECK_FALSE(needs_utf8_output(false, 437));    // a pipe or a file: bytes are passed on as they are
+    // without a console (the test runner's pipe) both calls are harmless and can be repeated
+    fairyfly::console::use_utf8_output();
+    fairyfly::console::restore_output_code_page();
+    fairyfly::console::restore_output_code_page();
+}

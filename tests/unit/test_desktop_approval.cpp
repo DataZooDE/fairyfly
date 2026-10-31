@@ -7,6 +7,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 
 #include "include/link/desktop_approval.h"
@@ -131,7 +132,7 @@ TEST_CASE("desktop approval: the notification's Approve approves, and the notifi
     CHECK(r.user == "jr@example.com");
     CHECK(r.sap.system == "BIG");
     CHECK(r.sap.transaction == "VA02");
-    CHECK(r.steps == std::vector<std::string>{"fill fields ctxtA, ctxtB, then press Execute (F8)"});
+    CHECK(r.steps == std::vector<std::string>{"fill 2 fields (A, B), then press Execute (F8)"});
     CHECK(r.offer_standing);  // the window offers "Don't ask again"
     CHECK(!r.nonce.empty());
     b.answer(r.id, r.nonce, Answer::Approve);
@@ -582,7 +583,7 @@ TEST_CASE("desktop approval: keys are named as people know them", "[link][approv
     CHECK(readable_step("press shift+f4") == "press Shift+F4");
     CHECK(readable_step("press 26") == "press Ctrl+F2");
     CHECK(readable_step("press pagedown") == "press Page Down");
-    CHECK(readable_step("fill fields ctxtA, ctxtB, then press f8") == "fill fields ctxtA, ctxtB, then press Execute (F8)");
+    CHECK(readable_step("fill fields ctxtA, ctxtB, then press f8") == "fill 2 fields (A, B), then press Execute (F8)");
     CHECK(readable_step("run 2 steps: 1. press 11; 2. click wnd[0]/tbar[0]/btn[3]") ==
           "run 2 steps: 1. press Save (Ctrl+S); 2. click Back (wnd[0]/tbar[0]/btn[3])");
     CHECK(readable_step("press nonsense") == "press nonsense");  // not a key: as it is
@@ -872,4 +873,75 @@ TEST_CASE("link runtime: a background thread counts until its work and captures 
     CHECK(ran);
     CHECK(seen == 1);   // still counted while the captures went away
     CHECK(runtime.background_threads() == 0);
+}
+
+// ---- fields by their screen label, never the technical id (SE16: "fill fields ctxtDATABROWSE-TABLENAME") -----------
+
+TEST_CASE("desktop approval: a filled field is named by its screen label", "[link][approval][labels]") {
+    const FieldLabels labels{{"ctxtDATABROWSE-TABLENAME", "Table Name"}, {"ctxtVBAK-AUART", "Order Type:"},
+                             {"txtVBAK-VKORG", "Sales Organization"}};
+    CHECK(readable_step("fill fields ctxtDATABROWSE-TABLENAME, then press enter", labels) == "fill Table Name, then press Enter");
+    CHECK(readable_step("fill fields ctxtVBAK-AUART, txtVBAK-VKORG, ctxtVBAK-VTWEG, then press 11", labels) ==
+          "fill 3 fields (Order Type, Sales Organization, VBAK-VTWEG), then press Save (Ctrl+S)");
+    // a single fill names its element by a shortened id
+    CHECK(readable_step("fill field wnd[0]/usr/ctxtDATABROWSE-TABLENAME", labels) == "fill Table Name");
+    CHECK(readable_step("fill field wnd[0]/.../ctxtRV45A-MABNR[1,0]") == "fill RV45A-MABNR[1,0]");
+    // inside a batch, every step
+    CHECK(readable_step("run 2 steps: 1. fill fields ctxtDATABROWSE-TABLENAME, then press enter; 2. click wnd[0]/tbar[0]/btn[11]",
+                        labels) == "run 2 steps: 1. fill Table Name, then press Enter; 2. click Save (wnd[0]/tbar[0]/btn[11])");
+}
+
+TEST_CASE("desktop approval: without a label the field name, never the full id or its type prefix", "[link][approval][labels]") {
+    CHECK(readable_step("fill fields ctxtDATABROWSE-TABLENAME, then press enter") == "fill DATABROWSE-TABLENAME, then press Enter");
+    CHECK(readable_step("fill fields pwdRSYST-BCODE, chkFLAG, cmbLIST, radR1, txtSOME_FIELD") ==
+          "fill 5 fields (RSYST-BCODE, FLAG, LIST, R1, SOME_FIELD)");
+    CHECK(readable_step("fill fields custom") == "fill custom");       // no known prefix: as it is
+    CHECK(readable_step("fill fields txt") == "fill txt");             // a prefix alone is no name
+    // a long label is cut, and an empty one is not used
+    const FieldLabels labels{{"txtA", std::string(80, 'L')}, {"txtB", "  "}};
+    const std::string out = readable_step("fill fields txtA, txtB", labels);
+    CHECK(out.size() < 80);
+    CHECK(out.find("B)") != std::string::npos);
+}
+
+TEST_CASE("desktop approval: the names to look up are the filled fields", "[link][approval][labels]") {
+    CHECK(fill_field_names("run 2 steps: 1. fill fields ctxtA, txtB, then press enter; 2. fill field wnd[0]/usr/txtC; 3. press 11") ==
+          std::vector<std::string>{"ctxtA", "txtB", "txtC"});
+    CHECK(fill_field_names("click wnd[0]/tbar[0]/btn[11]").empty());
+    CHECK(field_lookup("ctxtDATABROWSE-TABLENAME") == FieldLookup{"DATABROWSE-TABLENAME", "GuiCTextField"});
+    CHECK(field_lookup("txtX") == FieldLookup{"X", "GuiTextField"});
+    CHECK(field_lookup("pwdX") == FieldLookup{"X", "GuiPasswordField"});
+    CHECK(field_lookup("cmbX") == FieldLookup{"X", "GuiComboBox"});
+    CHECK(field_lookup("chkX") == FieldLookup{"X", "GuiCheckBox"});
+    CHECK(field_lookup("radX") == FieldLookup{"X", "GuiRadioButton"});
+    CHECK(field_lookup("custom") == FieldLookup{"custom", ""});
+}
+
+TEST_CASE("desktop approval: the notification and the window name fields by the labels the desk reads", "[link][approval][labels]") {
+    auto ui = std::make_shared<FakeUi>();
+    ui->window_answer = Answer::Deny;
+    ui->can_notify = false;
+    auto d = desk();
+    std::vector<std::string> asked;
+    d.field_labels = [&asked](const std::vector<std::string>& names) {
+        asked = names;
+        return FieldLabels{{"ctxtDATABROWSE-TABLENAME", "Table Name"}};
+    };
+    Broker b(ui, d, fast());
+    b.decide(prompt("fill fields ctxtDATABROWSE-TABLENAME, then press enter"));
+    REQUIRE(ui->windows.size() == 1);
+    CHECK(asked == std::vector<std::string>{"ctxtDATABROWSE-TABLENAME"});
+    CHECK(ui->windows[0].summary == "fill Table Name, then press Enter");
+    CHECK(ui->windows[0].steps == std::vector<std::string>{"fill Table Name, then press Enter"});
+
+    // a desk that cannot read labels (SAP busy, no session): the field name
+    auto failing = desk();
+    failing.field_labels = [](const std::vector<std::string>&) -> FieldLabels { throw std::runtime_error("busy"); };
+    auto ui2 = std::make_shared<FakeUi>();
+    ui2->window_answer = Answer::Deny;
+    ui2->can_notify = false;
+    Broker b2(ui2, failing, fast());
+    b2.decide(prompt("fill fields ctxtDATABROWSE-TABLENAME, then press enter"));
+    REQUIRE(ui2->windows.size() == 1);
+    CHECK(ui2->windows[0].summary == "fill DATABROWSE-TABLENAME, then press Enter");
 }
