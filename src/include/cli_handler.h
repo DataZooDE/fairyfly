@@ -7,6 +7,7 @@
 #include "credential_store.h"
 #include "audit_log.h"
 #include "fill_fields.h"
+#include "screen_only.h"
 #include "screen_snapshot.h"
 #include "login_flow.h"
 #include "session_startup.h"
@@ -70,6 +71,9 @@ struct ScreenFilterOptions {
     std::optional<std::string> type_filter;   ///< Filter by exact element type
     bool first_match_only = false;            ///< Return only first matching element
 };
+
+/// Sets the selector `value` (one of only_selector_values) in `filters`; false for any other value (nothing set).
+bool select_only(ScreenFilterOptions& filters, const std::string& value);
 
 /// Applies the filters to a screen read. With `text_contains` on a screen that has tabs it also adds
 /// `tabs_searched` (names), `tabs_skipped` ([{tab_id, tab_name, reason}]: not_expanded, not_requested,

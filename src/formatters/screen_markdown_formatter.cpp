@@ -5,6 +5,7 @@
 #include "include/formatters/grid_renderer.h"
 #include "include/grid_types.h"
 #include "include/formatters/table_formatter.h"
+#include "include/formatters/compact_json.h"
 #include "include/formatters/markdown_table_formatter.h"
 #include "include/element_renderer_registry.h"
 #include "include/semantic_classifier.h"
@@ -787,7 +788,26 @@ void render_summary(std::ostringstream& oss, [[maybe_unused]] const json& data, 
 
 }  // namespace
 
+namespace {
+std::string format_screen(const json& data, bool compact);
+}  // namespace
+
 std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
+    std::string out;
+    if (compact) {
+        json shown = data;
+        formatters::hide_empty_columns(shown);  // compact: grid columns empty in every returned row are left out
+        out = format_screen(shown, compact);
+    } else {
+        out = format_screen(data, compact);
+    }
+    // SAP pads texts with non-breaking and other odd spaces (HTML viewer pages, list cells): plain spaces read the same
+    // and survive consoles and tools that are not UTF-8 clean
+    return utils::normalize_spaces(out);
+}
+
+namespace {
+std::string format_screen(const json& data, bool compact) {
     std::ostringstream oss;
     render_header(oss, data, compact);
     // Check if we have hierarchy data
@@ -804,6 +824,7 @@ std::string ScreenMarkdownFormatter::format(const json& data, bool compact) {
         section(oss, data, hierarchy, compact);
     return oss.str();
 }
+}  // namespace
 
 // Helper function implementations
 namespace {

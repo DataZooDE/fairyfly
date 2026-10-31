@@ -180,7 +180,7 @@ TEST_CASE("gui_screen_read passes offset and only=tables to the CLI", "[mcp][too
     REQUIRE(read != nullptr);
     using Argv = std::vector<std::string>;
     CHECK(read->build_argv(json{{"offset", 40}, {"max_rows", 20}, {"only", "tables"}}, mcp::Policy{}) ==
-          Argv{"screen", "read", "--only-tables", "--max-rows", "20", "--offset", "40", "--compact", "--output",
+          Argv{"screen", "read", "--only", "tables", "--max-rows", "20", "--offset", "40", "--compact", "--output",
                "markdown"});
     // offset 0 is the default and adds nothing
     CHECK(read->build_argv(json{{"offset", 0}}, mcp::Policy{}) ==
@@ -785,4 +785,64 @@ TEST_CASE("no_tabs: the selected tab's subscreen fields are part of the base rea
     cli::apply_screen_filters(data, filters);
     CHECK(ids_of(data.at("elements")) ==
           std::vector<std::string>{"ctxtSUID_ST_NODE_LOGONDATA-USERALIAS", "ctxtSUID_ST_NODE_LOGONDATA-CLASS"});
+}
+
+// ---- `screen read --only <value>`: the MCP tool's `only`, one implementation ------------------------------------
+
+TEST_CASE("--only takes exactly the MCP tool's values", "[screen][filters][only]") {
+    CHECK(cli::only_selector_values() == std::vector<std::string>{"buttons", "fields", "editable", "f4_fields", "tables"});
+    // the MCP schema offers the same list
+    const auto specs = mcp::read_tool_specs();
+    for (const auto& spec : specs)
+        if (spec.def.name == "gui_screen_read")
+            CHECK(spec.def.input_schema.at("properties").at("only").at("enum") == json(cli::only_selector_values()));
+    for (const auto& value : cli::only_selector_values()) {
+        cli::ScreenFilterOptions filters;
+        REQUIRE(cli::select_only(filters, value));
+        CHECK(filters.only_buttons == (value == "buttons"));
+        CHECK(filters.only_fields == (value == "fields"));
+        CHECK(filters.only_editable == (value == "editable"));
+        CHECK(filters.only_f4_fields == (value == "f4_fields"));
+        CHECK(filters.only_tables == (value == "tables"));
+    }
+    cli::ScreenFilterOptions filters;
+    CHECK_FALSE(cli::select_only(filters, "grids"));
+    CHECK_FALSE(cli::select_only(filters, ""));
+    CHECK_FALSE(filters.only_buttons);
+}
+
+TEST_CASE("--only tables and --only editable filter the screen like the MCP tool", "[screen][filters][only]") {
+    const json grid = {{"id", "wnd[0]/usr/cntlGRID/shellcont/shell"}, {"type", "GuiShell"}, {"subtype", "GridView"},
+                       {"table_data", {{"columns", json::array({"A"})}, {"rows", json::array({json::array({"x"})})}}}};
+    const json field = {{"id", "wnd[0]/usr/ctxtDATABROWSE-TABLENAME"}, {"type", "GuiCTextField"},
+                        {"name", "DATABROWSE-TABLENAME"}, {"text", ""}, {"changeable", true}, {"enabled", true}};
+    const json label = {{"id", "wnd[0]/usr/lblTEXT"}, {"type", "GuiLabel"}, {"name", "TEXT"}, {"text", "Table Name"},
+                        {"changeable", false}, {"enabled", true}};
+    const json screen = {{"elements", json::array({grid, field, label})},
+                         {"hierarchy", {{"tables", json::array({grid})}, {"form_fields", json::array({label, field})}}},
+                         {"element_count", 3}};
+
+    SECTION("tables: only the grid, with its rows") {
+        json data = screen;
+        cli::ScreenFilterOptions filters;
+        REQUIRE(cli::select_only(filters, "tables"));
+        cli::apply_screen_filters(data, filters);
+        REQUIRE(data.at("elements").size() == 1);
+        CHECK(data.at("elements").at(0).at("id") == grid.at("id"));
+        CHECK(data.at("elements").at(0).at("table_data").at("rows").size() == 1);
+        CHECK_FALSE(data.contains("suppressed"));
+    }
+    SECTION("editable: the empty changeable field with its id; the grid is listed under suppressed") {
+        json data = screen;
+        cli::ScreenFilterOptions filters;
+        REQUIRE(cli::select_only(filters, "editable"));
+        cli::apply_screen_filters(data, filters);
+        REQUIRE(data.at("elements").size() == 1);
+        CHECK(data.at("elements").at(0).at("id") == field.at("id"));
+        CHECK(data.at("suppressed").at("by") == "editable");
+        CHECK(data.at("suppressed").at("grid_ids").at(0) == grid.at("id"));
+        // non-compact (the CLI's default, as MCP's only=editable): the id is shown
+        const auto md = cli::ScreenMarkdownFormatter::format(data, false);
+        CHECK(md.find("ctxtDATABROWSE-TABLENAME") != std::string::npos);
+    }
 }

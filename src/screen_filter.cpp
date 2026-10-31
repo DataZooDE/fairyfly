@@ -226,6 +226,23 @@ static std::pair<json, json> filter_elements(const json& elements, const ScreenF
     return {filtered, filter_stats};
 }
 
+const std::vector<std::string>& only_selector_values()
+{
+    static const std::vector<std::string> values{"buttons", "fields", "editable", "f4_fields", "tables"};
+    return values;
+}
+
+bool select_only(ScreenFilterOptions& filters, const std::string& value)
+{
+    if (value == "buttons") filters.only_buttons = true;
+    else if (value == "fields") filters.only_fields = true;
+    else if (value == "editable") filters.only_editable = true;
+    else if (value == "f4_fields") filters.only_f4_fields = true;
+    else if (value == "tables") filters.only_tables = true;
+    else return false;
+    return true;
+}
+
 /// Name of the `only` selector in effect (MCP argument spelling), empty when none.
 static std::string only_selector_name(const ScreenFilterOptions& filters)
 {

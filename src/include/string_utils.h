@@ -48,6 +48,23 @@ constexpr bool is_ascii_alnum(char c) { return (c >= '0' && c <= '9') || (c >= '
     return std::string(s.substr(first, s.find_last_not_of(chars) - first + 1));
 }
 
+/// UTF-8 text with SAP's odd spaces made plain: U+00A0 (no-break space), U+2007 (figure space) and U+202F (narrow
+/// no-break space) become ' ', U+200B (zero width space) and U+FEFF (byte order mark) are removed. Everything else,
+/// also invalid UTF-8, stays as it is.
+[[nodiscard]] inline std::string normalize_spaces(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const auto b = [&](std::size_t k) { return i + k < s.size() ? static_cast<unsigned char>(s[i + k]) : 0u; };
+        if (b(0) == 0xC2 && b(1) == 0xA0) { out += ' '; i += 1; continue; }
+        if (b(0) == 0xE2 && b(1) == 0x80 && (b(2) == 0x87 || b(2) == 0xAF)) { out += ' '; i += 2; continue; }
+        if (b(0) == 0xE2 && b(1) == 0x80 && b(2) == 0x8B) { i += 2; continue; }
+        if (b(0) == 0xEF && b(1) == 0xBB && b(2) == 0xBF) { i += 2; continue; }
+        out += s[i];
+    }
+    return out;
+}
+
 /// Equal ignoring ASCII case.
 [[nodiscard]] inline bool iequals(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;

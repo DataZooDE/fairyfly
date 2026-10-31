@@ -1,5 +1,6 @@
 #include "include/html_viewer_reader.h"
 #include "include/com/utf8.h"
+#include "include/string_utils.h"
 
 #include <UIAutomation.h>
 #include <wrl/client.h>
@@ -104,7 +105,8 @@ ReadOnce read_once(HWND hwnd) {
         --safe_length;
     }
     try {
-        result.text = com::wide_to_utf8(std::wstring_view(body, safe_length));
+        // &nbsp; and friends as plain spaces: the page text is read as text, not laid out
+        result.text = utils::normalize_spaces(com::wide_to_utf8(std::wstring_view(body, safe_length)));
     } catch (const std::exception&) {
         result = {};
     }

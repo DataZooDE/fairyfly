@@ -4,6 +4,7 @@
 #include "include/formatters/screen_markdown_formatter.h"
 #include "include/cli_handler.h"
 #include "include/core.h"
+#include "include/mcp/tool_catalog.h"
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string>
@@ -185,4 +186,128 @@ TEST_CASE("format_output: Markdown identical for compact flag regardless of JSON
             fairyfly::cli::ScreenMarkdownFormatter::format(data, true));
     // Markdown never sees id-only hierarchy: compacting is JSON/TOON only.
     REQUIRE(md.find("hierarchy_format") == std::string::npos);
+}
+
+// ---- compact hides grid/table columns that are empty in every returned row (SM50 cntlGRID1) ---------------------
+
+namespace {
+
+/// An SM50-like ALV grid: STATE_INFO_DISP and ACTION are empty in every row, PID and STATUS are not.
+json sm50_grid() {
+    return {{"id", "wnd[0]/usr/cntlGRID1/shellcont/shell"}, {"type", "GuiShell"}, {"subtype", "GridView"},
+            {"table_data", {{"columns", json::array({"PID", "STATE_INFO_DISP", "STATUS", "ACTION"})},
+                            {"rows", json::array({json::array({"4711", "", "Running", "  "}),
+                                                  json::array({"4712", "", "Waiting", ""}),
+                                                  json::array({"4713"})})},  // a short row: missing cells are empty
+                            {"total_row_count", 3}}}};
+}
+
+json screen_with(const json& grid) {
+    return {{"elements", json::array({grid})}, {"element_count", 1},
+            {"hierarchy", {{"tables", json::array({grid})}}}};
+}
+
+}  // namespace
+
+TEST_CASE("compact: columns empty in every returned row are hidden and named", "[compact][columns]") {
+    json data = screen_with(sm50_grid());
+    fairyfly::formatters::hide_empty_columns(data);
+    const auto& table = data["elements"][0]["table_data"];
+    CHECK(table["columns"] == json::array({"PID", "STATUS"}));
+    CHECK(table["rows"][0] == json::array({"4711", "Running"}));
+    CHECK(table["rows"][1] == json::array({"4712", "Waiting"}));
+    CHECK(table["rows"][2] == json::array({"4713", ""}));
+    CHECK(table["hidden_empty_columns"] == json::array({"STATE_INFO_DISP", "ACTION"}));
+    // the hierarchy copy is handled too
+    CHECK(data["hierarchy"]["tables"][0]["table_data"]["columns"] == json::array({"PID", "STATUS"}));
+    // idempotent: nothing more to hide, the note stays
+    json again = data;
+    fairyfly::formatters::hide_empty_columns(again);
+    CHECK(again == data);
+}
+
+TEST_CASE("compact: no rows, or every column empty, hides nothing", "[compact][columns]") {
+    json no_rows = sm50_grid();
+    no_rows["table_data"]["rows"] = json::array();
+    json data = screen_with(no_rows);
+    const json before = data;
+    fairyfly::formatters::hide_empty_columns(data);
+    CHECK(data == before);
+
+    json all_empty = sm50_grid();
+    all_empty["table_data"]["rows"] = json::array({json::array({"", "", "", ""})});
+    data = screen_with(all_empty);
+    const json before_all = data;
+    fairyfly::formatters::hide_empty_columns(data);
+    CHECK(data == before_all);
+}
+
+TEST_CASE("compact: a paged grid keeps all its columns, so every page has the same columns", "[compact][columns][window]") {
+    for (const json& window : {json{{"offset", 0}, {"returned", 3}, {"next_offset", 3}},
+                               json{{"offset", 3}, {"returned", 3}},
+                               json{{"offset", 3}, {"returned", 3}, {"next_offset", 6}}}) {
+        json grid = sm50_grid();
+        grid["table_data"].update(window);
+        json data = screen_with(grid);
+        fairyfly::formatters::hide_empty_columns(data);
+        CHECK(data["elements"][0]["table_data"]["columns"].size() == 4);
+        CHECK_FALSE(data["elements"][0]["table_data"].contains("hidden_empty_columns"));
+    }
+    // the whole table in one read (offset 0, no next_offset): hidden
+    json grid = sm50_grid();
+    grid["table_data"].update(json{{"offset", 0}, {"returned", 3}});
+    json data = screen_with(grid);
+    fairyfly::formatters::hide_empty_columns(data);
+    CHECK(data["elements"][0]["table_data"]["columns"].size() == 2);
+}
+
+TEST_CASE("gui_screen_read says that compact hides empty grid columns", "[compact][columns][mcp]") {
+    for (const auto& spec : fairyfly::mcp::read_tool_specs())
+        if (spec.def.name == "gui_screen_read") {
+            CHECK(spec.def.description.find("hidden_empty_columns") != std::string::npos);
+            CHECK(spec.def.input_schema.at("properties").at("compact").at("description").get<std::string>().find(
+                      "empty in every row") != std::string::npos);
+        }
+}
+
+TEST_CASE("compact Markdown hides empty grid columns and says so; non-compact is unchanged", "[compact][columns][markdown]") {
+    const json data = screen_with(sm50_grid());
+    const std::string compact = fairyfly::cli::ScreenMarkdownFormatter::format(data, true);
+    CHECK(compact.find("STATE_INFO_DISP |") == std::string::npos);
+    size_t empties = 0;  // only the one missing STATUS cell of the short row
+    for (size_t at = compact.find("_empty_"); at != std::string::npos; at = compact.find("_empty_", at + 1)) ++empties;
+    CHECK(empties == 1);
+    CHECK(compact.find("_Columns empty in all rows hidden: STATE_INFO_DISP, ACTION_") != std::string::npos);
+    CHECK(compact.find("| PID") != std::string::npos);
+
+    const std::string full = fairyfly::cli::ScreenMarkdownFormatter::format(data, false);
+    CHECK(full.find("STATE_INFO_DISP") != std::string::npos);
+    CHECK(full.find("Columns empty in all rows hidden") == std::string::npos);
+}
+
+TEST_CASE("compact JSON and TOON hide empty grid columns too", "[compact][columns]") {
+    using fairyfly::cli::OutputFormat;
+    json data = screen_with(sm50_grid());
+    data["compact"] = true;
+    const json parsed = json::parse(fairyfly::cli::format_output(success_result(data), OutputFormat::Json, false, kRead));
+    const auto& table = parsed["data"]["elements"][0]["table_data"];
+    CHECK(table["columns"] == json::array({"PID", "STATUS"}));
+    CHECK(table["hidden_empty_columns"] == json::array({"STATE_INFO_DISP", "ACTION"}));
+    const std::string toon = fairyfly::cli::format_output(success_result(data), OutputFormat::Toon, false, kRead);
+    CHECK(toon.find("hidden_empty_columns") != std::string::npos);
+
+    data["compact"] = false;
+    const json plain = json::parse(fairyfly::cli::format_output(success_result(data), OutputFormat::Json, false, kRead));
+    CHECK(plain["data"]["elements"][0]["table_data"]["columns"].size() == 4);
+}
+
+TEST_CASE("screen Markdown shows a non-breaking space from SAP as a plain space", "[markdown][text]") {
+    json grid = sm50_grid();
+    grid["table_data"]["rows"][0][2] = "Run\xC2\xA0ning";
+    const json data = screen_with(grid);
+    for (bool compact : {false, true}) {
+        const std::string md = fairyfly::cli::ScreenMarkdownFormatter::format(data, compact);
+        CHECK(md.find("\xC2\xA0") == std::string::npos);
+        CHECK(md.find("Run ning") != std::string::npos);
+    }
 }

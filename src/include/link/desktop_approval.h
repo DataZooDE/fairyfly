@@ -22,6 +22,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <map>
+
 #include "approver.hpp"  // libffl
 
 namespace fairyfly::link::approval {
@@ -92,11 +94,17 @@ private:
     bool enforced_ = false;
 };
 
+/// Screen labels of filled fields, by the field name the summary shows ("ctxtDATABROWSE-TABLENAME" -> "Table Name").
+using FieldLabels = std::map<std::string, std::string>;
+
 struct Desk {
     /// True while a person can answer: an interactive, active and unlocked session.
     std::function<bool()> can_ask;
     /// The SAP session the change would run in.
     std::function<SapContext()> sap;
+    /// The screen labels of the fields a change fills (names as fill_field_names gives them); a field without one is
+    /// left out. Null or failing: the summary names the fields by their names.
+    std::function<FieldLabels(const std::vector<std::string>&)> field_labels;
     /// "Allow changes in SAP"; null: every change asks.
     std::shared_ptr<Standing> standing;
     /// False when fairyfly here refuses every change anyway (--read-only, FAIRYFLY_READ_ONLY): nobody is asked, the
@@ -135,7 +143,28 @@ std::string client_name(const std::string& client_id);
 
 /// A step as a person reads it: the standard toolbar's buttons and the keys get their names ("click Save
 /// (wnd[0]/tbar[0]/btn[11])", "press Save (Ctrl+S)" for "press 11"); everything else stays as libffl's summary says it.
-std::string readable_step(const std::string& step);
+/// Filled fields are named by their screen label from `labels`, else by their name without the type prefix, never by
+/// the element id: "fill fields ctxtDATABROWSE-TABLENAME, then press enter" -> "fill Table Name, then press Enter",
+/// several "fill 3 fields (Order Type, Sales Organization, VBAK-VTWEG)". A rewrite that would make the text longer than
+/// libffl's summary limit keeps the step as it is.
+/// Labels are cleaned (control and bidi/format characters removed, white space collapsed, at most 40 bytes); two
+/// fields with the same label, and every labelled field when `with_names` (the approval window's steps), also show
+/// their name: "Table Name (DATABROWSE-TABLENAME)".
+std::string readable_step(const std::string& step, const FieldLabels& labels = {}, bool with_names = false);
+
+/// The fields a summary or step fills ("fill fields A, B" and "fill field <id>": the id's last part, after its window,
+/// "wnd[1]/ctxtWERKS"), in order.
+std::vector<std::string> fill_field_names(const std::string& summary);
+
+/// How the desktop finds a filled field on the screen: GuiContainer.FindByName(name, type) from the name in the
+/// summary ("ctxtVBAK-AUART" -> {"VBAK-AUART", "GuiCTextField"}, "wnd[1]/ctxtWERKS" -> window 1); type empty for a
+/// name without a known prefix.
+struct FieldLookup {
+    std::string name, type;
+    int window = -1;  ///< wnd[N] of the field, -1: not known (the active window)
+    bool operator==(const FieldLookup&) const = default;
+};
+FieldLookup field_lookup(const std::string& field);
 
 class Broker {
 public:
