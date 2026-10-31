@@ -1334,6 +1334,38 @@ TEST_CASE("Both trays share a persistent opt-in for SAP startup", "[tray][startu
     CHECK_FALSE(find_item(menu, TrayAction::ToggleSapStartup)->checked);
 }
 
+TEST_CASE("SAP startup follows SAP permissions without replacing the bold status line", "[tray][startup][placement]") {
+    FakeSettings settings;
+    const auto verify = [&](TrayMenuModel menu, TrayAction permission) {
+        const auto status = menu.items.front().label;
+        append_sap_startup_menu(menu, &settings);
+        CHECK(menu.items.front().label == status);
+        CHECK(menu.items.front().action == TrayAction::None);
+        const auto* writes = find_item(menu, permission);
+        const auto* startup = find_item(menu, TrayAction::ToggleSapStartup);
+        REQUIRE(writes);
+        REQUIRE(startup);
+        CHECK(startup == writes + 1);
+        CHECK(startup->checkable == writes->checkable);
+        CHECK(startup->enabled);
+        CHECK_FALSE(startup->checked);
+        CHECK(startup->children.empty());
+    };
+    verify(build_menu(make_status(true, true), {}), TrayAction::ToggleReadOnly);
+    LinkWritesView writes;
+    writes.available = true;
+    verify(build_link_menu(paired("connected"), writes), TrayAction::LinkToggleWrites);
+
+    SECTION("unpaired link keeps its status first and still offers startup") {
+        auto menu = build_link_menu(LinkView{});
+        const auto status = menu.items.front().label;
+        append_sap_startup_menu(menu, &settings);
+        CHECK(menu.items.front().label == status);
+        REQUIRE(find_item(menu, TrayAction::ToggleSapStartup));
+        CHECK(menu.items.front().action != TrayAction::ToggleSapStartup);
+    }
+}
+
 TEST_CASE("tray: both modes show the gateway startup prohibition", "[tray][startup-policy-status]") {
     TrayState state;
     state.link = paired("connected");
