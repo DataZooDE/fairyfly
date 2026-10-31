@@ -298,6 +298,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     int64_t budget = req.deadline_ms > 0 ? std::min<int64_t>(req.deadline_ms + 1000, 130000) : 125000;
     try {
         CallInfo info{st_.tenant, c.sub, c.client, req.id, g.allow_write, g.tcodes, cancel};
+        info.sap_startup_granted = g.allow_sap_startup;
         // audit trail: only while the notice is up (policy on) and when this call asks for it
         bool record = false;
         StepRequest sr;

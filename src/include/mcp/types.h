@@ -76,6 +76,8 @@ struct CallContext {
     Principal principal;                   ///< caller identity (default: local stdio principal)
     ProtocolEra era = ProtocolEra::Legacy; ///< protocol era of this request
     bool http = false;                     ///< transport: false = stdio
+    bool link_request = false;             ///< signed gateway call, independent of HTTP transport
+    bool sap_startup_granted = false;      ///< verified gateway grant; never a tool argument
     std::optional<BatchLease> batch_lease; ///< broker-only pin for a single-session batch
     /// Optional progress reporter (added for the HTTP/SSE transport, additive): emits a
     /// notifications/progress event when the client supplied a progressToken. Empty = no reporting.

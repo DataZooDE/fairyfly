@@ -74,6 +74,7 @@ public:
     int refreshes = 0;   ///< how often SAP Logon was looked up again (refresh_application)
     void refresh_application() override { ++refreshes; }
     EngineStatus engine_status() const override { return status; }
+    Result start_sap_logon() override { return record("start_sap_logon"); }
     std::uint64_t generation = 1;   ///< what application_generation answers (++: SAP Logon was replaced)
     std::uint64_t application_generation() const override { return generation; }
 

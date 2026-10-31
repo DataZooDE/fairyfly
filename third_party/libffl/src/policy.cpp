@@ -21,7 +21,7 @@ bool is_dangerous(const std::string& tool) {
 }
 
 nlohmann::json Grants::to_json() const {
-    return {{"tools", tools}, {"tcodes", tcodes}, {"systems", systems}, {"allow_write", allow_write}, {"screenshots", screenshots}, {"approval", approval}};
+    return {{"tools", tools}, {"tcodes", tcodes}, {"systems", systems}, {"allow_write", allow_write}, {"screenshots", screenshots}, {"approval", approval}, {"allow_sap_startup", allow_sap_startup}};
 }
 
 Grants Grants::from_json(const nlohmann::json& j) {
@@ -35,6 +35,7 @@ Grants Grants::from_json(const nlohmann::json& j) {
     };
     g.tools = list("tools"); g.tcodes = list("tcodes"); g.systems = list("systems");
     g.allow_write = j.value("allow_write", false);
+    g.allow_sap_startup = j.value("allow_sap_startup", false);
     g.screenshots = j.value("screenshots", false);
     g.approval = j.value("approval", std::string("device"));
     return g;
@@ -67,6 +68,7 @@ static Allow yallow(const YAML::Node& n) {
     if (!n) return a;
     a.tools = ylist(n["tools"]); a.tcodes = ylist(n["tcodes"]); a.systems = ylist(n["systems"]);
     a.allow_write = n["allow_write"] ? n["allow_write"].as<bool>() : false;
+    a.allow_sap_startup = n["allow_sap_startup"] ? n["allow_sap_startup"].as<bool>() : false;
     a.screenshots = n["screenshots"] ? n["screenshots"].as<bool>() : false;
     a.approval = n["approval"] ? n["approval"].as<std::string>() : "";
     return a;
@@ -113,6 +115,7 @@ Engine Engine::load(const std::string& text) {
         e.def_.tools.push_back("element.fill");
         e.def_.tools.push_back("gui_batch");
         e.def_.allow_write = true;
+        e.def_.allow_sap_startup = true;  // capped by tenant and local opt-in
     }
     if (e.def_.approval.empty()) e.def_.approval = "device";
     return e;
@@ -135,10 +138,12 @@ Grants Engine::grants(const Identity& id) const {
     Grants g;
     g.tools = def_.tools; g.tcodes = def_.tcodes; g.systems = def_.systems;
     g.allow_write = def_.allow_write; g.screenshots = def_.screenshots; g.approval = def_.approval;
+    g.allow_sap_startup = def_.allow_sap_startup;
     for (auto& r : rules_) {
         if (!r.match.matches(id)) continue;
         merge(g.tools, r.allow.tools); merge(g.tcodes, r.allow.tcodes); merge(g.systems, r.allow.systems);
         g.allow_write = g.allow_write || r.allow.allow_write;
+        g.allow_sap_startup = g.allow_sap_startup || r.allow.allow_sap_startup;
         g.screenshots = g.screenshots || r.allow.screenshots;
         if (r.allow.approval == "device") g.approval = "device";  // strictest wins
     }
@@ -413,6 +418,11 @@ CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::j
         const std::string at = "batch item " + std::to_string(n) + ": ";
         if (!item.is_object() || !item.contains("tool") || !item["tool"].is_string() || item["tool"].get<std::string>().empty())
             return bad(at + "needs a 'tool' name");
+        // fairyfly's batch item has exactly `tool` and `arguments`; any other key (`ref`, `bind`, `when`, ...) could name a
+        // target or a condition the checks below never see (element, command field, read-only guard): refused here
+        for (auto& [key, _] : item.items())
+            if (key != "tool" && key != "arguments")
+                return bad(at + "'" + key.substr(0, 32) + "' cannot be checked by the gateway; give each item only 'tool' and 'arguments'");
         const std::string t = item["tool"];
         if (!valid_tool_name(t)) return deny("TOOL_NAME_INVALID", at + "'" + t.substr(0, 64) + "' is not a tool name (tool names are lower case)");
         const nlohmann::json a = item.contains("arguments") ? item["arguments"] : nlohmann::json::object();

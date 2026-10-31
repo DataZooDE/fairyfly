@@ -357,6 +357,23 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
     return result;
 }
 
+Result CommandHandler::ensure_sap_logon(const startup::Policy& policy) {
+    engine_->refresh_application();
+    const auto status = engine_->engine_status();
+    if (status.available) return Result::ok();
+    if (status.sap_logon_running)
+        return Result::fail("SAP_SCRIPTING_UNAVAILABLE", "SAP Logon is running but its scripting interface is unavailable.",
+            json::array({"Enable SAP GUI scripting and resolve any SAP GUI Security prompt, then retry."}));
+    if (auto denied = startup::check(policy)) return *denied;
+    auto started = engine_->start_sap_logon();
+    if (started.status != Result::Status::Success) return started;
+    engine_->refresh_application();
+    if (!engine_->engine_status().available)
+        return Result::fail("SAP_STARTUP_NOT_READY", "SAP Logon started but its scripting interface is not ready.",
+            json::array({"Check the local SAP Logon window and any SAP GUI Security prompt, then retry."}));
+    return Result::ok();
+}
+
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
 {
     pending_owner_attach_.reset();

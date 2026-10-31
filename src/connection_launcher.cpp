@@ -11,6 +11,7 @@
 #include <cctype>
 #include <windows.h>
 #include <cwchar>
+#include <filesystem>
 
 namespace fairyfly {
 namespace sap {
@@ -55,6 +56,48 @@ ConnectionLauncher::ConnectionLauncher(ComGuiApplicationPtr app,
             });
         };
     }
+}
+
+Result ConnectionLauncher::launch_sap_logon() {
+    std::vector<std::wstring> candidates;
+    for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        for (DWORD view : {RRF_SUBKEY_WOW6464KEY, RRF_SUBKEY_WOW6432KEY}) {
+            wchar_t path[32768]{};
+            DWORD bytes = sizeof(path);
+            if (RegGetValueW(root, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\saplogon.exe",
+                             nullptr, RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | view, nullptr, path, &bytes) == ERROR_SUCCESS)
+                candidates.emplace_back(path);
+        }
+    }
+    for (const wchar_t* variable : {L"ProgramW6432", L"ProgramFiles", L"ProgramFiles(x86)"}) {
+        wchar_t base[32768]{};
+        const DWORD count = GetEnvironmentVariableW(variable, base, 32768);
+        if (count > 0 && count < 32768)
+            candidates.push_back(std::wstring(base) + L"\\SAP\\FrontEnd\\SAPgui\\saplogon.exe");
+    }
+    std::wstring executable;
+    for (const auto& path : candidates) {
+        std::error_code error;
+        if (std::filesystem::path(path).is_absolute() && std::filesystem::is_regular_file(path, error)) {
+            executable = path;
+            break;
+        }
+    }
+    if (executable.empty())
+        return Result::fail("SAP_LOGON_NOT_INSTALLED", "The local SAP Logon executable could not be found.",
+            json::array({"Install SAP GUI for Windows or repair its SAP Logon App Paths registration, then retry."}));
+    std::wstring line = text::quote_argument_always<wchar_t>(executable);
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_SHOWMINNOACTIVE;
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(executable.c_str(), line.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process))
+        return Result::fail("SAP_LOGON_START_FAILED", "Windows could not start SAP Logon.",
+            json::array({"Start SAP Logon manually in this Windows session to inspect the error, then retry."}));
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return Result::ok();
 }
 
 std::wstring ConnectionLauncher::sapshcut_command_line(

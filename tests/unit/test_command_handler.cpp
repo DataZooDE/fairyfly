@@ -47,6 +47,38 @@ TEST_CASE("command handler: a fill under --read-only is refused before anything 
     CHECK(rig.engine->calls.empty());
 }
 
+TEST_CASE("SAP Logon startup requires opt in before process creation", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    const auto result = rig.handler->ensure_sap_logon({false, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+}
+
+TEST_CASE("Running SAP Logon never needs startup permission", "[handler][startup]") {
+    Rig rig(false);
+    const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+}
+
+TEST_CASE("SAP Logon startup reports engine failures", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    rig.engine->next = Result::fail("SAP_LOGON_NOT_INSTALLED", "Install SAP GUI.");
+    const auto result = rig.handler->ensure_sap_logon({true, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_LOGON_NOT_INSTALLED");
+    CHECK(rig.engine->count("start_sap_logon") == 1);
+}
+
+TEST_CASE("SAP Logon startup requires verified scripting readiness", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    const auto result = rig.handler->ensure_sap_logon({true, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_STARTUP_NOT_READY");
+    CHECK(rig.engine->count("start_sap_logon") == 1);
+}
+
 TEST_CASE("command handler: without a saved connection nothing is sent to SAP", "[handler]") {
     Rig rig(false);
     const Result r = rig.handler->handle_fill("wnd[0]/usr/txtA", "x", std::nullopt);

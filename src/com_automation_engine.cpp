@@ -5,6 +5,7 @@
 #include "include/object_tree_diag.h"
 #include "include/session_facts.h"
 #include "include/session_info.h"
+#include "include/connection_launcher.h"
 #include "include/action_status.h"
 #include "include/field_fill_info.h"
 #include "include/tab_guard.h"
@@ -419,6 +420,35 @@ void ComAutomationEngine::no_session_error(Result& result, bool used_sapshcut) c
             "Try increasing timeout or manual login first"
         });
     }
+}
+
+Result ComAutomationEngine::start_sap_logon() {
+    // Serialize startup across CLI, tray and MCP processes in this Windows session.
+    HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\fairyfly.sap-logon-startup");
+    if (!mutex) return Result::fail("SAP_STARTUP_LOCK_FAILED", "Cannot coordinate SAP Logon startup; retry the task.");
+    struct Lock {
+        HANDLE handle;
+        bool acquired = false;
+        ~Lock() { if (acquired) ReleaseMutex(handle); CloseHandle(handle); }
+    } lock{mutex};
+    const DWORD wait = WaitForSingleObject(mutex, 20000);
+    lock.acquired = wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED;
+    if (!lock.acquired)
+        return Result::fail("SAP_STARTUP_BUSY", "Another Fairyfly process is starting SAP Logon; retry shortly.");
+    refresh_application();
+    if (engine_status().available) return Result::ok();
+    if (!engine_status().sap_logon_running) {
+        auto started = sap::ConnectionLauncher::launch_sap_logon();
+        if (started.status != Result::Status::Success) return started;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    do {
+        refresh_application();
+        if (engine_status().available) return Result::ok();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return Result::fail("SAP_STARTUP_NOT_READY", "SAP Logon did not expose its scripting interface within 20 seconds.",
+        json::array({"Check SAP Logon and any SAP GUI Security prompt on this desktop, then retry."}));
 }
 
 Result ComAutomationEngine::launch_connection(const std::string& connection_name, bool allow_sapshcut) {

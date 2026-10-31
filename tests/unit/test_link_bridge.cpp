@@ -19,6 +19,21 @@
 using fairyfly::link::MainThreadTools;
 using nlohmann::json;
 
+TEST_CASE("link bridge carries the independent startup grant", "[link][startup]") {
+    std::atomic<bool> stop{false};
+    ffy::link::CallInfo info;
+    info.write_granted = true;
+    const auto denied = fairyfly::link::link_call_context(info, stop);
+    CHECK(denied.link_request);
+    CHECK_FALSE(denied.sap_startup_granted);
+    info.write_granted = false;
+    info.sap_startup_granted = true;
+    const auto granted = fairyfly::link::link_call_context(info, stop);
+    CHECK(granted.link_request);
+    CHECK(granted.sap_startup_granted);
+    CHECK(granted.principal.read_only);
+}
+
 TEST_CASE("link bridge: reports queue and execution without exposing call arguments", "[link][latency]") {
     MainThreadTools tools;
     tools.set_handlers([] { return json::array(); }, [](const std::string&, const json&, const ffy::link::CallInfo&) {

@@ -9,6 +9,7 @@
 #include "fill_fields.h"
 #include "screen_snapshot.h"
 #include "login_flow.h"
+#include "session_startup.h"
 #include <string>
 #include <cstdint>
 #include <map>
@@ -238,6 +239,7 @@ public:
                                           std::optional<int> connection) const noexcept;
 
     // Connection management - two modes
+    Result ensure_sap_logon(const startup::Policy& policy);
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded
     /// (credential_name empty = Credential Manager entry keyed by the connection name).

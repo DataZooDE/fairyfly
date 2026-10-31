@@ -25,6 +25,7 @@ struct CallInfo {
     std::vector<std::string> tcodes;
     // set once the gateway cancelled the call (timeout, client gone); null: never. A batch stops before its next step.
     std::shared_ptr<const std::atomic<bool>> cancel;
+    bool sap_startup_granted = false;
     bool cancelled() const { return cancel && cancel->load(); }
 };
 
