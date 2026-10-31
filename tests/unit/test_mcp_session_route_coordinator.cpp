@@ -51,6 +51,10 @@ TEST_CASE("Unbound HTTP requests can reach startup admission without retargeting
     SECTION("sticky selected id remains pinned") {
         routing->set_sticky_connection(principal_key(caller), 7, "sid|key|generation", "A4H/001/ALICE");
     }
+    SECTION("a missing automatically prepared target reaches identity-checked recovery") {
+        routing->set_sticky_connection(principal_key(caller), 7, "sid|key|generation", "A4H/001/ALICE", "Bigfox");
+        expect_startup = true;
+    }
     SessionRouteCoordinator coordinator(admission, policy, routing, all_tool_specs(),
         [](std::optional<int>) { return SessionRouteFacts{}; },
         [](const std::string&, int) { return std::make_shared<EmptyProvider>(); });

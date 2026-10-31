@@ -159,9 +159,17 @@ HttpEndpoint::SessionRoute SessionRouteCoordinator::route_impl(const Principal& 
     if (!sap.connection_id || (plan.connection && sap.connection_id != plan.connection) ||
         !complete_identity(sap.session_identity) || sap.system.empty() || sap.client.empty() || sap.user.empty() ||
         (!plan.sticky_identity.empty() && plan.sticky_identity != sap.session_identity)) {
-        if (policy_.prepare_missing_session && !plan.connection && plan.sticky_identity.empty()) {
+        const auto prior = routing_->sticky_target(principal_key(principal));
+        const bool recover_prepared = !args.contains("connection") && !policy_.default_connection && prior &&
+            !prior->startup_default.empty() && plan.connection == prior->connection &&
+            !prior->sap_identity.empty() && owner_identity_allowed(policy_, principal, prior->sap_identity) &&
+            sap.user.empty() && (!sap.connection_id || sap.connection_id == prior->connection) &&
+            (sap.session_identity.empty() || sap.session_identity == prior->session_identity);
+        if (policy_.prepare_missing_session &&
+            ((!plan.connection && plan.sticky_identity.empty()) || recover_prepared)) {
             // Startup runs on the global COM executor, after ordinary dispatcher
-            // admission. No existing explicit/default/sticky target is replaced here.
+            // admission. Only the caller's automatically prepared target may recover;
+            // the dispatcher rechecks its configured name and saved SAP identity.
             HttpEndpoint::SessionRoute route;
             route.global_control = true;
             return route;
