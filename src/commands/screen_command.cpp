@@ -28,7 +28,8 @@ Grid/table reads are bounded: follow next_offset for further rows.
 Examples:
   fairyfly screen read --connection 3 --no-tabs --compact
   fairyfly screen read --connection 3 --type GuiShell --no-tabs
-  fairyfly screen read --connection 3 --only-tables --max-rows 100 --offset 0
+  fairyfly screen read --connection 3 --only tables --max-rows 100 --offset 0
+  fairyfly screen read --only editable --no-tabs
 )HELP");
         read_cmd_->add_flag_callback("--no-children", [this]() { read_children_ = false; }, "Don't include child elements");
         read_cmd_->add_flag("--no-tabs", no_tabs_, "Skip tab expansion (faster, less complete)");
@@ -56,12 +57,19 @@ Examples:
         read_cmd_->add_option("--object-tree-props", object_tree_props_, "Diagnostic: comma separated property names for --dump-object-tree")
             ->delimiter(',')->group("");
 
-        // Filter options
-        read_cmd_->add_flag("--only-buttons", filters_.only_buttons, "Show only GuiButton elements");
-        read_cmd_->add_flag("--only-fields", filters_.only_fields, "Show only input fields");
-        read_cmd_->add_flag("--only-editable", filters_.only_editable, "Show only changeable fields");
-        read_cmd_->add_flag("--only-f4-fields", filters_.only_f4_fields, "Show only fields with F4 search help");
-        read_cmd_->add_flag("--only-tables", filters_.only_tables, "Show only grids and table controls (with their rows)");
+        // Filter options: --only takes the MCP tool's `only` values (cli::select_only); the --only-* flags are the
+        // older spelling of the same selectors
+        auto* only = read_cmd_->add_option("--only", only_,
+            "Show only buttons, fields (input fields), editable (changeable fields, empty ones included, with their ids), "
+            "f4_fields (fields with F4 help) or tables (grids and table controls with their rows). "
+            "Grids and trees it drops are listed under `suppressed`")
+            ->check(CLI::IsMember(cli::only_selector_values()));
+        for (auto* flag : {read_cmd_->add_flag("--only-buttons", filters_.only_buttons, "Same as --only buttons"),
+                           read_cmd_->add_flag("--only-fields", filters_.only_fields, "Same as --only fields"),
+                           read_cmd_->add_flag("--only-editable", filters_.only_editable, "Same as --only editable"),
+                           read_cmd_->add_flag("--only-f4-fields", filters_.only_f4_fields, "Same as --only f4_fields"),
+                           read_cmd_->add_flag("--only-tables", filters_.only_tables, "Same as --only tables")})
+            only->excludes(flag);
         read_cmd_->add_option("--text-contains", filter_text_contains_, "Filter by text/tooltip containing string (case-insensitive); grids and table controls keep only the rows with a matching cell");
         read_cmd_->add_option("--id-contains", filter_id_contains_, "Filter by element ID containing string");
         read_cmd_->add_option("--type", filter_type_, "Filter by exact element type");
@@ -118,6 +126,8 @@ Example: fairyfly screen capture --file screen.png --connection 3
         if (*read_cmd_) {
             bool should_expand_tabs = !no_tabs_ || !only_tab_.empty();
 
+            if (!only_.empty() && !cli::select_only(filters_, only_))  // CLI11 checked it already
+                return Result::fail("INVALID_ARGUMENT", "--only must be one of buttons, fields, editable, f4_fields, tables");
             // Populate optional filter strings from CLI options
             if (!filter_text_contains_.empty()) {
                 filters_.text_contains = filter_text_contains_;
@@ -184,6 +194,7 @@ private:
     bool read_children_ = true;
     bool no_tabs_ = false;
     std::string only_tab_;
+    std::string only_;
     bool skip_trees_ = false;
     bool compact_ = false;
     bool probe_all_ = false;

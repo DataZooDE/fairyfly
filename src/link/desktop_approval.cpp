@@ -57,7 +57,91 @@ std::optional<std::string> key_name(const std::string& key) {
     return "VKey " + std::to_string(*v);
 }
 
+// SAP GUI scripting's id prefixes of the fields a fill sets, longest first
+struct Prefix {
+    const char* prefix;
+    const char* type;
+};
+constexpr Prefix kFieldPrefixes[] = {{"ctxt", "GuiCTextField"}, {"txt", "GuiTextField"},  {"pwd", "GuiPasswordField"},
+                                     {"cmb", "GuiComboBox"},    {"chk", "GuiCheckBox"},   {"rad", "GuiRadioButton"}};
+
+// at most `max` bytes, cut at a character boundary, "..." when cut
+std::string cut(std::string s, std::size_t max) {
+    if (s.size() <= max) return s;
+    std::size_t at = max - 3;
+    while (at > 0 && (static_cast<unsigned char>(s[at]) & 0xC0) == 0x80) --at;
+    return s.substr(0, at) + "...";
+}
+
+std::string trimmed(const std::string& s) {
+    const auto first = s.find_first_not_of(" \t");
+    if (first == std::string::npos) return "";
+    return s.substr(first, s.find_last_not_of(" \t") - first + 1);
+}
+
+// the field's name in the summary as people read it: its label, else the name without the type prefix
+std::string field_text(const std::string& field, const FieldLabels& labels) {
+    if (const auto it = labels.find(field); it != labels.end()) {
+        std::string label = trimmed(it->second);
+        while (!label.empty() && (label.back() == ':' || label.back() == ' ')) label.pop_back();
+        if (!label.empty()) return cut(label, 40);
+    }
+    return field_lookup(field).name;
+}
+
+// "fill fields A, B, then press K" / "fill field <id>" from `at` (the 'f' of "fill") up to the step's end (';' or the
+// end of the text): the field names (of an id its last part), what follows them (", then press K") and where it ends;
+// nullopt when `at` starts neither form
+struct Fill {
+    std::vector<std::string> names;
+    std::string rest;
+    std::size_t end = 0;
+};
+std::optional<Fill> parse_fill(const std::string& s, std::size_t at) {
+    static const std::string many = "fill fields ", one = "fill field ";
+    if (at > 0 && s[at - 1] != ' ') return std::nullopt;
+    Fill fill;
+    fill.end = s.find(';', at);
+    if (fill.end == std::string::npos) fill.end = s.size();
+    if (s.compare(at, many.size(), many) == 0) {
+        for (std::size_t from = at + many.size(); from < fill.end;) {
+            std::size_t comma = s.find(", ", from);
+            if (comma == std::string::npos || comma > fill.end) comma = fill.end;
+            const std::string item = s.substr(from, comma - from);
+            if (item.rfind("then ", 0) == 0) {
+                fill.rest = ", " + s.substr(from, fill.end - from);
+                break;
+            }
+            if (!item.empty()) fill.names.push_back(item);
+            from = comma == fill.end ? fill.end : comma + 2;
+        }
+    } else if (s.compare(at, one.size(), one) == 0) {
+        std::string id = s.substr(at + one.size(), fill.end - at - one.size());
+        if (const auto slash = id.find_last_of('/'); slash != std::string::npos && slash + 1 < id.size()) id = id.substr(slash + 1);
+        if (!id.empty()) fill.names.push_back(id);
+    } else {
+        return std::nullopt;
+    }
+    if (fill.names.empty()) return std::nullopt;
+    return fill;
+}
+
 }  // namespace
+
+FieldLookup field_lookup(const std::string& field) {
+    for (const auto& p : kFieldPrefixes) {
+        const std::string prefix = p.prefix;
+        if (field.size() > prefix.size() && field.compare(0, prefix.size(), prefix) == 0) return {field.substr(prefix.size()), p.type};
+    }
+    return {field, ""};
+}
+
+std::vector<std::string> fill_field_names(const std::string& summary) {
+    std::vector<std::string> names;
+    for (std::size_t at = summary.find("fill field"); at != std::string::npos; at = summary.find("fill field", at + 1))
+        if (auto fill = parse_fill(summary, at)) names.insert(names.end(), fill->names.begin(), fill->names.end());
+    return names;
+}
 
 std::string client_name(const std::string& client_id) {
     std::string id = client_id;
@@ -83,12 +167,34 @@ std::string client_name(const std::string& client_id) {
     return host.empty() ? id : host;
 }
 
-std::string readable_step(const std::string& step) {
+std::string readable_step(const std::string& step, const FieldLabels& labels) {
     // SAP GUI's standard toolbar (tbar[0]) is the same on every screen
     static const std::pair<const char*, const char*> buttons[] = {{"tbar[0]/btn[0]", "Enter"}, {"tbar[0]/btn[3]", "Back"},
                                                                   {"tbar[0]/btn[11]", "Save"}, {"tbar[0]/btn[12]", "Cancel"},
                                                                   {"tbar[0]/btn[15]", "Exit"}};
     std::string out = step;
+    // filled fields by their label or name, never the element id
+    {
+        std::string named;
+        std::size_t done = 0;
+        for (std::size_t at = out.find("fill field"); at != std::string::npos; at = out.find("fill field", at + 1)) {
+            const auto fill = parse_fill(out, at);
+            if (!fill) continue;
+            std::string text = "fill ";
+            if (fill->names.size() == 1) {
+                text += field_text(fill->names[0], labels);
+            } else {
+                text += std::to_string(fill->names.size()) + " fields (";
+                for (std::size_t i = 0; i < fill->names.size(); ++i) text += (i ? ", " : "") + field_text(fill->names[i], labels);
+                text += ")";
+            }
+            named += out.substr(done, at - done) + text + fill->rest;
+            done = fill->end;
+            at = fill->end - 1;
+        }
+        named += out.substr(done);
+        if (named.size() <= ffy::approval::kMaxSummary || named.size() <= out.size()) out = std::move(named);
+    }
     for (const auto& [id, name] : buttons) {
         const std::string suffix = std::string(id);
         for (size_t at = out.find(suffix); at != std::string::npos; at = out.find(suffix, at + 1)) {
@@ -188,8 +294,22 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     r.client_id = client_id(p);
     r.user = p.user;
     r.tool = p.tool;
-    r.summary = readable_step(p.summary.empty() ? p.text : p.summary);
-    for (const auto& s : p.steps) r.steps.push_back(readable_step(s));
+    FieldLabels labels;
+    if (desk_.field_labels) {
+        auto names = fill_field_names(p.summary);
+        for (const auto& s : p.steps)
+            for (auto& n : fill_field_names(s))
+                if (std::find(names.begin(), names.end(), n) == names.end()) names.push_back(std::move(n));
+        if (!names.empty()) {
+            try {
+                labels = desk_.field_labels(names);
+            } catch (const std::exception& e) {
+                spdlog::warn("approval: the labels of the filled fields could not be read: {}", e.what());
+            }
+        }
+    }
+    r.summary = readable_step(p.summary.empty() ? p.text : p.summary, labels);
+    for (const auto& s : p.steps) r.steps.push_back(readable_step(s, labels));
     if (r.steps.empty()) r.steps.push_back(r.summary);
     r.offer_standing = desk_.standing && !desk_.standing->enforced() && !p.enforced;
     if (desk_.sap) {

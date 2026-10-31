@@ -18,7 +18,14 @@ namespace formatters {
 ///    are always kept. An absent boolean therefore means false.
 ///  - Adds `compact: true`, `hierarchy_format: "ids"`, `tab_elements_format: "ids"`.
 /// Idempotent: already-compact data is returned unchanged.
+///  - Hides grid/table columns that are empty in every returned row (hide_empty_columns).
 nlohmann::json compact_screen_json(const nlohmann::json& data);
+
+/// `--compact` for grids and table controls (every format): in each `table_data` / `grid_data` object anywhere in
+/// `data`, the columns whose cells are empty (or only white space, or missing) in every returned row are removed
+/// from `columns` and every row, and their names are listed in `hidden_empty_columns`. Nothing is hidden without
+/// rows or when every column is empty. Idempotent.
+void hide_empty_columns(nlohmann::json& data);
 
 }  // namespace formatters
 }  // namespace fairyfly

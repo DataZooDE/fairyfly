@@ -230,8 +230,11 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   - **Allow changes in SAP** on in the link tray: changes run without asking (the standing approval; also while the
     screen is locked, the person turned it on for when they are away). The decision is `standing`;
   - off (the default):
-  - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields, then save" with **Approve**, **Deny** and
-    **Details**; it stays on screen until answered and can be answered from the notification centre too;
+  - a notification "<assistant> wants to change SAP: VA02 - fill 3 fields (Order Type, Sales Organization,
+    Distribution Channel), then press Save (Ctrl+S)" with **Approve**, **Deny** and **Details**; filled fields are
+    named by their screen label (read from the active window), else by the field name without its type prefix
+    ("SE16 - fill DATABROWSE-TABLENAME, then press Enter"), never by the element id; it stays on screen until answered
+    and can be answered from the notification centre too;
   - **Details** (or a click on the notification) opens the approval window: the assistant by name ("Claude", the
     client's URL in brackets), the account it acts for, the SAP system, client and transaction, every step numbered
     (standard toolbar buttons named: "click Save (wnd[0]/tbar[0]/btn[11])"), a countdown; **Deny** is the default
