@@ -290,3 +290,12 @@ Gateway deployment must use the repository's GitOps promotion workflow (docs/DEP
 - Gateway policy push RED CI41159331236: 352 cases, 3 failed, 8 failing assertions. Implementation f0ee314 adds LinkPolicy field, ready/push org cap and Agent accessor; mutation patterns updated through 65c4322. All 375 patterns pass locally; CI41160446118 pending.
 - Claude review 4 completed: scratch/claude-startup-review-4.txt. No high severity. Follow up startup failure metadata before final target admission, sticky assignment before admission, malformed org verified boolean, authorization-denial and allowed-continuation regression tests. Vendor sync and tray status still planned, not done. Distinguish pushed admin availability from per-call grant.
 - Remaining broad scope from previous checkpoint still applies. No release/deployment yet.
+
+## 2026-10-31 03:43 checkpoint: gateway status in both trays
+- Prior turn made progress: desktop bd47d7c and gateway policy-push commits were pushed; real startup action guard passed.
+- Desktop sync_libffl.py ran against committed gateway 496f77d (source changes from f0ee314); destination third_party/libffl was verified before replacement.
+- Tray policy-status RED: startup-tray-status-red-tests.log, 1 case / 2 failed assertions. GREEN after wiring gateway_sap_startup_allowed status and both menus: startup-tray-status-green2-tests.log, 139 cases / 902 assertions. Includes fresh-screen denial metadata and transaction continuation checks from Claude review4. Local checkbox stays independent of link's admin cap. Status follows existing 15-second heartbeat.
+- First green attempt caught a reserved local-setting-name collision in status JSON and a wrong transaction test argument (tcode vs code); corrected, no test weakened.
+- Full suite now running separately, scratch/startup-tray-status-full-tests.log, exec session  (see active tool handle). No live SAP startup overlaps it. Previous full run had one preparation mutex timeout and one trail status polling failure; both need the clean suite result.
+- Gateway malformed verified regression committed 496f77d; RED CI41160830054 in progress. Desktop status source sync references this commit. Gateway instruction updates are currently uncommitted. Do not push a green fix until the red test result is recorded.
+- Remaining scope unchanged: cached/sticky recovery, HTTP prelogin and batch startup/leases, real link checks, review follow-ups, final green/release/deploy. Production is unchanged.

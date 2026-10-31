@@ -226,8 +226,31 @@ TEST_CASE("MCP prepares a fresh session before asking to observe it for a screen
         facts.session_identity = "session-seven|key|generation";
         return facts;
     });
-    const auto result = d.call_tool("gui_key_send", {{"key", "enter"}}, ctx_with_id());
+    auto context = ctx_with_id();
+    bool denied = false;
+    bool transaction = false;
+    SECTION("screen actions require observation") {}
+    SECTION("unauthorized system receives no prepared-session metadata") {
+        context.principal.sap_systems = {"OTHER/001"};
+        denied = true;
+    }
+    SECTION("an explicitly requested transaction may continue") { transaction = true; }
+    const auto result = d.call_tool(transaction ? "gui_transaction_start" : "gui_key_send",
+        transaction ? json{{"code", "BP"}} : json{{"key", "enter"}}, context);
+    if (denied) {
+        CHECK(result.is_error);
+        CHECK(actions == 0);
+        CHECK(text_of(result).find("SESSION_PREPARED") == std::string::npos);
+        CHECK(text_of(result).find("connection_file_id") == std::string::npos);
+        if (result.structured) CHECK(result.structured->dump().find("connection_file_id") == std::string::npos);
+        return;
+    }
     CHECK(ready);
+    if (transaction) {
+        CHECK_FALSE(result.is_error);
+        CHECK(actions == 1);
+        return;
+    }
     CHECK(actions == 0);
     REQUIRE(result.is_error);
     CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);

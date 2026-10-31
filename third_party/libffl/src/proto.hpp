@@ -85,6 +85,7 @@ struct LinkPolicy {
     // tray's "Allow changes in SAP" and the window's "Don't ask again" are greyed out. false: the user decides ("user").
     // The gateway also signs it into each call (grants.approval "always"), which decides that call (link::Agent).
     bool approval_enforced = false;
+    bool allow_sap_startup = false;  // admin availability only; each call still needs a signed grant
     nlohmann::json to_json() const;  // {"v":1,"approval_enforced":bool}
     static LinkPolicy from_json(const nlohmann::json& j);
 };

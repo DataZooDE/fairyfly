@@ -81,11 +81,12 @@ TrailPolicy TrailPolicy::from_json(const nlohmann::json& j) {
     return p;
 }
 
-nlohmann::json LinkPolicy::to_json() const { return {{"v", 1}, {"approval_enforced", approval_enforced}}; }
+nlohmann::json LinkPolicy::to_json() const { return {{"v", 1}, {"approval_enforced", approval_enforced}, {"allow_sap_startup", allow_sap_startup}}; }
 
 LinkPolicy LinkPolicy::from_json(const nlohmann::json& j) {
     LinkPolicy p;
     if (j.is_object() && j.contains("approval_enforced") && j["approval_enforced"].is_boolean()) p.approval_enforced = j["approval_enforced"];
+    if (j.is_object() && j.contains("allow_sap_startup") && j["allow_sap_startup"].is_boolean()) p.allow_sap_startup = j["allow_sap_startup"];
     return p;
 }
 

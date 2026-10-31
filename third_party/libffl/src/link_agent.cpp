@@ -426,6 +426,7 @@ void Agent::set_trail_policy(const proto::TrailPolicy& p) {
 void Agent::set_link_policy(const proto::LinkPolicy& p) {
     std::lock_guard<std::mutex> l(policy_mu_);
     enforced_ = p.approval_enforced;
+    startup_allowed_ = p.allow_sap_startup;
     if (told_ == int(p.approval_enforced)) return;
     told_ = int(p.approval_enforced);
     if (p.approval_enforced) spdlog::warn("approval is required by your administrator: every change asks at this desktop");

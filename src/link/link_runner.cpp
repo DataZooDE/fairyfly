@@ -471,6 +471,8 @@ public:
         }
         const json status = read_status(path_);
         v.state = describe(status, ffy::now_unix(), system::os_process_probe());
+        if (v.state != state::kNotRunning && status.contains("gateway_sap_startup_allowed") && status["gateway_sap_startup_allowed"].is_boolean())
+            v.gateway_sap_startup_allowed = status["gateway_sap_startup_allowed"].get<bool>();
         if (v.state != state::kNotRunning && status.contains("trail")) {
             const auto p = ffy::proto::TrailPolicy::from_json(status["trail"]);
             v.trail_on = p.on;
@@ -709,8 +711,9 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     SupervisorOptions supervision;
     supervision.status_changed = trail_changed.get();
     // a call SAP GUI has not answered for kStuckCallAfter: the tray turns amber and names it (within a heartbeat)
-    supervision.status_extra = [recorder, clock_skew, tools] {
+    supervision.status_extra = [recorder, clock_skew, tools, net] {
         return json{{"trail", recorder->current_policy().to_json()},
+                    {"gateway_sap_startup_allowed", net->agent.sap_startup_allowed()},
                     {"clock_skew_s", clock_skew->load()},
                     {"stuck_call", stuck_call_status(tools->in_flight())}};
     };

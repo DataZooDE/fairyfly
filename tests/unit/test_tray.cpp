@@ -1334,6 +1334,19 @@ TEST_CASE("Both trays share a persistent opt-in for SAP startup", "[tray][startu
     CHECK_FALSE(find_item(menu, TrayAction::ToggleSapStartup)->checked);
 }
 
+TEST_CASE("tray: both modes show the gateway startup prohibition", "[tray][startup-policy-status]") {
+    TrayState state;
+    state.link = paired("connected");
+    const std::string warning = "Automatic SAP startup via link disabled by administrator";
+    CHECK_FALSE(has_label(top_labels(build_link_menu(state.link)), warning));
+    state.link.gateway_sap_startup_allowed = false;
+    CHECK(has_label(top_labels(build_link_menu(state.link)), warning));
+    CHECK(has_label(link_labels(build_menu(make_status(true, true), state)), warning));
+    state.link.gateway_sap_startup_allowed = true;
+    CHECK_FALSE(has_label(top_labels(build_link_menu(state.link)), warning));
+    CHECK_FALSE(has_label(link_labels(build_menu(make_status(true, true), state)), warning));
+}
+
 AutostartPlan link_plan() {
     AutostartPlan plan;
     plan.name = kLinkAutostartValueName;

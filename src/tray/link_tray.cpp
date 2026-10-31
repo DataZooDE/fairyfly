@@ -30,6 +30,8 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
 
     if (link.paired) {
         model.items.push_back(item(who(link) + ": " + link.state, TrayAction::None, false));
+        if (link.gateway_sap_startup_allowed == false)
+            model.items.push_back(item("Automatic SAP startup via link disabled by administrator", TrayAction::None, false));
         if (!clock.empty()) model.items.push_back(item(clock, TrayAction::None, false));
         if (!stuck.empty()) model.items.push_back(item(stuck, TrayAction::None, false));
         if (link.trail_on) model.items.push_back(item(trail_menu_text(link), TrayAction::None, false));

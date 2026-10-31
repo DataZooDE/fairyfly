@@ -65,6 +65,7 @@ struct LinkView {
     /// connection ("" when it named none) and the seconds so far. Empty `stuck_tool`: none.
     std::string stuck_tool, stuck_connection;
     std::int64_t stuck_s = 0;
+    std::optional<bool> gateway_sap_startup_allowed;
 };
 
 /// The menu line, tooltip part and balloon while the desktop clock is off (clock_skew_s != 0); empty otherwise.
