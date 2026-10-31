@@ -166,6 +166,8 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
     auto host = tray::make_win32_tray_host();
     auto opener = tray::make_win32_file_opener();
     tray::TrayServices tray_services;
+    auto settings = tray::make_win32_tray_settings();
+    tray_services.settings = settings.get();
     tray_services.host = host.get();
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();

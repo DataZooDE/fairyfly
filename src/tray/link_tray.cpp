@@ -122,7 +122,9 @@ AutostartView LinkTrayController::autostart_view() {
 }
 
 TrayMenuModel LinkTrayController::menu() {
-    return build_link_menu(link_, writes_view(), mcp_view(), autostart_view(), services_.self_update);
+    auto model = build_link_menu(link_, writes_view(), mcp_view(), autostart_view(), services_.self_update);
+    append_sap_startup_menu(model, services_.settings);
+    return model;
 }
 
 TrayView LinkTrayController::view() {
@@ -157,6 +159,10 @@ void LinkTrayController::on_tick() {
 }
 
 void LinkTrayController::on_action(TrayAction action) {
+    if (action == TrayAction::ToggleSapStartup) {
+        if (!toggle_sap_startup(services_.settings)) notify("Could not save the automatic SAP startup setting.");
+        return;
+    }
     const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
                               [this](const std::string& text) { notify(text); }};
     const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };

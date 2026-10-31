@@ -8,6 +8,7 @@ namespace commands {
 // Command factory functions (defined in each command file)
 std::unique_ptr<CommandBase> create_attach_command();
 std::unique_ptr<CommandBase> create_launch_command();
+std::unique_ptr<CommandBase> create_session_default_command();
 std::unique_ptr<CommandBase> create_login_command();
 std::unique_ptr<CommandBase> create_disconnect_command();
 std::unique_ptr<CommandBase> create_connections_command();
@@ -37,6 +38,7 @@ void register_all_commands() {
     registry.register_command(create_list_command());
     registry.register_command(create_attach_command());
     registry.register_command(create_launch_command());
+    registry.register_command(create_session_default_command());
     registry.register_command(create_login_command());
     registry.register_command(create_disconnect_command());
     registry.register_command(create_connections_command());

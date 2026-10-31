@@ -37,6 +37,7 @@ std::string join(const std::vector<std::string>& parts, const std::string& sep) 
 const std::vector<Row>& rows() {
     static const std::vector<Row> table = {
         {{"session", "list"}, "List all SAP GUI connections, sessions, and windows", "SESSION", true, nullptr, false, kListing},
+        {{"session", "default"}, "Show or configure the local default SAP Logon connection", "SESSION", false, nullptr},
         {{"session", "attach"}, "Attach to a running SAP GUI window or exact session ID", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "launch"}, "Launch SAP Logon connection", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "login"}, "Log into a launched SAP GUI session", "SESSION", true, nullptr, false, kSessionSetup},

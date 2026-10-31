@@ -1306,6 +1306,34 @@ struct ShowingHost : FakeHost {
     bool show_running_instance() override { ++shown; return other_tray; }
 };
 
+TEST_CASE("Both trays share a persistent opt-in for SAP startup", "[tray][startup]") {
+    FakeSettings settings;
+    FakeControl control;
+    TrayServices mcp_services;
+    mcp_services.settings = &settings;
+    TrayController mcp(control, nullptr, mcp_services, {});
+    LinkTrayServices link_services;
+    link_services.settings = &settings;
+    LinkTrayController link(link_services, {});
+    auto menu = mcp.menu();
+    const auto* entry = find_item(menu, TrayAction::ToggleSapStartup);
+    REQUIRE(entry);
+    CHECK(entry->label == "Allow automatic SAP startup");
+    CHECK(entry->checkable);
+    CHECK_FALSE(entry->checked);
+    mcp.on_action(TrayAction::ToggleSapStartup);
+    CHECK(settings.get(kAllowSapStartupSetting) == "1");
+    menu = link.menu();
+    entry = find_item(menu, TrayAction::ToggleSapStartup);
+    REQUIRE(entry);
+    CHECK(entry->checked);
+    link.on_action(TrayAction::ToggleSapStartup);
+    CHECK(settings.get(kAllowSapStartupSetting) == "0");
+    menu = mcp.menu();
+    REQUIRE(find_item(menu, TrayAction::ToggleSapStartup));
+    CHECK_FALSE(find_item(menu, TrayAction::ToggleSapStartup)->checked);
+}
+
 AutostartPlan link_plan() {
     AutostartPlan plan;
     plan.name = kLinkAutostartValueName;

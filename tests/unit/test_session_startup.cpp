@@ -1,9 +1,52 @@
 #include <catch2/catch_test_macros.hpp>
 #include "include/session_startup.h"
 #include "policy.hpp"
+#include "include/startup_settings.h"
+#include <map>
 
 using fairyfly::startup::Policy;
 using fairyfly::startup::check;
+
+namespace {
+struct Settings : fairyfly::tray::TraySettings {
+    std::map<std::string, std::string> values;
+    bool writable = true;
+    std::optional<std::string> get(const std::string& key) override {
+        const auto found = values.find(key);
+        return found == values.end() ? std::nullopt : std::optional<std::string>(found->second);
+    }
+    bool set(const std::string& key, const std::string& value) override {
+        if (!writable) return false;
+        values[key] = value;
+        return true;
+    }
+};
+}
+
+TEST_CASE("Startup settings use checkbox for trays and explicit flag for headless runs", "[startup]") {
+    using namespace fairyfly;
+    Settings settings;
+    settings.values[tray::kAllowSapStartupSetting] = "1";
+    settings.values[tray::kSapDefaultConnectionSetting] = "Bigfox";
+    CHECK(startup::read_local(settings, true, false).local_enabled);
+    CHECK_FALSE(startup::read_local(settings, false, false).local_enabled);
+    CHECK(startup::read_local(settings, false, true).local_enabled);
+    settings.values[tray::kAllowSapStartupSetting] = "0";
+    CHECK_FALSE(startup::read_local(settings, true, true).local_enabled);
+    CHECK(startup::read_local(settings, false, true).default_connection == "Bigfox");
+}
+
+TEST_CASE("Default SAP connection is saved locally without enabling startup", "[startup]") {
+    using namespace fairyfly;
+    Settings settings;
+    REQUIRE(startup::configure_default(settings, "Bigfox").status == Result::Status::Success);
+    CHECK(settings.get(tray::kSapDefaultConnectionSetting) == "Bigfox");
+    CHECK_FALSE(startup::read_local(settings, true, false).local_enabled);
+    CHECK(startup::configure_default(settings, "  ").status == Result::Status::Error);
+    CHECK(settings.get(tray::kSapDefaultConnectionSetting) == "Bigfox");
+    settings.writable = false;
+    CHECK(startup::configure_default(settings, "Other").status == Result::Status::Error);
+}
 
 TEST_CASE("SAP startup requires local opt in with actionable instructions", "[startup]") {
     const auto result = check(Policy{false, false, false, "Bigfox"});

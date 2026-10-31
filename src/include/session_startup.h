@@ -32,7 +32,7 @@ inline std::optional<Result> check(const Policy& policy) {
     if (policy.default_connection.find_first_not_of(" \t\r\n") == std::string::npos)
         return Result::fail("SAP_AUTOSTART_DEFAULT_MISSING",
             "No local default SAP connection is configured.",
-            json::array({"Configure the local default SAP Logon connection name in Fairyfly, then retry."}));
+            json::array({"Run 'fairyfly session default NAME' locally with your SAP Logon connection name, then retry."}));
     return std::nullopt;
 }
 

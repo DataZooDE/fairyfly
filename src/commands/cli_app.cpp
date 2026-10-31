@@ -73,6 +73,9 @@ void add_global_options(CLI::App& app, GlobalOptions& global_opts) {
     app.add_flag("--read-only", global_opts.read_only,
                  "Refuse state-changing actions (save, delete, release, ...); also FAIRYFLY_READ_ONLY=1")
         ->group(kGlobalGroup);
+    app.add_flag("--allow-sap-startup", global_opts.allow_sap_startup,
+                 "Allow on-demand SAP startup and login using the local default connection; tray modes use their checkbox")
+        ->group(kGlobalGroup);
     app.add_flag("--no-audit", global_opts.no_audit,
                  "Do not write the audit trail for this run; also FAIRYFLY_AUDIT=0")->group(kGlobalGroup);
     app.add_flag("--audit-required", global_opts.audit_required,

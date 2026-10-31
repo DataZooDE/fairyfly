@@ -84,7 +84,11 @@ TrayController::TrayController(mcp::IServerControl& control, IServerRunner* runn
                                TrayPaths paths, TrayState state)
     : control_(control), runner_(runner), services_(services), paths_(std::move(paths)), state_(std::move(state)) {}
 
-TrayMenuModel TrayController::menu() { return build_menu(control_.status(), state_); }
+TrayMenuModel TrayController::menu() {
+    auto model = build_menu(control_.status(), state_);
+    append_sap_startup_menu(model, services_.settings);
+    return model;
+}
 
 TrayView TrayController::view() {
     const auto model = build_menu(control_.status(), state_);
@@ -147,6 +151,10 @@ bool TrayActions::start_detached(const std::vector<std::string>& args) const {
 }
 
 void TrayController::on_action(TrayAction action) {
+    if (action == TrayAction::ToggleSapStartup) {
+        if (!toggle_sap_startup(services_.settings)) notify("Could not save the automatic SAP startup setting.");
+        return;
+    }
     const TrayActions actions{services_.opener, services_.launcher, paths_.exe,
                               [this](const std::string& text) { notify(text); }};
     const auto open = [&](const std::filesystem::path& path, const char* what) { actions.open(path, what); };

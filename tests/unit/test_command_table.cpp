@@ -74,6 +74,14 @@ TEST_CASE("command table: every entry resolves to a registered CLI path", "[comm
     }
 }
 
+TEST_CASE("CLI accepts startup opt in and local default configuration", "[command_table][startup]") {
+    CHECK(dry_parse({"--allow-sap-startup", "screen", "read"}).ok);
+    CHECK(dry_parse({"mcp", "--allow-sap-startup"}).ok);
+    CHECK(dry_parse({"link", "run", "--allow-sap-startup"}).ok);
+    CHECK(dry_parse({"session", "default", "Bigfox"}).ok);
+    CHECK(dry_parse({"session", "default"}).ok);
+}
+
 TEST_CASE("command table: tool names, families and uniqueness", "[command_table]") {
     std::set<std::string> paths, tools;
     std::set<std::string> known_families;

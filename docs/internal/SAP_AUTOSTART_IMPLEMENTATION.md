@@ -33,18 +33,28 @@
 - Red/green logs: `scratch/startup-{grant,bridge,process}-{red,green}-tests.log`.
 - Native process startup locates SAP Logon through App Paths / standard install locations, starts minimized,
   serializes process creation with a named mutex, and waits at most 20 seconds for scripting readiness.
-- Gateway PR 167 at dce29c6 contains deliberately red admin API tests. CI run 41151436983 is still running.
-  Administrator setting implementation, persistence, translations, and browser test are local, not yet pushed;
-  retain the red run's evidence before pushing the green implementation.
+- Gateway PR 167: dce29c6 contains deliberately red admin API tests. CI run 41151436983 finished red:
+  351 cases, 350 passed, only the new administrator-setting test failed (5 expected assertions).
+  Evidence is `fairyfly-gateway-work/startup-red-ci.log` (untracked). Implementation, persistence, translations,
+  tenant cap and browser test pushed as 1f27880; green CI pending. Do not merge before desktop/live acceptance.
 - No automatic lifecycle integration or live validation yet. No release/deployment has happened.
+- Tray checkbox and default settings have red/green coverage. Both tray controllers use the same HKCU values;
+  tray reads ignore the CLI opt-in and headless reads require it. `session default [NAME]` stores/shows the local
+  default without enabling startup. `--allow-sap-startup` parses for CLI, MCP and link.
+- Combined `[startup],[tray],[command_table]` run: 117 cases / 1371 assertions passed, logged in
+  `scratch/startup-cli-green-tests.log`. Earlier red logs: `startup-tray-red-tests.log`,
+  `startup-settings-red-tests.log`, `startup-cli-red-tests.log`.
+- CLI smoke: `build-msix/Release/fairyfly.exe session default` returned empty default and startup false;
+  help shows the new flag. No SAP session was changed.
 
 ## Next work
 
 - Integrate session discovery/reuse/default-connection launch/login and readiness into CLI and MCP admission.
   The new `ensure_sap_logon` handler method is a guarded primitive, not yet invoked by ordinary operations.
   Never let implicit preparation bypass token scopes/target authorization or owner-mode lease routing.
-- Add persistent tray startup checkbox + shared local default and CLI options. Apply gateway permission via
+- Wire the implemented tray checkbox/default (`startup_settings.*`) and global CLI option into execution. Apply gateway permission via
   `CallContext::link_request` and `sap_startup_granted`; the bridge now carries the verified signed grant.
+- Show gateway startup prohibition in the link tray without disabling the shared local setting for local MCP.
 - Native startup has no cancellation hook yet and only serializes process start, not connection/login;
   cover cancellation and concurrent session preparation before live acceptance.
 - Gateway runtime cap currently intersects tenant `allow_sap_startup` with the policy grant. Missing persisted
