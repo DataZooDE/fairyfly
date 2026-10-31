@@ -225,6 +225,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/credential_store.cpp
     src/credential_resolver.cpp
     src/console_prompt.cpp
+    src/console_output.cpp
     src/commands/credentials_command.cpp
     src/menu_navigation.cpp
     src/mcp/json_rpc.cpp

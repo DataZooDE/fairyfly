@@ -1,6 +1,8 @@
 #include "include/formatters/compact_json.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 #include <unordered_set>
 
 namespace fairyfly {
@@ -68,7 +70,57 @@ void convert_hierarchy(json& scope, std::unordered_set<std::string>& ids, json& 
     }
 }
 
+bool blank_cell(const json& row, std::size_t col) {
+    if (!row.is_array() || col >= row.size()) return true;
+    const json& cell = row[col];
+    if (cell.is_null()) return true;
+    if (!cell.is_string()) return false;
+    for (char c : cell.get_ref<const std::string&>())
+        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') return false;
+    return true;
+}
+
+void hide_in_table(json& table) {
+    if (!table.is_object() || !table.contains("columns") || !table.contains("rows")) return;
+    json& columns = table["columns"];
+    json& rows = table["rows"];
+    if (!columns.is_array() || !rows.is_array() || rows.empty() || columns.empty()) return;
+    std::vector<bool> keep(columns.size(), false);
+    for (std::size_t c = 0; c < columns.size(); ++c)
+        for (const auto& row : rows)
+            if (!blank_cell(row, c)) { keep[c] = true; break; }
+    if (std::find(keep.begin(), keep.end(), true) == keep.end()) return;       // all empty: keep the table as it is
+    if (std::find(keep.begin(), keep.end(), false) == keep.end()) return;      // nothing to hide
+    json hidden = json::array(), kept_columns = json::array();
+    for (std::size_t c = 0; c < columns.size(); ++c) (keep[c] ? kept_columns : hidden).push_back(columns[c]);
+    for (auto& row : rows) {
+        if (!row.is_array()) continue;
+        json kept = json::array();
+        for (std::size_t c = 0; c < columns.size(); ++c)
+            if (keep[c]) kept.push_back(c < row.size() ? row[c] : json(""));
+        row = std::move(kept);
+    }
+    columns = std::move(kept_columns);
+    json& listed = table["hidden_empty_columns"];
+    if (!listed.is_array()) listed = json::array();
+    for (auto& name : hidden) listed.push_back(std::move(name));
+    if (table.contains("column_count") && table["column_count"].is_number_integer())
+        table["column_count"] = columns.size();
+}
+
 }  // namespace
+
+void hide_empty_columns(json& data) {
+    if (data.is_array()) {
+        for (auto& item : data) hide_empty_columns(item);
+        return;
+    }
+    if (!data.is_object()) return;
+    for (auto& [key, value] : data.items()) {
+        if (key == "table_data" || key == "grid_data") hide_in_table(value);
+        else if (value.is_object() || value.is_array()) hide_empty_columns(value);
+    }
+}
 
 json compact_screen_json(const json& data) {
     if (!data.is_object()) return data;
@@ -93,6 +145,7 @@ json compact_screen_json(const json& data) {
     }
 
     if (data.contains("elements") || !elements.empty()) out["elements"] = std::move(elements);
+    hide_empty_columns(out);
     out["compact"] = true;
     out["hierarchy_format"] = "ids";
     out["tab_elements_format"] = "ids";

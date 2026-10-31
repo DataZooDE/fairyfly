@@ -1,5 +1,6 @@
 #include "include/cli_entry.h"
 #include "include/com/utf8.h"
+#include "include/console_output.h"
 #include "include/link/link_runner.h"
 #include "include/mcp/session_worker_main.h"
 #include <cstdio>
@@ -12,6 +13,7 @@ namespace {
 /// A `link` worker given up on Ctrl+C (a TLS connect or HTTP call in libffl cannot be interrupted) may still run:
 /// then the process ends without static destructors and atexit handlers (OpenSSL's cleanup) it could race with.
 int finish(int code) {
+    fairyfly::console::restore_output_code_page();
     if (fairyfly::link::background_threads() == 0) return code;
     std::cout.flush();
     std::cerr.flush();
@@ -38,6 +40,8 @@ int wmain(int argc, wchar_t** wargv) {
     if (hDesk) SetThreadDesktop(hDesk);
     if (argc == 2 && utf8_args[1] == "--mcp-session-worker")
         return fairyfly::mcp::run_session_worker_stdio();
+    // SAP texts are UTF-8: the console shows them as such (also U+00A0 and umlauts in cmd.exe on code page 437/850)
+    fairyfly::console::use_utf8_output();
     return finish(fairyfly::cli::run_cli(argc, arg_ptrs.data()));
 }
 #else

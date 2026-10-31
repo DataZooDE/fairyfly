@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- `screen read --compact` leaves out grid and table columns that are empty in every returned row and names them in one
+  line (`_Columns empty in all rows hidden: STATE_INFO_DISP, ..._`; JSON/TOON: `hidden_empty_columns`). SM50's work
+  process list now fits a console line per row. Output without `--compact` is unchanged.
+- Windows consoles show SAP texts correctly: fairyfly switches the console's output code page to UTF-8 for its run (and
+  restores it afterwards), so umlauts and non-breaking spaces no longer turn into mojibake such as `τá` in cmd.exe on
+  code page 437/850. Screen-read text also shows SAP's non-breaking, narrow and zero-width spaces as plain spaces
+  (HTML viewer pages, grid cells).
+- Approval notification and window name filled fields by their screen label: "SE16 – fill Table Name, then press
+  Enter", several "fill 3 fields (Order Type, Sales Organization, Distribution Channel)"; without a label the field
+  name without its type prefix (`DATABROWSE-TABLENAME`), never the element id.
+- `screen read --only buttons|fields|editable|f4_fields|tables`: the MCP tool's `only`, with the same values and
+  meaning (dropped grids and trees under `suppressed`); MCP now runs the CLI through `--only`. The `--only-*` flags
+  remain as the older spelling.
+
 ## 2026.10.31.2
 
 - Place **Allow automatic SAP startup** directly below the SAP permissions checkbox in both tray modes, with normal checkbox styling. The status line remains first and bold.

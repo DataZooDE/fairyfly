@@ -596,6 +596,33 @@ void configure_approval(ffy::link::AgentConfig& cfg, const LinkOptions& o, LinkR
                                                2000);
                                            return ran ? *read : *out;
                                        };
+    desk.field_labels = [weak = std::weak_ptr<MainThreadTools>(tools), peek](const std::vector<std::string>& names) {
+        // the screen labels of the fields a change fills, read on the main (COM) thread from the active window
+        auto read = std::make_shared<approval::FieldLabels>();
+        auto t = weak.lock();
+        if (!t) return approval::FieldLabels{};
+        const bool ran = t->invoke(
+            [read, names, peek] {
+                cli::CommandHandler* h = peek ? peek() : nullptr;
+                auto s = h ? h->attached_com_session() : nullptr;
+                if (!s) return;
+                sap::ComGuiWindowPtr window;
+                try { window = s->get_active_window(); } catch (const std::exception&) { return; }
+                if (!window) return;
+                for (const auto& name : names) {
+                    try {
+                        const auto lookup = approval::field_lookup(name);
+                        const auto field = window->find_by_name(lookup.name, lookup.type);
+                        if (!field) continue;
+                        std::string label = field->get_label();
+                        if (label.empty()) label = field->get_tooltip();
+                        if (!label.empty()) (*read)[name] = label;
+                    } catch (const std::exception&) {}
+                }
+            },
+            2000);
+        return ran ? *read : approval::FieldLabels{};
+    };
     cfg.approver = o.approve == "no" ? ffy::link::fixed_approver(false) : approval::make_desktop_approver(std::move(desk));
     // the desktop's own check: write rights only for the call approved here, whatever the grant says about approval
     tools->set_write_permit(approval::take_permit);
