@@ -76,6 +76,8 @@ struct CallContext {
     Principal principal;                   ///< caller identity (default: local stdio principal)
     ProtocolEra era = ProtocolEra::Legacy; ///< protocol era of this request
     bool http = false;                     ///< transport: false = stdio
+    bool link_request = false;             ///< signed gateway call, independent of HTTP transport
+    bool sap_startup_granted = false;      ///< verified gateway grant; never a tool argument
     std::optional<BatchLease> batch_lease; ///< broker-only pin for a single-session batch
     /// Optional progress reporter (added for the HTTP/SSE transport, additive): emits a
     /// notifications/progress event when the client supplied a progressToken. Empty = no reporting.
@@ -141,10 +143,12 @@ struct Policy {
     /// link: how changes are allowed when the call itself was granted read-only (the organisation's switch in the
     /// fairyfly web app, not this desktop); empty: no such hint.
     std::string grant_write_hint;
+    bool prepare_missing_session = false; ///< route unbound requests to the authorized startup dispatcher
 };
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).
 struct ServeOptions {
+    bool startup_tray_mode = false; ///< internal: use shared local startup checkbox instead of headless CLI opt-in
     bool read_only = false;
     bool allow_write = false;
     std::optional<int> default_connection;

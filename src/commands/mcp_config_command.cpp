@@ -160,12 +160,15 @@ int run_tray(McpExtras& x, const config::McpConfig& layers, mcp::ServeOptions& o
         host->message_box("fairyfly MCP", "TRAY_SERVER_UNAVAILABLE: this build has no HTTP server to run under the tray.");
         return 2;
     }
+    options.startup_tray_mode = true;
     std::unique_ptr<tray::IServerRunner> runner = factory(options);
     if (!runner) return startup_error(true, "TRAY_SERVER_UNAVAILABLE", "The MCP server could not be created; details are in " + log_file, 2);
 
     auto host = tray::make_win32_tray_host();
     auto opener = tray::make_win32_file_opener();
     tray::TrayServices tray_services;
+    auto settings = tray::make_win32_tray_settings();
+    tray_services.settings = settings.get();
     tray_services.host = host.get();
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();

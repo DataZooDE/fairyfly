@@ -37,6 +37,7 @@ std::string join(const std::vector<std::string>& parts, const std::string& sep) 
 const std::vector<Row>& rows() {
     static const std::vector<Row> table = {
         {{"session", "list"}, "List all SAP GUI connections, sessions, and windows", "SESSION", true, nullptr, false, kListing},
+        {{"session", "default"}, "Show or configure the local default SAP Logon connection", "SESSION", false, nullptr},
         {{"session", "attach"}, "Attach to a running SAP GUI window or exact session ID", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "launch"}, "Launch SAP Logon connection", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "login"}, "Log into a launched SAP GUI session", "SESSION", true, nullptr, false, kSessionSetup},
@@ -97,6 +98,11 @@ std::vector<CommandSpec> build_commands() {
 } // namespace
 
 std::string CommandSpec::path_string() const { return join(path, " "); }
+
+bool can_continue_after_startup(const std::string& tool_name) {
+    return tool_has(tool_name, Trait::ScreenData) || tool_name == "gui_screen_capture" ||
+        tool_name == "gui_transaction_start";
+}
 
 bool tool_has(const std::string& tool_name, Trait trait) {
     const CommandSpec* spec = find_by_tool(tool_name);

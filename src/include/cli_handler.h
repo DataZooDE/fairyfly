@@ -9,6 +9,8 @@
 #include "fill_fields.h"
 #include "screen_snapshot.h"
 #include "login_flow.h"
+#include "session_startup.h"
+#include "startup_coordination.h"
 #include <string>
 #include <cstdint>
 #include <map>
@@ -102,11 +104,18 @@ private:
     std::function<void(int)> connection_changed_hook_;
     std::function<bool(const audit::SapFacts&, const std::string&)> attach_target_guard_;
     std::function<bool(const audit::SapFacts&, const std::string&)> login_target_guard_;
+    bool login_guard_redacts_errors_ = true;
     std::function<bool(const audit::SapFacts&, const std::string&)> launch_target_guard_;
+    std::string startup_adoption_session_; ///< trusted internal startup selection, never a CLI argument
     std::optional<Connection> pending_owner_launch_;
     std::optional<Connection> pending_owner_attach_;
     std::string expected_mcp_session_, expected_mcp_owner_;  ///< one MCP call, checked after selecting the live session
     std::unique_ptr<cred::CredentialStore> credential_store_;
+    std::function<startup::Policy()> automatic_startup_;
+    bool continue_after_startup_ = false;
+    std::shared_ptr<startup::LoginAttempts> startup_attempts_;
+    std::function<Result(const std::string&)> login_submit_guard_;
+    bool preparing_session_ = false;
 
     /// Look up type/text/tooltip of an element (best effort, empty on failure).
     // the parts of handle_login (cli_handler.cpp)
@@ -182,11 +191,16 @@ public:
     void set_attach_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
         attach_target_guard_ = std::move(guard);
     }
-    void set_login_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
+    void set_login_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard,
+                                bool redact_errors = true) {
         login_target_guard_ = std::move(guard);
+        login_guard_redacts_errors_ = redact_errors;
     }
     void set_launch_target_guard(std::function<bool(const audit::SapFacts&, const std::string&)> guard) {
         launch_target_guard_ = std::move(guard);
+    }
+    void set_startup_adoption_session(const std::string& session_id) {
+        startup_adoption_session_ = session_id;
     }
     /// Remove only the exact cache generation written by this tray launch.
     bool rollback_owner_launch(int connection_id);
@@ -238,6 +252,15 @@ public:
                                           std::optional<int> connection) const noexcept;
 
     // Connection management - two modes
+    Result ensure_sap_logon(const startup::Policy& policy, const std::function<bool()>& cancelled = {});
+    void set_login_submit_guard(std::function<Result(const std::string&)> guard) { login_submit_guard_ = std::move(guard); }
+    Result prepare_default_session(const startup::Policy& policy);
+    void set_automatic_startup(std::function<startup::Policy()> policy,
+                              std::shared_ptr<startup::LoginAttempts> attempts = {}, bool continue_after_startup = false) {
+        automatic_startup_ = std::move(policy);
+        startup_attempts_ = std::move(attempts);
+        continue_after_startup_ = continue_after_startup;
+    }
     Result handle_attach(int timeout_seconds, std::optional<std::string> session_id = std::nullopt);
     /// With `login`, runs the same logon path as `login` after the launch succeeded
     /// (credential_name empty = Credential Manager entry keyed by the connection name).

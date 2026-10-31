@@ -1306,6 +1306,47 @@ struct ShowingHost : FakeHost {
     bool show_running_instance() override { ++shown; return other_tray; }
 };
 
+TEST_CASE("Both trays share a persistent opt-in for SAP startup", "[tray][startup]") {
+    FakeSettings settings;
+    FakeControl control;
+    TrayServices mcp_services;
+    mcp_services.settings = &settings;
+    TrayController mcp(control, nullptr, mcp_services, {});
+    LinkTrayServices link_services;
+    link_services.settings = &settings;
+    LinkTrayController link(link_services, {});
+    auto menu = mcp.menu();
+    const auto* entry = find_item(menu, TrayAction::ToggleSapStartup);
+    REQUIRE(entry);
+    CHECK(entry->label == "Allow automatic SAP startup");
+    CHECK(entry->checkable);
+    CHECK_FALSE(entry->checked);
+    mcp.on_action(TrayAction::ToggleSapStartup);
+    CHECK(settings.get(kAllowSapStartupSetting) == "1");
+    menu = link.menu();
+    entry = find_item(menu, TrayAction::ToggleSapStartup);
+    REQUIRE(entry);
+    CHECK(entry->checked);
+    link.on_action(TrayAction::ToggleSapStartup);
+    CHECK(settings.get(kAllowSapStartupSetting) == "0");
+    menu = mcp.menu();
+    REQUIRE(find_item(menu, TrayAction::ToggleSapStartup));
+    CHECK_FALSE(find_item(menu, TrayAction::ToggleSapStartup)->checked);
+}
+
+TEST_CASE("tray: both modes show the gateway startup prohibition", "[tray][startup-policy-status]") {
+    TrayState state;
+    state.link = paired("connected");
+    const std::string warning = "Automatic SAP startup via link disabled by administrator";
+    CHECK_FALSE(has_label(top_labels(build_link_menu(state.link)), warning));
+    state.link.gateway_sap_startup_allowed = false;
+    CHECK(has_label(top_labels(build_link_menu(state.link)), warning));
+    CHECK(has_label(link_labels(build_menu(make_status(true, true), state)), warning));
+    state.link.gateway_sap_startup_allowed = true;
+    CHECK_FALSE(has_label(top_labels(build_link_menu(state.link)), warning));
+    CHECK_FALSE(has_label(link_labels(build_menu(make_status(true, true), state)), warning));
+}
+
 AutostartPlan link_plan() {
     AutostartPlan plan;
     plan.name = kLinkAutostartValueName;

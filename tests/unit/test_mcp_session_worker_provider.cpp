@@ -212,3 +212,28 @@ TEST_CASE("uncertain disconnect outcome retires cached routing", "[mcp][worker-p
     CHECK(result.is_error);
     CHECK(retired == 1);
 }
+
+TEST_CASE("routed startup-enabled provider accepts an implicit batch on its bound session", "[mcp][worker-provider][startup][batch]") {
+    SessionWorkerProviderConfig config;
+    config.policy.owner_sap_identities = {"A4H/001/ALICE"};
+    config.policy.prepare_missing_session = true;
+    config.connection = 7;
+    config.session_identity = "/app/con[0]/ses[0]|key|generation";
+    config.specs = all_tool_specs();
+    config.probe = [](int id) { CHECK(id == 7); return probe_reply(); };
+    int actions = 0;
+    config.invoke = [&](const WorkerCall& call, const std::function<void()>& before_send) {
+        before_send();
+        CHECK(call.connection == 7);
+        ++actions;
+        return json{{"status", "success"}, {"data", {{"title", "Easy Access"}}}};
+    };
+    auto provider = make_session_worker_provider(std::move(config));
+    auto ctx = caller();
+    ctx.principal.rate_per_minute = 1;
+    const auto result = provider->call_tool("gui_batch", {{"items", json::array({
+        {{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}}})}}, ctx);
+    INFO(result.content.dump());
+    CHECK_FALSE(result.is_error);
+    CHECK(actions == 1);
+}

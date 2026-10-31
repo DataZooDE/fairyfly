@@ -10,6 +10,7 @@
 #include "support/temp_dir.h"
 
 #include <memory>
+#include <future>
 
 using namespace fairyfly;
 using fairyfly::test::FakeEngine;
@@ -45,6 +46,161 @@ TEST_CASE("command handler: a fill under --read-only is refused before anything 
     CHECK(code_of(r) == "READ_ONLY_REFUSED");
     CHECK(r.to_json().dump().find("secret") == std::string::npos);  // the value is never echoed
     CHECK(rig.engine->calls.empty());
+}
+
+TEST_CASE("SAP Logon startup requires opt in before process creation", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    const auto result = rig.handler->ensure_sap_logon({false, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+}
+
+TEST_CASE("CLI task reports disabled startup before touching SAP", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "Bigfox"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+    CHECK(rig.engine->count("execute_transaction") == 0);
+}
+
+TEST_CASE("CLI stale and logged-out saved sessions respect startup permission", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    fairyfly::test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->application_info = {{"total_connections", 0}, {"total_sessions", 0}, {"connections", json::array()}};
+    SECTION("stale saved connection") {}
+    SECTION("existing logged-out session") {
+        rig.engine->live_sessions[kSession] = true;
+        scripting.facts.system = "A4H"; scripting.facts.client = "001";
+        rig.engine->application_info = {{"total_connections", 1}, {"total_sessions", 1},
+            {"connections", json::array({{{"description", "BIG"}, {"sessions", json::array({{{"id", kSession}, {"user", ""}}})}}})}};
+    }
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("execute_transaction") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
+TEST_CASE("CLI verified manual login clears the matching retry block", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H"; scripting.facts.client = "001"; scripting.facts.user = "DEVELOPER";
+    scripting.connection_description = "BIG";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    auto attempts = std::make_shared<startup::LoginAttempts>(rig.dir.path());
+    REQUIRE(attempts->begin("BIG").status == Result::Status::Success);
+    const auto identity_key = startup::LoginAttempts::credential_key("A4H/001/DEVELOPER");
+    REQUIRE(attempts->begin(identity_key).status == Result::Status::Success);
+    REQUIRE(attempts->begin("Other").status == Result::Status::Success);
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; }, attempts);
+    bool failed = false, busy = false, read_only_recovery = false;
+    SECTION("successful command clears") {}
+    SECTION("successful screen read clears without navigation") { read_only_recovery = true; }
+    SECTION("failed command retains retry guard") { failed = true; rig.engine->next = Result::fail("TEST_FAILURE", "test"); }
+    SECTION("another preparation retains retry guard") { busy = true; }
+    std::promise<void> held, release;
+    auto released = release.get_future();
+    auto contender = std::async(std::launch::async, [&] {
+        auto guard = busy ? startup::acquire_preparation_guard() : startup::PreparationGuard{};
+        held.set_value();
+        released.wait();
+    });
+    held.get_future().wait();
+    const auto result = read_only_recovery
+        ? rig.handler->handle_screen_read(false, std::nullopt, false, {})
+        : rig.handler->handle_transaction("SE11", std::nullopt);
+    release.set_value();
+    contender.get();
+    CHECK((result.status == Result::Status::Error) == failed);
+    CHECK(attempts->pending("BIG") == (failed || busy));
+    CHECK(attempts->pending(identity_key) == (failed || busy));
+    CHECK(attempts->begin("Other").status == Result::Status::Error);
+}
+
+TEST_CASE("CLI implicit startup cannot replace a saved target with another default", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    rig.engine->application_info = {{"total_connections", 0}, {"total_sessions", 0}, {"connections", json::array()}};
+    rig.handler->set_automatic_startup([] { return startup::Policy{true, false, false, "Other"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SESSION_TARGET_CHANGED");
+    CHECK(rig.engine->count("execute_transaction") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
+TEST_CASE("CLI session preparation reuses logged-on default without launching", "[handler][startup]") {
+    Rig rig(false);
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H";
+    scripting.facts.client = "001";
+    scripting.facts.user = "DEVELOPER";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->application_info = {{"total_connections", 1}, {"total_sessions", 1},
+        {"connections", json::array({{{"id", "/app/con[0]"}, {"description", "Bigfox"},
+            {"sessions", json::array({{{"id", kSession}, {"user", "DEVELOPER"}, {"system", "A4H"}, {"client", "001"}}})}}})}};
+    rig.engine->next = Result::ok({{"session_id", kSession}, {"connection_id", "/app/con[0]"}});
+    const auto result = rig.handler->prepare_default_session({false, false, false, "Bigfox"});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("attach_by_session_id") == 1);
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
+TEST_CASE("CLI does not click an unobserved screen after automatic startup", "[handler][startup][startup-observation]") {
+    Rig rig(false);
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H"; scripting.facts.client = "001"; scripting.facts.user = "DEVELOPER";
+    scripting.connection_description = "Bigfox";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    rig.engine->application_info = {{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}};
+    rig.engine->next = Result::ok({{"session_id", kSession}, {"connection_id", "/app/con[0]"}, {"description", "Bigfox"}});
+    rig.handler->set_automatic_startup([] { return startup::Policy{true, false, false, "Bigfox"}; });
+    const auto result = rig.handler->handle_click("@active/tbar[0]/btn[0]", std::nullopt);
+    CHECK(code_of(result) == "SESSION_PREPARED");
+    CHECK(result.error.value("connection_open", false));
+    CHECK(rig.engine->count("click_element") == 0);
+}
+
+TEST_CASE("Running SAP Logon never needs startup permission", "[handler][startup]") {
+    Rig rig(false);
+    const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("start_sap_logon") == 0);
+}
+
+TEST_CASE("SAP Logon already starting is awaited even when automatic startup is disabled", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, true, "starting"};
+    rig.engine->on_call = [&](const std::string& call) {
+        if (call == "start_sap_logon") rig.engine->status = {true, true, "ready"};
+    };
+    const auto result = rig.handler->ensure_sap_logon({false, true, false, ""});
+    CHECK(result.status == Result::Status::Success);
+    CHECK(rig.engine->count("start_sap_logon") == 1);
+    CHECK_FALSE(rig.engine->startup_may_create_process);
+}
+
+TEST_CASE("SAP Logon startup reports engine failures", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    rig.engine->next = Result::fail("SAP_LOGON_NOT_INSTALLED", "Install SAP GUI.");
+    const auto result = rig.handler->ensure_sap_logon({true, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_LOGON_NOT_INSTALLED");
+    CHECK(rig.engine->count("start_sap_logon") == 1);
+}
+
+TEST_CASE("SAP Logon startup requires verified scripting readiness", "[handler][startup]") {
+    Rig rig(false);
+    rig.engine->status = {false, false, "not running"};
+    const auto result = rig.handler->ensure_sap_logon({true, false, false, "Bigfox"});
+    CHECK(code_of(result) == "SAP_STARTUP_NOT_READY");
+    CHECK(rig.engine->count("start_sap_logon") == 1);
 }
 
 TEST_CASE("command handler: without a saved connection nothing is sent to SAP", "[handler]") {
@@ -252,4 +408,28 @@ TEST_CASE("command handler: fill with fields checks the session once per call", 
         CHECK(r.error.contains("action_result"));
         CHECK(rig.engine->key_reads == 1);
     }
+}
+
+TEST_CASE("Native startup adoption never opens a new connection when its owner guard is unavailable", "[handler][startup][startup-prelogin]") {
+    Rig rig(false);
+    rig.handler->set_startup_adoption_session(kSession);
+    SECTION("no owner identities") {}
+    SECTION("no live target guard") { rig.handler->set_attach_owner_identities({"A4H/001/OWNER"}); }
+    const auto result = rig.handler->handle_launch("Bigfox");
+    CHECK(code_of(result) == "SAP_STARTUP_UNAVAILABLE");
+    CHECK(rig.engine->count("launch_connection") == 0);
+    CHECK(rig.engine->count("attach_by_session_id") == 0);
+}
+
+TEST_CASE("Native startup adoption rejects a different attached session before writing a receipt", "[handler][startup][startup-prelogin]") {
+    Rig rig(false);
+    rig.handler->set_startup_adoption_session(kSession);
+    rig.handler->set_attach_owner_identities({"A4H/001/OWNER"});
+    rig.handler->set_launch_target_guard([](const audit::SapFacts&, const std::string&) { return true; });
+    rig.engine->next = Result::ok({{"session_id", "/app/con[1]/ses[0]"}, {"connection_id", "/app/con[1]"}});
+    const auto result = rig.handler->handle_launch("Bigfox");
+    CHECK(code_of(result) == "OWNER_SESSION_UNAVAILABLE");
+    CHECK(rig.engine->count("attach_by_session_id") == 1);
+    CHECK(rig.engine->count("launch_connection") == 0);
+    CHECK(cli::ConnectionManager(rig.dir.path().string()).list_connections().empty());
 }

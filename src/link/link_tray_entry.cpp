@@ -59,6 +59,7 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     auto host = tray::make_win32_tray_host(tray::TrayKind::Link);
     auto opener = tray::make_win32_file_opener();
     tray::LinkTrayServices tray_services;
+    tray_services.settings = settings.get();
     tray_services.host = host.get();
     tray_services.opener = opener.get();
     tray_services.launcher = launcher.get();

@@ -19,6 +19,7 @@ public:
         int connection;
         std::string session_identity;
         std::string sap_identity;  ///< "SYS/CLIENT/USER" of that session when attached (empty: unknown)
+        std::string startup_default;  ///< configured entry that successfully prepared this target
     };
 
     std::optional<StickyTarget> sticky_target(const std::string& principal_key) const {
@@ -33,9 +34,9 @@ public:
     }
 
     void set_sticky_connection(const std::string& principal_key, int connection, std::string session_identity,
-                               std::string sap_identity = "") {
+                               std::string sap_identity = "", std::string startup_default = "") {
         std::lock_guard<std::mutex> lock(mu_);
-        sticky_[principal_key] = StickyTarget{connection, std::move(session_identity), std::move(sap_identity)};
+        sticky_[principal_key] = StickyTarget{connection, std::move(session_identity), std::move(sap_identity), std::move(startup_default)};
     }
 
     /// An unauthenticated SAP window has no SAP user to authorize. Only the token that
@@ -65,6 +66,26 @@ public:
             }) >= 8) return false;
         prelogin_[connection] = PreloginClaim{token_id, session_identity, now + std::chrono::minutes(15)};
         return true;
+    }
+
+    struct PreloginTarget {
+        int connection;
+        std::string session_identity;
+    };
+    // Selection only: callers must recheck the exact saved generation and live
+    // SAP facts before using this receipt. Never disclose another token's claim.
+    std::optional<PreloginTarget> owned_prelogin_target(const std::string& token_id,
+            const std::string& session_id, Clock::time_point now = Clock::now()) const {
+        if (token_id.empty() || session_id.empty()) return std::nullopt;
+        std::lock_guard<std::mutex> lock(mu_);
+        std::optional<PreloginTarget> result;
+        for (const auto& [id, claim] : prelogin_) {
+            if (claim.token_id != token_id || claim.expires_at <= now ||
+                claim.session_identity.rfind(session_id + "|", 0) != 0) continue;
+            if (result) return std::nullopt; // stale generations are ambiguous
+            result = PreloginTarget{id, claim.session_identity};
+        }
+        return result;
     }
 
     bool owns_prelogin(const std::string& token_id, int connection, const std::string& session_identity,

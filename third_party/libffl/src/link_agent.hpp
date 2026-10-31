@@ -25,6 +25,7 @@ struct CallInfo {
     std::vector<std::string> tcodes;
     // set once the gateway cancelled the call (timeout, client gone); null: never. A batch stops before its next step.
     std::shared_ptr<const std::atomic<bool>> cancel;
+    bool sap_startup_granted = false;
     bool cancelled() const { return cancel && cancel->load(); }
 };
 
@@ -137,6 +138,7 @@ public:
     // none reads as not enforced. Every change is decided under the stricter of this and the call's own grant.
     void set_link_policy(const proto::LinkPolicy& p);
     bool approval_enforced() const { return enforced_.load(); }  // the last pushed setting (a tray may poll it)
+    bool sap_startup_allowed() const { return startup_allowed_.load(); }
     std::vector<std::string> caps() const;  // what hello announces
     bool refresh_local();  // reads the local tool catalog; false if fairyfly is unreachable
 
@@ -165,6 +167,7 @@ private:
     static constexpr int kExpiredAsSkew = 3;
     proto::TrailPolicy trail_;  // guarded by mu_
     std::atomic<bool> enforced_{false};  // LinkPolicy::approval_enforced, as last pushed
+    std::atomic<bool> startup_allowed_{false};
     std::mutex policy_mu_;               // orders set_link_policy calls and what the Approver is told
     int told_ = -1;                      // what the Approver was last told (-1: nothing yet); guarded by policy_mu_
     std::vector<proto::Frame> trail_frames(const StepRequest& s, StepRecord rec);

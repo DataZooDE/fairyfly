@@ -19,6 +19,7 @@
 #include "include/mcp/tool_catalog.h"
 #include "include/command_table.h"
 #include "include/link/link_call.h"
+#include "support/temp_dir.h"
 
 using namespace fairyfly::mcp;
 using fairyfly::Result;
@@ -89,6 +90,420 @@ CallContext ctx_with_id(int id = 1) {
 }
 
 } // namespace
+
+TEST_CASE("MCP implicit startup reports local and gateway denials before launching", "[mcp][startup]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
+        return err("NO_CONNECTIONS", "No saved connection");
+    };
+    auto d = f.make();
+    bool started = false;
+    bool local_enabled = false;
+    d.set_session_startup([&] { return fairyfly::startup::Policy{local_enabled, false, false, "Bigfox"}; },
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { started = true; return Result::ok(); });
+    auto ctx = ctx_with_id();
+    SECTION("local permission") {
+        const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+        CHECK(result.is_error);
+        CHECK(text_of(result).find("SAP_AUTOSTART_DISABLED") != std::string::npos);
+    }
+    SECTION("gateway permission is independent") {
+        local_enabled = true;
+        ctx.link_request = true;
+        const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+        CHECK(result.is_error);
+        CHECK(text_of(result).find("SAP_AUTOSTART_ADMIN_DISABLED") != std::string::npos);
+    }
+    CHECK_FALSE(started);
+    CHECK(std::none_of(f.calls.begin(), f.calls.end(), [](const Argv& argv) {
+        return argv.size() > 1 && argv[0] == "session" && (argv[1] == "launch" || argv[1] == "login");
+    }));
+}
+
+TEST_CASE("MCP implicit startup cannot bypass lifecycle scopes", "[mcp][startup]") {
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
+        return err("NO_CONNECTIONS", "No saved connection");
+    };
+    auto d = f.make();
+    bool started = false;
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { started = true; return Result::ok(); });
+    auto ctx = ctx_with_id();
+    ctx.principal.all_scopes = false;
+    ctx.principal.scopes = {"screen.read", "session.list"};
+    const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+    CHECK(result.is_error);
+    CHECK(text_of(result).find("SCOPE_DENIED") != std::string::npos);
+    CHECK_FALSE(started);
+}
+
+TEST_CASE("MCP implicit startup completes SSO before the original screen request", "[mcp][startup]") {
+    Fixture f;
+    bool ready = false;
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "session" && argv[1] == "list")
+            return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
+        if (argv.size() > 1 && argv[0] == "session" && argv[1] == "launch") {
+            ready = true;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        if (argv.size() > 1 && argv[0] == "screen" && argv[1] == "read") {
+            CHECK(ready);
+            CHECK(has_pair(argv, "--connection", "7"));
+            return Result::ok({{"screen", "SAP Easy Access"}});
+        }
+        return err("UNEXPECTED", "Unexpected operation");
+    };
+    auto d = f.make();
+    int starts = 0;
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>& cancelled) {
+            CHECK(static_cast<bool>(cancelled));
+            ++starts; return Result::ok();
+        });
+    d.set_sap_facts_provider([&](std::optional<int> id) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!ready) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7;
+        facts.system = "A4H"; facts.client = "001"; facts.user = "DEVELOPER";
+        facts.session_identity = "session-7";
+        return facts;
+    });
+    auto ctx = ctx_with_id();
+    ctx.link_request = true;
+    ctx.sap_startup_granted = true;
+    ctx.cancelled = [] { return false; };
+    bool limited = false;
+    SECTION("normal budget") {}
+    SECTION("one requested operation uses one allowance including preparation") {
+        ctx.principal.rate_per_minute = 1;
+        ctx.principal.rate_families = {{"screen", 1}, {"session", 1}};
+        limited = true;
+    }
+    const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+    INFO(text_of(result));
+    CHECK_FALSE(result.is_error);
+    CHECK(starts == 1);
+    REQUIRE(f.calls.size() == 3);
+    CHECK(f.calls[0][1] == "list");
+    CHECK(f.calls[1][1] == "launch");
+    CHECK(f.calls[2][1] == "read");
+    if (limited) {
+        ready = false;
+        const auto denied = d.call_tool("gui_screen_read", json::object(), ctx);
+        CHECK(denied.is_error);
+        CHECK(text_of(denied).find("RATE_LIMITED") != std::string::npos);
+        CHECK(f.calls.size() == 3);
+        CHECK(starts == 1);
+    }
+}
+
+TEST_CASE("MCP explicit targets never trigger implicit startup", "[mcp][startup]") {
+    Fixture f;
+    f.handler = [](const Argv&) { return err("INVALID_CONNECTION", "Explicit connection is unavailable"); };
+    auto d = f.make();
+    bool policy_read = false;
+    d.set_session_startup([&] { policy_read = true; return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) {
+            FAIL("Explicit targeting must not start SAP"); return Result::ok();
+        });
+    CHECK(d.call_tool("gui_screen_read", {{"connection", 42}}, ctx_with_id()).is_error);
+    CHECK_FALSE(policy_read);
+    CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("MCP prepares a fresh session before asking to observe it for a screen action", "[mcp][startup][startup-observation]") {
+    Fixture f;
+    bool ready = false;
+    int actions = 0;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            ready = true;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        ++actions;
+        return Result::ok();
+    };
+    Policy policy; policy.read_only = false; policy.allow_write = true;
+    auto d = f.make(policy);
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!ready) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = "DEVELOPER";
+        facts.session_identity = "session-seven|key|generation";
+        return facts;
+    });
+    auto context = ctx_with_id();
+    bool denied = false;
+    bool transaction = false;
+    SECTION("screen actions require observation") {}
+    SECTION("unauthorized system receives no prepared-session metadata") {
+        context.principal.sap_systems = {"OTHER/001"};
+        denied = true;
+    }
+    SECTION("an explicitly requested transaction may continue") { transaction = true; }
+    const auto result = d.call_tool(transaction ? "gui_transaction_start" : "gui_key_send",
+        transaction ? json{{"code", "BP"}} : json{{"key", "enter"}}, context);
+    if (denied) {
+        CHECK(result.is_error);
+        CHECK(actions == 0);
+        CHECK(text_of(result).find("SESSION_PREPARED") == std::string::npos);
+        CHECK(text_of(result).find("connection_file_id") == std::string::npos);
+        if (result.structured) CHECK(result.structured->dump().find("connection_file_id") == std::string::npos);
+        return;
+    }
+    CHECK(ready);
+    if (transaction) {
+        CHECK_FALSE(result.is_error);
+        CHECK(actions == 1);
+        return;
+    }
+    CHECK(actions == 0);
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 7);
+}
+
+TEST_CASE("All MCP transports stop blind batch actions after implicit startup", "[mcp][startup][batch][startup-observation]") {
+    for (const bool link : {false, true}) {
+        for (const bool read_first : {false, true}) {
+            INFO("link=" << link << " read_first=" << read_first);
+            Fixture f;
+            bool ready = false;
+            int actions = 0;
+            f.handler = [&](const Argv& argv) {
+                if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+                if (argv[0] == "session" && argv[1] == "launch") {
+                    ready = true;
+                    return Result::ok({{"connection_file_id", 7}});
+                }
+                ++actions;
+                return Result::ok();
+            };
+            Policy policy; policy.read_only = false; policy.allow_write = true;
+            auto d = f.make(policy);
+            d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+                [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+            d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+                if (!ready) return std::nullopt;
+                fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "SESSION_MANAGER"};
+                facts.connection_id = 7;
+                facts.session_identity = "session-seven|key|generation";
+                return facts;
+            });
+            auto context = ctx_with_id();
+            context.link_request = link;
+            context.sap_startup_granted = link;
+            const json action = {{"tool", "gui_key_send"}, {"arguments", {{"key", "enter"}}}};
+            const json first = read_first ? json{{"tool", "gui_screen_read"}} : action;
+            const auto result = d.call_tool("gui_batch", {{"items", json::array({first, action})},
+                {"stop_on_error", false}}, context);
+            INFO(text_of(result));
+            CHECK(ready);
+            CHECK(result.is_error);
+            CHECK(text_of(result).find("SESSION_PREPARED") != std::string::npos);
+            CHECK(actions == 0);
+        }
+    }
+}
+
+TEST_CASE("MCP recovers its implicit startup default after the session closes", "[mcp][startup][startup-recovery]") {
+    Fixture f;
+    bool ready = false;
+    int launches = 0;
+    std::string saved_name = "Bigfox", live_user = "DEVELOPER";
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            ready = true;
+            ++launches;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        return Result::ok();
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); });
+    d.set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        fairyfly::auth::SessionTarget target;
+        target.system = "A4H/001"; target.user = "DEVELOPER"; target.connection_name = saved_name;
+        return target;
+    });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!ready) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = live_user;
+        facts.session_identity = "session-seven|key-" + std::to_string(launches) + "|generation";
+        return facts;
+    });
+    json args = {{"no_tabs", true}, {"skip_trees", true}};
+    REQUIRE_FALSE(d.call_tool("gui_screen_read", args, ctx_with_id()).is_error);
+    REQUIRE(launches == 1);
+    ready = false;
+    int expected_launches = 2;
+    bool error = false;
+    SECTION("same default and identity recover") {}
+    SECTION("another saved connection is not replaced") { saved_name = "Other"; expected_launches = 1; error = true; }
+    SECTION("startup origin survives deletion of the saved connection") { saved_name.clear(); }
+    SECTION("SSO returning another SAP user is refused") { live_user = "OTHER"; error = true; }
+    SECTION("SAP usernames compare without case") { live_user = "developer"; }
+    SECTION("an explicit connection is not automatically replaced") { args["connection"] = 7; expected_launches = 1; }
+    const auto recovered = d.call_tool("gui_screen_read", args, ctx_with_id());
+    INFO(text_of(recovered));
+    CHECK(recovered.is_error == error);
+    CHECK(launches == expected_launches);
+    if (live_user == "OTHER") {
+        // Failed recovery must not overwrite the original principal's sticky identity.
+        live_user = "DEVELOPER";
+        ready = false;
+        const auto retry = d.call_tool("gui_screen_read", args, ctx_with_id());
+        INFO(text_of(retry));
+        CHECK_FALSE(retry.is_error);
+        CHECK(launches == 3);
+    }
+}
+
+TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][startup][startup-submit]") {
+    fairyfly::test::TempDir dir{"mcp-startup-submit"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    Fixture f;
+    bool opened = false;
+    int submissions = 0;
+    std::function<Result(const std::string&)> submit_guard;
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "session") {
+            if (argv[1] == "list") return Result::ok({{"connections", json::array()}});
+            if (argv[1] == "launch") {
+                opened = true;
+                return Result::ok({{"connection_file_id", 7}});
+            }
+            if (argv[1] == "login") {
+                REQUIRE(submit_guard);
+                const auto allowed = submit_guard("A4H/001/DEVELOPER");
+                if (allowed.status != Result::Status::Success) return allowed;
+                ++submissions;
+                return Result::fail("LOGIN_FAILED", "Login needs manual attention.");
+            }
+        }
+        return Result::fail("UNEXPECTED", "Unexpected operation.");
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); }, attempts);
+    d.set_login_submit_guard_override([&](std::function<Result(const std::string&)> guard) { submit_guard = std::move(guard); });
+    d.set_sap_facts_provider([&](std::optional<int> id) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!opened) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001";
+        return facts;
+    });
+    auto ctx = ctx_with_id();
+    ctx.principal.all_scopes = false;
+    ctx.principal.scopes = {"screen.read", "session.list", "session.launch"};
+    bool login_allowed = false;
+    SECTION("login scope denied") {}
+    SECTION("failed submission remains blocked") { login_allowed = true; ctx.principal.scopes.insert("session.login"); }
+    const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find(login_allowed ? "LOGIN_FAILED" : "SCOPE_DENIED") != std::string::npos);
+    CHECK(submissions == (login_allowed ? 1 : 0));
+    CHECK((attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Error) == login_allowed);
+    CHECK_FALSE(submit_guard);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 7);
+}
+
+TEST_CASE("MCP clears only a verified matching manual login retry block", "[mcp][startup][startup-manual-recovery]") {
+    fairyfly::test::TempDir dir{"mcp-manual-login"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    REQUIRE(attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Success);
+    REQUIRE(attempts->begin("Other").status == Result::Status::Success);
+    Fixture f;
+    auto d = f.make();
+    std::string live_name = "Bigfox";
+    std::string live_user = "DEVELOPER";
+    auto ctx = ctx_with_id();
+    bool should_clear = true;
+    SECTION("verified manually authenticated default") {}
+    SECTION("another SAP user does not clear this identity block") { live_user = "OTHER"; should_clear = false; }
+    SECTION("another connection does not clear the default's block") { live_name = "Other"; should_clear = false; }
+    SECTION("unauthenticated session does not clear the block") { live_user.clear(); should_clear = false; }
+    SECTION("scope denial does not clear the block") { ctx.principal.all_scopes = false; should_clear = false; }
+    d.set_session_startup([] { return fairyfly::startup::Policy{false, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) {
+            FAIL("Manual login recovery must not launch SAP"); return Result::ok();
+        }, attempts);
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001"; facts.user = live_user;
+        facts.session_identity = "session-seven|key|generation";
+        return facts;
+    });
+    d.set_session_target_resolver([&](const CommandDispatcher::TargetQuery&) {
+        fairyfly::auth::SessionTarget target;
+        target.system = "A4H/001"; target.user = live_user; target.connection_name = live_name;
+        return target;
+    });
+    const auto result = d.call_tool("gui_screen_read", {{"connection", 7}, {"no_tabs", true}}, ctx);
+    CHECK(result.is_error == !ctx.principal.all_scopes);
+    CHECK((attempts->begin(fairyfly::startup::LoginAttempts::credential_key("A4H/001/DEVELOPER")).status == Result::Status::Success) == should_clear);
+    CHECK(attempts->begin("Other").status == Result::Status::Error);
+}
+
+TEST_CASE("MCP automatic credential login keeps later implicit calls on the authenticated session", "[mcp][startup][startup-followup]") {
+    fairyfly::test::TempDir dir{"mcp-startup-followup"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    Fixture f;
+    bool opened = false, ready = false;
+    int starts = 0, logins = 0;
+    std::function<Result(const std::string&)> submit_guard;
+    f.handler = [&](const Argv& argv) {
+        if (argv[0] == "session" && argv[1] == "list") return Result::ok({{"connections", json::array()}});
+        if (argv[0] == "session" && argv[1] == "launch") {
+            opened = true;
+            return Result::ok({{"connection_file_id", 7}});
+        }
+        if (argv[0] == "session" && argv[1] == "login") {
+            REQUIRE(submit_guard);
+            const auto allowed = submit_guard("A4H/001/DEVELOPER");
+            REQUIRE(allowed.status == Result::Status::Success);
+            ready = true;
+            ++logins;
+            return Result::ok({{"connection_id", 7}});
+        }
+        REQUIRE(argv[0] == "screen");
+        return Result::ok({{"connection_id", 7}, {"screen", "SAP Easy Access"}});
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { ++starts; return Result::ok(); }, attempts);
+    d.set_login_submit_guard_override([&](std::function<Result(const std::string&)> guard) { submit_guard = std::move(guard); });
+    d.set_sap_facts_provider([&](std::optional<int>) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!opened) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001";
+        facts.user = ready ? "DEVELOPER" : "";
+        facts.session_identity = ready ? "session-seven|key|generation" : "session-seven||generation";
+        return facts;
+    });
+    const auto first = d.call_tool("gui_screen_read", json::object(), ctx_with_id());
+    INFO(text_of(first));
+    REQUIRE_FALSE(first.is_error);
+    const auto second = d.call_tool("gui_screen_read", json::object(), ctx_with_id(2));
+    INFO(text_of(second));
+    CHECK_FALSE(second.is_error);
+    CHECK(starts == 1);
+    CHECK(logins == 1);
+}
 
 TEST_CASE("Dispatcher: a failed audit write in required mode reports AUDIT_UNAVAILABLE", "[mcp][dispatcher][audit]") {
     mcp_audit_reset_failure();
@@ -1283,6 +1698,8 @@ TEST_CASE("Dispatcher: auto_attach re-attaches a default from gui_session_attach
     };
     // attach explicitly (connection 0, Bigfox/100/LEE), then SAP Logon restarts: connection 0's session is gone
     auto start = [&](Fixture& f, Desk& desk, CommandDispatcher* d) {
+        d->set_session_startup([] { return fairyfly::startup::Policy{false, false, false, "Another default"}; },
+            [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::fail("UNEXPECTED_STARTUP", "Existing-session reattach needs no startup."); });
         f.handler = [&](const Argv& argv) { return desk(argv); };
         desk.live[0] = facts_of(kBigfox, 0, "/app/con[0]/ses[0]|k0|g0");
         d->set_sap_facts_provider([&desk](std::optional<int> c) -> std::optional<SapFacts> {

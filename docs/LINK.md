@@ -187,10 +187,12 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 
 ## What runs where
 
-- The tray may start before SAP Logon (at Windows logon): until SAP Logon runs, calls answer that it is not running
-  (`gui_doctor`: com_engine "SAP Logon is not running"). Every call looks SAP Logon up again, so once you start it and
-  log on the next call sees the session; after SAP Logon was restarted the tray drops the old one by itself. fairyfly
-  never starts a SAP GUI scripting engine of its own.
+- The tray may start before SAP Logon. Session startup is on demand: configure `fairyfly session default "Bigfox"`,
+  enable **Allow automatic SAP startup** locally, and have the gateway administrator permit startup in Settings.
+  A headless `link run` uses `--allow-sap-startup` instead of the tray checkbox. If a requested task needs a session,
+  Fairyfly can start SAP Logon, open the default connection and log in through local credentials or SSO. Disabled
+  settings produce actionable MCP errors. An existing authenticated session remains usable without this permission.
+  Startup permission is independent of **Allow changes in SAP**. See [On-demand startup](MCP.md#on-demand-startup).
 - Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
   itself (with several open, the assistant is told to pick one or to ask you). After SAP Logon or the tray restarted,
   a closed default connection is re-attached the same way, only to a session of the same SAP system, client and user,

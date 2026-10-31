@@ -75,6 +75,32 @@ TEST_CASE("session worker: the first matching call binds it; a mismatch later is
     CHECK(handlers == 1);
 }
 
+TEST_CASE("Worker discovery distinguishes a stopped SAP process from failed enumeration", "[mcp][worker-main][startup][startup-process-owner]") {
+    fairyfly::test::TempDir dir("worker-startup-discovery");
+    bool stopped = true;
+    bool partial = false;
+    SECTION("confirmed stopped process is an empty listing") {}
+    SECTION("enumeration failure is not an empty listing") { stopped = false; }
+    SECTION("partial enumeration is not an empty listing") { stopped = false; partial = true; }
+    const WorkerInvoker invoke = make_session_worker_invoker([&] {
+        auto engine = std::make_unique<fairyfly::test::FakeEngine>();
+        if (stopped) engine->status = {false, false, "not running"};
+        else if (partial) engine->application_info = {{"connections", json::array()}, {"total_connections", 0},
+            {"total_sessions", 0}, {"connection_enumeration_errors", 1}};
+        else engine->application_info = nullptr;
+        return std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(engine),
+            std::make_unique<cli::ConnectionManager>(dir.path().string()));
+    });
+    WorkerCall call;
+    call.enumerate = true;
+    const auto result = invoke(call);
+    if (stopped) {
+        REQUIRE(result.status == Result::Status::Success);
+        CHECK(result.data["connections"] == json::array());
+        CHECK(result.data["total_sessions"] == 0);
+    } else CHECK(code(result) == "OWNER_IDENTITY_UNKNOWN");
+}
+
 TEST_CASE("session worker: the live session must be the call's, with its owner", "[mcp][worker-main]") {
     const std::optional<WorkerBinding> unbound;
     const auto call = call_for(3, "ses-A", "S4H/100/ALICE");
@@ -126,4 +152,30 @@ TEST_CASE("session worker: a call's handler settings are put back, also when the
         const WorkerCallFlags capped(handler, call, true);
         CHECK(handler.read_only());
     }
+}
+
+TEST_CASE("Worker discovery verifies prelogin rows for private startup selection", "[mcp][worker-main][startup][startup-prelogin]") {
+    fairyfly::test::TempDir dir("worker-prelogin-discovery");
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H";
+    scripting.facts.client = "000";
+    scripting.facts.transaction = "S000";
+    scripting.connection_description = "Bigfox";
+    const WorkerInvoker invoke = make_session_worker_invoker([&] {
+        auto engine = std::make_unique<fairyfly::test::FakeEngine>();
+        engine->scripting_fake = &scripting;
+        engine->application_info = {{"total_connections", 1}, {"total_sessions", 1}, {"connections", json::array({{{"id", "/app/con[0]"},
+            {"description", "Bigfox"}, {"sessions", json::array({{{"id", "/app/con[0]/ses[0]"}, {"user", ""}}})}}})}};
+        return std::make_unique<cli::CommandHandler>(std::make_unique<cred::InMemoryCredentialStore>(), std::move(engine),
+            std::make_unique<cli::ConnectionManager>(dir.path().string()));
+    });
+    WorkerCall call;
+    call.enumerate = true;
+    const auto result = invoke(call);
+    REQUIRE(result.status == Result::Status::Success);
+    const auto& row = result.data.at("connections").at(0).at("sessions").at(0);
+    REQUIRE(row.contains("verified_target"));
+    CHECK(row["verified_target"]["user"] == "");
+    CHECK(row["verified_target"]["system"] == "A4H/000");
+    CHECK(row["verified_target"]["connection_name"] == "Bigfox");
 }

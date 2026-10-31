@@ -13,6 +13,7 @@
 #include "include/action_argument_checks.h"
 #include "include/login_flow.h"
 #include "include/credential_resolver.h"
+#include "include/session_preparation.h"
 #include "include/table_data_extractor.h"
 #include "include/constants.h"
 #include <spdlog/spdlog.h>
@@ -198,6 +199,38 @@ std::vector<int> CommandHandler::prune_dead_entries()
 ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optional<int> explicit_conn_id,
                                                                     bool update_cache)
 {
+    if (!explicit_conn_id && automatic_startup_ && !preparing_session_) {
+        const auto existing = conn_mgr_->resolve_connection(std::nullopt);
+        const bool saved = existing.status == ResultT<Connection>::Status::Success;
+        // Ambiguous saved targets require an explicit choice, even if SAP is closed.
+        if (!saved && existing.error.value("code", "") != "NO_CONNECTIONS") return existing;
+        const auto live = saved ? audit_facts_for_connection(existing.value.id) : audit::SapFacts{};
+        if (sap_logon_missing() || !saved || live.system.empty() || live.client.empty() || live.user.empty()) {
+            const auto policy = automatic_startup_();
+            if (saved && !policy.default_connection.empty() &&
+                !sap::ConnectionLauncher::matches_connection_name(policy.default_connection, existing.value.connection_description)) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = {{"code", "SESSION_TARGET_CHANGED"},
+                    {"message", "The saved SAP target differs from the configured startup default. Attach the intended session explicitly before retrying."}};
+                return refused;
+            }
+            const auto prepared = prepare_default_session(policy);
+            if (prepared.status != Result::Status::Success) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = prepared.error;
+                return refused;
+            }
+            explicit_conn_id = prepared.data.at("connection_file_id").get<int>();
+            if (prepared.data.value("startup_changed_screen", false) && !continue_after_startup_) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = startup::observation_required(*explicit_conn_id).error;
+                return refused;
+            }
+        }
+    }
     if (auto missing = sap_logon_missing()) {
         ResultT<Connection> refused;
         refused.status = ResultT<Connection>::Status::Error;
@@ -333,11 +366,30 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
         }
         return result;
     }
-    if (conn.server_session_key.empty()) return result;   // positionally identified (no key known): nothing to compare
+    const auto confirmed = [&]() -> Result& {
+        if (result.status != Result::Status::Success || !automatic_startup_ || !startup_attempts_ || preparing_session_)
+            return result;
+        const auto policy = automatic_startup_();
+        if (!startup_attempts_->pending(policy.default_connection) && !startup_attempts_->has_login_attempts()) return result;
+        // Never clear another process's in-flight attempt or wait behind it.
+        const auto guard = startup::acquire_preparation_guard({}, std::chrono::milliseconds(0));
+        if (!guard.token) return result;
+        const auto target = peek_session_target("", "", conn.id);
+        if (!policy.default_connection.empty() && !target.ambiguous &&
+            !target.facts.system.empty() && !target.facts.client.empty() && !target.facts.user.empty() &&
+            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name)) {
+            const bool launch_cleared = startup_attempts_->clear(policy.default_connection);
+            const bool login_cleared = startup_attempts_->clear(startup::LoginAttempts::credential_key(
+                target.facts.system + "/" + target.facts.client + "/" + target.facts.user));
+            if (!launch_cleared || !login_cleared) spdlog::warn("Cannot clear SAP startup retry protection after confirmed recovery");
+        }
+        return result;
+    };
+    if (conn.server_session_key.empty()) return confirmed();   // live positional session; no key to compare
     if (live->empty())
         return inconclusive("the SAP session after the action could not be confirmed (its server session key is not "
                             "readable: a round trip or a logoff in progress)");
-    if (*live == conn.server_session_key) return result;
+    if (*live == conn.server_session_key) return confirmed();
 
     // Another SAP session sits at the saved path now (SAP was ended and logged on again): the action may have gone to
     // the old, closed session, whose COM objects can still answer S_OK. Never report that as success.
@@ -355,6 +407,90 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
     changed.duration = result.duration;
     result = std::move(changed);
     return result;
+}
+
+Result CommandHandler::ensure_sap_logon(const startup::Policy& policy, const std::function<bool()>& cancelled) {
+    if (cancelled && cancelled()) return Result::fail("CANCELLED", "SAP startup was cancelled.");
+    engine_->refresh_application();
+    const auto status = engine_->engine_status();
+    if (status.available) return Result::ok();
+    if (!status.sap_logon_running)
+        if (auto denied = startup::check(policy)) return *denied;
+    // Waiting for an existing process is allowed without startup permission.
+    // The engine must not create a replacement if that process disappears.
+    auto started = engine_->start_sap_logon(!status.sap_logon_running, cancelled);
+    if (started.status != Result::Status::Success) return started;
+    engine_->refresh_application();
+    if (!engine_->engine_status().available)
+        return Result::fail("SAP_STARTUP_NOT_READY", "SAP Logon started but its scripting interface is not ready.",
+            json::array({"Check the local SAP Logon window and any SAP GUI Security prompt, then retry."}));
+    return Result::ok();
+}
+
+Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
+    if (preparing_session_)
+        return Result::fail("SAP_STARTUP_IN_PROGRESS", "SAP session preparation is already in progress.");
+    struct PreparationGuard {
+        bool& active;
+        explicit PreparationGuard(bool& value) : active(value) { active = true; }
+        ~PreparationGuard() { active = false; }
+    } guard(preparing_session_);
+    startup::Operations operations;
+    std::string ready_identity;
+    operations.current_policy = automatic_startup_;
+    if (startup_attempts_) {
+        operations.login_ready = [this, &policy, &ready_identity] {
+            const bool launch_cleared = startup_attempts_->clear(policy.default_connection);
+            const bool login_cleared = startup_attempts_->clear(startup::LoginAttempts::credential_key(ready_identity));
+            if (!launch_cleared || !login_cleared)
+                spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
+        };
+    }
+    operations.invoke = [this, &policy](const std::string& name, const json& args) {
+        if (name == "gui_session_list") {
+            engine_->refresh_application();
+            return handle_list_all();
+        }
+        if (name == "gui_session_attach")
+            return handle_attach(0, args.at("session_id").get<std::string>());
+        if (name == "gui_session_launch") {
+            const auto ready = ensure_sap_logon(policy);
+            if (ready.status != Result::Status::Success) return ready;
+            const auto current = automatic_startup_ ? automatic_startup_() : policy;
+            if (current.default_connection != policy.default_connection)
+                return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+            if (auto denied = startup::check(current)) return *denied;
+            if (startup_attempts_) {
+                const auto attempt = startup_attempts_->begin_launch(policy.default_connection);
+                if (attempt.status != Result::Status::Success) return attempt;
+            }
+            return handle_launch(args.at("name").get<std::string>(), false, false);
+        }
+        if (name == "gui_session_login") {
+            struct RestoreSubmitGuard {
+                std::function<Result(const std::string&)>& slot;
+                std::function<Result(const std::string&)> previous;
+                ~RestoreSubmitGuard() { slot = std::move(previous); }
+            } restore{login_submit_guard_, std::move(login_submit_guard_)};
+            login_submit_guard_ = [this, policy](const std::string& identity) {
+                const auto current = automatic_startup_ ? automatic_startup_() : policy;
+                if (current.default_connection != policy.default_connection)
+                    return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+                if (auto denied = startup::check(current)) return *denied;
+                return startup_attempts_ ? startup_attempts_->begin(startup::LoginAttempts::credential_key(identity))
+                    : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
+            };
+            return handle_login("", args.at("connection").get<int>(), false, "", "fail");
+        }
+        return Result::fail("SAP_STARTUP_UNAVAILABLE", "Unsupported session preparation operation.");
+    };
+    operations.authenticated = [this, &ready_identity](int id) {
+        const auto facts = audit_facts_for_connection(id);
+        const bool ready = !facts.system.empty() && !facts.client.empty() && !facts.user.empty();
+        ready_identity = ready ? facts.system + "/" + facts.client + "/" + facts.user : std::string();
+        return ready;
+    };
+    return startup::prepare(policy, operations);
 }
 
 Result CommandHandler::handle_attach(int timeout_seconds, std::optional<std::string> session_id)
@@ -512,10 +648,14 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 {
     pending_owner_launch_.reset();
     spdlog::info("Launching SAP connection: {}", connection_name);
-    auto result = engine_->launch_connection(connection_name, allow_sapshcut);
+    const bool adopting = !startup_adoption_session_.empty();
+    if (adopting && (attach_owner_identities_.empty() || !launch_target_guard_))
+        return Result::fail("SAP_STARTUP_UNAVAILABLE", "Existing-window startup requires a verified owner guard.");
+    auto result = adopting ? engine_->attach_by_session_id(startup_adoption_session_)
+                           : engine_->launch_connection(connection_name, allow_sapshcut);
 
     if (result.status == Result::Status::Success) {
-        spdlog::info("Successfully launched SAP connection: {}", connection_name);
+        spdlog::info("Successfully {} SAP connection: {}", adopting ? "selected existing" : "launched", connection_name);
 
         // Extract connection info from result
         std::string session_id = result.data.value("session_id", "");
@@ -533,6 +673,7 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
                             {"message", "the requested SAP connection is unavailable"}};
             return result;
         };
+        if (adopting && session_id != startup_adoption_session_) return owner_launch_unavailable();
         std::string checked_server_key;
         std::string checked_description;
         if (!attach_owner_identities_.empty()) {
@@ -573,7 +714,9 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
         }
 
         // Create or update connection file
-        Connection conn = attach_owner_identities_.empty() ? conn_mgr_->create_or_update_connection(
+        // Adoption updates the existing saved receipt for this exact path;
+        // opening a new owner window still always creates a fresh receipt.
+        Connection conn = (attach_owner_identities_.empty() || adopting) ? conn_mgr_->create_or_update_connection(
             session_id,
             connection_id,
             description,
@@ -587,7 +730,9 @@ Result CommandHandler::handle_launch(const std::string& connection_name, bool al
 
         result.data["connection_file_id"] = conn.id;
         result.data["connection_file"] = conn.get_file_path();
-        result.data["message"] = fmt::format("Launched SAP connection '{}' (connection: {})", connection_name, conn.id);
+        result.data["message"] = fmt::format("{} SAP connection '{}' (connection: {})",
+            adopting ? "Reused" : "Launched", connection_name, conn.id);
+        if (adopting) result.data["adopted_existing_session"] = true;
 
         spdlog::info("Created/updated connection file: {}", conn.get_file_path());
 
@@ -684,7 +829,10 @@ Result CommandHandler::refuse_owner_login(Result result, bool password_typed) {
     if (password_typed) {
         try { engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), ""); } catch (...) {}
     }
-    result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
+    if (login_guard_redacts_errors_)
+        result.set_error("OWNER_SESSION_UNAVAILABLE", "the requested SAP logon is unavailable");
+    else
+        result.set_error("SESSION_TARGET_CHANGED", "The local credentials do not match the saved SAP target. Correct the local credentials or log in manually, then retry.");
     return result;
 }
 
@@ -821,7 +969,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         });
     if (resolved.status != ResultT<cred::ResolvedLogin>::Status::Success) {
         result.status = Result::Status::Error;
-        result.error = login_target_guard_
+        result.error = login_target_guard_ && login_guard_redacts_errors_
             ? json{{"code", "OWNER_SESSION_UNAVAILABLE"},
                    {"message", "the requested SAP logon is unavailable"}}
             : resolved.error;
@@ -876,6 +1024,18 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     password_typed = true;
 
     if (!owner_login_allowed()) return deny_owner_login();
+    if (login_submit_guard_) {
+        Result permission;
+        try {
+            const auto live = audit_facts_for_connection(selected.value.id);
+            permission = login_submit_guard_(live.system + "/" + credentials.client + "/" + credentials.username);
+        }
+        catch (...) { permission = Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection failed. Log in manually."); }
+        if (permission.status != Result::Status::Success) {
+            engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
+            return permission;
+        }
+    }
     result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
     if (result.status != Result::Status::Success) {
         engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
@@ -1713,6 +1873,11 @@ Result CommandHandler::handle_screen_read(bool include_children, std::optional<i
         }
     }
 
+    // A successful read is enough to confirm manual login recovery. Keep the
+    // ordinary no-marker read path free of additional SAP probes.
+    if (result.status == Result::Status::Success && automatic_startup_ && startup_attempts_ &&
+        (startup_attempts_->pending(automatic_startup_().default_connection) || startup_attempts_->has_login_attempts()))
+        return confirm_session_after_action(conn_result.value, result);
     return result;
 }
 

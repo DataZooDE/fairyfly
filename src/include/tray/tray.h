@@ -32,6 +32,7 @@ enum class IconState { Running, Warning, Stopped, Error };
 enum class TrayKind { Mcp, Link };
 
 enum class TrayAction {
+    ToggleSapStartup,
     None,
     Start, Stop, Restart,
     ToggleReadOnly,
@@ -64,6 +65,7 @@ struct LinkView {
     /// connection ("" when it named none) and the seconds so far. Empty `stuck_tool`: none.
     std::string stuck_tool, stuck_connection;
     std::int64_t stuck_s = 0;
+    std::optional<bool> gateway_sap_startup_allowed;
 };
 
 /// The menu line, tooltip part and balloon while the desktop clock is off (clock_skew_s != 0); empty otherwise.
@@ -204,7 +206,12 @@ struct AutostartPlan {
 /// The values the trays keep in TraySettings: every name lives here (docs/MSIX.md lists them for the package move).
 inline constexpr const char* kAutostartDefaultedSetting = "link-autostart-defaulted";
 inline constexpr const char* kLinkAllowChangesSetting = "link_allow_changes";   ///< "Allow changes in SAP" (approval::Standing)
-inline constexpr const char* kTraySettingNames[] = {kAutostartDefaultedSetting, kLinkAllowChangesSetting};
+inline constexpr const char* kAllowSapStartupSetting = "allow_sap_startup";
+inline constexpr const char* kSapDefaultConnectionSetting = "sap_default_connection";
+inline constexpr const char* kTraySettingNames[] = {kAutostartDefaultedSetting, kLinkAllowChangesSetting,
+                                                 kAllowSapStartupSetting, kSapDefaultConnectionSetting};
+void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings);
+bool toggle_sap_startup(TraySettings* settings);
 /// At the start of a tray that fairyfly-tray.exe started (`launched`): the very first time it turns "Start with Windows"
 /// on (and notes that, so turning it off in the menu stays off); a Run value of an older version that starts fairyfly.exe
 /// (a console at every logon) starts `program` instead, its options kept. Started any other way it changes nothing.
@@ -353,6 +360,7 @@ struct TrayServices {
     std::function<std::optional<std::string>()> latest_update;
     std::chrono::milliseconds update_check_delay{30000};
     TrayClaim claim;   ///< a held single-instance guard (another installation's tray, a removed one's)
+    TraySettings* settings = nullptr;
 };
 
 /// The effects both trays' menus share: open a file or folder, run a command in a console that stays open, start
@@ -459,6 +467,7 @@ struct LinkTrayServices {
     std::function<bool()> link_busy;
     bool self_update = true;   ///< "Check for updates"; false in an MSIX build (packaging::self_updates)
     TrayClaim claim;           ///< a held single-instance guard (another installation's tray, a removed one's)
+    TraySettings* settings = nullptr;
 };
 
 class LinkTrayController : public TrayListener {

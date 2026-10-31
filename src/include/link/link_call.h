@@ -15,6 +15,8 @@ namespace fairyfly::link {
 /// ctx.cancelled before each step.
 inline mcp::CallContext link_call_context(const ffy::link::CallInfo& info, const std::atomic<bool>& stop) {
     mcp::CallContext ctx;
+    ctx.link_request = true;
+    ctx.sap_startup_granted = info.sap_startup_granted;
     ctx.request_id = info.request_id;
     ctx.cancelled = [&stop, cancel = info.cancel] { return stop.load() || (cancel && cancel->load()); };
     ctx.principal.name = "link:" + info.tenant + "/" + info.user;

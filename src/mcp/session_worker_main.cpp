@@ -71,9 +71,19 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
             if (state->bound) return Result::fail("WORKER_SESSION_MISMATCH", "worker is bound to a saved connection");
             cli::CommandHandler& handler = ensure_handler();
             Result result = handler.handle_list_all();
+            // Confirmed process absence means there cannot be an owner session.
+            // Keep every other enumeration failure closed; the global dispatcher
+            // will separately authorize any on-demand launch after an empty list.
+            if (result.status == Result::Status::Error && result.error.is_object() &&
+                result.error.value("code", "") == "SAP_LOGON_NOT_RUNNING")
+                return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
             if (result.status != Result::Status::Success || !result.data.is_object() ||
                 !result.data.contains("connections") || !result.data["connections"].is_array())
                 return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP sessions could not be enumerated");
+            for (const auto* field : {"connection_enumeration_errors", "session_enumeration_errors"})
+                if (result.data.contains(field) &&
+                    (!result.data[field].is_number_integer() || result.data[field] != 0))
+                    return Result::fail("OWNER_IDENTITY_UNKNOWN", "SAP session enumeration was incomplete");
             for (auto& connection : result.data["connections"]) {
                 if (!connection.is_object() || !connection.contains("sessions") ||
                     !connection["sessions"].is_array()) continue;
@@ -81,8 +91,10 @@ WorkerInvoker make_session_worker_invoker(std::function<std::unique_ptr<cli::Com
                     if (!session.is_object() || !session.contains("id") || !session["id"].is_string()) continue;
                     try {
                         const auto target = handler.peek_session_target("", session["id"].get<std::string>(), std::nullopt);
-                        if (target.ambiguous || target.facts.system.empty() || target.facts.client.empty() ||
-                            target.facts.user.empty()) continue;
+                        // Login windows are verified facts too. The broker does
+                        // not authorize them; the dispatcher hides them from public
+                        // listings and applies startup/owner guards before reuse.
+                        if (target.ambiguous || target.facts.system.empty() || target.facts.client.empty()) continue;
                         session["verified_target"] = {{"system", target.facts.system + "/" + target.facts.client},
                                                       {"user", target.facts.user},
                                                       {"connection_name", target.connection_name}};

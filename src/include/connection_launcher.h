@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include "com/wrapper.h"
+#include "core.h"
 
 namespace fairyfly {
 namespace sap {
@@ -27,6 +28,8 @@ public:
 
     /// Launch the selected SAP Logon entry without putting credentials in a process command line.
     static bool launch_sapshcut(const std::string& connection_name);
+    /// Start the locally installed SAP Logon, minimized, with no credentials or connection arguments.
+    static Result launch_sap_logon();
 
     /// NOTE: credentials never go on this command line (no -pw/-user); `launch --login`
     /// logs on afterwards through the scripting API once the session is ready.

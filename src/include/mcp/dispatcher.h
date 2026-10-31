@@ -63,6 +63,16 @@ public:
     /// logged and ignored.
     using BeforeCall = std::function<std::shared_ptr<void>()>;
     void set_before_call(BeforeCall hook) { before_call_ = std::move(hook); }
+    using StartupPolicyProvider = std::function<startup::Policy()>;
+    using SapLogonStarter = std::function<Result(const startup::Policy&, const std::function<bool()>&)>;
+    using LoginSubmitGuardOverride = std::function<void(std::function<Result(const std::string&)>)>;
+    void set_login_submit_guard_override(LoginSubmitGuardOverride hook) { login_submit_guard_override_ = std::move(hook); }
+    void set_session_startup(StartupPolicyProvider policy, SapLogonStarter starter,
+                             std::shared_ptr<startup::LoginAttempts> attempts = {}) {
+        startup_policy_ = std::move(policy);
+        sap_logon_starter_ = std::move(starter);
+        startup_attempts_ = std::move(attempts);
+    }
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }
     using OwnerSessionListingProvider = std::function<Result(std::chrono::milliseconds,
@@ -101,6 +111,13 @@ public:
     using LoginTargetGuardOverride = std::function<void(LoginTargetGuard)>;
     void set_login_target_guard_override(LoginTargetGuardOverride hook) {
         login_target_guard_override_ = std::move(hook);
+    }
+    void set_login_recovery_guard_override(LoginTargetGuardOverride hook) {
+        login_recovery_guard_override_ = std::move(hook);
+    }
+    using StartupAdoptionOverride = std::function<void(const std::string&)>;
+    void set_startup_adoption_override(StartupAdoptionOverride hook) {
+        startup_adoption_override_ = std::move(hook);
     }
     using LaunchTargetGuard = std::function<bool(const audit::SapFacts&, const std::string& connection_name)>;
     using LaunchTargetGuardOverride = std::function<void(LaunchTargetGuard)>;
@@ -273,15 +290,16 @@ private:
     std::optional<CallRefusal> admit_prelogin_close(const Principal& principal, const std::optional<audit::SapFacts>& live_facts,
                                                     const McpCallRecord& record, std::optional<std::string>& current_system);
     std::optional<CallRefusal> admission_refusal(const ToolSpec* spec, const std::string& name, const json& args,
-                                                 const CallContext& ctx, bool selection_input);
+                                                 const CallContext& ctx, bool selection_input, bool rate_prepaid = false);
     /// steady_clock ms of the last successful single-field gui_element_fill (0 = none): a second one soon after gets a
     /// hint to use `fields`.
     std::atomic<long long> last_single_fill_ms_{0};
 
     ToolResult run_single(const std::string& name, const json& args, const CallContext& ctx,
-                          std::string* code_out = nullptr, McpCallRecord* record_out = nullptr);
+                          std::string* code_out = nullptr, McpCallRecord* record_out = nullptr, bool rate_prepaid = false,
+                          bool batch_observation_required = false);
     ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,
-                            const CallContext& ctx);
+                            const CallContext& ctx, bool rate_prepaid = false, bool batch_observation_required = false);
     ToolResult run_batch(const json& args, const CallContext& ctx);
     ToolResult audited(const std::string& tool, const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
                        const CallContext& ctx, std::string* code_out, McpCallRecord* record_out = nullptr);
@@ -299,8 +317,8 @@ private:
     RateLimiter limiter_;
     std::function<bool(std::chrono::steady_clock::time_point)> rate_gate_;
     void set_sticky_connection(const std::string& principal_name, int id, std::string session_identity,
-                               std::string sap_identity = "") {
-        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity), std::move(sap_identity));
+                               std::string sap_identity = "", std::string startup_default = "") {
+        routing_state_->set_sticky_connection(principal_name, id, std::move(session_identity), std::move(sap_identity), std::move(startup_default));
     }
     std::shared_ptr<SessionRoutingState> routing_state_ = std::make_shared<SessionRoutingState>();
     /// Principals whose last screen-acting call ended outside their T-code allowlist: their next screen-acting
@@ -323,6 +341,14 @@ private:
     std::shared_ptr<KeyedRateLimiter> keyed_limiter_ = std::make_shared<KeyedRateLimiter>();
     SapFactsProvider facts_provider_;
     BeforeCall before_call_;
+    StartupPolicyProvider startup_policy_;
+    SapLogonStarter sap_logon_starter_;
+    LoginSubmitGuardOverride login_submit_guard_override_;
+    std::shared_ptr<startup::LoginAttempts> startup_attempts_;
+    std::optional<startup::Policy> preparing_startup_;
+    std::string preparing_identity_;
+    Result prepare_implicit_session(const CallContext& ctx, std::optional<audit::SapFacts>& ready_facts,
+                                    const std::string& expected_identity = "");
     ConnectionSnapshotProvider connection_snapshot_provider_;
     OwnerSessionListingProvider owner_session_listing_provider_;
     SessionTargetResolver target_resolver_;
@@ -331,7 +357,10 @@ private:
     OwnerSessionOverride owner_session_override_;
     AttachTargetGuardOverride attach_target_guard_override_;
     LoginTargetGuardOverride login_target_guard_override_;
+    LoginTargetGuardOverride login_recovery_guard_override_;
     LaunchTargetGuardOverride launch_target_guard_override_;
+    StartupAdoptionOverride startup_adoption_override_;
+    std::string startup_adoption_session_;
     LaunchRollbackOverride launch_rollback_override_;
     AttachFinalizeOverride attach_finalize_override_;
     LoginLaneReserver login_lane_reserver_;

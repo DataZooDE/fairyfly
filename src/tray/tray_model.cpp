@@ -3,6 +3,19 @@
 #include "include/version.h"
 
 namespace fairyfly::tray {
+void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings) {
+    if (!settings) return;
+    auto entry = item("Allow automatic SAP startup", TrayAction::ToggleSapStartup);
+    entry.checkable = true;
+    entry.checked = settings->get(kAllowSapStartupSetting).value_or("0") == "1";
+    menu.items.insert(menu.items.begin(), std::move(entry));
+}
+
+bool toggle_sap_startup(TraySettings* settings) {
+    if (!settings) return false;
+    const bool enabled = settings->get(kAllowSapStartupSetting).value_or("0") == "1";
+    return settings->set(kAllowSapStartupSetting, enabled ? "0" : "1");
+}
 
 MenuItem item(std::string label, TrayAction action, bool enabled) {
     MenuItem m;
@@ -109,6 +122,8 @@ TrayMenuModel build_menu(const mcp::ServerStatus& status, const TrayState& state
         cloud.children.push_back(item("Connect to cloud... (pair in a console)", TrayAction::LinkPair));
     } else {
         cloud.children.push_back(item(lv.organisation + " (" + lv.account + "): " + lv.state, TrayAction::None, false));
+        if (lv.gateway_sap_startup_allowed == false)
+            cloud.children.push_back(item("Automatic SAP startup via link disabled by administrator", TrayAction::None, false));
         if (lv.trail_on) cloud.children.push_back(item(trail_menu_text(lv), TrayAction::None, false));
         cloud.children.push_back(item("Start link", TrayAction::LinkStart, lv.state == link::state::kNotRunning));
         if (lv.paused) cloud.children.push_back(item("Resume", TrayAction::LinkResume));

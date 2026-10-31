@@ -10,6 +10,7 @@ add_executable(unit_tests
     unit/test_markdown_table_formatter.cpp
     unit/test_toon_encoder.cpp
     unit/test_connection_launcher.cpp
+    unit/test_session_startup.cpp
     unit/test_login_flow.cpp
     unit/test_screenshot_handler.cpp
     unit/test_screen_reader.cpp

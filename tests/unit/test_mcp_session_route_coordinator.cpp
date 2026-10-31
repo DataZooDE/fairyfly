@@ -33,6 +33,37 @@ TEST_CASE("worker probe facts are parsed without trusting incomplete replies", "
     CHECK_FALSE(facts_from_worker_probe(reply).sap.connection_id);
 }
 
+TEST_CASE("Unbound HTTP requests can reach startup admission without retargeting explicit sessions", "[mcp][startup][route-coordinator]") {
+    SessionExecutorPool admission(2, 8, 5000);
+    auto routing = std::make_shared<SessionRoutingState>();
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/ALICE"};
+    policy.prepare_missing_session = true;
+    Principal caller;
+    caller.id = "token-1";
+    caller.sap_systems = {"A4H/001"};
+    caller.connections = {"Bigfox"};
+    json args = json::object();
+    bool expect_startup = false;
+    SECTION("no selected session") { expect_startup = true; }
+    SECTION("explicit saved id remains pinned") { args["connection"] = 7; }
+    SECTION("server default remains pinned") { policy.default_connection = 7; }
+    SECTION("sticky selected id remains pinned") {
+        routing->set_sticky_connection(principal_key(caller), 7, "sid|key|generation", "A4H/001/ALICE");
+    }
+    SECTION("a missing automatically prepared target reaches identity-checked recovery") {
+        routing->set_sticky_connection(principal_key(caller), 7, "sid|key|generation", "A4H/001/ALICE", "Bigfox");
+        expect_startup = true;
+    }
+    SessionRouteCoordinator coordinator(admission, policy, routing, all_tool_specs(),
+        [](std::optional<int>) { return SessionRouteFacts{}; },
+        [](const std::string&, int) { return std::make_shared<EmptyProvider>(); });
+    const auto route = coordinator.route(caller, "gui_screen_read", args);
+    CHECK(route.global_control == expect_startup);
+    CHECK(route.error_code.empty() == expect_startup);
+    CHECK_FALSE(route.provider);
+}
+
 TEST_CASE("session route preflight runs on its admission STA and pins a live owner session", "[mcp][route-coordinator]") {
     SessionExecutorPool admission(8, 8, 5000);
     const auto caller_thread = std::this_thread::get_id();
@@ -421,4 +452,45 @@ TEST_CASE("cached route admits behind a busy same-session worker, then fresh rou
     CHECK(probes == 1);
     CHECK(coordinator.route(caller, "gui_screen_read", {{"connection", 7}}).error_code.empty());
     CHECK(probes == 2);
+}
+
+TEST_CASE("implicit startup routing rechecks a cached session before choosing its executor", "[mcp][startup][route-coordinator][startup-cache]") {
+    for (const std::string tool : {"gui_screen_read", "gui_batch"}) {
+        for (const bool sticky : {false, true}) {
+            INFO(tool << " sticky=" << sticky);
+            SessionExecutorPool admission(2, 8, 5000);
+            auto routing = std::make_shared<SessionRoutingState>();
+            Policy policy;
+            policy.owner_sap_identities = {"A4H/001/ALICE"};
+            policy.prepare_missing_session = true;
+            Principal caller;
+            caller.id = "token-1";
+            if (sticky) routing->set_sticky_connection(caller.id, 7, "sid|key|generation", "A4H/001/ALICE", "Bigfox");
+            bool live = true;
+            SessionRouteCoordinator coordinator(admission, policy, routing, all_tool_specs(),
+                [&](std::optional<int>) {
+                    SessionRouteFacts facts;
+                    if (live) {
+                        facts.sap.connection_id = 7;
+                        facts.sap.session_identity = "sid|key|generation";
+                        facts.sap.system = "A4H";
+                        facts.sap.client = "001";
+                        facts.sap.user = "ALICE";
+                        facts.connection_name = "Bigfox";
+                    }
+                    return facts;
+                }, [](const std::string&, int) { return std::make_shared<EmptyProvider>(); });
+            const json args = tool == "gui_batch" ? json{{"items", json::array({{{"tool", "gui_screen_read"}}})}} : json::object();
+            const auto ready = coordinator.route_cached(caller, tool, args);
+            REQUIRE(ready.error_code.empty());
+            REQUIRE(ready.provider);
+            CHECK(ready.lane_key == "window:sid");
+            CHECK_FALSE(ready.global_control);
+            live = false;
+            const auto missing = coordinator.route_cached(caller, tool, args);
+            CHECK(missing.error_code.empty());
+            CHECK(missing.global_control);
+            CHECK_FALSE(missing.provider);
+        }
+    }
 }

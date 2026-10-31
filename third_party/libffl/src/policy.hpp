@@ -13,6 +13,7 @@ bool is_dangerous(const std::string& tool);
 struct Grants {
     std::vector<std::string> tools, tcodes, systems;
     bool allow_write = false, screenshots = false;
+    bool allow_sap_startup = false;  // independent of writes; absent old assertions deny startup
     std::string approval = "device";  // "device": confirm on the desktop; "none"
     nlohmann::json to_json() const;
     static Grants from_json(const nlohmann::json& j);
@@ -26,6 +27,7 @@ struct Identity {
 struct Allow {
     std::vector<std::string> tools, tcodes, systems;
     bool allow_write = false, screenshots = false;
+    bool allow_sap_startup = false;
     std::string approval;
 };
 struct Match {
