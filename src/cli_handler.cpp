@@ -201,10 +201,21 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
 {
     if (!explicit_conn_id && automatic_startup_ && !preparing_session_) {
         const auto existing = conn_mgr_->resolve_connection(std::nullopt);
-        if (sap_logon_missing() ||
-            (existing.status != ResultT<Connection>::Status::Success &&
-             existing.error.value("code", "") == "NO_CONNECTIONS")) {
-            const auto prepared = prepare_default_session(automatic_startup_());
+        const bool saved = existing.status == ResultT<Connection>::Status::Success;
+        // Ambiguous saved targets require an explicit choice, even if SAP is closed.
+        if (!saved && existing.error.value("code", "") != "NO_CONNECTIONS") return existing;
+        const auto live = saved ? audit_facts_for_connection(existing.value.id) : audit::SapFacts{};
+        if (sap_logon_missing() || !saved || live.system.empty() || live.client.empty() || live.user.empty()) {
+            const auto policy = automatic_startup_();
+            if (saved && !policy.default_connection.empty() &&
+                !sap::ConnectionLauncher::matches_connection_name(policy.default_connection, existing.value.connection_description)) {
+                ResultT<Connection> refused;
+                refused.status = ResultT<Connection>::Status::Error;
+                refused.error = {{"code", "SESSION_TARGET_CHANGED"},
+                    {"message", "The saved SAP target differs from the configured startup default. Attach the intended session explicitly before retrying."}};
+                return refused;
+            }
+            const auto prepared = prepare_default_session(policy);
             if (prepared.status != Result::Status::Success) {
                 ResultT<Connection> refused;
                 refused.status = ResultT<Connection>::Status::Error;
@@ -315,6 +326,14 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     }
 
     validated_generation_[conn.id] = generation;
+    if (automatic_startup_ && startup_attempts_ && !preparing_session_) {
+        const auto policy = automatic_startup_();
+        const auto target = peek_session_target("", "", conn.id);
+        if (!policy.default_connection.empty() && !target.ambiguous &&
+            !target.facts.system.empty() && !target.facts.client.empty() && !target.facts.user.empty() &&
+            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name))
+            startup_attempts_->clear(policy.default_connection);
+    }
     ResultT<Connection> result;
     result.status = ResultT<Connection>::Status::Success;
     result.value = conn;
@@ -402,8 +421,10 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
     startup::Operations operations;
     operations.current_policy = automatic_startup_;
     if (startup_attempts_) {
-        operations.begin_login = [this, &policy] { return startup_attempts_->begin(policy.default_connection); };
-        operations.login_ready = [this, &policy] { startup_attempts_->clear(policy.default_connection); };
+        operations.login_ready = [this, &policy] {
+            if (!startup_attempts_->clear(policy.default_connection))
+                spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
+        };
     }
     operations.invoke = [this, &policy](const std::string& name, const json& args) {
         if (name == "gui_session_list") {
@@ -415,10 +436,28 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
         if (name == "gui_session_launch") {
             const auto ready = ensure_sap_logon(policy);
             if (ready.status != Result::Status::Success) return ready;
+            const auto current = automatic_startup_ ? automatic_startup_() : policy;
+            if (current.default_connection != policy.default_connection)
+                return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+            if (auto denied = startup::check(current)) return *denied;
             return handle_launch(args.at("name").get<std::string>(), false, false);
         }
-        if (name == "gui_session_login")
+        if (name == "gui_session_login") {
+            struct RestoreSubmitGuard {
+                std::function<Result()>& slot;
+                std::function<Result()> previous;
+                ~RestoreSubmitGuard() { slot = std::move(previous); }
+            } restore{login_submit_guard_, std::move(login_submit_guard_)};
+            login_submit_guard_ = [this, policy] {
+                const auto current = automatic_startup_ ? automatic_startup_() : policy;
+                if (current.default_connection != policy.default_connection)
+                    return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+                if (auto denied = startup::check(current)) return *denied;
+                return startup_attempts_ ? startup_attempts_->begin(policy.default_connection)
+                    : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
+            };
             return handle_login("", args.at("connection").get<int>(), false, "", "fail");
+        }
         return Result::fail("SAP_STARTUP_UNAVAILABLE", "Unsupported session preparation operation.");
     };
     operations.authenticated = [this](int id) {
@@ -947,6 +986,15 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
     password_typed = true;
 
     if (!owner_login_allowed()) return deny_owner_login();
+    if (login_submit_guard_) {
+        Result permission;
+        try { permission = login_submit_guard_(); }
+        catch (...) { permission = Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection failed. Log in manually."); }
+        if (permission.status != Result::Status::Success) {
+            engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
+            return permission;
+        }
+    }
     result = engine_->click_element(ElementId("@active/tbar[0]/btn[0]"));
     if (result.status != Result::Status::Success) {
         engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");

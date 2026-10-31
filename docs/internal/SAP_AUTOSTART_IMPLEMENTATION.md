@@ -49,6 +49,45 @@
 
 ## Next work
 
+### Review follow-up checkpoint (2026-10-31, 02:51 local)
+
+This checkpoint supersedes the pending status in older entries below. The feature is not released.
+
+- Claude review 2 completed (`scratch/claude-startup-review-2.txt`). Accepted fixes: move the durable
+  attempt latch to immediately before the credential-submit action; preserve structured preparation errors;
+  recheck policy after native readiness waits; catch failed facts probes; report latch-clear failures.
+- Saved CLI recovery: stale/logged-out sessions use guarded preparation, a different saved/default target is
+  refused, and verified manual authentication clears only the matching latch. Red: 3 cases / 5 failed assertions;
+  green: 3 cases / 14 assertions (`scratch/startup-recovery-{red,green}-tests.log`).
+- HTTP implicit missing-session routing now reaches global preparation; explicit/default/sticky targets still
+  retain their routing checks. MCP forwards cancellation to native startup. Red: 2 cases / 3 failed assertions;
+  green: 5 cases / 35 assertions (`scratch/startup-http-{red,green}-tests.log`). Live HTTP acceptance is pending.
+- Before-submit handler tests failed red in 2 cases / 5 assertions; then passed. New MCP tests proved scope
+  denial does not record an attempt, failed submission does, and guard hooks are reset. They additionally
+  exposed missing structured recovery metadata (2 failed assertions); that is now fixed with owner-boundary
+  redaction preserved. Combined targeted run: 43 cases / 205 assertions passed in
+  `scratch/startup-review-fixes-green-tests.log`. Full regression passed: 1568 cases, 1567 passed,
+  one skipped, 26411 assertions passed. Explicit process exit 0 recorded with
+  `scratch/startup-review-fixes-full-confirmed.log` (the first redirected PowerShell run had an ambiguous
+  shell status despite the same all-passing Catch2 summary, so the exit code was confirmed by rerun).
+- Real SAP follow-up on the new binary: read-only CLI, startup disabled, reused the logged-on Bigfox
+  A4H/001 session and returned SAP Easy Access / SESSION_MANAGER in 1029ms. Evidence:
+  `scratch/startup-live-review-fixes-reuse{,-timing}.json`. This checks reuse only, not remaining startup paths.
+- Gateway organisation-cap red commit 43fadc2: CI 41156195658 failed only the new cap assertions (5 failures,
+  351 of 352 cases passed). Green implementation ddbd947 pushed; CI 41157165534 running. It adds persistence,
+  IT policy checkbox, propagation to existing tenants and refusal of prohibited department settings.
+  Organisation cap defaults to unrestricted for migration; tenant and desktop opt-in still default off.
+- Claude review 3 is running read-only on the before-submit/metadata fixes and gateway organisation cap.
+  Output: `scratch/claude-startup-review-3.txt`, errors alongside it. No SAP or credential access is authorized
+  for that review.
+- Updated MCP/link documentation and workflow skill; skill validator passed. Endpoint instructions remain to
+  be updated after integration stabilizes. Personal installed skill is not yet replaced.
+
+Still required: MCP cached/sticky/manual-login recovery; owner HTTP live startup and existing prelogin path;
+batch/lease preparation; prevent screen actions against an unobserved screen after new startup (Claude 2);
+malformed/partial discovery and dynamic-policy tests; link tray admin status; all live acceptance scenarios;
+final review, green PRs, release and production deployment. No business data changed during these fixes.
+
 ### Current checkpoint (2026-10-31, 02:25 local)
 
 - Shared discovery/reuse/launch/login is now implemented in `session_preparation.*`. The whole sequence holds

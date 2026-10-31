@@ -64,7 +64,9 @@ public:
     using BeforeCall = std::function<std::shared_ptr<void>()>;
     void set_before_call(BeforeCall hook) { before_call_ = std::move(hook); }
     using StartupPolicyProvider = std::function<startup::Policy()>;
-    using SapLogonStarter = std::function<Result(const startup::Policy&)>;
+    using SapLogonStarter = std::function<Result(const startup::Policy&, const std::function<bool()>&)>;
+    using LoginSubmitGuardOverride = std::function<void(std::function<Result()>)>;
+    void set_login_submit_guard_override(LoginSubmitGuardOverride hook) { login_submit_guard_override_ = std::move(hook); }
     void set_session_startup(StartupPolicyProvider policy, SapLogonStarter starter,
                              std::shared_ptr<startup::LoginAttempts> attempts = {}) {
         startup_policy_ = std::move(policy);
@@ -333,6 +335,7 @@ private:
     BeforeCall before_call_;
     StartupPolicyProvider startup_policy_;
     SapLogonStarter sap_logon_starter_;
+    LoginSubmitGuardOverride login_submit_guard_override_;
     std::shared_ptr<startup::LoginAttempts> startup_attempts_;
     std::optional<startup::Policy> preparing_startup_;
     Result prepare_implicit_session(const CallContext& ctx);

@@ -143,6 +143,7 @@ struct Policy {
     /// link: how changes are allowed when the call itself was granted read-only (the organisation's switch in the
     /// fairyfly web app, not this desktop); empty: no such hint.
     std::string grant_write_hint;
+    bool prepare_missing_session = false; ///< route unbound requests to the authorized startup dispatcher
 };
 
 /// Parsed options of `fairyfly mcp` (raw CLI values, before the env cap is applied).

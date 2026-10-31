@@ -33,6 +33,33 @@ TEST_CASE("worker probe facts are parsed without trusting incomplete replies", "
     CHECK_FALSE(facts_from_worker_probe(reply).sap.connection_id);
 }
 
+TEST_CASE("Unbound HTTP requests can reach startup admission without retargeting explicit sessions", "[mcp][startup][route-coordinator]") {
+    SessionExecutorPool admission(2, 8, 5000);
+    auto routing = std::make_shared<SessionRoutingState>();
+    Policy policy;
+    policy.owner_sap_identities = {"A4H/001/ALICE"};
+    policy.prepare_missing_session = true;
+    Principal caller;
+    caller.id = "token-1";
+    caller.sap_systems = {"A4H/001"};
+    caller.connections = {"Bigfox"};
+    json args = json::object();
+    bool expect_startup = false;
+    SECTION("no selected session") { expect_startup = true; }
+    SECTION("explicit saved id remains pinned") { args["connection"] = 7; }
+    SECTION("server default remains pinned") { policy.default_connection = 7; }
+    SECTION("sticky selected id remains pinned") {
+        routing->set_sticky_connection(principal_key(caller), 7, "sid|key|generation", "A4H/001/ALICE");
+    }
+    SessionRouteCoordinator coordinator(admission, policy, routing, all_tool_specs(),
+        [](std::optional<int>) { return SessionRouteFacts{}; },
+        [](const std::string&, int) { return std::make_shared<EmptyProvider>(); });
+    const auto route = coordinator.route(caller, "gui_screen_read", args);
+    CHECK(route.global_control == expect_startup);
+    CHECK(route.error_code.empty() == expect_startup);
+    CHECK_FALSE(route.provider);
+}
+
 TEST_CASE("session route preflight runs on its admission STA and pins a live owner session", "[mcp][route-coordinator]") {
     SessionExecutorPool admission(8, 8, 5000);
     const auto caller_thread = std::this_thread::get_id();

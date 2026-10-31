@@ -272,10 +272,38 @@ The file is append-only by convention, not tamper-proof.
 
 ## Sessions and connections
 
+### On-demand startup
+
+Configure the SAP Logon entry locally with `fairyfly session default "Bigfox"` (omit the name to inspect it).
+For a tray process, enable **Allow automatic SAP startup** in its menu. Headless CLI, MCP and link processes
+require `--allow-sap-startup`; a saved tray setting does not opt a headless process in. The setting is separate
+from permission to change SAP business data. Link requests also require the administrator's startup permission
+in the gateway; a local setting cannot override an administrator's prohibition.
+
+The first request needing a session reuses a suitable logged-on session or prepares the configured default.
+Preparation may start SAP Logon, open the connection, and use SSO or locally stored credentials. It runs on demand,
+not when the tray starts. Explicit saved connection IDs remain explicit targets. HTTP lifecycle scopes,
+connection/system restrictions, owner identities and leases still apply; startup permission grants none of them.
+The endpoint must expose the session lifecycle tools needed for preparation.
+
+| Error | Corrective action |
+|---|---|
+| `SAP_AUTOSTART_DISABLED` | Enable the local tray checkbox, or restart the headless process with `--allow-sap-startup`. |
+| `SAP_AUTOSTART_ADMIN_DISABLED` | Ask the gateway administrator to allow automatic SAP startup, or log in manually. |
+| `SAP_AUTOSTART_DEFAULT_MISSING` | Configure the local SAP Logon entry with `fairyfly session default "<name>"`. |
+| `SAP_STARTUP_BUSY` | Another process is preparing SAP. Wait briefly and inspect/retry the task. |
+| `SAP_LOGIN_REQUIRED` | Complete login or SSO locally before retrying; automatic credential submission is blocked after an uncertain or failed attempt. |
+
+Credentials stay on the desktop. A login attempt is recorded before submission to prevent repeated automatic
+password attempts across requests and process restarts. A verified manual login allows normal operation again.
+Cancellation after session selection reports the saved connection so the client can inspect the outcome.
+
+### Selection and recovery
+
 - The last successful `gui_session_attach` or `gui_session_launch` becomes the sticky default of the calling principal: later calls of the same principal without `connection` use it (over HTTP each token has its own default, the local stdio principal has one). `--default-connection N` sets a server-wide default at start. The sticky default is only a targeting convenience: all principals still drive the same SAP GUI (one shared session per connection, one call at a time), so one client navigating changes the screen the next client sees.
 - Pass `connection` to target another saved connection. `gui_connection_list` and `gui_session_list` show what exists.
 - `gui_session_attach` without `session_id` attaches automatically when exactly one session is open; with several it fails with MULTIPLE_SESSIONS and lists them, so call it again with a `session_id` from `gui_session_list`.
-- Automatic attach (stdio server and `fairyfly link run`, not HTTP): a call that acts on a connection, gives no `connection`, and finds no saved connection attaches to the only open SAP GUI session itself and runs again. That session becomes the sticky default. So the first `gui_screen_read` works without a `gui_session_attach`, even for a client that is not offered that tool. With no open session the call fails with `NO_SESSIONS`; with several, `MULTIPLE_SESSIONS` lists them and nothing is chosen. The call is audited once, as the tool that was called.
+- An unbound request can prepare a session before the requested operation. Several matching sessions produce `MULTIPLE_SESSIONS`; select the intended session explicitly. MCP preparation steps pass through lifecycle admission and auditing before the original operation is authorized against the resulting session.
 - Automatic re-attach (same transports): when that default connection's session is gone (SAP Logon or the link tray restarted) and exactly one SAP GUI session is open with the same SAP system, client and user as the saved connection recorded, the call re-attaches to it, runs again and adds a note ("re-attached to the only open SAP session"). An explicit `connection`, no or several open sessions, or another system/client/user keep `INVALID_CONNECTION`. The same applies to a default set by `gui_session_attach` whose session is gone (previously `SESSION_TARGET_CHANGED`); a default that now names another live session keeps `SESSION_TARGET_CHANGED`. A re-attach for a change (a tool that is not read-only in the catalog: click, key, fill, menu, popup, batch, ...) needs that verified, logged-on identity. A connection file saved before 2026-10-25 records no identity, a file saved on the logon screen records no user, and an open session on the logon screen has no user: then the only open session is re-attached for read-only tools only (with a warning in the log and a note in the result), and a change keeps `INVALID_CONNECTION` (or `SESSION_TARGET_CHANGED`) with the hint "attach the SAP session again (gui_session_attach) and retry".
 - A state-changing action (key, transaction, click, fill, F4, popup close, menu select) reads the SAP server session key at the saved path afterwards (`fields` with `then_key`: once per call): a readable key that differs from the saved one (SAP ended and logged on again) gives `SESSION_CHANGED` with the action's own answer in `action_result` (the outcome is unknown: read the screen before repeating; it is never retried on another session); an unreadable key keeps the result with `session_check: "inconclusive"` and a warning; a session that is gone (the action may have closed it, e.g. `/nex`) keeps the result with `session_closed: true`.
 - Errors about attaching (`NO_CONNECTIONS`, `INVALID_CONNECTION`, `NO_SESSIONS`, `MULTIPLE_SESSIONS`) carry a `hint` for the AI assistant instead of console commands: which tool to call, or what to ask the person at the desktop.

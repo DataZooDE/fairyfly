@@ -40,6 +40,12 @@ namespace {
 
 std::string dump_compact(const json& j) { return j.dump(-1, ' ', false, json::error_handler_t::replace); }
 
+bool owner_boundary_error(const std::string& code) {
+    return code == "OWNER_IDENTITY_UNKNOWN" || code == "OWNER_IDENTITY_DENIED" ||
+           code == "SESSION_TARGET_UNKNOWN" || code == "SYSTEM_UNKNOWN" || code == "SYSTEM_DENIED" ||
+           code == "CONNECTION_DENIED" || code == "SESSION_TARGET_CHANGED";
+}
+
 ToolResult error_result(const std::string& code, const std::string& message, const std::string& hint = "") {
     ToolResult r;
     r.is_error = true;
@@ -1481,15 +1487,41 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx) {
         return current;
     };
     if (startup_attempts_) {
-        operations.begin_login = [this, &policy] { return startup_attempts_->begin(policy.default_connection); };
-        operations.login_ready = [this, &policy] { startup_attempts_->clear(policy.default_connection); };
+        operations.login_ready = [this, &policy] {
+            if (!startup_attempts_->clear(policy.default_connection))
+                spdlog::warn("Cannot clear the automatic SAP login retry block after verified login");
+        };
     }
     operations.authenticated = [this](int id) {
-        const auto facts = facts_provider_ ? facts_provider_(id) : std::nullopt;
+        std::optional<audit::SapFacts> facts;
+        try { if (facts_provider_) facts = facts_provider_(id); } catch (...) {}
         return facts && facts->connection_id == id && !facts->system.empty() &&
             !facts->client.empty() && !facts->user.empty();
     };
-    operations.invoke = [this, &ctx](const std::string& tool, const json& args) {
+    operations.invoke = [this, &ctx, &policy](const std::string& tool, const json& args) {
+        struct ResetSubmitGuard {
+            const LoginSubmitGuardOverride& hook;
+            bool installed = false;
+            ~ResetSubmitGuard() { if (installed) { try { hook({}); } catch (...) {} } }
+        } reset{login_submit_guard_override_};
+        if (tool == "gui_session_login") {
+            if (!login_submit_guard_override_)
+                return Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
+            login_submit_guard_override_([this, &ctx, policy] {
+                if (ctx.cancelled && ctx.cancelled()) return Result::fail("CANCELLED", "SAP login was cancelled.");
+                if (ctx.http && (!ctx.reauthorize || !ctx.reauthorize()))
+                    return Result::fail("TOKEN_CHANGED", "Authorization changed before SAP login; retry with valid authorization.");
+                auto current = startup_policy_();
+                current.link_request = ctx.link_request;
+                current.gateway_allowed = ctx.sap_startup_granted;
+                if (current.default_connection != policy.default_connection)
+                    return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+                if (auto denied = startup::check(current)) return *denied;
+                return startup_attempts_ ? startup_attempts_->begin(policy.default_connection)
+                    : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
+            });
+            reset.installed = true;
+        }
         std::string code;
         const auto answer = run_single(tool, args, ctx, &code);
         if (answer.structured && answer.structured->is_object()) {
@@ -1548,13 +1580,27 @@ std::optional<ToolResult> CommandDispatcher::admit_call(const std::string& name,
         return fail(refused->code, refused->message, refused->hint);
     if (startup_policy_ && !preparing_startup_ && accepts_connection && !record.connection &&
         !args.contains("connection") && command_table::tool_has(name, command_table::Trait::ScreenBound)) {
-        const auto live = facts_provider_ ? facts_provider_(std::nullopt) : std::nullopt;
+        std::optional<audit::SapFacts> live;
+        try { if (facts_provider_) live = facts_provider_(std::nullopt); } catch (...) {}
         if (!live || live->system.empty() || live->client.empty() || live->user.empty()) {
             const auto prepared = prepare_implicit_session(ctx);
-            if (prepared.status != Result::Status::Success)
-                return fail(prepared.error.value("code", "SAP_STARTUP_UNAVAILABLE"),
-                    prepared.error.value("message", "SAP session preparation failed."),
-                    prepared.error.contains("suggestions") ? prepared.error["suggestions"].dump() : "");
+            if (prepared.status != Result::Status::Success) {
+                const auto error_code = prepared.error.value("code", "SAP_STARTUP_UNAVAILABLE");
+                std::string hint;
+                if (prepared.error.contains("suggestions") && prepared.error["suggestions"].is_array()) {
+                    for (const auto& suggestion : prepared.error["suggestions"])
+                        if (suggestion.is_string()) {
+                            if (!hint.empty()) hint += " ";
+                            hint += suggestion.get<std::string>();
+                        }
+                }
+                auto refused = fail(error_code,
+                    prepared.error.value("message", "SAP session preparation failed."), hint);
+                // Keep the opened connection and recovery details, but never undo owner-boundary redaction.
+                if (!(owner_mode(ctx) && owner_boundary_error(error_code)))
+                    refused.structured = prepared.to_json();
+                return refused;
+            }
             record.connection = prepared.data.at("connection_file_id").get<int>();
             // Continue through original target authorization and owner/lease checks.
             // Internal lifecycle calls have independently passed their own admission.
@@ -2016,10 +2062,17 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
                 return fail(denied->error.value("code", "SAP_AUTOSTART_DISABLED"),
                     denied->error.value("message", "SAP startup is disabled."));
             if (!sap_logon_starter_) return fail("SAP_STARTUP_UNAVAILABLE", "SAP startup is unavailable on this endpoint.");
-            const auto ready = sap_logon_starter_(current);
+            const auto ready = sap_logon_starter_(current, ctx.cancelled);
             if (ready.status != Result::Status::Success)
                 return fail(ready.error.value("code", "SAP_STARTUP_UNAVAILABLE"),
                     ready.error.value("message", "SAP Logon could not be prepared."));
+            auto after_wait = startup_policy_();
+            after_wait.link_request = ctx.link_request;
+            after_wait.gateway_allowed = ctx.sap_startup_granted;
+            if (after_wait.default_connection != current.default_connection)
+                return fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
+            if (auto denied = startup::check(after_wait))
+                return fail(denied->error.value("code", "SAP_AUTOSTART_DISABLED"), denied->error.value("message", "SAP startup is disabled."));
         }
         result = invoke_selected(argv);
         // 5b. auto-attach (stdio, link)
@@ -2209,10 +2262,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
                                            std::string& code, const CallContext& ctx) {
     const auto execution_started = std::chrono::steady_clock::now();
     auto fail = [&](const std::string& c, const std::string& message, const std::string& hint = "") {
-        if (owner_mode(ctx) &&
-            (c == "OWNER_IDENTITY_UNKNOWN" || c == "OWNER_IDENTITY_DENIED" || c == "SESSION_TARGET_UNKNOWN" ||
-             c == "SYSTEM_UNKNOWN" || c == "SYSTEM_DENIED" || c == "CONNECTION_DENIED" ||
-             c == "SESSION_TARGET_CHANGED")) {
+        if (owner_mode(ctx) && owner_boundary_error(c)) {
             record.error_code = c;  // the audit sink may distinguish boundary probes; the caller may not
             code = "OWNER_SESSION_UNAVAILABLE";
             return error_result(code, "the requested SAP session is unavailable");

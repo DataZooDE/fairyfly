@@ -75,10 +75,6 @@ Result prepare(const Policy& policy, const Operations& operations) {
         // SSO may already have authenticated the newly opened connection. Only
         // resolve credentials when the live session still needs login.
         if (auto refused = permission()) return with_connection(*refused);
-        if (!operations.begin_login)
-            return with_connection(Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in to SAP manually."));
-        const auto attempt = operations.begin_login();
-        if (attempt.status != Result::Status::Success) return with_connection(attempt);
         if (cancelled()) return cancel_result();
         auto login = operations.invoke("gui_session_login", {{"connection", id}, {"multiple_logon", "fail"}});
         if (login.status != Result::Status::Success) {

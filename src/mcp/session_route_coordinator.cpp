@@ -158,8 +158,16 @@ HttpEndpoint::SessionRoute SessionRouteCoordinator::route_impl(const Principal& 
     const auto& sap = facts.sap;
     if (!sap.connection_id || (plan.connection && sap.connection_id != plan.connection) ||
         !complete_identity(sap.session_identity) || sap.system.empty() || sap.client.empty() || sap.user.empty() ||
-        (!plan.sticky_identity.empty() && plan.sticky_identity != sap.session_identity))
+        (!plan.sticky_identity.empty() && plan.sticky_identity != sap.session_identity)) {
+        if (policy_.prepare_missing_session && !plan.connection && plan.sticky_identity.empty()) {
+            // Startup runs on the global COM executor, after ordinary dispatcher
+            // admission. No existing explicit/default/sticky target is replaced here.
+            HttpEndpoint::SessionRoute route;
+            route.global_control = true;
+            return route;
+        }
         return denied("OWNER_SESSION_UNAVAILABLE");
+    }
     const std::string owner = sap_identity(sap);
     if (!owner_identity_allowed(policy_, principal, owner))
         return denied("OWNER_SESSION_UNAVAILABLE");

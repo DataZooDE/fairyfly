@@ -76,6 +76,7 @@ Policy make_policy(const ServeOptions& options, bool read_only, bool allow_write
     policy.audit_required = sink && sink->mode() == audit::Mode::Required;
     policy.owner_sap_identities = options.owner_sap_identities;
     policy.auto_attach = !http;  // stdio and link; an HTTP endpoint keeps explicit attaches (tokens, owner routing)
+    policy.prepare_missing_session = true;
     if (link)
         policy.allow_write_hint = "fairyfly on this desktop was started with --read-only or FAIRYFLY_READ_ONLY; the person "
                                   "at the desktop can restart the fairyfly link without it";
@@ -120,8 +121,13 @@ int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<in
 void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler,
                         CommandDispatcher::StartupPolicyProvider startup_policy) {
     dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
+    dispatcher.set_login_submit_guard_override([lazy_handler](std::function<Result()> guard) {
+        lazy_handler().set_login_submit_guard(std::move(guard));
+    });
     dispatcher.set_session_startup(std::move(startup_policy),
-        [lazy_handler](const startup::Policy& policy) { return lazy_handler().ensure_sap_logon(policy); },
+        [lazy_handler](const startup::Policy& policy, const std::function<bool()>& cancelled) {
+            return lazy_handler().ensure_sap_logon(policy, cancelled);
+        },
         std::make_shared<startup::LoginAttempts>(config::Environment::process().data_dir()));
     // Token authorization needs the target SAP system and a per-call read-only override.
     dispatcher.set_sap_facts_provider([lazy_handler](std::optional<int> connection) -> std::optional<audit::SapFacts> {

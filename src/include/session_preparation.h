@@ -10,7 +10,8 @@ struct Operations {
     std::function<bool(int)> authenticated;
     std::function<bool()> cancelled;
     std::function<Policy()> current_policy;
-    std::function<Result()> begin_login;
+    // The authorized login operation must install its retry guard immediately
+    // before credential submission, after admission and credential resolution.
     std::function<void()> login_ready;
 };
 Result prepare(const Policy& policy, const Operations& operations);

@@ -65,6 +65,51 @@ TEST_CASE("CLI task reports disabled startup before touching SAP", "[handler][st
     CHECK(rig.engine->count("execute_transaction") == 0);
 }
 
+TEST_CASE("CLI stale and logged-out saved sessions respect startup permission", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    fairyfly::test::FakeScripting scripting;
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->application_info = {{"total_connections", 0}, {"total_sessions", 0}, {"connections", json::array()}};
+    SECTION("stale saved connection") {}
+    SECTION("existing logged-out session") {
+        rig.engine->live_sessions[kSession] = true;
+        scripting.facts.system = "A4H"; scripting.facts.client = "001";
+        rig.engine->application_info = {{"total_connections", 1}, {"total_sessions", 1},
+            {"connections", json::array({{{"description", "BIG"}, {"sessions", json::array({{{"id", kSession}, {"user", ""}}})}}})}};
+    }
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SAP_AUTOSTART_DISABLED");
+    CHECK(rig.engine->count("execute_transaction") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
+TEST_CASE("CLI verified manual login clears the matching retry block", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    fairyfly::test::FakeScripting scripting;
+    scripting.facts.system = "A4H"; scripting.facts.client = "001"; scripting.facts.user = "DEVELOPER";
+    scripting.connection_description = "BIG";
+    rig.engine->scripting_fake = &scripting;
+    rig.engine->live_sessions[kSession] = true;
+    auto attempts = std::make_shared<startup::LoginAttempts>(rig.dir.path());
+    REQUIRE(attempts->begin("BIG").status == Result::Status::Success);
+    REQUIRE(attempts->begin("Other").status == Result::Status::Success);
+    rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; }, attempts);
+    REQUIRE(rig.handler->handle_transaction("SE11", std::nullopt).status == Result::Status::Success);
+    CHECK(attempts->begin("BIG").status == Result::Status::Success);
+    CHECK(attempts->begin("Other").status == Result::Status::Error);
+}
+
+TEST_CASE("CLI implicit startup cannot replace a saved target with another default", "[handler][startup][startup-recovery]") {
+    Rig rig;
+    rig.engine->application_info = {{"total_connections", 0}, {"total_sessions", 0}, {"connections", json::array()}};
+    rig.handler->set_automatic_startup([] { return startup::Policy{true, false, false, "Other"}; });
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    CHECK(code_of(result) == "SESSION_TARGET_CHANGED");
+    CHECK(rig.engine->count("execute_transaction") == 0);
+    CHECK(rig.engine->count("launch_connection") == 0);
+}
+
 TEST_CASE("CLI session preparation reuses logged-on default without launching", "[handler][startup]") {
     Rig rig(false);
     fairyfly::test::FakeScripting scripting;

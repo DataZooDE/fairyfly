@@ -65,6 +65,7 @@ struct Preparation {
     fairyfly::Result listed = fairyfly::Result::ok({{"connections", fairyfly::json::array()}});
     fairyfly::Result login = fairyfly::Result::ok();
     bool ready = false, cancelled = false, attempted = false;
+    int submissions = 0;
     std::vector<std::string> calls;
     fairyfly::startup::Operations operations() {
         return {[this](const std::string& tool, const fairyfly::json& args) {
@@ -72,6 +73,9 @@ struct Preparation {
             if (tool == "gui_session_list") return listed;
             if (tool == "gui_session_login") {
                 CHECK(args["multiple_logon"] == "fail");
+                if (attempted) return fairyfly::Result::fail("SAP_LOGIN_REQUIRED", "Complete login manually.");
+                attempted = true;
+                ++submissions;
                 ready = login.status == fairyfly::Result::Status::Success;
                 return login;
             }
@@ -81,11 +85,7 @@ struct Preparation {
             }
             return fairyfly::Result::ok({{"connection_file_id", 7}});
         }, [this](int id) { CHECK(id == 7); return ready; }, [this] { return cancelled; }, {},
-        [this] {
-            if (attempted) return fairyfly::Result::fail("SAP_LOGIN_REQUIRED", "Complete login manually.");
-            attempted = true;
-            return fairyfly::Result::ok();
-        }, [this] { attempted = false; }};
+        [this] { attempted = false; }};
     }
     void session(const std::string& user) {
         listed = fairyfly::Result::ok({{"connections", fairyfly::json::array({
@@ -159,7 +159,8 @@ TEST_CASE("Later requests do not retry a failed automatic login", "[startup]") {
     fixture.calls.clear();
     const auto again = fairyfly::startup::prepare(policy, fixture.operations());
     CHECK(again.error.value("code", "") == "SAP_LOGIN_REQUIRED");
-    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach"});
+    CHECK(fixture.calls == std::vector<std::string>{"gui_session_list", "gui_session_attach", "gui_session_login"});
+    CHECK(fixture.submissions == 1);
 }
 
 TEST_CASE("Cancellation after launch retains the opened connection and never logs in", "[startup]") {

@@ -19,6 +19,7 @@
 #include "include/mcp/tool_catalog.h"
 #include "include/command_table.h"
 #include "include/link/link_call.h"
+#include "support/temp_dir.h"
 
 using namespace fairyfly::mcp;
 using fairyfly::Result;
@@ -101,7 +102,7 @@ TEST_CASE("MCP implicit startup reports local and gateway denials before launchi
     bool started = false;
     bool local_enabled = false;
     d.set_session_startup([&] { return fairyfly::startup::Policy{local_enabled, false, false, "Bigfox"}; },
-        [&](const fairyfly::startup::Policy&) { started = true; return Result::ok(); });
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { started = true; return Result::ok(); });
     auto ctx = ctx_with_id();
     SECTION("local permission") {
         const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
@@ -131,7 +132,7 @@ TEST_CASE("MCP implicit startup cannot bypass lifecycle scopes", "[mcp][startup]
     auto d = f.make();
     bool started = false;
     d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
-        [&](const fairyfly::startup::Policy&) { started = true; return Result::ok(); });
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>&) { started = true; return Result::ok(); });
     auto ctx = ctx_with_id();
     ctx.principal.all_scopes = false;
     ctx.principal.scopes = {"screen.read", "session.list"};
@@ -161,7 +162,10 @@ TEST_CASE("MCP implicit startup completes SSO before the original screen request
     auto d = f.make();
     int starts = 0;
     d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
-        [&](const fairyfly::startup::Policy&) { ++starts; return Result::ok(); });
+        [&](const fairyfly::startup::Policy&, const std::function<bool()>& cancelled) {
+            CHECK(static_cast<bool>(cancelled));
+            ++starts; return Result::ok();
+        });
     d.set_sap_facts_provider([&](std::optional<int> id) -> std::optional<fairyfly::audit::SapFacts> {
         if (!ready) return std::nullopt;
         fairyfly::audit::SapFacts facts;
@@ -173,6 +177,7 @@ TEST_CASE("MCP implicit startup completes SSO before the original screen request
     auto ctx = ctx_with_id();
     ctx.link_request = true;
     ctx.sap_startup_granted = true;
+    ctx.cancelled = [] { return false; };
     const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
     INFO(text_of(result));
     CHECK_FALSE(result.is_error);
@@ -189,10 +194,62 @@ TEST_CASE("MCP explicit targets never trigger implicit startup", "[mcp][startup]
     auto d = f.make();
     bool policy_read = false;
     d.set_session_startup([&] { policy_read = true; return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
-        [](const fairyfly::startup::Policy&) { FAIL("Explicit targeting must not start SAP"); return Result::ok(); });
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) {
+            FAIL("Explicit targeting must not start SAP"); return Result::ok();
+        });
     CHECK(d.call_tool("gui_screen_read", {{"connection", 42}}, ctx_with_id()).is_error);
     CHECK_FALSE(policy_read);
     CHECK(f.calls.size() == 1);
+}
+
+TEST_CASE("MCP records a login attempt only after lifecycle admission", "[mcp][startup][startup-submit]") {
+    fairyfly::test::TempDir dir{"mcp-startup-submit"};
+    auto attempts = std::make_shared<fairyfly::startup::LoginAttempts>(dir.path());
+    Fixture f;
+    bool opened = false;
+    int submissions = 0;
+    std::function<Result()> submit_guard;
+    f.handler = [&](const Argv& argv) {
+        if (argv.size() > 1 && argv[0] == "session") {
+            if (argv[1] == "list") return Result::ok({{"connections", json::array()}});
+            if (argv[1] == "launch") {
+                opened = true;
+                return Result::ok({{"connection_file_id", 7}});
+            }
+            if (argv[1] == "login") {
+                REQUIRE(submit_guard);
+                const auto allowed = submit_guard();
+                if (allowed.status != Result::Status::Success) return allowed;
+                ++submissions;
+                return Result::fail("LOGIN_FAILED", "Login needs manual attention.");
+            }
+        }
+        return Result::fail("UNEXPECTED", "Unexpected operation.");
+    };
+    auto d = f.make();
+    d.set_session_startup([] { return fairyfly::startup::Policy{true, false, false, "Bigfox"}; },
+        [](const fairyfly::startup::Policy&, const std::function<bool()>&) { return Result::ok(); }, attempts);
+    d.set_login_submit_guard_override([&](std::function<Result()> guard) { submit_guard = std::move(guard); });
+    d.set_sap_facts_provider([&](std::optional<int> id) -> std::optional<fairyfly::audit::SapFacts> {
+        if (!opened) return std::nullopt;
+        fairyfly::audit::SapFacts facts;
+        facts.connection_id = 7; facts.system = "A4H"; facts.client = "001";
+        return facts;
+    });
+    auto ctx = ctx_with_id();
+    ctx.principal.all_scopes = false;
+    ctx.principal.scopes = {"screen.read", "session.list", "session.launch"};
+    bool login_allowed = false;
+    SECTION("login scope denied") {}
+    SECTION("failed submission remains blocked") { login_allowed = true; ctx.principal.scopes.insert("session.login"); }
+    const auto result = d.call_tool("gui_screen_read", json::object(), ctx);
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find(login_allowed ? "LOGIN_FAILED" : "SCOPE_DENIED") != std::string::npos);
+    CHECK(submissions == (login_allowed ? 1 : 0));
+    CHECK((attempts->begin("Bigfox").status == Result::Status::Error) == login_allowed);
+    CHECK_FALSE(submit_guard);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["error"]["connection_file_id"] == 7);
 }
 
 TEST_CASE("Dispatcher: a failed audit write in required mode reports AUDIT_UNAVAILABLE", "[mcp][dispatcher][audit]") {
