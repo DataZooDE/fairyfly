@@ -344,3 +344,15 @@ TEST_CASE("Launch retry guards persist independently of credential submission", 
     fairyfly::startup::LoginAttempts missing({});
     CHECK(missing.begin_launch("Bigfox").status == fairyfly::Result::Status::Error);
 }
+
+TEST_CASE("Recovery clears the launch marker even when the login marker cannot be removed", "[startup][startup-coordination]") {
+    fairyfly::test::TempDir temp{"startup-clear-partial"};
+    fairyfly::startup::LoginAttempts attempts(temp.path());
+    REQUIRE(attempts.begin("Bigfox").status == fairyfly::Result::Status::Success);
+    REQUIRE(attempts.begin_launch("Bigfox").status == fairyfly::Result::Status::Success);
+    for (const auto& entry : std::filesystem::directory_iterator(temp.path() / "startup-login-attempts"))
+        std::filesystem::create_directory(entry.path() / "nonempty");
+    CHECK_FALSE(attempts.clear("Bigfox"));
+    CHECK(attempts.begin_launch("Bigfox").status == fairyfly::Result::Status::Success);
+    CHECK(attempts.pending("Bigfox"));
+}

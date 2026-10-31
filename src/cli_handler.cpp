@@ -332,14 +332,6 @@ ResultT<Connection> CommandHandler::resolve_and_validate_connection(std::optiona
     }
 
     validated_generation_[conn.id] = generation;
-    if (automatic_startup_ && startup_attempts_ && !preparing_session_) {
-        const auto policy = automatic_startup_();
-        const auto target = peek_session_target("", "", conn.id);
-        if (!policy.default_connection.empty() && !target.ambiguous &&
-            !target.facts.system.empty() && !target.facts.client.empty() && !target.facts.user.empty() &&
-            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name))
-            startup_attempts_->clear(policy.default_connection);
-    }
     ResultT<Connection> result;
     result.status = ResultT<Connection>::Status::Success;
     result.value = conn;
@@ -374,11 +366,26 @@ Result& CommandHandler::confirm_session_after_action(const Connection& conn, Res
         }
         return result;
     }
-    if (conn.server_session_key.empty()) return result;   // positionally identified (no key known): nothing to compare
+    const auto confirmed = [&]() -> Result& {
+        if (result.status != Result::Status::Success || !automatic_startup_ || !startup_attempts_ || preparing_session_)
+            return result;
+        const auto policy = automatic_startup_();
+        if (!startup_attempts_->pending(policy.default_connection)) return result;
+        // Never clear another process's in-flight attempt or wait behind it.
+        const auto guard = startup::acquire_preparation_guard({}, std::chrono::milliseconds(0));
+        if (!guard.token) return result;
+        const auto target = peek_session_target("", "", conn.id);
+        if (!policy.default_connection.empty() && !target.ambiguous &&
+            !target.facts.system.empty() && !target.facts.client.empty() && !target.facts.user.empty() &&
+            sap::ConnectionLauncher::matches_connection_name(policy.default_connection, target.connection_name))
+            startup_attempts_->clear(policy.default_connection);
+        return result;
+    };
+    if (conn.server_session_key.empty()) return confirmed();   // live positional session; no key to compare
     if (live->empty())
         return inconclusive("the SAP session after the action could not be confirmed (its server session key is not "
                             "readable: a round trip or a logoff in progress)");
-    if (*live == conn.server_session_key) return result;
+    if (*live == conn.server_session_key) return confirmed();
 
     // Another SAP session sits at the saved path now (SAP was ended and logged on again): the action may have gone to
     // the old, closed session, whose COM objects can still answer S_OK. Never report that as success.

@@ -3717,9 +3717,10 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
     p.sap_systems = {"A4H/001"};
     p.connections = {"Bigfox"};
     auto routing = std::make_shared<SessionRoutingState>();
-    bool owned = true, stale = false, expired = false, missing = false, duplicate = false, foreign_extra = false;
+    bool owned = true, stale = false, expired = false, missing = false, duplicate = false, foreign_extra = false, fresh_login = false;
     std::string claim_token = p.id;
     SECTION("own claim can complete login") {}
+    SECTION("fresh window binds its claim before local credential login") { owned = false; missing = true; fresh_login = true; }
     SECTION("own claim remains selectable beside a foreign window") { foreign_extra = true; }
     SECTION("another token claim stays private") { owned = false; claim_token = "other-token"; }
     SECTION("changed saved generation retires the stale claim and starts fresh") { owned = false; stale = true; }
@@ -3761,6 +3762,7 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
             REQUIRE(fresh);
             REQUIRE(f.launch_guard);
             audit::SapFacts launched{"A4H", "001", "OWNER", "SESSION_MANAGER"};
+            if (fresh_login) { launched.client = "000"; launched.user.clear(); launched.transaction = "S000"; }
             launched.connection_id = 9;
             launched.session_identity = "fresh-session|key|new-generation";
             REQUIRE(f.launch_guard(launched, "Bigfox"));
@@ -3769,7 +3771,7 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
             return Result::ok({{"connection_file_id", 9}, {"session_id", "fresh-session"}});
         }
         if (argv[0] == "session" && argv[1] == "login") {
-            REQUIRE(owned);
+            REQUIRE((owned || fresh_login));
             audit::SapFacts anticipated = current;
             anticipated.client = "001";
             anticipated.user = "OWNER";
@@ -3778,7 +3780,7 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
             current = anticipated;
             current.transaction = "SESSION_MANAGER";
             ++logins;
-            return Result::ok({{"connection_id", 7}, {"session_id", "session-one"}});
+            return Result::ok({{"connection_id", *current.connection_id}, {"session_id", fresh_login ? "fresh-session" : "session-one"}});
         }
         REQUIRE(argv[0] == "screen"); // no launch or attach: retain the owned receipt
         ++reads;
@@ -3788,7 +3790,7 @@ TEST_CASE("Multi-owner startup reuses only the caller's exact prelogin claim", "
     INFO(text_of(result));
     CHECK_FALSE(result.is_error);
     CHECK(launches == (fresh ? 1 : 0));
-    CHECK(logins == (owned ? 1 : 0));
+    CHECK(logins == (owned || fresh_login ? 1 : 0));
     CHECK(reads == 1);
     if (stale) CHECK_FALSE(routing->owns_prelogin(p.id, 7, "session-one|key|generation"));
 }

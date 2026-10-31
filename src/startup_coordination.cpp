@@ -87,9 +87,10 @@ bool LoginAttempts::pending(const std::string& connection) const {
 bool LoginAttempts::clear(const std::string& connection) {
     if (root_.empty() || !root_.is_absolute() || connection.empty()) return false;
     try {
-        std::filesystem::remove(attempt_path(root_, connection));
-        std::filesystem::remove(attempt_path(root_ / "startup-launch-attempts", connection));
-        return true;
+        std::error_code login_error, launch_error;
+        std::filesystem::remove(attempt_path(root_, connection), login_error);
+        std::filesystem::remove(attempt_path(root_ / "startup-launch-attempts", connection), launch_error);
+        return !login_error && !launch_error;
     } catch (...) { return false; }
 }
 } // namespace fairyfly::startup

@@ -10,6 +10,7 @@
 #include "support/temp_dir.h"
 
 #include <memory>
+#include <future>
 
 using namespace fairyfly;
 using fairyfly::test::FakeEngine;
@@ -95,8 +96,23 @@ TEST_CASE("CLI verified manual login clears the matching retry block", "[handler
     REQUIRE(attempts->begin("BIG").status == Result::Status::Success);
     REQUIRE(attempts->begin("Other").status == Result::Status::Success);
     rig.handler->set_automatic_startup([] { return startup::Policy{false, false, false, "BIG"}; }, attempts);
-    REQUIRE(rig.handler->handle_transaction("SE11", std::nullopt).status == Result::Status::Success);
-    CHECK(attempts->begin("BIG").status == Result::Status::Success);
+    bool failed = false, busy = false;
+    SECTION("successful command clears") {}
+    SECTION("failed command retains retry guard") { failed = true; rig.engine->next = Result::fail("TEST_FAILURE", "test"); }
+    SECTION("another preparation retains retry guard") { busy = true; }
+    std::promise<void> held, release;
+    auto released = release.get_future();
+    auto contender = std::async(std::launch::async, [&] {
+        auto guard = busy ? startup::acquire_preparation_guard() : startup::PreparationGuard{};
+        held.set_value();
+        released.wait();
+    });
+    held.get_future().wait();
+    const auto result = rig.handler->handle_transaction("SE11", std::nullopt);
+    release.set_value();
+    contender.get();
+    CHECK((result.status == Result::Status::Error) == failed);
+    CHECK(attempts->pending("BIG") == (failed || busy));
     CHECK(attempts->begin("Other").status == Result::Status::Error);
 }
 
