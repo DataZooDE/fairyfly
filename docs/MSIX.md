@@ -284,8 +284,8 @@ and what it registers is decided in [src/include/link/toast_identity.h](../src/i
 | `msix` | `<PackageFamilyName>!Tray`, i.e. `DataZoo.fairyfly_73q587949tsjt!Tray`: the family part of `GetCurrentApplicationUserModelId` (`GetCurrentPackageFamilyName` as fallback) | none at run time: the manifest's `com:ExeServer` and `desktop:ToastNotificationActivation` on the `Tray` application, class `{17C79966-…}` (`kToastActivatorClsidMsix`). No HKCU value, no `SetCurrentProcessExplicitAppUserModelID` | the manifest's `Arguments="-Embedding"` |
 | `msix` run outside its package | none: no toast, the approval window asks; `fairyfly doctor` warns | none | - |
 
-`fairyfly link run` through the execution alias runs as the `Cli` application; its toasts are still the `Tray`
-application's, which declares the activator. In both builds the running link registers the activator's class object
+`fairyfly link run` through the execution alias runs as the `Tray` application, which declares the activator (packages
+up to 2026.10.31 ran it as a hidden `Cli` application; its toasts were still the `Tray` application's). In both builds the running link registers the activator's class object
 (`CoRegisterClassObject`, in a multithreaded apartment kept for the process) as it starts, so a click on the toast or
 in the notification centre reaches the running tray. When no tray runs, COM starts `fairyfly-tray.exe -Embedding`,
 which starts the link tray like the Start menu; once paired, that link registers the class and receives the click and

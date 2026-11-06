@@ -11,7 +11,8 @@
 
   - Tray: fairyfly-tray.exe without arguments starts "fairyfly link run" in its tray, as the MSI's Start-menu entry does.
     Its StartupTask replaces the MSI's HKCU Run value "fairyfly-link" (the MSIX build writes no Run value).
-  - Cli: fairyfly.exe, no Start-menu tile; the execution alias puts fairyfly.exe on the PATH of every terminal
+  - The CLI: fairyfly.exe is no application of its own (Partner Center refuses a hidden one as headless); the tray
+    application declares the execution alias, which puts fairyfly.exe on the PATH of every terminal
     (%LOCALAPPDATA%\Microsoft\WindowsApps), which is also what `fairyfly mcp client-config` stdio snippets start.
   - The approval notifications: the toast activator COM class (src/link/desktop_approval_win32.cpp,
     src/include/tray/tray_contract.h) is declared here, because HKCU registrations made at run time stay in the
