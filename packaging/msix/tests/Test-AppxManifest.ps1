@@ -9,7 +9,8 @@
   PublisherDisplayName DataZoo; CMakeLists.txt must take its cache defaults from cmake/msix_manifest.cmake.
   With identity values set the rendered manifest must be well-formed XML with no placeholder left, carry the identity
   (XML-escaped) and the MSIX version of packaging/msix_version.ps1, declare runFullTrust, the tray's StartupTask (instead
-  of the MSI's HKCU Run value), the fairyfly.exe execution alias for terminals, and the toast activator with the
+  of the MSI's HKCU Run value), the fairyfly.exe execution alias for terminals (declared by the tray application: no hidden application, which
+  Partner Center refuses as headless), and the toast activator with the
   CLSID, COM server argument and application id the code uses (src/include/tray/tray_contract.h). Rendering must
   fail for a placeholder the template does not get a value for, an empty value, an identity name MSIX does not allow
   and a publisher that is no distinguished name.
@@ -161,13 +162,17 @@ try {
         Check ($toastApp -and $codeApp -and $toastApp.Id -ceq $codeApp) "the application declaring the toast activation, '$($toastApp.Id)', is the code's kPackageTrayApplicationId '$codeApp' (AUMID <PackageFamilyName>!$codeApp)"
         Check ($toastApp -and $toastApp.Executable -eq $server.Executable -and $toastApp.Id -eq ($xml.SelectSingleNode("/f:Package/f:Applications/f:Application[f:Extensions/com:Extension/com:ComServer]", $ns)).Id) 'the COM server is declared by the same application (fairyfly-tray.exe)'
 
-        $cli = One "/f:Package/f:Applications/f:Application[@Executable='fairyfly.exe']"
-        Check ($null -ne $cli) 'Application for the CLI (fairyfly.exe)'
-        $alias = One "//uap5:Extension[@Category='windows.appExecutionAlias' and @Executable='fairyfly.exe']/uap5:AppExecutionAlias"
+        # Partner Center refuses an application with AppListEntry="none" ("headless app", needs a waiver), so the CLI is
+        # no application of its own: the tray application declares the alias, with its own executable (like wt.exe)
+        Check ($xml.SelectNodes("//uap:VisualElements[@AppListEntry='none']", $ns).Count -eq 0) 'no application hidden with AppListEntry="none" (the Store refuses headless apps)'
+        $alias = One "/f:Package/f:Applications/f:Application[@Id='$codeApp']/f:Extensions/uap5:Extension[@Category='windows.appExecutionAlias' and @Executable='fairyfly.exe']/uap5:AppExecutionAlias"
         Check ($null -ne $alias -and $alias.GetAttribute('Subsystem', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -eq 'console') 'the alias runs fairyfly.exe as a console program'
+        # MakeAppx refuses a console alias unless its application declares SupportsMultipleInstances="true" (0x80080204)
+        $aliasApp = One "/f:Package/f:Applications/f:Application[f:Extensions/uap5:Extension[@Category='windows.appExecutionAlias']]"
+        Check ($null -ne $aliasApp -and $aliasApp.GetAttribute('SupportsMultipleInstances', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -eq 'true') 'the application with the console alias declares desktop4:SupportsMultipleInstances="true" (MakeAppx requires it)'
         Check ($null -ne (One "//uap5:ExecutionAlias[@Alias='fairyfly.exe']")) 'execution alias fairyfly.exe (terminals, stdio MCP clients)'
         $ids = @($xml.SelectNodes('/f:Package/f:Applications/f:Application', $ns) | ForEach-Object { $_.Id })
-        Check ($ids.Count -eq 2 -and ($ids | Select-Object -Unique).Count -eq 2) "two applications with distinct ids ($($ids -join ', '))"
+        Check ($ids.Count -eq 1 -and $ids[0] -ceq $codeApp) "one application, the tray '$codeApp' ($($ids -join ', '))"
 
         # the data directory is %USERPROFILE%\.fairyfly (docs/DATA_DIR.md), which is not virtualized on any Windows
         # version: no exclusion under AppData (it only worked on Windows 11) and no restricted capability for it

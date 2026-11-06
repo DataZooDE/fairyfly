@@ -456,8 +456,8 @@ jobs:
         if ($out -notmatch 'UPDATE_MANAGED_BY_STORE') { Write-Error "the installed package does not leave updates to the Store: $out"; exit 1 }
         Write-Host "alias OK: fairyfly $v, update check -> UPDATE_MANAGED_BY_STORE"
         # the approval toasts' AUMID (src/include/link/toast_identity.h, docs/MSIX.md): the package's tray application
-        # <family>!Tray is registered for this user, and the packaged fairyfly (here through the alias, i.e. as the Cli
-        # application) resolves its notifications to it (not the MSI's DataZoo.fairyfly). A toast itself needs an interactive
+        # <family>!Tray is registered for this user, and the packaged fairyfly (here through the alias, which the tray
+        # application declares) resolves its notifications to it (not the MSI's DataZoo.fairyfly). A toast itself needs an interactive
         # desktop, which a runner does not have: clicking Approve/Deny is checked on the VM (docs/MSIX.md).
         $trayAumid = "$($pkg.PackageFamilyName)!Tray"
         if (Get-Command Get-StartApps -ErrorAction SilentlyContinue) {

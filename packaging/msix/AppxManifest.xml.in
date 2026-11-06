@@ -11,7 +11,8 @@
 
   - Tray: fairyfly-tray.exe without arguments starts "fairyfly link run" in its tray, as the MSI's Start-menu entry does.
     Its StartupTask replaces the MSI's HKCU Run value "fairyfly-link" (the MSIX build writes no Run value).
-  - Cli: fairyfly.exe, no Start-menu tile; the execution alias puts fairyfly.exe on the PATH of every terminal
+  - The CLI: fairyfly.exe is no application of its own (Partner Center refuses a hidden one as headless); the tray
+    application declares the execution alias, which puts fairyfly.exe on the PATH of every terminal
     (%LOCALAPPDATA%\Microsoft\WindowsApps), which is also what `fairyfly mcp client-config` stdio snippets start.
   - The approval notifications: the toast activator COM class (src/link/desktop_approval_win32.cpp,
     src/include/tray/tray_contract.h) is declared here, because HKCU registrations made at run time stay in the
@@ -53,7 +54,8 @@
   </Resources>
 
   <Applications>
-    <Application Id="Tray" Executable="fairyfly-tray.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Tray" Executable="fairyfly-tray.exe" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="fairyfly"
         Description="fairyfly cloud link in the system tray (pairing, local MCP server from its menu)"
@@ -76,19 +78,7 @@
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="17C79966-EDD0-4906-9F80-49A822C45334" />
         </desktop:Extension>
-      </Extensions>
-    </Application>
-
-    <Application Id="Cli" Executable="fairyfly.exe" EntryPoint="Windows.FullTrustApplication"
-                 desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="fairyfly CLI"
-        Description="fairyfly command line and MCP server"
-        BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
-        AppListEntry="none" />
-      <Extensions>
+        <!-- the CLI is no application of its own: Partner Center refuses one hidden with AppListEntry="none" -->
         <uap5:Extension Category="windows.appExecutionAlias" Executable="fairyfly.exe" EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">
             <uap5:ExecutionAlias Alias="fairyfly.exe" />

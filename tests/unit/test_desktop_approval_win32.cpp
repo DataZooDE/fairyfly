@@ -100,7 +100,7 @@ TEST_CASE("toast identity: the Store package's tray application, nothing written
     // the manifest's activator, not the MSI's: side by side, COM gives each package's clicks to its own link
     CHECK(t.activator_clsid == fairyfly::tray::contract::kToastActivatorClsidMsix);
     CHECK(t.activator_clsid != fairyfly::tray::contract::kToastActivatorClsidMsi);
-    // `fairyfly link run` through the execution alias runs as the Cli application, which declares no activator
+    // packages up to 2026.10.31: the execution alias ran as a hidden Cli application, which declares no activator
     CHECK(toast_identity(Package::Msix, family + L"!Cli", family).app_id == family + L"!Tray");
     // a package identity without an application id: the family alone
     CHECK(toast_identity(Package::Msix, L"", family).app_id == family + L"!Tray");
