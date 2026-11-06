@@ -167,6 +167,9 @@ try {
         Check ($xml.SelectNodes("//uap:VisualElements[@AppListEntry='none']", $ns).Count -eq 0) 'no application hidden with AppListEntry="none" (the Store refuses headless apps)'
         $alias = One "/f:Package/f:Applications/f:Application[@Id='$codeApp']/f:Extensions/uap5:Extension[@Category='windows.appExecutionAlias' and @Executable='fairyfly.exe']/uap5:AppExecutionAlias"
         Check ($null -ne $alias -and $alias.GetAttribute('Subsystem', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -eq 'console') 'the alias runs fairyfly.exe as a console program'
+        # MakeAppx refuses a console alias unless its application declares SupportsMultipleInstances="true" (0x80080204)
+        $aliasApp = One "/f:Package/f:Applications/f:Application[f:Extensions/uap5:Extension[@Category='windows.appExecutionAlias']]"
+        Check ($null -ne $aliasApp -and $aliasApp.GetAttribute('SupportsMultipleInstances', 'http://schemas.microsoft.com/appx/manifest/desktop/windows10/4') -eq 'true') 'the application with the console alias declares desktop4:SupportsMultipleInstances="true" (MakeAppx requires it)'
         Check ($null -ne (One "//uap5:ExecutionAlias[@Alias='fairyfly.exe']")) 'execution alias fairyfly.exe (terminals, stdio MCP clients)'
         $ids = @($xml.SelectNodes('/f:Package/f:Applications/f:Application', $ns) | ForEach-Object { $_.Id })
         Check ($ids.Count -eq 1 -and $ids[0] -ceq $codeApp) "one application, the tray '$codeApp' ($($ids -join ', '))"

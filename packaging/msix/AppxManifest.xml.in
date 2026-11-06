@@ -54,7 +54,8 @@
   </Resources>
 
   <Applications>
-    <Application Id="Tray" Executable="fairyfly-tray.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="Tray" Executable="fairyfly-tray.exe" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="fairyfly"
         Description="fairyfly cloud link in the system tray (pairing, local MCP server from its menu)"
