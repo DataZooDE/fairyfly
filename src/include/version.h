@@ -3,6 +3,6 @@
 namespace fairyfly {
 
 /// Single source of the CLI version string (--version, response metadata, audit records).
-inline constexpr const char* FAIRYFLY_VERSION = "2026.10.31.3";
+inline constexpr const char* FAIRYFLY_VERSION = "2026.11.06";
 
 } // namespace fairyfly

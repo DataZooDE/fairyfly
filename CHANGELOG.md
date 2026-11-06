@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.11.06
+
+- Microsoft Store package: the `fairyfly.exe` execution alias is declared by the Tray application (with
+  `desktop4:SupportsMultipleInstances="true"`, which MakeAppx requires for a console alias) instead of a hidden `Cli`
+  application with `AppListEntry="none"`, which Partner Center refuses as a "headless app". `fairyfly` in a terminal
+  works as before; it now runs as `<family>!Tray`, the application whose toasts it already used. MSI and winget
+  packages are unchanged.
+
 ## 2026.10.31.3
 
 - Both tray modes ask for confirmation before enabling automatic SAP startup. Declining preserves the setting; disabling remains immediate, consistent with SAP writes.
