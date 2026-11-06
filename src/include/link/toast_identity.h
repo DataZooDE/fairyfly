@@ -29,7 +29,8 @@ struct ToastIdentity {
 };
 
 /// `process_app_id`: GetCurrentApplicationUserModelId of this process (empty: none), e.g. <family>!Tray for the link
-/// tray, <family>!Cli for `fairyfly` through the execution alias.
+/// tray and for `fairyfly` through the execution alias (the tray application declares it), <family>!Cli for the alias of
+/// packages up to 2026.10.31, which had a hidden Cli application.
 /// `package_family`: GetCurrentPackageFamilyName (empty: no package identity), used when the process has a package but
 /// no application id. Under MSIX the toast is always the tray application's: only it declares the activator.
 inline ToastIdentity toast_identity(packaging::Package build, std::wstring_view process_app_id, std::wstring_view package_family) {

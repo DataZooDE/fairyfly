@@ -76,19 +76,7 @@
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="17C79966-EDD0-4906-9F80-49A822C45334" />
         </desktop:Extension>
-      </Extensions>
-    </Application>
-
-    <Application Id="Cli" Executable="fairyfly.exe" EntryPoint="Windows.FullTrustApplication"
-                 desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="fairyfly CLI"
-        Description="fairyfly command line and MCP server"
-        BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
-        AppListEntry="none" />
-      <Extensions>
+        <!-- the CLI is no application of its own: Partner Center refuses one hidden with AppListEntry="none" -->
         <uap5:Extension Category="windows.appExecutionAlias" Executable="fairyfly.exe" EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">
             <uap5:ExecutionAlias Alias="fairyfly.exe" />

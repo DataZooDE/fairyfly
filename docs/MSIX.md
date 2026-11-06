@@ -62,8 +62,11 @@ the same result and that each version is higher than the one before.
   MSI's shortcut. Its `desktop:StartupTask` (`fairyflyLinkTray`) replaces the Run value. It also declares the
   approval toast's COM activator (`{17C79966-…}`, the Store package's own, `-Embedding`) as `com:ExeServer` + `desktop:ToastNotificationActivation`.
   Its AUMID `DataZoo.fairyfly_73q587949tsjt!Tray` is the approval toasts' (see [Approval notifications](#approval-notifications)).
-- **Cli** (`fairyfly.exe`, `AppListEntry="none"`, console subsystem): `uap5:AppExecutionAlias` `fairyfly.exe`. This puts
-  it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not needed.
+- **The CLI** (`fairyfly.exe`, console subsystem) is no application of its own: the Tray application declares the
+  `uap5:AppExecutionAlias` `fairyfly.exe` with `Executable="fairyfly.exe"` (as Windows Terminal does for `wt.exe`). This
+  puts it on every terminal's PATH through `%LOCALAPPDATA%\Microsoft\WindowsApps`, so the MSI's user-PATH entry is not
+  needed. Up to 2026.10.31 it was a second application `Cli` with `AppListEntry="none"`; Partner Center refuses that as a
+  "headless app" (it needs the `HeadlessAppBypass` waiver), so the Store package must not hide an application.
 - `runFullTrust` only. No `unvirtualizedResources` and no `virtualization:ExcludedDirectories`: fairyfly's data is in
   `%USERPROFILE%\.fairyfly`, outside AppData (see [the decision below](#decision-the-data-directory-outside-appdata)).
 - `Assets\Square44x44Logo.png` (44x44), `Square150x150Logo.png` (150x150), `Wide310x150Logo.png` (310x150, the tray's
