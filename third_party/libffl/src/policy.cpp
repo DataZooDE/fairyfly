@@ -357,6 +357,8 @@ bool read_only_refuses(const std::string& tool, const nlohmann::json& args) {
         const std::string w = lower(trim(str("window")));
         return !vkey_read_only_ok(*v, w.empty() || w == "@active" ? -1 : window_index(w));
     }
+    // cleanup deletes the saved connection files fairyfly considers stale: anything but an explicit false deletes
+    if (tool == "gui_connection_list") return args.contains("cleanup") && !(args["cleanup"].is_boolean() && !args["cleanup"].get<bool>());
     if (tool == "gui_popup_close") {  // always acts on a popup: Enter there confirms
         const int64_t v = args.contains("vkey") ? args["vkey"].get<int64_t>() : 12;
         return v < 0 || v > 99 || !vkey_read_only_ok(int(v), 1);
