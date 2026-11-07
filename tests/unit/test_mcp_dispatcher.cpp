@@ -1387,7 +1387,7 @@ TEST_CASE("Dispatcher: gui_batch_read runs read-only steps through the full pipe
     // result_mode=summary works as for gui_batch
     f.calls.clear();
     f.records.clear();
-    const auto compact = d.call_tool("gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"tab", "tabpT2"}}}}})}, {"result_mode", "summary"}},
+    const auto compact = d.call_tool("gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}}})}, {"result_mode", "summary"}},
                                      ctx_with_id());
     REQUIRE_FALSE(compact.is_error);
     REQUIRE(compact.structured);
@@ -1436,6 +1436,8 @@ TEST_CASE("Dispatcher: gui_batch_read refuses the whole batch for any step that 
         {{"tool", "gui_screen_read"}},  // expands every tab
         {{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", false}}}},
         {{"tool", "gui_screen_read"}, {"arguments", {{"only", "editable"}}}},
+        // re-review of #145: a named tab is selected when it is not the current one (restore can fail)
+        {{"tool", "gui_screen_read"}, {"arguments", {{"tab", "tabpT2"}}}},
     };
     for (const auto& step : changing) {
         INFO(step.dump());
