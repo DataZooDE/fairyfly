@@ -246,7 +246,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     // step fills, or fairyfly's read-only guard would refuse a step; never because of gui_batch's own annotation. The
     // guard's id and label rules may only make read-only grants stricter: with a write grant fairyfly does not run it.
     bool step_changes = false;
-    if (tool == "gui_batch") {
+    if (policy::is_batch(tool)) {
         std::lock_guard<std::mutex> l(mu_);
         for (auto& t : checked.tools)
             if (auto i = local_.find(t); i == local_.end() || i->second.destructive) step_changes = true;
@@ -254,7 +254,7 @@ Agent::Outcome Agent::serve(const proto::Frame& req, std::shared_ptr<const std::
     // A single call: its annotation, a fill, or what the guard would refuse - the same rule as for a batch step. So
     // gui_popup_close (annotated as no change in fairyfly's catalog) asks only for a key that confirms the popup
     // (Enter: "Really delete? Yes"), never for F12 / Shift+F3 / F3, which cancel it (policy::read_only_refuses).
-    const bool change = checked.writes || checked.read_only_refused || (tool == "gui_batch" ? step_changes : lt.destructive);
+    const bool change = checked.writes || checked.read_only_refused || (policy::is_batch(tool) ? step_changes : lt.destructive);
     ApprovalResult r;
     bool asked = false;
     auto late = [&] { return cancel && cancel->load(); };  // the gateway stopped waiting (its approval deadline)

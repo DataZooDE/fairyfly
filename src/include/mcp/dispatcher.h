@@ -300,7 +300,8 @@ private:
                           bool batch_observation_required = false);
     ToolResult execute_call(const std::string& name, const json& args, McpCallRecord& record, std::string& code,
                             const CallContext& ctx, bool rate_prepaid = false, bool batch_observation_required = false);
-    ToolResult run_batch(const json& args, const CallContext& ctx);
+    /// gui_batch or gui_batch_read (`batch_tool`): items validated, authorized and run in order.
+    ToolResult run_batch(const std::string& batch_tool, const json& args, const CallContext& ctx);
     ToolResult audited(const std::string& tool, const std::function<ToolResult(McpCallRecord&, std::string&)>& fn,
                        const CallContext& ctx, std::string* code_out, McpCallRecord* record_out = nullptr);
     Result invoke(const std::vector<std::string>& argv);

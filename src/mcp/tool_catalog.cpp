@@ -675,11 +675,11 @@ std::vector<ToolSpec> read_tool_specs() {
             return argv;
         }, false));
 
-    // gui_batch --------------------------------------------------------------------------------
+    // gui_batch and gui_batch_read ---------------------------------------------------------------
     {
         json item = {{"type", "object"}, {"additionalProperties", false}, {"required", json::array({"tool"})},
                      {"properties", {{"tool", {{"type", "string"}, {"minLength", 1},
-                                               {"description", "Tool name, e.g. gui_element_click. gui_batch cannot be nested."}}},
+                                               {"description", "Tool name, e.g. gui_element_click. gui_batch and gui_batch_read cannot be nested."}}},
                                      {"arguments", {{"type", "object"}, {"description", "Arguments of that tool."}}}}}};
         item["properties"]["include_result"] = boolean("In summary mode, include this item's full text result (and image content, if any).");
         item["properties"]["bind"] = str_min("gui_screen_find only: bind its one unambiguous element ID to this name for later items.");
@@ -689,14 +689,24 @@ std::vector<ToolSpec> read_tool_specs() {
                             {"transaction", str_min("Exact current transaction code.")}}}};
         item["properties"]["expect"] = screen_condition;
         item["properties"]["when"] = screen_condition;
-        json schema = make_schema(
-            {{"items", {{"type", "array"}, {"minItems", 1}, {"maxItems", 20}, {"items", item},
-                        {"description", "Tool calls to run in order (1-20)."}}},
-             {"stop_on_error", boolean("Stop at the first failing item (default true).")},
-             {"result_mode", enum_str({"full", "summary"}, "full (default) returns all item text; summary returns ordered status and errors, with full text only for items marked include_result.")},
-             {"connection", conn},
-             {"lease_id", str_min("Owner-mode HTTP: lease held for the entire single-session batch.")}},
-            {"items"});
+        const auto batch_schema = [&](const json& items_item, const char* lease_text) {
+            return make_schema(
+                {{"items", {{"type", "array"}, {"minItems", 1}, {"maxItems", 20}, {"items", items_item},
+                            {"description", "Tool calls to run in order (1-20)."}}},
+                 {"stop_on_error", boolean("Stop at the first failing item (default true).")},
+                 {"result_mode", enum_str({"full", "summary"}, "full (default) returns all item text; summary returns ordered status and errors, with full text only for items marked include_result.")},
+                 {"connection", conn},
+                 {"lease_id", str_min(lease_text)}},
+                {"items"});
+        };
+        const auto no_cli = [](const char* name) {
+            return [name](const json&, const Policy&) -> Argv {
+                throw std::invalid_argument(std::string(name) + " is executed by the dispatcher and has no CLI mapping");
+            };
+        };
+        std::string read_steps;
+        for (const auto& tool : command_table::read_only_step_tools()) read_steps += (read_steps.empty() ? "" : ", ") + tool;
+
         specs.push_back(make_spec(
             "gui_batch", "Run several SAP tool calls",
             "Runs up to 20 tool calls in order in ONE round trip, e.g. [gui_transaction_start, gui_screen_read]{?gui_element_fill: or "
@@ -709,13 +719,31 @@ std::vector<ToolSpec> read_tool_specs() {
             "A gui_screen_find item may bind its unique match; a later element item may use ref instead of an absolute element ID. "
             "Set expect on gui_screen_find to stop if its title/transaction differ; set when on the immediately following item to run it only if they match. "
             "Batch a known action and its verification; return only observations needed for the next decision. After an uncertain write, inspect the screen before retrying. "
-            "gui_batch cannot be nested. On owner-restricted HTTP, pass one explicit connection and, for "
+            "gui_batch and gui_batch_read cannot be nested. On owner-restricted HTTP, pass one explicit connection and, for "
             "navigation or writes, one lease_id held across the whole batch. Mixed-session batches are refused. "
-            "Because items can change SAP state, this tool is annotated destructive.",
-            schema, annotations("Run several SAP tool calls", false, true, false), ToolOutput::Json,
-            [](const json&, const Policy&) -> Argv {
-                throw std::invalid_argument("gui_batch is executed by the dispatcher and has no CLI mapping");
-            }, false));
+            "Because items can change SAP state (navigate, click, fill, send keys, close popups, select menus), this tool is "
+            "annotated destructive{?gui_batch_read:; to only read, use gui_batch_read}.",
+            batch_schema(item, "Owner-mode HTTP: lease held for the entire single-session batch."),
+            annotations("Run several SAP tool calls", false, true, false), ToolOutput::Json, no_cli("gui_batch"), false));
+
+        // gui_batch_read: the same items, restricted to tools that change nothing (refused up front, nothing runs)
+        json read_item = item;
+        read_item["properties"]["tool"]["description"] = "Tool name, one of: " + read_steps + ".";
+        read_item["properties"]["tool"]["enum"] = command_table::read_only_step_tools();
+        read_item["properties"]["ref"] = str_min("gui_element_get only: use the named field bound by an earlier gui_screen_find item on the same screen.");
+        specs.push_back(make_spec(
+            "gui_batch_read", "Run several read-only SAP tool calls",
+            "Runs up to 20 READ-ONLY tool calls in order in ONE round trip, e.g. [gui_screen_find, gui_element_get, gui_menu_list]. "
+            "Items may only be these tools, which change nothing in SAP or on the PC: " + read_steps + ". "
+            "Any other item (a transaction start, click, fill, key, popup, menu selection, F4 help, session or connection change, "
+            "or a nested batch) refuses the WHOLE batch before any item runs (BATCH_NOT_READ_ONLY){?gui_batch:; use gui_batch for steps that can change state}. "
+            "Every item goes through the same policy, rate limit and audit trail as a standalone call. Results are returned in "
+            "order; stop_on_error (default true) skips the rest after the first failure. Use result_mode=summary to omit "
+            "unrequested item payloads; set include_result on a specific item to return its text. A gui_screen_find item may bind "
+            "its unique match for a later gui_element_get item (ref); expect/when guard items by the window title or transaction. "
+            "On owner-restricted HTTP, pass one explicit connection; mixed-session batches are refused.",
+            batch_schema(read_item, "Owner-mode HTTP: lease held for the entire single-session batch (only needed where a read item itself needs one)."),
+            annotations("Run several read-only SAP tool calls", true, false, true), ToolOutput::Json, no_cli("gui_batch_read"), true));
     }
 
     return specs;

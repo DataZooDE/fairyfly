@@ -47,7 +47,7 @@ SessionRoutePlan plan_session_route(const Principal& principal, const std::strin
         plan.kind = SessionRoutePlan::Kind::GlobalControl;
         return plan;
     }
-    const bool batch = tool == "gui_batch";
+    const bool batch = command_table::is_batch_tool(tool);
     const bool accepts_connection = batch ||
         (found->def.input_schema.is_object() &&
          found->def.input_schema.value("properties", json::object()).contains("connection"));

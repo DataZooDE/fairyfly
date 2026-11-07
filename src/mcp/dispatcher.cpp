@@ -2655,12 +2655,13 @@ std::optional<CommandDispatcher::CallRefusal> CommandDispatcher::prepare_owner_b
     return std::nullopt;
 }
 
-ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext& ctx) {
-    const ToolSpec* spec = find_spec("gui_batch");
+ToolResult CommandDispatcher::run_batch(const std::string& batch_tool, const json& raw_args, const CallContext& ctx) {
+    const ToolSpec* spec = find_spec(batch_tool);
+    const bool read_only_batch = batch_tool == "gui_batch_read";
     json args = raw_args.is_null() ? json::object() : raw_args;
     // a refusal of the whole batch: one audit record
     auto batch_fail = [&](const std::string& reason, const std::string& message) {
-        return audited("gui_batch", [&](McpCallRecord&, std::string& code) {
+        return audited(batch_tool, [&](McpCallRecord&, std::string& code) {
             code = reason;
             return error_result(reason, message);
         }, ctx, nullptr);
@@ -2671,6 +2672,25 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
     if (policy_.audit_required && (!hook_ || mcp_audit_failed()))
         return batch_fail("AUDIT_UNAVAILABLE", "The required audit trail is unavailable; no batch action was run.");
 
+    // gui_batch_read runs only steps that change nothing (Trait::ReadOnlyStep): any other item, a nested batch included,
+    // refuses the whole batch before anything runs. Checked before the schema (whose tool enum would say the same as
+    // INVALID_ARGUMENT) so that the refusal names its reason.
+    if (read_only_batch && args.is_object() && args.contains("items") && args["items"].is_array()) {
+        std::size_t index = 0;
+        for (const auto& item : args["items"]) {
+            ++index;
+            if (!item.is_object() || !item.contains("tool") || !item["tool"].is_string()) continue;  // the schema reports it
+            const std::string tool = item["tool"].get<std::string>();
+            if (command_table::tool_has(tool, command_table::Trait::ReadOnlyStep)) continue;
+            std::string allowed;
+            for (const auto& name : command_table::read_only_step_tools()) allowed += (allowed.empty() ? "" : ", ") + name;
+            return batch_fail("BATCH_NOT_READ_ONLY",
+                              "batch item " + std::to_string(index) + " (" + tool.substr(0, 64) +
+                                  ") is not a read-only step; gui_batch_read runs only " + allowed +
+                                  ". No item was run; use gui_batch for steps that can change state.");
+        }
+    }
+
     // Validate the whole batch up front (one audit record when it is rejected).
     std::string problem;
     try {
@@ -2678,8 +2698,9 @@ ToolResult CommandDispatcher::run_batch(const json& raw_args, const CallContext&
         std::set<std::string> binding_names;
         std::string previous_tool;
         for (const auto& item : args["items"]) {
-            if (item["tool"] == "gui_batch") throw std::invalid_argument("gui_batch cannot be nested inside gui_batch");
             const std::string tool = item["tool"].get<std::string>();
+            if (command_table::is_batch_tool(tool))
+                throw std::invalid_argument(tool + " cannot be nested inside " + batch_tool);
             if (item.contains("expect") && tool != "gui_screen_find")
                 throw std::invalid_argument("expect requires gui_screen_find");
             if (item.contains("when") && previous_tool != "gui_screen_find")
@@ -3029,7 +3050,7 @@ ToolResult CommandDispatcher::call_tool(const std::string& name, const json& arg
             spdlog::warn("Looking up SAP Logon before {} failed: {}", name, e.what());
         }
     }
-    if (name == "gui_batch" && find_spec("gui_batch")) return run_batch(args, ctx);
+    if (command_table::is_batch_tool(name) && find_spec(name)) return run_batch(name, args, ctx);
     return run_single(name, args, ctx);
 }
 

@@ -36,7 +36,7 @@ std::string join(const std::vector<std::string>& parts, const std::string& sep) 
 
 const std::vector<Row>& rows() {
     static const std::vector<Row> table = {
-        {{"session", "list"}, "List all SAP GUI connections, sessions, and windows", "SESSION", true, nullptr, false, kListing},
+        {{"session", "list"}, "List all SAP GUI connections, sessions, and windows", "SESSION", true, nullptr, false, kListing | Trait::ReadOnlyStep},
         {{"session", "default"}, "Show or configure the local default SAP Logon connection", "SESSION", false, nullptr},
         {{"session", "attach"}, "Attach to a running SAP GUI window or exact session ID", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "launch"}, "Launch SAP Logon connection", "SESSION", true, nullptr, false, kSessionSetup},
@@ -44,19 +44,19 @@ const std::vector<Row>& rows() {
         {{"session", "disconnect"}, "Remove a saved connection; optionally close its SAP GUI session", "SESSION", true, nullptr, false, Trait::WorkerBound | Trait::LeaseCapable},
         {{"session", "lease"}, "Acquire, renew or release an MCP session lease", "SESSION", true, nullptr, true, kSessionSetup},
         {{"connection", "list"}, "List and manage saved fairyfly connections", "CONNECTION", true, nullptr, false, kListing},
-        {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr, false, kOnScreenLeased | Trait::ScreenData, Render::ScreenRead},
-        {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr, false, kOnScreen | Trait::ScreenData, Render::ScreenFind},
-        {{"screen", "capture"}, "Capture screenshot", "SCREEN", true, nullptr, false, kOnScreen},
-        {{"menu", "list"}, "List the menu bar tree", "MENU", true, nullptr, false, kOnScreen | Trait::ScreenData},
+        {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr, false, kOnScreenLeased | Trait::ScreenData | Trait::ReadOnlyStep, Render::ScreenRead},
+        {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr, false, kOnScreen | Trait::ScreenData | Trait::ReadOnlyStep, Render::ScreenFind},
+        {{"screen", "capture"}, "Capture screenshot", "SCREEN", true, nullptr, false, kOnScreen | Trait::ReadOnlyStep},
+        {{"menu", "list"}, "List the menu bar tree", "MENU", true, nullptr, false, kOnScreen | Trait::ScreenData | Trait::ReadOnlyStep},
         {{"menu", "select"}, "Select a menu item by its text path", "MENU", true, nullptr, false, kOnScreenLeased},
-        {{"element", "get"}, "Read field value", "ELEMENT", true, nullptr, false, kOnScreenLeased | Trait::ScreenData},
+        {{"element", "get"}, "Read field value", "ELEMENT", true, nullptr, false, kOnScreenLeased | Trait::ScreenData | Trait::ReadOnlyStep},
         {{"element", "click"}, "Click UI element", "ELEMENT", true, nullptr, false, kOnScreenLeased},
         {{"element", "fill"}, "Fill text field", "ELEMENT", true, nullptr, false, kOnScreenLeased},
         {{"element", "f4"}, "Press F4 to open search help dialog for a field", "ELEMENT", true, nullptr, false, kOnScreenLeased},
         {{"key", "send"}, "Send a key (enter, f1..f12, shift+f1..shift+f12 or a raw VKey number) to a window", "KEY", true, nullptr, false, kOnScreenLeased},
         {{"popup", "close"}, "Close the active popup (sends F12 to wnd[N>0]) and verify it closed", "POPUP", true, nullptr, false, kOnScreenLeased},
         {{"transaction", "start"}, "Execute SAP transaction", "TRANSACTION", true, nullptr, false, Trait::WorkerBound | Trait::ScreenBound | Trait::LeaseCapable},
-        {{"credentials", "list"}, "List stored credentials (never shows passwords)", "CREDENTIALS", true, nullptr, false, kListing},
+        {{"credentials", "list"}, "List stored credentials (never shows passwords)", "CREDENTIALS", true, nullptr, false, kListing | Trait::ReadOnlyStep},
         {{"credentials", "set"}, "Store a credential (the password is prompted for or read from stdin)", "CREDENTIALS", false, nullptr},
         {{"credentials", "delete"}, "Delete a stored credential", "CREDENTIALS", false, nullptr},
         {{"credentials", "import-env"}, "Import a colon-separated credential file into the store", "CREDENTIALS", false, nullptr},
@@ -70,8 +70,10 @@ const std::vector<Row>& rows() {
         {{"update", "apply"}, "Download, verify and install the latest fairyfly release", "UPDATE", false, nullptr},
         {{"mcp"}, "Start the MCP server (stdio)", "MCP SERVER", false, nullptr},
         {{"mcp", "tools"}, "Print the MCP tool table", "MCP SERVER", false, nullptr},
-        {{"doctor"}, "Run comprehensive preflight environment and scripting diagnostics", "SYSTEM", true, "system", false, Trait::GlobalControl | Trait::Targetless, Render::Doctor},
+        {{"doctor"}, "Run comprehensive preflight environment and scripting diagnostics", "SYSTEM", true, "system", false, Trait::GlobalControl | Trait::Targetless | Trait::ReadOnlyStep, Render::Doctor},
         {{"batch"}, "Run many commands from stdin (or --file), one per line, in one process", "SYSTEM", true, "batch", false, static_cast<unsigned>(Trait::Targetless)},
+        // MCP only: gui_batch restricted to the ReadOnlyStep tools (gui_batch itself can run state-changing steps)
+        {{"batch_read"}, "Run several read-only MCP tool calls in one round trip", "SYSTEM", true, "batch", true, static_cast<unsigned>(Trait::Targetless)},
     };
     return table;
 }
@@ -102,6 +104,15 @@ std::string CommandSpec::path_string() const { return join(path, " "); }
 bool can_continue_after_startup(const std::string& tool_name) {
     return tool_has(tool_name, Trait::ScreenData) || tool_name == "gui_screen_capture" ||
         tool_name == "gui_transaction_start";
+}
+
+bool is_batch_tool(const std::string& tool_name) { return tool_name == "gui_batch" || tool_name == "gui_batch_read"; }
+
+std::vector<std::string> read_only_step_tools() {
+    std::vector<std::string> out;
+    for (const auto& spec : all_commands())
+        if (spec.is_tool() && spec.has(Trait::ReadOnlyStep)) out.push_back(spec.tool_name);
+    return out;
 }
 
 bool tool_has(const std::string& tool_name, Trait trait) {

@@ -455,7 +455,7 @@ TEST_CASE("cached route admits behind a busy same-session worker, then fresh rou
 }
 
 TEST_CASE("implicit startup routing rechecks a cached session before choosing its executor", "[mcp][startup][route-coordinator][startup-cache]") {
-    for (const std::string tool : {"gui_screen_read", "gui_batch"}) {
+    for (const std::string tool : {"gui_screen_read", "gui_batch", "gui_batch_read"}) {
         for (const bool sticky : {false, true}) {
             INFO(tool << " sticky=" << sticky);
             SessionExecutorPool admission(2, 8, 5000);
@@ -480,7 +480,7 @@ TEST_CASE("implicit startup routing rechecks a cached session before choosing it
                     }
                     return facts;
                 }, [](const std::string&, int) { return std::make_shared<EmptyProvider>(); });
-            const json args = tool == "gui_batch" ? json{{"items", json::array({{{"tool", "gui_screen_read"}}})}} : json::object();
+            const json args = tool != "gui_screen_read" ? json{{"items", json::array({{{"tool", "gui_screen_read"}}})}} : json::object();
             const auto ready = coordinator.route_cached(caller, tool, args);
             REQUIRE(ready.error_code.empty());
             REQUIRE(ready.provider);

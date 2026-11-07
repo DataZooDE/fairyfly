@@ -155,7 +155,8 @@ with one SAP connection, which avoids starting fairyfly for each step. A line is
 name, either as a JSON array (`["transaction","start","SM37"]`) or as shell-style words (double quotes; a backslash
 escapes a space, quote or backslash). Blank lines and lines starting with `#` are ignored. Each line prints one compact
 JSON result. A failing line does not stop the batch unless `--stop-on-error` is given; the exit code is 1 if any line
-failed. `fairyfly --read-only batch` applies the read-only guard to every line.
+failed. `fairyfly --read-only batch` applies the read-only guard to every line. (Over MCP, `gui_batch` runs tool calls
+in one round trip and `gui_batch_read` only read-only ones; see [MCP.md](MCP.md). Neither is a CLI command.)
 
 ~~~powershell
 @'

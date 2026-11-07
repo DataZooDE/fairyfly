@@ -425,6 +425,18 @@ TEST_CASE("command table: tool classification has one source", "[command_table][
             "gui_element_click", "gui_element_fill", "gui_element_f4", "gui_key_send", "gui_popup_close"});
     // returns SAP screen content: the result gets the "untrusted data" header
     CHECK(tools_with(ct::Trait::ScreenData) == S{"gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list"});
+    // changes nothing in SAP or on the PC, whatever its arguments: the only steps gui_batch_read runs (owner decision
+    // 2026-11-07). Not navigation (transaction start, F4, attach), not gui_connection_list (cleanup deletes files).
+    CHECK(tools_with(ct::Trait::ReadOnlyStep) ==
+          S{"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list", "gui_element_get",
+            "gui_credentials_list", "gui_doctor"});
+    CHECK(ct::read_only_step_tools() ==
+          std::vector<std::string>{"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list",
+                                   "gui_element_get", "gui_credentials_list", "gui_doctor"});
+    CHECK(ct::is_batch_tool("gui_batch"));
+    CHECK(ct::is_batch_tool("gui_batch_read"));
+    CHECK_FALSE(ct::is_batch_tool("gui_screen_read"));
+    CHECK(ct::find_by_tool("gui_batch_read")->mcp_only);
     CHECK(ct::tool_has("gui_screen_read", ct::Trait::WorkerBound));
     CHECK_FALSE(ct::tool_has("gui_no_such_tool", ct::Trait::WorkerBound));
     CHECK(ct::path_has({"screen", "read"}, ct::Trait::WorkerBound));

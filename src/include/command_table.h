@@ -21,6 +21,7 @@ enum class Trait : unsigned {
     ScreenBound = 1u << 6,    ///< acts on one established session's screen (owner-mode batch items)
     ActsOnScreen = 1u << 7,   ///< runs inside the transaction open now (T-code allowlists)
     ScreenData = 1u << 8,     ///< returns SAP screen content (results get the "untrusted data" header)
+    ReadOnlyStep = 1u << 9,   ///< changes nothing in SAP or on the PC, whatever its arguments: a step gui_batch_read runs
 };
 constexpr unsigned operator|(Trait a, Trait b) { return static_cast<unsigned>(a) | static_cast<unsigned>(b); }
 constexpr unsigned operator|(unsigned a, Trait b) { return a | static_cast<unsigned>(b); }
@@ -64,6 +65,10 @@ const CommandSpec* find_by_tool(const std::string& tool_name);
 /// The tool / the CLI command has the trait (false for unknown names).
 bool tool_has(const std::string& tool_name, Trait trait);
 bool can_continue_after_startup(const std::string& tool_name);
+/// gui_batch or gui_batch_read: a tool whose `items` are calls of other tools, run by the dispatcher.
+bool is_batch_tool(const std::string& tool_name);
+/// The tools gui_batch_read accepts as items (Trait::ReadOnlyStep), in command table order.
+std::vector<std::string> read_only_step_tools();
 bool path_has(const std::vector<std::string>& path, Trait trait);
 /// The render of the tool / the CLI command (Generic for unknown names).
 Render render_of_tool(const std::string& tool_name);

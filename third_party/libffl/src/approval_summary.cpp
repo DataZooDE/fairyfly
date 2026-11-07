@@ -108,7 +108,7 @@ std::string step_summary(const std::string& tool, const json& args) {
 
 std::vector<std::string> steps(const std::string& tool, const json& args) {
     std::vector<std::string> out;
-    if (tool == "gui_batch" && args.is_object() && args.contains("items") && args["items"].is_array()) {
+    if ((tool == "gui_batch" || tool == "gui_batch_read") && args.is_object() && args.contains("items") && args["items"].is_array()) {
         for (auto& item : args["items"]) {
             if (!item.is_object() || !item.contains("tool") || !item["tool"].is_string()) out.push_back("invalid step");
             else out.push_back(step_summary(item["tool"], item.contains("arguments") ? item["arguments"] : json::object()));
@@ -122,7 +122,7 @@ std::vector<std::string> steps(const std::string& tool, const json& args) {
 std::optional<std::string> summarize(const std::string& tool, const json& args) {
     std::string out;
     const auto list = steps(tool, args);
-    if (tool == "gui_batch" && args.is_object() && args.contains("items") && args["items"].is_array()) {
+    if ((tool == "gui_batch" || tool == "gui_batch_read") && args.is_object() && args.contains("items") && args["items"].is_array()) {
         // one approval covers every step: the summary names every one, numbered, or the call is not asked for at all
         out = "run " + std::to_string(list.size()) + (list.size() == 1 ? " step: " : " steps: ");
         for (std::size_t n = 0; n < list.size(); ++n) out += (n ? "; " : "") + std::to_string(n + 1) + ". " + list[n];
