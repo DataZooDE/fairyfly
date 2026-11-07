@@ -2688,7 +2688,7 @@ ToolResult CommandDispatcher::run_batch(const std::string& batch_tool, const jso
                 if (why.empty()) continue;
                 return batch_fail("BATCH_NOT_READ_ONLY",
                                   "batch item " + std::to_string(index) + " (" + tool + "): " + why +
-                                      "; in gui_batch_read a screen read must pass no_tabs=true or name one tab, and "
+                                      "; in gui_batch_read a screen read must pass no_tabs=true (no tab), and "
                                       "gui_element_get must not activate a tab. No item was run; use gui_batch to select tabs.");
             }
             std::string allowed;

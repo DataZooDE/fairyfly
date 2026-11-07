@@ -5,7 +5,7 @@
 - New MCP tool `gui_batch_read`: up to 20 read-only tool calls in one round trip, with the step format of `gui_batch`
   (`include_result`, `bind`/`ref`, `expect`/`when`, `result_mode`). Its items may only be `gui_session_list`,
   `gui_screen_read`, `gui_screen_find`, `gui_screen_capture`, `gui_menu_list`, `gui_element_get`,
-  `gui_credentials_list` and `gui_doctor`, and screen reads must pass `no_tabs=true` or name one `tab` (`gui_element_get`
+  `gui_credentials_list` and `gui_doctor`, and screen reads must pass `no_tabs=true`, without `tab` (`gui_element_get`
   without `activate_tab`), since selecting SAP tabs is no read; any other step (navigation, clicks, fills, keys, popups, menus, session or
   connection changes, nested batches) refuses the whole call with `BATCH_NOT_READ_ONLY` before any item runs. It is
   annotated read-only (`readOnlyHint: true`, `destructiveHint: false`), listed in read-only mode and needs the `batch`

@@ -25,7 +25,7 @@ enum class Trait : unsigned {
     ScreenData = 1u << 8,     ///< returns SAP screen content (results get the "untrusted data" header)
     ReadOnlyStep = 1u << 9,   ///< a step gui_batch_read runs: changes no SAP data and nothing on the PC; the dispatcher
                               ///< also refuses its tab-selecting arguments (gui_element_get activate_tab=true,
-                              ///< gui_screen_read without no_tabs or tab; see batch_read_tab_selection)
+                              ///< gui_screen_read without no_tabs=true, a named tab included; see batch_read_tab_selection)
 };
 constexpr unsigned operator|(Trait a, Trait b) { return static_cast<unsigned>(a) | static_cast<unsigned>(b); }
 constexpr unsigned operator|(unsigned a, Trait b) { return a | static_cast<unsigned>(b); }
@@ -74,7 +74,8 @@ bool is_batch_tool(const std::string& tool_name);
 /// The tools gui_batch_read accepts as items (Trait::ReadOnlyStep), in command table order.
 std::vector<std::string> read_only_step_tools();
 /// Why the arguments of a gui_batch_read item would select a SAP tab (gui_element_get activate_tab=true,
-/// gui_screen_read without no_tabs=true or one named tab: mcp::lease_required_for_call), empty when they do not.
+/// gui_screen_read without no_tabs=true, also with a named `tab`, which is selected when it is not the current one),
+/// empty when they do not.
 std::string batch_read_tab_selection(const std::string& tool_name, const nlohmann::json& args);
 bool path_has(const std::vector<std::string>& path, Trait trait);
 /// The render of the tool / the CLI command (Generic for unknown names).

@@ -16,7 +16,8 @@ bool is_batch(const std::string& tool);
 // gui_element_get, gui_credentials_list (still dangerous as a step), gui_doctor. The tool alone; see read_only_args.
 bool read_only_step(const std::string& tool);
 // The step's arguments select no SAP tab (fairyfly's lease_required_for_call): gui_element_get without
-// activate_tab=true, gui_screen_read only with no_tabs=true or one named tab. Empty when fine, else why not.
+// activate_tab=true, gui_screen_read only with no_tabs=true (a named tab is selected when it is not the current one).
+// Empty when fine, else why not.
 std::string tab_selection(const std::string& tool, const nlohmann::json& args);
 
 struct Grants {

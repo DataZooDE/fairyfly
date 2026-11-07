@@ -36,8 +36,8 @@ std::string tab_selection(const std::string& tool, const nlohmann::json& args) {
         return "activate_tab selects the element's SAP tab";
     if (tool == "gui_screen_read") {
         const bool no_tabs = args.is_object() && args.contains("no_tabs") && args["no_tabs"].is_boolean() && args["no_tabs"].get<bool>();
-        const bool one_tab = args.is_object() && args.contains("tab") && args["tab"].is_string() && !args["tab"].get<std::string>().empty();
-        if (!no_tabs && !one_tab) return "a screen read without no_tabs=true or tab selects every SAP tab";
+        if (args.is_object() && args.contains("tab")) return "a screen read of a named tab selects that tab when it is not the current one";
+        if (!no_tabs) return "a screen read without no_tabs=true selects every SAP tab";
     }
     return "";
 }
@@ -456,8 +456,8 @@ CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::j
                                                    "gui_credentials_list and gui_doctor; use gui_batch for steps that can change state");
         if (reads_only)  // an allowed tool that would select SAP tabs: no read-only step either
             if (const auto why = tab_selection(t, item.contains("arguments") ? item["arguments"] : nlohmann::json::object()); !why.empty())
-                return deny("BATCH_NOT_READ_ONLY", at + t + ": " + why + "; in gui_batch_read a screen read must pass no_tabs=true or "
-                                                       "name one tab, and gui_element_get must not activate a tab");
+                return deny("BATCH_NOT_READ_ONLY", at + t + ": " + why + "; in gui_batch_read a screen read must pass no_tabs=true "
+                                                       "(no tab), and gui_element_get must not activate a tab");
         if (is_batch(t)) return bad(at + t + " cannot be nested");
         if (is_dangerous(t) || !tool_allowed(g.tools, t)) return deny("POLICY_DENIED", at + t + " is not permitted for this user");
         auto step = check_step(g, t, a);

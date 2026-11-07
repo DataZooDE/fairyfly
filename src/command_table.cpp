@@ -122,8 +122,8 @@ std::string batch_read_tab_selection(const std::string& tool_name, const nlohman
         return "activate_tab selects the element's SAP tab";
     if (tool_name == "gui_screen_read") {
         const bool no_tabs = args.contains("no_tabs") && args["no_tabs"].is_boolean() && args["no_tabs"].get<bool>();
-        const bool one_tab = args.contains("tab") && args["tab"].is_string() && !args["tab"].get<std::string>().empty();
-        if (!no_tabs && !one_tab) return "a screen read without no_tabs=true or tab selects every SAP tab";
+        if (args.contains("tab")) return "a screen read of a named tab selects that tab when it is not the current one";
+        if (!no_tabs) return "a screen read without no_tabs=true selects every SAP tab";
     }
     return {};
 }
