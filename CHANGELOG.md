@@ -1,16 +1,20 @@
 # Changelog
 
-## Unreleased
+## 2026.11.07
 
 - New MCP tool `gui_batch_read`: up to 20 read-only tool calls in one round trip, with the step format of `gui_batch`
   (`include_result`, `bind`/`ref`, `expect`/`when`, `result_mode`). Its items may only be `gui_session_list`,
   `gui_screen_read`, `gui_screen_find`, `gui_screen_capture`, `gui_menu_list`, `gui_element_get`,
-  `gui_credentials_list` and `gui_doctor`, and screen reads must pass `no_tabs=true`, without `tab` (`gui_element_get`
-  without `activate_tab`), since selecting SAP tabs is no read; any other step (navigation, clicks, fills, keys, popups, menus, session or
-  connection changes, nested batches) refuses the whole call with `BATCH_NOT_READ_ONLY` before any item runs. It is
-  annotated read-only (`readOnlyHint: true`, `destructiveHint: false`), listed in read-only mode and needs the `batch`
-  scope. `gui_batch` is unchanged and stays annotated destructive; its description points to `gui_batch_read` for
-  reads. AI directories (Anthropic's Claude directory, OpenAI's) refuse one tool that mixes reads and writes.
+  `gui_credentials_list` and `gui_doctor`; screen reads must pass `no_tabs=true` (a named `tab` is refused too) and
+  `gui_element_get` must not set `activate_tab`, since selecting SAP tabs is no read. Any other step (navigation,
+  clicks, fills, keys, popups, menus, session or connection changes, nested batches) refuses the whole call with
+  `BATCH_NOT_READ_ONLY` before any item runs. It is annotated read-only (`readOnlyHint: true`, `destructiveHint:
+  false`), listed in read-only mode and needs the `batch` scope. `gui_batch` is unchanged and stays annotated
+  destructive; its description points to `gui_batch_read` for reads. AI directories (Anthropic's Claude directory,
+  OpenAI's) refuse one tool that mixes reads and writes.
+- Cloud link (libffl from gateway #214, including #216): the link checks `gui_batch_read`'s steps like `gui_batch`'s
+  (grants, screenshots, transaction lists, the same read-only and tab rules), and `gui_connection_list` with `cleanup`
+  other than false counts as a change (it deletes connection files): it needs a write grant and the desktop's approval.
 
 ## 2026.11.06
 
