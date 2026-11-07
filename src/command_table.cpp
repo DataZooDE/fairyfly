@@ -115,6 +115,19 @@ std::vector<std::string> read_only_step_tools() {
     return out;
 }
 
+std::string batch_read_tab_selection(const std::string& tool_name, const nlohmann::json& args) {
+    if (!args.is_object()) return {};
+    if (tool_name == "gui_element_get" && args.contains("activate_tab") &&
+        !(args["activate_tab"].is_boolean() && !args["activate_tab"].get<bool>()))
+        return "activate_tab selects the element's SAP tab";
+    if (tool_name == "gui_screen_read") {
+        const bool no_tabs = args.contains("no_tabs") && args["no_tabs"].is_boolean() && args["no_tabs"].get<bool>();
+        const bool one_tab = args.contains("tab") && args["tab"].is_string() && !args["tab"].get<std::string>().empty();
+        if (!no_tabs && !one_tab) return "a screen read without no_tabs=true or tab selects every SAP tab";
+    }
+    return {};
+}
+
 bool tool_has(const std::string& tool_name, Trait trait) {
     const CommandSpec* spec = find_by_tool(tool_name);
     return spec && spec->has(trait);

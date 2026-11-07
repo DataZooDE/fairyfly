@@ -734,7 +734,9 @@ std::vector<ToolSpec> read_tool_specs() {
         specs.push_back(make_spec(
             "gui_batch_read", "Run several read-only SAP tool calls",
             "Runs up to 20 READ-ONLY tool calls in order in ONE round trip, e.g. [gui_screen_find, gui_element_get, gui_menu_list]. "
-            "Items may only be these tools, which change nothing in SAP or on the PC: " + read_steps + ". "
+            "Items may only be these tools, which change no SAP data and nothing on the PC: " + read_steps + "; "
+            "screen reads in a read-only batch must name one tab or pass no_tabs=true, and gui_element_get must not set "
+            "activate_tab (both would select SAP tabs). "
             "Any other item (a transaction start, click, fill, key, popup, menu selection, F4 help, session or connection change, "
             "or a nested batch) refuses the WHOLE batch before any item runs (BATCH_NOT_READ_ONLY){?gui_batch:; use gui_batch for steps that can change state}. "
             "Every item goes through the same policy, rate limit and audit trail as a standalone call. Results are returned in "

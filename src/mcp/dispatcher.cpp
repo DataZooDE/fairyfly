@@ -2681,7 +2681,16 @@ ToolResult CommandDispatcher::run_batch(const std::string& batch_tool, const jso
             ++index;
             if (!item.is_object() || !item.contains("tool") || !item["tool"].is_string()) continue;  // the schema reports it
             const std::string tool = item["tool"].get<std::string>();
-            if (command_table::tool_has(tool, command_table::Trait::ReadOnlyStep)) continue;
+            if (command_table::tool_has(tool, command_table::Trait::ReadOnlyStep)) {
+                // an allowed tool whose arguments select SAP tabs is no read-only step either (review of #145)
+                const json arguments = item.contains("arguments") ? item["arguments"] : json::object();
+                const std::string why = command_table::batch_read_tab_selection(tool, arguments);
+                if (why.empty()) continue;
+                return batch_fail("BATCH_NOT_READ_ONLY",
+                                  "batch item " + std::to_string(index) + " (" + tool + "): " + why +
+                                      "; in gui_batch_read a screen read must pass no_tabs=true or name one tab, and "
+                                      "gui_element_get must not activate a tab. No item was run; use gui_batch to select tabs.");
+            }
             std::string allowed;
             for (const auto& name : command_table::read_only_step_tools()) allowed += (allowed.empty() ? "" : ", ") + name;
             return batch_fail("BATCH_NOT_READ_ONLY",
