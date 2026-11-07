@@ -257,6 +257,24 @@ TEST_CASE("authorize: gui_batch checks every item", "[auth][authz][batch]") {
     CHECK(d.code == "READ_ONLY");
 }
 
+TEST_CASE("authorize: gui_batch_read needs the batch scope and checks every item", "[auth][authz][batch][batch_read]") {
+    Principal p = token("reader", {"batch", "screen"});
+    p.tcodes = {"SE16"};
+    auto batch = [&](const Principal& who, json items) { return decide(who, "gui_batch_read", {{"items", items}}); };
+    CHECK(batch(p, json::array({{{"tool", "gui_screen_read"}}, {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "x"}}}}})).allowed);
+
+    auto d = batch(p, json::array({{{"tool", "gui_screen_read"}}, {{"tool", "gui_element_get"}, {"arguments", {{"element", "x"}}}}}));
+    CHECK_FALSE(d.allowed);  // scope element missing
+    CHECK(d.code == "SCOPE_DENIED");
+    CHECK(d.message.find("batch item 2") != std::string::npos);
+
+    CHECK(decide(token("nb", {"screen"}), "gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}}})}}).code == "SCOPE_DENIED");
+    // a read-only token may run it
+    Principal ro = token("ro", {"batch", "screen"});
+    ro.read_only = true;
+    CHECK(batch(ro, json::array({{{"tool", "gui_screen_read"}}})).allowed);
+}
+
 // ---- dispatcher integration ------------------------------------------------------------------
 namespace {
 

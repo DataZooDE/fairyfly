@@ -103,6 +103,7 @@ TEST_CASE("scopes: the verb list is derived from the command table", "[auth][sco
     CHECK(verb_scope_of_tool("gui_session_disconnect") == "session.disconnect");
     CHECK(verb_scope_of_tool("gui_doctor").empty());
     CHECK(verb_scope_of_tool("gui_batch").empty());
+    CHECK(verb_scope_of_tool("gui_batch_read").empty());  // family "batch" only, like gui_batch
 }
 
 TEST_CASE("scopes: validation codes and messages", "[auth][scopes]") {
@@ -162,7 +163,7 @@ TEST_CASE("scopes: every tool resolves to its own valid verb scope", "[auth][sco
     for (const auto& spec : all_tool_specs()) {
         INFO(spec.def.name);
         const std::string verb = verb_scope_of_tool(spec.def.name);
-        if (spec.def.name == "gui_doctor" || spec.def.name == "gui_batch") {
+        if (spec.def.name == "gui_doctor" || spec.def.name == "gui_batch" || spec.def.name == "gui_batch_read") {
             CHECK(verb.empty());
             continue;
         }
@@ -185,7 +186,7 @@ TEST_CASE("scopes: tools/list shows exactly what the scopes allow", "[auth][scop
           std::set<std::string>{"gui_session_list", "gui_session_attach", "gui_screen_read", "gui_screen_find", "gui_screen_capture"});
     CHECK(listed(token({"session.disconnect"})) == std::set<std::string>{"gui_session_disconnect"});
     CHECK(listed(token({"session", "session.list"})).size() == 5);
-    CHECK(listed(token({"system", "batch"})) == std::set<std::string>{"gui_doctor", "gui_batch"});
+    CHECK(listed(token({"system", "batch"})) == std::set<std::string>{"gui_doctor", "gui_batch", "gui_batch_read"});
     CHECK(listed(token({})).empty());
     Principal star;
     star.all_scopes = true;

@@ -37,7 +37,7 @@ bool has_scope(const mcp::Principal& p, const std::string& family, const std::st
 
 bool system_exempt(const std::string& family, const std::string& tool) {
     return family == "session" || family == "connection" || family == "system" || family == "credentials" ||
-           tool == "gui_batch";
+           command_table::is_batch_tool(tool);
 }
 
 bool matches_any(const std::vector<std::string>& patterns, const std::string& text) {
@@ -230,7 +230,7 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
         }
     }
 
-    if (tool == "gui_batch" && depth == 0 && args.is_object() && args.contains("items") && args["items"].is_array()) {
+    if (command_table::is_batch_tool(tool) && depth == 0 && args.is_object() && args.contains("items") && args["items"].is_array()) {
         std::size_t index = 0;
         for (const auto& item : args["items"]) {
             ++index;
@@ -243,7 +243,7 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                 for (const auto& s : catalog)
                     if (s.def.name == name) { item_spec = &s; break; }
             }
-            if (!item_spec || name == "gui_batch") continue;  // unknown / nested: rejected by the dispatcher
+            if (!item_spec || command_table::is_batch_tool(name)) continue;  // unknown / nested: rejected by the dispatcher
             const json item_args = item.contains("arguments") ? item["arguments"] : json::object();
             auto decision = authorize_impl(principal, *item_spec, item_spec->family, item_args, server_policy, current_system,
                                            current_tcode, false, lookup, depth + 1, input);

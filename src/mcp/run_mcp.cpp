@@ -50,7 +50,7 @@ constexpr const char* kInstructions =
     "startup settings and credentials are managed locally. Never request passwords in chat or blindly retry a failed login. "
     "Prefer the current tab (no_tabs=true) or one named tab for known tasks. Table text filters search fetched rows only; follow next_offset. For form-only work use only=editable, no_tabs=true, skip_trees=true and projection=refs. "
     "Fill the requested fields in one gui_element_fill call with fields; use then_key only when required. "
-    "Batch known steps and verification with gui_batch, guards and result_mode=summary; include_result only where needed. "
+    "Batch known steps and verification with gui_batch, guards and result_mode=summary; include_result only where needed. Batch pure reads with gui_batch_read. "
     "After an authorized Save, verify persistence. After an uncertain write, inspect before retrying. "
     "Obtain user authorization for saves, posts, releases, deletes, password changes or ending sessions; "
     "existing authorization for the same action remains valid. In read-only mode "

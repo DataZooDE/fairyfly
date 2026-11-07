@@ -21,7 +21,7 @@ For form work prefer `gui_screen_read` with `only=editable`, `no_tabs=true`, `sk
 
 Fill all requested fields together using `gui_element_fill.fields`. Do not fill unrelated editable fields. Use `then_key` only when the workflow needs Enter or F8.
 
-Batch known dependent steps and the observation needed next. Prefer `result_mode=summary` and `include_result` on the final useful observation. Bind a unique `gui_screen_find` match and use its `ref` later in that batch. `expect` is a find precondition; `when` is only supported on the immediately following item. Keep `stop_on_error=true`. Do not guess a control on an unexpected screen or parallelize actions against one SAP session.
+Batch known dependent steps and the observation needed next; when every step only reads, use `gui_batch_read` where the catalog offers it. Prefer `result_mode=summary` and `include_result` on the final useful observation. Bind a unique `gui_screen_find` match and use its `ref` later in that batch. `expect` is a find precondition; `when` is only supported on the immediately following item. Keep `stop_on_error=true`. Do not guess a control on an unexpected screen or parallelize actions against one SAP session.
 
 Short screen refs and batch bindings have different scopes. Re-observe after navigation; stale refs must fail. On owner-mode HTTP retain the same connection and lease for the batch.
 

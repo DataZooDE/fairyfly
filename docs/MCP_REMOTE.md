@@ -196,7 +196,7 @@ windows to private workers and ordered per-window lanes. Different windows can m
 calls to one window remain ordered. On the tested A4H host, a read of one window finished while a 20-read
 batch ran in another, both for separate SAP connections and for two windows in one connection. SAP GUI-wide
 operations and SAP backend waits can still limit concurrency.
-Owner-mode `gui_batch` requires a top-level `connection` and uses one top-level `lease_id` for all items that
+Owner-mode `gui_batch` (and `gui_batch_read`) requires a top-level `connection` and uses one top-level `lease_id` for all items that
 select tabs, navigate or write. Mixed-session batches are refused before any item runs. A queued HTTP call is
 reauthenticated against fresh token metadata before execution; an action already running cannot be revoked mid-call.
 

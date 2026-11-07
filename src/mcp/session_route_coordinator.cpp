@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "include/auth/authorize.h"
+#include "include/command_table.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/session_lease_policy.h"
 
@@ -191,7 +192,7 @@ HttpEndpoint::SessionRoute SessionRouteCoordinator::route_impl(const Principal& 
     target.system = system;
     target.user = sap.user;
     target.connection_name = facts.connection_name;
-    const std::string auth_tool = tool == "gui_batch" ? "gui_screen_read" : tool;
+    const std::string auth_tool = command_table::is_batch_tool(tool) ? "gui_screen_read" : tool;
     if (!auth::authorize_session_target(principal, auth_tool, args, target).allowed)
         return denied("OWNER_SESSION_UNAVAILABLE");
     if (!from_cache) {

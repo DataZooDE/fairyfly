@@ -139,7 +139,7 @@ TEST_CASE("MCP catalog: every tool is well formed", "[mcp][tools]") {
     for (const char* name : {"gui_doctor", "gui_session_list", "gui_connection_list", "gui_session_attach", "gui_session_launch", "gui_session_login",
                              "gui_transaction_start", "gui_screen_read", "gui_screen_find", "gui_element_get", "gui_menu_list", "gui_screen_capture",
                              "gui_credentials_list", "gui_element_click", "gui_key_send", "gui_popup_close", "gui_element_f4",
-                             "gui_menu_select", "gui_session_disconnect", "gui_batch"})
+                             "gui_menu_select", "gui_session_disconnect", "gui_batch", "gui_batch_read"})
         CHECK(seen.count(name) == 1);
 }
 
@@ -180,6 +180,45 @@ TEST_CASE("MCP catalog: batch annotations and destructive flags", "[mcp][tools]"
     CHECK(spec_of(specs, "gui_session_launch").def.description.find("DESTRUCTIVE") != std::string::npos);
     CHECK(spec_of(specs, "gui_session_disconnect").def.description.find("DESTRUCTIVE") != std::string::npos);
     CHECK(spec_of(specs, "gui_screen_read").def.description.find("max_rows") != std::string::npos);
+}
+
+TEST_CASE("MCP catalog: gui_batch_read is read-only and names exactly the steps it runs; gui_batch stays destructive", "[mcp][tools][batch_read]") {
+    // owner decision 2026-11-07: Anthropic's directory rejects a tool that mixes reads and writes, OpenAI forbids
+    // generic executors. gui_batch_read takes only steps that change nothing; gui_batch keeps every step.
+    const auto specs = read_tool_specs();
+    const auto& read = spec_of(specs, "gui_batch_read");
+    const auto& batch = spec_of(specs, "gui_batch");
+    CHECK_FALSE(read.write_tool);  // listed in read-only mode
+    CHECK(read.family == "batch");
+    CHECK(read.def.title == "Run several read-only SAP tool calls");
+    CHECK(read.def.annotations["title"] == "Run several read-only SAP tool calls");
+    CHECK(read.def.annotations["readOnlyHint"] == true);
+    CHECK(read.def.annotations["destructiveHint"] == false);
+    CHECK(read.def.annotations["openWorldHint"] == false);
+    CHECK(batch.def.annotations["readOnlyHint"] == false);
+    CHECK(batch.def.annotations["destructiveHint"] == true);
+    CHECK(batch.def.annotations["openWorldHint"] == false);
+    // the same step format, restricted to the read-only tools
+    const auto& tool = read.def.input_schema["properties"]["items"]["items"]["properties"]["tool"];
+    const json read_only_steps = json::array({"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture",
+                                              "gui_menu_list", "gui_element_get", "gui_credentials_list", "gui_doctor"});
+    CHECK(tool["enum"] == read_only_steps);
+    CHECK(read.def.input_schema["properties"]["result_mode"] == batch.def.input_schema["properties"]["result_mode"]);
+    for (const char* key : {"include_result", "bind", "ref", "expect", "when"})
+        CHECK(read.def.input_schema["properties"]["items"]["items"]["properties"].contains(key));
+    // the description says exactly what it runs and where everything else goes
+    const std::string text = describe_for(read, {"gui_batch", "gui_batch_read"});
+    for (const auto& step : read_only_steps) CHECK(text.find(step.get<std::string>()) != std::string::npos);
+    CHECK(text.find("BATCH_NOT_READ_ONLY") != std::string::npos);
+    CHECK(text.find("screen reads in a read-only batch must pass no_tabs=true") != std::string::npos);
+    CHECK(text.find("name one tab") == std::string::npos);
+    CHECK(text.find("activate_tab") != std::string::npos);
+    CHECK(text.find("use gui_batch for steps that can change state") != std::string::npos);
+    CHECK(describe_for(read, {"gui_batch_read"}).find("use gui_batch") == std::string::npos);  // not offered when hidden
+    const std::string batch_text = describe_for(batch, {"gui_batch", "gui_batch_read"});
+    CHECK(batch_text.find("to only read, use gui_batch_read") != std::string::npos);
+    // no CLI mapping: the dispatcher runs it
+    CHECK_THROWS_AS(read.build_argv(json{{"items", json::array({{{"tool", "gui_screen_read"}}})}}, Policy{}), std::invalid_argument);
 }
 
 TEST_CASE("MCP catalog: no secret-bearing properties, capture never writes files", "[mcp][tools]") {

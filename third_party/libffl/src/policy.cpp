@@ -20,6 +20,28 @@ bool is_dangerous(const std::string& tool) {
     return false;
 }
 
+bool is_batch(const std::string& tool) { return tool == "gui_batch" || tool == "gui_batch_read"; }
+
+bool read_only_step(const std::string& tool) {
+    static const char* r[] = {"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture",
+                              "gui_menu_list",    "gui_element_get", "gui_credentials_list", "gui_doctor"};
+    for (auto x : r)
+        if (tool == x) return true;
+    return false;
+}
+
+std::string tab_selection(const std::string& tool, const nlohmann::json& args) {
+    if (tool == "gui_element_get" && args.is_object() && args.contains("activate_tab") &&
+        !(args["activate_tab"].is_boolean() && !args["activate_tab"].get<bool>()))
+        return "activate_tab selects the element's SAP tab";
+    if (tool == "gui_screen_read") {
+        const bool no_tabs = args.is_object() && args.contains("no_tabs") && args["no_tabs"].is_boolean() && args["no_tabs"].get<bool>();
+        if (args.is_object() && args.contains("tab")) return "a screen read of a named tab selects that tab when it is not the current one";
+        if (!no_tabs) return "a screen read without no_tabs=true selects every SAP tab";
+    }
+    return "";
+}
+
 nlohmann::json Grants::to_json() const {
     return {{"tools", tools}, {"tcodes", tcodes}, {"systems", systems}, {"allow_write", allow_write}, {"screenshots", screenshots}, {"approval", approval}, {"allow_sap_startup", allow_sap_startup}};
 }
@@ -101,12 +123,12 @@ Engine Engine::load(const std::string& text) {
         throw Error(std::string("policy: ") + ex.what());
     }
     // Without default tools the agent may read and navigate (attach, start a transaction, click, keys, menus, popups,
-    // F4) but not write: allow_write stays false and gui_element_fill, screenshots and the dangerous tools (credentials,
-    // launch, login, batch) are not granted.
+    // F4) and batch reads (gui_batch_read) but not write: allow_write stays false and gui_element_fill, screenshots and
+    // the dangerous tools (credentials, launch, login, gui_batch) are not granted.
     if (e.def_.tools.empty())
         e.def_.tools = {"session.list", "session.attach", "connection.list", "screen.read", "screen.find", "element.get",
                         "element.click", "element.f4", "menu.list", "menu.select", "key.send", "popup.close",
-                        "transaction.start", "gui_doctor"};
+                        "transaction.start", "gui_doctor", "batch.read"};
     // No policy text at all (the SaaS edition): also fill fields and run batches, and writes are allowed, but only
     // where a tenant switch caps them (builtin_default(): a tenant is read-only unless it allows writes; a gateway
     // without tenants stays read-only). Every write still needs the desktop's write mode and an approval.
@@ -335,6 +357,8 @@ bool read_only_refuses(const std::string& tool, const nlohmann::json& args) {
         const std::string w = lower(trim(str("window")));
         return !vkey_read_only_ok(*v, w.empty() || w == "@active" ? -1 : window_index(w));
     }
+    // cleanup deletes the saved connection files fairyfly considers stale: anything but an explicit false deletes
+    if (tool == "gui_connection_list") return args.contains("cleanup") && !(args["cleanup"].is_boolean() && !args["cleanup"].get<bool>());
     if (tool == "gui_popup_close") {  // always acts on a popup: Enter there confirms
         const int64_t v = args.contains("vkey") ? args["vkey"].get<int64_t>() : 12;
         return v < 0 || v > 99 || !vkey_read_only_ok(int(v), 1);
@@ -406,12 +430,13 @@ CallCheck check_step(const Grants& g, const std::string& tool, const nlohmann::j
 
 CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::json& args) {
     if (!valid_tool_name(tool)) return deny("TOOL_NAME_INVALID", "'" + tool.substr(0, 64) + "' is not a tool name (tool names are lower case)");
-    if (tool != "gui_batch") return check_step(g, tool, args);
+    if (!is_batch(tool)) return check_step(g, tool, args);
+    const bool reads_only = tool == "gui_batch_read";
     CallCheck r;
     auto bad = [&](const std::string& msg) { return deny("BATCH_INVALID", msg); };
     if (!args.is_object() || !args.contains("items") || !args["items"].is_array() || args["items"].empty() ||
         args["items"].size() > kMaxBatchItems)
-        return bad("gui_batch needs 'items': 1 to " + std::to_string(kMaxBatchItems) + " tool calls");
+        return bad(tool + " needs 'items': 1 to " + std::to_string(kMaxBatchItems) + " tool calls");
     std::size_t n = 0;
     for (auto& item : args["items"]) {
         ++n;
@@ -427,7 +452,15 @@ CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::j
         if (!valid_tool_name(t)) return deny("TOOL_NAME_INVALID", at + "'" + t.substr(0, 64) + "' is not a tool name (tool names are lower case)");
         const nlohmann::json a = item.contains("arguments") ? item["arguments"] : nlohmann::json::object();
         if (!a.is_object()) return bad(at + "'arguments' must be an object");
-        if (t == "gui_batch") return bad(at + "gui_batch cannot be nested");
+        if (reads_only && !read_only_step(t))  // also a nested batch: the whole call is refused, nothing runs
+            return deny("BATCH_NOT_READ_ONLY", at + t + " is not a read-only step; gui_batch_read runs only gui_session_list, "
+                                                   "gui_screen_read, gui_screen_find, gui_screen_capture, gui_menu_list, gui_element_get, "
+                                                   "gui_credentials_list and gui_doctor; use gui_batch for steps that can change state");
+        if (reads_only)  // an allowed tool that would select SAP tabs: no read-only step either
+            if (const auto why = tab_selection(t, item.contains("arguments") ? item["arguments"] : nlohmann::json::object()); !why.empty())
+                return deny("BATCH_NOT_READ_ONLY", at + t + ": " + why + "; in gui_batch_read a screen read must pass no_tabs=true "
+                                                       "(no tab), and gui_element_get must not activate a tab");
+        if (is_batch(t)) return bad(at + t + " cannot be nested");
         if (is_dangerous(t) || !tool_allowed(g.tools, t)) return deny("POLICY_DENIED", at + t + " is not permitted for this user");
         auto step = check_step(g, t, a);
         if (!step.ok()) return deny(step.code.c_str(), at + step.message);

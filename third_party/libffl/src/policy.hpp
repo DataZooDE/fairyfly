@@ -9,6 +9,16 @@ namespace ffy::policy {
 
 // Never matched by "*" or by a family; a policy has to name them exactly.
 bool is_dangerous(const std::string& tool);
+// gui_batch or gui_batch_read: a call whose `items` are calls of other tools, each checked as a step.
+bool is_batch(const std::string& tool);
+// A step gui_batch_read may run: changes nothing in SAP or on the PC whatever its arguments (fairyfly's command table
+// Trait::ReadOnlyStep): gui_session_list, gui_screen_read, gui_screen_find, gui_screen_capture, gui_menu_list,
+// gui_element_get, gui_credentials_list (still dangerous as a step), gui_doctor. The tool alone; see tab_selection.
+bool read_only_step(const std::string& tool);
+// The step's arguments select no SAP tab (fairyfly's lease_required_for_call): gui_element_get without
+// activate_tab=true, gui_screen_read only with no_tabs=true (a named tab is selected when it is not the current one).
+// Empty when fine, else why not.
+std::string tab_selection(const std::string& tool, const nlohmann::json& args);
 
 struct Grants {
     std::vector<std::string> tools, tcodes, systems;
@@ -66,7 +76,8 @@ bool tool_allowed(const std::vector<std::string>& patterns, const std::string& t
 bool tcode_allowed(const std::vector<std::string>& allowed, const std::string& code);  // empty list = unrestricted
 
 // What one tools/call does beyond its name, checked the same way by the gateway and the desktop: the steps of a
-// gui_batch (each granted, none dangerous or nested, transactions allowed), typing into the command field while
+// gui_batch or gui_batch_read (each granted, none dangerous or nested, transactions allowed; gui_batch_read: only
+// read_only_step tools, any other refuses the call with BATCH_NOT_READ_ONLY), typing into the command field while
 // transactions are restricted (also in a multi-field fill), screenshots. `tools` lists the step tools of a batch.
 struct CallCheck {
     std::string code, message;
