@@ -70,6 +70,9 @@ TEST_CASE("session route planning keeps control calls and batches safe", "[mcp][
     const auto batch = plan_session_route(caller, "gui_batch", {{"connection", 9}}, policy, routing, specs);
     CHECK(batch.kind == SessionRoutePlan::Kind::Session);
     CHECK(batch.connection == 9);
+    const auto read_batch = plan_session_route(caller, "gui_batch_read", {{"connection", 9}}, policy, routing, specs);
+    CHECK(read_batch.kind == SessionRoutePlan::Kind::Session);  // routed like gui_batch
+    CHECK(read_batch.connection == 9);
     const auto disconnect = plan_session_route(caller, "gui_session_disconnect", {{"connection", 9}}, policy, routing, specs);
     CHECK(disconnect.kind == SessionRoutePlan::Kind::Session);
     CHECK(disconnect.connection == 9);

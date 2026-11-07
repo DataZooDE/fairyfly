@@ -103,7 +103,7 @@ TEST_CASE("command table: tool names, families and uniqueness", "[command_table]
         CHECK(spec.tool_name == ct::derived_tool_name(spec.path));  // no exceptions to the derivation rule
         CHECK(spec.tool_name == "gui_" + join(spec.path, "_"));
         if (spec.path.front() == "doctor") CHECK(spec.family == "system");
-        else if (spec.path.front() == "batch") CHECK(spec.family == "batch");
+        else if (spec.path.front() == "batch" || spec.path.front() == "batch_read") CHECK(spec.family == "batch");
         else CHECK(spec.family == spec.path.front());
         known_families.insert(spec.family);
         CHECK(ct::find_by_tool(spec.tool_name) == &spec);
@@ -403,7 +403,7 @@ TEST_CASE("command table: tool classification has one source", "[command_table][
           S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_session_lease",
             "gui_session_attach", "gui_session_login", "gui_session_launch"});
     CHECK(tools_with(ct::Trait::Targetless) ==
-          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch"});
+          S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch", "gui_batch_read"});
     CHECK(tools_with(ct::Trait::Listing) == S{"gui_session_list", "gui_connection_list", "gui_credentials_list"});
     CHECK(tools_with(ct::Trait::SessionSystem) ==
           S{"gui_session_launch", "gui_session_login", "gui_session_attach", "gui_session_lease"});

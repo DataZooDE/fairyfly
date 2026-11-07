@@ -198,7 +198,7 @@ TEST_CASE("tool metadata: every tool resolves to a valid verb scope (doctor and 
     for (const auto& spec : all_tool_specs()) {
         INFO("tool " << spec.def.name);
         const std::string verb = auth::verb_scope_of_tool(spec.def.name);
-        if (spec.def.name == "gui_doctor" || spec.def.name == "gui_batch") {
+        if (spec.def.name == "gui_doctor" || spec.def.name == "gui_batch" || spec.def.name == "gui_batch_read") {
             CHECK(verb.empty());
             CHECK_FALSE(auth::validate_scope(spec.family));
             continue;

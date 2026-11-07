@@ -1347,6 +1347,127 @@ TEST_CASE("Dispatcher: gui_batch stop_on_error, nesting and validation", "[mcp][
     CHECK(f.calls.empty());
 }
 
+TEST_CASE("Dispatcher: gui_batch_read runs read-only steps through the full pipeline", "[mcp][dispatcher][batch][batch_read]") {
+    // owner decision 2026-11-07: reads get their own batch tool (Claude directory: a tool must not mix reads and writes)
+    Fixture f;
+    f.handler = [](const Argv& argv) {
+        const auto command = fairyfly::command_table::command_of_argv(argv);
+        if (command == "screen find")
+            return Result::ok({{"title", "T"}, {"elements", json::array({{{"id", "wnd[0]/usr/txtEMAIL"}}})}, {"element_count", 1},
+                               {"match_limit_reached", false}, {"scan_limit_reached", false}});
+        return Result::ok({{"title", "T"}, {"scanned_count", 0}, {"elements", json::array()}});
+    };
+    auto d = f.make();  // the default policy: read-only
+    fairyfly::audit::SapFacts facts{"A4H", "001", "DEVELOPER", "BP"};
+    facts.program = "SAPLBUPA";
+    facts.screen_number = "1100";
+    facts.connection_id = 4;
+    facts.session_identity = "test-session";
+    facts.window_title = "T";
+    d.set_sap_facts_provider([&](std::optional<int>) { return std::optional{facts}; });
+    const json items = json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}},
+                                    {{"tool", "gui_screen_find"}, {"arguments", {{"name_contains", "EMAIL"}}}, {"bind", "email"}},
+                                    {{"tool", "gui_element_get"}, {"ref", "email"}},
+                                    {{"tool", "gui_menu_list"}},
+                                    {{"tool", "gui_session_list"}},
+                                    {{"tool", "gui_doctor"}}});
+    const auto r = d.call_tool("gui_batch_read", {{"items", items}, {"connection", 4}}, ctx_with_id(7));
+    REQUIRE_FALSE(r.is_error);
+    REQUIRE(f.calls.size() == 6);
+    CHECK(std::find(f.calls[2].begin(), f.calls[2].end(), "wnd[0]/usr/txtEMAIL") != f.calls[2].end());  // ref resolved
+    REQUIRE(f.records.size() == 6);  // one audit record per item, none for the batch itself
+    CHECK(f.records[0].tool == "gui_screen_read");
+    CHECK(f.records[5].tool == "gui_doctor");
+    CHECK(f.records[5].request_id == "7");
+    const std::string text = text_of(r);
+    const json summary = json::parse(text.substr(0, text.find('\n')));
+    REQUIRE(summary.size() == 6);
+    for (const auto& item : summary) CHECK(item["ok"] == true);
+
+    // result_mode=summary works as for gui_batch
+    f.calls.clear();
+    f.records.clear();
+    const auto compact = d.call_tool("gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}}})}, {"result_mode", "summary"}},
+                                     ctx_with_id());
+    REQUIRE_FALSE(compact.is_error);
+    REQUIRE(compact.structured);
+    CHECK((*compact.structured)["items"][0]["tool"] == "gui_screen_read");
+    CHECK(f.calls.size() == 1);
+
+    // listed in read-only mode, read-only annotated
+    bool listed = false;
+    for (const auto& def : d.list_tools())
+        if (def.name == "gui_batch_read") {
+            listed = true;
+            CHECK(def.annotations["readOnlyHint"] == true);
+            CHECK(def.annotations["destructiveHint"] == false);
+        }
+    CHECK(listed);
+}
+
+TEST_CASE("Dispatcher: gui_batch_read refuses the whole batch for any step that can change state; nothing runs", "[mcp][dispatcher][batch][batch_read]") {
+    Fixture f;
+    Policy write;  // even in write mode
+    write.read_only = false;
+    write.allow_write = true;
+    auto d = f.make(write);
+    const json read = {{"tool", "gui_screen_read"}};
+    const std::vector<json> changing = {
+        {{"tool", "gui_transaction_start"}, {"arguments", {{"code", "SE16"}}}},
+        {{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/tbar[0]/btn[11]"}}}},
+        {{"tool", "gui_element_fill"}, {"arguments", {{"element", "wnd[0]/usr/txtA"}, {"value", "1"}}}},
+        {{"tool", "gui_element_f4"}, {"arguments", {{"element", "wnd[0]/usr/ctxtA"}}}},
+        {{"tool", "gui_key_send"}, {"arguments", {{"key", "f3"}}}},
+        {{"tool", "gui_popup_close"}},
+        {{"tool", "gui_menu_select"}, {"arguments", {{"path", "Table/Save"}}}},
+        {{"tool", "gui_session_attach"}, {"arguments", {{"session_id", "/app/con[0]/ses[0]"}}}},
+        {{"tool", "gui_session_launch"}, {"arguments", {{"name", "PRD"}}}},
+        {{"tool", "gui_session_login"}},
+        {{"tool", "gui_session_disconnect"}},
+        {{"tool", "gui_session_lease"}, {"arguments", {{"action", "release"}}}},
+        {{"tool", "gui_connection_list"}, {"arguments", {{"cleanup", true}}}},
+        {{"tool", "gui_connection_list"}},  // a listing, but its tool can delete files: not a read-only step
+        {{"tool", "gui_batch"}, {"arguments", {{"items", json::array({read})}}}},
+        {{"tool", "gui_batch_read"}, {"arguments", {{"items", json::array({read})}}}},
+        {{"tool", "gui_no_such_tool"}},
+    };
+    for (const auto& step : changing) {
+        INFO(step.dump());
+        f.calls.clear();
+        f.records.clear();
+        const auto r = d.call_tool("gui_batch_read", {{"items", json::array({read, step})}, {"stop_on_error", false}}, ctx_with_id());
+        CHECK(r.is_error);
+        CHECK(text_of(r).rfind("ERROR BATCH_NOT_READ_ONLY", 0) == 0);
+        CHECK(text_of(r).find("batch item 2") != std::string::npos);
+        CHECK(text_of(r).find("gui_batch") != std::string::npos);  // says where the step belongs
+        CHECK(f.calls.empty());  // no partial execution: not even the read before it
+        REQUIRE(f.records.size() == 1);
+        CHECK(f.records[0].tool == "gui_batch_read");
+        CHECK(f.records[0].error_code == "BATCH_NOT_READ_ONLY");
+    }
+    // malformed batches are argument errors, as for gui_batch
+    for (const json& bad : {json::object(), json{{"items", json::array()}}, json{{"items", json::array({{{"x", 1}}})}},
+                            json{{"items", json::array({read})}, {"extra", 1}}}) {
+        f.calls.clear();
+        const auto r = d.call_tool("gui_batch_read", bad, ctx_with_id());
+        CHECK(r.is_error);
+        CHECK(text_of(r).rfind("ERROR INVALID_ARGUMENT", 0) == 0);
+        CHECK(f.calls.empty());
+    }
+    // gui_batch still runs the same steps
+    f.calls.clear();
+    const auto mixed = d.call_tool("gui_batch", {{"items", json::array({read, changing[0]})}}, ctx_with_id());
+    CHECK_FALSE(mixed.is_error);
+    CHECK(f.calls.size() == 2);
+    // and gui_batch_read cannot be nested in gui_batch
+    f.calls.clear();
+    const auto nested = d.call_tool("gui_batch", {{"items", json::array({{{"tool", "gui_batch_read"}, {"arguments", {{"items", json::array({read})}}}}})}},
+                                    ctx_with_id());
+    CHECK(nested.is_error);
+    CHECK(text_of(nested).rfind("ERROR INVALID_ARGUMENT", 0) == 0);
+    CHECK(f.calls.empty());
+}
+
 TEST_CASE("Dispatcher: batch items are checked, limited and audited per item", "[mcp][dispatcher][batch]") {
     // Unknown tool inside a batch: per-item TOOL_NOT_FOUND, other items still run without stop_on_error.
     Fixture f;
