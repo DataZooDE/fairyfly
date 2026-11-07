@@ -13,6 +13,7 @@
 #include "include/mcp/dispatcher.h"
 #include "include/mcp/run_mcp.h"
 #include "include/mcp/tool_catalog.h"
+#include "policy.hpp"  // libffl (vendored): the link's own list of read-only batch steps
 
 using namespace fairyfly;
 namespace ct = fairyfly::command_table;
@@ -433,6 +434,16 @@ TEST_CASE("command table: tool classification has one source", "[command_table][
     CHECK(ct::read_only_step_tools() ==
           std::vector<std::string>{"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture", "gui_menu_list",
                                    "gui_element_get", "gui_credentials_list", "gui_doctor"});
+    // review of #145 (F2): the link (libffl, vendored from the gateway) checks gui_batch_read with its own list; it
+    // must name exactly these tools, in both directions
+    for (const auto& spec : ct::all_commands()) {
+        if (!spec.is_tool()) continue;
+        INFO(spec.tool_name);
+        CHECK(ffy::policy::read_only_step(spec.tool_name) == spec.has(ct::Trait::ReadOnlyStep));
+    }
+    for (const auto& tool : ct::read_only_step_tools()) CHECK(ffy::policy::read_only_step(tool));
+    CHECK_FALSE(ffy::policy::read_only_step("gui_no_such_tool"));
+    CHECK(ffy::policy::is_batch("gui_batch_read") == ct::is_batch_tool("gui_batch_read"));
     CHECK(ct::is_batch_tool("gui_batch"));
     CHECK(ct::is_batch_tool("gui_batch_read"));
     CHECK_FALSE(ct::is_batch_tool("gui_screen_read"));

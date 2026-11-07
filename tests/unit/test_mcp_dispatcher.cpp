@@ -1387,7 +1387,7 @@ TEST_CASE("Dispatcher: gui_batch_read runs read-only steps through the full pipe
     // result_mode=summary works as for gui_batch
     f.calls.clear();
     f.records.clear();
-    const auto compact = d.call_tool("gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}}})}, {"result_mode", "summary"}},
+    const auto compact = d.call_tool("gui_batch_read", {{"items", json::array({{{"tool", "gui_screen_read"}, {"arguments", {{"tab", "tabpT2"}}}}})}, {"result_mode", "summary"}},
                                      ctx_with_id());
     REQUIRE_FALSE(compact.is_error);
     REQUIRE(compact.structured);
@@ -1411,7 +1411,7 @@ TEST_CASE("Dispatcher: gui_batch_read refuses the whole batch for any step that 
     write.read_only = false;
     write.allow_write = true;
     auto d = f.make(write);
-    const json read = {{"tool", "gui_screen_read"}};
+    const json read = {{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", true}}}};
     const std::vector<json> changing = {
         {{"tool", "gui_transaction_start"}, {"arguments", {{"code", "SE16"}}}},
         {{"tool", "gui_element_click"}, {"arguments", {{"element", "wnd[0]/tbar[0]/btn[11]"}}}},
@@ -1430,6 +1430,12 @@ TEST_CASE("Dispatcher: gui_batch_read refuses the whole batch for any step that 
         {{"tool", "gui_batch"}, {"arguments", {{"items", json::array({read})}}}},
         {{"tool", "gui_batch_read"}, {"arguments", {{"items", json::array({read})}}}},
         {{"tool", "gui_no_such_tool"}},
+        {{"tool", "GUI_SCREEN_READ"}, {"arguments", {{"no_tabs", true}}}},  // tool names are exact
+        // review of #145 (F1): allowed tools whose arguments select SAP tabs (session_lease_policy.h)
+        {{"tool", "gui_element_get"}, {"arguments", {{"element", "wnd[0]/usr/txtA"}, {"activate_tab", true}}}},
+        {{"tool", "gui_screen_read"}},  // expands every tab
+        {{"tool", "gui_screen_read"}, {"arguments", {{"no_tabs", false}}}},
+        {{"tool", "gui_screen_read"}, {"arguments", {{"only", "editable"}}}},
     };
     for (const auto& step : changing) {
         INFO(step.dump());

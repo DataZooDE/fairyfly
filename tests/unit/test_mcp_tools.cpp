@@ -210,6 +210,8 @@ TEST_CASE("MCP catalog: gui_batch_read is read-only and names exactly the steps 
     const std::string text = describe_for(read, {"gui_batch", "gui_batch_read"});
     for (const auto& step : read_only_steps) CHECK(text.find(step.get<std::string>()) != std::string::npos);
     CHECK(text.find("BATCH_NOT_READ_ONLY") != std::string::npos);
+    CHECK(text.find("screen reads in a read-only batch must name one tab or pass no_tabs") != std::string::npos);
+    CHECK(text.find("activate_tab") != std::string::npos);
     CHECK(text.find("use gui_batch for steps that can change state") != std::string::npos);
     CHECK(describe_for(read, {"gui_batch_read"}).find("use gui_batch") == std::string::npos);  // not offered when hidden
     const std::string batch_text = describe_for(batch, {"gui_batch", "gui_batch_read"});
