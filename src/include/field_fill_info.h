@@ -43,7 +43,7 @@ std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, b
 struct GridCellProbe {
     std::string column;                       ///< technical name of the filled column (MATNR, MENGE, ...)
     std::optional<std::string> column_title;  ///< its displayed title, when the grid exposes one
-    std::vector<std::string> columns;         ///< the columns read back: the filled one and those the decision needs
+    std::vector<std::string> columns;         ///< the row's columns as read back (the filled one included)
     std::vector<std::string> row;             ///< their cells in `columns` order
     bool row_known = false;                   ///< false when a needed cell could not be read or the row moved
 };
@@ -63,18 +63,14 @@ struct GridAccess {
     std::function<void()> modify;  ///< the edit itself (ModifyCell / ModifyCheckBox, TriggerModified); may throw
 };
 
-/// The columns besides the filled one whose cells the echo decision needs: the NAME/HEADERNAME column of a
-/// NAME/VALUE list, else every column of a grid without titles (Column0, ...), and the first column as the row anchor.
-std::vector<std::string> grid_fill_context_columns(const std::string& column, const std::vector<std::string>& columns);
-
 struct GridFillEcho {
     std::string value;
     bool redacted = true;
 };
 
-/// fill_grid_cell's flow: read the context cells, run the edit, read them again with the filled cell and its title,
-/// and decide the echo. A failed read, no column order, or context cells that changed (the grid re-sorted) give the
-/// "could not verify" marker. Exceptions of `modify` propagate.
+/// fill_grid_cell's flow: read the row's anchor (the first non-empty other cell), run the edit, read the whole row
+/// once with the filled cell's title, and decide the echo by the screen-read row rule. A failed read, no column order
+/// or a changed anchor (the grid re-sorted) give the "could not verify" marker. Exceptions of `modify` propagate.
 GridFillEcho fill_grid_cell_echo(const GridAccess& grid, int row, const std::string& column, const std::string& typed);
 
 /// The `field` object of a fill result: {type, max_length?, input_kind?, format_hint?, format_hint_source?,

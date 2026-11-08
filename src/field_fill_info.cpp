@@ -145,57 +145,56 @@ std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& 
     return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
 }
 
-std::vector<std::string> grid_fill_context_columns(const std::string& column, const std::vector<std::string>& columns) {
-    std::vector<std::string> out;
-    const auto add = [&](const std::string& c) {
-        if (c != column && std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
-    };
-    if (columns.empty()) return out;
-    add(columns.front());  // the row's anchor: a re-sort after the edit moves it
-    bool named = false;
-    for (const auto& c : columns) {
-        const auto n = normalize_sensitive_name(c);
-        if (n == "name" || n == "headername") {
-            add(c);
-            named = true;
-        }
-    }
-    // a grid without titles may be a NAME/VALUE list whose name sits in any cell: redact_sensitive_header_rows scans
-    // the whole row then, so the decision needs all of it
-    if (!named && std::all_of(columns.begin(), columns.end(), [](const std::string& c) { return is_generic_column_title(c); }))
-        for (const auto& c : columns) add(c);
-    return out;
-}
-
 GridFillEcho fill_grid_cell_echo(const GridAccess& grid, int row, const std::string& column, const std::string& typed) {
     const std::vector<std::string> columns = grid.column_order ? grid.column_order() : std::vector<std::string>{};
-    const auto context = grid_fill_context_columns(column, columns);
-    const auto read_context = [&](std::vector<std::string>& values) {
-        bool ok = static_cast<bool>(grid.cell);
-        for (const auto& c : context) {
-            const auto v = ok ? grid.cell(row, c) : std::nullopt;
-            if (!v) ok = false;
-            values.push_back(v.value_or(std::string()));
-        }
-        return ok;
-    };
-    std::vector<std::string> before, after;
-    const bool before_ok = read_context(before);
-    if (grid.modify) grid.modify();
-    const bool after_ok = read_context(after);
-    const auto filled = grid.cell ? grid.cell(row, column) : std::nullopt;
+    const auto read = [&](const std::string& c) { return grid.cell ? grid.cell(row, c) : std::nullopt; };
 
+    // Before the edit only the row's anchor: the first other cell that is not empty (and the empty ones before it).
+    // A re-sort after the edit (commit) moves the row; an all-empty row is anchored by all its cells.
+    std::vector<std::pair<std::string, std::string>> anchor;
+    bool before_ok = !columns.empty() && static_cast<bool>(grid.cell);
+    for (const auto& c : columns) {
+        if (!before_ok) break;
+        if (c == column) continue;
+        const auto v = read(c);
+        if (!v) { before_ok = false; break; }
+        anchor.emplace_back(c, *v);
+        if (!v->empty()) break;
+    }
+    if (grid.modify) grid.modify();
+
+    // After it the whole row once: the screen-read row rule (redact_sensitive_header_rows) judges every cell
+    // ({ID, PARAM, VALUE} with PARAM = client_secret hides the row), so the echo decision needs all of them.
     GridCellProbe probe;
     probe.column = column;
     if (grid.title) probe.column_title = grid.title(column);
-    // every needed cell read, before and after, and the context unchanged: the same row (no re-sort on commit)
-    probe.row_known = !columns.empty() && before_ok && after_ok && filled.has_value() && before == after;
-    if (probe.row_known) {
-        probe.columns = context;
-        probe.row = after;
-        probe.columns.push_back(column);
-        probe.row.push_back(*filled);
+    bool after_ok = before_ok;
+    std::vector<std::string> values;
+    for (const auto& c : columns) {
+        if (!after_ok) break;
+        const auto v = read(c);
+        if (!v) after_ok = false;
+        else values.push_back(*v);
     }
+    probe.columns = columns;
+    if (after_ok && std::find(columns.begin(), columns.end(), column) == columns.end()) {
+        const auto v = read(column);  // a column the order does not list
+        if (!v) after_ok = false;
+        else {
+            probe.columns.push_back(column);
+            values.push_back(*v);
+        }
+    }
+    bool same_row = after_ok;
+    for (const auto& [c, v] : anchor) {
+        if (!same_row) break;
+        const auto at = std::find(columns.begin(), columns.end(), c) - columns.begin();
+        same_row = values[static_cast<std::size_t>(at)] == v;
+    }
+    probe.row_known = same_row;
+    if (probe.row_known) probe.row = std::move(values);
+    else probe.columns.clear();
+
     GridFillEcho echo;
     echo.value = grid_fill_value_echo(probe, typed, echo.redacted);
     return echo;
