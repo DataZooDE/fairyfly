@@ -66,6 +66,42 @@ std::string ComGuiGrid::get_cell_value(int row, const std::string& column_name) 
     }
 }
 
+std::optional<std::string> ComGuiGrid::try_get_cell_value(int row, const std::string& column_name) const {
+    try {
+        if (!dispatch_) return std::nullopt;
+        DISPID dispid;
+        if (FAILED(element_.resolve_dispid(L"GetCellValue", &dispid))) return std::nullopt;
+        VARIANT result_var;
+        com::VariantGuard result_guard(&result_var);
+        const HRESULT hr = invoke(dispatch_, dispid, DISPATCH_METHOD,
+                                  {_variant_t(static_cast<long>(row)), bstr_arg(column_name)}, result_guard.get());
+        if (FAILED(hr)) return std::nullopt;
+        const std::string context = fmt::format("try_get_cell_value row={} col='{}'", row, column_name);
+        return safe_bstr_to_string(result_var, context.c_str());
+    } catch (const std::exception& e) {
+        spdlog::debug("try_get_cell_value|exception|row={}|column={}|error={}", row, column_name, e.what());
+        return std::nullopt;
+    }
+}
+
+std::optional<std::string> ComGuiGrid::displayed_column_title(const std::string& column_name) const {
+    try {
+        if (!dispatch_) return std::nullopt;
+        DISPID dispid;
+        if (FAILED(element_.resolve_dispid(L"GetDisplayedColumnTitle", &dispid))) return std::nullopt;
+        VARIANT result_var;
+        com::VariantGuard result_guard(&result_var);
+        if (FAILED(invoke(dispatch_, dispid, DISPATCH_METHOD, {bstr_arg(column_name)}, result_guard.get())))
+            return std::nullopt;
+        std::string title = safe_bstr_to_string(result_var, "displayed_column_title");
+        if (title.empty()) return std::nullopt;
+        return title;
+    } catch (const std::exception& e) {
+        spdlog::debug("displayed_column_title|exception|column={}|error={}", column_name, e.what());
+        return std::nullopt;
+    }
+}
+
 void ComGuiGrid::select_grid_row(int row, const std::string& column_name) {
     if (!dispatch_) throw ComException("Null GridView element");
     if (row < 0 || column_name.empty()) throw ComException("Invalid GridView row or column");

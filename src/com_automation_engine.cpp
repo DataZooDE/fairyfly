@@ -1421,27 +1421,23 @@ Result ComAutomationEngine::fill_grid_cell(const ElementId& element, int row,
         }
         const auto before_status = read_action_status(session);
         auto grid_view = as_grid(*grid);
-        grid_view.modify_grid_cell(row, column, value, checkbox, commit);
-        const auto after_status = read_action_status(session);
         // The echo is the cell as the grid now shows it, redacted only by the rules a screen read of this row applies
         // (2026-11-08: a fixed "[REDACTED]" hid every ALV cell, MATNR/MENGE/WERKS/EEIND in ME21N, like a password).
-        GridCellProbe cell;
-        cell.column = column;
-        try {
-            cell.columns = grid_view.get_column_order();
-            for (const auto& name : cell.columns) cell.row.push_back(grid_view.get_cell_value(row, name));
-            cell.row_known = !cell.columns.empty();
-        } catch (const std::exception& e) {
-            spdlog::debug("fill_grid_cell: row {} not read back: {}", row, e.what());
-        }
-        bool value_redacted = false;
+        // Only the cells the decision needs are read, before and after the edit; a failed read or a moved row fails closed.
+        GridAccess access;
+        access.column_order = [&] { return grid_view.get_column_order(); };
+        access.cell = [&](int r, const std::string& c) { return grid_view.try_get_cell_value(r, c); };
+        access.title = [&](const std::string& c) { return grid_view.displayed_column_title(c); };
+        access.modify = [&] { grid_view.modify_grid_cell(row, column, value, checkbox, commit); };
+        const auto echo = fill_grid_cell_echo(access, row, column, value);
+        const auto after_status = read_action_status(session);
         result.status = Result::Status::Success;
         result.data["action"] = "modify_grid_cell";
         result.data["element"] = resolved.path;
         result.data["row"] = row;
         result.data["column"] = column;
-        result.data["value"] = grid_fill_value_echo(cell, value, value_redacted);
-        if (value_redacted) result.data["value_redacted"] = true;
+        result.data["value"] = echo.value;
+        if (echo.redacted) result.data["value_redacted"] = true;
         result.data["checkbox"] = checkbox;
         result.data["committed"] = commit;
         attach_status_bar(result, before_status, after_status);

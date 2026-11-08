@@ -122,6 +122,9 @@ std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& 
     redacted = true;
     // the filled column names a credential itself (also one the column order does not list)
     if (const auto reason = sensitive_name_reason(probe.column); !reason.empty()) return redaction_marker(reason.c_str());
+    // ... or its displayed title does ("Password", "Kennwort" over a Z column)
+    if (probe.column_title)
+        if (const auto reason = sensitive_name_reason(*probe.column_title); !reason.empty()) return redaction_marker(reason.c_str());
     if (!probe.row_known || probe.columns.empty() || probe.row.size() != probe.columns.size())
         return redaction_marker(redaction_reason::unverified);
 
@@ -140,6 +143,62 @@ std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& 
     if (is_redaction_marker(shown)) return shown;
     redacted = false;
     return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
+}
+
+std::vector<std::string> grid_fill_context_columns(const std::string& column, const std::vector<std::string>& columns) {
+    std::vector<std::string> out;
+    const auto add = [&](const std::string& c) {
+        if (c != column && std::find(out.begin(), out.end(), c) == out.end()) out.push_back(c);
+    };
+    if (columns.empty()) return out;
+    add(columns.front());  // the row's anchor: a re-sort after the edit moves it
+    bool named = false;
+    for (const auto& c : columns) {
+        const auto n = normalize_sensitive_name(c);
+        if (n == "name" || n == "headername") {
+            add(c);
+            named = true;
+        }
+    }
+    // a grid without titles may be a NAME/VALUE list whose name sits in any cell: redact_sensitive_header_rows scans
+    // the whole row then, so the decision needs all of it
+    if (!named && std::all_of(columns.begin(), columns.end(), [](const std::string& c) { return is_generic_column_title(c); }))
+        for (const auto& c : columns) add(c);
+    return out;
+}
+
+GridFillEcho fill_grid_cell_echo(const GridAccess& grid, int row, const std::string& column, const std::string& typed) {
+    const std::vector<std::string> columns = grid.column_order ? grid.column_order() : std::vector<std::string>{};
+    const auto context = grid_fill_context_columns(column, columns);
+    const auto read_context = [&](std::vector<std::string>& values) {
+        bool ok = static_cast<bool>(grid.cell);
+        for (const auto& c : context) {
+            const auto v = ok ? grid.cell(row, c) : std::nullopt;
+            if (!v) ok = false;
+            values.push_back(v.value_or(std::string()));
+        }
+        return ok;
+    };
+    std::vector<std::string> before, after;
+    const bool before_ok = read_context(before);
+    if (grid.modify) grid.modify();
+    const bool after_ok = read_context(after);
+    const auto filled = grid.cell ? grid.cell(row, column) : std::nullopt;
+
+    GridCellProbe probe;
+    probe.column = column;
+    if (grid.title) probe.column_title = grid.title(column);
+    // every needed cell read, before and after, and the context unchanged: the same row (no re-sort on commit)
+    probe.row_known = !columns.empty() && before_ok && after_ok && filled.has_value() && before == after;
+    if (probe.row_known) {
+        probe.columns = context;
+        probe.row = after;
+        probe.columns.push_back(column);
+        probe.row.push_back(*filled);
+    }
+    GridFillEcho echo;
+    echo.value = grid_fill_value_echo(probe, typed, echo.redacted);
+    return echo;
 }
 
 json build_fill_field_info(const FieldProbe& probe, const std::string& typed) {

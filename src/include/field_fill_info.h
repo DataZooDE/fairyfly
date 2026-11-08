@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core.h"
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,17 +41,41 @@ std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, b
 /// What a GridView cell fill knows after ModifyCell: the filled column, the grid's column order and the row's cells
 /// as read back (GetCellValue), the filled cell included. Plain data so the echo is unit-testable without COM.
 struct GridCellProbe {
-    std::string column;                ///< technical name of the filled column (MATNR, MENGE, ...)
-    std::vector<std::string> columns;  ///< the grid's column order
-    std::vector<std::string> row;      ///< the row's cells in `columns` order
-    bool row_known = false;            ///< false when the column order or the row could not be read
+    std::string column;                       ///< technical name of the filled column (MATNR, MENGE, ...)
+    std::optional<std::string> column_title;  ///< its displayed title, when the grid exposes one
+    std::vector<std::string> columns;         ///< the columns read back: the filled one and those the decision needs
+    std::vector<std::string> row;             ///< their cells in `columns` order
+    bool row_known = false;                   ///< false when a needed cell could not be read or the row moved
 };
 
 /// The `value` of a grid cell fill: the cell as read back from the grid (the typed value when the column is not in
-/// the column order), redacted by the rules a screen read of that row applies (redact_sensitive_header_rows: a
-/// credential column, a NAME/VALUE row naming a credential) plus a credential-named filled column, and masked like a
-/// field echo. Not echoed when the row could not be read (fail closed). `redacted` reports a marker.
+/// `columns`), redacted by the rules a screen read of that row applies (redact_sensitive_header_rows: a credential
+/// column, a NAME/VALUE row naming a credential) plus a credential-named filled column or displayed title, and
+/// masked like a field echo. Not echoed when the row could not be read (fail closed). `redacted` reports a marker.
 std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& typed, bool& redacted);
+
+/// The grid as fill_grid_cell sees it: COM in production (ComGuiGrid), plain functions so the whole flow is
+/// unit-testable. `cell` answers nullopt when GetCellValue fails; `title` nullopt when the grid shows no title.
+struct GridAccess {
+    std::function<std::vector<std::string>()> column_order;
+    std::function<std::optional<std::string>(int row, const std::string& column)> cell;
+    std::function<std::optional<std::string>(const std::string& column)> title;
+    std::function<void()> modify;  ///< the edit itself (ModifyCell / ModifyCheckBox, TriggerModified); may throw
+};
+
+/// The columns besides the filled one whose cells the echo decision needs: the NAME/HEADERNAME column of a
+/// NAME/VALUE list, else every column of a grid without titles (Column0, ...), and the first column as the row anchor.
+std::vector<std::string> grid_fill_context_columns(const std::string& column, const std::vector<std::string>& columns);
+
+struct GridFillEcho {
+    std::string value;
+    bool redacted = true;
+};
+
+/// fill_grid_cell's flow: read the context cells, run the edit, read them again with the filled cell and its title,
+/// and decide the echo. A failed read, no column order, or context cells that changed (the grid re-sorted) give the
+/// "could not verify" marker. Exceptions of `modify` propagate.
+GridFillEcho fill_grid_cell_echo(const GridAccess& grid, int row, const std::string& column, const std::string& typed);
 
 /// The `field` object of a fill result: {type, max_length?, input_kind?, format_hint?, format_hint_source?,
 /// numerical?, required?, value_normalized?, format_warning?}. Never a hard validation: a mismatch with SAP's own
