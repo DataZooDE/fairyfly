@@ -13,6 +13,8 @@
 #include "include/mcp/tool_catalog.h"
 #include "include/sensitive_data.h"
 
+#include "policy.hpp"  // libffl (vendored from the gateway): the link's own check of the same click rules
+
 namespace fairyfly::auth {
 
 namespace {
@@ -124,6 +126,27 @@ PolicyDecision check_selection_input(const mcp::Principal& principal, const json
     return PolicyDecision{};
 }
 
+/// The gateway's click rules under a transaction list (libffl check_call, fairyfly-gateway #251, 2026-11-08): no click on
+/// the system toolbar's Save button `tbar[0]/btn[11]` (Ctrl+S is a refused key, so its button is too) and none on a menu
+/// bar item (an `mbar` path segment: the click selects the GuiMenu, the route gui_menu_select is refused for). libffl
+/// matches the ids (bracket indices as numbers, any case, any prefix); only the id arguments are handed over, so an
+/// unrelated argument cannot turn the check into an argument error that would let the click through.
+std::optional<PolicyDecision> tcode_click_refusal(const mcp::Principal& principal, const json& args) {
+    if (!args.is_object()) return std::nullopt;
+    json ids = json::object();
+    for (const char* key : {"element", "id", "element_id"})
+        if (args.contains(key) && args[key].is_string()) ids[key] = args[key];
+    if (ids.empty()) return std::nullopt;
+    ffy::policy::Grants grants;
+    grants.tools = {"*"};
+    grants.tcodes = principal.tcodes;
+    grants.allow_write = true;
+    const auto checked = ffy::policy::check_call(grants, "gui_element_click", ids);
+    if (checked.code != "TCODE_DENIED") return std::nullopt;
+    return refuse("TCODE_DENIED", "token '" + principal.name + "' has a T-code allowlist: " + checked.message +
+                                  " (or ask the operator to create the token with --allow-navigation)");
+}
+
 PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSpec& spec, const std::string& family,
                               const json& args, const mcp::Policy& server_policy,
                               const std::optional<std::string>& current_system,
@@ -216,6 +239,8 @@ PolicyDecision authorize_impl(const mcp::Principal& principal, const mcp::ToolSp
                                                   "tokens with a T-code allowlist (allowed: 12 (default), 0, 4, 8, 80-83, see gui_key_send for the names); ask the "
                                                   "operator to create the token with --allow-navigation");
             }
+        } else if (!principal.allow_navigation && tool == "gui_element_click") {
+            if (auto refusal = tcode_click_refusal(principal, args)) return *refusal;
         } else if (tool == "gui_element_fill") {
             // `element` and its aliases `id` / `element_id`: all of them are checked, whichever the builder will use.
             bool okcd = false;
