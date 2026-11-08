@@ -118,6 +118,88 @@ std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, b
     return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
 }
 
+std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& typed, bool& redacted) {
+    redacted = true;
+    // the filled column names a credential itself (also one the column order does not list)
+    if (const auto reason = sensitive_name_reason(probe.column); !reason.empty()) return redaction_marker(reason.c_str());
+    // ... or its displayed title does ("Password", "Kennwort" over a Z column)
+    if (probe.column_title)
+        if (const auto reason = sensitive_name_reason(*probe.column_title); !reason.empty()) return redaction_marker(reason.c_str());
+    if (!probe.row_known || probe.columns.empty() || probe.row.size() != probe.columns.size())
+        return redaction_marker(redaction_reason::unverified);
+
+    // the row as a screen read of the grid reports it, with the filled cell as the grid now shows it
+    json columns = probe.columns;
+    json row = probe.row;
+    const auto at = std::find(probe.columns.begin(), probe.columns.end(), probe.column);
+    std::size_t index = static_cast<std::size_t>(at - probe.columns.begin());
+    if (at == probe.columns.end()) {
+        columns.push_back(probe.column);
+        row.push_back(typed);
+    }
+    json table = {{"columns", columns}, {"rows", json::array({row})}};
+    redact_sensitive_header_rows(table);
+    const std::string shown = table["rows"][0][index].get<std::string>();
+    if (is_redaction_marker(shown)) return shown;
+    redacted = false;
+    return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
+}
+
+GridFillEcho fill_grid_cell_echo(const GridAccess& grid, int row, const std::string& column, const std::string& typed) {
+    const std::vector<std::string> columns = grid.column_order ? grid.column_order() : std::vector<std::string>{};
+    const auto read = [&](const std::string& c) { return grid.cell ? grid.cell(row, c) : std::nullopt; };
+
+    // Before the edit only the row's anchor: the first other cell that is not empty (and the empty ones before it).
+    // A re-sort after the edit (commit) moves the row; an all-empty row is anchored by all its cells.
+    std::vector<std::pair<std::string, std::string>> anchor;
+    bool before_ok = !columns.empty() && static_cast<bool>(grid.cell);
+    for (const auto& c : columns) {
+        if (!before_ok) break;
+        if (c == column) continue;
+        const auto v = read(c);
+        if (!v) { before_ok = false; break; }
+        anchor.emplace_back(c, *v);
+        if (!v->empty()) break;
+    }
+    if (grid.modify) grid.modify();
+
+    // After it the whole row once: the screen-read row rule (redact_sensitive_header_rows) judges every cell
+    // ({ID, PARAM, VALUE} with PARAM = client_secret hides the row), so the echo decision needs all of them.
+    GridCellProbe probe;
+    probe.column = column;
+    if (grid.title) probe.column_title = grid.title(column);
+    bool after_ok = before_ok;
+    std::vector<std::string> values;
+    for (const auto& c : columns) {
+        if (!after_ok) break;
+        const auto v = read(c);
+        if (!v) after_ok = false;
+        else values.push_back(*v);
+    }
+    probe.columns = columns;
+    if (after_ok && std::find(columns.begin(), columns.end(), column) == columns.end()) {
+        const auto v = read(column);  // a column the order does not list
+        if (!v) after_ok = false;
+        else {
+            probe.columns.push_back(column);
+            values.push_back(*v);
+        }
+    }
+    bool same_row = after_ok;
+    for (const auto& [c, v] : anchor) {
+        if (!same_row) break;
+        const auto at = std::find(columns.begin(), columns.end(), c) - columns.begin();
+        same_row = values[static_cast<std::size_t>(at)] == v;
+    }
+    probe.row_known = same_row;
+    if (probe.row_known) probe.row = std::move(values);
+    else probe.columns.clear();
+
+    GridFillEcho echo;
+    echo.value = grid_fill_value_echo(probe, typed, echo.redacted);
+    return echo;
+}
+
 json build_fill_field_info(const FieldProbe& probe, const std::string& typed) {
     json info = json::object();
     info["type"] = probe.type;

@@ -31,7 +31,13 @@ struct HttpResponse {
     }
 };
 
-// Throws ffy::Error on transport failure (DNS, connect, TLS, timeout, body too large). HTTP error statuses are returned.
+// A request sent (or attempted) that failed on the way: DNS, connect, TLS, timeout, body too large. Thrown by http_do
+// in place of a plain Error so that a caller can tell a transient failure from a bad request (scheme, method).
+struct HttpTransportError : Error {
+    using Error::Error;
+};
+
+// Throws ffy::HttpTransportError on transport failure (DNS, connect, TLS, timeout, body too large). HTTP error statuses are returned.
 HttpResponse http_do(const HttpRequest& req);
 bool proxy_bypass(const std::string& host, const std::string& no_proxy);  // exposed for tests
 

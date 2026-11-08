@@ -2,6 +2,7 @@
 // Typed views over a ComGuiElement (the element stays the owner): the grid methods of a GuiGridView / grid shell and
 // the toolbar methods of a toolbar shell or a grid's built-in toolbar. The tree methods: tree_view.h.
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,10 @@ public:
     /// @param column_name Column identifier from ColumnOrder
     /// @return Cell value as string, empty if not available
     std::string get_cell_value(int row, const std::string& column_name) const;
+    /// GetCellValue that says when it failed (nullopt): a read-back that must fail closed cannot take "" for a value.
+    std::optional<std::string> try_get_cell_value(int row, const std::string& column_name) const;
+    /// GetDisplayedColumnTitle: the column's title as the grid shows it; nullopt when it has none or the call fails.
+    std::optional<std::string> displayed_column_title(const std::string& column_name) const;
     /// Select a GridView row and activate its cell (zero-based row, technical column ID).
     void select_grid_row(int row, const std::string& column_name);
     /// Double-click a GridView cell (SetCurrentCell then DoubleClickCurrentCell).

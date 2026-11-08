@@ -61,7 +61,14 @@ inline bool is_sensitive_data_name(const std::string& name) {
            key == "sessiontoken" || key == "xsessiontoken" ||
            key == "authorization" || key == "proxyauthorization" ||
            key == "xcsrftoken" || key == "cookie" || key == "setcookie" ||
-           key == "authenticationinfo";
+           key == "authenticationinfo" ||
+           // abbreviations SAP screens and DDIC use: PASSW (RSYST-PASSW), KENNW ("Kennw."), XUBCODE (SU01)
+           key == "passw" || key == "kennw" || key == "xubcode";
+}
+
+// The German abbreviation "Kennw." only at the end of a name: KENNWERT (a characteristic value) is business data.
+inline bool ends_with_kennw(const std::string& normalized) {
+    return normalized.size() >= 5 && normalized.compare(normalized.size() - 5, 5, "kennw") == 0;
 }
 
 inline bool contains_sensitive_data_name(const std::string& value) {
@@ -71,10 +78,10 @@ inline bool contains_sensitive_data_name(const std::string& value) {
                                "contrasena", "contrasea", "motdepasse", "senha", "wachtwoord",
                                "passord", "adgangskode", "heslo", "salasana", "paroladordine",
                                "secret", "geheim", "apikey", "token", "cookie",
-                               "authorization", "authenticationinfo"}) {
+                               "authorization", "authenticationinfo", "passw", "xubcode"}) {
         if (name.find(marker) != std::string::npos) return true;
     }
-    return contains_sensitive_utf8_name(value) ||
+    return contains_sensitive_utf8_name(value) || ends_with_kennw(name) ||
            (name.size() >= 3 && name.compare(name.size() - 3, 3, "pwd") == 0);
 }
 
@@ -220,10 +227,10 @@ inline bool contains_password_word(const std::string& name) {
     const std::string key = normalize_sensitive_name(name);
     for (const auto* word : {"password", "passwd", "passwort", "kennwort", "contrasena", "contrasea",
                              "motdepasse", "senha", "wachtwoord", "passord", "adgangskode", "heslo",
-                             "salasana", "paroladordine"}) {
+                             "salasana", "paroladordine", "passw", "xubcode"}) {
         if (key.find(word) != std::string::npos) return true;
     }
-    return contains_sensitive_utf8_name(name) ||
+    return contains_sensitive_utf8_name(name) || ends_with_kennw(key) ||
            (key.size() >= 3 && key.compare(key.size() - 3, 3, "pwd") == 0);
 }
 
