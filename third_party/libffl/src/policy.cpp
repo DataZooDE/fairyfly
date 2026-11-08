@@ -22,6 +22,8 @@ bool is_dangerous(const std::string& tool) {
 
 bool is_batch(const std::string& tool) { return tool == "gui_batch" || tool == "gui_batch_read"; }
 
+bool batch_item_refused(const std::string& tool) { return is_dangerous(tool) || lower(tool) == "gui_screen_capture"; }
+
 bool read_only_step(const std::string& tool) {
     static const char* r[] = {"gui_session_list", "gui_screen_read", "gui_screen_find", "gui_screen_capture",
                               "gui_menu_list",    "gui_element_get", "gui_credentials_list", "gui_doctor"};
@@ -332,17 +334,59 @@ bool label_changes(const std::string& label) {
     return false;
 }
 
+// `what` occurs in the (lower-case) id, not followed by another digit
+bool id_has(const std::string& id, const std::string& what) {
+    for (auto p = id.find(what); p != std::string::npos; p = id.find(what, p + 1))
+        if (p + what.size() >= id.size() || !std::isdigit(static_cast<unsigned char>(id[p + what.size()]))) return true;
+    return false;
+}
+
+// an element id lower-cased and trimmed, its bracket indices as numbers: whitespace inside brackets dropped and a
+// number's leading zeros too ("tbar[ 00 ]/btn[011]" -> "tbar[0]/btn[11]"), so a spelling cannot slip past a match
+std::string canonical_id(const std::string& raw) {
+    const std::string id = lower(trim(raw));
+    std::string out;
+    for (std::size_t i = 0; i < id.size(); ++i) {
+        if (id[i] != '[') { out.push_back(id[i]); continue; }
+        auto close = id.find(']', i);
+        if (close == std::string::npos) { out.append(id, i, std::string::npos); break; }
+        std::string inner;
+        for (std::size_t j = i + 1; j < close; ++j)
+            if (!std::isspace(static_cast<unsigned char>(id[j]))) inner.push_back(id[j]);
+        if (!inner.empty() && std::all_of(inner.begin(), inner.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+            const auto nz = inner.find_first_not_of('0');
+            inner = nz == std::string::npos ? "0" : inner.substr(nz);
+        }
+        out += "[" + inner + "]";
+        i = close;
+    }
+    return out;
+}
+
+// the system toolbar's standard Save button (Ctrl+S) in any window, with or without the /app/con[x]/ses[y]/ or
+// @active/ prefix; an application's own save buttons (application toolbar, screen) cannot be told from the id
+bool is_save_button(const std::string& raw) { return id_has(canonical_id(raw), "tbar[0]/btn[11]"); }
+
+// an item of a window's menu bar (a path segment "mbar"): fairyfly's gui_element_click selects a GuiMenu, so a click
+// there is a menu selection (System/Services/..., Save in the menu) and can leave the transaction like gui_menu_select
+bool is_menu_bar_item(const std::string& raw) {
+    const std::string id = canonical_id(raw);
+    for (std::size_t a = 0; a <= id.size();) {
+        auto b = id.find('/', a);
+        if (b == std::string::npos) b = id.size();
+        if (id.compare(a, b - a, "mbar") == 0) return true;
+        a = b + 1;
+    }
+    return false;
+}
+
 // matched_read_only_rule on the id alone (the element's type and label are on the screen)
 bool element_id_changes(const std::string& raw) {
     const std::string id = lower(trim(raw));
     for (const char* frag : {"&delete", "&save", "&release"})
         if (id.find(frag) != std::string::npos) return true;
-    auto at = [&](const std::string& what) {  // what, not followed by another digit
-        for (auto p = id.find(what); p != std::string::npos; p = id.find(what, p + 1))
-            if (p + what.size() >= id.size() || !std::isdigit(static_cast<unsigned char>(id[p + what.size()]))) return true;
-        return false;
-    };
-    if (at("tbar[0]/btn[11]")) return true;  // the standard Save button
+    auto at = [&](const std::string& what) { return id_has(id, what); };
+    if (is_save_button(id)) return true;  // the standard Save button
     // a button of a popup: Yes/OK confirm whatever the dialog asks; only the standard Cancel is known to be safe here
     const auto leaf = id.substr(id.find_last_of('/') == std::string::npos ? 0 : id.find_last_of('/') + 1);
     if (window_index(id) > 0 && leaf.rfind("btn", 0) == 0 && !at("tbar[0]/btn[12]")) return true;
@@ -406,6 +450,22 @@ CallCheck check_step(const Grants& g, const std::string& tool, const nlohmann::j
             r.code = "TCODE_DENIED";
             r.message = tool + " is not allowed while your transactions are restricted: " + why;
         }
+    } else if (!g.tcodes.empty() && tool == "gui_element_click") {
+        // owner 2026-11-08: under a list, Ctrl+S is refused as a key, so its button is too (a standing approval would
+        // otherwise let the click save); application-specific save buttons are not detected (docs/THREAT_MODEL.md)
+        for (const char* k : {"element", "id", "element_id"})
+            if (args.contains(k) && args[k].is_string() && is_save_button(args[k].get<std::string>())) {
+                r.code = "TCODE_DENIED";
+                r.message = "gui_element_click is not allowed while your transactions are restricted: saving is not allowed for "
+                            "this account's transaction list; save in SAP yourself";
+            }
+        // review of #251: a click on a menu bar item selects it, the route gui_menu_select is refused for
+        for (const char* k : {"element", "id", "element_id"})
+            if (args.contains(k) && args[k].is_string() && is_menu_bar_item(args[k].get<std::string>())) {
+                r.code = "TCODE_DENIED";
+                r.message = "gui_element_click is not allowed while your transactions are restricted: menu bar items can start "
+                            "other transactions or save; use gui_transaction_start";
+            }
     } else if (tool == "gui_element_fill") {
         r.writes = true;
         if (!g.tcodes.empty()) {
@@ -454,14 +514,14 @@ CallCheck check_call(const Grants& g, const std::string& tool, const nlohmann::j
         if (!a.is_object()) return bad(at + "'arguments' must be an object");
         if (reads_only && !read_only_step(t))  // also a nested batch: the whole call is refused, nothing runs
             return deny("BATCH_NOT_READ_ONLY", at + t + " is not a read-only step; gui_batch_read runs only gui_session_list, "
-                                                   "gui_screen_read, gui_screen_find, gui_screen_capture, gui_menu_list, gui_element_get, "
-                                                   "gui_credentials_list and gui_doctor; use gui_batch for steps that can change state");
+                                                   "gui_screen_read, gui_screen_find, gui_menu_list, gui_element_get and gui_doctor; "
+                                                   "use gui_batch for steps that can change state");
         if (reads_only)  // an allowed tool that would select SAP tabs: no read-only step either
             if (const auto why = tab_selection(t, item.contains("arguments") ? item["arguments"] : nlohmann::json::object()); !why.empty())
                 return deny("BATCH_NOT_READ_ONLY", at + t + ": " + why + "; in gui_batch_read a screen read must pass no_tabs=true "
                                                        "(no tab), and gui_element_get must not activate a tab");
         if (is_batch(t)) return bad(at + t + " cannot be nested");
-        if (is_dangerous(t) || !tool_allowed(g.tools, t)) return deny("POLICY_DENIED", at + t + " is not permitted for this user");
+        if (batch_item_refused(t) || !tool_allowed(g.tools, t)) return deny("POLICY_DENIED", at + t + " is not permitted for this user");
         auto step = check_step(g, t, a);
         if (!step.ok()) return deny(step.code.c_str(), at + step.message);
         r.writes = r.writes || step.writes;

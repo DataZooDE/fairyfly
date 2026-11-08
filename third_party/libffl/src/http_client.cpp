@@ -56,12 +56,13 @@ HttpResponse http_do(const HttpRequest& rq) {
     httplib::Result res;
     const std::string& m = rq.method;
     if (m == "GET") res = cli.Get(u.target, headers);
+    else if (m == "HEAD") res = cli.Head(u.target, headers);
     else if (m == "POST") res = cli.Post(u.target, headers, rq.body, ctype);
     else if (m == "PATCH") res = cli.Patch(u.target, headers, rq.body, ctype);
     else if (m == "PUT") res = cli.Put(u.target, headers, rq.body, ctype);
     else if (m == "DELETE") res = cli.Delete(u.target, headers, rq.body, ctype);
     else throw Error("unsupported method " + m);
-    if (!res) throw Error("http " + m + " " + rq.url + ": " + httplib::to_string(res.error()));
+    if (!res) throw HttpTransportError("http " + m + " " + rq.url + ": " + httplib::to_string(res.error()));
 
     HttpResponse out;
     out.status = res->status;
