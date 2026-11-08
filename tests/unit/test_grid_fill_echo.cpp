@@ -5,6 +5,10 @@
 #include "include/field_fill_info.h"
 #include "include/sensitive_data.h"
 
+#include <functional>
+#include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -118,4 +122,185 @@ TEST_CASE("field fill: a password field stays redacted next to the grid echo", "
     const auto echo = fill_value_echo(probe, "hunter2", redacted);
     CHECK(redacted);
     CHECK(echo == redaction_marker(redaction_reason::password_field));
+}
+
+// ---- the read-back around the edit (fill_grid_cell_echo: fill_grid_cell's whole flow over GridAccess) ---------------
+
+namespace {
+
+/// An in-memory grid behind the GridAccess seam: cells by (row, column), reads that can fail, a log of what was read.
+struct MemoryGrid {
+    std::vector<std::string> columns;
+    std::map<std::string, std::string> titles;
+    std::vector<std::map<std::string, std::string>> rows;
+    std::set<std::string> failing;  // columns whose GetCellValue fails
+    std::vector<std::string> read_log;
+    std::function<void()> after_edit;  // e.g. a re-sort on commit
+
+    GridAccess access(int row, const std::string& column, const std::string& value) {
+        GridAccess a;
+        a.column_order = [this] { return columns; };
+        a.cell = [this](int r, const std::string& c) -> std::optional<std::string> {
+            read_log.push_back(c);
+            if (failing.count(c) || r < 0 || r >= static_cast<int>(rows.size())) return std::nullopt;
+            return rows[static_cast<std::size_t>(r)][c];
+        };
+        a.title = [this](const std::string& c) -> std::optional<std::string> {
+            auto it = titles.find(c);
+            return it == titles.end() ? std::nullopt : std::optional<std::string>(it->second);
+        };
+        a.modify = [this, row, column, value] {
+            rows[static_cast<std::size_t>(row)][column] = value;
+            if (after_edit) after_edit();
+        };
+        return a;
+    }
+};
+
+MemoryGrid me21n_grid() {
+    MemoryGrid g;
+    g.columns = {"EBELP", "MATNR", "TXZ01", "MENGE", "MEINS", "WERKS", "EEIND", "NETPR", "WAERS", "BEDNR"};
+    g.rows = {{{"EBELP", "10"}, {"MATNR", ""}, {"MENGE", ""}, {"WERKS", ""}},
+              {{"EBELP", "20"}, {"MATNR", "MAT-0002"}, {"MENGE", "3"}, {"WERKS", "1000"}}};
+    return g;
+}
+
+/// rows: [[a, b]] (a braced {{a, b}} would be a JSON object)
+nlohmann::json one_row(const std::string& a, const std::string& b) {
+    return nlohmann::json::array({nlohmann::json::array({a, b})});
+}
+
+MemoryGrid name_value_grid() {
+    MemoryGrid g;
+    g.columns = {"NAME", "VALUE"};
+    g.rows = {{{"NAME", "Authorization"}, {"VALUE", ""}}, {{"NAME", "Content-Type"}, {"VALUE", ""}}};
+    return g;
+}
+
+}  // namespace
+
+TEST_CASE("grid fill: the filled column reaches the echo decision", "[fill][grid][privacy]") {
+    auto g = me21n_grid();
+    auto echo = fill_grid_cell_echo(g.access(0, "MATNR", "MAT-0001"), 0, "MATNR", "MAT-0001");
+    CHECK(echo.value == "MAT-0001");
+    CHECK_FALSE(echo.redacted);
+    CHECK(g.rows[0]["MATNR"] == "MAT-0001");  // the edit ran
+
+    g = me21n_grid();
+    g.columns.push_back("PASSWORD");
+    echo = fill_grid_cell_echo(g.access(0, "PASSWORD", "hunter2"), 0, "PASSWORD", "hunter2");
+    CHECK(echo.redacted);
+    CHECK(echo.value.find("hunter2") == std::string::npos);
+}
+
+TEST_CASE("grid fill: a cell that cannot be read back fails closed", "[fill][grid][privacy]") {
+    SECTION("the NAME cell of a NAME/VALUE row") {
+        auto g = name_value_grid();
+        g.failing = {"NAME"};
+        const auto echo = fill_grid_cell_echo(g.access(0, "VALUE", "Bearer abc"), 0, "VALUE", "Bearer abc");
+        CHECK(echo.redacted);
+        CHECK(echo.value == redaction_marker(redaction_reason::unverified));
+    }
+    SECTION("the filled cell") {
+        auto g = me21n_grid();
+        g.failing = {"MATNR"};
+        CHECK(fill_grid_cell_echo(g.access(0, "MATNR", "MAT-0001"), 0, "MATNR", "MAT-0001").redacted);
+    }
+    SECTION("no column order") {
+        auto g = me21n_grid();
+        g.columns.clear();
+        CHECK(fill_grid_cell_echo(g.access(0, "MATNR", "x"), 0, "MATNR", "x").redacted);
+    }
+    SECTION("a NAME/VALUE row echoes unless its name is a credential") {
+        auto g = name_value_grid();
+        const auto echo = fill_grid_cell_echo(g.access(1, "VALUE", "application/json"), 1, "VALUE", "application/json");
+        CHECK_FALSE(echo.redacted);
+        CHECK(echo.value == "application/json");
+        g = name_value_grid();
+        CHECK(fill_grid_cell_echo(g.access(0, "VALUE", "Bearer abc"), 0, "VALUE", "Bearer abc").redacted);
+    }
+}
+
+TEST_CASE("grid fill: only the cells the decision needs are read", "[fill][grid][privacy]") {
+    auto g = me21n_grid();
+    fill_grid_cell_echo(g.access(0, "MENGE", "5"), 0, "MENGE", "5");
+    // a business grid: the filled cell and one anchor cell (before and after the edit), never the whole row
+    CHECK(std::set<std::string>(g.read_log.begin(), g.read_log.end()) == std::set<std::string>{"EBELP", "MENGE"});
+
+    auto nv = name_value_grid();
+    nv.columns = {"NAME", "VALUE", "COMMENT", "CHANGED_BY"};
+    fill_grid_cell_echo(nv.access(1, "VALUE", "x"), 1, "VALUE", "x");
+    CHECK(std::set<std::string>(nv.read_log.begin(), nv.read_log.end()) == std::set<std::string>{"NAME", "VALUE"});
+}
+
+TEST_CASE("grid fill: a grid that re-sorts after the edit does not echo another row", "[fill][grid][privacy]") {
+    auto g = me21n_grid();
+    g.after_edit = [&g] { std::swap(g.rows[0], g.rows[1]); };  // commit re-sorted the grid
+    const auto echo = fill_grid_cell_echo(g.access(0, "MATNR", "MAT-0001"), 0, "MATNR", "MAT-0001");
+    CHECK(echo.redacted);
+    CHECK(echo.value == redaction_marker(redaction_reason::unverified));
+
+    auto nv = name_value_grid();
+    nv.after_edit = [&nv] { std::swap(nv.rows[0], nv.rows[1]); };
+    CHECK(fill_grid_cell_echo(nv.access(1, "VALUE", "x"), 1, "VALUE", "x").redacted);
+}
+
+TEST_CASE("grid fill: a displayed column title that names a credential redacts", "[fill][grid][privacy]") {
+    for (const char* title : {"Password", "Kennwort", "Passwort", "Kennw.", "Passw."}) {
+        INFO(title);
+        auto g = me21n_grid();
+        g.columns.push_back("ZZFIELD1");
+        g.titles["ZZFIELD1"] = title;
+        const auto echo = fill_grid_cell_echo(g.access(0, "ZZFIELD1", "hunter2"), 0, "ZZFIELD1", "hunter2");
+        CHECK(echo.redacted);
+        CHECK(echo.value.find("hunter2") == std::string::npos);
+    }
+    auto g = me21n_grid();
+    g.titles["MATNR"] = "Material";
+    CHECK_FALSE(fill_grid_cell_echo(g.access(0, "MATNR", "M-1"), 0, "MATNR", "M-1").redacted);
+}
+
+TEST_CASE("credential names: near-miss abbreviations are caught in fill echoes and screen reads", "[fill][grid][privacy][sensitive]") {
+    for (const char* name : {"PASSW", "XUBCODE", "KENNW", "RSYST-PASSW", "XU400-XUBCODE", "NEW_PASSW"}) {
+        INFO(name);
+        // grid fill echo
+        GridCellProbe probe;
+        probe.column = name;
+        probe.columns = {"BNAME", name};
+        probe.row = {"ZUSER", "hunter2"};
+        probe.row_known = true;
+        bool redacted = false;
+        CHECK(grid_fill_value_echo(probe, "hunter2", redacted).find("hunter2") == std::string::npos);
+        CHECK(redacted);
+        // field fill echo
+        FieldProbe field;
+        field.type = "GuiTextField";
+        field.id = std::string("wnd[0]/usr/txt") + name;
+        field.text_after = "hunter2";
+        field.text_after_known = true;
+        CHECK(fill_value_echo(field, "hunter2", redacted).find("hunter2") == std::string::npos);
+        // screen read of a grid
+        nlohmann::json table = {{"columns", {"BNAME", name}}, {"rows", one_row("ZUSER", "hunter2")}};
+        redact_sensitive_header_rows(table);
+        CHECK(table["rows"][0][1] != "hunter2");
+        // screen read of a NAME/VALUE list
+        nlohmann::json list = {{"columns", {"NAME", "VALUE"}}, {"rows", one_row(name, "hunter2")}};
+        redact_sensitive_header_rows(list);
+        CHECK(list["rows"][0][1] != "hunter2");
+    }
+    // lookalike business names stay readable
+    for (const char* name : {"KENNWERT", "SUBCODE", "BARCODE", "PASSAGE"}) {
+        INFO(name);
+        nlohmann::json table = {{"columns", {"MATNR", name}}, {"rows", one_row("M-1", "42")}};
+        redact_sensitive_header_rows(table);
+        CHECK(table["rows"][0][1] == "42");
+        GridCellProbe probe;
+        probe.column = name;
+        probe.columns = {"MATNR", name};
+        probe.row = {"M-1", "42"};
+        probe.row_known = true;
+        bool redacted = true;
+        CHECK(grid_fill_value_echo(probe, "42", redacted) == "42");
+        CHECK_FALSE(redacted);
+    }
 }

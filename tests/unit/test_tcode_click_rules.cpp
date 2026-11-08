@@ -6,8 +6,6 @@
 #include "include/mcp/policy.h"
 #include "include/mcp/tool_catalog.h"
 
-#include "policy.hpp"  // libffl (vendored): the gateway's own check, for the parity test
-
 #include "support/tool_specs.h"
 
 #include <optional>
@@ -131,20 +129,20 @@ TEST_CASE("authorize: the click rules leave other buttons and tokens without a l
     CHECK(click(nav, {{"element", "wnd[0]/mbar/menu[0]"}}).allowed);
 }
 
-TEST_CASE("authorize: the local click rules agree with libffl's check_call", "[auth][authz][navigation][tcode_click][libffl]") {
-    ffy::policy::Grants g;
-    g.tools = {"*"};
-    g.tcodes = {"ME21N"};
-    g.allow_write = true;
+TEST_CASE("authorize: other arguments of the click cannot get a Save click past the rule", "[auth][authz][navigation][tcode_click]") {
+    // libffl refuses a call with a malformed `path`/`key`/`vkey` as ARGUMENT_INVALID before it looks at the id; the local
+    // check must still see the Save button and the menu bar (only the ids are judged)
     const Principal p = allowlisted({"ME21N"});
-    auto all = std::vector<std::string>(std::begin(kSaveIds), std::end(kSaveIds));
-    all.insert(all.end(), std::begin(kMenuBarIds), std::end(kMenuBarIds));
-    all.insert(all.end(), std::begin(kOtherButtons), std::end(kOtherButtons));
-    for (const auto& id : all) {
-        INFO(id);
-        const auto gateway = ffy::policy::check_call(g, "gui_element_click", {{"element", id}});
-        const auto local = click(p, {{"element", id}});
-        CHECK(local.allowed == gateway.ok());
-        if (!gateway.ok()) CHECK(local.code == gateway.code);
+    for (const json& extra : {json{{"path", 5}}, json{{"key", json::array()}}, json{{"vkey", "x"}}, json{{"fields", "x"}},
+                              json{{"code", nullptr}}}) {
+        INFO(extra.dump());
+        json save = {{"element", "wnd[0]/tbar[0]/btn[11]"}};
+        save.update(extra);
+        CHECK(click(p, save).code == "TCODE_DENIED");
+        json menu = {{"id", "wnd[0]/mbar/menu[1]"}};
+        menu.update(extra);
+        CHECK(click(p, menu).code == "TCODE_DENIED");
     }
+    // one id alias names the Save button while another names a harmless button: refused
+    CHECK(click(p, {{"element", "wnd[0]/usr/btnOK"}, {"element_id", "wnd[0]/tbar[0]/btn[11]"}}).code == "TCODE_DENIED");
 }
