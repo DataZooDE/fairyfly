@@ -134,7 +134,9 @@ struct MemoryGrid {
     std::map<std::string, std::string> titles;
     std::vector<std::map<std::string, std::string>> rows;
     std::set<std::string> failing;  // columns whose GetCellValue fails
-    std::vector<std::string> read_log;
+    std::vector<std::string> read_log;        // every cell read
+    std::vector<std::string> read_before;     // the cells read before the edit
+    bool edited = false;
     std::function<void()> after_edit;  // e.g. a re-sort on commit
 
     GridAccess access(int row, const std::string& column, const std::string& value) {
@@ -142,6 +144,7 @@ struct MemoryGrid {
         a.column_order = [this] { return columns; };
         a.cell = [this](int r, const std::string& c) -> std::optional<std::string> {
             read_log.push_back(c);
+            if (!edited) read_before.push_back(c);
             if (failing.count(c) || r < 0 || r >= static_cast<int>(rows.size())) return std::nullopt;
             return rows[static_cast<std::size_t>(r)][c];
         };
@@ -150,6 +153,7 @@ struct MemoryGrid {
             return it == titles.end() ? std::nullopt : std::optional<std::string>(it->second);
         };
         a.modify = [this, row, column, value] {
+            edited = true;
             rows[static_cast<std::size_t>(row)][column] = value;
             if (after_edit) after_edit();
         };
@@ -221,16 +225,70 @@ TEST_CASE("grid fill: a cell that cannot be read back fails closed", "[fill][gri
     }
 }
 
-TEST_CASE("grid fill: only the cells the decision needs are read", "[fill][grid][privacy]") {
+TEST_CASE("grid fill: the anchor before the edit, the row once after it", "[fill][grid][privacy]") {
     auto g = me21n_grid();
     fill_grid_cell_echo(g.access(0, "MENGE", "5"), 0, "MENGE", "5");
-    // a business grid: the filled cell and one anchor cell (before and after the edit), never the whole row
-    CHECK(std::set<std::string>(g.read_log.begin(), g.read_log.end()) == std::set<std::string>{"EBELP", "MENGE"});
+    CHECK(g.read_before == std::vector<std::string>{"EBELP"});
+    // after the edit every cell of the row exactly once (the screen-read row rule needs all of them)
+    std::vector<std::string> after(g.read_log.begin() + static_cast<std::ptrdiff_t>(g.read_before.size()), g.read_log.end());
+    std::sort(after.begin(), after.end());
+    auto all = g.columns;
+    std::sort(all.begin(), all.end());
+    CHECK(after == all);
+}
 
-    auto nv = name_value_grid();
-    nv.columns = {"NAME", "VALUE", "COMMENT", "CHANGED_BY"};
-    fill_grid_cell_echo(nv.access(1, "VALUE", "x"), 1, "VALUE", "x");
-    CHECK(std::set<std::string>(nv.read_log.begin(), nv.read_log.end()) == std::set<std::string>{"NAME", "VALUE"});
+TEST_CASE("grid fill: a titled grid without a NAME column hides a credential row like a screen read", "[fill][grid][privacy]") {
+    MemoryGrid g;
+    g.columns = {"ID", "PARAM", "VALUE"};
+    g.rows = {{{"ID", "1"}, {"PARAM", "client_secret"}, {"VALUE", ""}}, {{"ID", "2"}, {"PARAM", "timeout"}, {"VALUE", ""}}};
+    // the screen read of that row hides it
+    nlohmann::json table = {{"columns", g.columns},
+                            {"rows", nlohmann::json::array({nlohmann::json::array({"1", "client_secret", "s3cr3t"})})}};
+    redact_sensitive_header_rows(table);
+    REQUIRE(table["rows"][0][2] != "s3cr3t");
+    // ... and so does the fill echo
+    auto echo = fill_grid_cell_echo(g.access(0, "VALUE", "s3cr3t"), 0, "VALUE", "s3cr3t");
+    CHECK(echo.redacted);
+    CHECK(echo.value.find("s3cr3t") == std::string::npos);
+    // a harmless parameter echoes
+    echo = fill_grid_cell_echo(g.access(1, "VALUE", "30"), 1, "VALUE", "30");
+    CHECK_FALSE(echo.redacted);
+    CHECK(echo.value == "30");
+}
+
+TEST_CASE("grid fill: without a usable first-column anchor another stable cell anchors the row", "[fill][grid][privacy]") {
+    SECTION("the filled column is the first column") {
+        auto g = me21n_grid();
+        fill_grid_cell_echo(g.access(1, "EBELP", "30"), 1, "EBELP", "30");
+        CHECK(g.read_before == std::vector<std::string>{"MATNR"});  // the first non-empty other cell
+        g = me21n_grid();
+        g.after_edit = [&g] { std::swap(g.rows[0], g.rows[1]); };
+        CHECK(fill_grid_cell_echo(g.access(1, "EBELP", "30"), 1, "EBELP", "30").redacted);
+    }
+    SECTION("the first column is empty") {
+        auto g = me21n_grid();
+        g.rows[0]["EBELP"] = "";
+        g.rows[1]["EBELP"] = "";
+        g.rows[0]["MATNR"] = "MAT-0001";
+        fill_grid_cell_echo(g.access(0, "MENGE", "5"), 0, "MENGE", "5");
+        CHECK(g.read_before == std::vector<std::string>{"EBELP", "MATNR"});
+        g.read_log.clear();
+        g.read_before.clear();
+        g.edited = false;
+        g.after_edit = [&g] { std::swap(g.rows[0], g.rows[1]); };
+        CHECK(fill_grid_cell_echo(g.access(0, "MENGE", "6"), 0, "MENGE", "6").redacted);
+    }
+    SECTION("an empty row: echoed unless its content changed") {
+        auto g = me21n_grid();
+        g.rows.push_back({});  // row 2: every cell empty
+        auto echo = fill_grid_cell_echo(g.access(2, "MATNR", "MAT-9"), 2, "MATNR", "MAT-9");
+        CHECK_FALSE(echo.redacted);
+        CHECK(echo.value == "MAT-9");
+        g = me21n_grid();
+        g.rows.push_back({});
+        g.after_edit = [&g] { std::swap(g.rows[1], g.rows[2]); };  // a filled row moved into row 2
+        CHECK(fill_grid_cell_echo(g.access(2, "MATNR", "MAT-9"), 2, "MATNR", "MAT-9").redacted);
+    }
 }
 
 TEST_CASE("grid fill: a grid that re-sorts after the edit does not echo another row", "[fill][grid][privacy]") {
