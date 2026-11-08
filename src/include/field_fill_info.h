@@ -2,6 +2,7 @@
 
 #include "core.h"
 #include <string>
+#include <vector>
 
 namespace fairyfly::sap {
 
@@ -34,6 +35,21 @@ std::string time_format_of_text(const std::string& text);
 /// The `value` of a fill result: the typed value as read back from the control (truncated to 200 characters, with
 /// an ellipsis marker) or "[REDACTED: reason]" for password/credential fields. `redacted` reports which one.
 std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, bool& redacted);
+
+/// What a GridView cell fill knows after ModifyCell: the filled column, the grid's column order and the row's cells
+/// as read back (GetCellValue), the filled cell included. Plain data so the echo is unit-testable without COM.
+struct GridCellProbe {
+    std::string column;                ///< technical name of the filled column (MATNR, MENGE, ...)
+    std::vector<std::string> columns;  ///< the grid's column order
+    std::vector<std::string> row;      ///< the row's cells in `columns` order
+    bool row_known = false;            ///< false when the column order or the row could not be read
+};
+
+/// The `value` of a grid cell fill: the cell as read back from the grid (the typed value when the column is not in
+/// the column order), redacted by the rules a screen read of that row applies (redact_sensitive_header_rows: a
+/// credential column, a NAME/VALUE row naming a credential) plus a credential-named filled column, and masked like a
+/// field echo. Not echoed when the row could not be read (fail closed). `redacted` reports a marker.
+std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& typed, bool& redacted);
 
 /// The `field` object of a fill result: {type, max_length?, input_kind?, format_hint?, format_hint_source?,
 /// numerical?, required?, value_normalized?, format_warning?}. Never a hard validation: a mismatch with SAP's own

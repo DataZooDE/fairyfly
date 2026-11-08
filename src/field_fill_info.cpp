@@ -118,6 +118,30 @@ std::string fill_value_echo(const FieldProbe& probe, const std::string& typed, b
     return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
 }
 
+std::string grid_fill_value_echo(const GridCellProbe& probe, const std::string& typed, bool& redacted) {
+    redacted = true;
+    // the filled column names a credential itself (also one the column order does not list)
+    if (const auto reason = sensitive_name_reason(probe.column); !reason.empty()) return redaction_marker(reason.c_str());
+    if (!probe.row_known || probe.columns.empty() || probe.row.size() != probe.columns.size())
+        return redaction_marker(redaction_reason::unverified);
+
+    // the row as a screen read of the grid reports it, with the filled cell as the grid now shows it
+    json columns = probe.columns;
+    json row = probe.row;
+    const auto at = std::find(probe.columns.begin(), probe.columns.end(), probe.column);
+    std::size_t index = static_cast<std::size_t>(at - probe.columns.begin());
+    if (at == probe.columns.end()) {
+        columns.push_back(probe.column);
+        row.push_back(typed);
+    }
+    json table = {{"columns", columns}, {"rows", json::array({row})}};
+    redact_sensitive_header_rows(table);
+    const std::string shown = table["rows"][0][index].get<std::string>();
+    if (is_redaction_marker(shown)) return shown;
+    redacted = false;
+    return truncate_utf8(redact_sensitive_response_text(shown), kFillEchoMaxChars);
+}
+
 json build_fill_field_info(const FieldProbe& probe, const std::string& typed) {
     json info = json::object();
     info["type"] = probe.type;
