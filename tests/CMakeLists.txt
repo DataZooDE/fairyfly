@@ -85,6 +85,7 @@ add_executable(unit_tests
     unit/test_setup_validators.cpp
     unit/test_auth.cpp
     unit/test_auth_policy.cpp
+    unit/test_tcode_click_rules.cpp
     unit/test_auth_scopes.cpp
     unit/test_mcp_config.cpp
     unit/test_mcp_client_config.cpp
@@ -108,6 +109,7 @@ add_executable(unit_tests
     unit/test_mcp_session_worker_provider.cpp
     unit/test_selection_input_guard.cpp
     unit/test_round2_usability.cpp
+    unit/test_grid_fill_echo.cpp
     unit/test_tray_win32_manual.cpp
 )
 
