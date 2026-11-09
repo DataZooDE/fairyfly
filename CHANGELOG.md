@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.11.09
+
+- Local tokens with a T-code allowlist (`mcp token create --tcode`) refuse `gui_element_click` on the Save button
+  (`tbar[0]/btn[11]`, in any window and id spelling) and on menu bar items (any id with an `mbar` segment) with
+  `TCODE_DENIED`, also as a `gui_batch` item: the same two rules as the cloud gateway (fairyfly-gateway #251). The
+  decision is libffl's own `check_call`, not a copy. `--allow-navigation` lifts both locally, as it lifts
+  `gui_menu_select` and Ctrl+S; the gateway always refuses them under a transaction list.
+- Cloud link (libffl synced from gateway v2026.11.08.4, including #251): the desktop applies the same click rules to
+  linked calls under a transaction list, and refuses `gui_screen_capture` as a batch item.
+- Filling a grid cell (`element fill` on an ALV grid) echoes the value the grid now shows instead of a fixed
+  `[REDACTED]`. The row is read back after the edit and judged by the screen-read rules: credential-named columns
+  (now also `PASSW`, `KENNW`, `XUBCODE`) and NAME/VALUE rows naming a credential stay redacted, and a row that cannot
+  be read back, or whose anchor cell changed, gives `[REDACTED: could not verify ...]`. Password fields are unchanged.
+
 ## 2026.11.07
 
 - New MCP tool `gui_batch_read`: up to 20 read-only tool calls in one round trip, with the step format of `gui_batch`
