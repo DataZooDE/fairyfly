@@ -3,7 +3,10 @@
 #include "proxy.hpp"
 
 #include <httplib.h>
+#include <openssl/crypto.h>
 #include <spdlog/spdlog.h>
+
+#include <chrono>
 
 #include <cctype>
 #include <mutex>
@@ -37,12 +40,19 @@ std::string scheme_of(const std::string& challenge) {
 class BasicAuth final : public Authenticator {
 public:
     BasicAuth(std::string u, std::string p) : user_(std::move(u)), pass_(std::move(p)) {}
+    ~BasicAuth() override {
+        OPENSSL_cleanse(user_.data(), user_.size());
+        OPENSSL_cleanse(pass_.data(), pass_.size());
+    }
     std::optional<std::string> respond(const std::vector<std::string>& challenges) override {
         if (sent_) return std::nullopt;  // a 407 after our credentials: they were refused
         for (auto& c : challenges)
             if (iequals(scheme_of(c), "Basic")) {
                 sent_ = true;
-                return "Basic " + b64std_encode(user_ + ":" + pass_);
+                std::string plain = user_ + ":" + pass_;
+                std::string v = "Basic " + b64std_encode(plain);
+                OPENSSL_cleanse(plain.data(), plain.size());
+                return v;
             }
         return std::nullopt;
     }
@@ -220,9 +230,14 @@ struct ProxyResponse {
     }
 };
 
-// Reads exactly the proxy's answer (byte by byte up to the blank line, then a declared body), never into the tunnel.
-bool read_exact(socket_t s, char* p, size_t n) {
+using Clock = std::chrono::steady_clock;
+
+// Reads exactly the proxy's answer (byte by byte up to the blank line, then a declared body), never into the tunnel,
+// and all of it before the deadline: a proxy that answers one byte at a time cannot hold the connect beyond it.
+bool read_exact(socket_t s, char* p, size_t n, Clock::time_point deadline) {
     while (n) {
+        auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - Clock::now()).count();
+        if (left <= 0 || httplib::detail::select_read(s, time_t(left / 1000000), time_t(left % 1000000)) <= 0) return false;
         auto r = httplib::detail::read_socket(s, p, n, 0);
         if (r <= 0) return false;
         p += r;
@@ -231,11 +246,11 @@ bool read_exact(socket_t s, char* p, size_t n) {
     return true;
 }
 
-bool read_line(socket_t s, std::string& line, size_t& budget) {
+bool read_line(socket_t s, std::string& line, size_t& budget, Clock::time_point deadline) {
     line.clear();
     char c;
     while (budget) {
-        if (!read_exact(s, &c, 1)) return false;
+        if (!read_exact(s, &c, 1, deadline)) return false;
         --budget;
         if (c == '\n') {
             if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -246,22 +261,21 @@ bool read_line(socket_t s, std::string& line, size_t& budget) {
     return false;
 }
 
-std::optional<ProxyResponse> read_response(socket_t s) {
+std::optional<ProxyResponse> read_response(socket_t s, Clock::time_point deadline) {
     ProxyResponse r;
     size_t budget = 64 * 1024;
     std::string line;
-    if (!read_line(s, line, budget)) return std::nullopt;
-    // HTTP/1.1 407 Proxy Authentication Required
-    if (line.rfind("HTTP/1.", 0) != 0 || line.size() < 12) return std::nullopt;
-    bool http11 = line[7] == '1';
-    try {
-        r.status = std::stoi(line.substr(9, 3));
-    } catch (...) {
+    if (!read_line(s, line, budget, deadline)) return std::nullopt;
+    // HTTP/1.1 407 Proxy Authentication Required: "HTTP/1.x", a space, exactly three digits, then a space or the end
+    auto digit = [&](size_t i) { return line[i] >= '0' && line[i] <= '9'; };
+    if (line.rfind("HTTP/1.", 0) != 0 || line.size() < 12 || (line[7] != '0' && line[7] != '1') || line[8] != ' ' || !digit(9) ||
+        !digit(10) || !digit(11) || (line.size() > 12 && line[12] != ' '))
         return std::nullopt;
-    }
+    bool http11 = line[7] == '1';
+    r.status = (line[9] - '0') * 100 + (line[10] - '0') * 10 + (line[11] - '0');
     r.reason = line.size() > 13 ? trim(line.substr(13)) : "";
     for (;;) {
-        if (!read_line(s, line, budget)) return std::nullopt;
+        if (!read_line(s, line, budget, deadline)) return std::nullopt;
         if (line.empty()) break;
         auto colon = line.find(':');
         if (colon == std::string::npos) continue;
@@ -281,25 +295,26 @@ std::optional<ProxyResponse> read_response(socket_t s) {
             long long n = std::stoll(cl);
             if (n >= 0 && n <= (1 << 20)) {
                 std::string body(size_t(n), '\0');
-                known = n == 0 || read_exact(s, body.data(), body.size());
+                known = n == 0 || read_exact(s, body.data(), body.size(), deadline);
             }
         } catch (...) {
         }
     } else if (lower(r.get("transfer-encoding")).find("chunked") != std::string::npos) {
+        const size_t cap = 1u << 20;
         size_t total = 0;
         for (;;) {
             size_t b = 1024;
-            if (!read_line(s, line, b)) break;
+            if (!read_line(s, line, b, deadline)) break;
             size_t n = 0;
             try {
                 n = std::stoul(line, nullptr, 16);
             } catch (...) {
                 break;
             }
+            if (n > cap - total) break;  // (checked before adding: no wrap-around)
             total += n;
-            if (total > (1u << 20)) break;
             std::string chunk(n + 2, '\0');
-            if (!read_exact(s, chunk.data(), chunk.size())) break;
+            if (!read_exact(s, chunk.data(), chunk.size(), deadline)) break;
             if (n == 0) {
                 known = true;  // (trailers are not expected after a proxy's error page)
                 break;
@@ -336,6 +351,8 @@ socket_t through(const Endpoint& px, const std::string& host, int port, const De
     const std::string target = (host.find(':') != std::string::npos && host[0] != '[' ? "[" + host + "]" : host) + ":" + std::to_string(port);
     const std::string via = " (" + px.str() + " -> " + target + ", proxy from " + d.source + ")";
 
+    // the whole CONNECT exchange (every round of the handshake) within the timeout, however the proxy paces its answers
+    const auto deadline = Clock::now() + std::chrono::milliseconds(timeout_ms);
     std::vector<std::unique_ptr<Authenticator>> auths;
     for (auto& f : d.authenticators)
         if (f)
@@ -346,8 +363,11 @@ socket_t through(const Endpoint& px, const std::string& host, int port, const De
         std::string req = "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\nUser-Agent: ffy-link/0.2\r\nProxy-Connection: Keep-Alive\r\n";
         if (authz) req += "Proxy-Authorization: " + *authz + "\r\n";
         req += "\r\n";
-        if (!send_all(guard.s, req)) throw Refused("proxy closed the connection" + via);
-        auto res = read_response(guard.s);
+        bool sent = send_all(guard.s, req);
+        OPENSSL_cleanse(req.data(), req.size());  // it may hold a Basic credential
+        if (authz) OPENSSL_cleanse(authz->data(), authz->size());
+        if (!sent) throw Refused("proxy closed the connection" + via);
+        auto res = read_response(guard.s, deadline);
         if (!res) throw Refused("proxy sent no valid answer to CONNECT" + via);
         if (res->status / 100 == 2) {
             spdlog::debug("proxy: tunnel to {} through {} ({}{})", target, px.str(), d.source,
@@ -371,9 +391,13 @@ socket_t through(const Endpoint& px, const std::string& host, int port, const De
                     active = a.get();
                     break;
                 }
-            if (!next)
-                throw Refused("proxy requires authentication (offers " + offered(ch) + "), and no credentials are configured for it" +
-                              (auths.empty() ? std::string() : " for these schemes") + via);
+            if (!next) {
+                std::string declined;
+                for (auto& a : auths)
+                    if (!a->declined().empty()) declined += (declined.empty() ? "" : "; ") + a->declined();
+                throw Refused("proxy requires authentication (offers " + offered(ch) + "), and " +
+                              (declined.empty() ? std::string("no credentials are configured for it") : declined) + via);
+            }
         }
         if (!res->reusable) {
             // the proxy ends the connection after its 407: the first answer only told us the schemes, so start over on a new

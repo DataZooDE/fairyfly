@@ -74,7 +74,7 @@ TEST_CASE("system proxy: the order of the settings - PAC/WPAD, then the manual p
     const std::string url = "https://fairyfly.io/ffl";
     ProxySettings none;
     int calls = 0;
-    auto counted = [&](AutoProxyResult r) { return [&calls, r] { ++calls; return r; }; };
+    auto counted = [&](AutoProxyResult r) { return [&calls, r](AutoSource) { ++calls; return r; }; };
 
     SECTION("nothing configured: DIRECT, and no script is evaluated") {
         auto r = resolve(none, std::nullopt, url, counted(pac("p:1")));
@@ -142,6 +142,122 @@ TEST_CASE("system proxy: the order of the settings - PAC/WPAD, then the manual p
         user.proxy = "user:8080";
         CHECK(resolve(user, m, url, {}).routes == Routes{via("user", 8080)});
     }
+}
+
+TEST_CASE("system proxy: every route knows where it came from; the PAC script is asked before detection") {
+    using ffy::proxy::Origin;
+    const std::string url = "https://fairyfly.io/ffl";
+    std::vector<AutoSource> asked;
+    auto answer = [&](AutoProxyResult pac_r, AutoProxyResult wpad_r) {
+        return [&asked, pac_r, wpad_r](AutoSource s) {
+            asked.push_back(s);
+            return s == AutoSource::pac ? pac_r : wpad_r;
+        };
+    };
+    AutoProxyResult failed;
+    failed.error = "the proxy script (PAC) could not be downloaded";
+
+    SECTION("an administrator's PAC script: origin pac; detection not asked") {
+        ProxySettings s;
+        s.auto_detect = true;
+        s.auto_config_url = "http://pac.corp.example/proxy.pac";
+        auto r = resolve(s, std::nullopt, url, answer(pac("pacproxy:8080"), pac("rogue:8080")));
+        REQUIRE(r.routes.size() == 1);
+        CHECK(r.routes[0].proxy.host == "pacproxy");
+        CHECK(r.routes[0].proxy.origin == Origin::pac);
+        CHECK(asked == std::vector<AutoSource>{AutoSource::pac});
+    }
+    SECTION("WPAD: origin discovered (also when the script failed first)") {
+        ProxySettings s;
+        s.auto_detect = true;
+        s.auto_config_url = "http://pac.corp.example/proxy.pac";
+        auto r = resolve(s, std::nullopt, url, answer(failed, pac("wpadproxy:3128")));
+        REQUIRE(r.routes.size() == 1);
+        CHECK(r.routes[0].proxy.origin == Origin::discovered);
+        CHECK(asked == std::vector<AutoSource>{AutoSource::pac, AutoSource::wpad});
+        CHECK(r.how == "PAC http://pac.corp.example/proxy.pac failed (the proxy script (PAC) could not be downloaded), automatic detection (WPAD)");
+    }
+    SECTION("manual and machine settings: origin configured") {
+        ProxySettings s;
+        s.proxy = "manual:8080";
+        CHECK(resolve(s, std::nullopt, url, {}).routes.at(0).proxy.origin == Origin::configured);
+        ProxySettings m;
+        m.proxy = "machine:3128";
+        CHECK(resolve(ProxySettings{}, m, url, {}).routes.at(0).proxy.origin == Origin::configured);
+    }
+}
+
+TEST_CASE("system proxy: the Windows login never goes to a proxy found by WPAD (unless the administrator allows it)") {
+    using ffy::proxy::Origin;
+    CHECK(windows_login_allowed(Origin::configured, false));
+    CHECK(windows_login_allowed(Origin::pac, false));
+    CHECK_FALSE(windows_login_allowed(Origin::discovered, false));
+    CHECK(windows_login_allowed(Origin::discovered, true));
+
+    int sspi_made = 0;
+    auto sspi = [&]() -> std::unique_ptr<ffy::proxy::Authenticator> {
+        ++sspi_made;
+        return ffy::proxy::basic("must-not", "be-used");  // stands in for SSPI: any authenticator that would answer
+    };
+    ffy::proxy::Endpoint wpad{"wpad-proxy.lan", 8080, Origin::discovered};
+    auto a = login_authenticator(wpad, false, sspi);
+    REQUIRE(a);
+    CHECK(sspi_made == 0);  // no security context, no token, nothing to send
+    CHECK_FALSE(a->respond({"NTLM", "Negotiate"}));
+    CHECK(a->declined().find("discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly") !=
+          std::string::npos);
+    CHECK_FALSE(a->respond({"NTLM TlRMTVNTUAACAAAA"}));
+
+    // the administrator's policy, or a proxy named explicitly: the real authenticator
+    CHECK(login_authenticator(wpad, true, sspi) != nullptr);
+    CHECK(sspi_made == 1);
+    login_authenticator({"proxy.corp.example", 8080, Origin::configured}, false, sspi);
+    login_authenticator({"proxy.corp.example", 8080, Origin::pac}, false, sspi);
+    CHECK(sspi_made == 3);
+}
+
+TEST_CASE("system proxy: a stored Basic credential is read only when a configured proxy asks for Basic") {
+    using ffy::proxy::Origin;
+    int reads = 0;
+    auto read = [&]() -> std::optional<StoredLogin> {
+        ++reads;
+        return StoredLogin{"alice", "s3cret"};
+    };
+    SECTION("no 407 offering Basic: never read") {
+        auto a = stored_basic({"proxy.corp.example", 8080, Origin::configured}, read);
+        CHECK_FALSE(a->respond({"NTLM", "Negotiate"}));
+        CHECK(reads == 0);
+    }
+    SECTION("a PAC or WPAD proxy asking for Basic: refused, never read") {
+        for (auto o : {Origin::pac, Origin::discovered}) {
+            auto a = stored_basic({"p", 8080, o}, read);
+            CHECK_FALSE(a->respond({"Basic realm=\"corp\""}));
+            CHECK(a->declined().find("only to a proxy set explicitly") != std::string::npos);
+        }
+        CHECK(reads == 0);
+    }
+    SECTION("a configured proxy asking for Basic: read once, sent once") {
+        auto a = stored_basic({"proxy.corp.example", 8080, Origin::configured}, read);
+        auto h = a->respond({"Basic realm=\"corp\""});
+        REQUIRE(h);
+        CHECK(*h == "Basic " + ffy::b64std_encode("alice:s3cret"));
+        CHECK(a->scheme() == "Basic");
+        CHECK_FALSE(a->respond({"Basic realm=\"corp\""}));  // a second 407: refused
+        CHECK(reads == 1);
+    }
+    SECTION("nothing stored: nothing sent") {
+        auto a = stored_basic({"proxy.corp.example", 8080, Origin::configured}, [] { return std::optional<StoredLogin>{}; });
+        CHECK_FALSE(a->respond({"Basic realm=x"}));
+    }
+}
+
+TEST_CASE("system proxy: malformed bypass and proxy entries are skipped safely") {
+    CHECK_FALSE(bypassed("fairyfly.io", 443, "http://"));
+    CHECK_FALSE(bypassed("fairyfly.io", 443, "https://;;,<local>"));
+    CHECK(bypassed("fairyfly.io", 443, "http://;fairyfly.io"));
+    CHECK(parse_proxy_list("http://").empty());
+    CHECK(parse_proxy_list("https=").empty());
+    CHECK(parse_proxy_list("https://tls-proxy:443;plain:8080") == Routes{via("plain", 8080)});  // the TLS entry is skipped (logged)
 }
 
 TEST_CASE("system proxy: Negotiate before NTLM; once chosen, only that scheme's next challenge") {
@@ -239,7 +355,15 @@ TEST_CASE("system proxy (Windows): the Windows resolver is installed for libffl 
     const char* env = std::getenv("HTTPS_PROXY");
     auto d = ffy::proxy::decide("wss://link.fairyfly.io/ffl");  // the real WinHTTP calls; must not throw
     if (!env || !*env) CHECK(d.source == "Windows proxy settings");
-    CHECK(d.authenticators.size() >= 2);  // SSPI, then a stored Basic credential
+    REQUIRE(d.authenticators.size() >= 2);  // SSPI, then a stored Basic credential
+    // the installed SSPI authenticator: a token for a configured proxy, none for a WPAD-discovered one (no policy here)
+    auto configured = d.authenticators[0]({"proxy.corp.example", 8080, ffy::proxy::Origin::configured});
+    REQUIRE(configured);
+    CHECK(configured->respond({"NTLM"}).has_value());
+    auto wpad = d.authenticators[0]({"wpad-proxy.lan", 8080, ffy::proxy::Origin::discovered});
+    REQUIRE(wpad);
+    CHECK_FALSE(wpad->respond({"NTLM"}).has_value());
+    CHECK_FALSE(wpad->declined().empty());
     // loopback never asks Windows
     CHECK(ffy::proxy::decide("wss://127.0.0.1:9/ffl").routes.empty());
 }

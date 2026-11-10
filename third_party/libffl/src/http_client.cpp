@@ -13,7 +13,10 @@ namespace ffy {
 
 // NO_PROXY entries are exact hosts or domain suffixes (".example.com", "*.example.com"); loopback is never proxied.
 bool proxy_bypass(const std::string& host, const std::string& no_proxy) {
-    if (host == "localhost" || host.rfind("127.", 0) == 0 || host == "::1" || host == "[::1]") return true;
+    // loopback: localhost, ::1 and 127.0.0.0/8 as an address (not a name like "127.evil.example")
+    if (iequals(host, "localhost") || host == "::1" || host == "[::1]" ||
+        (host.rfind("127.", 0) == 0 && host.find_first_not_of("0123456789.") == std::string::npos))
+        return true;
     for (auto& e : split_csv(no_proxy)) {
         std::string d = lower(e);
         if (d == "*") return true;

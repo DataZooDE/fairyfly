@@ -2,8 +2,12 @@
 // order of the settings and the choice of an SSPI challenge. The WinHTTP and SSPI calls are in system_proxy_win32.cpp.
 #include "include/link/system_proxy.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cctype>
+#include <mutex>
+#include <set>
 
 #include "util.hpp"  // libffl
 
@@ -28,8 +32,17 @@ std::vector<std::string> tokens(const std::string& s, const std::string& seps) {
 
 std::optional<ffy::proxy::Endpoint> endpoint(std::string v) {
     std::string l = ffy::lower(v);
-    if (l.rfind("http://", 0) == 0) v = v.substr(7);
-    else if (l.find("://") != std::string::npos) return std::nullopt;  // https:// (TLS to the proxy), socks://: not supported
+    if (l.rfind("http://", 0) == 0) {
+        v = v.substr(7);
+    } else if (l.find("://") != std::string::npos) {  // https:// (TLS to the proxy), socks://: not supported, said once
+        static std::mutex mu;
+        static std::set<std::string> warned;
+        std::lock_guard<std::mutex> g(mu);
+        if (warned.insert(l).second)
+            spdlog::warn("proxy: the proxy entry {} is skipped: only http:// proxies are supported (no TLS to the proxy, no SOCKS)",
+                         l.substr(0, 120));
+        return std::nullopt;
+    }
     while (!v.empty() && v.back() == '/') v.pop_back();
     ffy::proxy::Endpoint e;
     std::string port;
@@ -129,40 +142,131 @@ bool bypassed(const std::string& host_in, int port, const std::string& bypass_li
         }
         if (p.front() == '<') continue;  // <-loopback> and the like
         if (auto s = p.find("://"); s != std::string::npos) p = p.substr(s + 3);
+        if (p.empty()) continue;  // "http://" alone
         if (p.front() == '.') p = "*" + p;
         if (glob(p, host) || glob(p, hostport)) return true;
     }
     return false;
 }
 
+namespace {
+ffy::proxy::Routes with_origin(ffy::proxy::Routes routes, ffy::proxy::Origin o) {
+    for (auto& r : routes) r.proxy.origin = o;
+    return routes;
+}
+}  // namespace
+
 Resolution resolve(const ProxySettings& user, const std::optional<ProxySettings>& machine, const std::string& url,
-                   const std::function<AutoProxyResult()>& autoproxy) {
+                   const std::function<AutoProxyResult(AutoSource)>& autoproxy) {
+    using ffy::proxy::Origin;
     ffy::Url u = ffy::parse_url(url);
     const int port = std::stoi(u.port);
     std::string note;
-    if (user.auto_detect || !user.auto_config_url.empty()) {
-        const std::string what = !user.auto_config_url.empty() ? "PAC " + without_query(user.auto_config_url)
-                                                                : std::string("automatic detection (WPAD)");
-        AutoProxyResult r = autoproxy ? autoproxy() : AutoProxyResult{false, false, {}, {}, "not available"};
-        if (r.ok) {
-            if (r.direct) return {{}, what + ": DIRECT"};
-            if (bypassed(u.host, port, r.bypass)) return {{}, what + ": bypass list"};
-            auto routes = parse_proxy_list(r.proxy);
-            return {routes, routes.empty() ? what + ": DIRECT" : what};
+    auto automatic = [&](AutoSource src, const std::string& what, Origin origin) -> std::optional<Resolution> {
+        AutoProxyResult r = autoproxy ? autoproxy(src) : AutoProxyResult{false, false, {}, {}, "not available"};
+        if (!r.ok) {
+            note += what + " failed (" + r.error + "), ";
+            return std::nullopt;
         }
-        note = what + " failed (" + r.error + "), ";
-    }
+        if (r.direct) return Resolution{{}, note + what + ": DIRECT"};
+        if (bypassed(u.host, port, r.bypass)) return Resolution{{}, note + what + ": bypass list"};
+        auto routes = with_origin(parse_proxy_list(r.proxy), origin);
+        return Resolution{routes, note + (routes.empty() ? what + ": DIRECT" : what)};
+    };
+    if (!user.auto_config_url.empty())
+        if (auto r = automatic(AutoSource::pac, "PAC " + without_query(user.auto_config_url), Origin::pac)) return *r;
+    if (user.auto_detect)
+        if (auto r = automatic(AutoSource::wpad, "automatic detection (WPAD)", Origin::discovered)) return *r;
     if (!user.proxy.empty()) {
         if (bypassed(u.host, port, user.bypass)) return {{}, note + "manual proxy settings: bypass list"};
-        auto routes = parse_proxy_list(user.proxy);
+        auto routes = with_origin(parse_proxy_list(user.proxy), Origin::configured);
         return {routes, note + (routes.empty() ? "manual proxy settings: none for https" : "manual proxy settings")};
     }
     if (machine && !machine->proxy.empty()) {
         if (bypassed(u.host, port, machine->bypass)) return {{}, note + "WinHTTP machine setting: bypass list"};
-        auto routes = parse_proxy_list(machine->proxy);
+        auto routes = with_origin(parse_proxy_list(machine->proxy), Origin::configured);
         return {routes, note + "WinHTTP machine setting (netsh winhttp)"};
     }
     return {{}, note + "no proxy configured"};
+}
+
+bool windows_login_allowed(ffy::proxy::Origin origin, bool discovered_login_policy) {
+    return origin != ffy::proxy::Origin::discovered || discovered_login_policy;
+}
+
+namespace {
+
+void wipe(std::string& s) {
+    volatile char* p = s.data();
+    for (size_t i = 0; i < s.size(); ++i) p[i] = 0;
+    s.clear();
+}
+
+// For a proxy that must not get the Windows login: sends nothing, logs once per connection that would have needed it.
+class NoLogin final : public ffy::proxy::Authenticator {
+public:
+    explicit NoLogin(ffy::proxy::Endpoint p) : proxy_(std::move(p)) {}
+    std::optional<std::string> respond(const std::vector<std::string>& challenges) override {
+        if (auto c = pick_sspi_challenge(challenges, "")) {
+            why_ = "the proxy requires the Windows login (" + c->scheme +
+                   ") but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly "
+                   "(manual setting, netsh winhttp, PAC script or HTTPS_PROXY)";
+            spdlog::warn("proxy: {}: {}", proxy_.str(), why_);
+        }
+        return std::nullopt;
+    }
+    std::string scheme() const override { return ""; }
+    std::string declined() const override { return why_; }
+
+private:
+    ffy::proxy::Endpoint proxy_;
+    std::string why_;
+};
+
+class StoredBasic final : public ffy::proxy::Authenticator {
+public:
+    StoredBasic(ffy::proxy::Endpoint p, std::function<std::optional<StoredLogin>()> read) : proxy_(std::move(p)), read_(std::move(read)) {}
+    std::optional<std::string> respond(const std::vector<std::string>& challenges) override {
+        if (sent_) return std::nullopt;  // a 407 after our credential: refused
+        bool offered = std::any_of(challenges.begin(), challenges.end(), [](const std::string& c) {
+            auto sp = c.find_first_of(" \t");
+            return ffy::iequals(ffy::trim(c.substr(0, sp)), "Basic");
+        });
+        if (!offered) return std::nullopt;
+        if (proxy_.origin != ffy::proxy::Origin::configured) {
+            why_ = "Basic is sent only to a proxy set explicitly, not to one from a PAC script or automatic detection";
+            return std::nullopt;
+        }
+        auto login = read_ ? read_() : std::nullopt;
+        if (!login) return std::nullopt;
+        std::string plain = login->user + ":" + login->password;
+        wipe(login->password);
+        wipe(login->user);
+        std::string v = "Basic " + ffy::b64std_encode(plain);
+        wipe(plain);
+        sent_ = true;
+        return v;
+    }
+    std::string scheme() const override { return sent_ ? "Basic" : ""; }
+    std::string declined() const override { return why_; }
+
+private:
+    ffy::proxy::Endpoint proxy_;
+    std::function<std::optional<StoredLogin>()> read_;
+    std::string why_;
+    bool sent_ = false;
+};
+
+}  // namespace
+
+std::unique_ptr<ffy::proxy::Authenticator> login_authenticator(const ffy::proxy::Endpoint& proxy, bool discovered_login_policy,
+                                                                const std::function<std::unique_ptr<ffy::proxy::Authenticator>()>& sspi) {
+    if (windows_login_allowed(proxy.origin, discovered_login_policy)) return sspi ? sspi() : nullptr;
+    return std::make_unique<NoLogin>(proxy);
+}
+
+std::unique_ptr<ffy::proxy::Authenticator> stored_basic(const ffy::proxy::Endpoint& proxy, std::function<std::optional<StoredLogin>()> read) {
+    return std::make_unique<StoredBasic>(proxy, std::move(read));
 }
 
 std::optional<SspiChallenge> pick_sspi_challenge(const std::vector<std::string>& challenges, const std::string& chosen) {

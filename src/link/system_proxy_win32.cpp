@@ -86,7 +86,7 @@ public:
         const auto now = std::chrono::steady_clock::now();
         if (auto i = cache_.find(key); i != cache_.end() && now - i->second.at < std::chrono::minutes(5)) return i->second.routes;
         const ProxySettings user = user_settings();
-        const Resolution r = resolve(user, machine_settings(), url, [&] { return autoproxy(user, url); });
+        const Resolution r = resolve(user, machine_settings(), url, [&](AutoSource src) { return autoproxy(user, url, src); });
         const std::string line = describe(r.routes) + " (" + r.how + ")";
         if (logged_[key] != line) {  // once per change, not on every reconnect
             spdlog::info("proxy: {} -> {}", u.host, line);
@@ -97,7 +97,8 @@ public:
     }
 
 private:
-    AutoProxyResult autoproxy(const ProxySettings& user, const std::string& url) {
+    // One source per call (the script, or detection), so that each route knows where it came from (Origin).
+    AutoProxyResult autoproxy(const ProxySettings& user, const std::string& url, AutoSource src) {
         AutoProxyResult r;
         if (!session_) {
             session_ = WinHttpOpen(L"fairyfly", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -108,13 +109,13 @@ private:
             WinHttpSetTimeouts(session_, 5000, 5000, 10000, 10000);  // the PAC download
         }
         WINHTTP_AUTOPROXY_OPTIONS o{};
-        if (user.auto_detect) {
+        if (src == AutoSource::wpad) {
             o.dwFlags |= WINHTTP_AUTOPROXY_AUTO_DETECT;
             o.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A;
         }
         std::wstring pac, wurl;
         try {  // strict: these decide where the traffic goes
-            if (!user.auto_config_url.empty()) pac = text::utf8_to_wide(user.auto_config_url);
+            if (src == AutoSource::pac) pac = text::utf8_to_wide(user.auto_config_url);
             wurl = text::utf8_to_wide(url);
         } catch (const std::invalid_argument&) {
             r.error = "the proxy script address is not valid UTF-8";
@@ -225,19 +226,25 @@ private:
     bool have_cred_ = false, have_ctx_ = false, done_ = false;
 };
 
-// Basic only with a credential stored for this proxy: generic credential "fairyfly-proxy:<host>".
-std::unique_ptr<ffy::proxy::Authenticator> stored_basic(const ffy::proxy::Endpoint& proxy) {
-    std::string host = proxy.host;
+// The stored credential "fairyfly-proxy:<host>" (generic, Credential Manager), read only when a proxy asks for Basic.
+std::optional<StoredLogin> read_stored_login(const std::string& proxy_host) {
+    std::string host = proxy_host;
     if (host.size() > 1 && host.front() == '[' && host.back() == ']') host = host.substr(1, host.size() - 2);
     try {
         cred::WindowsCredentialStore store("fairyfly-proxy:");
         auto c = store.read(host);
-        if (!c) return nullptr;
-        return ffy::proxy::basic(c->meta.username, c->password.utf8());
+        if (!c) return std::nullopt;
+        return StoredLogin{c->meta.username, c->password.utf8()};
     } catch (const std::exception& e) {
         spdlog::warn("proxy: the stored credential fairyfly-proxy:{} cannot be read: {}", host, e.what());
-        return nullptr;
+        return std::nullopt;
     }
+}
+
+// The administrator's opt-in for the Windows login to WPAD-discovered proxies (HKLM policy, off by default).
+bool discovered_login_policy() {
+    DWORD v = 0, size = sizeof v;
+    return RegGetValueW(HKEY_LOCAL_MACHINE, kPolicyKey, kDiscoveredLoginPolicy, RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS && v == 1;
 }
 
 }  // namespace
@@ -253,7 +260,11 @@ void install_system_proxy() {
         ffy::proxy::Config c;
         c.source = "Windows proxy settings";
         c.resolve = [resolver](const std::string& url) { return resolver->routes(url); };
-        c.authenticators = {[](const ffy::proxy::Endpoint& e) { return make_sspi_authenticator(e.host); }, stored_basic};
+        c.authenticators = {
+            [](const ffy::proxy::Endpoint& e) {
+                return login_authenticator(e, discovered_login_policy(), [&e] { return make_sspi_authenticator(e.host); });
+            },
+            [](const ffy::proxy::Endpoint& e) { return stored_basic(e, [host = e.host] { return read_stored_login(host); }); }};
         ffy::proxy::configure(std::move(c));
     });
 }

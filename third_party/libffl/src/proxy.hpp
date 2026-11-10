@@ -15,11 +15,21 @@
 namespace ffy::proxy {
 
 // An HTTP proxy (CONNECT). Proxies spoken to over TLS ("https://proxy") are not supported.
+// Where a proxy came from decides which credentials it may be offered: a proxy named by an administrator or the user
+// (manual settings, machine policy, HTTPS_PROXY, an administrator's PAC script) may get the Windows login; one found by
+// automatic discovery (WPAD, which anyone on the local network can answer) must not, or it collects NTLM hashes.
+enum class Origin {
+    configured,  // named explicitly: manual settings, machine setting, HTTPS_PROXY
+    pac,         // from a PAC script at a configured address
+    discovered,  // from automatic discovery (WPAD)
+};
+
 struct Endpoint {
     std::string host;
     int port = 0;
+    Origin origin = Origin::configured;
     std::string str() const;  // host:port, for messages
-    bool operator==(const Endpoint&) const = default;
+    bool operator==(const Endpoint& o) const { return host == o.host && port == o.port; }  // the origin is not identity
 };
 
 // One way to reach a URL: through a proxy, or DIRECT. A resolver returns them in the order to try; the next one is
@@ -44,6 +54,9 @@ public:
     virtual std::optional<std::string> respond(const std::vector<std::string>& challenges) = 0;
     // The scheme in use, for messages ("Negotiate", "NTLM", "Basic"); "" before respond() picked one.
     virtual std::string scheme() const = 0;
+    // Why it offered nothing although it could have (e.g. "the proxy was discovered automatically: the Windows login
+    // is not sent to it"), for the error message; "" when it simply has no credentials for the offered schemes.
+    virtual std::string declined() const { return {}; }
 };
 using AuthenticatorFactory = std::function<std::unique_ptr<Authenticator>(const Endpoint& proxy)>;
 
