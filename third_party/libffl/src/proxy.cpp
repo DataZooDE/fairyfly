@@ -156,7 +156,9 @@ Decision decide(const std::string& url) {
     if (!env.error.empty()) throw Error(env.error);
     if (env.proxy) {
         d.source = "environment (HTTPS_PROXY)";
-        d.routes.push_back(Route::via(*env.proxy));
+        Endpoint ep = *env.proxy;
+        ep.origin = Origin::configured;  // named explicitly by HTTPS_PROXY
+        d.routes.push_back(Route::via(ep));
         d.authenticators = c.authenticators;
         if (!env.user.empty() || !env.password.empty())
             d.authenticators.push_back([user = env.user, pw = env.password](const Endpoint&) { return basic(user, pw); });

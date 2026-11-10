@@ -41,6 +41,24 @@ std::string winhttp_error(DWORD e) {
     }
 }
 
+// The administrator's opt-in for the Windows login to WPAD-discovered proxies (HKLM policy, off by default).
+bool discovered_login_policy() {
+    DWORD v = 0, size = sizeof v;
+    return RegGetValueW(HKEY_LOCAL_MACHINE, kPolicyKey, kDiscoveredLoginPolicy, RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS && v == 1;
+}
+
+// The PAC URL group policy sets ("Use automatic configuration script"), machine before user; "" when none.
+std::string policy_pac_url() {
+    const wchar_t* key = L"Software\\Policies\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
+        wchar_t buf[2048];
+        DWORD size = sizeof buf;
+        if (RegGetValueW(root, key, L"AutoConfigURL", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
+            return text::wide_to_utf8_lossy(buf);
+    }
+    return {};
+}
+
 ProxySettings user_settings() {
     WINHTTP_CURRENT_USER_IE_PROXY_CONFIG c{};
     ProxySettings s;
@@ -50,6 +68,7 @@ ProxySettings user_settings() {
     }
     s.auto_detect = c.fAutoDetect != FALSE;
     s.auto_config_url = take(c.lpszAutoConfigUrl);
+    s.pac_by_policy = !s.auto_config_url.empty() && policy_pac_url() == s.auto_config_url;
     s.proxy = take(c.lpszProxy);
     s.bypass = take(c.lpszProxyBypass);
     return s;
@@ -127,7 +146,10 @@ private:
         }
         WINHTTP_PROXY_INFO info{};
         BOOL ok = WinHttpGetProxyForUrl(session_, wurl.c_str(), &o, &info);
-        if (!ok && GetLastError() == ERROR_WINHTTP_LOGIN_FAILURE) {  // the script's server wants the Windows login
+        // the script's server wants the Windows login: only a trusted configured script (or with the administrator's WPAD
+        // policy) gets it; a rogue "wpad" host asking for NTLM gets nothing
+        if (!ok && GetLastError() == ERROR_WINHTTP_LOGIN_FAILURE &&
+            script_logon_allowed(src, pac_trusted(user.auto_config_url, user.pac_by_policy), discovered_login_policy())) {
             o.fAutoLogonIfChallenged = TRUE;
             ok = WinHttpGetProxyForUrl(session_, wurl.c_str(), &o, &info);
         }
@@ -239,12 +261,6 @@ std::optional<StoredLogin> read_stored_login(const std::string& proxy_host) {
         spdlog::warn("proxy: the stored credential fairyfly-proxy:{} cannot be read: {}", host, e.what());
         return std::nullopt;
     }
-}
-
-// The administrator's opt-in for the Windows login to WPAD-discovered proxies (HKLM policy, off by default).
-bool discovered_login_policy() {
-    DWORD v = 0, size = sizeof v;
-    return RegGetValueW(HKEY_LOCAL_MACHINE, kPolicyKey, kDiscoveredLoginPolicy, RRF_RT_REG_DWORD, nullptr, &v, &size) == ERROR_SUCCESS && v == 1;
 }
 
 }  // namespace

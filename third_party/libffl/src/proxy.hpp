@@ -27,7 +27,7 @@ enum class Origin {
 struct Endpoint {
     std::string host;
     int port = 0;
-    Origin origin = Origin::configured;
+    Origin origin = Origin::discovered;  // fail closed: a resolver that does not say where a proxy came from gets no credentials
     std::string str() const;  // host:port, for messages
     bool operator==(const Endpoint& o) const { return host == o.host && port == o.port; }  // the origin is not identity
 };

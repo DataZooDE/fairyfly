@@ -318,7 +318,8 @@ without a proxy (backoff up to 60 s); a proxy that goes away and comes back is u
 | Proxy from | Windows login (Negotiate/NTLM) | Basic (stored credential) |
 |---|---|---|
 | manual proxy settings, `netsh winhttp` / group policy machine setting, `HTTPS_PROXY` | yes | yes |
-| the PAC script at the configured address | yes | no |
+| a **trusted** PAC script: its address is `https://`, or it is set by group policy with a dotted host name (`http://pac.corp.example/proxy.pac`) | yes | no |
+| any other PAC script (`http://` set by the user, or a single-label host like `http://wpad/`) | no, as for WPAD | no |
 | automatic detection (WPAD) | **no**, unless the administrator allows it (below) | no |
 
 - **Negotiate (Kerberos) or NTLM with the Windows login** of the user running fairyfly, through SSPI. Nothing has to be
@@ -331,6 +332,12 @@ without a proxy (backoff up to 60 s); a proxy that goes away and comes back is u
   the proxy explicitly (manual setting, `netsh winhttp`, or a PAC script at a fixed address). Where WPAD is controlled
   (DHCP/DNS of the domain only), an administrator can allow it: `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD
   `AllowLoginToDiscoveredProxies` = `1` (read at each proxy connection).
+- **Downloading the script.** When the server of a proxy script asks for a login (401), WinHTTP answers with the
+  Windows login only for a trusted PAC script (above) or with the administrator's WPAD policy; WinHTTP would otherwise
+  treat a single-label host such as `wpad` as intranet and send NTLM to whoever answers that name. A configured script
+  that fails and falls back to automatic detection is logged as a warning.
+- Group policy here means the "automatic configuration script" policy (`AutoConfigURL` under
+  `HKLM` or `HKCU\Software\Policies\Microsoft\Windows\CurrentVersion\Internet Settings`) holding the same address.
 - **NTLMv1**: whether Windows sends NTLMv2 or the weak NTLMv1 is the machine's `LmCompatibilityLevel` (group policy
   "Network security: LAN Manager authentication level"); it should be "Send NTLMv2 response only. Refuse LM & NTLM"
   (5). fairyfly does not change it.

@@ -173,8 +173,12 @@ Resolution resolve(const ProxySettings& user, const std::optional<ProxySettings>
         auto routes = with_origin(parse_proxy_list(r.proxy), origin);
         return Resolution{routes, note + (routes.empty() ? what + ": DIRECT" : what)};
     };
-    if (!user.auto_config_url.empty())
-        if (auto r = automatic(AutoSource::pac, "PAC " + without_query(user.auto_config_url), Origin::pac)) return *r;
+    if (!user.auto_config_url.empty()) {
+        const Origin o = pac_trusted(user.auto_config_url, user.pac_by_policy) ? Origin::pac : Origin::discovered;
+        if (auto r = automatic(AutoSource::pac, "PAC " + without_query(user.auto_config_url), o)) return *r;
+        if (user.auto_detect)
+            spdlog::warn("proxy: {}falling back to automatic detection (WPAD); its proxies get no credentials", note);
+    }
     if (user.auto_detect)
         if (auto r = automatic(AutoSource::wpad, "automatic detection (WPAD)", Origin::discovered)) return *r;
     if (!user.proxy.empty()) {
@@ -188,6 +192,25 @@ Resolution resolve(const ProxySettings& user, const std::optional<ProxySettings>
         return {routes, note + "WinHTTP machine setting (netsh winhttp)"};
     }
     return {{}, note + "no proxy configured"};
+}
+
+bool pac_trusted(const std::string& pac_url, bool by_policy) {
+    ffy::Url u;
+    try {
+        u = ffy::parse_url(pac_url);
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (u.scheme == "https") return true;  // the server proves its name: nobody on the LAN can stand in for it
+    if (!by_policy || u.host.find('.') == std::string::npos) return false;
+    // a dotted host name, not an address (an IP literal says nothing about who set it up)
+    return std::any_of(u.host.begin(), u.host.end(), [](unsigned char c) { return std::isalpha(c); }) &&
+           u.host.find(':') == std::string::npos;
+}
+
+bool script_logon_allowed(AutoSource src, bool pac_is_trusted, bool discovered_login_policy) {
+    if (discovered_login_policy) return true;
+    return src == AutoSource::pac && pac_is_trusted;
 }
 
 bool windows_login_allowed(ffy::proxy::Origin origin, bool discovered_login_policy) {

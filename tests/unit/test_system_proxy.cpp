@@ -161,6 +161,7 @@ TEST_CASE("system proxy: every route knows where it came from; the PAC script is
         ProxySettings s;
         s.auto_detect = true;
         s.auto_config_url = "http://pac.corp.example/proxy.pac";
+        s.pac_by_policy = true;  // set by group policy, with a dotted host name: trusted
         auto r = resolve(s, std::nullopt, url, answer(pac("pacproxy:8080"), pac("rogue:8080")));
         REQUIRE(r.routes.size() == 1);
         CHECK(r.routes[0].proxy.host == "pacproxy");
@@ -185,6 +186,46 @@ TEST_CASE("system proxy: every route knows where it came from; the PAC script is
         m.proxy = "machine:3128";
         CHECK(resolve(ProxySettings{}, m, url, {}).routes.at(0).proxy.origin == Origin::configured);
     }
+}
+
+TEST_CASE("system proxy: a PAC script is trusted with credentials only over https or when set by policy with a dotted name") {
+    using ffy::proxy::Origin;
+    CHECK(pac_trusted("https://pac.corp.example/proxy.pac", false));  // the server proves its name
+    CHECK(pac_trusted("https://wpad/wpad.dat", false));
+    CHECK(pac_trusted("http://pac.corp.example/proxy.pac", true));    // group policy, dotted name
+    CHECK_FALSE(pac_trusted("http://pac.corp.example/proxy.pac", false));  // set by the user
+    CHECK_FALSE(pac_trusted("http://wpad/wpad.dat", true));                // single label: anyone on the LAN can be "wpad"
+    CHECK_FALSE(pac_trusted("http://10.0.0.5/proxy.pac", true));           // an address names no one
+    CHECK_FALSE(pac_trusted("file:///C:/proxy.pac", true));
+    CHECK_FALSE(pac_trusted("not a url", true));
+
+    const std::string url = "https://fairyfly.io/ffl";
+    auto origin_for = [&](const std::string& pac_url, bool by_policy) {
+        ProxySettings s;
+        s.auto_config_url = pac_url;
+        s.pac_by_policy = by_policy;
+        auto r = resolve(s, std::nullopt, url, [](AutoSource) { return pac("p:8080"); });
+        REQUIRE(r.routes.size() == 1);
+        return r.routes[0].proxy.origin;
+    };
+    CHECK(origin_for("https://pac.corp.example/proxy.pac", false) == Origin::pac);
+    CHECK(origin_for("http://pac.corp.example/proxy.pac", true) == Origin::pac);
+    CHECK(origin_for("http://pac.corp.example/proxy.pac", false) == Origin::discovered);  // like WPAD: no credentials
+    CHECK(origin_for("http://wpad/wpad.dat", true) == Origin::discovered);
+    // an untrusted script's proxy gets neither the Windows login nor Basic
+    ffy::proxy::Endpoint e{"p", 8080, origin_for("http://wpad/wpad.dat", false)};
+    CHECK_FALSE(login_authenticator(e, false, [] { return ffy::proxy::basic("x", "y"); })->respond({"NTLM"}));
+    CHECK_FALSE(stored_basic(e, [] { return std::optional<StoredLogin>{StoredLogin{"a", "b"}}; })->respond({"Basic realm=x"}));
+}
+
+TEST_CASE("system proxy: downloading a proxy script never answers a 401 with the Windows login unless the script is trusted") {
+    // WinHTTP's fAutoLogonIfChallenged: a rogue "wpad" host asking for NTLM gets nothing
+    CHECK_FALSE(script_logon_allowed(AutoSource::wpad, false, false));
+    CHECK_FALSE(script_logon_allowed(AutoSource::wpad, true, false));   // (a trusted PAC URL says nothing about WPAD)
+    CHECK_FALSE(script_logon_allowed(AutoSource::pac, false, false));
+    CHECK(script_logon_allowed(AutoSource::pac, true, false));
+    CHECK(script_logon_allowed(AutoSource::wpad, false, true));         // the administrator's WPAD policy
+    CHECK(script_logon_allowed(AutoSource::pac, false, true));
 }
 
 TEST_CASE("system proxy: the Windows login never goes to a proxy found by WPAD (unless the administrator allows it)") {

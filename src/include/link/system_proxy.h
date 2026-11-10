@@ -36,6 +36,7 @@ namespace fairyfly::link::sysproxy {
 struct ProxySettings {
     bool auto_detect = false;     ///< WPAD
     std::string auto_config_url;  ///< PAC script URL
+    bool pac_by_policy = false;   ///< the PAC URL is set by group policy (Software\Policies\...\Internet Settings)
     std::string proxy;            ///< "proxy:8080" or "http=a:80;https=b:8443" (also from a PAC result)
     std::string bypass;           ///< "<local>;*.corp.example;10.*"
 };
@@ -76,6 +77,16 @@ Resolution resolve(const ProxySettings& user, const std::optional<ProxySettings>
 /// HKLM\SOFTWARE\Policies\DataZoo\fairyfly, DWORD AllowLoginToDiscoveredProxies = 1. Off by default.
 inline constexpr const wchar_t* kPolicyKey = L"SOFTWARE\\Policies\\DataZoo\\fairyfly";
 inline constexpr const wchar_t* kDiscoveredLoginPolicy = L"AllowLoginToDiscoveredProxies";
+
+/// Whether a configured PAC script is trusted with credentials: fetched over https://, or set by group policy with a
+/// dotted host name (not a single-label "wpad"/"proxy" that anyone on the local network can claim). An untrusted script
+/// is treated like WPAD: its proxies count as discovered.
+bool pac_trusted(const std::string& pac_url, bool by_policy);
+
+/// Whether WinHTTP may answer a 401 with the Windows login while DOWNLOADING a proxy script (fAutoLogonIfChallenged):
+/// only for a trusted configured script, or with the administrator's WPAD policy on. Otherwise a rogue "wpad" host
+/// could ask for NTLM before any proxy is named (WinHTTP treats single-label hosts as intranet).
+bool script_logon_allowed(AutoSource src, bool pac_is_trusted, bool discovered_login_policy);
 
 /// Whether this proxy may be offered the Windows login (Negotiate/NTLM).
 bool windows_login_allowed(ffy::proxy::Origin origin, bool discovered_login_policy);
