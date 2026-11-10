@@ -3,7 +3,8 @@
 `fairyfly link` connects this desktop's fairyfly to the fairyfly cloud gateway, so that AI assistants your
 organisation has connected there can use your SAP GUI:
 - Supported assistants: Gemini Enterprise, Claude, ChatGPT and Copilot Studio.
-- The connection is outbound only: no port is opened on the PC and no VPN is needed.
+- The connection is outbound only: no port is opened on the PC and no VPN is needed. It goes through the corporate
+  proxy of the Windows settings when there is one ([Corporate proxies](#corporate-proxies)).
 - The cloud side is described in the gateway's documentation (research repository,
   `2026-10-14-fairyfly-cloud-agent-access/gateway`).
 
@@ -283,6 +284,71 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   Answering or closing the SAP dialog, waiting for the long-running step, or ending the SAP session (or SAP GUI)
   releases fairyfly. The log has one
   `SAP_GUI_NOT_RESPONDING` warning per diagnosis.
+
+## Corporate proxies
+
+The link, `link pair` and `fairyfly update` use the **Windows proxy settings** of the signed-in user, the same ones
+Edge and Windows use (Settings › Network & Internet › Proxy, or Internet Options › Connections › LAN settings,
+usually set by group policy). Source: `src/link/system_proxy.cpp` (decisions), `src/link/system_proxy_win32.cpp`
+(WinHTTP, SSPI), libffl's `proxy.*` (the tunnel).
+
+Which proxy, in the order Windows uses:
+1. **Automatically detect settings** (WPAD) and/or **Use setup script** (a PAC file): WinHTTP evaluates them for the
+   gateway's address (`https://<gateway>/…`; the link's `wss://` is asked as `https://`). The script's answer is
+   followed in its order: `PROXY a:8080; PROXY b:8080; DIRECT` tries a, then b (only when a cannot be reached), then
+   connects directly. A proxy that answers (even with an error) is not skipped.
+2. If detection or the script fails, or neither is on: the **manual proxy server** (`https=` entry, else the one for
+   all protocols) with its exceptions ("Don't use the proxy server for local addresses" = `<local>`, `*.corp.example`,
+   `10.*`).
+3. Otherwise WinHTTP's machine setting (`netsh winhttp set proxy`).
+4. Otherwise direct.
+
+Results are kept for 5 minutes. The link log (`link.log`) has one line per gateway host when the choice changes, e.g.
+`proxy: fairyfly.io -> proxy.corp.example:8080 (PAC http://wpad.corp.example/wpad.dat)`, and the link connects with
+`link: connecting through proxy proxy.corp.example:8080 (from Windows proxy settings)`.
+
+**How it connects.** Through a proxy, fairyfly sends `CONNECT <gateway>:443` and runs TLS inside the tunnel, end to end
+with the gateway: the certificate and host name are checked as on a direct connection, and the proxy sees only the
+host name and port. The WebSocket of the link and every HTTPS request take the same path. Reconnecting works as
+without a proxy (backoff up to 60 s); a proxy that goes away and comes back is used again.
+
+**Proxy authentication.**
+- **Negotiate (Kerberos) or NTLM with the Windows login** of the user running fairyfly, through SSPI. Nothing has to be
+  configured and no password is stored or asked for. Negotiate is preferred when the proxy offers both; the SPN is
+  `HTTP/<proxy host>` as written in the settings.
+- **Basic** only when a credential is stored explicitly for that proxy in the Windows Credential Manager, as a generic
+  credential named `fairyfly-proxy:<proxy host>`:
+  `cmdkey /generic:fairyfly-proxy:proxy.corp.example /user:CORP\alice /pass` (prompts for the password). Basic sends the
+  password to the proxy unencrypted (base64); prefer Negotiate.
+- Credentials are never written to the log or an error message, and never put into a URL.
+
+**Overrides (environment).** `HTTPS_PROXY=http://proxy.corp.example:8080` uses that proxy for `https://` and `wss://`
+instead of the Windows settings (with `http://user:password@host:port` its user and password are offered as Basic;
+prefer the Credential Manager entry). `NO_PROXY=fairyfly.io,.corp.example` connects directly to those hosts (exact names,
+`.suffix`, `*.suffix`, `*`), also when the Windows settings name a proxy. Loopback (`localhost`, `127.*`, `[::1]`) is
+never proxied. `https://proxy` addresses (TLS to the proxy) and SOCKS are not supported.
+
+**Errors** (in `link run`, the tray's notices and `link.log`; the link keeps retrying):
+
+| Message | Meaning |
+|---|---|
+| `proxy refused CONNECT 403 Forbidden (proxy:8080 -> fairyfly.io:443, proxy from Windows proxy settings)` | the proxy's policy blocks the gateway: IT must allow it (below) |
+| `proxy requires authentication (offers Basic), and no credentials are configured for it` | only Basic is offered: store a `fairyfly-proxy:<host>` credential, or ask IT for Negotiate/NTLM |
+| `proxy requires authentication: it refused the NTLM credentials of this user` | the Windows login was rejected (user not allowed through, or the proxy is not in the domain) |
+| `proxy closed the connection during NTLM authentication` | the proxy does not keep the connection open for NTLM (needs HTTP keep-alive) |
+| `cannot reach proxy proxy:8080 (...)` | no proxy in the list could be reached (and the settings list no `DIRECT`) |
+
+**What IT must allow** (on the proxy and the firewall):
+- `CONNECT` to port **443** of the gateway's host (`fairyfly.io`, or your gateway) and of the link host it hands out
+  at pairing (the `wss://` address), plus `github.com` and `objects.githubusercontent.com` (release downloads) for
+  `fairyfly update`.
+- **No TLS inspection** (break and inspect) for these hosts: fairyfly checks the gateway's certificate against the
+  Windows certificate store, so an inspecting proxy works only if its CA is trusted there and it passes the link's
+  long-lived WebSocket (`Upgrade: websocket`) unchanged. Exempting the hosts is simpler.
+- Long-lived connections: the link holds one WebSocket open and sends a ping every 20 s; allow tunnels to stay idle
+  for at least 60 s.
+- Authentication by Negotiate/NTLM with the user's domain login (connection-based: keep-alive on the proxy
+  connection), or Basic with a stored credential.
 
 ## The shared protocol library
 

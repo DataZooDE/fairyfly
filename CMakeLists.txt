@@ -247,6 +247,8 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/desktop_approval_win32.cpp
     src/link/trail_recorder.cpp
     src/link/trail_screen_source.cpp
+    src/link/system_proxy.cpp
+    src/link/system_proxy_win32.cpp
     src/update/update_model.cpp
     src/update/updater.cpp
     src/mcp/http_tray_runner.cpp
@@ -386,6 +388,7 @@ if(WIN32)
         crypt32
         wintrust
         winhttp
+        secur32
         shell32
         ws2_32
         wtsapi32

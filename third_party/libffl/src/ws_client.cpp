@@ -4,8 +4,12 @@
 
 #include <httplib.h>
 
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
 #include <atomic>
 
+#include "proxy.hpp"
 #include "util.hpp"
 
 namespace ffy {
@@ -32,9 +36,26 @@ std::unique_ptr<WsClient> WsClient::connect(const std::string& url, const std::s
     im->ws->set_connection_timeout(std::chrono::milliseconds(timeout_ms));
     im->ws->set_read_timeout(std::chrono::milliseconds(timeout_ms));
     im->ws->set_write_timeout(std::chrono::seconds(20));
+    // through an HTTP proxy when the environment or the installed resolver (fairyfly: Windows settings) says so: a
+    // CONNECT tunnel to host:port, then TLS and the upgrade inside it, as for a direct connection
+    std::string tunnel_error;
+    auto d = proxy::decide(url);
+    if (!std::all_of(d.routes.begin(), d.routes.end(), [](const proxy::Route& r) { return r.direct; })) {
+        std::string first = d.routes.front().direct ? std::string("DIRECT") : d.routes.front().proxy.str();
+        spdlog::info("link: connecting through proxy {} (from {})", first, d.source);
+        im->ws->set_socket_factory([d, host = u.host, port = std::stoi(u.port), timeout_ms, &tunnel_error](httplib::Error& e) -> socket_t {
+            try {
+                return proxy::open_tunnel(host, port, d, timeout_ms);
+            } catch (const std::exception& x) {
+                tunnel_error = x.what();
+                e = httplib::Error::ProxyConnection;
+                return INVALID_SOCKET;
+            }
+        });
+    }
     auto res = im->ws->connect();
     if (!res) {
-        std::string why = httplib::to_string(res.error());
+        std::string why = tunnel_error.empty() ? httplib::to_string(res.error()) : tunnel_error;
         if (res.status() != -1) why += " (HTTP " + std::to_string(res.status()) + ")";
         throw Error("websocket connect " + url + ": " + why);
     }

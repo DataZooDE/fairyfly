@@ -2046,6 +2046,11 @@ using ErrorLogger = std::function<void(const Error &, const Request *)>;
 
 using SocketOptions = std::function<void(socket_t sock)>;
 
+// fairyfly patch (not upstream): a client's connected socket comes from this factory instead of a direct TCP
+// connect, e.g. a tunnel through an HTTP proxy (CONNECT) that the caller authenticated itself. TLS and the request
+// then run inside it as for a direct connection. Returns INVALID_SOCKET and sets error on failure.
+using SocketFactory = std::function<socket_t(Error &error)>;
+
 void default_socket_options(socket_t sock);
 
 bool set_socket_opt(socket_t sock, int level, int optname, int optval);
@@ -2863,6 +2868,7 @@ public:
   void set_tcp_nodelay(bool on);
   void set_ipv6_v6only(bool on);
   void set_socket_options(SocketOptions socket_options);
+  void set_socket_factory(SocketFactory socket_factory); // fairyfly patch
 
   void set_connection_timeout(time_t sec, time_t usec = 0);
   template <class Rep, class Period>
@@ -3002,6 +3008,7 @@ protected:
   bool tcp_nodelay_ = CPPHTTPLIB_TCP_NODELAY;
   bool ipv6_v6only_ = CPPHTTPLIB_IPV6_V6ONLY;
   SocketOptions socket_options_ = nullptr;
+  SocketFactory socket_factory_ = nullptr; // fairyfly patch
 
   bool compress_ = false;
   bool decompress_ = true;
@@ -3248,6 +3255,7 @@ public:
   void set_address_family(int family);
   void set_tcp_nodelay(bool on);
   void set_socket_options(SocketOptions socket_options);
+  void set_socket_factory(SocketFactory socket_factory); // fairyfly patch
 
   void set_connection_timeout(time_t sec, time_t usec = 0);
   template <class Rep, class Period>
@@ -4603,6 +4611,7 @@ public:
   void set_address_family(int family);
   void set_ipv6_v6only(bool on);
   void set_socket_options(SocketOptions socket_options);
+  void set_socket_factory(SocketFactory socket_factory); // fairyfly patch
 
   void set_connection_timeout(time_t sec, time_t usec = 0);
   template <class Rep, class Period>
@@ -4658,6 +4667,7 @@ private:
   bool tcp_nodelay_ = CPPHTTPLIB_TCP_NODELAY;
   bool ipv6_v6only_ = CPPHTTPLIB_IPV6_V6ONLY;
   SocketOptions socket_options_ = nullptr;
+  SocketFactory socket_factory_ = nullptr; // fairyfly patch
   time_t connection_timeout_sec_ = CPPHTTPLIB_CONNECTION_TIMEOUT_SECOND;
   time_t connection_timeout_usec_ = CPPHTTPLIB_CONNECTION_TIMEOUT_USECOND;
   std::string interface_;
@@ -15016,6 +15026,7 @@ inline void ClientImpl::copy_settings(const ClientImpl &rhs) {
   tcp_nodelay_ = rhs.tcp_nodelay_;
   ipv6_v6only_ = rhs.ipv6_v6only_;
   socket_options_ = rhs.socket_options_;
+  socket_factory_ = rhs.socket_factory_; // fairyfly patch
   compress_ = rhs.compress_;
   decompress_ = rhs.decompress_;
   payload_max_length_ = rhs.payload_max_length_;
@@ -15061,6 +15072,7 @@ ClientImpl::is_proxy_enabled_for_host(const std::string &host) const {
 }
 
 inline socket_t ClientImpl::create_client_socket(Error &error) const {
+  if (socket_factory_) { return socket_factory_(error); } // fairyfly patch
   if (is_proxy_enabled_for_host(host_)) {
     return detail::create_client_socket(
         proxy_host_, std::string(), proxy_port_, address_family_, tcp_nodelay_,
@@ -17507,6 +17519,10 @@ inline void ClientImpl::set_tcp_nodelay(bool on) { tcp_nodelay_ = on; }
 
 inline void ClientImpl::set_ipv6_v6only(bool on) { ipv6_v6only_ = on; }
 
+inline void ClientImpl::set_socket_factory(SocketFactory socket_factory) {
+  socket_factory_ = std::move(socket_factory);
+}
+
 inline void ClientImpl::set_socket_options(SocketOptions socket_options) {
   socket_options_ = std::move(socket_options);
 }
@@ -18212,6 +18228,10 @@ inline void Client::set_address_family(int family) {
 }
 
 inline void Client::set_tcp_nodelay(bool on) { cli_->set_tcp_nodelay(on); }
+
+inline void Client::set_socket_factory(SocketFactory socket_factory) {
+  cli_->set_socket_factory(std::move(socket_factory));
+}
 
 inline void Client::set_socket_options(SocketOptions socket_options) {
   cli_->set_socket_options(std::move(socket_options));
@@ -23125,11 +23145,14 @@ inline Result WebSocketClient::connect() {
   detail::apply_addr_map(addr_map_, host_, connect_host, ip);
 
   auto error = Error::Success;
-  sock_ = detail::create_client_socket(
-      connect_host, ip, port_, address_family_, tcp_nodelay_, ipv6_v6only_,
-      socket_options_, connection_timeout_sec_, connection_timeout_usec_,
-      read_timeout_sec_, read_timeout_usec_, write_timeout_sec_,
-      write_timeout_usec_, interface_, error);
+  sock_ = socket_factory_ // fairyfly patch
+              ? socket_factory_(error)
+              : detail::create_client_socket(
+                    connect_host, ip, port_, address_family_, tcp_nodelay_,
+                    ipv6_v6only_, socket_options_, connection_timeout_sec_,
+                    connection_timeout_usec_, read_timeout_sec_,
+                    read_timeout_usec_, write_timeout_sec_, write_timeout_usec_,
+                    interface_, error);
 
   if (sock_ == INVALID_SOCKET) {
     if (error == Error::Success) { error = Error::Connection; }
@@ -23226,6 +23249,10 @@ inline void WebSocketClient::set_address_family(int family) {
 }
 
 inline void WebSocketClient::set_ipv6_v6only(bool on) { ipv6_v6only_ = on; }
+
+inline void WebSocketClient::set_socket_factory(SocketFactory socket_factory) {
+  socket_factory_ = std::move(socket_factory);
+}
 
 inline void WebSocketClient::set_socket_options(SocketOptions socket_options) {
   socket_options_ = std::move(socket_options);
