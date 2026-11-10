@@ -11,6 +11,11 @@ What the code does is described in [LINK.md, Corporate proxies](../LINK.md#corpo
 below quote the exact strings the code writes; `<proxy>` is the proxy as written in the settings (`host:port`),
 `<gateway>` the gateway's host name (`fairyfly.io`, or the test gateway).
 
+**At a customer (pilot).** Owner decision (2026-11-10): the test runs at a customer/pilot. Their IT gets the bilingual
+one-pager [PROXY_PILOT_IT_SHEET.md](PROXY_PILOT_IT_SHEET.md) beforehand; the session follows
+[PROXY_PILOT_RUN_SHEET.md](PROXY_PILOT_RUN_SHEET.md), which says which cases are mandatory for their proxy type. Cases
+their network cannot do stay open for the test setup in the appendix.
+
 ## Prerequisites
 
 - A **Windows 10/11 PC joined to the domain**, signed in as a domain user (`whoami` shows `CORP\<user>`). A second
@@ -42,7 +47,9 @@ below quote the exact strings the code writes; `<proxy>` is the proxy as written
   `build.yml` run on the commit to be tagged, at or after 448b6975:
   `gh run list -R DataZooDE/fairyfly -w build.yml -b main -L 5`, then
   `gh run download <run id> -R DataZooDE/fairyfly -n fairyfly-windows-x64`.
-- Install `fairyfly.msi` (per user). Record `fairyfly --version` and the commit in the results table.
+- Install `fairyfly.msi` (per user). Record `fairyfly --version` and the commit in the results table. A build of a commit between two releases
+  reports the version of the last release (448b6975 says `2026.11.09`, like the release `v2026.11.09` without proxy
+  support), so the commit is what identifies it.
 - An unsigned build cannot be updated by `fairyfly update apply` from a signed release and vice versa; for case 10 an
   update *check* is enough.
 
