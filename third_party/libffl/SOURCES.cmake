@@ -3,6 +3,7 @@ set(LIBFFL_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/src/util.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/crypto.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/jws.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/src/proxy.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/http_client.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/proto.cpp
   ${CMAKE_CURRENT_LIST_DIR}/src/policy.cpp

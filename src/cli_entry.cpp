@@ -35,6 +35,7 @@
 #include "include/exceptions.h"
 #include "include/version.h"
 #include "include/audit_log.h"
+#include "include/link/system_proxy.h"
 #ifdef _WIN32
 #include <windows.h>
 #include <comdef.h>
@@ -460,6 +461,10 @@ int fairyfly::cli::run_cli(int argc, char** argv) {
     // tries again (docs/DATA_DIR.md).
     const config::MigrationResult moved = config::migrate_process_data_dir();
     for (const auto& warning : config::migration_warnings(moved)) std::cerr << "fairyfly: warning: " << warning << std::endl;
+
+    // HTTPS through the Windows proxy settings (WinHTTP: manual proxy, PAC, WPAD; Negotiate/NTLM with the Windows login)
+    // for everything libffl sends: the cloud link, pairing, update checks. HTTPS_PROXY / NO_PROXY override (docs/LINK.md).
+    fairyfly::link::sysproxy::install_system_proxy();
 
     // Audit trail: flags are pre-scanned so the sink exists before parsing (parse errors are audited too).
     bool cli_no_audit = false, cli_required = false;

@@ -5,12 +5,18 @@
 
 #include <httplib.h>
 
+#include <algorithm>
+
+#include "proxy.hpp"
+
 namespace ffy {
 
-// Outbound proxy from HTTPS_PROXY / HTTP_PROXY (enterprise egress); NO_PROXY entries are exact hosts or domain
-// suffixes (".example.com", "*.example.com"); loopback is never proxied.
+// NO_PROXY entries are exact hosts or domain suffixes (".example.com", "*.example.com"); loopback is never proxied.
 bool proxy_bypass(const std::string& host, const std::string& no_proxy) {
-    if (host == "localhost" || host.rfind("127.", 0) == 0 || host == "::1" || host == "[::1]") return true;
+    // loopback: localhost, ::1 and 127.0.0.0/8 as an address (not a name like "127.evil.example")
+    if (iequals(host, "localhost") || host == "::1" || host == "[::1]" ||
+        (host.rfind("127.", 0) == 0 && host.find_first_not_of("0123456789.") == std::string::npos))
+        return true;
     for (auto& e : split_csv(no_proxy)) {
         std::string d = lower(e);
         if (d == "*") return true;
@@ -23,11 +29,14 @@ bool proxy_bypass(const std::string& host, const std::string& no_proxy) {
     return false;
 }
 
-static void apply_proxy(httplib::Client& cli, const Url& u) {
-    std::string p = u.tls() ? env_or("HTTPS_PROXY", env_or("https_proxy")) : env_or("HTTP_PROXY", env_or("http_proxy"));
+// Plain http:// through HTTP_PROXY (forwarded by the proxy, not tunnelled). https:// goes through proxy.hpp: the
+// environment override or the installed resolver, as a CONNECT tunnel (see http_do).
+static void apply_http_proxy(httplib::Client& cli, const Url& u) {
+    std::string p = env_or("HTTP_PROXY", env_or("http_proxy"));
     if (p.empty() || proxy_bypass(u.host, env_or("NO_PROXY", env_or("no_proxy")))) return;
-    Url pu = parse_url(p);
-    cli.set_proxy(pu.host, std::stoi(pu.port));
+    auto e = proxy::parse_proxy_url(p);
+    cli.set_proxy(e.proxy->host, e.proxy->port);
+    if (!e.user.empty()) cli.set_proxy_basic_auth(e.user, e.password);
 }
 
 HttpResponse http_do(const HttpRequest& rq) {
@@ -42,8 +51,23 @@ HttpResponse http_do(const HttpRequest& rq) {
     cli.set_follow_location(false);
     cli.set_keep_alive(false);
     cli.set_path_encode(false);  // targets are built (and percent-encoded) by the callers
+    std::string tunnel_error;  // why the proxy tunnel failed, in place of cpp-httplib's generic "Proxy connection failed"
     if (!rq.connect_ip.empty()) cli.set_hostname_addr_map({{u.host, rq.connect_ip}});  // TLS still checks the name
-    else apply_proxy(cli, u);
+    else if (!u.tls()) apply_http_proxy(cli, u);
+    else {
+        auto d = proxy::decide(rq.url);
+        if (!std::all_of(d.routes.begin(), d.routes.end(), [](const proxy::Route& r) { return r.direct; })) {
+            cli.set_socket_factory([d, host = u.host, port = std::stoi(u.port), t = rq.timeout_ms, &tunnel_error](httplib::Error& e) -> socket_t {
+                try {
+                    return proxy::open_tunnel(host, port, d, t);
+                } catch (const std::exception& x) {
+                    tunnel_error = x.what();
+                    e = httplib::Error::ProxyConnection;
+                    return INVALID_SOCKET;
+                }
+            });
+        }
+    }
 
     httplib::Headers headers{{"User-Agent", "fairyfly-gateway/0.2"}};
     std::string ctype;
@@ -62,7 +86,7 @@ HttpResponse http_do(const HttpRequest& rq) {
     else if (m == "PUT") res = cli.Put(u.target, headers, rq.body, ctype);
     else if (m == "DELETE") res = cli.Delete(u.target, headers, rq.body, ctype);
     else throw Error("unsupported method " + m);
-    if (!res) throw HttpTransportError("http " + m + " " + rq.url + ": " + httplib::to_string(res.error()));
+    if (!res) throw HttpTransportError("http " + m + " " + rq.url + ": " + (tunnel_error.empty() ? httplib::to_string(res.error()) : tunnel_error));
 
     HttpResponse out;
     out.status = res->status;

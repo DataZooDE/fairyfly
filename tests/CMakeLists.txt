@@ -78,6 +78,7 @@ add_executable(unit_tests
     unit/test_link_console.cpp
     unit/test_trail_recorder.cpp
     unit/test_update.cpp
+    unit/test_system_proxy.cpp
     unit/test_update_version.cpp
     unit/test_packaging.cpp
     unit/test_command_registry_threads.cpp
