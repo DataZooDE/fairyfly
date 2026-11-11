@@ -42,7 +42,8 @@ New to fairyfly? Start with the [project README](../README.md): what fairyfly is
 ## Internal notes
 
 [internal/](internal/) holds working material of the development team: open work and its archive, the error and
-fix history, build measurements, a general SAP GUI Scripting API reference and dated investigation notes. Plans
+fix history, build measurements, a general SAP GUI Scripting API reference, dated investigation notes and manual
+release checks ([PROXY_MANUAL_TEST.md](internal/PROXY_MANUAL_TEST.md): corporate proxies before a release). Plans
 and traces of work in progress (`MCP_PARALLEL_SESSIONS_PLAN.md`, `AGENT_CLI_IMPROVEMENT_PLAN.md`, `traces/`) are
 also kept here for now. These files record how things were at the time they were written and may describe commands
 or behavior that have changed. The guides above and `fairyfly --help` describe the current version.

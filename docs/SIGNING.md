@@ -127,6 +127,10 @@ self-signed certificate, a missing time stamp and wrong `O=`/`C=` are refused, a
 
 ## Releasing
 
+0. **Proxy changes: manual test first.** The first release with corporate proxy support (#149), and any later
+   release that changes `src/link/system_proxy*` or `third_party/libffl/src/proxy.*`, needs the manual test in a
+   network with a real proxy: [internal/PROXY_MANUAL_TEST.md](internal/PROXY_MANUAL_TEST.md) on the release
+   candidate's build, its results table filled in and attached to the release pull request (owner decision 2026-11-10).
 1. Bump the calendar version with `./packaging/set_version.ps1 -Version YYYY.MM.DD` (it sets `src/include/version.h`,
    `CMakeLists.txt` and `vcpkg.json`); for a further release on a day that already has one, use the next
    `YYYY.MM.DD.N` (`2026.10.24.1`, then `2026.10.24.2`, ... up to `.99`). Update `CHANGELOG.md`, merge through a reviewed pull request (`.github/CODEOWNERS` lists the reviewer
