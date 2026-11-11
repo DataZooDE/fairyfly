@@ -2,7 +2,11 @@
 
 The condensed form of [PROXY_MANUAL_TEST.md](PROXY_MANUAL_TEST.md) for one session in a customer's network, on their
 proxy, which we cannot reconfigure. Expected lines, setups and the results table are in the full checklist; case
-numbers are the same. The customer's IT gets [PROXY_PILOT_IT_SHEET.md](PROXY_PILOT_IT_SHEET.md) beforehand.
+numbers are the same. The customer's IT gets [PROXY_PILOT_IT_SHEET.md](PROXY_PILOT_IT_SHEET.md) beforehand (it is
+written for them: send it as it is, with the kit's `fairyfly.msi` and `SHA256SUMS`).
+
+The tray logs `info`/`warn` only (`FFLYLOG_LEVEL` has no effect there): every check of a `debug` line, such as the
+tunnel's `authenticated with ...`, runs in the console.
 
 ## Before the session
 
@@ -32,7 +36,7 @@ numbers are the same. The customer's IT gets [PROXY_PILOT_IT_SHEET.md](PROXY_PIL
 | Manual proxy, Kerberos/NTLM | 3a (by FQDN, `klist`) or 3b, whichever it offers | 5 (`HTTPS_PROXY`, 5b), 4a (only with a user the proxy refuses), 3c (`netsh winhttp`, admin) |
 | PAC over `https://`, or `http://` FQDN set by GPO | 6 / 6b | 9 (user sets a missing PAC URL + auto-detect, if not locked by GPO) |
 | PAC set by the user over `http://`, proxy authenticates | 7 (expect the refusal; this is the finding to report: IT must set the script by GPO or over https) | 7b |
-| WPAD, proxy authenticates | 8 (tray), 8b + 8c (admin sets/removes the policy) | 9 |
+| WPAD, proxy authenticates | 8 (tray), 8b + 8c in the console (admin sets/removes the policy) | 9 |
 | WPAD, no auth | 8d | |
 | Basic only | 13a, 13b (the **user or IT** types the password at the `cmdkey` prompt, never us), 13c | 13d |
 | Direct 443 open as well | 1 (with the proxy off, if they let the user change it) | |
@@ -40,9 +44,8 @@ numbers are the same. The customer's IT gets [PROXY_PILOT_IT_SHEET.md](PROXY_PIL
 
 4. (10 min) **Case 15**: the collection command of the IT sheet; no match. If the customer sends logs, they run it,
    not us.
-5. (10 min) Remove: the "Removing it" steps of the IT sheet, plus `Remove-Item Env:HTTPS_PROXY, Env:NO_PROXY` and
-   `[Environment]::SetEnvironmentVariable('FFLYLOG_LEVEL', $null, 'User')` if set, `netsh winhttp reset proxy` only if
-   case 3c changed it; remove the desktop in the web app.
+5. (10 min) Remove: the "Removing it" steps of the IT sheet, plus `Remove-Item Env:HTTPS_PROXY, Env:NO_PROXY` if set,
+   `netsh winhttp reset proxy` only if case 3c changed it; remove the desktop in the web app.
 
 ## Afterwards
 

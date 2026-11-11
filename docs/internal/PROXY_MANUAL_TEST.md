@@ -67,8 +67,9 @@ their network cannot do stay open for the test setup in the appendix.
   `connection to <gateway> lost (<reason>) – reconnecting in <n> s`, `reconnected to <gateway>`) and, with
   `--log-level debug`, the proxy lines below.
 - Cases marked **(tray)** are run with the tray instead (Start menu **fairyfly**); its log is
-  `%USERPROFILE%\.fairyfly\logs\link.log` (tray menu **Open log**), which has the `info` and `warn` lines. Set
-  `FFLYLOG_LEVEL=debug` for the user before starting the tray to get the `debug` lines there too.
+  `%USERPROFILE%\.fairyfly\logs\link.log` (tray menu **Open log**), which has the `info` and `warn` lines only: the
+  tray sets its log level to `info` (`src/tray/tray_win32.cpp`), so `FFLYLOG_LEVEL=debug` has no effect there. Check a
+  `debug` line (the tunnel's `authenticated with ...`) in the console.
 - Check the current Windows proxy settings before each case:
 
       Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' |
@@ -182,10 +183,11 @@ Setup: no script, manual proxy off, "Automatically detect settings" on; WPAD ans
 Policy value absent.
 - `proxy: <gateway> -> <proxy> (automatic detection (WPAD))`.
 - Refused as in case 7 (`... but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly ...`),
-  retried; the proxy log shows no user. **(tray)**: run this case with the tray; the same lines are in `link.log`.
-- 8b Elevated: `reg add HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v AllowLoginToDiscoveredProxies /t REG_DWORD /d 1 /f`.
+  retried; the proxy log shows no user. **(tray)**: run this case with the tray; the same lines are in `link.log`
+  (they are `info`/`warn`).
+- 8b In the console (`authenticated with` is a `debug` line, which the tray does not log). Elevated: `reg add HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v AllowLoginToDiscoveredProxies /t REG_DWORD /d 1 /f`.
   The policy is read at each proxy connection: without restarting the link, the next reconnect succeeds with
-  `... authenticated with Negotiate`; `reconnected to <gateway>` (or `connected` in the tray).
+  `... authenticated with Negotiate`; `reconnected to <gateway>`.
 - 8c `/d 0` (or delete the value): after the next reconnect (or restart) it is refused again.
 - 8d WPAD with the proxy in no-auth mode: connects without the policy (discovered proxies are used, they only get no
   credentials).
@@ -221,7 +223,8 @@ Setup: case 3a (connected through the Kerberos proxy). Stop the proxy service.
 ### 12. Pairing and update check through the proxy
 
 Setup: case 3a (Kerberos, manual proxy), direct 443 blocked.
-- `fairyfly link unpair`, then `fairyfly link pair --gateway https://<gateway> --log-level debug`: `Contacting <gateway>…`,
+- `fairyfly link unpair`, then `fairyfly link pair --gateway https://<gateway> --log-level debug`:
+  `Contacting https://<gateway>…` (the full URL),
   the QR code and number appear; finish on the phone; `fairyfly link run` then connects. Lines
   `proxy: <gateway> -> <proxy> (manual proxy settings)` and `proxy: tunnel to <gateway>:443 through <proxy> (..., authenticated with Negotiate)`.
 - `fairyfly update check --log-level debug`: reports the latest release (no error); lines
@@ -253,11 +256,12 @@ Setup: proxy in Basic-only mode, set manually.
 After all cases, on the PC:
 
     $files = Get-ChildItem $env:USERPROFILE\.fairyfly\logs\*.log*, $env:USERPROFILE\proxy-test\*.txt
-    $files | Select-String -Pattern 'Proxy-Authorization', 'TlRMTVNT', 'YII[A-Za-z0-9+/]{16}',
-      'Negotiate [A-Za-z0-9+/]{16}', 'NTLM [A-Za-z0-9+/]{16}', 'Basic [A-Za-z0-9+/=]{8}', 'S3cret-Proxy-Test',
+    $files | Select-String -CaseSensitive -Pattern 'Proxy-Authorization', 'TlRMTVNT', 'YII[A-Za-z0-9+/]{16}',
+      '(Negotiate|NTLM) [A-Za-z0-9+/]{16}', 'Basic (?!credentials)[A-Za-z0-9+/]{8,}', 'S3cret-Proxy-Test',
       '<basic test password>', '<base64 of user:password>'
 
-Expected: no match. (`TlRMTVNT` is base64 of an NTLM message, `YII` the start of a base64 SPNEGO/Kerberos token.) Also
+Expected: no match. (`-CaseSensitive` and the `(?!credentials)` keep the code's own lines out, such as `it refused the
+Basic credentials of this user`; checked against every message of `system_proxy*.cpp` and libffl's `proxy.cpp`.) (`TlRMTVNT` is base64 of an NTLM message, `YII` the start of a base64 SPNEGO/Kerberos token.) Also
 check the tray's notices and error message boxes seen during the cases: none showed a password or a token.
 
 ## Results
