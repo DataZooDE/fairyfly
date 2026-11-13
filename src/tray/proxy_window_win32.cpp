@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 
+#include "include/link/proxy_cli.h"  // kUnsupportedText
 #include "include/text/utf8.h"
 #include "tray_resource.h"
 

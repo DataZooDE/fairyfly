@@ -16,6 +16,7 @@
 #include <fstream>
 #include <thread>
 
+#include "include/link/proxy_cli.h"
 #include "include/link/proxy_sources.h"
 #include "include/link/trail_recorder.h"
 #include "include/tray/proxy_window.h"
