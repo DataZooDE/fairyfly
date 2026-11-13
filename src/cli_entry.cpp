@@ -34,6 +34,7 @@
 #include "include/mcp/http_tray_runner.h"
 #include "include/mcp/tool_catalog.h"
 #include "include/exceptions.h"
+#include "include/build_version.h"
 #include "include/version.h"
 #include "include/audit_log.h"
 #include "include/link/system_proxy.h"
@@ -146,7 +147,7 @@ namespace {
     int run_one_impl(const std::vector<std::string>& argv, const HandlerProvider& get_handler,
                      GlobalOptions& global_opts, bool batch_mode, audit::AuditRecord& audit_out) {
     CLI::App app{"fairyfly - LLM-powered SAP GUI automation CLI"};
-    app.set_version_flag("--version", fairyfly::FAIRYFLY_VERSION);
+    app.set_version_flag("--version", fairyfly::display_version());
 
     add_global_options(app, global_opts);
     build_command_tree(app);

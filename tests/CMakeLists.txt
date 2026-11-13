@@ -28,6 +28,7 @@ add_executable(unit_tests
     unit/test_display_text_policy.cpp
     unit/test_raii_core_renderers.cpp
     unit/test_doctor.cpp
+    unit/test_build_version.cpp
     unit/test_connection_manager.cpp
     unit/test_grid_analyzer.cpp
     unit/test_batch_command.cpp

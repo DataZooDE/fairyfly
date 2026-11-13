@@ -34,6 +34,7 @@
 #include "include/mcp/session_token_status.h"
 #include "include/mcp/tool_catalog.h"
 #include "include/mcp/transport.h"
+#include "include/build_version.h"
 #include "include/version.h"
 
 namespace fairyfly::mcp {
@@ -444,7 +445,7 @@ int run_mcp(const ServeOptions& options, const std::function<cli::CommandHandler
     }
 
     ServerOptions server_options;
-    server_options.version = fairyfly::FAIRYFLY_VERSION;
+    server_options.version = fairyfly::display_version();
     server_options.instructions = kInstructions;
     server_options.call_timeout_ms = options.call_timeout_ms;
     CommandDispatcher::StartupPolicyProvider startup_policy = [tray_mode = options.startup_tray_mode, enabled = global.allow_sap_startup] {

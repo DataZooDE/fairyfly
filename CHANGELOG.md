@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Development builds are marked: a build not made from its release tag `vYYYY.MM.DD[.N]` shows `<base>-dev+<short commit>`
+  (e.g. `2026.11.09-dev+268d4b9`) in `fairyfly --version`, the trays, `fairyfly doctor` (check and field `version`), the
+  first line of the tray logs, the audit records, MCP `serverInfo` and the version the link reports to the gateway
+  (Admin › Desktops). Releases, the MSI/MSIX package versions and the numeric file version are unchanged.
 - Corporate proxies (on top of the Windows proxy settings of #149): fairyfly also reads the **browser proxy policies**
   of Edge and Chrome (`HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome`: `ProxyMode`,
   `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`) and

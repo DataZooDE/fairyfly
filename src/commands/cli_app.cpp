@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "include/commands/command_registry.h"
+#include "include/build_version.h"
 #include "include/version.h"
 
 namespace fairyfly {
@@ -56,7 +57,7 @@ private:
 }
 
 void add_global_options(CLI::App& app, GlobalOptions& global_opts) {
-    app.set_version_flag("--version", fairyfly::FAIRYFLY_VERSION)->group(kGlobalGroup);
+    app.set_version_flag("--version", fairyfly::display_version())->group(kGlobalGroup);
     if (CLI::Option* help = app.get_help_ptr()) help->group(kGlobalGroup);
 
     app.add_option("--log-level", global_opts.log_level,

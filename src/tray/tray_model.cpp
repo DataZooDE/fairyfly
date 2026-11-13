@@ -2,6 +2,7 @@
 
 #include "include/link/link_state_names.h"
 #include "include/tray/mcp_tray.h"
+#include "include/build_version.h"
 #include "include/version.h"
 
 namespace fairyfly::tray {
@@ -66,7 +67,7 @@ std::string fit_tooltip(const std::string& text) {
     return text.substr(0, end) + "...";
 }
 
-MenuItem version_item() { return item(std::string("fairyfly ") + FAIRYFLY_VERSION, TrayAction::None, false); }
+MenuItem version_item() { return item("fairyfly " + display_version(), TrayAction::None, false); }
 
 namespace {
 

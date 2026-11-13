@@ -2,6 +2,7 @@
 #include "include/string_utils.h"
 #include "include/text/utf8.h"
 #include "include/sensitive_data.h"
+#include "include/build_version.h"
 #include "include/version.h"
 
 #include <nlohmann/json.hpp>
@@ -98,7 +99,7 @@ nlohmann::ordered_json build_json(const AuditRecord& r, const std::vector<std::s
     nlohmann::ordered_json j = nlohmann::ordered_json::object();
     j["ts"] = utc_timestamp_ms(r.ts);
     j["v"] = 1;
-    j["fairyfly"] = FAIRYFLY_VERSION;
+    j["fairyfly"] = display_version();
     j["pid"] = r.pid != 0 ? r.pid : current_pid();
     j["cmd"] = cap_bytes(r.command, kMaxFactBytes, false);
     j["argv"] = argv;

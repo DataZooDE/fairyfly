@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "include/build_version.h"
 #include "include/packaging.h"
 #include "include/cli_handler.h"
 #include "include/credential_store.h"
@@ -35,6 +36,7 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
         bool has_com = false;
         nlohmann::json sessions;
         nlohmann::json notifications;
+        nlohmann::json version;
 
         for (const auto& check : checks) {
             REQUIRE(check.contains("name"));
@@ -48,6 +50,7 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
             if (name == "com_engine") has_com = true;
             if (name == "active_sessions") sessions = check;
             if (name == "approval_notifications") notifications = check;
+            if (name == "version") version = check;
             if (name == "data_dir") CHECK(check["status"] == "pass");   // the test run's own data directory
         }
 
@@ -55,6 +58,11 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
         REQUIRE(has_processes);
         REQUIRE(has_registry);
         REQUIRE(has_com);
+        // the version this binary shows (a development build: <base>-dev+<commit>), as a check and as a field
+        CHECK(result.data["version"] == fairyfly::display_version());
+        REQUIRE(version.is_object());
+        CHECK(version["status"] == "info");
+        CHECK(version["message"].get<std::string>().find("fairyfly " + fairyfly::display_version() + " (") == 0);
         // the toasts' AUMID (include/link/toast_identity.h): the MSI's; a Store build outside its package has none
         REQUIRE(notifications.is_object());
         if (fairyfly::packaging::kPackage == fairyfly::packaging::Package::Msi) {

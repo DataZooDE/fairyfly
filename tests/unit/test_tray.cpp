@@ -18,6 +18,7 @@
 
 #include <windows.h>
 #include <objbase.h>
+#include "include/build_version.h"
 #include "include/version.h"
 
 using namespace fairyfly;
@@ -188,8 +189,8 @@ struct Fixture {
 } // namespace
 
 // ================= menu model =================
-// the running version, shown (disabled) above "Check for updates" in both trays
-const std::string kVersionItem = std::string("fairyfly ") + FAIRYFLY_VERSION;
+// the running version, shown (disabled) above "Check for updates" in both trays: a development build with its commit
+const std::string kVersionItem = std::string("fairyfly ") + display_version();
 
 TEST_CASE("tray menu: running read-only server with warnings", "[tray][menu]") {
     const auto m = build_menu(make_status(true, true, {"no tokens", "insecure"}), {});

@@ -1,5 +1,6 @@
 // CommandHandler::handle_doctor: the preflight checks of `fairyfly doctor` (probes and judges in doctor_checks.h).
 #include "include/cli_handler.h"
+#include "include/build_version.h"
 #include "include/doctor_checks.h"
 #include "include/automation_engine.h"
 #include "include/config/data_dir.h"
@@ -18,6 +19,7 @@ Result CommandHandler::handle_doctor()
 {
     spdlog::info("Running preflight environment and scripting diagnostics");
     std::vector<doctor::Check> checks;
+    checks.push_back(doctor::judge_version(display_version(), is_release_build()));   // a development build: <base>-dev+<commit>
 #ifdef _WIN32
     std::string station, desktop;
     doctor::probe_desktop(station, desktop);
@@ -96,6 +98,7 @@ Result CommandHandler::handle_doctor()
     json listed = json::array();
     for (const auto& c : checks) listed.push_back(doctor::to_json(c));
     Result result = Result::ok(json::object());
+    result.data["version"] = display_version();
     result.data["overall_health"] = doctor::overall_health(checks);
     result.data["checks"] = std::move(listed);
     return result;

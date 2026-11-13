@@ -105,6 +105,14 @@ jobs:
           if ($info.ProductName -ne "fairyfly") { Write-Error "ProductName is '$($info.ProductName)', expected 'fairyfly'"; exit 1 }
           if ($info.ProductVersion -ne $reported) { Write-Error "ProductVersion '$($info.ProductVersion)' differs from --version '$reported'"; exit 1 }
           Write-Host "  Version info OK: $($info.ProductName) $($info.ProductVersion)"
+
+          # Not a release tag: a development build shows <base>-dev+<short commit> (cmake/build_kind.cmake); the
+          # numeric version fields and FileVersion stay the base version that the MSI/MSIX versions are made from
+          $null = (Get-Content src/include/version.h -Raw) -match 'FAIRYFLY_VERSION\s*=\s*"([0-9.]+)"'; $base = $Matches[1]
+          $commit = (git rev-parse HEAD).Trim().Substring(0, 7)
+          if ($reported -cne "$base-dev+$commit") { Write-Error "--version is '$reported', expected '$base-dev+$commit' for a build of $commit (not a release tag)"; exit 1 }
+          if ($info.FileVersion -ne $base) { Write-Error "FileVersion '$($info.FileVersion)' is not the base version $base"; exit 1 }
+          Write-Host "  Development build marked: $reported (FileVersion $($info.FileVersion))"
         } else {
           Write-Error "fairyfly.exe not found!"
           exit 1
@@ -406,7 +414,10 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        $version = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        # a PR/main build is a development build (<base>-dev+<commit>); the tag a release would carry is v<base>
+        $reported = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        if ($reported -cmatch '^(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?)-dev\+[0-9a-f]{7}$') { $version = $Matches[1] }
+        else { Write-Error "the msix fairyfly.exe reports '$reported', not <base>-dev+<commit>"; exit 1 }
         $tag = "v$version"
         try { & ./packaging/check_release_tag.ps1 -Tag $tag -Version $version } catch { Write-Error $_.Exception.Message; exit 1 }
         $previous = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft | not) | .tag_name')

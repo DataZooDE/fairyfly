@@ -28,6 +28,9 @@ nlohmann::json to_json(const Check& check);
 std::string overall_health(const std::vector<Check>& checks);
 
 // ---- judges ----
+/// The version this binary shows (include/build_version.h) and whether it is a release: info either way.
+Check judge_version(const std::string& shown, bool release);
+
 Check judge_desktop(const std::string& window_station, const std::string& desktop);
 
 /// The data directory (docs/DATA_DIR.md): fail (DATA_DIR_UNAVAILABLE) without one or when this start could not move
