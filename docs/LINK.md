@@ -4,7 +4,8 @@
 organisation has connected there can use your SAP GUI:
 - Supported assistants: Gemini Enterprise, Claude, ChatGPT and Copilot Studio.
 - The connection is outbound only: no port is opened on the PC and no VPN is needed. It goes through the corporate
-  proxy of the Windows settings when there is one ([Corporate proxies](#corporate-proxies)).
+  proxy (found automatically from the browser policies and Windows settings, or set with `fairyfly proxy set`;
+  [Corporate proxies](#corporate-proxies)).
 - The cloud side is described in the gateway's documentation (research repository,
   `2026-10-14-fairyfly-cloud-agent-access/gateway`).
 
@@ -287,12 +288,35 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
 
 ## Corporate proxies
 
-The link, `link pair` and `fairyfly update` use the **Windows proxy settings** of the signed-in user, the same ones
-Edge and Windows use (Settings › Network & Internet › Proxy, or Internet Options › Connections › LAN settings,
-usually set by group policy). Source: `src/link/system_proxy.cpp` (decisions), `src/link/system_proxy_win32.cpp`
-(WinHTTP, SSPI), libffl's `proxy.*` (the tunnel).
+The link, `link pair` and `fairyfly update` go through the proxy your organisation uses. Without any setting fairyfly
+finds it itself, from the same places Edge, Chrome and Firefox and Windows take it; you or your IT can also set it for
+fairyfly. Source: `src/link/proxy_config.cpp` (the sources and their order, portable), `src/link/proxy_sources_win32.cpp`
+(registry, policies.json), `src/link/system_proxy*.cpp` (Windows settings, WinHTTP, SSPI), libffl's `proxy.*` (the
+tunnel).
 
-Which proxy, in this order:
+**Which proxy.** The first of these that decides wins:
+
+| # | Source | Where | Decides when |
+|---|---|---|---|
+| 1 | **fairyfly policy** (IT) | `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`: `ProxyMode` (`auto`, `manual`, `pac`, `direct`), `ProxyServer` (`host:port`), `ProxyBypass`, `ProxyPacUrl` (REG_SZ) | `ProxyMode` is not `auto`. The setting is **locked**: the tray window shows "Set by your administrator", `fairyfly proxy set/reset` answer `PROXY_SETTING_LOCKED` |
+| 2 | **your fairyfly setting** | `fairyfly proxy set`, or the link tray's **Network / proxy...** (per user, `HKCU\Software\DataZoo\fairyfly\tray`, values `proxy_mode`, `proxy_server`, `proxy_bypass`, `proxy_pac_url`) | its mode is not Auto (and no fairyfly policy exists) |
+| 3 | **`HTTPS_PROXY`** (and `NO_PROXY`) | the environment of the fairyfly process | it is set |
+| 4 | **browser policy** | Edge, then Chrome: `HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome` (`ProxyMode`, `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`); then Firefox: `HKLM\Software\Policies\Mozilla\Firefox\Proxy` (`Mode`, `HTTPProxy`/`SSLProxy`, `UseHTTPProxyForAllProtocols`, `AutoConfigURL`, `Passthrough`), else `distribution\policies.json` in Firefox's install folder | the first browser with a proxy policy decides; a policy that says "use the system settings" (`system`) hands over to 5 |
+| 5 | **Windows** | the user's setup script (PAC), then "Automatically detect settings" (WPAD), then the manual proxy server, then `netsh winhttp` | as before (below) |
+| | otherwise | | direct |
+
+Modes of 1 and 2: **Auto** (decides nothing: 3 to 5 decide; a fairyfly policy in Auto also locks your setting to
+Auto), **Manual** (`host:port` plus exceptions such as `<local>;*.corp.example;10.*`), **PAC** (the script's address,
+`http://` or `https://`) and **Direct** (no proxy, whatever 3 to 5 say). A fairyfly policy with an invalid value
+still locks; the proxy is then chosen as in Auto, and `fairyfly proxy show` and `fairyfly doctor` say what is wrong.
+`NO_PROXY` belongs to 3: it does not override 1 or 2, which have their own exceptions.
+
+Why browser policy ranks above the Windows settings: an administrator who sets a browser's proxy by policy names the
+proxy explicitly for this desktop's traffic, while the Windows settings are often the user's own (Internet Options
+can be changed without rights) or empty where the browsers are managed. A browser policy that defers to the system
+(`ProxyMode` `system`, Firefox `Mode` `system`) keeps the Windows settings in charge.
+
+Windows settings (5), in the order Windows uses them:
 1. **Use setup script** (a PAC file at the address IT configured), then **Automatically detect settings** (WPAD) if
    there is no script or it fails: WinHTTP evaluates them for the gateway's address (`https://<gateway>/…`; the link's
    `wss://` is asked as `https://`). The answer is followed in its order: `PROXY a:8080; PROXY b:8080; DIRECT` tries
@@ -304,9 +328,40 @@ Which proxy, in this order:
 3. Otherwise WinHTTP's machine setting (`netsh winhttp set proxy`).
 4. Otherwise direct.
 
-Results are kept for 5 minutes. The link log (`link.log`) has one line per gateway host when the choice changes, e.g.
-`proxy: fairyfly.io -> proxy.corp.example:8080 (PAC http://wpad.corp.example/wpad.dat)`, and the link connects with
-`link: connecting through proxy proxy.corp.example:8080 (from Windows proxy settings)`.
+A PAC script named by 1, 2 or a browser policy that cannot be downloaded or evaluated means **direct** for that
+source (as Chrome does without `ProxyPacMandatory`), with the reason in `fairyfly proxy show`; the sources below it
+are not tried.
+
+**Setting it yourself.**
+
+| Command | What it does |
+|---|---|
+| `fairyfly proxy show` | the setting (and whether it is locked), the route in plain words, where it came from, its trust, and what each source says |
+| `fairyfly proxy set --mode manual --server proxy.corp.example:8080 [--bypass "<local>;*.corp.example"]` | your Manual setting |
+| `fairyfly proxy set --mode pac --pac https://pac.corp.example/proxy.pac` | your PAC setting |
+| `fairyfly proxy set --mode direct` / `--mode auto` | Direct / back to automatic |
+| `fairyfly proxy test [--mode ... --server ...]` | a real connection through the route: HTTPS `GET /health` on the gateway, then the link's WebSocket upgrade (closed at once, nothing sent); with `--mode` it tests that setting without saving it. `PROXY_TEST_FAILED` with the error otherwise |
+| `fairyfly proxy reset` | forgets your setting (Auto) |
+
+The link tray's **Network / proxy...** opens a window with the same: the mode, its fields, the route in plain words
+("via proxy.corp.example:8080 from PAC (https://pac.corp.example/proxy.pac, Edge policy (HKLM)), Windows login: yes",
+or "direct (your fairyfly setting: Direct)"), **Test connection** (the same test, with what the window shows, saved or
+not), **Save** and **Cancel**; every field is locked when the fairyfly policy applies. A saved change takes effect at
+once: the running link notices within a second (also one changed by `fairyfly proxy set` in a console, or by a new
+policy), drops the cached routes and reconnects along the new route; no restart. `fairyfly doctor` has a `proxy`
+check: setting, route, source, trust and the connection test (warn `PROXY_TEST_FAILED` when the gateway cannot be
+reached).
+
+What is checked before a setting is saved or used (the same for the fairyfly policy's values): the proxy is `host:port`
+(a leading `http://` is accepted); `https://` proxy addresses (TLS to the proxy), `socks://` and other schemes,
+`user:password@`, paths, lists, spaces and control characters (line breaks) are refused; the PAC address is `http://`
+or `https://` with a host name; exceptions are printable ASCII. Credentials never go into a setting: the Windows login
+is used, or a Credential Manager entry (below).
+
+Results are kept for 5 minutes (emptied at once when the fairyfly policy or your setting changes). The link log
+(`link.log`) has one line per gateway host when the choice changes, e.g.
+`proxy: fairyfly.io -> via proxy.corp.example:8080 from PAC (http://pac.corp.example/proxy.pac, Windows proxy settings), Windows login: yes`,
+and the link connects with `link: connecting through proxy proxy.corp.example:8080 (from the proxy settings (fairyfly proxy show))`.
 
 **How it connects.** Through a proxy, fairyfly sends `CONNECT <gateway>:443` and runs TLS inside the tunnel, end to end
 with the gateway: the certificate and host name are checked as on a direct connection, and the proxy sees only the
@@ -317,10 +372,15 @@ without a proxy (backoff up to 60 s); a proxy that goes away and comes back is u
 
 | Proxy from | Windows login (Negotiate/NTLM) | Basic (stored credential) |
 |---|---|---|
-| manual proxy settings, `netsh winhttp` / group policy machine setting, `HTTPS_PROXY` | yes | yes |
-| a **trusted** PAC script: its address is `https://`, or it is set by group policy with a dotted host name (`http://pac.corp.example/proxy.pac`) | yes | no |
-| any other PAC script (`http://` set by the user, or a single-label host like `http://wpad/`) | no, as for WPAD | no |
-| automatic detection (WPAD) | **no**, unless the administrator allows it (below) | no |
+| named explicitly: the fairyfly policy or your fairyfly setting in Manual, `HTTPS_PROXY`, a browser policy's proxy server, the manual proxy settings, `netsh winhttp` / group policy machine setting | yes | yes |
+| a **trusted** PAC script: its address is `https://`, or it is set by an administrator with a dotted host name (`http://pac.corp.example/proxy.pac`): the fairyfly policy, an Edge/Chrome policy, a Firefox policy only administrators can change, the Windows "automatic configuration script" group policy | yes | no |
+| any other PAC script (`http://` set by the user, in fairyfly or in Windows; a Firefox policies.json that a non-administrator can change; a single-label host like `http://wpad/`; an IP address) | no, as for WPAD | no |
+| automatic detection (WPAD), also when a browser policy turns it on | **no**, unless the administrator allows it (below) | no |
+
+A browser policy counts as an administrator's when only administrators can change it: the registry policy keys
+always; Firefox's `policies.json` only when the file, its `distribution` folder and the install folder are owned by
+SYSTEM, Administrators or TrustedInstaller and nobody else may write, delete or re-permission them (a per-user Firefox
+install, or a folder with "Users: Modify", makes it the user's own setting).
 
 - **Negotiate (Kerberos) or NTLM with the Windows login** of the user running fairyfly, through SSPI. Nothing has to be
   configured and no password is stored or asked for. Negotiate is preferred when the proxy offers both; the SPN is
@@ -348,10 +408,12 @@ without a proxy (backoff up to 60 s); a proxy that goes away and comes back is u
   Negotiate.
 - Credentials are never written to the log or an error message, and never put into a URL.
 
-**Overrides (environment).** `HTTPS_PROXY=http://proxy.corp.example:8080` uses that proxy for `https://` and `wss://`
-instead of the Windows settings (with `http://user:password@host:port` its user and password are offered as Basic;
+**Environment.** `HTTPS_PROXY=http://proxy.corp.example:8080` uses that proxy for `https://` and `wss://`
+instead of the browser policies and the Windows settings (not instead of the fairyfly policy or your fairyfly setting;
+fairyfly takes both variables out of libffl's view at start and ranks them itself, child processes still inherit
+them) (with `http://user:password@host:port` its user and password are offered as Basic;
 prefer the Credential Manager entry). `NO_PROXY=fairyfly.io,.corp.example` connects directly to those hosts (exact names,
-`.suffix`, `*.suffix`, `*`), also when the Windows settings name a proxy. Loopback (`localhost`, `127.*`, `[::1]`) is
+`.suffix`, `*.suffix`, `*`), also when a browser policy or the Windows settings name a proxy. Loopback (`localhost`, `127.*`, `[::1]`) is
 never proxied. `https://proxy` addresses (TLS to the proxy) and SOCKS are not supported: such an entry is skipped
 with a warning in the log (and the next entry, or DIRECT if the settings list it, is used).
 
@@ -359,7 +421,7 @@ with a warning in the log (and the next entry, or DIRECT if the settings list it
 
 | Message | Meaning |
 |---|---|
-| `proxy refused CONNECT 403 Forbidden (proxy:8080 -> fairyfly.io:443, proxy from Windows proxy settings)` | the proxy's policy blocks the gateway: IT must allow it (below) |
+| `proxy refused CONNECT 403 Forbidden (proxy:8080 -> fairyfly.io:443, proxy from the proxy settings (fairyfly proxy show))` | the proxy's policy blocks the gateway: IT must allow it (below) |
 | `proxy requires authentication (offers NTLM, Negotiate), and the proxy requires the Windows login (NTLM) but was discovered automatically (WPAD): ...` | the proxy came from WPAD: IT sets it explicitly, or allows the login by policy (above) |
 | `proxy requires authentication (offers Basic), and no credentials are configured for it` | only Basic is offered: store a `fairyfly-proxy:<host>` credential, or ask IT for Negotiate/NTLM |
 | `proxy requires authentication: it refused the NTLM credentials of this user` | the Windows login was rejected (user not allowed through, or the proxy is not in the domain) |

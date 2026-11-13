@@ -2,9 +2,10 @@
 
 // The Windows proxy settings for the cloud link and every other HTTPS request fairyfly makes through libffl
 // (pairing, the link's WebSocket, update checks). libffl tunnels through the proxy (CONNECT) and asks the
-// authenticators installed here; HTTPS_PROXY / NO_PROXY still override (libffl, third_party/libffl/src/proxy.hpp).
+// authenticators installed here. The Windows settings are the last of the sources include/link/proxy_config.h ranks
+// (fairyfly policy, your fairyfly setting, HTTPS_PROXY / NO_PROXY, browser policies, then these).
 //
-// Where the routes come from, in the order Windows itself uses:
+// Where the Windows routes come from, in the order Windows itself uses:
 //   1. automatic configuration of the current user (WinHttpGetIEProxyConfigForCurrentUser): a setup script (PAC URL),
 //      then "Automatically detect settings" (WPAD), evaluated by WinHttpGetProxyForUrl for the URL;
 //   2. if that is off or fails: the user's manual proxy server with its bypass list ("Don't use the proxy server for
@@ -117,7 +118,8 @@ std::optional<SspiChallenge> pick_sspi_challenge(const std::vector<std::string>&
 /// The SPN for Negotiate against a proxy: "HTTP/<host>" (brackets of an IPv6 literal removed).
 std::wstring proxy_spn(const std::string& proxy_host);
 
-/// Installs the Windows resolver and the authenticators into libffl (once, at start). No-op outside Windows.
+/// Installs the resolver of include/link/proxy_config.h (all sources, Windows last) and the authenticators into libffl
+/// (once, at start; proxycfg::process_resolver() is it afterwards). No-op outside Windows.
 void install_system_proxy();
 
 /// A Negotiate/NTLM authenticator with the logged-on user's credentials (SSPI). Windows only; nullptr elsewhere.

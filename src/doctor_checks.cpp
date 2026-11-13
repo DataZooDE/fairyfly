@@ -66,6 +66,25 @@ Check judge_data_dir(const std::string& dir, const std::string& migration_error,
     return {"data_dir", "pass", "Data directory " + dir};
 }
 
+Check judge_proxy(const ProxyFacts& f) {
+    std::string setting = "setting " + f.setting + (f.locked ? " (set by your administrator)" : f.setting_from == "user" ? " (yours)" : "");
+    std::string details = "Route: " + f.route + ". Source: " + f.source + ". Windows login: " + (f.windows_login ? "yes" : "no") +
+                          ", stored Basic credential: " + (f.stored_basic ? "allowed" : "no") + ". Test: " + f.test + ".";
+    if (!f.warnings.empty()) details += " Warnings: " + f.warnings;
+    Check c{"proxy", "pass", "Gateway reachable " + f.route + " (" + setting + ")", details, "", ""};
+    if (!f.test_ok) {
+        c.status = "warn";
+        c.message = "Gateway not reachable " + f.route + " (" + setting + ")";
+        c.remediation = "Run `fairyfly proxy test` for the error, `fairyfly proxy show` for every source; docs/LINK.md \"Corporate proxies\" "
+                        "lists what IT must allow.";
+        c.code = "PROXY_TEST_FAILED";
+    } else if (!f.warnings.empty()) {
+        c.status = "warn";
+        c.remediation = "See `fairyfly proxy show` (warnings).";
+    }
+    return c;
+}
+
 Check judge_notifications(packaging::Package build, const std::string& app_id) {
     if (app_id.empty())
         return {"approval_notifications", "warn",

@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "include/link/proxy_config.h"
 #include "include/link/system_proxy.h"
 #include "util.hpp"  // libffl
 
@@ -393,9 +394,11 @@ TEST_CASE("system proxy (Windows): Negotiate is preferred and completes against 
 
 TEST_CASE("system proxy (Windows): the Windows resolver is installed for libffl and answers for this machine's settings") {
     install_system_proxy();
-    const char* env = std::getenv("HTTPS_PROXY");
     auto d = ffy::proxy::decide("wss://link.fairyfly.io/ffl");  // the real WinHTTP calls; must not throw
-    if (!env || !*env) CHECK(d.source == "Windows proxy settings");
+    // HTTPS_PROXY is taken from libffl's view by install_system_proxy: fairyfly's resolver always decides
+    CHECK(d.source == fairyfly::link::proxycfg::kConfigSource);
+    CHECK(std::getenv("HTTPS_PROXY") == nullptr);
+    REQUIRE(fairyfly::link::proxycfg::process_resolver());
     REQUIRE(d.authenticators.size() >= 2);  // SSPI, then a stored Basic credential
     // the installed SSPI authenticator: a token for a configured proxy, none for a WPAD-discovered one (no policy here)
     auto configured = d.authenticators[0]({"proxy.corp.example", 8080, ffy::proxy::Origin::configured});

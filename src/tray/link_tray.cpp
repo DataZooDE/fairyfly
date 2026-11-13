@@ -17,7 +17,7 @@ std::string who(const LinkView& link) { return link.organisation + " (" + link.a
 std::vector<std::string> mcp_tray_args() { return {"mcp", "--tray", "--http"}; }
 
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes, const McpTrayView& mcp,
-                              const AutostartView& autostart, bool self_update) {
+                              const AutostartView& autostart, bool self_update, bool proxy_window) {
     TrayMenuModel model;
     if (link.state == link::state::kConnected) model.icon = IconState::Running;
     else if (link.state == link::state::kPaused) model.icon = IconState::Warning;
@@ -55,6 +55,7 @@ TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes
         model.items.push_back(separator());
         model.items.push_back(item("Pair with the fairyfly cloud... (console)", TrayAction::LinkPair));
     }
+    if (proxy_window) model.items.push_back(item(kProxyMenuItem, TrayAction::ProxySettings));
     if (mcp.available) {
         model.items.push_back(separator());
         MenuItem start = item(mcp.running ? "Local MCP server running" : "Start local MCP server", TrayAction::StartMcpServer,
@@ -124,7 +125,8 @@ AutostartView LinkTrayController::autostart_view() {
 }
 
 TrayMenuModel LinkTrayController::menu() {
-    auto model = build_link_menu(link_, writes_view(), mcp_view(), autostart_view(), services_.self_update);
+    auto model = build_link_menu(link_, writes_view(), mcp_view(), autostart_view(), services_.self_update,
+                                 static_cast<bool>(services_.open_proxy_window));
     append_sap_startup_menu(model, services_.settings);
     return model;
 }
@@ -215,6 +217,9 @@ void LinkTrayController::on_action(TrayAction action) {
     case TrayAction::OpenLog: open(paths_.log_file, "the log"); break;
     case TrayAction::OpenAuditFolder: open(paths_.audit_dir, "the audit trail folder"); break;
     case TrayAction::UpdateCheck: console({"update", "check"}); break;
+    case TrayAction::ProxySettings:
+        if (services_.open_proxy_window) services_.open_proxy_window();   // returns when the window is closed
+        break;
     case TrayAction::Quit:
         // the UI ends once `link run` has returned (run_link_with_tray)
         quit_requested_ = true;

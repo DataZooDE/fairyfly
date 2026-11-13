@@ -21,6 +21,7 @@ Help works without SAP.
 | `popup` | `close` | Close the active popup |
 | `menu` | `list`, `select` | Show or select menu bar items |
 | `credentials` | `list`, `set`, `delete`, `import-env` | Manage SAP logon data in the Windows Credential Manager |
+| `proxy` | `show`, `set`, `test`, `reset` | The proxy for the cloud link and fairyfly's HTTPS requests ([LINK.md, Corporate proxies](LINK.md#corporate-proxies)) |
 | `mcp` | server, `tools`, `token`, `setup`, `teardown`, `cert export`, `config`, `client-config`, `doctor` | The MCP server for AI agents ([MCP.md](MCP.md), [MCP_REMOTE.md](MCP_REMOTE.md)) |
 | (root) | `doctor`, `batch` | Environment check; many commands in one process |
 

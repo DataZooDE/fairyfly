@@ -39,6 +39,21 @@ Check judge_data_dir(const std::string& dir, const std::string& migration_error,
 /// (`app_id`, UTF-8); a Store build without its package identity (empty `app_id`) has none: warn.
 Check judge_notifications(packaging::Package build, const std::string& app_id);
 
+/// The proxy to the gateway (include/link/proxy_config.h): its source, route, trust and the connection test. pass when
+/// the test reached the gateway; warn (PROXY_TEST_FAILED) when not, or when a source could not be read.
+struct ProxyFacts {
+    std::string setting = "auto";      ///< mode of the effective setting
+    std::string setting_from = "default";  ///< policy | user | default
+    bool locked = false;
+    std::string route;                 ///< route_text
+    std::string source;                ///< what decided
+    bool windows_login = false, stored_basic = false;
+    bool test_ok = false;
+    std::string test;                  ///< the test's summary
+    std::string warnings;
+};
+Check judge_proxy(const ProxyFacts& facts);
+
 struct ProcessScan {
     bool logon = false;  ///< saplogon.exe
     bool gui = false;    ///< sapgui.exe

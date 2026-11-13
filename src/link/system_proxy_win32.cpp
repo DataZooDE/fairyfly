@@ -16,6 +16,8 @@
 #include <mutex>
 
 #include "include/credential_store.h"
+#include "include/link/proxy_config.h"
+#include "include/link/proxy_sources.h"
 #include "include/text/utf8.h"
 #include "util.hpp"  // libffl
 
@@ -84,40 +86,15 @@ std::optional<ProxySettings> machine_settings() {
     return s;
 }
 
-std::string describe(const ffy::proxy::Routes& routes) {
-    if (routes.empty()) return "DIRECT";
-    std::string s;
-    for (auto& r : routes) s += (s.empty() ? "" : ", ") + (r.direct ? std::string("DIRECT") : r.proxy.str());
-    return s;
-}
-
-// The routes per scheme://host:port, cached for 5 minutes: automatic detection can take seconds, and the link asks again
-// on every reconnect. One WinHTTP session keeps WinHTTP's own script cache.
-class Resolver {
+// WinHTTP's evaluation of a proxy script (PAC at an address, or automatic detection) for one URL. One WinHTTP session
+// keeps WinHTTP's own script cache; one source per call, so that each route knows where it came from (Origin).
+class ScriptEvaluator {
 public:
-    ~Resolver() {
+    ~ScriptEvaluator() {
         if (session_) WinHttpCloseHandle(session_);
     }
-    ffy::proxy::Routes routes(const std::string& url) {
-        const ffy::Url u = ffy::parse_url(url);
-        const std::string key = u.scheme + "://" + u.host + ":" + u.port;
+    AutoProxyResult evaluate(const std::string& url, AutoSource src, const std::string& pac_url, bool trusted) {
         std::lock_guard<std::mutex> l(mu_);
-        const auto now = std::chrono::steady_clock::now();
-        if (auto i = cache_.find(key); i != cache_.end() && now - i->second.at < std::chrono::minutes(5)) return i->second.routes;
-        const ProxySettings user = user_settings();
-        const Resolution r = resolve(user, machine_settings(), url, [&](AutoSource src) { return autoproxy(user, url, src); });
-        const std::string line = describe(r.routes) + " (" + r.how + ")";
-        if (logged_[key] != line) {  // once per change, not on every reconnect
-            spdlog::info("proxy: {} -> {}", u.host, line);
-            logged_[key] = line;
-        }
-        cache_[key] = Cached{now, r.routes};
-        return r.routes;
-    }
-
-private:
-    // One source per call (the script, or detection), so that each route knows where it came from (Origin).
-    AutoProxyResult autoproxy(const ProxySettings& user, const std::string& url, AutoSource src) {
         AutoProxyResult r;
         if (!session_) {
             session_ = WinHttpOpen(L"fairyfly", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -134,7 +111,7 @@ private:
         }
         std::wstring pac, wurl;
         try {  // strict: these decide where the traffic goes
-            if (src == AutoSource::pac) pac = text::utf8_to_wide(user.auto_config_url);
+            if (src == AutoSource::pac) pac = text::utf8_to_wide(pac_url);
             wurl = text::utf8_to_wide(url);
         } catch (const std::invalid_argument&) {
             r.error = "the proxy script address is not valid UTF-8";
@@ -148,8 +125,7 @@ private:
         BOOL ok = WinHttpGetProxyForUrl(session_, wurl.c_str(), &o, &info);
         // the script's server wants the Windows login: only a trusted configured script (or with the administrator's WPAD
         // policy) gets it; a rogue "wpad" host asking for NTLM gets nothing
-        if (!ok && GetLastError() == ERROR_WINHTTP_LOGIN_FAILURE &&
-            script_logon_allowed(src, pac_trusted(user.auto_config_url, user.pac_by_policy), discovered_login_policy())) {
+        if (!ok && GetLastError() == ERROR_WINHTTP_LOGIN_FAILURE && script_logon_allowed(src, trusted, discovered_login_policy())) {
             o.fAutoLogonIfChallenged = TRUE;
             ok = WinHttpGetProxyForUrl(session_, wurl.c_str(), &o, &info);
         }
@@ -164,15 +140,28 @@ private:
         return r;
     }
 
-    struct Cached {
-        std::chrono::steady_clock::time_point at;
-        ffy::proxy::Routes routes;
-    };
+private:
     std::mutex mu_;
     HINTERNET session_ = nullptr;
-    std::map<std::string, Cached> cache_;
-    std::map<std::string, std::string> logged_;
 };
+
+// Everything the decision reads, now (registry values and WinHTTP's settings: cheap; scripts are evaluated lazily).
+proxycfg::Inputs read_inputs(const proxycfg::EnvOverrides& env) {
+    proxycfg::Inputs in;
+    in.policy = proxycfg::win::read_fairyfly_policy();
+    if (!in.policy.error.empty()) in.warnings.push_back("fairyfly policy (HKLM\\SOFTWARE\\Policies\\DataZoo\\fairyfly): " + in.policy.error + "; the proxy is chosen automatically");
+    if (!in.policy.present) {
+        std::string w;
+        in.user = proxycfg::win::read_user_setting(&w);
+        if (!w.empty()) in.warnings.push_back(w);
+    }
+    in.env = env;
+    in.browsers = proxycfg::win::read_browser_policies(in.warnings);
+    in.windows = user_settings();
+    in.machine = machine_settings();
+    in.discovered_login_policy = discovered_login_policy();
+    return in;
+}
 
 // Negotiate (Kerberos, else NTLM inside it) or NTLM with the logged-on user's credentials. One instance per proxy
 // connection: the security context belongs to that connection.
@@ -272,16 +261,23 @@ std::unique_ptr<ffy::proxy::Authenticator> make_sspi_authenticator(const std::st
 void install_system_proxy() {
     static std::once_flag once;
     std::call_once(once, [] {
-        auto resolver = std::make_shared<Resolver>();
-        ffy::proxy::Config c;
-        c.source = "Windows proxy settings";
-        c.resolve = [resolver](const std::string& url) { return resolver->routes(url); };
-        c.authenticators = {
-            [](const ffy::proxy::Endpoint& e) {
-                return login_authenticator(e, discovered_login_policy(), [&e] { return make_sspi_authenticator(e.host); });
-            },
-            [](const ffy::proxy::Endpoint& e) { return stored_basic(e, [host = e.host] { return read_stored_login(host); }); }};
-        ffy::proxy::configure(std::move(c));
+        // HTTPS_PROXY / NO_PROXY rank below the fairyfly setting (include/link/proxy_config.h): taken from libffl's view
+        const proxycfg::EnvOverrides env = proxycfg::take_env_overrides();
+        auto scripts = std::make_shared<ScriptEvaluator>();
+        proxycfg::RouteResolver::Sources src;
+        src.inputs = [env] { return read_inputs(env); };
+        src.autoproxy = [scripts](const std::string& url, AutoSource s, const std::string& pac, bool trusted) {
+            return scripts->evaluate(url, s, pac, trusted);
+        };
+        src.fingerprint = [] { return proxycfg::win::setting_fingerprint(); };
+        auto resolver = std::make_shared<proxycfg::RouteResolver>(std::move(src));
+        resolver->setting_changed();  // records the fingerprint the running link compares with
+        proxycfg::AuthSources auth;
+        auth.discovered_login_policy = [] { return discovered_login_policy(); };
+        auth.sspi = [](const ffy::proxy::Endpoint& e) { return make_sspi_authenticator(e.host); };
+        auth.stored_login = [](const std::string& host) { return read_stored_login(host); };
+        ffy::proxy::configure(proxycfg::make_libffl_config(resolver, env, std::move(auth)));
+        proxycfg::set_process_resolver(resolver);
     });
 }
 

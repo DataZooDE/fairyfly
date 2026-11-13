@@ -9,6 +9,7 @@
 #include "include/link/link_console.h"
 #include "include/link/link_runner.h"
 #include "include/packaging.h"
+#include "include/tray/proxy_window.h"
 #include "include/tray/tray.h"
 #include "include/tray/tray_win32.h"
 
@@ -80,6 +81,11 @@ int run_link_tray(const LinkOptions& o, const std::function<cli::CommandHandler&
     tray_services.claim.com_start = start.com_start;   // -Embedding: a running link tray keeps its menu closed
     tray_services.link_busy = [lock = link_run_lock_name(o.state_path.empty() ? default_state_path() : o.state_path)] {
         return tray::make_win32_single_instance(lock)->exists();
+    };
+
+    // "Network / proxy...": the proxy setting of this user; a saved change reconnects the running link (run_link polls it)
+    tray_services.open_proxy_window = [h = host.get()] {
+        tray::show_proxy_window(tray::make_proxy_window_services([h](const std::string& text) { h->balloon("fairyfly link", text); }));
     };
 
     tray::TrayPaths paths;

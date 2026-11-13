@@ -27,6 +27,7 @@
 #include "include/commands/global_options.h"
 #include "include/commands/batch_command.h"
 #include "include/commands/link_command.h"
+#include "include/commands/proxy_command.h"
 #include "include/commands/mcp_command.h"
 #include "include/commands/cli_app.h"
 #include "include/mcp/run_mcp.h"
@@ -265,6 +266,16 @@ namespace {
                 return *handled;
             g_skip_invocation_audit = true;
             return mcp::run_mcp(serve_options, get_handler, global_opts, g_audit.sink, peek);
+        }
+
+        // `proxy show|set|test|reset` never touch SAP: no shared handler (it would attach to SAP GUI first)
+        for (const auto& command : CommandRegistry::instance().all_commands()) {
+            auto* proxy_command = dynamic_cast<ProxyCommand*>(command.get());
+            if (!proxy_command || !proxy_command->was_invoked()) continue;
+            command_result = proxy_command->execute_without_sap();
+            note_result(audit_out, command_result);
+            print_result();
+            return command_result.status == Result::Status::Success ? 0 : 1;
         }
 
         // `link run` is special-cased like `mcp`: it runs fairyfly's dispatcher for calls from the cloud gateway.
