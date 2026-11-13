@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Corporate proxies (on top of the Windows proxy settings of #149): fairyfly also reads the **browser proxy policies**
+  of Edge and Chrome (`HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome`: `ProxyMode`,
+  `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`) and
+  Firefox (`HKLM\Software\Policies\Mozilla\Firefox\Proxy`, else `distribution\policies.json`). The order: fairyfly
+  policy > your fairyfly setting > `HTTPS_PROXY`/`NO_PROXY` > browser policy (Edge, Chrome, Firefox; `system` hands
+  over) > Windows settings. A browser policy's proxy server counts as explicit (Windows login, stored Basic); its PAC
+  script follows the PAC trust rule; a `policies.json` that a non-administrator can change counts as the user's own.
+  `HTTPS_PROXY` therefore no longer overrides a proxy you set for fairyfly; it still overrides browser policies and the
+  Windows settings.
+- New `fairyfly proxy show|set|test|reset`: modes Auto, Manual (`host:port` + exceptions), PAC (URL) and Direct, saved
+  per user (`HKCU\Software\DataZoo\fairyfly\tray`, `proxy_*`). `proxy test` connects to the gateway through the route
+  (HTTPS `GET /health` and the link's WebSocket upgrade), also for a setting not saved yet. IT can set and lock it:
+  `HKLM\SOFTWARE\Policies\DataZoo\fairyfly` `ProxyMode`, `ProxyServer`, `ProxyBypass`, `ProxyPacUrl`
+  (`PROXY_SETTING_LOCKED`). https:// and SOCKS proxies, credentials, control characters and non-http(s) PAC addresses
+  are refused.
+- Link tray: **Network / proxy...** opens a window with the mode, its fields, the route in plain words ("via ... from
+  ..., Windows login: yes"), **Test connection**, Save and Cancel; locked ("Set by your administrator") under the
+  fairyfly policy. A saved change (also from the CLI or a new policy) reconnects the running link at once, no restart.
+- `fairyfly doctor` has a `proxy` check (setting, route, source, trust, connection test; `PROXY_TEST_FAILED` warns).
+- Proxy error messages say `proxy from the proxy settings (fairyfly proxy show)` instead of `from Windows proxy
+  settings`; the `proxy: <host> -> ...` log line is the route in plain words.
+
 ## 2026.11.09
 
 - Local tokens with a T-code allowlist (`mcp token create --tcode`) refuse `gui_element_click` on the Save button

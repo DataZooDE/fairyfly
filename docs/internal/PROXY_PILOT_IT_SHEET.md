@@ -13,7 +13,13 @@ Inhalt dieser Maske geht über `fairyfly.io` an den dabei verwendeten KI-Assiste
 
 **Was wir von Ihnen brauchen.**
 - Wie der PC den Proxy findet: **manuell** (Adresse:Port), **PAC-Skript** (URL; per Gruppenrichtlinie oder vom Benutzer
-  gesetzt?) oder **automatische Erkennung (WPAD)**.
+  gesetzt?) oder **automatische Erkennung (WPAD)**; und ob Edge, Chrome oder Firefox den Proxy **per Richtlinie**
+  bekommen (Edge/Chrome `ProxyMode`/`ProxyServer`/`ProxyPacUrl`/`ProxySettings`, Firefox `Proxy` per GPO oder
+  `policies.json`). fairyfly liest diese Richtlinien mit.
+- Optional: Sie können den Proxy für fairyfly auch selbst vorgeben und sperren:
+  `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, REG_SZ `ProxyMode` = `manual` | `pac` | `direct` | `auto`, dazu
+  `ProxyServer` (`host:port`), `ProxyBypass` (`<local>;*.firma.de`) bzw. `ProxyPacUrl`. Dann kann der Benutzer die
+  Einstellung nicht ändern (Fenster „Network / proxy…“ zeigt „Set by your administrator“).
 - Wie sich Benutzer am Proxy anmelden: gar nicht, **Kerberos/NTLM** (Windows-Anmeldung) oder **Basic**
   (Benutzer/Passwort).
 - Freigabe auf Proxy und Firewall: `CONNECT fairyfly.io:443`, möglichst **ohne TLS-Inspection**, Verbindungen dürfen
@@ -22,8 +28,9 @@ Inhalt dieser Maske geht über `fairyfly.io` an den dabei verwendeten KI-Assiste
   `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD `AllowLoginToDiscoveredProxies` = `1` setzt (danach löschen).
 
 **Was wir nie tun.** Wir fragen **keine Passwörter** ab und speichern keine. Die Windows-Anmeldung (Kerberos/NTLM) geht
-nur an Proxys, die Ihre IT ausdrücklich eingetragen hat: manuell, `netsh winhttp`, `HTTPS_PROXY`, oder ein PAC-Skript
-über `https://` bzw. per Gruppenrichtlinie mit vollständigem Hostnamen (z. B. `http://pac.firma.de/proxy.pac`, nicht
+nur an Proxys, die ausdrücklich eingetragen sind: manuell (Windows oder fairyfly), `netsh winhttp`, `HTTPS_PROXY`, per
+Browser- oder fairyfly-Richtlinie, oder ein PAC-Skript über `https://` bzw. per Richtlinie (Windows, Edge/Chrome,
+fairyfly, eine nur von Administratoren änderbare Firefox-`policies.json`) mit vollständigem Hostnamen (z. B. `http://pac.firma.de/proxy.pac`, nicht
 `http://wpad/…` und keine IP-Adresse). Nie an einen automatisch gefundenen Proxy (WPAD), außer Sie setzen den Wert oben.
 Basic nur an einen ausdrücklich eingetragenen Proxy und nur, wenn der Benutzer selbst das Passwort in der
 Windows-Anmeldeinformationsverwaltung als `fairyfly-proxy:<proxy-host>` hinterlegt. Logs bleiben auf dem PC. Nur wenn
@@ -39,7 +46,7 @@ verbieten“ (`DisableUserInstalls`) und „Windows Installer deaktivieren“ (`
 
 **Entfernen.** Tray › Beenden; `fairyfly link unpair`; Einstellungen › Apps › fairyfly › Deinstallieren; Ordner
 `%USERPROFILE%\.fairyfly` und `%USERPROFILE%\proxy-test` löschen; ggf. `cmdkey /delete:fairyfly-proxy:<proxy-host>`
-und den Richtlinienwert oben löschen. Wir entfernen das Gerät in fairyfly.io.
+und die Richtlinienwerte oben löschen; `fairyfly proxy reset`, falls der Benutzer einen Proxy gesetzt hat. Wir entfernen das Gerät in fairyfly.io.
 
 ## English
 
@@ -54,7 +61,13 @@ needed.
 
 **What we need from you.**
 - How the PC finds the proxy: **manual** (address:port), **PAC script** (URL; set by group policy or by the user?) or
-  **automatic detection (WPAD)**.
+  **automatic detection (WPAD)**; and whether Edge, Chrome or Firefox get the proxy **by policy** (Edge/Chrome
+  `ProxyMode`/`ProxyServer`/`ProxyPacUrl`/`ProxySettings`, Firefox `Proxy` by GPO or `policies.json`). fairyfly reads
+  these policies too.
+- Optional: you can also set and lock the proxy for fairyfly yourself: `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`,
+  REG_SZ `ProxyMode` = `manual` | `pac` | `direct` | `auto`, with `ProxyServer` (`host:port`), `ProxyBypass`
+  (`<local>;*.corp.example`) or `ProxyPacUrl`. The user then cannot change the setting (the "Network / proxy..." window
+  shows "Set by your administrator").
 - How users authenticate to the proxy: not at all, **Kerberos/NTLM** (Windows login), or **Basic** (user/password).
 - Allowed on proxy and firewall: `CONNECT fairyfly.io:443`, preferably **without TLS inspection**, connections may be
   idle for at least 60 s. Optional `api.github.com`, `github.com`, `*.githubusercontent.com` (update check).
@@ -62,8 +75,9 @@ needed.
   `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD `AllowLoginToDiscoveredProxies` = `1` (delete it afterwards).
 
 **What we never do.** We **never ask for or store passwords**. The Windows login (Kerberos/NTLM) is sent only to
-proxies your IT configured explicitly: manual, `netsh winhttp`, `HTTPS_PROXY`, or a PAC script over `https://` or set
-by group policy with a full host name (e.g. `http://pac.corp.example/proxy.pac`, not `http://wpad/…` and not an IP
+proxies configured explicitly: manual (Windows or fairyfly), `netsh winhttp`, `HTTPS_PROXY`, by browser or fairyfly
+policy, or a PAC script over `https://` or set by policy (Windows, Edge/Chrome, fairyfly, a Firefox `policies.json`
+only administrators can change) with a full host name (e.g. `http://pac.corp.example/proxy.pac`, not `http://wpad/…` and not an IP
 address). Never to an automatically discovered proxy (WPAD) unless you set the value above. Basic goes only to an
 explicitly configured proxy, and only if the user stores the password in the Windows Credential Manager as
 `fairyfly-proxy:<proxy host>` themselves. Logs stay on the PC. Only if **you** choose to send them, check them first
@@ -79,7 +93,7 @@ If that is not possible, deploy the MSI in the user context (e.g. Intune "User")
 
 **Removing it.** Tray › Quit; `fairyfly link unpair`; Settings › Apps › fairyfly › Uninstall; delete
 `%USERPROFILE%\.fairyfly` and `%USERPROFILE%\proxy-test`; if created, `cmdkey /delete:fairyfly-proxy:<proxy host>` and
-the policy value above. We remove the device in fairyfly.io.
+the policy values above; `fairyfly proxy reset` if the user set a proxy. We remove the device in fairyfly.io.
 
 ## Logs / Log-Dateien
 
