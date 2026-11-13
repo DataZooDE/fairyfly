@@ -89,8 +89,28 @@ bool pac_trusted(const std::string& pac_url, bool by_policy);
 /// could ask for NTLM before any proxy is named (WinHTTP treats single-label hosts as intranet).
 bool script_logon_allowed(AutoSource src, bool pac_is_trusted, bool discovered_login_policy);
 
-/// Whether this proxy may be offered the Windows login (Negotiate/NTLM).
+/// fairyfly's own origin, next to libffl's three (libffl only carries it): a proxy from a source other users can change
+/// (a Firefox policies.json without an administrators-only ACL). It NEVER gets the Windows login or a stored credential,
+/// whatever the administrator's AllowLoginToDiscoveredProxies says: that policy trusts the network's WPAD, not a file
+/// any user may have planted a proxy in.
+inline constexpr ffy::proxy::Origin kUntrustedOrigin = static_cast<ffy::proxy::Origin>(0x55);
+
+/// Whether this proxy may be offered the Windows login (Negotiate/NTLM). Unknown origins (kUntrustedOrigin): never.
 bool windows_login_allowed(ffy::proxy::Origin origin, bool discovered_login_policy);
+
+/// While one lives on this thread, a proxy script's server is never answered with the Windows login, whatever the
+/// policy (the untrusted source's script: proxy_config.cpp sets it around the evaluation, the WinHTTP evaluator obeys).
+class NoScriptLoginScope {
+public:
+    NoScriptLoginScope();
+    ~NoScriptLoginScope();
+    NoScriptLoginScope(const NoScriptLoginScope&) = delete;
+    NoScriptLoginScope& operator=(const NoScriptLoginScope&) = delete;
+    static bool active();
+
+private:
+    bool previous_;
+};
 
 /// The Negotiate/NTLM authenticator for one proxy connection: `sspi()` (the real SSPI one) when the proxy may get the
 /// Windows login, otherwise one that sends nothing, logs the refusal once and says why in the error.

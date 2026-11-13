@@ -412,3 +412,36 @@ TEST_CASE("system proxy (Windows): the Windows resolver is installed for libffl 
     CHECK(ffy::proxy::decide("wss://127.0.0.1:9/ffl").routes.empty());
 }
 #endif
+
+TEST_CASE("system proxy: a proxy from an untrusted source never gets the Windows login, whatever the WPAD policy") {
+    const auto untrusted = kUntrustedOrigin;
+    CHECK_FALSE(windows_login_allowed(untrusted, false));
+    CHECK_FALSE(windows_login_allowed(untrusted, true));  // AllowLoginToDiscoveredProxies=1
+    CHECK(windows_login_allowed(ffy::proxy::Origin::discovered, true));
+    CHECK_FALSE(windows_login_allowed(static_cast<ffy::proxy::Origin>(0x7e), true));  // anything unknown: never
+    int sspi_made = 0;
+    auto a = login_authenticator({"planted.example", 3128, untrusted}, true, [&] {
+        ++sspi_made;
+        return std::unique_ptr<ffy::proxy::Authenticator>();
+    });
+    REQUIRE(a);
+    CHECK_FALSE(a->respond({"NTLM"}));
+    CHECK(sspi_made == 0);
+    CHECK(a->declined().find("other users can change") != std::string::npos);
+    // nor a stored Basic credential
+    int reads = 0;
+    auto b = stored_basic({"planted.example", 3128, untrusted}, [&] {
+        ++reads;
+        return std::optional<StoredLogin>(StoredLogin{"alice", "pw"});
+    });
+    CHECK_FALSE(b->respond({"Basic realm=x"}));
+    CHECK(reads == 0);
+    // and its script's server is never answered with the login, also with the policy on
+    CHECK(script_logon_allowed(AutoSource::wpad, false, true));
+    {
+        NoScriptLoginScope scope;
+        CHECK_FALSE(script_logon_allowed(AutoSource::wpad, false, true));
+        CHECK_FALSE(script_logon_allowed(AutoSource::pac, true, true));
+    }
+    CHECK(script_logon_allowed(AutoSource::pac, true, false));
+}

@@ -438,7 +438,12 @@ std::optional<RouteDecision> from_script(RouteDecision d, const Target& t, const
                                          bool trusted, bool untrusted, const AutoProxy& autoproxy, std::string& failed) {
     using ffy::proxy::Origin;
     const std::string what = src == AutoSource::pac ? "PAC " + without_query(pac_url) : std::string("automatic detection (WPAD)");
-    AutoProxyResult r = autoproxy ? autoproxy(url, src, pac_url, trusted && !untrusted) : AutoProxyResult{false, false, {}, {}, "not available"};
+    AutoProxyResult r;
+    {
+        std::optional<sysproxy::NoScriptLoginScope> no_login;  // its script's server never gets the login either
+        if (untrusted) no_login.emplace();
+        r = autoproxy ? autoproxy(url, src, pac_url, trusted && !untrusted) : AutoProxyResult{false, false, {}, {}, "not available"};
+    }
     if (!r.ok) {
         failed += (failed.empty() ? "" : "; ") + what + " failed (" + r.error + ")";
         return std::nullopt;
@@ -452,7 +457,7 @@ std::optional<RouteDecision> from_script(RouteDecision d, const Target& t, const
         d.how = what + ": bypass list";
         return d;
     }
-    const Origin o = untrusted || src == AutoSource::wpad ? Origin::discovered : (trusted ? Origin::pac : Origin::discovered);
+    const Origin o = untrusted ? sysproxy::kUntrustedOrigin : src == AutoSource::wpad ? Origin::discovered : (trusted ? Origin::pac : Origin::discovered);
     d.routes = with_origin(sysproxy::parse_proxy_list(r.proxy), o);
     d.how = d.routes.empty() ? what + ": DIRECT" : what;
     return d;
@@ -576,7 +581,7 @@ RouteDecision decide(const Inputs& in, const std::string& url, const AutoProxy& 
             d.how = "proxy server: bypass list";
             return after(d, failed);
         }
-        d.routes = with_origin(sysproxy::parse_proxy_list(b.server), b.untrusted ? Origin::discovered : Origin::configured);
+        d.routes = with_origin(sysproxy::parse_proxy_list(b.server), b.untrusted ? sysproxy::kUntrustedOrigin : Origin::configured);
         d.how = "proxy server";
         return after(d, failed);
     }
@@ -651,7 +656,8 @@ json to_json(const RouteDecision& d, bool discovered_login_policy) {
         }
         const char* o = r.proxy.origin == ffy::proxy::Origin::configured ? "configured"
                         : r.proxy.origin == ffy::proxy::Origin::pac      ? "pac"
-                                                                         : "discovered";
+                        : r.proxy.origin == ffy::proxy::Origin::discovered ? "discovered"
+                                                                           : "untrusted";
         routes.push_back(json{{"proxy", r.proxy.str()}, {"origin", o}});
     }
     json j{{"route", route_text(d, discovered_login_policy)},

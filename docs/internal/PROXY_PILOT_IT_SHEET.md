@@ -26,6 +26,9 @@ Inhalt dieser Maske geht über `fairyfly.io` an den dabei verwendeten KI-Assiste
   mind. 60 s ruhen. Optional `api.github.com`, `github.com`, `*.githubusercontent.com` (Update-Prüfung).
 - Optional, nur wenn Sie WPAD mit Anmeldung nutzen: jemand mit Adminrechten, der für den Test den Wert
   `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD `AllowLoginToDiscoveredProxies` = `1` setzt (danach löschen).
+  Nicht dauerhaft setzen, wo WPAD gefälscht werden kann: fällt das PAC-Skript aus (z. B. weil jemand seinen Server
+  blockiert), nimmt fairyfly die nächste Quelle, ggf. die automatische Erkennung, und mit diesem Wert bekäme ein
+  untergeschobener WPAD-Proxy die Windows-Anmeldung.
 
 **Was wir nie tun.** Wir fragen **keine Passwörter** ab und speichern keine. Die Windows-Anmeldung (Kerberos/NTLM) geht
 nur an Proxys, die ausdrücklich eingetragen sind: manuell (Windows oder fairyfly), `netsh winhttp`, `HTTPS_PROXY`, per
@@ -75,6 +78,8 @@ needed.
   idle for at least 60 s. Optional `api.github.com`, `github.com`, `*.githubusercontent.com` (update check).
 - Optional, only if you use WPAD with authentication: someone with admin rights who sets, for the test,
   `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD `AllowLoginToDiscoveredProxies` = `1` (delete it afterwards).
+  Do not keep it where WPAD can be spoofed: if the PAC script fails (e.g. someone blocks its server), fairyfly takes the
+  next source, possibly automatic detection, and with this value a planted WPAD proxy would get the Windows login.
 
 **What we never do.** We **never ask for or store passwords**. The Windows login (Kerberos/NTLM) is sent only to
 proxies configured explicitly: manual (Windows or fairyfly), `netsh winhttp`, `HTTPS_PROXY`, by browser or fairyfly

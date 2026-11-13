@@ -401,7 +401,12 @@ behind a link is not read. Its permissions are read from the same open handles, 
   but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly`. IT should set
   the proxy explicitly (manual setting, `netsh winhttp`, or a PAC script at a fixed address). Where WPAD is controlled
   (DHCP/DNS of the domain only), an administrator can allow it: `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`, DWORD
-  `AllowLoginToDiscoveredProxies` = `1` (read at each proxy connection).
+  `AllowLoginToDiscoveredProxies` = `1` (read at each proxy connection). **Do not enable it where WPAD can be
+  spoofed** (any network where a non-administrator can answer WPAD's DHCP/DNS lookup): a PAC script that fails hands
+  over to the next source (the order above), so someone who blocks the trusted PAC server can make fairyfly fall back to
+  automatic detection and, with this policy on, hand the Windows login to their own "WPAD" proxy. A proxy from a
+  `policies.json` that other users can change never gets the login or a stored credential, also with this policy on
+  (fairyfly's own "untrusted" origin).
 - **Downloading the script.** When the server of a proxy script asks for a login (401), WinHTTP answers with the
   Windows login only for a trusted PAC script (above) or with the administrator's WPAD policy; WinHTTP would otherwise
   treat a single-label host such as `wpad` as intranet and send NTLM to whoever answers that name. A configured script

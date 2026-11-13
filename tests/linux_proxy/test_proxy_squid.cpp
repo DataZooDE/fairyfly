@@ -178,6 +178,7 @@ TEST_CASE("proxy squid: a policies.json other users can change gets neither the 
     EnvGuard env{{"SSL_CERT_FILE", t.ca_file().c_str()}};
     int reads = 0;
     AuthSources auth;
+    auth.discovered_login_policy = [] { return true; };  // AllowLoginToDiscoveredProxies=1 does not change it
     auth.sspi = [](const ffy::proxy::Endpoint&) -> std::unique_ptr<ffy::proxy::Authenticator> { return std::make_unique<TestNtlm>(); };
     auth.stored_login = [&](const std::string&) {
         ++reads;
@@ -192,7 +193,7 @@ TEST_CASE("proxy squid: a policies.json other users can change gets neither the 
     ff.kind = BrowserPolicy::Kind::fixed;
     ff.server = "127.0.0.1:" + std::to_string(ntlm.port());
     inst.in->browsers = {ff};
-    CHECK_THAT(get_error(t.https()), ContainsSubstring("not sending credentials"));
+    CHECK_THAT(get_error(t.https()), ContainsSubstring("comes from a policy file other users can change: not sending credentials"));
     CHECK_FALSE(ntlm.tunnelled(t.hostport()));
     inst.in->browsers[0].server = "127.0.0.1:" + std::to_string(basic.port());
     *inst.fingerprint = "basic";

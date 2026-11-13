@@ -491,7 +491,7 @@ TEST_CASE("proxy config: a PAC script's proxies get the Windows login only when 
     in.browsers = {browser("Firefox", K::pac, "https://pac.corp.example/p.pac", false)};
     CHECK(origin_for(in) == Origin::pac);
     in.browsers.back().untrusted = true;  // a policies.json other users can change: not even an https:// script
-    CHECK(origin_for(in) == Origin::discovered);
+    CHECK(origin_for(in) == fairyfly::link::sysproxy::kUntrustedOrigin);
     CHECK(scripts.asked.back() == "pac https://pac.corp.example/p.pac");  // and no login while downloading it
 
     // the route says where the script came from
@@ -538,9 +538,12 @@ TEST_CASE("proxy config: a policies.json other users can change gives its proxy 
     in.browsers[0].untrusted = true;
     auto d = decide(in, kUrl, {});
     CHECK(d.routes == Routes{via("ff.corp.example", 3128)});
-    CHECK(first_origin(d) == Origin::discovered);
+    CHECK(first_origin(d) == fairyfly::link::sysproxy::kUntrustedOrigin);
     CHECK_FALSE(windows_login(d, false));
+    CHECK_FALSE(windows_login(d, true));  // also with AllowLoginToDiscoveredProxies=1: that trusts WPAD, not a planted file
+    CHECK(route_text(d, true).find("Windows login: no") != std::string::npos);
     CHECK_FALSE(stored_basic_allowed(d));
+    CHECK(to_json(d, true)["routes"][0]["origin"] == "untrusted");
     CHECK_THAT(d.warning, ContainsSubstring("can be changed by users other than administrators"));
     CHECK(d.source == "Firefox policies.json (user-writable)");
     CHECK(route_text(d, false) == "via ff.corp.example:3128 from Firefox policies.json (user-writable), Windows login: no");

@@ -198,7 +198,7 @@ TEST_CASE("proxy sources (Windows): a policies.json in a folder users can write 
         r.proxy = "p:1";
         return r;
     });
-    CHECK(d.routes.front().proxy.origin == ffy::proxy::Origin::discovered);
+    CHECK(d.routes.front().proxy.origin == fairyfly::link::sysproxy::kUntrustedOrigin);
 
     std::ofstream(install / "distribution" / "policies.json") << "{";
     w.clear();
