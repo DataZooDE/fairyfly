@@ -12,7 +12,7 @@
 #include <thread>
 
 #include "include/text/utf8.h"
-#include "include/tray/tray_resource.h"
+#include "tray_resource.h"
 
 namespace fairyfly::tray {
 

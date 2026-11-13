@@ -289,7 +289,6 @@ TEST_CASE("proxy sources (Windows): WinHTTP evaluates a real PAC script at a con
 TEST_CASE("proxy window (Windows): the form, Save, and the locked view - with screenshots", "[proxy][win32][window]") {
     using namespace fairyfly::tray;
     std::optional<Setting> saved;
-    std::vector<Setting> routed;
     ProxyWindowServices s;
     s.load = [] {
         ProxyWindowState st;
@@ -298,8 +297,7 @@ TEST_CASE("proxy window (Windows): the form, Save, and the locked view - with sc
         st.setting.bypass = "<local>;*.corp.example";
         return st;
     };
-    s.route = [&](const Setting& x) {
-        routed.push_back(x);
+    s.route = [](const Setting&) {  // runs on the window's worker threads: captures nothing of the test
         return std::string("via proxy.corp.example:8080 from your fairyfly setting, Windows login: yes");
     };
     s.save = [&](const Setting& x) -> std::optional<std::string> {

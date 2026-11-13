@@ -38,7 +38,7 @@ Result CommandHandler::handle_doctor()
     }
     {
         // the route to the gateway and a real connection test through it (up to ~16 s when the network is cut off)
-        namespace pc = link::proxycfg;
+        namespace pc = fairyfly::link::proxycfg;
         auto s = pc::process_services();
         const pc::Inputs in = s.inputs ? s.inputs() : pc::Inputs{};
         const pc::ProbeTargets t = s.targets ? s.targets() : pc::probe_targets("", "https://fairyfly.io");
