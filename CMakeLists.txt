@@ -147,6 +147,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/read_only_guard.cpp
     src/cli_entry.cpp
     src/audit_log.cpp
+    src/build_version.cpp
     src/audit_retention.cpp
     src/cli_handler_audit.cpp
     src/automation_engine.cpp
