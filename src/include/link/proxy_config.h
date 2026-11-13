@@ -83,7 +83,7 @@ inline constexpr const wchar_t* kPolicyServerValue = L"ProxyServer";
 inline constexpr const wchar_t* kPolicyPacValue = L"ProxyPacUrl";
 inline constexpr const wchar_t* kPolicyBypassValue = L"ProxyBypass";
 
-/// The user's setting, in the trays' per-user settings (tray::TraySettings, HKCU\Software\DataZoo\fairyfly\tray).
+/// The user's setting, in the trays' per-user settings (tray::TraySettings, the key tray::contract::kSettingsKey).
 inline constexpr const char* kUserModeSetting = tray::kProxyModeSetting;
 inline constexpr const char* kUserServerSetting = tray::kProxyServerSetting;
 inline constexpr const char* kUserBypassSetting = tray::kProxyBypassSetting;
@@ -155,8 +155,9 @@ struct EnvOverrides {
     std::string https_proxy;  ///< raw value (may hold user:password@; never logged)
     std::string no_proxy;
 };
-/// Reads HTTPS_PROXY/https_proxy and NO_PROXY/no_proxy and hides them from libffl's lookup (the C runtime's copy).
-/// On Windows the process environment block keeps them, so child processes inherit them unchanged.
+/// Reads HTTPS_PROXY and NO_PROXY and hides them from libffl's lookup (config::take_from_runtime_view: the C
+/// runtime's copy; the process environment block keeps them, so child processes inherit them). Windows
+/// (proxy_sources_win32.cpp): install_system_proxy() calls it once at start.
 EnvOverrides take_env_overrides();
 
 enum class Tier { fairyfly_policy, user_setting, environment, browser_policy, windows };

@@ -2,6 +2,7 @@
 #include "include/string_utils.h"
 #include "include/text/utf8.h"
 
+#include <cctype>
 #include <cstdlib>
 #include <string_view>
 #ifdef _WIN32
@@ -114,6 +115,30 @@ void set_process_env(const char* name, const std::string& value) {
     _wputenv_s(text::utf8_to_wide(name).c_str(), text::utf8_to_wide(value).c_str());
 #else
     setenv(name, value.c_str(), 1);
+#endif
+}
+
+std::string take_from_runtime_view(const char* name) {
+#ifdef _WIN32
+    const std::string value = Environment::process().get(name);  // names are case-insensitive here
+    const std::wstring wname = text::utf8_to_wide(name);
+    std::wstring block;
+    if (const DWORD n = GetEnvironmentVariableW(wname.c_str(), nullptr, 0); n > 0) {
+        block.resize(n);
+        const DWORD got = GetEnvironmentVariableW(wname.c_str(), block.data(), n);
+        block.resize(got < n ? got : 0);
+    }
+    _wputenv_s(wname.c_str(), L"");                                             // the C runtime's copy and the block
+    if (!block.empty()) SetEnvironmentVariableW(wname.c_str(), block.c_str());  // the block again: children inherit it
+    return value;
+#else
+    std::string lower(name);
+    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string value = Environment::process().get(name);
+    if (value.empty()) value = Environment::process().get(lower.c_str());
+    unsetenv(name);
+    unsetenv(lower.c_str());
+    return value;
 #endif
 }
 

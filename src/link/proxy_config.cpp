@@ -771,15 +771,6 @@ void set_process_resolver(std::shared_ptr<RouteResolver> r) {
     resolver_slot() = std::move(r);
 }
 
-#ifndef _WIN32
-EnvOverrides take_env_overrides() {
-    EnvOverrides e;
-    e.https_proxy = ffy::env_or("HTTPS_PROXY", ffy::env_or("https_proxy"));
-    e.no_proxy = ffy::env_or("NO_PROXY", ffy::env_or("no_proxy"));
-    for (const char* n : {"HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy"}) ::unsetenv(n);
-    return e;
-}
-#endif
 
 // ---- Test connection ------------------------------------------------------------------------------------------------
 

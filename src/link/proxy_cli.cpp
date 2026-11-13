@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 
+#include "include/config/environment.h"
 #include "include/link/link_runner.h"
 #ifdef _WIN32
 #include "include/link/proxy_sources.h"
@@ -182,7 +183,8 @@ Services process_services(const std::string& state_path_in) {
             link_url = ffy::link::load_state(state_path).link_url;
         } catch (const std::exception&) {
         }
-        std::string gateway = ffy::env_or("FAIRYFLY_LINK_GATEWAY", "https://fairyfly.io");  // link_console.h kDefaultGateway
+        std::string gateway = config::process_env()(config::env::kLinkGateway);
+        if (gateway.empty()) gateway = "https://fairyfly.io";  // link_console.h kDefaultGateway
         try {
             return probe_targets(link_url, gateway);
         } catch (const std::exception&) {

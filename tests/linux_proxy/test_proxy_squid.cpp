@@ -280,13 +280,3 @@ TEST_CASE("proxy squid: a changed setting reconnects the running link along the 
     CHECK(connects == 2);  // one reconnect, not a loop
     std::filesystem::remove_all(dir);
 }
-
-TEST_CASE("proxy squid: HTTPS_PROXY and NO_PROXY are taken from libffl's view at start") {
-    EnvGuard env{{"HTTPS_PROXY", "http://env.example:3128"}, {"NO_PROXY", ".corp.example"}};
-    const EnvOverrides e = take_env_overrides();
-    CHECK(e.https_proxy == "http://env.example:3128");
-    CHECK(e.no_proxy == ".corp.example");
-    CHECK(std::getenv("HTTPS_PROXY") == nullptr);
-    CHECK(std::getenv("NO_PROXY") == nullptr);
-    CHECK(ffy::proxy::decide("https://fairyfly.io/").source == "default");  // libffl no longer decides by them
-}

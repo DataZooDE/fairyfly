@@ -13,30 +13,19 @@
 #include <fstream>
 #include <sstream>
 
+#include "include/config/environment.h"
 #include "include/text/utf8.h"
 #include "include/tray/tray_contract.h"
 #include "util.hpp"  // libffl
 
 namespace fairyfly::link::proxycfg {
 
-// HTTPS_PROXY / NO_PROXY: libffl reads them with getenv, i.e. from the C runtime's copy of the environment. They are
-// removed from that copy (and _putenv_s removes them from the process environment block too), then put back into the
-// block alone: libffl no longer sees them, child processes (the tray's link, the MCP server) inherit them unchanged.
+// HTTPS_PROXY / NO_PROXY: libffl reads them with getenv, before fairyfly's resolver. Taken out of that view (the
+// process environment block keeps them: the tray's link and the MCP server inherit them unchanged) and ranked here.
 EnvOverrides take_env_overrides() {
     EnvOverrides e;
-    e.https_proxy = ffy::env_or("HTTPS_PROXY", ffy::env_or("https_proxy"));
-    e.no_proxy = ffy::env_or("NO_PROXY", ffy::env_or("no_proxy"));
-    for (const wchar_t* name : {L"HTTPS_PROXY", L"NO_PROXY"}) {  // names are case-insensitive on Windows
-        std::wstring saved;
-        const DWORD n = GetEnvironmentVariableW(name, nullptr, 0);
-        if (n > 0) {
-            saved.resize(n);
-            const DWORD got = GetEnvironmentVariableW(name, saved.data(), n);
-            saved.resize(got < n ? got : 0);
-        }
-        _wputenv_s(name, L"");
-        if (!saved.empty()) SetEnvironmentVariableW(name, saved.c_str());
-    }
+    e.https_proxy = config::take_from_runtime_view(config::env::kHttpsProxy);  // case-insensitive on Windows
+    e.no_proxy = config::take_from_runtime_view(config::env::kNoProxy);
     return e;
 }
 
@@ -196,11 +185,8 @@ std::vector<std::filesystem::path> firefox_install_dirs() {
             if (auto dir = reg_string(root, main, L"Install Directory")) add(std::filesystem::path(text::utf8_to_wide_lossy(*dir)));
         }
     }
-    for (const wchar_t* env : {L"ProgramFiles", L"ProgramFiles(x86)"}) {
-        wchar_t buf[MAX_PATH];
-        const DWORD n = GetEnvironmentVariableW(env, buf, MAX_PATH);
-        if (n > 0 && n < MAX_PATH) add(std::filesystem::path(buf) / L"Mozilla Firefox");
-    }
+    for (const char* env : {config::env::kProgramFiles, config::env::kProgramFilesX86})
+        if (const std::string dir = config::process_env()(env); !dir.empty()) add(text::utf8_path(dir) / L"Mozilla Firefox");
     return out;
 }
 
