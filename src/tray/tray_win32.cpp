@@ -1,3 +1,4 @@
+#include "include/build_version.h"
 #include "include/text/utf8.h"
 #include "include/tray/tray_win32.h"
 #include "include/tray/tray_contract.h"
@@ -692,6 +693,7 @@ std::string route_logging_to_file(const std::string& file_name) {
         logger->set_level(spdlog::level::info);
         logger->flush_on(spdlog::level::warn);
         spdlog::set_default_logger(logger);
+        spdlog::info("{}", build_description());   // which build wrote this log (a development build: its commit)
         // the start's data directory move (stderr has nobody reading it in a tray): failures and every conflict
         if (const auto moved = config::last_migration())
             for (const auto& warning : config::migration_warnings(*moved)) spdlog::warn("{}", warning);

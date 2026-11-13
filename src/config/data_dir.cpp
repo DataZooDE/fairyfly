@@ -1,6 +1,7 @@
 // fairyfly's data directory and its move from %LOCALAPPDATA%\fairyfly (include/config/data_dir.h).
 #include "include/config/data_dir.h"
 #include "include/text/utf8.h"
+#include "include/build_version.h"
 #include "include/version.h"
 
 #include <algorithm>
@@ -246,10 +247,10 @@ nlohmann::json read_marker(const fs::path& dir) {
 void write_marker(const fs::path& dir, const MigrationResult& r) {
     nlohmann::json j = read_marker(dir);
     if (!j.contains("created")) j["created"] = utc_now();
-    if (!j.contains("fairyfly")) j["fairyfly"] = FAIRYFLY_VERSION;
+    if (!j.contains("fairyfly")) j["fairyfly"] = display_version();
     if (!j["migrated_from"].is_array()) j["migrated_from"] = nlohmann::json::array();
     for (const auto& f : r.migrated_from)
-        j["migrated_from"].push_back({{"path", text::path_utf8(f)}, {"at", utc_now()}, {"by", FAIRYFLY_VERSION}});
+        j["migrated_from"].push_back({{"path", text::path_utf8(f)}, {"at", utc_now()}, {"by", display_version()}});
     if (!j["conflicts"].is_array()) j["conflicts"] = nlohmann::json::array();
     for (const auto& c : r.conflicts) j["conflicts"].push_back(to_json(c));
     write_file_atomic(dir / kDataDirMarker, j.dump(2) + "\n");
@@ -259,7 +260,7 @@ void write_moved_note(const fs::path& old_dir, const fs::path& target) {
     const std::string to = text::path_utf8(target);
     const std::string note =
         "fairyfly now keeps its data (audit trail, logs, mcp.yaml, cloud link pairing, sessions) in\r\n\r\n    " + to +
-        "\r\n\r\nEverything in this folder was copied there on " + utc_now() + " by fairyfly " + FAIRYFLY_VERSION +
+        "\r\n\r\nEverything in this folder was copied there on " + utc_now() + " by fairyfly " + display_version() +
         ".\r\nThis folder is no longer used and fairyfly never deletes it. Records an older fairyfly writes here from now\r\n"
         "on are not copied. Delete the folder yourself once you have checked the new one.\r\n";
     write_file_atomic(old_dir / kMovedNote, note);

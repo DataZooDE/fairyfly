@@ -154,6 +154,26 @@ self-signed certificate, a missing time stamp and wrong `O=`/`C=` are refused, a
 The inputs of the signing action were checked against its `action.yml` at v2.0.0, but the signed path cannot run
 before the Azure account exists; the first signed release is its end-to-end test (step 9 above).
 
+### Development builds
+
+Only a build of the commit its tag `v<version>` points at is a release. Every other build (a pull request, `main`, a
+local build) shows the base version from the version files with `-dev+<first 7 hex digits of the commit>`, e.g.
+`2026.11.09-dev+268d4b9` (`2026.11.09-dev` when built without git), so a pilot or CI build cannot pass for the
+release of the same day. CMake decides at configure time ([cmake/build_kind.cmake](../cmake/build_kind.cmake),
+`src/include/build_version.h`): `FAIRYFLY_BUILD_KIND=auto` (default) means release when `HEAD` carries the tag
+`v<version>`, or when GitHub Actions runs on `refs/tags/v<version>` for this very commit; `release` and `dev` force
+it (`release.yml` and `winget.yml` pass `release`). A new commit or checkout configures again.
+
+The marked version is what `fairyfly --version`, the trays' version line, `fairyfly doctor` (check `version`, field
+`version`), the first line of the trays' log files, MCP `serverInfo.version`, the audit records and the exe's
+`ProductVersion` string show, and what the link sends as its pairing and `hello` version: the gateway stores that
+string as it is (no version parsing or minimum-version check there; up to 32 characters, the longest marked version
+has 25), so a development desktop shows as `...-dev+<commit>` in Admin › Desktops. Unchanged: the version files,
+`FileVersion` and the numeric `FILEVERSION`/`PRODUCTVERSION`, the MSI version (`msi_version.ps1`), the MSIX 4-part
+version (`msix_version.ps1`), the version `fairyfly update` compares (the base version), and the link's fixed
+User-Agent (`ffy-link/0.2`, vendored libffl). `build.yml` checks that a non-tag build reports
+`<base>-dev+<HEAD's 7 digits>` with `FileVersion` = base.
+
 ## Updates
 
 `fairyfly update apply` (src/update/update_model.cpp, `decide()`) accepts a release only when its `fairyfly.exe`

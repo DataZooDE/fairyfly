@@ -414,7 +414,10 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
-        $version = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        # a PR/main build is a development build (<base>-dev+<commit>); the tag a release would carry is v<base>
+        $reported = (& build-msix/Release/fairyfly.exe --version | Out-String).Trim()
+        if ($reported -cmatch '^(\d{4}\.\d{2}\.\d{2}(?:\.\d+)?)-dev\+[0-9a-f]{7}$') { $version = $Matches[1] }
+        else { Write-Error "the msix fairyfly.exe reports '$reported', not <base>-dev+<commit>"; exit 1 }
         $tag = "v$version"
         try { & ./packaging/check_release_tag.ps1 -Tag $tag -Version $version } catch { Write-Error $_.Exception.Message; exit 1 }
         $previous = @(gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq '.[] | select(.draft | not) | .tag_name')

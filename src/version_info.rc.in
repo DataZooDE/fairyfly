@@ -1,6 +1,8 @@
 // Version information of fairyfly.exe (configured by CMake: configure_file, @VAR@ placeholders).
 // Product name = project name and a product version that is consistent across builds (needed by most signing services).
 // The 4th binary field is the same-day release N of YYYY.MM.DD.N (0 for the day's first release).
+// ProductVersion (string) is what `fairyfly --version` shows: <base>-dev+<commit> for a development build
+// (cmake/build_kind.cmake); FileVersion and the numeric fields always carry the base version.
 #include <winver.h>
 
 VS_VERSION_INFO VERSIONINFO
@@ -23,7 +25,7 @@ BEGIN
             VALUE "LegalCopyright",   "Copyright (c) 2025-2026 DataZoo GmbH. Business Source License 1.1."
             VALUE "OriginalFilename", "@FAIRYFLY_RC_NAME@.exe"
             VALUE "ProductName",      "fairyfly"
-            VALUE "ProductVersion",   "@FAIRYFLY_VERSION_STRING@"
+            VALUE "ProductVersion",   "@FAIRYFLY_DISPLAY_VERSION@"
         END
     END
     BLOCK "VarFileInfo"

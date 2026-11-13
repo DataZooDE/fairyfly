@@ -42,6 +42,7 @@
 #include "include/link/desktop_approval_win32.h"
 #include "include/tray/tray_win32.h"
 #endif
+#include "include/build_version.h"
 #include "include/version.h"
 
 // libffl
@@ -335,7 +336,7 @@ Result link_pair(const LinkOptions& options, const PairIo& io) {
     while (o.gateway.size() > 8 && o.gateway.back() == '/') o.gateway.pop_back();
     try {
         out << "Contacting " << o.gateway << "\xE2\x80\xA6" << std::endl;
-        auto pc = std::make_shared<ffy::link::PairingClient>(o.gateway, host_name(), "Windows", fairyfly::FAIRYFLY_VERSION);
+        auto pc = std::make_shared<ffy::link::PairingClient>(o.gateway, host_name(), "Windows", fairyfly::display_version());
         const auto t0 = std::chrono::steady_clock::now();
         auto shown = unless_stopped<ffy::link::PairingDisplay>([pc] { return pc->start(); }, stop);
         if (!shown) return cancelled();
@@ -715,7 +716,8 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
     auto tools = std::make_shared<MainThreadTools>();
     ffy::link::AgentConfig cfg;
     cfg.local = tools;
-    cfg.version = fairyfly::FAIRYFLY_VERSION;
+    // the gateway keeps it as it is (Admin > Desktops): a development build shows as <base>-dev+<commit> there too
+    cfg.version = fairyfly::display_version();
     configure_approval(cfg, o, runtime, tools, peek);
     // offer this desktop's tool list on every connect; the gateway keeps it only from a catalog_publishers account,
     // otherwise it uses its built-in catalog

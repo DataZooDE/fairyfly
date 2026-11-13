@@ -95,8 +95,10 @@ jobs:
       if: steps.exe-cache.outputs.cache-hit != 'true'
       run: |
         $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        # release builds (FAIRYFLY_BUILD_KIND=release, no -dev+<commit>): the exe and its variants stand in for
+        # releases, and the exe cache is keyed by the sources, not by the commit
         cmake -B build -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DFAIRYFLY_BUILD_KIND=release
         cmake --build build --config Release --target fairyfly --parallel
       shell: pwsh
 

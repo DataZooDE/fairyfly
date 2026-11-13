@@ -36,7 +36,9 @@ std::string overall_health(const std::vector<Check>& checks) {
     return warned ? "warning" : "ok";
 }
 
-Check judge_version(const std::string& shown, bool) { return {"version", "info", "fairyfly " + shown}; }
+Check judge_version(const std::string& shown, bool release) {
+    return {"version", "info", "fairyfly " + shown + (release ? " (release)" : " (development build, not a release)")};
+}
 
 Check judge_desktop(const std::string& window_station, const std::string& desktop) {
     const std::string context = window_station + "\\" + desktop;

@@ -12,9 +12,10 @@ tunnel's `authenticated with ...`, runs in the console.
 
 - Answers from IT: proxy discovery (manual / PAC URL, set by GPO or user / WPAD), authentication (none / Negotiate /
   NTLM / Basic), proxy product, TLS inspection on `fairyfly.io` yes/no, whether direct 443 is blocked.
-- Build: the MSI from the `build.yml` run on the commit under test (pilot kit: run 42796161961, commit 448b6975,
-  `fairyfly --version` = `2026.11.09`, the same number as the release `v2026.11.09` without proxy support, so record the
-  **commit**, not only the version). Unsigned; MSI preferred over the test-signed MSIX (admin + certificate, and its
+- Build: the MSI from the `build.yml` run on the commit under test (pilot kit: the run and the build's commit as shown
+  in the kit's `README.txt`). Record the **commit**, not only the version: a build made before the development-build
+  marking reports the plain base version (e.g. `2026.11.09`, the same number as the release `v2026.11.09` without proxy
+  support); a later one reports `<base>-dev+<commit>` ([SIGNING.md](../SIGNING.md#development-builds)). Unsigned; MSI preferred over the test-signed MSIX (admin + certificate, and its
   `update check` answers `UPDATE_MANAGED_BY_STORE`, so case 12 cannot run on it).
 - Our side: a pilot organisation on `fairyfly.io` with a pairing account and a phone; the web app open on our laptop.
 - Pick the row below that matches their setup; skip what their network cannot do.

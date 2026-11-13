@@ -96,8 +96,9 @@ jobs:
     - name: Build (Release, static)
       run: |
         $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
+        # FAIRYFLY_BUILD_KIND=release: --version is the plain tag version (cmake/build_kind.cmake; checked below)
         cmake -B build -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DFAIRYFLY_BUILD_KIND=release
         cmake --build build --config Release --target fairyfly unit_tests --parallel
       shell: pwsh
 
@@ -178,7 +179,7 @@ jobs:
       run: |
         $env:VCPKG_ROOT = "${{ github.workspace }}/vcpkg"
         cmake -B build-msix -G "Visual Studio 17 2022" -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DFAIRYFLY_PACKAGE=msix
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DFAIRYFLY_PACKAGE=msix -DFAIRYFLY_BUILD_KIND=release
         if ($LASTEXITCODE -ne 0) { exit 1 }
         cmake --build build-msix --config Release --target fairyfly unit_tests --parallel
         if ($LASTEXITCODE -ne 0) { exit 1 }

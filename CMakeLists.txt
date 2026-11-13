@@ -58,7 +58,18 @@ string(JSON _ff_vcpkg_version GET "${_ff_manifest}" version)
 if(NOT _ff_vcpkg_version STREQUAL PROJECT_VERSION)  # both plain numbers (2026.10.5): vcpkg refuses leading zeros
     message(FATAL_ERROR "vcpkg.json has version \"${_ff_vcpkg_version}\", CMakeLists.txt ${PROJECT_VERSION}: set both (and version.h) with packaging/set_version.ps1")
 endif()
-message(STATUS "fairyfly ${FAIRYFLY_VERSION_STRING}")
+# Release (built from the tag v<version>) or development build: the shown version gets "-dev+<short commit>" for the
+# latter (cmake/build_kind.cmake, include/build_version.h); the numbers above and every package version stay as they are.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_kind.cmake)
+fairyfly_build_kind("${FAIRYFLY_VERSION_STRING}" FAIRYFLY_BUILD_RELEASE FAIRYFLY_BUILD_COMMIT FAIRYFLY_DISPLAY_VERSION)
+if(FAIRYFLY_BUILD_RELEASE)
+    set(FAIRYFLY_BUILD_RELEASE_CXX true)
+    message(STATUS "fairyfly ${FAIRYFLY_DISPLAY_VERSION} (release build)")
+else()
+    set(FAIRYFLY_BUILD_RELEASE_CXX false)
+    message(STATUS "fairyfly ${FAIRYFLY_DISPLAY_VERSION} (development build; FAIRYFLY_BUILD_KIND=${FAIRYFLY_BUILD_KIND})")
+endif()
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/build_info.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.cpp @ONLY)
 
 # Require C++20
 set(CMAKE_CXX_STANDARD 20)
@@ -316,6 +327,8 @@ set(FAIRYFLY_LIB_SOURCES
 
 # Create static library for core functionality (compiled once, linked by both exe and tests)
 add_library(fairyfly_core STATIC ${FAIRYFLY_LIB_SOURCES})
+# the build kind and commit (configured above): only this file is compiled again when HEAD moves
+target_sources(fairyfly_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.cpp)
 
 if(MSVC)
     target_precompile_headers(fairyfly_core PRIVATE
