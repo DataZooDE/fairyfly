@@ -310,6 +310,7 @@ namespace {
         CommandHandler& handler = get_handler();
         handler.set_read_only(global_opts.read_only);
         handler.set_batch_mode(batch_mode);  // credentials set/import-env cannot prompt inside `batch`
+        handler.set_doctor_live_proxy_test(!batch_mode && invoked_command_words(app) == std::vector<std::string>{"doctor"});
         const auto* active_spec = command_table::find_by_path(invoked_command_words(app));
         if (active_spec && active_spec->has(command_table::Trait::ScreenBound)) {
             handler.set_automatic_startup([enabled = global_opts.allow_sap_startup] {

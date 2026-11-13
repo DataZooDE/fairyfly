@@ -37,33 +37,50 @@ Result CommandHandler::handle_doctor()
                                                 config::recorded_conflicts(data)));
     }
     {
-        // the route to the gateway and a real connection test through it (up to ~16 s when the network is cut off)
         namespace pc = fairyfly::link::proxycfg;
         auto s = pc::process_services();
-        const pc::Inputs in = s.inputs ? s.inputs() : pc::Inputs{};
         const pc::ProbeTargets t = s.targets ? s.targets() : pc::probe_targets("", "https://fairyfly.io");
-        doctor::ProxyFacts f;
-        try {
-            const pc::RouteDecision d = pc::decide(in, t.https_url, s.autoproxy);
-            f.setting = pc::mode_name(d.effective.mode);
-            f.setting_from = d.setting_from;
-            f.locked = d.locked;
-            f.route = pc::route_text(d, in.discovered_login_policy);
-            f.source = d.source + (d.how.empty() ? "" : " (" + d.how + ")");
-            f.windows_login = pc::windows_login(d, in.discovered_login_policy);
-            f.stored_basic = pc::stored_basic_allowed(d);
-        } catch (const std::exception& e) {
-            f.route = std::string("cannot be determined: ") + e.what();
-        }
-        for (const auto& w : in.warnings) f.warnings += (f.warnings.empty() ? "" : " ") + w;
-        if (s.probe) {
-            const pc::ProbeResult p = s.probe(t, std::nullopt);
-            f.test_ok = p.ok;
-            f.test = p.summary;
+        if (!doctor_live_proxy_test_) {
+            // gui_doctor (MCP) and batch: fast, and no internal proxy or PAC host names for a remote caller
+            std::string state = "direct";
+            if (auto resolver = pc::process_resolver()) {
+                try {
+                    const auto routes = resolver->routes(t.https_url);  // cached: the link has usually asked already
+                    for (const auto& r : routes)
+                        if (!r.direct) state = "configured";
+                } catch (const std::exception&) {
+                    state = "failing";
+                }
+            }
+            checks.push_back(doctor::judge_proxy_summary(state));
         } else {
-            f.test = "not available";
+            // `fairyfly doctor` in a console: the route, its source and trust, and a real connection test (up to ~16 s
+            // when the network is cut off)
+            const pc::Inputs in = s.inputs ? s.inputs() : pc::Inputs{};
+            doctor::ProxyFacts f;
+            try {
+                const pc::RouteDecision d = pc::decide(in, t.https_url, s.autoproxy);
+                f.setting = pc::mode_name(d.effective.mode);
+                f.setting_from = d.setting_from;
+                f.locked = d.locked;
+                f.route = pc::route_text(d, in.discovered_login_policy);
+                f.source = d.source + (d.how.empty() ? "" : " (" + d.how + ")");
+                f.windows_login = pc::windows_login(d, in.discovered_login_policy);
+                f.stored_basic = pc::stored_basic_allowed(d);
+                if (!d.warning.empty()) f.warnings = d.warning;
+            } catch (const std::exception& e) {
+                f.route = std::string("cannot be determined: ") + e.what();
+            }
+            for (const auto& w : in.warnings) f.warnings += (f.warnings.empty() ? "" : " ") + w;
+            if (s.probe) {
+                const pc::ProbeResult p = s.probe(t, std::nullopt);
+                f.test_ok = p.ok;
+                f.test = p.summary;
+            } else {
+                f.test = "not available";
+            }
+            checks.push_back(doctor::judge_proxy(f));
         }
-        checks.push_back(doctor::judge_proxy(f));
     }
     refresh_sap_gui();  // what SAP Logon is running now (no second lookup inside an MCP call that did it)
     const EngineStatus engine = engine_ ? engine_->engine_status() : EngineStatus{false, true, "no automation engine"};

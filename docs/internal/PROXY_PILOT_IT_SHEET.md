@@ -32,6 +32,8 @@ nur an Proxys, die ausdrücklich eingetragen sind: manuell (Windows oder fairyfl
 Browser- oder fairyfly-Richtlinie, oder ein PAC-Skript über `https://` bzw. per Richtlinie (Windows, Edge/Chrome,
 fairyfly, eine nur von Administratoren änderbare Firefox-`policies.json`) mit vollständigem Hostnamen (z. B. `http://pac.firma.de/proxy.pac`, nicht
 `http://wpad/…` und keine IP-Adresse). Nie an einen automatisch gefundenen Proxy (WPAD), außer Sie setzen den Wert oben.
+Eine `policies.json`, die auch Nicht-Administratoren ändern können (z. B. `C:\Firefox` auf Terminalservern), bekommt
+nie Anmeldedaten.
 Basic nur an einen ausdrücklich eingetragenen Proxy und nur, wenn der Benutzer selbst das Passwort in der
 Windows-Anmeldeinformationsverwaltung als `fairyfly-proxy:<proxy-host>` hinterlegt. Logs bleiben auf dem PC. Nur wenn
 **Sie** sie uns schicken wollen, prüfen Sie sie vorher (Befehl unten); sie enthalten keine Passwörter oder Tokens.
@@ -78,7 +80,8 @@ needed.
 proxies configured explicitly: manual (Windows or fairyfly), `netsh winhttp`, `HTTPS_PROXY`, by browser or fairyfly
 policy, or a PAC script over `https://` or set by policy (Windows, Edge/Chrome, fairyfly, a Firefox `policies.json`
 only administrators can change) with a full host name (e.g. `http://pac.corp.example/proxy.pac`, not `http://wpad/…` and not an IP
-address). Never to an automatically discovered proxy (WPAD) unless you set the value above. Basic goes only to an
+address). Never to an automatically discovered proxy (WPAD) unless you set the value above. A `policies.json` that
+non-administrators can change (e.g. `C:\Firefox` on terminal servers) never gets credentials. Basic goes only to an
 explicitly configured proxy, and only if the user stores the password in the Windows Credential Manager as
 `fairyfly-proxy:<proxy host>` themselves. Logs stay on the PC. Only if **you** choose to send them, check them first
 (command below); they contain no passwords or tokens.

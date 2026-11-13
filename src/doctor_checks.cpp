@@ -85,6 +85,13 @@ Check judge_proxy(const ProxyFacts& f) {
     return c;
 }
 
+Check judge_proxy_summary(const std::string& state) {
+    if (state == "failing")
+        return {"proxy", "warn", "proxy: failing", "", "Run `fairyfly doctor` or `fairyfly proxy test` at this desktop for details.",
+                "PROXY_ROUTE_FAILED"};
+    return {"proxy", "info", "proxy: " + state, "", "", ""};
+}
+
 Check judge_notifications(packaging::Package build, const std::string& app_id) {
     if (app_id.empty())
         return {"approval_notifications", "warn",

@@ -6,19 +6,24 @@
 //   1. fairyfly policy      HKLM\SOFTWARE\Policies\DataZoo\fairyfly ProxyMode (+ ProxyServer, ProxyPacUrl, ProxyBypass):
 //                           locks the setting (the tray window shows "set by your administrator", the CLI refuses);
 //   2. your fairyfly setting `fairyfly proxy set` / the tray's "Network / proxy..." (HKCU tray settings);
-//   3. HTTPS_PROXY          (with NO_PROXY), the environment of the process;
+//   3. HTTPS_PROXY          (with NO_PROXY), the environment of the process; never while 1 exists (in any mode);
 //   4. browser policy       Edge, then Chrome (HKLM, else HKCU \Software\Policies\Microsoft\Edge | Google\Chrome), then
-//                           Firefox (HKLM\Software\Policies\Mozilla\Firefox\Proxy, else distribution\policies.json);
-//                           the first browser with a proxy policy decides, "system" hands over to 5;
+//                           Firefox (HKLM, else HKCU \Software\Policies\Mozilla\Firefox\Proxy, else policies.json in
+//                           the install folder from HKLM / Program Files); the first browser with a proxy policy
+//                           decides, "system" hands over to 5;
 //   5. Windows              the user's PAC script / automatic detection (WPAD) / manual proxy, then netsh winhttp
 //                           (system_proxy.h resolve()).
-// A setting in mode Auto (1 or 2) decides nothing: the next sources decide (with 1 in Auto, 2 is skipped).
+// A setting in mode Auto (1 or 2) decides nothing: the next sources decide (with 1 present, 2 and 3 are skipped).
+// A PAC script (or detection) named by 1, 2 or 4 that fails hands over to the next source, with a warning
+// ("PAC <url> failed (<reason>), using next source: <source>").
 //
 // Trust (which credentials a proxy may get) follows from where it came from, as before (system_proxy.h): a proxy named
 // explicitly by 1, 2, 3 or a browser policy is Origin::configured (Windows login and a stored Basic credential); a PAC
 // script's proxies are Origin::pac when the script is trusted (https://, or an http:// dotted non-IP host set by an
 // administrator: 1 or a browser policy that only administrators can write), else Origin::discovered like WPAD's.
-// A Firefox policies.json that a non-administrator can change counts as the user's own setting, not as policy.
+// Firefox's HKCU policy counts as the user's own setting (explicit; its PAC script only trusted over https://). A
+// Firefox policies.json that a non-administrator can change is untrusted: its proxies get no credentials at all
+// (Origin::discovered), with a warning, since another user could have put their own proxy there.
 //
 // Everything here is portable (unit-tested, and end to end against a real squid on Linux); the registry, file ACL and
 // WinHTTP parts are in proxy_sources_win32.cpp and system_proxy_win32.cpp.
@@ -102,6 +107,9 @@ struct BrowserPolicy {
     std::string browser;   ///< "Edge", "Chrome", "Firefox"
     std::string where;     ///< "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge", "C:\\...\\distribution\\policies.json"
     bool admin = true;     ///< only administrators can change it (registry policy keys; a policies.json with such an ACL)
+    /// A file non-administrators can change (a policies.json without an administrators-only ACL): anyone with write
+    /// access could name their own proxy there, so its proxies get no credentials at all (Origin::discovered).
+    bool untrusted = false;
     Kind kind = Kind::system;
     std::string server;    ///< fixed: a proxy list (WinHTTP/Chrome syntax: "host:port", "https=a:1;http=b:2")
     std::string bypass;
@@ -193,6 +201,9 @@ struct RouteDecision {
     Setting effective;          ///< the fairyfly policy's, else the user's, else Auto
     std::string setting_from;   ///< "policy", "user", "default"
     bool discovered_login_policy = false;  ///< Inputs::discovered_login_policy, for route_text
+    /// For the log, `proxy show` and doctor: sources that failed and the one used instead ("PAC <url> failed
+    /// (<reason>), using next source: <source>"), or why a policy proxy gets no credentials.
+    std::string warning;
 };
 
 /// The routes for an https:// URL (the order at the top of this file).
@@ -241,6 +252,9 @@ public:
     /// The current fingerprint differs from the one of the last call (the first call only records it): then the cache
     /// is emptied too. The running link polls it to reconnect when the setting changes.
     bool setting_changed();
+    /// True when HTTPS_PROXY decides now (no fairyfly policy, no user setting other than Auto, also none as a candidate
+    /// on this thread): only then is HTTPS_PROXY's user:password offered (make_libffl_config).
+    bool environment_decides();
     const Sources& sources() const { return src_; }
 
 private:
@@ -258,7 +272,7 @@ private:
 };
 
 /// libffl's configuration around a resolver: routes from it, the authenticators by origin (system_proxy.h), and Basic
-/// with HTTPS_PROXY's user:password for the HTTPS_PROXY proxy itself. Throws from resolve when the decision has an
+/// with HTTPS_PROXY's user:password for the HTTPS_PROXY proxy itself, only while HTTPS_PROXY decides. Throws from resolve when the decision has an
 /// error (an invalid HTTPS_PROXY that decides), so the request fails with it rather than going elsewhere.
 struct AuthSources {
     std::function<bool()> discovered_login_policy;

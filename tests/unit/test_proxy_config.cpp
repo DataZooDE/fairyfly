@@ -249,7 +249,10 @@ TEST_CASE("proxy config: Firefox's Proxy policy (policies.json and registry valu
     CHECK(p->kind == K::fixed);
     CHECK(p->server == "web:3128");
     CHECK(p->label() == "Firefox policies.json");
-    CHECK(firefox_policy("C:\\Users\\a\\ff\\distribution\\policies.json", false, v)->label() == "Firefox policies.json (user-writable)");
+    auto writable = firefox_policy("C:\\Firefox\\distribution\\policies.json", false, v);
+    writable->untrusted = true;  // set by the reader when non-administrators can change the file
+    CHECK(writable->label() == "Firefox policies.json (user-writable)");
+    CHECK(firefox_policy("HKCU\\Software\\Policies\\Mozilla\\Firefox\\Proxy", false, v)->label() == "Firefox policy (HKCU)");
 
     v.http_for_all = false;  // HTTPS goes direct in Firefox then
     CHECK(firefox_policy("x", true, v)->kind == K::direct);
@@ -362,22 +365,30 @@ TEST_CASE("proxy config: the order of the sources - fairyfly policy, your settin
     CHECK(scripts.asked.empty());  // nothing evaluated a script on the way
 }
 
-TEST_CASE("proxy config: Auto decides nothing; the policy in Auto (or invalid) also skips the user's setting") {
+TEST_CASE("proxy config: the fairyfly policy in any mode (Auto, invalid) skips the user's setting and HTTPS_PROXY/NO_PROXY") {
     Inputs in;
     in.env.https_proxy = "http://env:3128";
+    in.env.no_proxy = "fairyfly.io";
     in.user = manual("user:8080");
+    in.windows.proxy = "windows:8080";
     Setting automatic;
     in.policy = policy(automatic);
     auto d = decide(in, kUrl, {});
-    CHECK(d.routes == Routes{via("env", 3128)});
+    CHECK(d.routes == Routes{via("windows", 8080)});  // a variable of the user's process does not beat the policy
+    CHECK(d.tier == Tier::windows);
     CHECK(d.locked);
     CHECK(d.effective.mode == Mode::automatic);
 
     in.policy = PolicySetting{true, {}, "ProxyMode must be auto, manual, pac or direct"};
     d = decide(in, kUrl, {});
-    CHECK(d.routes == Routes{via("env", 3128)});
+    CHECK(d.routes == Routes{via("windows", 8080)});
     CHECK(d.locked);
     CHECK_FALSE(d.policy_error.empty());
+
+    in.policy = {};  // without the policy, the user's setting, then the environment
+    CHECK(decide(in, kUrl, {}).routes == Routes{via("user", 8080)});
+    in.user.reset();
+    CHECK(decide(in, kUrl, {}).source == "NO_PROXY");
 }
 
 TEST_CASE("proxy config: Direct wins over everything below it; the bypass list of a manual proxy") {
@@ -475,22 +486,70 @@ TEST_CASE("proxy config: a PAC script's proxies get the Windows login only when 
     in.policy = {};
     in.browsers = {browser("Edge", K::pac, "http://pac.corp.example/p.pac")};
     CHECK(origin_for(in) == Origin::pac);
-    in.browsers = {browser("Firefox", K::pac, "http://pac.corp.example/p.pac", false)};  // user-writable policies.json
+    in.browsers = {browser("Firefox", K::pac, "http://pac.corp.example/p.pac", false)};  // the user's own (HKCU) policy
     CHECK(origin_for(in) == Origin::discovered);
     in.browsers = {browser("Firefox", K::pac, "https://pac.corp.example/p.pac", false)};
     CHECK(origin_for(in) == Origin::pac);
+    in.browsers.back().untrusted = true;  // a policies.json other users can change: not even an https:// script
+    CHECK(origin_for(in) == Origin::discovered);
+    CHECK(scripts.asked.back() == "pac https://pac.corp.example/p.pac");  // and no login while downloading it
 
     // the route says where the script came from
     in.browsers = {browser("Edge", K::pac, "https://pac.corp.example/p.pac?token=abc")};
     auto d = decide(in, kUrl, scripts.fn());
     CHECK(route_text(d, false) == "via script:3128 from PAC (https://pac.corp.example/p.pac, Edge policy (HKLM)), Windows login: yes");
 
-    // a script that fails: DIRECT for that tier, saying why (the tiers below are not used)
+    // owner decision: a script that fails hands over to the next source, which keeps its own trust, and says so
     scripts.fail = true;
     in.windows.proxy = "windows:8080";
     d = decide(in, kUrl, scripts.fn());
-    CHECK(d.routes.empty());
-    CHECK_THAT(d.how, ContainsSubstring("could not be downloaded"));
+    CHECK(d.routes == Routes{via("windows", 8080)});
+    CHECK(d.tier == Tier::windows);
+    CHECK(d.warning ==
+          "PAC https://pac.corp.example/p.pac failed (the proxy script (PAC) could not be downloaded), using next source: Windows proxy settings");
+    CHECK(to_json(d, false)["warning"] == d.warning);
+
+    // the fairyfly policy's script fails: the browser policy is next (the user's setting and HTTPS_PROXY are not)
+    in.policy = policy(pac("https://pac.corp.example/admin.pac"));
+    in.user = manual("user:8080");
+    in.env.https_proxy = "http://env:3128";
+    in.browsers = {browser("Edge", K::pac, "https://pac.corp.example/edge.pac"), browser("Chrome", K::fixed, "chrome:8080")};
+    d = decide(in, kUrl, scripts.fn());
+    CHECK(d.routes == Routes{via("chrome", 8080)});
+    CHECK(first_origin(d) == Origin::configured);
+    CHECK(d.warning == "PAC https://pac.corp.example/admin.pac failed (the proxy script (PAC) could not be downloaded); PAC "
+                       "https://pac.corp.example/edge.pac failed (the proxy script (PAC) could not be downloaded), using next source: "
+                       "Chrome policy (HKLM)");
+    // detection by policy that finds nothing hands over too, and WPAD's proxies still get nothing when it does
+    in.policy = {};
+    in.user = pac("https://pac.corp.example/mine.pac");
+    in.env = {};
+    in.browsers = {browser("Firefox", K::auto_detect)};
+    d = decide(in, kUrl, scripts.fn());
+    CHECK(d.tier == Tier::windows);
+    CHECK_THAT(d.warning, ContainsSubstring("automatic detection (WPAD) failed"));
+    CHECK_THAT(d.warning, ContainsSubstring("using next source: Windows proxy settings"));
+}
+
+TEST_CASE("proxy config: a policies.json other users can change gives its proxy no credentials, and says so") {
+    using K = BrowserPolicy::Kind;
+    Inputs in;
+    in.browsers = {browser("Firefox", K::fixed, "ff.corp.example:3128", false)};
+    in.browsers[0].untrusted = true;
+    auto d = decide(in, kUrl, {});
+    CHECK(d.routes == Routes{via("ff.corp.example", 3128)});
+    CHECK(first_origin(d) == Origin::discovered);
+    CHECK_FALSE(windows_login(d, false));
+    CHECK_FALSE(stored_basic_allowed(d));
+    CHECK_THAT(d.warning, ContainsSubstring("can be changed by users other than administrators"));
+    CHECK(d.source == "Firefox policies.json (user-writable)");
+    CHECK(route_text(d, false) == "via ff.corp.example:3128 from Firefox policies.json (user-writable), Windows login: no");
+    // the user's own HKCU policy (owner decision): explicit, like the user's fairyfly setting
+    in.browsers[0].untrusted = false;
+    in.browsers[0].where = "HKCU\\Software\\Policies\\Mozilla\\Firefox\\Proxy";
+    d = decide(in, kUrl, {});
+    CHECK(first_origin(d) == Origin::configured);
+    CHECK(d.warning.empty());
 }
 
 TEST_CASE("proxy config: the Windows settings decide last, as before, and a trusted Windows script is said so") {
@@ -596,9 +655,13 @@ TEST_CASE("proxy config: the resolver caches per host, drops the cache when the 
 }
 
 TEST_CASE("proxy config: libffl's configuration - HTTPS_PROXY's user:password only for that proxy, logins by origin") {
-    auto resolver = std::make_shared<RouteResolver>(RouteResolver::Sources{});
     EnvOverrides env;
     env.https_proxy = "http://alice:pw@env:3128";
+    auto inputs = std::make_shared<Inputs>();
+    inputs->env = env;
+    RouteResolver::Sources src;
+    src.inputs = [inputs] { return *inputs; };
+    auto resolver = std::make_shared<RouteResolver>(src);
     int sspi_made = 0;
     AuthSources auth;
     auth.sspi = [&](const ffy::proxy::Endpoint&) -> std::unique_ptr<ffy::proxy::Authenticator> {
@@ -614,6 +677,19 @@ TEST_CASE("proxy config: libffl's configuration - HTTPS_PROXY's user:password on
     REQUIRE(basic);
     CHECK(basic->respond({"Basic realm=x"}).value_or("") == "Basic " + ffy::b64std_encode("alice:pw"));
     CHECK_FALSE(c.authenticators[1](other));
+    CHECK_FALSE(c.authenticators[1](ffy::proxy::Endpoint{"env", 3128, Origin::pac}));  // same address from a PAC script
+    // only while HTTPS_PROXY decides: not when your setting (also one under test) or the policy names that proxy
+    inputs->user = manual("env:3128");
+    CHECK_FALSE(c.authenticators[1](env_proxy));
+    inputs->user.reset();
+    {
+        ScopedCandidate cand(manual("env:3128"));
+        CHECK_FALSE(c.authenticators[1](env_proxy));
+    }
+    inputs->policy = policy(Setting{});
+    CHECK_FALSE(c.authenticators[1](env_proxy));
+    inputs->policy = {};
+    CHECK(c.authenticators[1](env_proxy));
     c.authenticators[0](env_proxy);
     CHECK(sspi_made == 1);
     auto refused = c.authenticators[0](ffy::proxy::Endpoint{"wpad-proxy", 8080, Origin::discovered});

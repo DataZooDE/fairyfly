@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <aclapi.h>
 #include <sddl.h>
+#include <shlobj.h>
 
 #include <spdlog/spdlog.h>
 
@@ -100,17 +101,43 @@ std::optional<BrowserPolicy> read_firefox_registry_policy(Hive hive, const std::
     v.autoconfig_url = reg_string(root, proxy, L"AutoConfigURL");
     v.passthrough = reg_string(root, proxy, L"Passthrough");
     if (auto d = reg_dword(root, proxy, L"UseHTTPProxyForAllProtocols")) v.http_for_all = *d != 0;
-    return firefox_policy(key_label(hive, proxy), true, v, warning);
+    // owner decision: Firefox's per-user policy counts as the user's own setting (explicit, but its PAC script is
+    // trusted only over https://), the machine's as an administrator's
+    return firefox_policy(key_label(hive, proxy), hive == Hive::machine, v, warning);
 }
 
-SecurityInfo security_info(const std::filesystem::path& path) {
+namespace {
+
+// An open handle that never follows a reparse point (symbolic link, junction, mount point).
+struct Handle {
+    HANDLE h = INVALID_HANDLE_VALUE;
+    ~Handle() {
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    }
+    bool ok() const { return h != INVALID_HANDLE_VALUE; }
+};
+
+// Opens without following a reparse point and refuses one; folders are held open without FILE_SHARE_DELETE, so they
+// cannot be renamed or replaced while the file inside is read.
+bool open_no_reparse(const std::filesystem::path& p, bool directory, Handle& out) {
+    const DWORD access = READ_CONTROL | FILE_READ_ATTRIBUTES | (directory ? 0 : GENERIC_READ);
+    out.h = CreateFileW(p.c_str(), access, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                        FILE_FLAG_OPEN_REPARSE_POINT | (directory ? FILE_FLAG_BACKUP_SEMANTICS : 0), nullptr);
+    if (!out.ok()) return false;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(out.h, &info)) return false;
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return false;
+    return ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+}
+
+SecurityInfo security_info_of(HANDLE h) {
     SecurityInfo info;
     PSECURITY_DESCRIPTOR sd = nullptr;
     PSID owner = nullptr;
     PACL dacl = nullptr;
-    const DWORD rc = GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner,
-                                           nullptr, &dacl, nullptr, &sd);
-    if (rc != ERROR_SUCCESS) return info;
+    if (GetSecurityInfo(h, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION, &owner, nullptr, &dacl, nullptr, &sd) !=
+        ERROR_SUCCESS)
+        return info;
     info.readable = true;
     info.owner_admin_like = admin_like(owner);
     info.has_dacl = dacl != nullptr;
@@ -118,15 +145,15 @@ SecurityInfo security_info(const std::filesystem::path& path) {
         for (DWORD i = 0; i < dacl->AceCount; ++i) {
             void* raw = nullptr;
             if (!GetAce(dacl, i, &raw)) continue;
-            const auto* h = static_cast<const ACE_HEADER*>(raw);
+            const auto* hd = static_cast<const ACE_HEADER*>(raw);
             Ace a;
-            a.inherit_only = (h->AceFlags & INHERIT_ONLY_ACE) != 0;
-            if (h->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+            a.inherit_only = (hd->AceFlags & INHERIT_ONLY_ACE) != 0;
+            if (hd->AceType == ACCESS_ALLOWED_ACE_TYPE) {
                 const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
                 a.allow = true;
                 a.mask = ace->Mask;
                 a.admin_like = admin_like(const_cast<DWORD*>(&ace->SidStart));
-            } else if (h->AceType == ACCESS_DENIED_ACE_TYPE) {
+            } else if (hd->AceType == ACCESS_DENIED_ACE_TYPE) {
                 const auto* ace = static_cast<const ACCESS_DENIED_ACE*>(raw);
                 a.allow = false;
                 a.mask = ace->Mask;
@@ -142,30 +169,65 @@ SecurityInfo security_info(const std::filesystem::path& path) {
     return info;
 }
 
-std::optional<BrowserPolicy> read_firefox_policies_json(const std::filesystem::path& install_dir, std::string* warning) {
+// No folder on the way to `p` is a reparse point (a junction could redirect it after the check).
+bool no_reparse_on_the_way(const std::filesystem::path& p) {
+    std::filesystem::path cur;
+    for (const auto& part : p) {
+        cur /= part;
+        if (cur == cur.root_name() || cur == cur.root_path()) continue;
+        const DWORD attrs = GetFileAttributesW(cur.c_str());
+        if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+SecurityInfo security_info(const std::filesystem::path& path) {
     std::error_code ec;
+    const bool directory = std::filesystem::is_directory(path, ec);
+    Handle h;
+    if (!open_no_reparse(path, directory, h)) return {};
+    return security_info_of(h.h);
+}
+
+std::optional<BrowserPolicy> read_firefox_policies_json(const std::filesystem::path& install_dir, std::string* warning) {
     const auto dist = install_dir / "distribution";
     const auto file = dist / "policies.json";
-    if (!std::filesystem::is_regular_file(file, ec)) return std::nullopt;
-    if (std::filesystem::file_size(file, ec) > 1024 * 1024) {
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec)) return std::nullopt;
+    // Checked and read through handles held open: the folders cannot be swapped and the file is the one checked.
+    Handle dir_h, dist_h, file_h;
+    if (!no_reparse_on_the_way(install_dir) || !open_no_reparse(install_dir, true, dir_h) || !open_no_reparse(dist, true, dist_h) ||
+        !open_no_reparse(file, false, file_h)) {
+        if (warning) *warning = "Firefox policies.json (" + text::path_utf8(file) + ") is behind a link or junction, or cannot be opened; ignored";
+        return std::nullopt;
+    }
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(file_h.h, &size) || size.QuadPart > 1024 * 1024) {
         if (warning) *warning = "Firefox policies.json is larger than 1 MB; ignored";
         return std::nullopt;
     }
-    std::ifstream in(file, std::ios::binary);
-    std::stringstream buf;
-    buf << in.rdbuf();
+    std::string content(static_cast<size_t>(size.QuadPart), '\0');
+    DWORD got = 0;
+    if (!content.empty() && (!ReadFile(file_h.h, content.data(), static_cast<DWORD>(content.size()), &got, nullptr) || got != content.size())) {
+        if (warning) *warning = "Firefox policies.json cannot be read; ignored";
+        return std::nullopt;
+    }
     std::string error;
-    FirefoxValues v = firefox_values_from_json(buf.str(), &error);
+    FirefoxValues v = firefox_values_from_json(content, &error);
     if (!error.empty()) {
         if (warning) *warning = "Firefox " + error + " (" + text::path_utf8(file) + "); ignored";
         return std::nullopt;
     }
     if (!v.any()) return std::nullopt;
-    // policy trust only when no one but administrators can change the file, its folder or the install folder (else
-    // anyone who can write there could name their own proxy as "policy"): otherwise it is the user's own setting
-    const bool admin = only_admins_can_change(security_info(file), false) && only_admins_can_change(security_info(dist), true) &&
-                       only_admins_can_change(security_info(install_dir), true);
-    return firefox_policy(text::path_utf8(file), admin, v, warning);
+    // policy trust only when no one but administrators can change the file, its folder or the install folder;
+    // otherwise anyone who can write there could name their own proxy: untrusted, its proxies get no credentials
+    const bool admin = only_admins_can_change(security_info_of(file_h.h), false) && only_admins_can_change(security_info_of(dist_h.h), true) &&
+                       only_admins_can_change(security_info_of(dir_h.h), true);
+    auto p = firefox_policy(text::path_utf8(file), admin, v, warning);
+    if (p) p->untrusted = !admin;
+    return p;
 }
 
 std::vector<std::filesystem::path> firefox_install_dirs() {
@@ -177,16 +239,19 @@ std::vector<std::filesystem::path> firefox_install_dirs() {
             if (std::filesystem::equivalent(o, p, ec)) return;
         out.push_back(p);
     };
-    for (HKEY root : {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER}) {
-        for (const wchar_t* product : {L"SOFTWARE\\Mozilla\\Mozilla Firefox", L"SOFTWARE\\Mozilla\\Mozilla Firefox ESR"}) {
-            auto ver = reg_string(root, product, L"CurrentVersion");
-            if (!ver || ver->empty()) continue;
-            std::wstring main = std::wstring(product) + L"\\" + text::utf8_to_wide_lossy(*ver) + L"\\Main";
-            if (auto dir = reg_string(root, main, L"Install Directory")) add(std::filesystem::path(text::utf8_to_wide_lossy(*dir)));
-        }
+    // only where an administrator installed it: the machine's registry and the Program Files folders (not HKCU, not
+    // environment variables, which the user controls)
+    for (const wchar_t* product : {L"SOFTWARE\\Mozilla\\Mozilla Firefox", L"SOFTWARE\\Mozilla\\Mozilla Firefox ESR"}) {
+        auto ver = reg_string(HKEY_LOCAL_MACHINE, product, L"CurrentVersion");
+        if (!ver || ver->empty()) continue;
+        std::wstring main = std::wstring(product) + L"\\" + text::utf8_to_wide_lossy(*ver) + L"\\Main";
+        if (auto dir = reg_string(HKEY_LOCAL_MACHINE, main, L"Install Directory")) add(std::filesystem::path(text::utf8_to_wide_lossy(*dir)));
     }
-    for (const char* env : {config::env::kProgramFiles, config::env::kProgramFilesX86})
-        if (const std::string dir = config::process_env()(env); !dir.empty()) add(text::utf8_path(dir) / L"Mozilla Firefox");
+    for (const KNOWNFOLDERID* id : {&FOLDERID_ProgramFiles, &FOLDERID_ProgramFilesX86}) {
+        PWSTR dir = nullptr;
+        if (SUCCEEDED(SHGetKnownFolderPath(*id, KF_FLAG_DEFAULT, nullptr, &dir)) && dir) add(std::filesystem::path(dir) / L"Mozilla Firefox");
+        CoTaskMemFree(dir);
+    }
     return out;
 }
 
@@ -207,8 +272,13 @@ std::vector<BrowserPolicy> read_browser_policies(std::vector<std::string>& warni
         }
         if (p) out.push_back(*p);
     }
+    // Firefox: the machine's policy, else the user's, else policies.json
     auto ff = read_firefox_registry_policy(roots.machine, roots.firefox, &w);
     note(w);
+    if (!ff && roots.user_hive) {
+        ff = read_firefox_registry_policy(Hive::user, roots.firefox, &w);
+        note(w);
+    }
     if (!ff) {
         for (const auto& dir : roots.firefox_dirs ? *roots.firefox_dirs : firefox_install_dirs()) {
             ff = read_firefox_policies_json(dir, &w);

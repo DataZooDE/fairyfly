@@ -303,8 +303,17 @@ lists them under `sources.browser_policies`.
   removed: `distribution\policies.json` with `{"policies":{"Proxy":{"Mode":"autoConfig","AutoConfigURL":"http://pac.corp.example/proxy.pac"}}}`
   (elevated editor): `... from PAC (http://pac.corp.example/proxy.pac, Firefox policies.json), Windows login: yes`.
   Then give `Users` write access to the `distribution` folder (`icacls "...\distribution" /grant Users:M`): the source
-  becomes `Firefox policies.json (user-writable)` and the same http:// script gets `Windows login: no` (refused as in
-  case 7). Undo with `icacls ... /remove Users` (or reinstall).
+  becomes `Firefox policies.json (user-writable)`, the log warns `... can be changed by users other than administrators:
+  its proxy gets no Windows login and no stored credential`, and even with an `https://` script or a `SSLProxy` server the
+  proxy gets no credentials (refused as in case 7; with a Basic-only proxy and a stored `fairyfly-proxy:` credential:
+  `Basic is sent only to a proxy set explicitly ...`). Undo with `icacls ... /remove Users` (or reinstall).
+- 16g **Firefox per-user policy** `HKCU\Software\Policies\Mozilla\Firefox\Proxy` (`Mode` `manual`, `SSLProxy` `<proxy>`),
+  no HKLM Firefox policy: `... from Firefox policy (HKCU), Windows login: yes` (the user's own setting).
+- 16h **Junction**: replace `distribution` by a junction (`mklink /J distribution C:\elsewhere`, elevated in Program
+  Files): `fairyfly proxy show` warns `... is behind a link or junction, or cannot be opened; ignored`.
+- 16i **PAC failure hands over**: Chrome `pac_script` with an unreachable `https://pac.corp.example/missing.pac`, Windows
+  manual proxy `<proxy>`: log warning `PAC https://pac.corp.example/missing.pac failed (...), using next source: Windows proxy settings`,
+  connected through `<proxy>`; `fairyfly doctor` shows the same warning.
 - Delete all browser policy values afterwards.
 
 ### 17. Your setting: CLI and tray window, without restart
@@ -341,7 +350,8 @@ Setup: elevated `reg add HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v ProxyMode /t
 - Tray window: `Set by your administrator (HKLM\SOFTWARE\Policies\DataZoo\fairyfly)`; mode buttons, fields and Save
   disabled; **Test connection** works.
 - `ProxyMode` `pac` with `ProxyPacUrl` `http://pac.corp.example/proxy.pac`: trusted (`Windows login: yes`).
-- `ProxyMode` `auto`: still locked, your Direct is ignored, the automatic sources decide.
+- `ProxyMode` `auto`: still locked, your Direct is ignored, the automatic sources decide; `$env:HTTPS_PROXY` in the
+  link's console is ignored too (a variable of the user's process does not beat the policy).
 - An invalid value (`ProxyServer` `socks5://x:1080`): locked, chosen as in Auto, `fairyfly proxy show` has `policy_error`,
   `fairyfly doctor` warns.
 - `reg delete HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v ProxyMode /f` (and the others): unlocked; your Direct decides again.
@@ -355,9 +365,10 @@ the link fails (`direct: ...`) and `fairyfly proxy test` says so.
 
 ### 20. doctor
 
-`fairyfly doctor` in each of the setups 16a, 17a, 18 and 19: check `proxy` with `Gateway reachable via ... (setting
-manual (yours))` / `(... set by your administrator)`, details with the source, `Windows login`, the stored-Basic trust
-and the test summary; with the proxy stopped: `warn`, code `PROXY_TEST_FAILED`.
+`fairyfly doctor` in a console in each of the setups 16a, 17a, 18 and 19: check `proxy` with `Gateway reachable via ...
+(setting manual (yours))` / `(... set by your administrator)`, details with the source, `Windows login`, the stored-Basic
+trust and the test summary; with the proxy stopped: `warn`, code `PROXY_TEST_FAILED`. Over MCP (`gui_doctor` from the
+assistant): only `proxy: configured` / `proxy: direct` / `proxy: failing`, no host names, no delay.
 
 ### 21. No credentials in the setting
 
@@ -389,7 +400,7 @@ search also covers these runs.
 | 13 | Basic via Credential Manager (13a–13d) | | | |
 | 14 | https/SOCKS entries | | | |
 | 15 | no credentials in logs | | | |
-| 16 | browser policies (16a Edge, 16b system handover, 16c Chrome PAC, 16d ProxySettings, 16e Firefox GPO, 16f policies.json admin/user-writable) | | | |
+| 16 | browser policies (16a Edge, 16b system handover, 16c Chrome PAC, 16d ProxySettings, 16e Firefox GPO, 16f policies.json admin/user-writable, 16g Firefox HKCU, 16h junction, 16i PAC failure hands over) | | | |
 | 17 | your setting: CLI, tray window, test, reconnect without restart (17a–17f) | | | |
 | 18 | fairyfly policy lock | | | |
 | 19 | Direct | | | |

@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <regex>
 #include <thread>
 
 #include "include/link/proxy_cli.h"
@@ -158,6 +159,9 @@ TEST_CASE("proxy sources (Windows): Edge/Chrome and Firefox policies from the re
     CHECK(list[1].kind == BrowserPolicy::Kind::fixed);
     CHECK(list[1].server == "ff.corp.example:3128");
     CHECK(warnings.empty());
+    CHECK(list[1].label() == "Firefox policy (HKCU)");  // read from this test's HKCU key: the user's own setting
+    CHECK_FALSE(list[1].admin);
+    CHECK_FALSE(list[1].untrusted);
 
     edge.set(L"ProxySettings", LR"({"ProxyMode":"fixed_servers","ProxyServer":"edge.corp.example:8080"})");
     edge.set_dword(L"ProxyServerMode", 0);  // overridden by ProxySettings
@@ -202,7 +206,39 @@ TEST_CASE("proxy sources (Windows): a policies.json in a folder users can write 
     CHECK_THAT(w, ContainsSubstring("not valid JSON"));
     CHECK_FALSE(read_firefox_policies_json(temp_dir("none"), &w));
     fs::remove_all(install);
-    CHECK_NOTHROW(firefox_install_dirs());
+    for (const auto& dir : firefox_install_dirs()) {  // never from HKCU or an environment variable the user sets
+        INFO(dir.string());
+        CHECK(dir.string().find(fs::temp_directory_path().string()) == std::string::npos);
+    }
+}
+
+TEST_CASE("proxy sources (Windows): policies.json behind a junction is not read", "[proxy][win32]") {
+    // the folder could be redirected after the check (TOCTOU): links and junctions on the way are refused
+    const fs::path base = temp_dir("junction");
+    const fs::path real = base / "real";
+    fs::create_directories(real);
+    std::ofstream(real / "policies.json") << R"({"policies":{"Proxy":{"Mode":"manual","SSLProxy":"evil:3128"}}})";
+    const fs::path install = base / "ff";
+    fs::create_directories(install);
+    std::wstring cmd = L"cmd.exe /d /c mklink /J \"" + (install / "distribution").wstring() + L"\" \"" + real.wstring() + L"\"";
+    REQUIRE(_wsystem(cmd.c_str()) == 0);  // a junction needs no administrator
+    REQUIRE(fs::exists(install / "distribution" / "policies.json"));
+    std::string w;
+    CHECK_FALSE(read_firefox_policies_json(install, &w));
+    CHECK_THAT(w, ContainsSubstring("link or junction"));
+    // and a junction higher up the install path as well
+    const fs::path linked = base / "linked";
+    fs::create_directories(real / "distribution");
+    std::ofstream(real / "distribution" / "policies.json") << R"({"policies":{"Proxy":{"Mode":"none"}}})";
+    cmd = L"cmd.exe /d /c mklink /J \"" + linked.wstring() + L"\" \"" + real.wstring() + L"\"";
+    REQUIRE(_wsystem(cmd.c_str()) == 0);
+    w.clear();
+    CHECK_FALSE(read_firefox_policies_json(linked, &w));
+    CHECK_THAT(w, ContainsSubstring("link or junction"));
+    CHECK(read_firefox_policies_json(real, &w));  // the same file without the junction is read
+    fs::remove(install / "distribution");  // the junction, not its target
+    fs::remove(linked);
+    fs::remove_all(base);
 }
 
 TEST_CASE("proxy sources (Windows): who may change a file, from its real security descriptor", "[proxy][win32]") {
@@ -249,7 +285,30 @@ TEST_CASE("proxy sources (Windows): HTTPS_PROXY is hidden from libffl but child 
     CloseHandle(pi.hProcess);
     CHECK(code == 7);
     SetEnvironmentVariableW(L"HTTPS_PROXY", nullptr);
+
+    // The C runtime's own spawn functions (_wsystem, _wspawn*) build the child's environment from the runtime's copy,
+    // in which the variable is hidden: such a child would not see it. fairyfly starts every child with CreateProcessW
+    // (inherits the block); the guard below keeps it that way.
+    CHECK(_wsystem(L"cmd.exe /d /c if defined HTTPS_PROXY (exit 7) else (exit 3)") == 3);
+    SetEnvironmentVariableW(L"HTTPS_PROXY", nullptr);
     SetEnvironmentVariableW(L"NO_PROXY", nullptr);
+}
+
+TEST_CASE("proxy sources (Windows): no file under src/ starts a process through the C runtime (it would lose HTTPS_PROXY)", "[proxy][win32]") {
+    namespace fs = std::filesystem;
+    const fs::path src = FAIRYFLY_SOURCE_DIR;
+    static const std::regex call(R"(\b(std::system|_w?system|_w?spawn[lv]p?e?|_w?exec[lv]p?e?|_w?popen)\s*\()");
+    std::vector<std::string> offenders;
+    for (const auto& e : fs::recursive_directory_iterator(src)) {
+        const auto ext = e.path().extension();
+        if (!e.is_regular_file() || (ext != ".cpp" && ext != ".h" && ext != ".hpp")) continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        for (std::sregex_iterator m(text.begin(), text.end(), call), end; m != end; ++m)
+            offenders.push_back(fs::relative(e.path(), src).string() + ": " + (*m)[1].str());
+    }
+    CAPTURE(offenders);
+    CHECK(offenders.empty());
 }
 
 TEST_CASE("proxy sources (Windows): WinHTTP evaluates a real PAC script at a configured address", "[proxy][win32]") {

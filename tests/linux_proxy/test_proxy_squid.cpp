@@ -160,9 +160,45 @@ TEST_CASE("proxy squid: HTTPS_PROXY's user:password go to that proxy, and only t
     NEED(other);
     Installed inst({}, {}, e);
     inst.in->user = manual(other);
-    const std::string err = get_error(t.https());
+    std::string err = get_error(t.https());
     CHECK_THAT(err, ContainsSubstring("proxy requires authentication (offers Basic)"));
     CHECK(err.find(Squid::kPassword) == std::string::npos);
+    // nor to the same proxy when another source names it: they belong to HTTPS_PROXY's route only
+    inst.in->user = manual(basic);
+    *inst.fingerprint = "same proxy, your setting";
+    err = get_error(t.https());
+    CHECK_THAT(err, ContainsSubstring("proxy requires authentication (offers Basic)"));
+}
+
+TEST_CASE("proxy squid: a policies.json other users can change gets neither the Windows login nor a stored credential") {
+    Squid ntlm(Squid::Ntlm), basic(Squid::Basic);
+    NEED(ntlm);
+    NEED(basic);
+    TlsTarget t;
+    EnvGuard env{{"SSL_CERT_FILE", t.ca_file().c_str()}};
+    int reads = 0;
+    AuthSources auth;
+    auth.sspi = [](const ffy::proxy::Endpoint&) -> std::unique_ptr<ffy::proxy::Authenticator> { return std::make_unique<TestNtlm>(); };
+    auth.stored_login = [&](const std::string&) {
+        ++reads;
+        return std::optional<fairyfly::link::sysproxy::StoredLogin>({Squid::kUser, Squid::kPassword});
+    };
+    Installed inst(auth);
+    BrowserPolicy ff;
+    ff.browser = "Firefox";
+    ff.where = "C:\\Firefox\\distribution\\policies.json";
+    ff.admin = false;
+    ff.untrusted = true;  // e.g. C:\Firefox inheriting "Authenticated Users: Modify" on a terminal server
+    ff.kind = BrowserPolicy::Kind::fixed;
+    ff.server = "127.0.0.1:" + std::to_string(ntlm.port());
+    inst.in->browsers = {ff};
+    CHECK_THAT(get_error(t.https()), ContainsSubstring("not sending credentials"));
+    CHECK_FALSE(ntlm.tunnelled(t.hostport()));
+    inst.in->browsers[0].server = "127.0.0.1:" + std::to_string(basic.port());
+    *inst.fingerprint = "basic";
+    CHECK_THAT(get_error(t.https()), ContainsSubstring("Basic is sent only to a proxy set explicitly"));
+    CHECK(reads == 0);  // the stored credential was not even read
+    CHECK_THAT(inst.resolver->decision(t.https()).warning, ContainsSubstring("can be changed by users other than administrators"));
 }
 
 TEST_CASE("proxy squid: a browser-policy proxy may get the login and a stored credential; one found by WPAD does not") {

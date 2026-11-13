@@ -202,6 +202,20 @@ TEST_CASE("proxy tray: the window's form is checked like the CLI's flags") {
     CHECK(form_setting(f).server.empty());
 }
 
+TEST_CASE("doctor: over MCP the proxy check says only configured, direct or failing") {
+    for (const char* s : {"configured", "direct"}) {
+        auto c = cli::doctor::judge_proxy_summary(s);
+        CHECK(c.name == "proxy");
+        CHECK(c.status == "info");
+        CHECK(c.message == std::string("proxy: ") + s);
+        CHECK(c.details.empty());  // no proxy or PAC host names for a remote caller
+    }
+    auto c = cli::doctor::judge_proxy_summary("failing");
+    CHECK(c.status == "warn");
+    CHECK(c.message == "proxy: failing");
+    CHECK_THAT(c.remediation, ContainsSubstring("at this desktop"));
+}
+
 TEST_CASE("doctor: the proxy check passes when the gateway answered, warns with the way forward when not") {
     cli::doctor::ProxyFacts f;
     f.route = "via proxy:8080 from your fairyfly setting, Windows login: yes";

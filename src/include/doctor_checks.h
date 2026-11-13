@@ -53,6 +53,9 @@ struct ProxyFacts {
     std::string warnings;
 };
 Check judge_proxy(const ProxyFacts& facts);
+/// The proxy check without the connection test and without names (gui_doctor over MCP, batch): state is
+/// "configured" (through a proxy), "direct" or "failing" (the route cannot be determined); info, warn when failing.
+Check judge_proxy_summary(const std::string& state);
 
 struct ProcessScan {
     bool logon = false;  ///< saplogon.exe

@@ -87,7 +87,7 @@ json show_json(const Inputs& in, const RouteDecision& d, const ProbeTargets& t) 
     if (!d.policy_error.empty()) j["policy_error"] = d.policy_error;
     json browsers = json::array();
     for (const auto& b : in.browsers) {
-        json bj{{"policy", b.label()}, {"mode", kind_name(b.kind)}, {"where", b.where}, {"admin", b.admin}};
+        json bj{{"policy", b.label()}, {"mode", kind_name(b.kind)}, {"where", b.where}, {"admin", b.admin}, {"untrusted", b.untrusted}};
         if (!b.server.empty()) bj["server"] = b.server;
         if (!b.pac_url.empty()) bj["pac_url"] = b.pac_url;
         browsers.push_back(bj);
@@ -100,7 +100,9 @@ json show_json(const Inputs& in, const RouteDecision& d, const ProbeTargets& t) 
                         {"windows_manual", in.windows.proxy},
                         {"winhttp_machine", in.machine ? in.machine->proxy : std::string()},
                         {"login_to_discovered_proxies", in.discovered_login_policy}};
-    if (!in.warnings.empty()) j["warnings"] = in.warnings;
+    std::vector<std::string> warnings = in.warnings;
+    if (!d.warning.empty()) warnings.insert(warnings.begin(), d.warning);
+    if (!warnings.empty()) j["warnings"] = warnings;
     return j;
 }
 

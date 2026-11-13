@@ -5,12 +5,15 @@
 - Corporate proxies (on top of the Windows proxy settings of #149): fairyfly also reads the **browser proxy policies**
   of Edge and Chrome (`HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome`: `ProxyMode`,
   `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`) and
-  Firefox (`HKLM\Software\Policies\Mozilla\Firefox\Proxy`, else `distribution\policies.json`). The order: fairyfly
-  policy > your fairyfly setting > `HTTPS_PROXY`/`NO_PROXY` > browser policy (Edge, Chrome, Firefox; `system` hands
-  over) > Windows settings. A browser policy's proxy server counts as explicit (Windows login, stored Basic); its PAC
-  script follows the PAC trust rule; a `policies.json` that a non-administrator can change counts as the user's own.
-  `HTTPS_PROXY` therefore no longer overrides a proxy you set for fairyfly; it still overrides browser policies and the
-  Windows settings.
+  Firefox (`HKLM\Software\Policies\Mozilla\Firefox\Proxy`, else the same under `HKCU` as the user's own setting, else
+  `distribution\policies.json` of an install folder from HKLM / Program Files). The order: fairyfly policy > your
+  fairyfly setting > `HTTPS_PROXY`/`NO_PROXY` (never while the fairyfly policy exists) > browser policy (Edge, Chrome,
+  Firefox; `system` hands over) > Windows settings. A PAC script (or detection) of one of these that fails hands over to
+  the next source, with a warning `PAC <url> failed (<reason>), using next source: <source>`. A browser policy's proxy
+  server counts as explicit (Windows login, stored Basic); its PAC script follows the PAC trust rule; a `policies.json`
+  that a non-administrator can change gets no credentials at all (warned), and one behind a link or junction is not
+  read. `HTTPS_PROXY` therefore no longer overrides a proxy you set for fairyfly; it still overrides browser policies and
+  the Windows settings, and its `user:password` goes only to its own route.
 - New `fairyfly proxy show|set|test|reset`: modes Auto, Manual (`host:port` + exceptions), PAC (URL) and Direct, saved
   per user (`HKCU\Software\DataZoo\fairyfly\tray`, `proxy_*`). `proxy test` connects to the gateway through the route
   (HTTPS `GET /health` and the link's WebSocket upgrade), also for a setting not saved yet. IT can set and lock it:
@@ -20,7 +23,9 @@
 - Link tray: **Network / proxy...** opens a window with the mode, its fields, the route in plain words ("via ... from
   ..., Windows login: yes"), **Test connection**, Save and Cancel; locked ("Set by your administrator") under the
   fairyfly policy. A saved change (also from the CLI or a new policy) reconnects the running link at once, no restart.
-- `fairyfly doctor` has a `proxy` check (setting, route, source, trust, connection test; `PROXY_TEST_FAILED` warns).
+- `fairyfly doctor` in a console has a `proxy` check (setting, route, source, trust, warnings, connection test;
+  `PROXY_TEST_FAILED` warns); over MCP (`gui_doctor`) only `proxy: configured|direct|failing`, fast and without host
+  names.
 - Proxy error messages say `proxy from the proxy settings (fairyfly proxy show)` instead of `from Windows proxy
   settings`; the `proxy: <host> -> ...` log line is the route in plain words.
 

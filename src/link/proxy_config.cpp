@@ -231,7 +231,7 @@ std::string BrowserPolicy::label() const {
     std::string scope;
     if (where.rfind("HKLM", 0) == 0) scope = "HKLM";
     else if (where.rfind("HKCU", 0) == 0) scope = "HKCU";
-    if (browser == "Firefox" && scope.empty()) return std::string("Firefox policies.json") + (admin ? "" : " (user-writable)");
+    if (browser == "Firefox" && scope.empty()) return std::string("Firefox policies.json") + (untrusted ? " (user-writable)" : "");
     return browser + " policy" + (scope.empty() ? "" : " (" + scope + ")");
 }
 
@@ -432,17 +432,18 @@ struct Target {
     int port = 443;
 };
 
-// A PAC script (or WPAD) for one tier: its answer, or DIRECT with the reason when it fails.
-RouteDecision from_script(RouteDecision d, const Target& t, const std::string& url, AutoSource src, const std::string& pac_url, bool trusted,
-                          const AutoProxy& autoproxy) {
+// A PAC script (or WPAD) for one tier: its answer; nullopt when it fails (`failed` says why: the next source decides).
+// `untrusted`: whatever it names gets no credentials.
+std::optional<RouteDecision> from_script(RouteDecision d, const Target& t, const std::string& url, AutoSource src, const std::string& pac_url,
+                                         bool trusted, bool untrusted, const AutoProxy& autoproxy, std::string& failed) {
     using ffy::proxy::Origin;
     const std::string what = src == AutoSource::pac ? "PAC " + without_query(pac_url) : std::string("automatic detection (WPAD)");
-    if (src == AutoSource::pac) d.pac_url = without_query(pac_url);
-    AutoProxyResult r = autoproxy ? autoproxy(url, src, pac_url, trusted) : AutoProxyResult{false, false, {}, {}, "not available"};
+    AutoProxyResult r = autoproxy ? autoproxy(url, src, pac_url, trusted && !untrusted) : AutoProxyResult{false, false, {}, {}, "not available"};
     if (!r.ok) {
-        d.how = what + " failed (" + r.error + "): DIRECT";
-        return d;
+        failed += (failed.empty() ? "" : "; ") + what + " failed (" + r.error + ")";
+        return std::nullopt;
     }
+    if (src == AutoSource::pac) d.pac_url = without_query(pac_url);
     if (r.direct) {
         d.how = what + ": DIRECT";
         return d;
@@ -451,14 +452,14 @@ RouteDecision from_script(RouteDecision d, const Target& t, const std::string& u
         d.how = what + ": bypass list";
         return d;
     }
-    const Origin o = src == AutoSource::wpad ? Origin::discovered : (trusted ? Origin::pac : Origin::discovered);
+    const Origin o = untrusted || src == AutoSource::wpad ? Origin::discovered : (trusted ? Origin::pac : Origin::discovered);
     d.routes = with_origin(sysproxy::parse_proxy_list(r.proxy), o);
     d.how = d.routes.empty() ? what + ": DIRECT" : what;
     return d;
 }
 
 std::optional<RouteDecision> from_setting(RouteDecision d, const Setting& s, bool by_admin, const Target& t, const std::string& url,
-                                          const AutoProxy& autoproxy) {
+                                          const AutoProxy& autoproxy, std::string& failed) {
     switch (s.mode) {
     case Mode::automatic: return std::nullopt;
     case Mode::direct: d.how = "Direct"; return d;
@@ -470,9 +471,24 @@ std::optional<RouteDecision> from_setting(RouteDecision d, const Setting& s, boo
         d.routes = with_origin(sysproxy::parse_proxy_list(s.server), ffy::proxy::Origin::configured);
         d.how = "manual proxy";
         return d;
-    case Mode::pac: return from_script(d, t, url, AutoSource::pac, s.pac_url, sysproxy::pac_trusted(s.pac_url, by_admin), autoproxy);
+    case Mode::pac:
+        return from_script(d, t, url, AutoSource::pac, s.pac_url, sysproxy::pac_trusted(s.pac_url, by_admin), false, autoproxy, failed);
     }
     return std::nullopt;
+}
+
+void add_warning(RouteDecision& d, const std::string& w) {
+    if (!w.empty()) d.warning += (d.warning.empty() ? "" : "; ") + w;
+}
+
+// The decision of a later source after earlier ones failed: says which failed and which one is used now.
+RouteDecision after(RouteDecision d, const std::string& failed) {
+    if (!failed.empty()) {
+        std::string w = failed + ", using next source: " + d.source;
+        if (!d.warning.empty()) w += "; " + d.warning;
+        d.warning = w;
+    }
+    return d;
 }
 
 }  // namespace
@@ -494,32 +510,33 @@ RouteDecision decide(const Inputs& in, const std::string& url, const AutoProxy& 
     }
     const ffy::Url u = ffy::parse_url(url);
     const Target t{u.host, std::stoi(u.port)};
+    std::string failed;  // PAC scripts / detection named by a source that did not work: the next source decides
 
-    // 1. the fairyfly policy (in Auto, or invalid, it skips the user setting too)
+    // 1. the fairyfly policy (in any mode, also Auto or invalid, it skips the user setting and the environment)
     if (in.policy.present) {
         RouteDecision d = base;
         d.tier = Tier::fairyfly_policy;
         d.source = tier_name(d.tier);
         if (in.policy.error.empty())
-            if (auto r = from_setting(d, in.policy.setting, true, t, url, autoproxy)) return *r;
+            if (auto r = from_setting(d, in.policy.setting, true, t, url, autoproxy, failed)) return *r;
     } else if (in.user) {  // 2. the user's own
         RouteDecision d = base;
         d.tier = Tier::user_setting;
         d.source = tier_name(d.tier);
-        if (auto r = from_setting(d, *in.user, false, t, url, autoproxy)) return *r;
+        if (auto r = from_setting(d, *in.user, false, t, url, autoproxy, failed)) return *r;
     }
-    // 3. the environment: NO_PROXY, HTTPS_PROXY
-    if (!in.env.no_proxy.empty()) {
+    // 3. the environment: NO_PROXY, HTTPS_PROXY (a variable of the user's process must not beat the administrator's policy)
+    if (!in.policy.present && !in.env.no_proxy.empty()) {
         std::string bare = t.host;
         if (bare.size() > 1 && bare.front() == '[' && bare.back() == ']') bare = bare.substr(1, bare.size() - 2);
         if (ffy::proxy_bypass(t.host, in.env.no_proxy) || ffy::proxy_bypass(bare, in.env.no_proxy)) {
             RouteDecision d = base;
             d.tier = Tier::environment;
             d.source = "NO_PROXY";
-            return d;
+            return after(d, failed);
         }
     }
-    if (!ffy::trim(in.env.https_proxy).empty()) {
+    if (!in.policy.present && !ffy::trim(in.env.https_proxy).empty()) {
         RouteDecision d = base;
         d.tier = Tier::environment;
         d.source = tier_name(d.tier);
@@ -532,29 +549,36 @@ RouteDecision decide(const Inputs& in, const std::string& url, const AutoProxy& 
         } catch (const std::exception& x) {
             d.error = std::string("HTTPS_PROXY: ") + x.what();  // never the value: it may hold a password
         }
-        return d;
+        return after(d, failed);
     }
     // 4. browser policies: the first browser with one decides; "system" hands over to the Windows settings
     for (const auto& b : in.browsers) {
         RouteDecision d = base;
         d.tier = Tier::browser_policy;
         d.source = b.label();
+        if (b.untrusted)
+            add_warning(d, b.label() + " (" + b.where + ") can be changed by users other than administrators: its proxy gets no "
+                           "Windows login and no stored credential");
         if (b.kind == BrowserPolicy::Kind::system) break;
         if (b.kind == BrowserPolicy::Kind::direct) {
             d.how = "Direct";
-            return d;
+            return after(d, failed);
         }
-        if (b.kind == BrowserPolicy::Kind::auto_detect) return from_script(d, t, url, AutoSource::wpad, "", false, autoproxy);
-        if (b.kind == BrowserPolicy::Kind::pac)
-            return from_script(d, t, url, AutoSource::pac, b.pac_url, sysproxy::pac_trusted(b.pac_url, b.admin), autoproxy);
+        if (b.kind == BrowserPolicy::Kind::auto_detect || b.kind == BrowserPolicy::Kind::pac) {
+            const bool pac = b.kind == BrowserPolicy::Kind::pac;
+            if (auto r = from_script(d, t, url, pac ? AutoSource::pac : AutoSource::wpad, pac ? b.pac_url : std::string(),
+                                     pac && sysproxy::pac_trusted(b.pac_url, b.admin), b.untrusted, autoproxy, failed))
+                return after(*r, failed);
+            continue;  // this browser's script failed: the next source decides (the next browser's policy, else Windows)
+        }
         // fixed
         if (sysproxy::bypassed(t.host, t.port, b.bypass)) {
             d.how = "proxy server: bypass list";
-            return d;
+            return after(d, failed);
         }
-        d.routes = with_origin(sysproxy::parse_proxy_list(b.server), Origin::configured);
+        d.routes = with_origin(sysproxy::parse_proxy_list(b.server), b.untrusted ? Origin::discovered : Origin::configured);
         d.how = "proxy server";
-        return d;
+        return after(d, failed);
     }
     // 5. Windows
     RouteDecision d = base;
@@ -571,7 +595,7 @@ RouteDecision decide(const Inputs& in, const std::string& url, const AutoProxy& 
     // the script decided (not: it failed and detection or the manual proxy did)
     if (r.how.rfind("PAC ", 0) == 0 && r.how.find(" failed (") == std::string::npos && !w.auto_config_url.empty())
         d.pac_url = without_query(w.auto_config_url);
-    return d;
+    return after(d, failed);
 }
 
 bool windows_login(const RouteDecision& d, bool discovered_login_policy) {
@@ -639,6 +663,7 @@ json to_json(const RouteDecision& d, bool discovered_login_policy) {
            {"stored_basic", stored_basic_allowed(d)}};
     if (!d.pac_url.empty()) j["pac_url"] = d.pac_url;
     if (!d.error.empty()) j["error"] = d.error;
+    if (!d.warning.empty()) j["warning"] = d.warning;
     return j;
 }
 
@@ -670,6 +695,14 @@ RouteDecision RouteResolver::decision(const std::string& url, const std::optiona
 void RouteResolver::invalidate() {
     std::lock_guard<std::mutex> l(mu_);
     cache_.clear();
+}
+
+bool RouteResolver::environment_decides() {
+    const Inputs in = src_.inputs ? src_.inputs() : Inputs{};
+    if (in.policy.present) return false;
+    if (const Setting* c = ScopedCandidate::current(); c && c->mode != Mode::automatic) return false;
+    if (!ScopedCandidate::current() && in.user) return false;
+    return !ffy::trim(in.env.https_proxy).empty();
 }
 
 bool RouteResolver::setting_changed() {
@@ -708,9 +741,10 @@ ffy::proxy::Routes RouteResolver::routes(const std::string& url) {
     const std::string line = route_text(d, d.discovered_login_policy);
     {
         std::lock_guard<std::mutex> l(mu_);
-        if (logged_[key] != line) {  // once per change, not on every reconnect
+        if (logged_[key] != line + d.warning) {  // once per change, not on every reconnect
             spdlog::info("proxy: {} -> {}", u.host, line);
-            logged_[key] = line;
+            if (!d.warning.empty()) spdlog::warn("proxy: {}", d.warning);
+            logged_[key] = line + d.warning;
         }
         cache_[key] = Cached{now, fp, d};
     }
@@ -740,9 +774,10 @@ ffy::proxy::Config make_libffl_config(std::shared_ptr<RouteResolver> resolver, c
         try {
             auto e = ffy::proxy::parse_proxy_url(env.https_proxy);
             if (e.proxy && (!e.user.empty() || !e.password.empty())) {
-                c.authenticators.push_back([ep = *e.proxy, user = e.user, pw = e.password](
+                c.authenticators.push_back([resolver, ep = *e.proxy, user = e.user, pw = e.password](
                                                const ffy::proxy::Endpoint& px) -> std::unique_ptr<ffy::proxy::Authenticator> {
-                    if (!(px == ep)) return nullptr;
+                    // only to HTTPS_PROXY's own route: the same proxy, named explicitly, while HTTPS_PROXY decides
+                    if (!(px == ep) || px.origin != ffy::proxy::Origin::configured || !resolver->environment_decides()) return nullptr;
                     return ffy::proxy::basic(user, pw);
                 });
             }

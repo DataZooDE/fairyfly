@@ -300,13 +300,13 @@ tunnel).
 |---|---|---|---|
 | 1 | **fairyfly policy** (IT) | `HKLM\SOFTWARE\Policies\DataZoo\fairyfly`: `ProxyMode` (`auto`, `manual`, `pac`, `direct`), `ProxyServer` (`host:port`), `ProxyBypass`, `ProxyPacUrl` (REG_SZ) | `ProxyMode` is not `auto`. The setting is **locked**: the tray window shows "Set by your administrator", `fairyfly proxy set/reset` answer `PROXY_SETTING_LOCKED` |
 | 2 | **your fairyfly setting** | `fairyfly proxy set`, or the link tray's **Network / proxy...** (per user, `HKCU\Software\DataZoo\fairyfly\tray`, values `proxy_mode`, `proxy_server`, `proxy_bypass`, `proxy_pac_url`) | its mode is not Auto (and no fairyfly policy exists) |
-| 3 | **`HTTPS_PROXY`** (and `NO_PROXY`) | the environment of the fairyfly process | it is set |
-| 4 | **browser policy** | Edge, then Chrome: `HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome` (`ProxyMode`, `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`); then Firefox: `HKLM\Software\Policies\Mozilla\Firefox\Proxy` (`Mode`, `HTTPProxy`/`SSLProxy`, `UseHTTPProxyForAllProtocols`, `AutoConfigURL`, `Passthrough`), else `distribution\policies.json` in Firefox's install folder | the first browser with a proxy policy decides; a policy that says "use the system settings" (`system`) hands over to 5 |
+| 3 | **`HTTPS_PROXY`** (and `NO_PROXY`) | the environment of the fairyfly process | it is set, and no fairyfly policy exists (in any mode, also Auto or invalid: a variable of the user's process never beats the administrator's policy) |
+| 4 | **browser policy** | Edge, then Chrome: `HKLM`, else `HKCU` `\Software\Policies\Microsoft\Edge` / `\Google\Chrome` (`ProxyMode`, `ProxyServer`, `ProxyPacUrl`, `ProxyBypassList`, the `ProxySettings` JSON policy, legacy `ProxyServerMode`); then Firefox: `HKLM\Software\Policies\Mozilla\Firefox\Proxy` (`Mode`, `HTTPProxy`/`SSLProxy`, `UseHTTPProxyForAllProtocols`, `AutoConfigURL`, `Passthrough`), else the same under `HKCU` (counts as the user's own setting), else `distribution\policies.json` in Firefox's install folder (taken only from `HKLM\SOFTWARE\Mozilla\Mozilla Firefox[ ESR]` and the Program Files folders) | the first browser with a proxy policy decides; a policy that says "use the system settings" (`system`) hands over to 5 |
 | 5 | **Windows** | the user's setup script (PAC), then "Automatically detect settings" (WPAD), then the manual proxy server, then `netsh winhttp` | as before (below) |
 | | otherwise | | direct |
 
 Modes of 1 and 2: **Auto** (decides nothing: 3 to 5 decide; a fairyfly policy in Auto also locks your setting to
-Auto), **Manual** (`host:port` plus exceptions such as `<local>;*.corp.example;10.*`), **PAC** (the script's address,
+Auto, and then only 4 and 5 decide), **Manual** (`host:port` plus exceptions such as `<local>;*.corp.example;10.*`), **PAC** (the script's address,
 `http://` or `https://`) and **Direct** (no proxy, whatever 3 to 5 say). A fairyfly policy with an invalid value
 still locks; the proxy is then chosen as in Auto, and `fairyfly proxy show` and `fairyfly doctor` say what is wrong.
 `NO_PROXY` belongs to 3: it does not override 1 or 2, which have their own exceptions.
@@ -328,9 +328,11 @@ Windows settings (5), in the order Windows uses them:
 3. Otherwise WinHTTP's machine setting (`netsh winhttp set proxy`).
 4. Otherwise direct.
 
-A PAC script named by 1, 2 or a browser policy that cannot be downloaded or evaluated means **direct** for that
-source (as Chrome does without `ProxyPacMandatory`), with the reason in `fairyfly proxy show`; the sources below it
-are not tried.
+A PAC script (or automatic detection) named by 1, 2 or a browser policy that cannot be downloaded or evaluated hands
+over to the **next source** in the order above (the next browser's policy, else the Windows settings; with the fairyfly
+policy present, 2 and 3 are skipped as always). Each route keeps the trust of where it came from (a WPAD proxy still
+gets nothing). The log (warning), `fairyfly proxy show` (`warnings`) and `fairyfly doctor` say
+`PAC <url> failed (<reason>), using next source: <source>`.
 
 **Setting it yourself.**
 
@@ -348,9 +350,10 @@ The link tray's **Network / proxy...** opens a window with the same: the mode, i
 or "direct (your fairyfly setting: Direct)"), **Test connection** (the same test, with what the window shows, saved or
 not), **Save** and **Cancel**; every field is locked when the fairyfly policy applies. A saved change takes effect at
 once: the running link notices within a second (also one changed by `fairyfly proxy set` in a console, or by a new
-policy), drops the cached routes and reconnects along the new route; no restart. `fairyfly doctor` has a `proxy`
-check: setting, route, source, trust and the connection test (warn `PROXY_TEST_FAILED` when the gateway cannot be
-reached).
+policy), drops the cached routes and reconnects along the new route; no restart. `fairyfly doctor` in a console has a
+`proxy` check: setting, route, source, trust, warnings and the connection test (warn `PROXY_TEST_FAILED` when the
+gateway cannot be reached). Over MCP (`gui_doctor`) the check stays fast and names no internal host: only
+`proxy: configured`, `proxy: direct` or `proxy: failing` (warn `PROXY_ROUTE_FAILED`).
 
 What is checked before a setting is saved or used (the same for the fairyfly policy's values): the proxy is `host:port`
 (a leading `http://` is accepted); `https://` proxy addresses (TLS to the proxy), `socks://` and other schemes,
@@ -374,13 +377,20 @@ without a proxy (backoff up to 60 s); a proxy that goes away and comes back is u
 |---|---|---|
 | named explicitly: the fairyfly policy or your fairyfly setting in Manual, `HTTPS_PROXY`, a browser policy's proxy server, the manual proxy settings, `netsh winhttp` / group policy machine setting | yes | yes |
 | a **trusted** PAC script: its address is `https://`, or it is set by an administrator with a dotted host name (`http://pac.corp.example/proxy.pac`): the fairyfly policy, an Edge/Chrome policy, a Firefox policy only administrators can change, the Windows "automatic configuration script" group policy | yes | no |
-| any other PAC script (`http://` set by the user, in fairyfly or in Windows; a Firefox policies.json that a non-administrator can change; a single-label host like `http://wpad/`; an IP address) | no, as for WPAD | no |
+| any other PAC script (`http://` set by the user, in fairyfly, Windows or Firefox's HKCU policy; a single-label host like `http://wpad/`; an IP address) | no, as for WPAD | no |
+| anything from a Firefox `policies.json` that a non-administrator can change (proxy server or PAC, also `https://`) | **no** | **no** |
 | automatic detection (WPAD), also when a browser policy turns it on | **no**, unless the administrator allows it (below) | no |
 
-A browser policy counts as an administrator's when only administrators can change it: the registry policy keys
-always; Firefox's `policies.json` only when the file, its `distribution` folder and the install folder are owned by
-SYSTEM, Administrators or TrustedInstaller and nobody else may write, delete or re-permission them (a per-user Firefox
-install, or a folder with "Users: Modify", makes it the user's own setting).
+A browser policy counts as an administrator's when only administrators can change it: the `HKLM` and (Edge, Chrome)
+`HKCU` policy keys always. Firefox's `HKCU` policy counts as the user's own setting (owner decision): its proxy server
+gets the Windows login like your fairyfly setting, its PAC script only when it is `https://`. Firefox's `policies.json`
+counts as policy only when the file, its `distribution` folder and the install folder are owned by SYSTEM,
+Administrators or TrustedInstaller and nobody else may write, delete or re-permission them. Otherwise (a folder such as
+`C:\Firefox` that inherits "Authenticated Users: Modify", common on terminal servers) another user could put their own
+proxy there and collect this user's login: its proxies get **no credentials at all**, and the log, `proxy show` and
+`doctor` warn `... can be changed by users other than administrators: its proxy gets no Windows login and no stored
+credential`. The file is opened once, without following links or junctions (also none on the folders above it); one
+behind a link is not read. Its permissions are read from the same open handles, and the folders are held open while it is read.
 
 - **Negotiate (Kerberos) or NTLM with the Windows login** of the user running fairyfly, through SSPI. Nothing has to be
   configured and no password is stored or asked for. Negotiate is preferred when the proxy offers both; the SPN is
