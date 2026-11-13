@@ -104,6 +104,7 @@ private:
     bool selection_input_only_ = false;  ///< see set_selection_input_only
     std::string selection_program_, selection_screen_;
     bool batch_mode_ = false; ///< inside `batch`: stdin belongs to the batch file, no prompts
+    bool doctor_live_proxy_test_ = false; ///< `fairyfly doctor` in a console: the proxy check runs a real connection test
     std::vector<std::string> attach_owner_identities_;  ///< HTTP endpoint owner guard, checked before cache writes
     std::function<void(int)> connection_changed_hook_;
     std::function<bool(const audit::SapFacts&, const std::string&)> attach_target_guard_;
@@ -185,6 +186,9 @@ public:
 
     /// Batch mode disables interactive/stdin secret prompts (credentials set / import-env).
     void set_batch_mode(bool batch_mode) { batch_mode_ = batch_mode; }
+    /// Only the console `fairyfly doctor` (not gui_doctor over MCP, not `batch`): the proxy check connects to the gateway
+    /// and names the route; otherwise it says only configured / direct / failing (fast, no internal host names).
+    void set_doctor_live_proxy_test(bool on) { doctor_live_proxy_test_ = on; }
     bool batch_mode() const { return batch_mode_; }
 
     void set_attach_owner_identities(std::vector<std::string> identities);

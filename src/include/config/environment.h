@@ -35,6 +35,8 @@ inline constexpr const char* kToken = "FAIRYFLY_TOKEN";                 // clien
 inline constexpr const char* kAuthHeader = "FAIRYFLY_AUTH_HEADER";      // client side: "Bearer <token>" (client-config)
 inline constexpr const char* kLinkGateway = "FAIRYFLY_LINK_GATEWAY";
 inline constexpr const char* kLinkForbidDefaultState = "FAIRYFLY_LINK_FORBID_DEFAULT_STATE";
+inline constexpr const char* kHttpsProxy = "HTTPS_PROXY";  // ranked by include/link/proxy_config.h (take_from_runtime_view)
+inline constexpr const char* kNoProxy = "NO_PROXY";
 inline constexpr const char* kLocalAppData = "LOCALAPPDATA";
 inline constexpr const char* kUserProfile = "USERPROFILE";
 inline constexpr const char* kXdgConfigHome = "XDG_CONFIG_HOME";
@@ -84,6 +86,12 @@ EnvLookup process_env();
 /// Sets (UTF-8) or removes a variable of this process; children started afterwards inherit it. The one writer.
 void set_process_env(const char* name, const std::string& value);
 void unset_process_env(const char* name);
+/// Returns the variable's value (also its lower-case spelling outside Windows) and removes it from the C runtime's copy
+/// of the environment, the one the C library lookup (and so libffl) reads. On Windows the process environment block keeps it, so child
+/// processes started with CreateProcessW still inherit it unchanged; one started through the C runtime (_wsystem,
+/// _wspawn*: they pass the runtime's copy) would not, so fairyfly starts none that way (test_proxy_sources_win32.cpp).
+/// The proxy variables, which fairyfly ranks itself (include/link/proxy_config.h).
+std::string take_from_runtime_view(const char* name);
 /// Environment::process().read_only_cap().
 inline bool read_only_cap() { return Environment::process().read_only_cap(); }
 

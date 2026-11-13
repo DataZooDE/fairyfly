@@ -208,13 +208,25 @@ bool pac_trusted(const std::string& pac_url, bool by_policy) {
            u.host.find(':') == std::string::npos;
 }
 
+namespace {
+thread_local bool t_no_script_login = false;
+}  // namespace
+
+NoScriptLoginScope::NoScriptLoginScope() : previous_(t_no_script_login) { t_no_script_login = true; }
+NoScriptLoginScope::~NoScriptLoginScope() { t_no_script_login = previous_; }
+bool NoScriptLoginScope::active() { return t_no_script_login; }
+
 bool script_logon_allowed(AutoSource src, bool pac_is_trusted, bool discovered_login_policy) {
+    if (NoScriptLoginScope::active()) return false;  // an untrusted source's script: never, whatever the policy
     if (discovered_login_policy) return true;
     return src == AutoSource::pac && pac_is_trusted;
 }
 
 bool windows_login_allowed(ffy::proxy::Origin origin, bool discovered_login_policy) {
-    return origin != ffy::proxy::Origin::discovered || discovered_login_policy;
+    using ffy::proxy::Origin;
+    if (origin == Origin::configured || origin == Origin::pac) return true;
+    if (origin == Origin::discovered) return discovered_login_policy;
+    return false;  // kUntrustedOrigin (and anything unknown): never
 }
 
 namespace {
@@ -231,9 +243,13 @@ public:
     explicit NoLogin(ffy::proxy::Endpoint p) : proxy_(std::move(p)) {}
     std::optional<std::string> respond(const std::vector<std::string>& challenges) override {
         if (auto c = pick_sspi_challenge(challenges, "")) {
-            why_ = "the proxy requires the Windows login (" + c->scheme +
-                   ") but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly "
-                   "(manual setting, netsh winhttp, PAC script or HTTPS_PROXY)";
+            why_ = proxy_.origin == kUntrustedOrigin
+                       ? "the proxy requires the Windows login (" + c->scheme +
+                             ") but comes from a policy file other users can change: not sending credentials; ask IT to restrict "
+                             "the file to administrators or to set the proxy explicitly"
+                       : "the proxy requires the Windows login (" + c->scheme +
+                             ") but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly "
+                             "(manual setting, netsh winhttp, PAC script or HTTPS_PROXY)";
             spdlog::warn("proxy: {}: {}", proxy_.str(), why_);
         }
         return std::nullopt;

@@ -55,6 +55,11 @@ struct SupervisorOptions {
     /// Set by anyone, cleared by the supervisor: closes the connection and opens it again at once (the gateway then
     /// receives the current tool catalog, e.g. after "Allow changes in SAP").
     std::atomic<bool>* reconnect = nullptr;
+    /// Polled on the supervising thread at every `poll`: true closes the connection (when there is one) and opens it
+    /// again at once, also during a back-off. The link sets it to "the proxy setting changed".
+    std::function<bool()> reconnect_when;
+    /// Called on the supervising thread just before such a reconnect (the link logs it).
+    std::function<void()> on_reconnect_when;
     /// Merged into every status written (the audit-trail policy); called on the supervising thread.
     std::function<nlohmann::json()> status_extra;
     /// Set by anyone, cleared by the supervisor: writes the status at once (the audit trail was turned on or off).

@@ -66,6 +66,10 @@ const std::vector<Row>& rows() {
         {{"link", "pause"}, "Disconnect the cloud link until resumed", "LINK", false, nullptr},
         {{"link", "resume"}, "Let a paused cloud link connect again", "LINK", false, nullptr},
         {{"link", "unpair"}, "Forget the cloud pairing on this desktop", "LINK", false, nullptr},
+        {{"proxy", "show"}, "Show the proxy setting, the route to the gateway and its trust", "PROXY", false, nullptr},
+        {{"proxy", "set"}, "Set the proxy for fairyfly: auto, manual (host:port), PAC URL or direct", "PROXY", false, nullptr},
+        {{"proxy", "test"}, "Test HTTPS and the link's WebSocket to the gateway through the route", "PROXY", false, nullptr},
+        {{"proxy", "reset"}, "Forget your proxy setting (back to automatic)", "PROXY", false, nullptr},
         {{"update", "check"}, "Check whether a newer fairyfly release exists", "UPDATE", false, nullptr},
         {{"update", "apply"}, "Download, verify and install the latest fairyfly release", "UPDATE", false, nullptr},
         {{"mcp"}, "Start the MCP server (stdio)", "MCP SERVER", false, nullptr},
@@ -174,6 +178,7 @@ const std::vector<GroupSpec>& groups() {
         {"transaction", "TRANSACTION", "Start SAP transactions"},
         {"credentials", "CREDENTIALS", "Manage SAP logon credentials in the Windows Credential Manager"},
         {"link", "LINK", "Connect this desktop to the fairyfly cloud gateway (outbound only)"},
+        {"proxy", "PROXY", "The proxy fairyfly uses for the cloud link and its HTTPS requests"},
         {"update", "UPDATE", "Check for and install new fairyfly releases"},
         {"mcp", "MCP SERVER", "Model Context Protocol server (stdio) and its tool table"},
     };

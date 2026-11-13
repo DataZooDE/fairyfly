@@ -43,6 +43,7 @@ enum class TrayAction {
     UpdateCheck,                                               ///< `fairyfly update check` in a console
     StartMcpServer,                                            ///< link tray: the local MCP server in its own tray
     ToggleAutostart,                                           ///< link tray: "Start with Windows"
+    ProxySettings,                                             ///< link tray: "Network / proxy..." (its window)
     Quit,
 };
 
@@ -208,7 +209,13 @@ inline constexpr const char* kAutostartDefaultedSetting = "link-autostart-defaul
 inline constexpr const char* kLinkAllowChangesSetting = "link_allow_changes";   ///< "Allow changes in SAP" (approval::Standing)
 inline constexpr const char* kAllowSapStartupSetting = "allow_sap_startup";
 inline constexpr const char* kSapDefaultConnectionSetting = "sap_default_connection";
-inline constexpr const char* kTraySettingNames[] = {kAutostartDefaultedSetting, kLinkAllowChangesSetting,
+/// The user's proxy setting (include/link/proxy_config.h: `fairyfly proxy set`, the link tray's "Network / proxy...").
+inline constexpr const char* kProxyModeSetting = "proxy_mode";
+inline constexpr const char* kProxyServerSetting = "proxy_server";
+inline constexpr const char* kProxyBypassSetting = "proxy_bypass";
+inline constexpr const char* kProxyPacSetting = "proxy_pac_url";
+inline constexpr const char* kTraySettingNames[] = {kProxyModeSetting, kProxyServerSetting, kProxyBypassSetting, kProxyPacSetting,
+                                                 kAutostartDefaultedSetting, kLinkAllowChangesSetting,
                                                  kAllowSapStartupSetting, kSapDefaultConnectionSetting};
 void append_sap_startup_menu(TrayMenuModel& menu, TraySettings* settings);
 class TrayHost;
@@ -448,9 +455,11 @@ struct AutostartView {
 
 /// Status line, Pause/Resume, Allow changes in SAP, Health check, Pair again (unpaired: Pair with the fairyfly cloud),
 /// Start local MCP server, Start with Windows, Open log/audit trail folder, Check for updates (not without
-/// `self_update`: an MSIX build), Quit.
+/// `self_update`: an MSIX build), Quit. With `proxy_window` also "Network / proxy..." (paired or not: pairing needs
+/// the proxy too), after the link's items.
 TrayMenuModel build_link_menu(const LinkView& link, const LinkWritesView& writes = {}, const McpTrayView& mcp = {},
-                              const AutostartView& autostart = {}, bool self_update = true);
+                              const AutostartView& autostart = {}, bool self_update = true, bool proxy_window = false);
+inline constexpr const char* kProxyMenuItem = "Network / proxy...";
 
 struct LinkTrayServices {
     TrayHost* host = nullptr;
@@ -470,6 +479,8 @@ struct LinkTrayServices {
     bool self_update = true;   ///< "Check for updates"; false in an MSIX build (packaging::self_updates)
     TrayClaim claim;           ///< a held single-instance guard (another installation's tray, a removed one's)
     TraySettings* settings = nullptr;
+    /// optional: opens the "Network / proxy..." window (modal, on the UI thread); without it the menu has no such item
+    std::function<void()> open_proxy_window;
 };
 
 class LinkTrayController : public TrayListener {

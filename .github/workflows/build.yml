@@ -76,6 +76,9 @@ jobs:
       shell: pwsh
 
     - name: Run unit tests (SAP-free tests only)
+      env:
+        # the "Network / proxy..." window's screenshots (tests/unit/test_proxy_sources_win32.cpp), uploaded below
+        FAIRYFLY_TEST_SCREENSHOTS: ${{ github.workspace }}/build/screenshots
       run: |
         Write-Host "Running unit tests (excluding SAP GUI-dependent tests)..."
         # Run tests excluding [!mayfail] tagged tests
@@ -282,6 +285,30 @@ jobs:
         name: test-results
         path: build/test-results.xml
         retention-days: 30
+
+    - name: Upload the tray window screenshots
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: tray-window-screenshots
+        path: build/screenshots/*.png
+        retention-days: 30
+        if-no-files-found: error
+
+  # fairyfly's portable proxy code (include/link/proxy_config.h: every source, the order, the trust) end to end
+  # against a real squid: HTTPS requests and the link's WebSocket through CONNECT tunnels, Basic and NTLM
+  # (squid's ntlm_fake_auth), a changed setting reconnecting the link. A skipped squid case fails the job.
+  proxy-linux:
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install build tools and squid
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq build-essential cmake ninja-build libssl-dev nlohmann-json3-dev libspdlog-dev catch2 squid openssl
+    - name: Proxy tests against squid
+      run: tests/linux_proxy/run.sh
 
   # The Microsoft Store configuration (FAIRYFLY_PACKAGE=msix, docs/MSIX.md): builds and runs the unit tests (the
   # [msix-build] cases check this build's wiring), checks the real fairyfly.exe answers `update` with the Store's code,

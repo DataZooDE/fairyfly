@@ -33,6 +33,7 @@
 #include "include/config/data_dir.h"
 #include "include/config/mcp_config.h"
 #include "include/link/main_thread_tools.h"
+#include "include/link/proxy_config.h"
 #include "include/link/trail_recorder.h"
 #include "include/link/trail_screen_source.h"
 #include "include/mcp/run_mcp.h"
@@ -752,6 +753,12 @@ int run_link(const LinkOptions& o, const std::function<cli::CommandHandler&()>& 
                     {"clock_skew_s", clock_skew->load()},
                     {"stuck_call", stuck_call_status(tools->in_flight())}};
     };
+    // `fairyfly proxy set|reset`, the tray's "Network / proxy..." or the administrator's policy changed the proxy
+    // setting: reconnect along the new route without a restart (include/link/proxy_config.h)
+    if (auto resolver = proxycfg::process_resolver()) {
+        supervision.reconnect_when = [resolver] { return resolver->setting_changed(); };
+        supervision.on_reconnect_when = [] { spdlog::info("proxy: the proxy setting changed; reconnecting"); };
+    }
     supervision.on_change = [printer, last = std::string()](const std::string& state) mutable {
         if (!last.empty()) {
             if (state == link::state::kPaused) printer->paused();

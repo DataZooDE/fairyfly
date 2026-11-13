@@ -210,6 +210,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/commands/mcp_command.cpp
     src/commands/link_command.cpp
     src/commands/update_command.cpp
+    src/commands/proxy_command.cpp
     src/commands/menu_command.cpp
     src/commands/command_groups.cpp
     src/commands/cli_app.cpp
@@ -249,6 +250,11 @@ set(FAIRYFLY_LIB_SOURCES
     src/link/trail_screen_source.cpp
     src/link/system_proxy.cpp
     src/link/system_proxy_win32.cpp
+    src/link/proxy_config.cpp
+    src/link/proxy_sources_win32.cpp
+    src/link/proxy_cli.cpp
+    src/tray/proxy_window.cpp
+    src/tray/proxy_window_win32.cpp
     src/update/update_model.cpp
     src/update/updater.cpp
     src/mcp/http_tray_runner.cpp

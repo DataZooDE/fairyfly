@@ -4,8 +4,11 @@ Owner decision (2026-11-10): the first desktop release with corporate proxy supp
 only after this checklist has passed in a network with a real proxy: a customer network, or a test setup with a
 Windows domain (appendix). The unit tests (`tests/unit/test_system_proxy.cpp`, libffl's proxy tests against a local
 proxy) cover the decisions and the CONNECT exchange; they cannot cover WinHTTP's PAC/WPAD evaluation, SSPI against a
-real KDC, or a real proxy's behaviour. Repeat the checklist for a later release that changes `src/link/system_proxy*`
-or `third_party/libffl/src/proxy.*`.
+real KDC, or a real proxy's behaviour. Repeat the checklist for a later release that changes `src/link/system_proxy*`,
+`src/link/proxy_*`, `src/tray/proxy_window*` or `third_party/libffl/src/proxy.*`. Since #151 the order of the sources,
+the browser policies, the fairyfly policy and the user setting are also covered end to end against a real squid on
+Linux (`tests/linux_proxy`, CI job `proxy-linux`) and the registry readers, ACL check and window on Windows CI; cases
+16 to 21 below check them on a real desktop.
 
 What the code does is described in [LINK.md, Corporate proxies](../LINK.md#corporate-proxies). The expected results
 below quote the exact strings the code writes; `<proxy>` is the proxy as written in the settings (`host:port`),
@@ -55,8 +58,12 @@ their network cannot do stay open for the test setup in the appendix.
 
 ## How to run a case
 
-- **Proxy settings are cached for 5 minutes** inside a running fairyfly. After changing any proxy setting, quit the
-  link (tray **Quit**, or Ctrl+C in the console) and start it again.
+- **Windows and browser proxy settings are cached for 5 minutes** inside a running fairyfly. After changing one of
+  them, quit the link (tray **Quit**, or Ctrl+C in the console) and start it again. A change of the fairyfly setting
+  (`fairyfly proxy set|reset`, the tray's **Network / proxy...**) or of the fairyfly policy takes effect without a
+  restart (cases 17 and 18).
+- Before each case, `fairyfly proxy show` records which source decides (`route.route`, `route.source`) and what every
+  source says (`sources`); `fairyfly proxy reset` unless the case sets your fairyfly setting.
 - Run the link in a PowerShell console so that every line is visible and kept (quit the tray first: a second link for
   the same pairing is refused with `LINK_ALREADY_RUNNING`):
 
@@ -87,9 +94,10 @@ The lines the code writes (`link.log` and the console with `--log-level debug`):
 
 | When | Line |
 |---|---|
-| the proxy choice for a host changes (once, not per reconnect) | `proxy: <gateway> -> <routes> (<how>)`, `<how>` one of `PAC <url>`, `automatic detection (WPAD)`, `manual proxy settings`, `WinHTTP machine setting (netsh winhttp)`, `no proxy configured`, `... : bypass list`, `... : DIRECT` |
-| the link connects through a proxy | `link: connecting through proxy <proxy> (from Windows proxy settings)` or `(from environment (HTTPS_PROXY))` |
-| the tunnel is open (debug) | `proxy: tunnel to <gateway>:443 through <proxy> (<source>[, authenticated with Negotiate\|NTLM\|Basic])` |
+| the proxy choice for a host changes (once, not per reconnect) | `proxy: <gateway> -> via <proxy> from <where>, Windows login: yes\|no` or `proxy: <gateway> -> direct (<source>: <how>)`; `<where>` is `PAC (<url>, <source>)`, `automatic detection (WPAD, <source>)`, `<source>` or `Windows proxy settings (<how>)`; `<source>` one of `fairyfly policy`, `your fairyfly setting`, `HTTPS_PROXY`, `NO_PROXY`, `Edge policy (HKLM)`, `Chrome policy (HKCU)`, `Firefox policy (HKLM)`, `Firefox policies.json[ (user-writable)]`, `Windows proxy settings` |
+| the fairyfly setting or policy changed while the link runs | `proxy: the proxy setting changed; reconnecting` |
+| the link connects through a proxy | `link: connecting through proxy <proxy> (from the proxy settings (fairyfly proxy show))` |
+| the tunnel is open (debug) | `proxy: tunnel to <gateway>:443 through <proxy> (the proxy settings (fairyfly proxy show)[, authenticated with Negotiate\|NTLM\|Basic])` |
 | the link is up / down | `link up: device=... gateway=...` / `link down (<error>), reconnecting in <n> ms` |
 
 ## Cases
@@ -100,7 +108,7 @@ Setup: manual proxy off, no script, "Automatically detect settings" off, `netsh 
 `HTTPS_PROXY`/`NO_PROXY`. Direct 443 to the gateway allowed.
 
 Expected:
-- `proxy: <gateway> -> DIRECT (no proxy configured)`; no `link: connecting through proxy` line.
+- `proxy: <gateway> -> direct (Windows proxy settings: no proxy configured)`; no `link: connecting through proxy` line.
 - `connected to <gateway> as ...`; a tool call works. Tray (if used): teal icon, status `connected`.
 
 ### 2. Manual proxy without authentication
@@ -109,18 +117,18 @@ Setup: proxy in no-auth mode. Settings › Proxy › Manual proxy setup: address
 blocked.
 
 Expected:
-- `proxy: <gateway> -> <proxy> (manual proxy settings)`, `link: connecting through proxy <proxy> (from Windows proxy settings)`,
-  `proxy: tunnel to <gateway>:443 through <proxy> (Windows proxy settings)` (no "authenticated with").
+- `proxy: <gateway> -> via <proxy> from Windows proxy settings (manual proxy settings), Windows login: yes`, `link: connecting through proxy <proxy> (from the proxy settings (fairyfly proxy show))`,
+  `proxy: tunnel to <gateway>:443 through <proxy> (the proxy settings (fairyfly proxy show))` (no "authenticated with").
 - Connected; a tool call works. The proxy's access log shows `CONNECT <gateway>:443` with no user.
 - 2b (optional): deny the gateway on the proxy (squid: `http_access deny CONNECT gateway_host` before the allow).
-  Expected: `connection ... lost` / `link down (proxy refused CONNECT 403 Forbidden (<proxy> -> <gateway>:443, proxy from Windows proxy settings)), reconnecting in ...`.
+  Expected: `connection ... lost` / `link down (proxy refused CONNECT 403 Forbidden (<proxy> -> <gateway>:443, proxy from the proxy settings (fairyfly proxy show))), reconnecting in ...`.
   Allow it again: `reconnected to <gateway>`.
 
 ### 3. Manual proxy with the Windows login
 
 3a **Kerberos (Negotiate)**: proxy offers Negotiate and NTLM, the proxy is set by its FQDN (the SPN is
 `HTTP/<host as written>`; an IP address cannot get a Kerberos ticket).
-- `proxy: tunnel to <gateway>:443 through <proxy> (Windows proxy settings, authenticated with Negotiate)`.
+- `proxy: tunnel to <gateway>:443 through <proxy> (the proxy settings (fairyfly proxy show), authenticated with Negotiate)`.
 - `klist` on the PC lists a ticket for `HTTP/<proxy host>`; the proxy log shows `<user>@<REALM>`.
 - Connected; a tool call works.
 
@@ -130,13 +138,13 @@ Expected:
 
 3c **netsh winhttp** (machine setting): manual proxy off, no script, no auto-detect;
 `netsh winhttp set proxy proxy-server="<proxy>" bypass-list="<local>"` (elevated), proxy in Negotiate mode.
-- `proxy: <gateway> -> <proxy> (WinHTTP machine setting (netsh winhttp))`, `... authenticated with Negotiate`.
+- `proxy: <gateway> -> via <proxy> from Windows proxy settings (WinHTTP machine setting (netsh winhttp)), Windows login: yes`, `... authenticated with Negotiate`.
 - Afterwards `netsh winhttp reset proxy`.
 
 ### 4. Authentication failures with an explicit proxy
 
 4a Proxy offers Negotiate/NTLM but the user is not allowed (sign in as the second user, or deny the user's group):
-`proxy requires authentication: it refused the Negotiate credentials of this user (offers Negotiate, NTLM) (<proxy> -> <gateway>:443, proxy from Windows proxy settings)`
+`proxy requires authentication: it refused the Negotiate credentials of this user (offers Negotiate, NTLM) (<proxy> -> <gateway>:443, proxy from the proxy settings (fairyfly proxy show))`
 (or `NTLM`). The link keeps retrying; no password prompt appears.
 
 4b (optional) Proxy closes the connection after each 407 (squid: `auth_param ntlm keep_alive off` plus
@@ -146,8 +154,8 @@ Expected:
 
 Setup: Windows manual proxy set to an address that does not exist (`192.0.2.1:3128`) so that the Windows settings
 would fail. In the console: `$env:HTTPS_PROXY = "http://<proxy>"`, proxy in Negotiate mode.
-- `link: connecting through proxy <proxy> (from environment (HTTPS_PROXY))`; no `proxy: <gateway> -> ...` line;
-  `proxy: tunnel to <gateway>:443 through <proxy> (environment (HTTPS_PROXY), authenticated with Negotiate)`.
+- `proxy: <gateway> -> via <proxy> from HTTPS_PROXY, Windows login: yes`, `link: connecting through proxy <proxy> (from the proxy settings (fairyfly proxy show))`;
+  `proxy: tunnel to <gateway>:443 through <proxy> (the proxy settings (fairyfly proxy show), authenticated with Negotiate)`.
 - Connected.
 - 5b `$env:HTTPS_PROXY = "https://<proxy>"`: refused with `HTTPS_PROXY: proxy scheme https:// is not supported (use http://host:port)`.
 - 5c `$env:HTTPS_PROXY = "http://baduser:S3cret-Proxy-Test@<proxy>"` against the Basic-only proxy: the 407 is answered
@@ -159,7 +167,7 @@ would fail. In the console: `$env:HTTPS_PROXY = "http://<proxy>"`, proxy in Nego
 
 Setup: manual proxy off, auto-detect off; Settings › Proxy › Use setup script: `https://pac.corp.example/proxy.pac`.
 Proxy in Negotiate/NTLM mode.
-- `proxy: <gateway> -> <proxy> (PAC https://pac.corp.example/proxy.pac)` (a query string is not shown),
+- `proxy: <gateway> -> via <proxy> from PAC (https://pac.corp.example/proxy.pac, Windows proxy settings), Windows login: yes` (a query string is not shown),
   `... authenticated with Negotiate`. Connected.
 - 6b Same script over http, set by **group policy** with the FQDN (`http://pac.corp.example/proxy.pac`, `gpupdate /force`,
   the `AutoConfigURL` policy value present): trusted as well, `... authenticated with Negotiate`. Connected.
@@ -167,21 +175,21 @@ Proxy in Negotiate/NTLM mode.
 ### 7. PAC script over http, not trusted (no credentials)
 
 Setup: script set **by the user** (not by policy) to `http://wpad/wpad.dat` (single label); proxy in Negotiate/NTLM mode.
-- `proxy: <gateway> -> <proxy> (PAC http://wpad/wpad.dat)`.
+- `proxy: <gateway> -> via <proxy> from PAC (http://wpad/wpad.dat, Windows proxy settings), Windows login: no`.
 - No credentials are sent (the proxy log shows only the anonymous 407). Error, retried:
-  `proxy requires authentication (offers Negotiate, NTLM), and the proxy requires the Windows login (Negotiate) but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly (manual setting, netsh winhttp, PAC script or HTTPS_PROXY) (<proxy> -> <gateway>:443, proxy from Windows proxy settings)`
+  `proxy requires authentication (offers Negotiate, NTLM), and the proxy requires the Windows login (Negotiate) but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly (manual setting, netsh winhttp, PAC script or HTTPS_PROXY) (<proxy> -> <gateway>:443, proxy from the proxy settings (fairyfly proxy show))`
   and the warning `proxy: <proxy>: the proxy requires the Windows login (Negotiate) but was discovered automatically (WPAD): ...`.
   (The wording names WPAD also for an untrusted script; record it, it is the same rule.)
 - 7b The same with a user-set `http://pac.corp.example/proxy.pac` (FQDN, but not by policy): the same refusal.
 - 7c (optional) The script's web server requires Windows authentication (IIS, Windows auth on the PAC): for 7a no
-  login is sent while downloading it, `proxy: <gateway> -> DIRECT (PAC http://wpad/wpad.dat failed (the proxy script's server refused the Windows login), no proxy configured)`
+  login is sent while downloading it, `proxy: <gateway> -> direct (Windows proxy settings: PAC http://wpad/wpad.dat failed (the proxy script's server refused the Windows login), no proxy configured)`
   or the next source; for 6b it is sent and the script loads.
 
 ### 8. WPAD-discovered proxy that requires authentication
 
 Setup: no script, manual proxy off, "Automatically detect settings" on; WPAD answers with the proxy in Negotiate/NTLM mode.
 Policy value absent.
-- `proxy: <gateway> -> <proxy> (automatic detection (WPAD))`.
+- `proxy: <gateway> -> via <proxy> from automatic detection (WPAD, Windows proxy settings), Windows login: no`.
 - Refused as in case 7 (`... but was discovered automatically (WPAD): not sending credentials; ask IT to set the proxy explicitly ...`),
   retried; the proxy log shows no user. **(tray)**: run this case with the tray; the same lines are in `link.log`
   (they are `info`/`warn`).
@@ -196,16 +204,17 @@ Policy value absent.
 
 Setup: script `https://pac.corp.example/missing.pac` (404) or an unreachable host, "Automatically detect settings" on.
 - Warning `proxy: PAC https://pac.corp.example/missing.pac failed (the proxy script (PAC) could not be downloaded), falling back to automatic detection (WPAD); its proxies get no credentials`.
-- Then `proxy: <gateway> -> <proxy> (PAC https://pac.corp.example/missing.pac failed (...), automatic detection (WPAD))`;
+- Then `proxy: <gateway> -> via <proxy> from Windows proxy settings (PAC https://pac.corp.example/missing.pac failed (...), automatic detection (WPAD)), Windows login: no`;
   with an authenticating proxy refused as in case 8.
 
 ### 10. Bypass and NO_PROXY
 
 10a Manual proxy with "Don't use the proxy server for" `<gateway>` (or `*.<domain>` of the gateway); direct 443
-allowed: `proxy: <gateway> -> DIRECT (manual proxy settings: bypass list)`, connected directly; the proxy log shows nothing.
+allowed: `proxy: <gateway> -> direct (Windows proxy settings: manual proxy settings: bypass list)`, connected directly; the proxy log shows nothing.
 
-10b Manual proxy without exception, `$env:NO_PROXY = "<gateway>"` (also try `.<parent domain>`): no `proxy:` line for the
-gateway, no `connecting through proxy`, connected directly. `Remove-Item Env:NO_PROXY`.
+10b Manual proxy without exception, `$env:NO_PROXY = "<gateway>"` (also try `.<parent domain>`):
+`proxy: <gateway> -> direct (NO_PROXY)`, no `connecting through proxy`, connected directly. With your fairyfly setting
+in Manual (case 17) `NO_PROXY` does not apply: it ranks below. `Remove-Item Env:NO_PROXY`.
 
 10c (optional) PAC returning `PROXY <dead>:3128; PROXY <proxy>; DIRECT`: the dead one is skipped
 (`proxy: cannot reach proxy <dead>:3128 (...)` warning), the second used.
@@ -226,15 +235,15 @@ Setup: case 3a (Kerberos, manual proxy), direct 443 blocked.
 - `fairyfly link unpair`, then `fairyfly link pair --gateway https://<gateway> --log-level debug`:
   `Contacting https://<gateway>…` (the full URL),
   the QR code and number appear; finish on the phone; `fairyfly link run` then connects. Lines
-  `proxy: <gateway> -> <proxy> (manual proxy settings)` and `proxy: tunnel to <gateway>:443 through <proxy> (..., authenticated with Negotiate)`.
+  `proxy: <gateway> -> via <proxy> from Windows proxy settings (manual proxy settings), Windows login: yes` and `proxy: tunnel to <gateway>:443 through <proxy> (..., authenticated with Negotiate)`.
 - `fairyfly update check --log-level debug`: reports the latest release (no error); lines
-  `proxy: api.github.com -> <proxy> (manual proxy settings)` and the tunnel to `api.github.com:443`. The proxy must
+  `proxy: api.github.com -> via <proxy> from Windows proxy settings (manual proxy settings), Windows login: yes` and the tunnel to `api.github.com:443`. The proxy must
   allow `api.github.com`, `github.com` and `*.githubusercontent.com`. Tray **Check for updates** shows the same result.
 
 ### 13. Basic from the Credential Manager
 
 Setup: proxy in Basic-only mode, set manually.
-- 13a No credential stored: `proxy requires authentication (offers Basic), and no credentials are configured for it (<proxy> -> <gateway>:443, proxy from Windows proxy settings)`.
+- 13a No credential stored: `proxy requires authentication (offers Basic), and no credentials are configured for it (<proxy> -> <gateway>:443, proxy from the proxy settings (fairyfly proxy show))`.
 - 13b `cmdkey /generic:fairyfly-proxy:<proxy host> /user:<basic user> /pass` (password prompted; host exactly as in the
   proxy setting, without port). Restart the link: `... authenticated with Basic`, connected; the proxy log shows the
   Basic user.
@@ -247,7 +256,7 @@ Setup: proxy in Basic-only mode, set manually.
 
 - Manual proxy address `https://<proxy>` (scheme typed into the address field), or per-protocol "Secure:
   `https://<proxy>`": warning once `proxy: the proxy entry https://<proxy> is skipped: only http:// proxies are supported (no TLS to the proxy, no SOCKS)`,
-  then `proxy: <gateway> -> DIRECT (manual proxy settings: none for https)`.
+  then `proxy: <gateway> -> direct (Windows proxy settings: manual proxy settings: none for https)`.
 - PAC returning `SOCKS <host>:1080`: no SOCKS connection is attempted (the entry is ignored, or skipped with the
   warning above, depending on how WinHTTP reports it; record the `proxy: <gateway> -> ...` line).
 
@@ -263,6 +272,110 @@ After all cases, on the PC:
 Expected: no match. (`-CaseSensitive` and the `(?!credentials)` keep the code's own lines out, such as `it refused the
 Basic credentials of this user`; checked against every message of `system_proxy*.cpp` and libffl's `proxy.cpp`.) (`TlRMTVNT` is base64 of an NTLM message, `YII` the start of a base64 SPNEGO/Kerberos token.) Also
 check the tray's notices and error message boxes seen during the cases: none showed a password or a token.
+
+### 16. Browser proxy policies (Edge, Chrome, Firefox)
+
+Setup: Windows manual proxy set to a dead address (`192.0.2.1:3128`), no script, no auto-detect, no `HTTPS_PROXY`,
+`fairyfly proxy reset`; proxy in Negotiate/NTLM mode. Set the policies elevated (or by GPO), one at a time, and
+restart the link after each (the policies are cached for 5 minutes like the Windows settings). `fairyfly proxy show`
+lists them under `sources.browser_policies`.
+
+- 16a **Edge, fixed server**: `reg add HKLM\SOFTWARE\Policies\Microsoft\Edge /v ProxyMode /t REG_SZ /d fixed_servers /f`
+  and `/v ProxyServer /d <proxy>`. Expected `proxy: <gateway> -> via <proxy> from Edge policy (HKLM), Windows login: yes`,
+  `... authenticated with Negotiate` (a policy-set proxy counts as explicit), connected.
+- 16b **Edge `system`** (`/v ProxyMode /d system`) with a Chrome policy 16a-style under `HKLM\SOFTWARE\Policies\Google\Chrome`:
+  Edge hands over to the Windows settings, Chrome is not asked: `... from Windows proxy settings (manual proxy settings)`
+  with the dead address, the link fails to reach it (`cannot reach proxy 192.0.2.1:3128`). Delete the Edge values: now
+  `... from Chrome policy (HKLM)`, connected.
+- 16c **Chrome PAC by policy**: `ProxyMode` `pac_script`, `ProxyPacUrl` `http://pac.corp.example/proxy.pac` (dotted, http):
+  trusted (an administrator's), `... from PAC (http://pac.corp.example/proxy.pac, Chrome policy (HKLM)), Windows login: yes`.
+  The same under `HKCU\Software\Policies\Google\Chrome` (also admin-only): `Chrome policy (HKCU)`, trusted too.
+  With `http://wpad/wpad.dat`: `Windows login: no`, refused as in case 7.
+- 16d **Chrome `ProxySettings` JSON**: `/v ProxySettings /d "{\"ProxyMode\":\"fixed_servers\",\"ProxyServer\":\"<proxy>\"}"`
+  together with `ProxyMode` `direct`: the JSON wins (`... from Chrome policy (HKLM)` via `<proxy>`). Broken JSON:
+  `fairyfly proxy show` has a warning `Chrome policy ProxySettings is not a JSON object; ignored` and the single
+  policies apply (direct).
+- 16e **Firefox by GPO**: `HKLM\SOFTWARE\Policies\Mozilla\Firefox\Proxy`, `Mode` `manual`, `HTTPProxy` `<proxy>`,
+  DWORD `UseHTTPProxyForAllProtocols` `1`: `... from Firefox policy (HKLM)`, authenticated, connected. Without
+  `UseHTTPProxyForAllProtocols` and without `SSLProxy`: `direct (Firefox policy (HKLM): Direct)` (as Firefox, HTTPS
+  goes direct).
+- 16f **Firefox policies.json**, Firefox installed per machine (`C:\Program Files\Mozilla Firefox`), registry policy
+  removed: `distribution\policies.json` with `{"policies":{"Proxy":{"Mode":"autoConfig","AutoConfigURL":"http://pac.corp.example/proxy.pac"}}}`
+  (elevated editor): `... from PAC (http://pac.corp.example/proxy.pac, Firefox policies.json), Windows login: yes`.
+  Then give `Users` write access to the `distribution` folder (`icacls "...\distribution" /grant Users:M`): the source
+  becomes `Firefox policies.json (user-writable)`, the log warns `... can be changed by users other than administrators:
+  its proxy gets no Windows login and no stored credential`, and even with an `https://` script or a `SSLProxy` server the
+  proxy gets no credentials (refused as in case 7; with a Basic-only proxy and a stored `fairyfly-proxy:` credential:
+  `Basic is sent only to a proxy set explicitly ...`). Undo with `icacls ... /remove Users` (or reinstall).
+- 16g **Firefox per-user policy** `HKCU\Software\Policies\Mozilla\Firefox\Proxy` (`Mode` `manual`, `SSLProxy` `<proxy>`),
+  no HKLM Firefox policy: `... from Firefox policy (HKCU), Windows login: yes` (the user's own setting).
+- 16h **Junction**: replace `distribution` by a junction (`mklink /J distribution C:\elsewhere`, elevated in Program
+  Files): `fairyfly proxy show` warns `... is behind a link or junction, or cannot be opened; ignored`.
+- 16i **PAC failure hands over**: Chrome `pac_script` with an unreachable `https://pac.corp.example/missing.pac`, Windows
+  manual proxy `<proxy>`: log warning `PAC https://pac.corp.example/missing.pac failed (...), using next source: Windows proxy settings`,
+  connected through `<proxy>`; `fairyfly doctor` shows the same warning.
+- Delete all browser policy values afterwards.
+
+### 17. Your setting: CLI and tray window, without restart
+
+Setup: the link connected through the Windows settings (case 2 or 3a); a second proxy port or instance `<proxy2>`.
+- 17a `fairyfly proxy set --mode manual --server <proxy2> --bypass "<local>"` in another console while the link runs:
+  within a second `proxy: the proxy setting changed; reconnecting`, then `... from your fairyfly setting, Windows login: yes`
+  through `<proxy2>` (its access log), `reconnected to <gateway>`. `fairyfly proxy show`: `setting.from` `user`.
+- 17b `$env:HTTPS_PROXY = "http://192.0.2.1:3128"` in the link's console, restart it: your setting still decides
+  (HTTPS_PROXY ranks below it). `fairyfly proxy reset`: within a second the link reconnects, now through HTTPS_PROXY
+  (fails: `cannot reach proxy 192.0.2.1:3128`). `Remove-Item Env:HTTPS_PROXY`.
+- 17c Tray **Network / proxy...** (link tray, paired or not): the window shows the mode and fields of the effective
+  setting and the route line. Choose **PAC script**, enter `https://pac.corp.example/proxy.pac`, **Test connection**:
+  `Test: OK. Connected to <gateway> (HTTPS and the link's WebSocket) via <proxy> from PAC (...)`; the gateway's access
+  log shows `GET /health` and a WebSocket upgrade on `/ffl` that closes at once. Nothing is saved yet (`fairyfly proxy show`
+  unchanged). **Save**: balloon `Proxy setting saved. The cloud link reconnects along the new route.`, the link reconnects.
+- 17d `fairyfly proxy test --mode manual --server 192.0.2.1:3128`: `PROXY_TEST_FAILED`, `cannot reach proxy 192.0.2.1:3128`;
+  the saved setting is unchanged.
+- 17e Refused input (CLI `INVALID_ARGUMENT`, window message box, nothing saved): `--server https://<proxy>` (says
+  https:// proxies are not supported), `--server socks5://<proxy>:1080`, `--server alice:pw@<proxy>` (says Credential
+  Manager), `--server <proxy-host>` (no port), `--pac file:///C:/p.pac`; in the window a line break pasted into the
+  proxy field.
+- 17f User-level PAC trust: `fairyfly proxy set --mode pac --pac http://pac.corp.example/proxy.pac` with an
+  authenticating proxy: `Windows login: no`, refused as in case 7 (your own http:// script is not trusted); with
+  `https://`: authenticated.
+- `fairyfly proxy reset` afterwards.
+
+### 18. fairyfly policy locks the setting
+
+Setup: elevated `reg add HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v ProxyMode /t REG_SZ /d manual /f`, `/v ProxyServer /d <proxy>`,
+`/v ProxyBypass /d "<local>"`; your setting set to Direct before (`fairyfly proxy set --mode direct`).
+- Within a second the running link reconnects: `... from fairyfly policy, Windows login: yes` through `<proxy>`.
+- `fairyfly proxy set --mode direct` and `fairyfly proxy reset`: `PROXY_SETTING_LOCKED` (`the proxy setting is set by your administrator ...`).
+- Tray window: `Set by your administrator (HKLM\SOFTWARE\Policies\DataZoo\fairyfly)`; mode buttons, fields and Save
+  disabled; **Test connection** works.
+- `ProxyMode` `pac` with `ProxyPacUrl` `http://pac.corp.example/proxy.pac`: trusted (`Windows login: yes`).
+- `ProxyMode` `auto`: still locked, your Direct is ignored, the automatic sources decide; `$env:HTTPS_PROXY` in the
+  link's console is ignored too (a variable of the user's process does not beat the policy).
+- An invalid value (`ProxyServer` `socks5://x:1080`): locked, chosen as in Auto, `fairyfly proxy show` has `policy_error`,
+  `fairyfly doctor` warns.
+- `reg delete HKLM\SOFTWARE\Policies\DataZoo\fairyfly /v ProxyMode /f` (and the others): unlocked; your Direct decides again.
+
+### 19. Direct
+
+Setup: Windows manual proxy and an Edge fixed-server policy (16a) set; direct 443 allowed.
+`fairyfly proxy set --mode direct`: `proxy: <gateway> -> direct (your fairyfly setting: Direct)`, no
+`connecting through proxy`, connected directly; the proxy's access log shows nothing. With direct 443 blocked:
+the link fails (`direct: ...`) and `fairyfly proxy test` says so.
+
+### 20. doctor
+
+`fairyfly doctor` in a console in each of the setups 16a, 17a, 18 and 19: check `proxy` with `Gateway reachable via ...
+(setting manual (yours))` / `(... set by your administrator)`, details with the source, `Windows login`, the stored-Basic
+trust and the test summary; with the proxy stopped: `warn`, code `PROXY_TEST_FAILED`. Over MCP (`gui_doctor` from the
+assistant): only `proxy: configured` / `proxy: direct` / `proxy: failing`, no host names, no delay.
+
+### 21. No credentials in the setting
+
+After cases 16 to 19: `reg query HKCU\Software\DataZoo\fairyfly\tray` shows only `proxy_mode`, `proxy_server`,
+`proxy_bypass`, `proxy_pac_url` without any user name or password; `fairyfly proxy show` with
+`HTTPS_PROXY=http://alice:S3cret-Proxy-Test@<proxy>` shows `"https_proxy_set": true` and never the value. Case 15's
+search also covers these runs.
 
 ## Results
 
@@ -287,6 +400,12 @@ check the tray's notices and error message boxes seen during the cases: none sho
 | 13 | Basic via Credential Manager (13a–13d) | | | |
 | 14 | https/SOCKS entries | | | |
 | 15 | no credentials in logs | | | |
+| 16 | browser policies (16a Edge, 16b system handover, 16c Chrome PAC, 16d ProxySettings, 16e Firefox GPO, 16f policies.json admin/user-writable, 16g Firefox HKCU, 16h junction, 16i PAC failure hands over) | | | |
+| 17 | your setting: CLI, tray window, test, reconnect without restart (17a–17f) | | | |
+| 18 | fairyfly policy lock | | | |
+| 19 | Direct | | | |
+| 20 | doctor | | | |
+| 21 | no credentials in the setting | | | |
 
 Attach the filled-in table (and the `proxy-test` folder, after case 15) to the release PR. A failing case blocks the
 release unless the owner decides otherwise in that PR.

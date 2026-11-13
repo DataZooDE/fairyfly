@@ -164,6 +164,12 @@ void supervise(const std::string& state_path, const std::function<void(const std
                 halt();
                 next_start = std::chrono::steady_clock::now();
             }
+            // e.g. the proxy setting changed: a new connection along the new route, at once (also out of a back-off)
+            if (o.reconnect_when && o.reconnect_when()) {
+                if (o.on_reconnect_when) o.on_reconnect_when();
+                halt();
+                next_start = std::chrono::steady_clock::now();
+            }
             if (!cur && std::chrono::steady_clock::now() >= next_start) {
                 cur = std::make_unique<Running>();
                 Running* r = cur.get();

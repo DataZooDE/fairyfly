@@ -22,7 +22,8 @@ tunnel's `authenticated with ...`, runs in the console.
 ## In the session
 
 1. (5 min) Install the MSI as the user; `fairyfly --version`; quit the tray (a console link and the tray would collide).
-   Run the Windows-settings check of "How to run a case" and note the effective source.
+   Run the Windows-settings check of "How to run a case" and `fairyfly proxy show`; note the effective source
+   (`route.source`: a browser policy may decide before the Windows settings) and `sources.browser_policies`.
 2. (10 min) **Case 12, pairing**: `mkdir $env:USERPROFILE\proxy-test -Force`,
    `fairyfly link pair --gateway https://fairyfly.io --log-level debug`, then
    `fairyfly link run --read-only --log-level debug *>&1 | Tee-Object $env:USERPROFILE\proxy-test\case-<n>.txt`.
@@ -39,13 +40,17 @@ tunnel's `authenticated with ...`, runs in the console.
 | WPAD, proxy authenticates | 8 (tray), 8b + 8c in the console (admin sets/removes the policy) | 9 |
 | WPAD, no auth | 8d | |
 | Basic only | 13a, 13b (the **user or IT** types the password at the `cmdkey` prompt, never us), 13c | 13d |
-| Direct 443 open as well | 1 (with the proxy off, if they let the user change it) | |
-| Any | 15 | 11 substitute: Wi-Fi/LAN off for 1 min and on again (we cannot stop their proxy), record the reconnect; 2b only if IT adds a deny rule |
+| Edge/Chrome proxy by policy | 16a (or 16c for a PAC policy) as their policy is; record the source `fairyfly proxy show` names | 16b (`system`), 16d (`ProxySettings`) only if IT changes their policy for the test |
+| Firefox proxy by GPO or policies.json | 16e / 16f (record the source: `Firefox policy (HKLM)`, `Firefox policies.json` or `(user-writable)`) | |
+| IT wants to set fairyfly itself | 18 (IT sets the `HKLM\SOFTWARE\Policies\DataZoo\fairyfly` values; we check the lock in the CLI and the window) | 18's `auto` and invalid-value steps |
+| Direct 443 open as well | 1 (with the proxy off, if they let the user change it), 19 | |
+| Any | 15; 17a + 17c (your setting by CLI and in the tray window, Test connection, reconnect without restart; needs only their proxy's address); 20 (doctor); 21 | 11 substitute: Wi-Fi/LAN off for 1 min and on again (we cannot stop their proxy), record the reconnect; 2b only if IT adds a deny rule |
 
 4. (10 min) **Case 15**: the collection command of the IT sheet; no match. If the customer sends logs, they run it,
    not us.
 5. (10 min) Remove: the "Removing it" steps of the IT sheet, plus `Remove-Item Env:HTTPS_PROXY, Env:NO_PROXY` if set,
-   `netsh winhttp reset proxy` only if case 3c changed it; remove the desktop in the web app.
+   `netsh winhttp reset proxy` only if case 3c changed it, `fairyfly proxy reset`, the browser and fairyfly policy values
+   IT set for cases 16/18; remove the desktop in the web app.
 
 ## Afterwards
 

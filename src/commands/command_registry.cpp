@@ -20,6 +20,7 @@ std::unique_ptr<CommandBase> create_list_command();
 std::unique_ptr<CommandBase> create_screen_command();
 std::unique_ptr<CommandBase> create_mcp_command();
 std::unique_ptr<CommandBase> create_link_command();
+std::unique_ptr<CommandBase> create_proxy_command();
 std::unique_ptr<CommandBase> create_update_command();
 std::unique_ptr<CommandBase> create_mcp_token_command();
 std::unique_ptr<CommandBase> create_menu_command();
@@ -53,6 +54,7 @@ void register_all_commands() {
     registry.register_command(create_tcode_command());
     registry.register_command(create_credentials_command());
     registry.register_command(create_link_command());  // before mcp: root help lists sections in command_table group order
+    registry.register_command(create_proxy_command());
     registry.register_command(create_update_command());
     registry.register_command(create_mcp_command());
     registry.register_command(create_mcp_token_command());

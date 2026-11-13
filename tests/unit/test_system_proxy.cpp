@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "include/link/proxy_config.h"
 #include "include/link/system_proxy.h"
 #include "util.hpp"  // libffl
 
@@ -393,9 +394,11 @@ TEST_CASE("system proxy (Windows): Negotiate is preferred and completes against 
 
 TEST_CASE("system proxy (Windows): the Windows resolver is installed for libffl and answers for this machine's settings") {
     install_system_proxy();
-    const char* env = std::getenv("HTTPS_PROXY");
     auto d = ffy::proxy::decide("wss://link.fairyfly.io/ffl");  // the real WinHTTP calls; must not throw
-    if (!env || !*env) CHECK(d.source == "Windows proxy settings");
+    // HTTPS_PROXY is taken from libffl's view by install_system_proxy: fairyfly's resolver always decides
+    CHECK(d.source == fairyfly::link::proxycfg::kConfigSource);
+    CHECK(std::getenv("HTTPS_PROXY") == nullptr);
+    REQUIRE(fairyfly::link::proxycfg::process_resolver());
     REQUIRE(d.authenticators.size() >= 2);  // SSPI, then a stored Basic credential
     // the installed SSPI authenticator: a token for a configured proxy, none for a WPAD-discovered one (no policy here)
     auto configured = d.authenticators[0]({"proxy.corp.example", 8080, ffy::proxy::Origin::configured});
@@ -409,3 +412,36 @@ TEST_CASE("system proxy (Windows): the Windows resolver is installed for libffl 
     CHECK(ffy::proxy::decide("wss://127.0.0.1:9/ffl").routes.empty());
 }
 #endif
+
+TEST_CASE("system proxy: a proxy from an untrusted source never gets the Windows login, whatever the WPAD policy") {
+    const auto untrusted = kUntrustedOrigin;
+    CHECK_FALSE(windows_login_allowed(untrusted, false));
+    CHECK_FALSE(windows_login_allowed(untrusted, true));  // AllowLoginToDiscoveredProxies=1
+    CHECK(windows_login_allowed(ffy::proxy::Origin::discovered, true));
+    CHECK_FALSE(windows_login_allowed(static_cast<ffy::proxy::Origin>(0x7e), true));  // anything unknown: never
+    int sspi_made = 0;
+    auto a = login_authenticator({"planted.example", 3128, untrusted}, true, [&] {
+        ++sspi_made;
+        return std::unique_ptr<ffy::proxy::Authenticator>();
+    });
+    REQUIRE(a);
+    CHECK_FALSE(a->respond({"NTLM"}));
+    CHECK(sspi_made == 0);
+    CHECK(a->declined().find("other users can change") != std::string::npos);
+    // nor a stored Basic credential
+    int reads = 0;
+    auto b = stored_basic({"planted.example", 3128, untrusted}, [&] {
+        ++reads;
+        return std::optional<StoredLogin>(StoredLogin{"alice", "pw"});
+    });
+    CHECK_FALSE(b->respond({"Basic realm=x"}));
+    CHECK(reads == 0);
+    // and its script's server is never answered with the login, also with the policy on
+    CHECK(script_logon_allowed(AutoSource::wpad, false, true));
+    {
+        NoScriptLoginScope scope;
+        CHECK_FALSE(script_logon_allowed(AutoSource::wpad, false, true));
+        CHECK_FALSE(script_logon_allowed(AutoSource::pac, true, true));
+    }
+    CHECK(script_logon_allowed(AutoSource::pac, true, false));
+}
