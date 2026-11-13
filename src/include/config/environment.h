@@ -89,7 +89,7 @@ EnvLookup process_env();
 void set_process_env(const char* name, const std::string& value);
 void unset_process_env(const char* name);
 /// Returns the variable's value (also its lower-case spelling outside Windows) and removes it from the C runtime's copy
-/// of the environment, which getenv (and so libffl) reads. On Windows the process environment block keeps it, so child
+/// of the environment, the one the C library lookup (and so libffl) reads. On Windows the process environment block keeps it, so child
 /// processes still inherit it unchanged. The proxy variables, which fairyfly ranks itself (include/link/proxy_config.h).
 std::string take_from_runtime_view(const char* name);
 /// Environment::process().read_only_cap().
