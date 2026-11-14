@@ -28,9 +28,18 @@ struct ResolvedLogin {
 
 using OpenFileFn = std::function<std::unique_ptr<std::istream>(const std::string& path)>;
 
+/// Why a stored entry cannot be used for logon ("no SAP user", "no SAP client"); empty when it can.
+/// Editing an entry in the Windows Credential Manager window drops fairyfly's client attribute.
+std::vector<std::string> stored_credential_problems(const CredentialSummary& meta);
+
+/// `value` as one copy-pasteable command argument: plain names unchanged, others in double quotes,
+/// "<name>" when quoting cannot make it safe for both PowerShell and cmd.
+std::string shell_argument(const std::string& value);
+
 /// Order: stdin, credentials file (deprecated), credential store (credential_name or
 /// default_connection). There is deliberately no implicit credential-file fallback.
-/// Errors: CREDENTIALS_NOT_FOUND, CREDENTIAL_FILE_UNAVAILABLE, INVALID_CREDENTIAL_FILE,
+/// Errors: CREDENTIALS_NOT_FOUND, CREDENTIALS_INCOMPLETE (stored entry without user or
+/// three-digit client), CREDENTIAL_FILE_UNAVAILABLE, INVALID_CREDENTIAL_FILE,
 /// CREDENTIAL_STORE_UNAVAILABLE, CREDENTIAL_STORE_ERROR.
 ResultT<ResolvedLogin> resolve_login_credentials(const LoginSource& source,
                                                  const std::string& default_connection,

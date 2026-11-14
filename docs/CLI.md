@@ -203,6 +203,12 @@ After importing a plaintext file, change the SAP password: the old one was on di
 `import-env` need a console or piped stdin (`CREDENTIALS_PROMPT_UNAVAILABLE` inside `batch`). They are allowed under
 `--read-only` because they do not touch SAP, and they are audited.
 
+Change a stored password only with `credentials set`, not in the Windows Credential Manager window: that window rewrites
+the entry without fairyfly's client and language. Login (also automatic login) refuses an entry without user or
+three-digit client with `CREDENTIALS_INCOMPLETE` before it fills the logon screen; `credentials list` marks such
+entries with `warnings`, and `doctor` reports them as `saved_credentials`. Repair with
+`fairyfly credentials set <name> --user <USER> --client <CLIENT>`.
+
 `session login [--connection <id>]` logs on to an open logon screen with credentials from exactly one source:
 
 - `--credential NAME`: a stored entry;

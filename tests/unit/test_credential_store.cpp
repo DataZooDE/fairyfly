@@ -211,6 +211,22 @@ TEST_CASE("credentials list and delete work against an injected store", "[cred][
     REQUIRE(handler.handle_credentials_delete("Bigfox").error.at("code") == "CREDENTIALS_NOT_FOUND");
 }
 
+TEST_CASE("credentials list warns only on entries login would refuse", "[cred][cli]") {
+    fairyfly::cli::CommandHandler handler(std::make_unique<InMemoryCredentialStore>());
+    handler.credential_store().write("Bigfox", CredentialSummary{"", "DEVELOPER", "", "", ""}, SecretBuffer(std::string("pw")));
+    handler.credential_store().write("Other", CredentialSummary{"", "DEVELOPER", "001", "EN", ""}, SecretBuffer(std::string("pw")));
+    const auto listed = handler.handle_credentials_list();
+    REQUIRE(listed.data.at("count") == 2);
+    for (const auto& entry : listed.data.at("credentials")) {
+        if (entry.at("connection") == "Bigfox") {
+            REQUIRE(entry.at("warnings").size() == 1);
+            CHECK(entry.at("warnings").at(0).get<std::string>().rfind("no SAP client", 0) == 0);
+        } else {
+            CHECK_FALSE(entry.contains("warnings"));
+        }
+    }
+}
+
 TEST_CASE("the credentials command has no password option", "[cred][cli]") {
     CLI::App app;
     auto command = fairyfly::commands::create_credentials_command();

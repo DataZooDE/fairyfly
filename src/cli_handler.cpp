@@ -477,7 +477,7 @@ Result CommandHandler::prepare_default_session(const startup::Policy& policy) {
                 if (current.default_connection != policy.default_connection)
                     return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
                 if (auto denied = startup::check(current)) return *denied;
-                return startup_attempts_ ? startup_attempts_->begin(startup::LoginAttempts::credential_key(identity))
+                return startup_attempts_ ? startup_attempts_->begin_login(identity)
                     : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
             };
             return handle_login("", args.at("connection").get<int>(), false, "", "fail");
@@ -968,6 +968,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
             return file;
         });
     if (resolved.status != ResultT<cred::ResolvedLogin>::Status::Success) {
+        spdlog::warn("SAP login refused before filling the logon screen: {}", resolved.error.value("code", ""));
         result.status = Result::Status::Error;
         result.error = login_target_guard_ && login_guard_redacts_errors_
             ? json{{"code", "OWNER_SESSION_UNAVAILABLE"},
@@ -982,6 +983,17 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         ~CredentialScrubber() { cred::scrub_login_credentials(credentials); }
     } scrubber{credentials};
     for (const auto& warning : resolved.value.warnings) spdlog::warn("{}", warning);
+    // Every source must name the client: filling an empty one blanks the screen's client field.
+    if (!valid_sap_user(credentials.username) || !valid_sap_client(credentials.client)) {
+        spdlog::warn("SAP login refused before filling the logon screen: CREDENTIALS_INCOMPLETE");
+        result.status = Result::Status::Error;
+        result.error = login_target_guard_ && login_guard_redacts_errors_
+            ? json{{"code", "OWNER_SESSION_UNAVAILABLE"}, {"message", "the requested SAP logon is unavailable"}}
+            : json{{"code", "CREDENTIALS_INCOMPLETE"},
+                   {"message", "The login credentials have no SAP user or three-digit client"},
+                   {"suggestions", json::array({"fairyfly credentials set <CONNECTION> --user <USER> --client <CLIENT>"})}};
+        return result;
+    }
 
     const auto owner_login_allowed = [&] { return owner_login_permitted(selected.value, credentials); };
     bool password_typed = false;
@@ -1032,6 +1044,7 @@ Result CommandHandler::handle_login(const std::string& credentials_file,
         }
         catch (...) { permission = Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection failed. Log in manually."); }
         if (permission.status != Result::Status::Success) {
+            spdlog::warn("Automatic SAP login refused before submission: {}", permission.error.value("code", ""));
             engine_->fill_field(ElementId("@active/usr/pwdRSYST-BCODE"), "");
             return permission;
         }

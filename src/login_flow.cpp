@@ -18,6 +18,34 @@ bool has_password_field(const nlohmann::json& screen) {
 }
 } // namespace
 
+bool valid_sap_client(std::string_view client) {
+    return client.size() == 3 && std::all_of(client.begin(), client.end(), [](unsigned char c) { return std::isdigit(c); });
+}
+
+namespace {
+// Unicode White_Space code points outside ASCII, as UTF-8 byte sequences.
+constexpr std::string_view kUnicodeBlanks[] = {
+    "\xC2\x85", "\xC2\xA0", "\xE1\x9A\x80", "\xE2\x80\x80", "\xE2\x80\x81", "\xE2\x80\x82", "\xE2\x80\x83",
+    "\xE2\x80\x84", "\xE2\x80\x85", "\xE2\x80\x86", "\xE2\x80\x87", "\xE2\x80\x88", "\xE2\x80\x89", "\xE2\x80\x8A",
+    "\xE2\x80\x8B", "\xE2\x80\xA8", "\xE2\x80\xA9", "\xE2\x80\xAF", "\xE2\x81\x9F", "\xE3\x80\x80", "\xEF\xBB\xBF"};
+} // namespace
+
+bool valid_sap_user(std::string_view user) {
+    while (!user.empty()) {
+        const auto lead = static_cast<unsigned char>(user.front());
+        if (lead < 0x80) {
+            if (!std::isspace(lead)) return true;
+            user.remove_prefix(1);
+            continue;
+        }
+        const auto blank = std::find_if(std::begin(kUnicodeBlanks), std::end(kUnicodeBlanks),
+                                        [&](std::string_view b) { return user.starts_with(b); });
+        if (blank == std::end(kUnicodeBlanks)) return true;
+        user.remove_prefix(blank->size());
+    }
+    return false;
+}
+
 LoginCredentials parse_login_credentials(std::istream& input) {
     LoginCredentials credentials;
     std::string line;
@@ -39,9 +67,7 @@ LoginCredentials parse_login_credentials(std::istream& input) {
         else if (key == "System ID") credentials.client = value;
         else if (key == "Language") credentials.language = value;
     }
-    if (credentials.username.empty() || credentials.password.empty() ||
-        credentials.client.size() != 3 ||
-        !std::all_of(credentials.client.begin(), credentials.client.end(), [](unsigned char c) { return std::isdigit(c); }) ||
+    if (credentials.username.empty() || credentials.password.empty() || !valid_sap_client(credentials.client) ||
         credentials.language.empty()) {
         throw std::invalid_argument("Credential file needs Username, Password, a three-digit System ID, and optional Language");
     }

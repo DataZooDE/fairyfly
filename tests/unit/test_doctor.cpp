@@ -3,6 +3,7 @@
 #include "include/packaging.h"
 #include "include/cli_handler.h"
 #include "include/credential_store.h"
+#include "include/doctor_checks.h"
 #include "support/fake_engine.h"
 #include "support/temp_dir.h"
 
@@ -52,6 +53,7 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
             if (name == "approval_notifications") notifications = check;
             if (name == "version") version = check;
             if (name == "data_dir") CHECK(check["status"] == "pass");   // the test run's own data directory
+            if (name == "saved_credentials") CHECK(check["status"] == "info");  // the injected store is empty
         }
 
         REQUIRE(has_desktop);
@@ -76,4 +78,19 @@ TEST_CASE("CommandHandler::handle_doctor diagnostics", "[cli][doctor]") {
         CHECK(sessions["status"] == "pass");
         CHECK(sessions["message"].get<std::string>().find("1 connections, 2 sessions") != std::string::npos);
     }
+}
+
+TEST_CASE("doctor judges saved credentials by count, without target names", "[cli][doctor]") {
+    using cred::CredentialSummary;
+    CHECK(doctor::judge_saved_credentials({}).status == "info");
+    const auto ok = doctor::judge_saved_credentials({CredentialSummary{"Bigfox", "DEVELOPER", "001", "EN", ""}});
+    CHECK(ok.status == "pass");
+    const auto incomplete = doctor::judge_saved_credentials(
+        {CredentialSummary{"Bigfox", "DEVELOPER", "", "", ""}, CredentialSummary{"Other", "DEVELOPER", "001", "EN", ""}});
+    CHECK(incomplete.status == "warn");
+    CHECK(incomplete.code == "CREDENTIALS_INCOMPLETE");
+    CHECK(incomplete.message == "1 of 2 saved SAP logon credential(s) have no SAP user or client");
+    const std::string all = doctor::to_json(incomplete).dump();
+    CHECK(all.find("Bigfox") == std::string::npos);
+    CHECK(all.find("Other") == std::string::npos);
 }

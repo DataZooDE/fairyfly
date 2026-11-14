@@ -5,6 +5,7 @@
 // No secret is ever put into a Result, a log line or an exception message.
 #include "include/cli_handler.h"
 #include "include/console_prompt.h"
+#include "include/credential_resolver.h"
 #include "include/login_flow.h"
 #include <spdlog/spdlog.h>
 #include <algorithm>
@@ -18,11 +19,6 @@ namespace cli {
 namespace {
 
 Result store_error(const cred::CredentialError& e) { return Result::fail(e.code(), e.what()); }
-
-bool valid_client(const std::string& client) {
-    return client.size() == 3 &&
-           std::all_of(client.begin(), client.end(), [](unsigned char c) { return std::isdigit(c); });
-}
 
 Result prompt_unavailable(const char* command) {
     Result result = Result::fail("CREDENTIALS_PROMPT_UNAVAILABLE",
@@ -43,8 +39,8 @@ Result CommandHandler::handle_credentials_set(const std::string& connection, con
     if (cred::trim_connection_name(connection).empty()) {
         return Result::fail("INVALID_ARGUMENT", "A connection name is required");
     }
-    if (user.empty()) return Result::fail("INVALID_ARGUMENT", "--user is required");
-    if (!valid_client(client)) return Result::fail("INVALID_ARGUMENT", "--client must be a three-digit SAP client");
+    if (!valid_sap_user(user)) return Result::fail("INVALID_ARGUMENT", "--user is required");
+    if (!valid_sap_client(client)) return Result::fail("INVALID_ARGUMENT", "--client must be a three-digit SAP client");
 
     try {
         cred::SecretBuffer password;
@@ -83,7 +79,14 @@ Result CommandHandler::handle_credentials_list()
         result.status = Result::Status::Success;
         result.data["credentials"] = nlohmann::json::array();
         const auto entries = credential_store().list();
-        for (const auto& entry : entries) result.data["credentials"].push_back(entry.to_json());
+        for (const auto& entry : entries) {
+            auto item = entry.to_json();
+            if (const auto problems = cred::stored_credential_problems(entry); !problems.empty()) {
+                item["warnings"] = nlohmann::json::array();
+                for (const auto& problem : problems) item["warnings"].push_back(problem + ": login will refuse; repair with `fairyfly credentials set`");
+            }
+            result.data["credentials"].push_back(std::move(item));
+        }
         result.data["count"] = entries.size();
         return result;
     } catch (const cred::CredentialError& e) {

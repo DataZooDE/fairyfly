@@ -1,5 +1,8 @@
 #include "include/credential_resolver.h"
 
+#include <algorithm>
+#include <cctype>
+
 namespace fairyfly::cred {
 
 namespace {
@@ -27,6 +30,22 @@ Resolved parse_source(std::istream& stream, const char* source) {
 }
 
 } // namespace
+
+std::string shell_argument(const std::string& value) {
+    const bool plain = !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) {
+        return std::isalnum(c) || c == '-' || c == '_' || c == '.' || c >= 0x80;
+    });
+    if (plain) return value;
+    if (value.empty() || value.find_first_of("\"`$%") != std::string::npos) return "<name>";
+    return "\"" + value + "\"";
+}
+
+std::vector<std::string> stored_credential_problems(const CredentialSummary& meta) {
+    std::vector<std::string> problems;
+    if (!valid_sap_user(meta.username)) problems.push_back("no SAP user");
+    if (!valid_sap_client(meta.client)) problems.push_back("no SAP client");
+    return problems;
+}
 
 void scrub_login_credentials(LoginCredentials& credentials) noexcept {
     scrub_string(credentials.password);
@@ -57,6 +76,21 @@ ResultT<ResolvedLogin> resolve_login_credentials(const LoginSource& source,
         try {
             std::optional<StoredCredential> stored = store.read(name);
             if (stored) {
+                // Refuse before any logon field is filled: an empty client would blank the logon screen's
+                // client and leave the automatic-login guard without an SAP identity.
+                if (const auto problems = stored_credential_problems(stored->meta); !problems.empty()) {
+                    std::string what = problems.front();
+                    for (std::size_t i = 1; i < problems.size(); ++i) what += " and " + problems[i];
+                    std::string user = valid_sap_user(stored->meta.username) ? shell_argument(stored->meta.username) : "<USER>";
+                    if (user == "<name>") user = "<USER>";
+                    return failure("CREDENTIALS_INCOMPLETE",
+                                   "Stored credentials for '" + name + "' have " + what +
+                                       "; the entry was probably edited outside fairyfly",
+                                   nlohmann::json::array(
+                                       {"fairyfly credentials set " + shell_argument(name) + " --user " + user + " --client <CLIENT>",
+                                        "Edit fairyfly entries only with `fairyfly credentials set`: the Windows "
+                                        "Credential Manager window removes the SAP client"}));
+                }
                 Resolved result;
                 result.status = Resolved::Status::Success;
                 result.value.source = "credential-manager";
@@ -73,7 +107,7 @@ ResultT<ResolvedLogin> resolve_login_credentials(const LoginSource& source,
         }
     }
 
-    const std::string shown = name.empty() ? "<name>" : name;
+    const std::string shown = shell_argument(name);
     return failure("CREDENTIALS_NOT_FOUND",
                    name.empty() ? "No credentials given and no connection name to look them up by"
                                 : "No stored credentials for connection '" + name + "'",

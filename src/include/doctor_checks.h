@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include "include/config/data_dir.h"
+#include "include/credential_store.h"
 #include "include/packaging.h"
 
 #include <cstddef>
@@ -59,6 +60,10 @@ Check judge_proxy(const ProxyFacts& facts);
 /// The proxy check without the connection test and without names (gui_doctor over MCP, batch): state is
 /// "configured" (through a proxy), "direct" or "failing" (the route cannot be determined); info, warn when failing.
 Check judge_proxy_summary(const std::string& state);
+/// The saved logon credentials (cred::stored_credential_problems): warn (CREDENTIALS_INCOMPLETE) when an entry has no
+/// SAP user or client, which `session login` and automatic login refuse. Counts only: no target names, since HTTP
+/// callers may not see the credential listing.
+Check judge_saved_credentials(const std::vector<cred::CredentialSummary>& entries);
 
 struct ProcessScan {
     bool logon = false;  ///< saplogon.exe

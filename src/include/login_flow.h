@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <nlohmann/json.hpp>
 
 namespace fairyfly {
@@ -17,6 +18,10 @@ struct LoginCredentials {
     std::string language = "EN";
 };
 
+/// An SAP client is exactly three ASCII digits (e.g. "001").
+bool valid_sap_client(std::string_view client);
+/// An SAP user name is not empty or blank (ASCII or Unicode whitespace, UTF-8).
+bool valid_sap_user(std::string_view user);
 LoginCredentials parse_login_credentials(std::istream& input);
 bool is_sap_logon_screen(const nlohmann::json& screen);
 bool sap_logon_completed(const nlohmann::json& screen);
