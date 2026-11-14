@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A saved logon credential without SAP user or client (editing a `fairyfly:<name>` entry in the Windows Credential
+  Manager window drops the client) is refused with `CREDENTIALS_INCOMPLETE` and a `fairyfly credentials set` repair
+  command before anything is typed into the logon screen. Automatic login used to fill an empty client and then fail
+  with the misleading `SAP_LOGIN_GUARD_UNAVAILABLE`, which the tray's `link.log` now explains (the missing system,
+  client or user, or the data directory). `credentials list` warns on such entries and `fairyfly doctor` has a
+  `saved_credentials` check (counts only).
 - Development builds are marked: a build not made from its release tag `vYYYY.MM.DD[.N]` shows `<base>-dev+<short commit>`
   (e.g. `2026.11.09-dev+268d4b9`) in `fairyfly --version`, the trays, `fairyfly doctor` (check and field `version`), the
   first line of the tray logs, the audit records, MCP `serverInfo` and the version the link reports to the gateway
