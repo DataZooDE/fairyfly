@@ -295,6 +295,8 @@ The endpoint must expose the session lifecycle tools needed for preparation.
 | `SAP_AUTOSTART_DEFAULT_MISSING` | Configure the local SAP Logon entry with `fairyfly session default "<name>"`. |
 | `SAP_STARTUP_BUSY` | Another process is preparing SAP. Wait briefly and inspect/retry the task. |
 | `SAP_LOGIN_REQUIRED` | Complete login or SSO locally before retrying; automatic credential submission is blocked after an uncertain or failed attempt. The block is per SAP account and shared across tokens, connection aliases and transports. |
+| `CREDENTIALS_INCOMPLETE` | The stored entry has no SAP user or client (usually edited in the Windows Credential Manager window). Repair it locally with `fairyfly credentials set <name> --user <USER> --client <CLIENT>`. Nothing was typed into SAP and no attempt was recorded. |
+| `SAP_LOGIN_GUARD_UNAVAILABLE` | The attempt could not be recorded, so no password was submitted. The tray's `link.log` names the reason (an unknown SAP system, client or user, or the data directory). Log in manually. |
 | `SAP_STARTUP_REQUIRES_ATTENTION` | Inspect SAP Logon and the local default, start the intended session and log in manually, then retry. A durable marker prevents another window after an incomplete launch; a verified successful login clears it. |
 
 Credentials stay on the desktop. A login attempt is recorded before submission to prevent repeated automatic

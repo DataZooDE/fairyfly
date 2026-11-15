@@ -1,6 +1,7 @@
 #include "include/startup_coordination.h"
 #include "include/auth/crypto.h"
 #include "include/string_utils.h"
+#include <spdlog/spdlog.h>
 #include <algorithm>
 #include <mutex>
 #ifdef _WIN32
@@ -62,6 +63,24 @@ std::string LoginAttempts::credential_key(const std::string& identity) {
         second + 1 == identity.size() || identity.find('/', second + 1) != std::string::npos) return {};
     // Account lockout counts across callers, connection aliases and transports.
     return "sap-credential-identity\n" + identity;
+}
+std::string LoginAttempts::missing_identity_part(const std::string& identity) {
+    const auto first = identity.find('/');
+    const auto second = first == std::string::npos ? first : identity.find('/', first + 1);
+    if (second == std::string::npos || identity.find('/', second + 1) != std::string::npos) return "identity";
+    if (first == 0) return "system";
+    if (second == first + 1) return "client";
+    if (second + 1 == identity.size()) return "user";
+    return {};
+}
+Result LoginAttempts::begin_login(const std::string& identity) {
+    const auto key = credential_key(identity);
+    if (key.empty())
+        spdlog::warn("Automatic SAP login refused: the SAP {} of the login is unknown", missing_identity_part(identity));
+    auto result = begin(key);
+    if (!key.empty() && result.status == Result::Status::Error && result.error.value("code", "") == "SAP_LOGIN_GUARD_UNAVAILABLE")
+        spdlog::warn("Automatic SAP login refused: the attempt could not be recorded in the data directory");
+    return result;
 }
 bool LoginAttempts::has_login_attempts() const {
     if (root_.empty() || !root_.is_absolute()) return false;

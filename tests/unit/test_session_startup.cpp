@@ -5,8 +5,26 @@
 #include "include/session_preparation.h"
 #include "include/startup_coordination.h"
 #include "support/temp_dir.h"
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/ringbuffer_sink.h>
+#include <fstream>
 #include <thread>
 #include <map>
+
+namespace {
+// Routes the default logger into memory for one test and restores it afterwards.
+struct CapturedLog {
+    std::shared_ptr<spdlog::sinks::ringbuffer_sink_mt> sink = std::make_shared<spdlog::sinks::ringbuffer_sink_mt>(32);
+    std::shared_ptr<spdlog::logger> previous = spdlog::default_logger();
+    CapturedLog() { spdlog::set_default_logger(std::make_shared<spdlog::logger>("captured", sink)); }
+    ~CapturedLog() { spdlog::set_default_logger(previous); }
+    std::string text() const {
+        std::string all;
+        for (const auto& line : sink->last_formatted()) all += line;
+        return all;
+    }
+};
+} // namespace
 
 using fairyfly::startup::Policy;
 using fairyfly::startup::check;
@@ -22,9 +40,40 @@ TEST_CASE("Automatic login attempts survive a new store instance and require man
     CHECK(first.begin("Bigfox").status == fairyfly::Result::Status::Success);
 }
 
+TEST_CASE("Automatic login names the missing part of an incomplete SAP identity", "[startup][startup-coordination]") {
+    using fairyfly::startup::LoginAttempts;
+    CHECK(LoginAttempts::missing_identity_part("A4H/001/DEVELOPER").empty());
+    CHECK(LoginAttempts::missing_identity_part("/001/DEVELOPER") == "system");
+    CHECK(LoginAttempts::missing_identity_part("A4H//DEVELOPER") == "client");
+    CHECK(LoginAttempts::missing_identity_part("A4H/001/") == "user");
+    CHECK(LoginAttempts::missing_identity_part("A4H/001") == "identity");
+    CHECK(LoginAttempts::missing_identity_part("A4H/001/DEV/X") == "identity");
+
+    fairyfly::test::TempDir temp{"startup-identity"};
+    LoginAttempts attempts(temp.path());
+    {
+        CapturedLog log;
+        CHECK(attempts.begin_login("A4H//DEVELOPER").error.value("code", "") == "SAP_LOGIN_GUARD_UNAVAILABLE");
+        CHECK(log.text().find("the SAP client of the login is unknown") != std::string::npos);
+        CHECK(log.text().find("DEVELOPER") == std::string::npos);
+    }
+    CHECK_FALSE(attempts.has_login_attempts());
+    REQUIRE(attempts.begin_login("A4H/001/DEVELOPER").status == fairyfly::Result::Status::Success);
+    CHECK(attempts.pending(LoginAttempts::credential_key("A4H/001/DEVELOPER")));
+}
+
 TEST_CASE("Automatic login refuses if its retry protection cannot be persisted", "[startup][startup-coordination]") {
     fairyfly::startup::LoginAttempts missing({});
     CHECK(missing.begin("Bigfox").status == fairyfly::Result::Status::Error);
+
+    // A data directory that cannot hold the marker: a plain file where the marker tree must go.
+    fairyfly::test::TempDir temp{"startup-unwritable"};
+    { std::ofstream(temp.path() / "startup-login-attempts") << "not a directory"; }
+    fairyfly::startup::LoginAttempts blocked(temp.path());
+    CapturedLog log;
+    CHECK(blocked.begin_login("A4H/001/DEVELOPER").error.value("code", "") == "SAP_LOGIN_GUARD_UNAVAILABLE");
+    CHECK(log.text().find("could not be recorded in the data directory") != std::string::npos);
+    CHECK(log.text().find("DEVELOPER") == std::string::npos);
 }
 
 TEST_CASE("Preparation lock is bounded and observes cancellation", "[startup][startup-coordination]") {

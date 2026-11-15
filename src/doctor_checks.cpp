@@ -1,5 +1,6 @@
 #include "include/doctor_checks.h"
 
+#include "include/credential_resolver.h"
 #include "include/string_utils.h"
 
 #include <fmt/format.h>
@@ -107,6 +108,24 @@ Check judge_notifications(packaging::Package build, const std::string& app_id) {
                 "The package's tray application; its manifest declares the toast activator (nothing is registered in HKCU)."};
     return {"approval_notifications", "pass", "Approval notifications as " + app_id,
             "Registered in HKCU (AppUserModelId and the toast activator's LocalServer32) when the cloud link starts."};
+}
+
+Check judge_saved_credentials(const std::vector<cred::CredentialSummary>& entries) {
+    if (entries.empty())
+        return {"saved_credentials", "info", "No saved SAP logon credentials",
+                "Automatic login and `session login` without a flag need one named like the connection.",
+                "fairyfly credentials set <CONNECTION> --user <USER> --client <CLIENT>"};
+    const auto incomplete = std::count_if(entries.begin(), entries.end(),
+                                          [](const auto& entry) { return !cred::stored_credential_problems(entry).empty(); });
+    if (incomplete == 0)
+        return {"saved_credentials", "pass", fmt::format("{} saved SAP logon credential(s) with user and client", entries.size())};
+    return {"saved_credentials", "warn",
+            fmt::format("{} of {} saved SAP logon credential(s) have no SAP user or client", incomplete, entries.size()),
+            "Login refuses them before filling the logon screen. Editing an entry in the Windows Credential Manager window "
+            "removes fairyfly's client.",
+            "Run `fairyfly credentials list` to see which, then `fairyfly credentials set <CONNECTION> --user <USER> --client "
+            "<CLIENT>`.",
+            "CREDENTIALS_INCOMPLETE"};
 }
 
 Check judge_processes(const ProcessScan& scan) {

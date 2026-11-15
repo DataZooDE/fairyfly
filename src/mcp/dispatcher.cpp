@@ -1587,7 +1587,7 @@ Result CommandDispatcher::prepare_implicit_session(const CallContext& ctx, std::
                 if (current.default_connection != policy.default_connection)
                     return Result::fail("SAP_STARTUP_CONFIG_CHANGED", "The default SAP connection changed; retry the task.");
                 if (auto denied = startup::check(current)) return *denied;
-                return startup_attempts_ ? startup_attempts_->begin(startup::LoginAttempts::credential_key(identity))
+                return startup_attempts_ ? startup_attempts_->begin_login(identity)
                     : Result::fail("SAP_LOGIN_GUARD_UNAVAILABLE", "Automatic login retry protection is unavailable. Log in manually.");
             });
             reset.installed = true;

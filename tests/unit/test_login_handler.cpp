@@ -72,6 +72,10 @@ struct LoginRig {
         engine->server_key = "key-1";
         auto store = std::make_unique<cred::InMemoryCredentialStore>();
         store->write("S4H", cred::CredentialSummary{"", "ALICE", "100", "EN", ""}, cred::SecretBuffer(std::string("pw-1")));
+        // As left by the Windows Credential Manager window: user and password kept, fairyfly's client dropped.
+        store->write("S4H-no-client", cred::CredentialSummary{"", "ALICE", "", "", ""}, cred::SecretBuffer(std::string("pw-1")));
+        store->write("S4H-bad-client", cred::CredentialSummary{"", "ALICE", "10", "EN", ""}, cred::SecretBuffer(std::string("pw-1")));
+        store->write("S4H-blank-user", cred::CredentialSummary{"", "   ", "100", "EN", ""}, cred::SecretBuffer(std::string("pw-1")));
         handler = std::make_unique<cli::CommandHandler>(std::move(store), std::move(fake),
                                                         std::make_unique<cli::ConnectionManager>(dir.path().string()));
         handler->set_login_target_guard([this](const audit::SapFacts&, const std::string& name) {
@@ -149,6 +153,35 @@ TEST_CASE("Missing credentials do not record an automatic login attempt", "[logi
     CHECK(rig.engine->count("click_element") == 0);
 }
 
+TEST_CASE("A stored credential without a client is refused before the logon screen is touched", "[login][startup][startup-submit]") {
+    LoginRig rig;
+    int attempts = 0;
+    rig.handler->set_login_submit_guard([&](const std::string&) { ++attempts; return Result::ok(); });
+    SECTION("with the default (redacting) owner guard") {
+        const auto result = rig.handler->handle_login("", 0, false, "S4H-no-client", "fail");
+        CHECK(code(result) == "OWNER_SESSION_UNAVAILABLE");
+        const std::string all = result.error.dump() + result.data.dump();
+        CHECK(all.find("S4H-no-client") == std::string::npos);
+        CHECK(all.find("ALICE") == std::string::npos);
+        CHECK(all.find("pw-1") == std::string::npos);
+    }
+    SECTION("with an owner guard that keeps actionable errors") {
+        rig.handler->set_login_target_guard([](const audit::SapFacts&, const std::string&) { return true; }, false);
+        const auto result = rig.handler->handle_login("", 0, false, "S4H-no-client", "fail");
+        CHECK(code(result) == "CREDENTIALS_INCOMPLETE");
+        REQUIRE(result.error.contains("suggestions"));
+        CHECK(result.error.at("suggestions").at(0) == "fairyfly credentials set S4H-no-client --user ALICE --client <CLIENT>");
+        CHECK(result.error.dump().find("pw-1") == std::string::npos);
+    }
+    SECTION("an invalid client or a blank user, without an owner guard") {
+        rig.handler->set_login_target_guard({});
+        CHECK(code(rig.handler->handle_login("", 0, false, "S4H-bad-client", "fail")) == "CREDENTIALS_INCOMPLETE");
+        CHECK(code(rig.handler->handle_login("", 0, false, "S4H-blank-user", "fail")) == "CREDENTIALS_INCOMPLETE");
+    }
+    CHECK(attempts == 0);
+    CHECK(rig.actions().empty());  // in particular RSYST-MANDT is never blanked
+}
+
 TEST_CASE("Recovery login retains actionable credential and identity errors", "[login][startup][startup-recovery-errors]") {
     LoginRig rig;
     rig.handler->set_login_target_guard([](const audit::SapFacts&, const std::string&) { return false; }, false);
@@ -160,6 +193,23 @@ TEST_CASE("Recovery login retains actionable credential and identity errors", "[
         CHECK(code(rig.login()) == "SESSION_TARGET_CHANGED");
     }
     CHECK(rig.actions().empty());
+}
+
+TEST_CASE("Automatic login records the SAP identity's attempt before submission and keeps it after a failure", "[login][startup][startup-submit]") {
+    LoginRig rig;
+    startup::LoginAttempts attempts(rig.dir.path());
+    std::string seen;
+    rig.handler->set_login_submit_guard([&](const std::string& identity) { seen = identity; return attempts.begin_login(identity); });
+    bool marked_at_submit = false;
+    rig.engine->on_call = [&](const std::string& call) {
+        if (call != "click_element @active/tbar[0]/btn[0]") return;
+        marked_at_submit = attempts.pending(startup::LoginAttempts::credential_key("S4H/100/ALICE"));
+        rig.engine->next = Result::fail("SUBMIT_FAILED", "Submission outcome is unknown.");
+    };
+    CHECK(rig.login().status == Result::Status::Error);
+    CHECK(seen == "S4H/100/ALICE");
+    CHECK(marked_at_submit);
+    CHECK(attempts.begin_login("S4H/100/ALICE").error.value("code", "") == "SAP_LOGIN_REQUIRED");
 }
 
 TEST_CASE("A failed credential submission retains its automatic retry block", "[login][startup][startup-submit]") {

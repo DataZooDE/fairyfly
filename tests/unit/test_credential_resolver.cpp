@@ -120,6 +120,70 @@ TEST_CASE("resolver reports CREDENTIALS_NOT_FOUND with a suggestion and never re
     REQUIRE(calls == 0);
 }
 
+TEST_CASE("resolver refuses a stored entry without user or three-digit client", "[cred][resolver]") {
+    InMemoryCredentialStore store;
+    store.write("NoClient", CredentialSummary{"", "DEVELOPER", "", "", ""}, SecretBuffer(std::string("store-pw")));
+    store.write("BadClient", CredentialSummary{"", "DEVELOPER", "1", "EN", ""}, SecretBuffer(std::string("store-pw")));
+    store.write("NoUser", CredentialSummary{"", "", "001", "EN", ""}, SecretBuffer(std::string("store-pw")));
+    store.write("NoLanguage", CredentialSummary{"", "DEVELOPER", "001", "", ""}, SecretBuffer(std::string("store-pw")));
+    std::istringstream in;
+    int calls = 0;
+    const auto by_name = [&](const std::string& name) {
+        return resolve_login_credentials(LoginSource{}, name, store, in, no_file_expected(&calls));
+    };
+
+    const auto no_client = by_name("NoClient");
+    REQUIRE(no_client.status == Status::Error);
+    REQUIRE(no_client.error.at("code") == "CREDENTIALS_INCOMPLETE");
+    REQUIRE(no_client.error.at("message").get<std::string>().find("no SAP client") != std::string::npos);
+    REQUIRE(no_client.error.at("suggestions").at(0) == "fairyfly credentials set NoClient --user DEVELOPER --client <CLIENT>");
+    REQUIRE(no_client.error.dump().find("store-pw") == std::string::npos);
+    REQUIRE(by_name("BadClient").error.at("code") == "CREDENTIALS_INCOMPLETE");
+    const auto no_user = by_name("NoUser");
+    REQUIRE(no_user.error.at("code") == "CREDENTIALS_INCOMPLETE");
+    REQUIRE(no_user.error.at("suggestions").at(0) == "fairyfly credentials set NoUser --user <USER> --client <CLIENT>");
+
+    const auto no_language = by_name("NoLanguage");
+    REQUIRE(no_language.status == Status::Success);
+    REQUIRE(no_language.value.credentials.language == "EN");
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("stored_credential_problems names what a stored entry lacks", "[cred][resolver]") {
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "DEVELOPER", "001", "", ""}).empty());
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "DEVELOPER", "", "", ""}) ==
+            std::vector<std::string>{"no SAP client"});
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "", "00A", "", ""}) ==
+            std::vector<std::string>{"no SAP user", "no SAP client"});
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", " \t", "001", "", ""}) ==
+            std::vector<std::string>{"no SAP user"});
+    // No-break space and ideographic space only: blank. Non-ASCII letters: a real name.
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "\xC2\xA0\xE3\x80\x80 ", "001", "", ""}) ==
+            std::vector<std::string>{"no SAP user"});
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "\xC3\x9C" "BER", "001", "", ""}).empty());
+    REQUIRE(stored_credential_problems(CredentialSummary{"Bigfox", "\xE6\x9D\xB1", "001", "", ""}).empty());
+}
+
+TEST_CASE("repair hints quote connection names that would split on the command line", "[cred][resolver]") {
+    REQUIRE(shell_argument("Bigfox") == "Bigfox");
+    REQUIRE(shell_argument("A4H-dev_1.2") == "A4H-dev_1.2");
+    REQUIRE(shell_argument("Production SAP") == "\"Production SAP\"");
+    REQUIRE(shell_argument("a&b") == "\"a&b\"");
+    REQUIRE(shell_argument("say \"hi\"") == "<name>");
+    REQUIRE(shell_argument("$env:X") == "<name>");
+    REQUIRE(shell_argument("") == "<name>");
+
+    InMemoryCredentialStore store;
+    store.write("Production SAP", CredentialSummary{"", "DEVELOPER", "", "", ""}, SecretBuffer(std::string("store-pw")));
+    std::istringstream in;
+    int calls = 0;
+    const auto incomplete = resolve_login_credentials(LoginSource{}, "Production SAP", store, in, no_file_expected(&calls));
+    REQUIRE(incomplete.error.at("suggestions").at(0) ==
+            "fairyfly credentials set \"Production SAP\" --user DEVELOPER --client <CLIENT>");
+    const auto missing = resolve_login_credentials(LoginSource{}, "Test SAP", store, in, no_file_expected(&calls));
+    REQUIRE(missing.error.at("suggestions").at(0) == "fairyfly credentials set \"Test SAP\"");
+}
+
 TEST_CASE("resolver reports unreadable and malformed files", "[cred][resolver]") {
     InMemoryCredentialStore store;
     std::istringstream in;
