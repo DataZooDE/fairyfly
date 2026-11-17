@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.11.15
 
 - A saved logon credential without SAP user or client (editing a `fairyfly:<name>` entry in the Windows Credential
   Manager window drops the client) is refused with `CREDENTIALS_INCOMPLETE` and a `fairyfly credentials set` repair
