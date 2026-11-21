@@ -101,6 +101,11 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
         const auto before_status = target_is_active ? read_action_status(session, window_before)
                                                     : read_action_status(session);
 
+        // Issue #155: the screen before and after the key tells a navigation from a GUI that ignores input.
+        const ScreenSnapshot screen_before = snapshot_of(session);
+        bool busy_before = false;
+        try { busy_before = session->is_busy(); } catch (const std::exception&) {}
+
         target->send_vkey(vkey);
         session->wait_for_completion(500);
         // The window that is active after the key is also reported below: fetch it once.
@@ -119,6 +124,8 @@ Result ComAutomationEngine::send_key(int vkey, const std::string& window) {
         result.data["vkey"] = vkey;
         result.data["window"] = window_before;
         result.data["window_after"] = window_after;
+        result.data["screen_changed"] = screen_snapshot_changed(screen_before, snapshot_of(session));
+        result.data["busy_before"] = busy_before;
         result.duration = timer.elapsed();
         return result;
     } catch (const ComException& e) {

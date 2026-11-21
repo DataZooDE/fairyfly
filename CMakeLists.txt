@@ -148,6 +148,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # Core library sources (shared between main executable and tests)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
+    src/hang_detector.cpp
     src/startup_settings.cpp
     src/session_preparation.cpp
     src/startup_coordination.cpp
@@ -272,6 +273,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp
+    src/system/sap_gui_process.cpp
     src/system/process_probe.cpp
     src/system/cert_scripts.cpp
     src/setup/setup_validators.cpp

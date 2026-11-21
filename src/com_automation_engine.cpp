@@ -826,6 +826,10 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
 
         // 1. Snapshot previous statusbar state to guard against stale messages
         const ActionStatus prev_status = read_action_status(session);
+        // Issue #155: an idle session whose screen stays the same after the command is the mark of a hung GUI.
+        const ScreenSnapshot screen_before = snapshot_of(session);
+        bool busy_before = false;
+        try { busy_before = session->is_busy(); } catch (const std::exception&) {}
         const std::string prev_sbar_text = prev_status.text;
         const std::string prev_sbar_type = prev_status.type;
 
@@ -922,11 +926,16 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
                 }
                 result.error["tcode"] = tcode;
                 result.error["actual_tcode"] = actual_tcode;
+                bool busy_now = false;
+                try { busy_now = session->is_busy(); } catch (const std::exception&) {}
+                result.error["session_busy"] = busy_before || busy_now;
+                result.error["screen_changed"] = screen_snapshot_changed(screen_before, snapshot_of(session));
                 result.duration = timer.elapsed();
                 return result;
             }
         }
         result.data["actual_tcode"] = actual_tcode;
+        result.data["screen_changed"] = screen_snapshot_changed(screen_before, snapshot_of(session));
 
         result.status = Result::Status::Success;
         result.data["tcode"] = tcode;
@@ -949,10 +958,11 @@ Result ComAutomationEngine::execute_transaction(const std::string& tcode) {
     return result;
 }
 
-ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
+ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const { return snapshot_of(current_session_); }
+
+ScreenSnapshot ComAutomationEngine::snapshot_of(const ComGuiSessionPtr& session) {
     ScreenSnapshot snapshot;
     try {
-        auto session = current_session_;
         if (!session) return snapshot;
         bool window_known = false;
         if (auto window = session->get_active_window()) {
@@ -961,6 +971,8 @@ ScreenSnapshot ComAutomationEngine::capture_screen_snapshot() const {
             try { snapshot.title = window->get_title(); } catch (const std::exception&) {}
         }
         try { snapshot.transaction = session->get_transaction_code(); } catch (const std::exception&) {}
+        snapshot.program = session->get_program();
+        snapshot.screen_number = session->get_screen_number();
         snapshot.statusbar_text = (window_known ? read_action_status(session, snapshot.window_id)
                                                 : read_action_status(session)).text;
     } catch (const std::exception&) {

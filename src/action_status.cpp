@@ -251,7 +251,8 @@ TransactionRequest normalize_transaction_request(const std::string& input) {
 bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after) {
     return before.window_id != after.window_id || before.title != after.title ||
            before.transaction != after.transaction ||
-           before.statusbar_text != after.statusbar_text;
+           before.statusbar_text != after.statusbar_text || before.program != after.program ||
+           before.screen_number != after.screen_number;
 }
 
 bool warning_needs_confirmation(const std::string& text) {

@@ -96,6 +96,8 @@ public:
     std::map<std::wstring, IDispatch*> find_by_id;
     std::vector<IDispatch*> items;
     std::function<void()> on_select;
+    /// Called after a generic method in `methods` was recorded (name, argument text), e.g. to let SendVKey change the screen.
+    std::function<void(const std::wstring&, const std::wstring&)> on_method;
     std::map<std::wstring, int> reads;
     int select_calls = 0;
     // Collection round-trip counters: _NewEnum calls (served from items when enumerable) and
@@ -244,6 +246,7 @@ public:
                 else return DISP_E_TYPEMISMATCH;
             }
             calls.emplace_back(name, text);
+            if (on_method) on_method(name, text);
             if (failing_calls.count(name + L"(" + text + L")")) return DISP_E_EXCEPTION;
             auto returned = dispatches.find(name);
             if (result && returned != dispatches.end() && returned->second) {

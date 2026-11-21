@@ -2295,6 +2295,8 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
             retry_after_reattach(result, *spec, args, effective, argv, record, reattach_only_session, invoke_selected);
         }
         if (result.error.is_object()) result.error.erase("stale_connection");  // internal: never to the caller
+        if (auto restarted = observe_responsiveness(name, args, result, record, ctx, worker_bound, invoke_selected))
+            return *restarted;
     }
     note_step("invoke", name, principal.name, invoke_started, record.invoke_ms);
     const auto invoke_finished = std::chrono::steady_clock::now();
@@ -2372,6 +2374,41 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
     record.post_invoke_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - invoke_finished).count();
     return shaped;
+}
+
+std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
+    const std::string& name, const json& args, Result& result, McpCallRecord& record, const CallContext& ctx,
+    bool worker_bound, const std::function<Result(const std::vector<std::string>&)>& invoke_selected) {
+    (void)ctx;
+    (void)worker_bound;
+    (void)invoke_selected;
+    if (recovering_hang_) return std::nullopt;
+    const std::string key = record.connection ? std::to_string(*record.connection) : std::string("implicit");
+    if (result.status == Result::Status::Success &&
+        (name == "gui_session_launch" || name == "gui_session_login" || name == "gui_session_attach")) {
+        hang_detector_.reset(key);
+        return std::nullopt;
+    }
+    const auto verdict = hang_detector_.observe(key, hang::classify(name, args, result));
+    if (!verdict.tripped) return std::nullopt;
+
+    json frontend = json::object();
+    if (hang_recovery_.probe) {
+        try { frontend = hang_recovery_.probe(); } catch (...) {}
+    }
+    Result unresponsive = Result::fail(hang::kUnresponsiveCode,
+        "SAP GUI does not react: " + std::to_string(verdict.consecutive_noops) +
+        " navigations in a row left the screen unchanged although the session is not busy.");
+    unresponsive.error["evidence"] = verdict.evidence;
+    if (!frontend.empty()) unresponsive.error["frontend"] = frontend;
+    unresponsive.error["original_operation_run"] = true;
+    unresponsive.error["hint"] =
+        "the SAP GUI window ignores input (a hung frontend or a native dialog blocking it). Do not retry the same "
+        "navigation in a loop: ask the person at the desktop to close any open SAP dialog or restart SAP Logon, or call "
+        "gui_session_restart if it is available to you; then read the screen again.";
+    unresponsive.duration = result.duration;
+    result = std::move(unresponsive);
+    return std::nullopt;
 }
 
 ToolResult CommandDispatcher::invoke_and_finish(const std::string& name, McpCallRecord& record, std::string& code,
