@@ -5,6 +5,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <random>
 
@@ -371,7 +372,18 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
     return r;
 }
 
+namespace {
+std::atomic<int> g_deciding{0};   // questions being decided by any Broker of this process (issue #155)
+struct Deciding {
+    Deciding() { ++g_deciding; }
+    ~Deciding() { --g_deciding; }
+};
+}  // namespace
+
+bool any_pending() noexcept { return g_deciding.load() > 0; }
+
 Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
+    const Deciding deciding;
     using clock = std::chrono::steady_clock;
     auto within = options_.answer_within;
     if (prompt.answer_s > 0) within = std::min(within, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds(prompt.answer_s)));

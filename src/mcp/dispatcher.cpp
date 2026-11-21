@@ -2379,9 +2379,6 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
 std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
     const std::string& name, const json& args, Result& result, McpCallRecord& record, const CallContext& ctx,
     bool worker_bound, const std::function<Result(const std::vector<std::string>&)>& invoke_selected) {
-    (void)ctx;
-    (void)worker_bound;
-    (void)invoke_selected;
     if (recovering_hang_) return std::nullopt;
     const std::string key = record.connection ? std::to_string(*record.connection) : std::string("implicit");
     if (result.status == Result::Status::Success &&
@@ -2392,20 +2389,157 @@ std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
     const auto verdict = hang_detector_.observe(key, hang::classify(name, args, result));
     if (!verdict.tripped) return std::nullopt;
 
-    json frontend = json::object();
-    if (hang_recovery_.probe) {
-        try { frontend = hang_recovery_.probe(); } catch (...) {}
+    const auto probe = [this]() -> json {
+        if (!hang_recovery_.probe) return json::object();
+        try {
+            json frontend = hang_recovery_.probe();
+            return frontend.is_object() ? frontend : json::object();
+        } catch (...) { return json::object(); }
+    };
+    json frontend = probe();
+
+    // Soft recovery (issue #155, step 2): nothing is ended. Each step stops the recovery once the GUI reacts.
+    struct Recovering {
+        bool& flag;
+        explicit Recovering(bool& f) : flag(f) { flag = true; }
+        ~Recovering() { flag = false; }
+    } recovering(recovering_hang_);
+    std::vector<std::string> connection_args;
+    if (record.connection) connection_args = {"--connection", std::to_string(*record.connection)};
+    const auto run = [&](std::vector<std::string> argv) {
+        argv.insert(argv.end(), connection_args.begin(), connection_args.end());
+        try { return invoke_selected(argv); }
+        catch (const std::exception& e) { return Result::fail("INTERNAL_ERROR", e.what()); }
+    };
+    const auto screen_changed = [](const Result& r) {
+        return r.status == Result::Status::Success && (!r.data.is_object() || r.data.value("screen_changed", true));
+    };
+    json attempted = json::array();
+    std::string recovered_step;
+    bool input_lost = false;
+    const auto dialogs = frontend.value("native_dialogs", json::array());
+    if (dialogs.is_array() && !dialogs.empty() && hang_recovery_.dismiss_native_dialogs) {
+        attempted.push_back("native_dialog_cancel");
+        int sent = 0;
+        try { sent = hang_recovery_.dismiss_native_dialogs(); } catch (...) {}
+        if (sent > 0) {
+            const json after = probe();
+            const auto left = after.value("native_dialogs", json::array());
+            if ((!left.is_array() || left.empty()) && after.value("main_window_enabled", true))
+                recovered_step = "native_dialog_cancelled";
+        }
     }
+    if (recovered_step.empty()) {
+        attempted.push_back("popup_close");
+        const Result closed = run({"popup", "close"});
+        if (closed.status == Result::Status::Success) recovered_step = "popup_closed";
+    }
+    if (recovered_step.empty()) {
+        attempted.push_back("command_n");
+        if (screen_changed(run({"transaction", "start", "/n"}))) {
+            recovered_step = "command_n";
+            input_lost = true;
+        }
+    }
+    if (recovered_step.empty()) {
+        attempted.push_back("cancel");
+        if (screen_changed(run({"key", "send", "F12"}))) recovered_step = "cancel";
+    }
+
+    if (!recovered_step.empty()) {
+        hang_detector_.reset(key);
+        Result recovered = Result::fail(hang::kRecoveredCode,
+            "SAP GUI did not react to " + std::to_string(verdict.consecutive_noops) +
+            " navigations in a row; it reacts again after " + recovered_step + ".");
+        recovered.error["evidence"] = verdict.evidence;
+        if (!frontend.empty()) recovered.error["frontend"] = frontend;
+        recovered.error["recovery"] = {{"recovered", true}, {"step", recovered_step}, {"attempted", attempted},
+                                       {"unsaved_input_lost", input_lost}};
+        recovered.error["original_operation_run"] = true;
+        recovered.error["hint"] =
+            "the SAP GUI was blocked and reacts again; the screen may differ from what you expect: read the screen, "
+            "then decide whether to repeat the intended action.";
+        recovered.duration = result.duration;
+        result = std::move(recovered);
+        return std::nullopt;
+    }
+
+    // Restart (issue #155, step 3): only for the implicit local default, only with automatic SAP startup allowed (the
+    // tray checkbox / --allow-sap-startup, and over the link the gateway's grant), never while a desktop approval
+    // waits, and once per stuck episode.
+    std::string refusal;
+    json corrective = json::array();
+    if (!startup_policy_) {
+        refusal = "startup_unavailable";
+    } else if ((args.is_object() && args.contains("connection")) || policy_.default_connection) {
+        refusal = "explicit_connection";
+    } else if (worker_bound || owner_mode(ctx)) {
+        refusal = "owner_session";
+    } else if (!hang_recovery_.end_sap_gui) {
+        refusal = "restart_unavailable";
+    } else {
+        auto current = startup_policy_();
+        current.link_request = ctx.link_request;
+        current.gateway_allowed = ctx.sap_startup_granted;
+        bool waiting = false;
+        try { waiting = hang_recovery_.approval_pending && hang_recovery_.approval_pending(); } catch (...) { waiting = true; }
+        if (auto denied = startup::check(current)) {
+            refusal = denied->error.value("code", "SAP_AUTOSTART_DISABLED");
+            if (denied->error.contains("suggestions")) corrective = denied->error["suggestions"];
+        } else if (waiting) {
+            refusal = "approval_pending";
+        } else if (hang_detector_.restart_used()) {
+            refusal = "already_restarted";
+        }
+    }
+    json restart = {{"allowed", refusal.empty()}};
+    if (refusal.empty()) {
+        Result ended;
+        try { ended = hang_recovery_.end_sap_gui(); }
+        catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
+        if (ended.status == Result::Status::Success) {
+            hang_detector_.note_restart();
+            hang_detector_.reset(key);
+            routing_state_->clear_sticky(principal_key(ctx.principal));
+            std::string rerun_code;
+            ToolResult rerun = run_single(name, args, ctx, &rerun_code, nullptr, true);
+            const json restarted = {{"sap_gui_restarted", true}, {"unsaved_input_lost", true},
+                                    {"evidence", verdict.evidence}, {"recovery_attempted", attempted}};
+            if (rerun.structured && rerun.structured->is_object()) {
+                json& body = *rerun.structured;
+                json& target = body.contains("error") && body["error"].is_object() ? body["error"] : body["data"];
+                if (!target.is_object()) target = json::object();
+                for (auto it = restarted.begin(); it != restarted.end(); ++it) target[it.key()] = it.value();
+            } else {
+                rerun.structured = json{{"status", rerun.is_error ? "error" : "success"}, {"restart", restarted}};
+            }
+            rerun.content.push_back({{"type", "text"},
+                {"text", "note: SAP GUI did not react and was restarted (SAP_GUI_RESTARTED); unsaved input in that "
+                         "session is lost. Read the screen before the next action."}});
+            record.error_code = rerun.is_error ? rerun_code : std::string();
+            return rerun;
+        }
+        restart["allowed"] = true;
+        restart["failed"] = ended.error.value("message", "SAP GUI could not be ended");
+    } else {
+        restart["reason"] = refusal;
+        if (!corrective.empty()) restart["corrective_action"] = corrective;
+    }
+
     Result unresponsive = Result::fail(hang::kUnresponsiveCode,
         "SAP GUI does not react: " + std::to_string(verdict.consecutive_noops) +
         " navigations in a row left the screen unchanged although the session is not busy.");
     unresponsive.error["evidence"] = verdict.evidence;
     if (!frontend.empty()) unresponsive.error["frontend"] = frontend;
+    unresponsive.error["recovery"] = {{"recovered", false}, {"attempted", attempted}};
+    unresponsive.error["restart"] = restart;
     unresponsive.error["original_operation_run"] = true;
     unresponsive.error["hint"] =
         "the SAP GUI window ignores input (a hung frontend or a native dialog blocking it). Do not retry the same "
         "navigation in a loop: ask the person at the desktop to close any open SAP dialog or restart SAP Logon, or call "
-        "gui_session_restart if it is available to you; then read the screen again.";
+        "gui_session_restart if it is available to you; then read the screen again." +
+        std::string(corrective.is_array() && !corrective.empty() && corrective[0].is_string()
+            ? " Automatic restart is off: " + corrective[0].get<std::string>() : "");
     unresponsive.duration = result.duration;
     result = std::move(unresponsive);
     return std::nullopt;
