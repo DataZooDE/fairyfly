@@ -379,3 +379,11 @@ local default connection on SAP Easy Access, credential in Windows Credential Ma
 that a responsive GUI and inactive keys never raise `SAP_GUI_UNRESPONSIVE`, that `gui_session_restart` is refused
 without `--allow-sap-startup` (saplogon.exe keeps its PID) and, with it, ends SAP GUI, logs on again and leaves a
 usable session. It ENDS SAP GUI. The automatic trip is unit-tested only (no reliable way to hang SAP GUI on purpose).
+
+## blocked_call_live.ps1 (issue #155, second variant)
+
+`powershell -File tests/integration/blocked_call_live.ps1 [-Exe build\Release\fairyfly.exe]`: same prerequisites as
+hung_gui_live.ps1. A server stall (SE37 test of the standard function module ENQUE_SLEEP, 45 s) must end in
+`SAP_SERVER_NOT_RESPONDING` without a restart; a frozen frontend (saplogon.exe suspended by the script) must end in
+`SAP_GUI_NOT_RESPONDING` without `--allow-sap-startup` (resumed afterwards) and in `SAP_GUI_RESTARTED` plus a newly
+prepared session with it. It ENDS SAP GUI.

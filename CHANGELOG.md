@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.11.22.1
+
+- A SAP GUI call that never returns (#155, second variant) is answered at its deadline instead of with a bare
+  `CALL_TIMEOUT`: `SAP_SERVER_NOT_RESPONDING` when SAP GUI still reacts and waits for the SAP server (never restarted),
+  `SAP_GUI_NOT_RESPONDING` with the reason when the frontend is frozen and may not be restarted, and `SAP_GUI_RESTARTED`
+  when it was frozen and fairyfly ended it under the same rules as the hung-GUI restart; the next call prepares the
+  session again. stdio, HTTP and the link. Live check `tests/integration/blocked_call_live.ps1`.
+
 ## 2026.11.22
 
 - A hung SAP GUI (open, not busy, but ignoring input) is detected instead of reported as success (#155): `gui_key_send`
