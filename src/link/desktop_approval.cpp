@@ -6,6 +6,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include <cctype>
 #include <random>
 
@@ -374,13 +381,44 @@ Request Broker::build(const ffy::link::ApprovalPrompt& p, uint64_t id) const {
 
 namespace {
 std::atomic<int> g_deciding{0};   // questions being decided by any Broker of this process (issue #155)
+#ifdef _WIN32
+std::mutex g_pending_mu;
+HANDLE g_pending_event = nullptr;   // held while this process asks: other fairyfly processes see it by name
+#endif
 struct Deciding {
-    Deciding() { ++g_deciding; }
-    ~Deciding() { --g_deciding; }
+    Deciding() {
+        if (++g_deciding == 1) {
+#ifdef _WIN32
+            std::lock_guard<std::mutex> lock(g_pending_mu);
+            if (!g_pending_event) g_pending_event = CreateEventW(nullptr, TRUE, FALSE, kPendingEventName);
+#endif
+        }
+    }
+    ~Deciding() {
+        if (--g_deciding == 0) {
+#ifdef _WIN32
+            std::lock_guard<std::mutex> lock(g_pending_mu);
+            if (g_deciding.load() == 0 && g_pending_event) {
+                CloseHandle(g_pending_event);
+                g_pending_event = nullptr;
+            }
+#endif
+        }
+    }
 };
 }  // namespace
 
-bool any_pending() noexcept { return g_deciding.load() > 0; }
+bool any_pending() noexcept {
+    if (g_deciding.load() > 0) return true;
+#ifdef _WIN32
+    // another process (the link tray) asking right now keeps the named event alive
+    if (HANDLE other = OpenEventW(SYNCHRONIZE, FALSE, kPendingEventName)) {
+        CloseHandle(other);
+        return true;
+    }
+#endif
+    return false;
+}
 
 Decision Broker::decide(const ffy::link::ApprovalPrompt& prompt) {
     const Deciding deciding;

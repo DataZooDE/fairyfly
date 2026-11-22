@@ -145,8 +145,9 @@ CommandDispatcher::HangRecovery hang_recovery_for(const std::function<cli::Comma
     hooks.dismiss_native_dialogs = [lazy_handler] {
         return system::dismiss_native_dialogs(system::probe_sap_gui(attached_window_handle(lazy_handler())).native_dialogs);
     };
-    hooks.end_sap_gui = [] {
+    hooks.end_sap_gui = [lazy_handler] {
         const auto outcome = system::terminate_sap_gui_processes(std::chrono::seconds(10));
+        try { lazy_handler().forget_sap_gui(); } catch (...) {}
         if (outcome.found.empty()) return Result::fail("SAP_GUI_NOT_FOUND", "No SAP GUI process of this logon session runs.");
         if (!outcome.error.empty() || outcome.ended.size() != outcome.found.size())
             return Result::fail("SAP_GUI_RESTART_FAILED", outcome.error.empty() ? "SAP GUI did not end" : outcome.error);

@@ -49,7 +49,8 @@ public:
     explicit Detector(int threshold = kNoOpThreshold) : threshold_(threshold) {}
 
     /// Feeds one call for a session key (the saved connection id or "implicit"). A Change resets that session
-    /// and ends the restart budget's episode; a NoOp counts; Neutral leaves the count unchanged.
+    /// and ends the restart budget's episode; a NoOp counts; Neutral leaves the count unchanged. Only a NoOp that
+    /// reaches the threshold trips (a read after the trip does not).
     Verdict observe(const std::string& session_key, const Observation& observation);
 
     /// Forgets a session (after recovery, restart, launch or login).

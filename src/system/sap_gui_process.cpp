@@ -123,26 +123,43 @@ int dismiss_native_dialogs(const std::vector<NativeDialog>& dialogs) noexcept {
 TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds wait) noexcept {
     TerminateOutcome outcome;
     try {
+        // Open every candidate first and check THAT handle (image and logon session): a process id reused after an
+        // earlier SAP process ended can then never be hit, because the handle keeps the checked process.
+        struct Held {
+            std::uint32_t pid = 0;
+            std::string image;
+            UniqueHandle process;
+        };
+        std::vector<Held> held;
         for (const auto& p : own_sap_processes()) {
-            outcome.found.push_back(p.pid);
             UniqueHandle process(OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, p.pid));
             if (!process) {
-                // it may have ended with saplogon.exe already
-                if (GetLastError() == ERROR_INVALID_PARAMETER) outcome.ended.push_back(p.pid);
-                else if (outcome.error.empty()) outcome.error = "cannot open " + p.image + " (pid " + std::to_string(p.pid) + ")";
+                if (GetLastError() == ERROR_INVALID_PARAMETER) continue;   // gone already
+                outcome.found.push_back(p.pid);
+                if (outcome.error.empty()) outcome.error = "cannot open " + p.image + " (pid " + std::to_string(p.pid) + ")";
                 continue;
             }
+            wchar_t path[MAX_PATH] = {};
+            DWORD length = MAX_PATH;
+            if (!QueryFullProcessImageNameW(process.get(), 0, path, &length)) continue;
+            const wchar_t* file = wcsrchr(path, L'\\');
+            const std::string image = narrow(file ? file + 1 : path);
+            if (!is_sap_gui_image(image) || !process_handle_owned_by_current_logon(process.get(), p.pid)) continue;
+            outcome.found.push_back(p.pid);
+            held.push_back({p.pid, image, std::move(process)});
+        }
+        for (auto& h : held) {   // saplogon.exe first (own_sap_processes order)
             DWORD code = 0;
-            if (GetExitCodeProcess(process.get(), &code) && code != STILL_ACTIVE) {
-                outcome.ended.push_back(p.pid);
+            if (GetExitCodeProcess(h.process.get(), &code) && code != STILL_ACTIVE) {
+                outcome.ended.push_back(h.pid);
                 continue;
             }
-            if (!TerminateProcess(process.get(), 1) && outcome.error.empty())
-                outcome.error = "cannot end " + p.image + " (pid " + std::to_string(p.pid) + ")";
-            if (WaitForSingleObject(process.get(), static_cast<DWORD>(wait.count())) == WAIT_OBJECT_0)
-                outcome.ended.push_back(p.pid);
+            if (!TerminateProcess(h.process.get(), 1) && outcome.error.empty())
+                outcome.error = "cannot end " + h.image + " (pid " + std::to_string(h.pid) + ")";
+            if (WaitForSingleObject(h.process.get(), static_cast<DWORD>(wait.count())) == WAIT_OBJECT_0)
+                outcome.ended.push_back(h.pid);
             else if (outcome.error.empty())
-                outcome.error = p.image + " (pid " + std::to_string(p.pid) + ") did not end in time";
+                outcome.error = h.image + " (pid " + std::to_string(h.pid) + ") did not end in time";
         }
     } catch (...) {
         if (outcome.error.empty()) outcome.error = "unexpected failure while ending SAP GUI";

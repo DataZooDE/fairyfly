@@ -5,6 +5,8 @@
 .DESCRIPTION
   Speaks newline-delimited JSON-RPC to two `fairyfly mcp` servers on this desktop:
 
+    server 0: mcp --allow-sap-startup                  (read-only)
+      restart.refused_read_only      gui_session_restart refused, saplogon.exe keeps its PID
     server 1: mcp --allow-write                       (automatic SAP startup OFF)
       responsive.f3_changes_screen   SU01 then F3: success with screen_changed true, never SAP_GUI_UNRESPONSIVE
       responsive.no_false_alarm      three SU01/F3 rounds: no SAP_GUI_UNRESPONSIVE
@@ -115,10 +117,19 @@ function Invoke-Su01AndBack($Srv) {
     return $k
 }
 
-$s1 = $null; $s2 = $null
+$s0 = $null; $s1 = $null; $s2 = $null
 $exit = 0
 try {
     if ((Get-SapLogonPids).Count -ne 1) { Write-Host 'exactly one saplogon.exe must run'; exit 2 }
+    $s0 = Start-Server 'mcp --allow-sap-startup'
+    Check 'restart.refused_read_only' {
+        $before = Get-SapLogonPids
+        $r = Invoke-Tool $s0 'gui_session_restart'
+        Assert-That (Test-IsError $r) "a read-only server ran gui_session_restart: $(Get-Text $r)"
+        Assert-That (((Get-SapLogonPids) -join ',') -eq ($before -join ',')) 'saplogon.exe changed on a read-only server'
+    }
+    Stop-Server $s0; $s0 = $null
+
     $s1 = Start-Server 'mcp --allow-write'
     $list = Invoke-Tool $s1 'gui_session_list'
     if ((Get-Text $list) -notmatch 'ses\[0\]') { Write-Host 'no SAP session'; exit 2 }
@@ -158,6 +169,7 @@ try {
     }
     Check 'restart.navigation_after' { [void](Invoke-Su01AndBack $s2) }
 } finally {
+    Stop-Server $s0
     Stop-Server $s1
     Stop-Server $s2
 }

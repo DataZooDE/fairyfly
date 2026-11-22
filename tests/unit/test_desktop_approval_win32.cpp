@@ -224,3 +224,14 @@ TEST_CASE("manual: the approval window when the administrator requires approval,
     const Answer a = ui->ask(r, [&] { return std::chrono::steady_clock::now() >= r.deadline; }, remember);
     std::cout << "answer " << int(a) << " remember " << remember << std::endl;
 }
+
+// Issue #155 review: a restart in one fairyfly process must see an approval another process (the link tray) asks.
+TEST_CASE("desktop approval: a question asked by another process counts as pending", "[link][approval][hang]") {
+    using namespace fairyfly::link::approval;
+    CHECK_FALSE(any_pending());
+    HANDLE other = CreateEventW(nullptr, TRUE, FALSE, kPendingEventName);   // what the other process holds while asking
+    REQUIRE(other != nullptr);
+    CHECK(any_pending());
+    CloseHandle(other);
+    CHECK_FALSE(any_pending());
+}

@@ -242,6 +242,9 @@ struct RestartRig {
     bool local_enabled = true;
     bool approval_waiting = false;
     bool hangs_after_restart = false;
+    json open_connections = json::array();   ///< what session list reports (description = SAP Logon entry)
+    bool end_fails = false;
+    std::string saved_connection_name = "Bigfox";   ///< SAP Logon entry of the saved connection 7
     int ended = 0;
     int launches = 0;
     CommandDispatcher dispatcher;
@@ -252,11 +255,14 @@ struct RestartRig {
         p.allow_write = write;
         return p;
     }
-    explicit RestartRig(bool write = false)
+    explicit RestartRig(bool write = true)
         : dispatcher([this](const Argv& argv) { return gui(argv); }, policy_for(write)) {
         gui.on_other = [this](const Argv& argv) {
             if (argv.size() > 1 && argv[0] == "session" && argv[1] == "list")
-                return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
+                return Result::ok({{"connections", logged_on ? open_connections : json::array()},
+                                   {"total_connections", logged_on ? open_connections.size() : 0}});
+            if (argv.size() > 1 && argv[0] == "session" && argv[1] == "attach")
+                return Result::ok({{"connection_file_id", 7}, {"session_id", "/app/con[0]/ses[0]"}});
             if (argv.size() > 1 && argv[0] == "session" && argv[1] == "launch") {
                 ++launches;
                 logged_on = true;
@@ -278,9 +284,15 @@ struct RestartRig {
         CommandDispatcher::HangRecovery hooks;
         hooks.end_sap_gui = [this] {
             ++ended;
+            if (end_fails) return Result::fail("SAP_GUI_RESTART_FAILED", "saplogon.exe (pid 1) did not end in time");
             logged_on = false;
             return Result::ok({{"ended", 1}});
         };
+        dispatcher.set_session_target_resolver([this](const CommandDispatcher::TargetQuery&) {
+            fairyfly::auth::SessionTarget target;
+            target.connection_name = saved_connection_name;
+            return target;
+        });
         hooks.approval_pending = [this] { return approval_waiting; };
         dispatcher.set_hang_recovery(hooks);
     }
@@ -389,7 +401,7 @@ TEST_CASE("MCP restart tool: listed in write mode, hidden from a read-only serve
     RestartRig write(true);
     const auto tools = write.dispatcher.list_tools();
     CHECK(std::any_of(tools.begin(), tools.end(), [](const ToolDef& t) { return t.name == "gui_session_restart"; }));
-    RestartRig read_only;
+    RestartRig read_only(false);
     const auto hidden = read_only.dispatcher.list_tools();
     CHECK(std::none_of(hidden.begin(), hidden.end(), [](const ToolDef& t) { return t.name == "gui_session_restart"; }));
     const auto refused = read_only.dispatcher.call_tool("gui_session_restart", json::object(), Rig::ctx());
@@ -431,4 +443,124 @@ TEST_CASE("MCP restart tool: refused without the checkbox, the grant or while an
     REQUIRE(result.is_error);
     CHECK(text_of(result).find(expected) != std::string::npos);
     CHECK(rig.ended == 0);
+}
+
+// ---- Review follow-up: never end SAP GUI sessions of another SAP Logon entry ------------------------------------
+
+namespace {
+json connection_of(const std::string& description) {
+    return {{"description", description}, {"id", "/app/con[0]"},
+            {"sessions", json::array({{{"id", "/app/con[0]/ses[0]"}, {"busy", false}, {"alive", true}}})}};
+}
+}  // namespace
+
+TEST_CASE("MCP hang: SAP GUI is not ended while a session of another SAP Logon entry is open", "[mcp][hang][restart]") {
+    RestartRig rig;
+    rig.open_connections = json::array({connection_of("Bigfox"), connection_of("PRD Production")});
+    const auto third = rig.trip_tcode();
+    INFO(text_of(third));
+    REQUIRE(third.is_error);
+    CHECK(error_of(third)["code"] == "SAP_GUI_UNRESPONSIVE");
+    CHECK(restart_of(third)["reason"] == "other_sessions_open");
+    CHECK(rig.ended == 0);
+}
+
+TEST_CASE("MCP hang: sessions of the default entry alone do not block the restart", "[mcp][hang][restart]") {
+    RestartRig rig;
+    rig.open_connections = json::array({connection_of("Bigfox"), connection_of(" bigfox ")});
+    const auto third = rig.trip_tcode();
+    INFO(text_of(third));
+    CHECK(rig.ended == 1);
+    CHECK_FALSE(third.is_error);
+}
+
+TEST_CASE("MCP restart tool: refused while a session of another SAP Logon entry is open", "[mcp][hang][restart-tool]") {
+    RestartRig rig(true);
+    rig.open_connections = json::array({connection_of("Bigfox"), connection_of("QAS")});
+    const auto result = rig.dispatcher.call_tool("gui_session_restart", json::object(), Rig::ctx());
+    INFO(text_of(result));
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find("SAP_RESTART_OTHER_SESSIONS") != std::string::npos);
+    CHECK(rig.ended == 0);
+}
+
+// ---- Codex review 2026-11-22 ------------------------------------------------------------------------------------
+
+TEST_CASE("MCP hang: a read-only call never ends SAP GUI", "[mcp][hang][restart][review]") {
+    RestartRig rig;
+    auto c = Rig::ctx();
+    c.principal.read_only = true;
+    SECTION("read-only token") {}
+    SECTION("read-only server") {
+        c.principal.read_only = false;
+        rig.dispatcher.set_read_only(true);
+    }
+    const auto third = rig.trip_tcode(c);
+    INFO(text_of(third));
+    REQUIRE(third.is_error);
+    CHECK(error_of(third)["code"] == "SAP_GUI_UNRESPONSIVE");
+    CHECK(restart_of(third)["reason"] == "read_only");
+    CHECK(rig.ended == 0);
+}
+
+TEST_CASE("MCP hang: a session attached from another SAP Logon entry is never restarted", "[mcp][hang][restart][review]") {
+    RestartRig rig(true);
+    rig.saved_connection_name = "PRD Production";
+    const auto attached = rig.dispatcher.call_tool("gui_session_attach", {{"session_id", "/app/con[0]/ses[0]"}}, Rig::ctx());
+    INFO(text_of(attached));
+    REQUIRE_FALSE(attached.is_error);
+    const auto third = rig.trip_tcode(Rig::ctx());
+    INFO(text_of(third));
+    REQUIRE(third.is_error);
+    CHECK(restart_of(third)["reason"] == "explicit_connection");
+    CHECK(rig.ended == 0);
+}
+
+TEST_CASE("MCP hang: a session attached from the default entry may be restarted", "[mcp][hang][restart][review]") {
+    RestartRig rig(true);
+    const auto attached = rig.dispatcher.call_tool("gui_session_attach", {{"session_id", "/app/con[0]/ses[0]"}}, Rig::ctx());
+    INFO(text_of(attached));
+    REQUIRE_FALSE(attached.is_error);
+    const auto third = rig.trip_tcode(Rig::ctx());
+    INFO(text_of(third));
+    CHECK(rig.ended == 1);
+}
+
+TEST_CASE("MCP hang: reading the screen after SAP_GUI_UNRESPONSIVE runs no recovery", "[mcp][hang][review]") {
+    Rig rig;
+    REQUIRE(error_of(trip(rig))["code"] == "SAP_GUI_UNRESPONSIVE");
+    const int closes = rig.gui.count("popup", "close");
+    const auto read = rig.dispatcher.call_tool("gui_screen_read", json::object(), Rig::ctx());
+    INFO(text_of(read));
+    CHECK_FALSE(read.is_error);
+    CHECK(rig.gui.count("popup", "close") == closes);
+    CHECK(rig.gui.count("key", "send") == 3 + 1);   // the three F3 and the one F12 of the first recovery
+}
+
+TEST_CASE("MCP hang: a transaction SAP keeps rejecting is not a hung GUI", "[mcp][hang][review]") {
+    Rig rig;
+    rig.gui.on_other = [](const Argv&) { return Result::ok(json::object()); };
+    CommandDispatcher& d = rig.dispatcher;
+    Result rejected = Result::fail("TRANSACTION_NOT_STARTED", "Requested transaction did not become active");
+    rejected.error["session_busy"] = false;
+    rejected.error["screen_changed"] = false;
+    rejected.error["statusbar_message"] = "Transaction ZNOPE does not exist";
+    rejected.error["message_type"] = "E";
+    rejected.error["statusbar_unchanged"] = true;
+    CHECK(fairyfly::hang::classify("gui_transaction_start", {{"code", "ZNOPE"}}, rejected).signal ==
+          fairyfly::hang::Signal::Neutral);
+    (void)d;
+}
+
+TEST_CASE("MCP hang: a failed attempt to end SAP GUI uses the episode's restart", "[mcp][hang][restart][review]") {
+    RestartRig rig;
+    rig.end_fails = true;
+    const auto first = rig.trip_tcode();
+    INFO(text_of(first));
+    REQUIRE(first.is_error);
+    CHECK(rig.ended == 1);
+    const auto second = rig.trip_tcode();
+    INFO(text_of(second));
+    CHECK(restart_of(second)["reason"] == "already_restarted");
+    CHECK(rig.ended == 1);
 }

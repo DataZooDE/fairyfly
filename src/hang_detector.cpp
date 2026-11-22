@@ -1,4 +1,4 @@
-﻿#include "include/hang_detector.h"
+#include "include/hang_detector.h"
 
 #include "include/vkey.h"
 
@@ -50,8 +50,10 @@ Observation classify(const std::string& tool, const json& args, const Result& re
             o.signal = changed ? Signal::Change : Signal::Neutral;
             return o;
         }
+        // SAP that keeps rejecting the code (an E/A message, also unchanged from an earlier attempt) reacts; it is not hung
+        const std::string message_type = result.error.value("message_type", std::string());
         if (o.error_code == "TRANSACTION_NOT_STARTED" && result.error.value("session_busy", true) == false &&
-            result.error.value("screen_changed", true) == false)
+            result.error.value("screen_changed", true) == false && message_type != "E" && message_type != "A")
             o.signal = Signal::NoOp;
         return o;
     }
@@ -79,7 +81,8 @@ Verdict Detector::observe(const std::string& session_key, const Observation& obs
         break;
     }
     verdict.consecutive_noops = state.noops;
-    verdict.tripped = state.noops >= threshold_;
+    // only a new no-op trips: a read after SAP_GUI_UNRESPONSIVE must not start a recovery again
+    verdict.tripped = observation.signal == Signal::NoOp && state.noops >= threshold_;
     if (verdict.tripped) verdict.evidence = state.evidence;
     return verdict;
 }

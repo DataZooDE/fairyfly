@@ -339,6 +339,8 @@ public:
     /// Before every call: look up the running SAP Logon again and drop what is cached from an earlier one
     /// (AutomationEngine::refresh_application). CommandRegistry::execute_active_command and the MCP dispatcher call it.
     void refresh_sap_gui() { if (engine_ && refresh_holds_ == 0) engine_->refresh_application(); }
+    /// After SAP GUI was ended on purpose (issue #155): drop its COM objects now, also inside a call's refresh hold.
+    void forget_sap_gui() { if (engine_) engine_->refresh_application(); }
     /// Looks SAP Logon up now and suppresses refresh_sap_gui until the returned token is released: one lookup per
     /// MCP call, also for a whole gui_batch (CommandDispatcher::set_before_call). No batch step can (re)start SAP Logon;
     /// a step that needs it while none is held looks it up itself (ComAutomationEngine::require_application).

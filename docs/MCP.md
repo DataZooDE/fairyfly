@@ -312,9 +312,12 @@ nothing on the screen changes. fairyfly notices that instead of reporting succes
 - Before reporting, fairyfly recovers without ending anything: Cancel to a native dialog of saplogon.exe/sapgui.exe,
   close a SAP popup, `/n`, F12. When one of them helps the call returns `SAP_GUI_RECOVERED` with `recovery.step`; read
   the screen before repeating the intended action.
-- Only when that fails, and only for the implicit local default connection with automatic SAP startup allowed (the tray
-  checkbox or `--allow-sap-startup`, over the link also the gateway's startup grant), with no desktop approval waiting and
-  once per stuck episode, fairyfly ends this logon session's SAP GUI processes, prepares the session again (SSO or Windows
+- Only when that fails, and only for the implicit local default connection (also a sticky one must belong to the local
+  default SAP Logon entry) with automatic SAP startup allowed (the tray checkbox or `--allow-sap-startup`, over the link
+  also the gateway's startup grant), for a call that may change state (never on a read-only server or for a read-only
+  token or grant), with no desktop approval waiting in any fairyfly process of this logon session, with no SAP GUI
+  session of another SAP Logon entry open, and once per stuck episode (a failed attempt counts), fairyfly ends this
+  logon session's SAP GUI processes, prepares the session again (SSO or Windows
   Credential Manager) and re-runs the call. Reads, screenshots and `gui_transaction_start` continue; other actions return
   `SESSION_PREPARED`. The result carries `sap_gui_restarted: true` and `unsaved_input_lost: true`.
 - `gui_session_restart` (write tool, MCP only, explicit scope `session.restart`) runs the same restart on request, for
@@ -323,10 +326,11 @@ nothing on the screen changes. fairyfly notices that instead of reporting succes
 
 | Error | Corrective action |
 |---|---|
-| `SAP_GUI_UNRESPONSIVE` | SAP GUI ignores input and could not be recovered. `evidence` lists the no-op calls, `frontend` the native dialogs found, `restart.reason` why it was not restarted (`SAP_AUTOSTART_DISABLED`, `explicit_connection`, `approval_pending`, `already_restarted`, ...). Do not retry the same navigation in a loop: ask the person at the desktop, or call `gui_session_restart` when allowed. |
+| `SAP_GUI_UNRESPONSIVE` | SAP GUI ignores input and could not be recovered. `evidence` lists the no-op calls, `frontend` the native dialogs found, `restart.reason` why it was not restarted (`SAP_AUTOSTART_DISABLED`, `SAP_AUTOSTART_ADMIN_DISABLED`, `explicit_connection`, `read_only`, `approval_pending`, `other_sessions_open`, `already_restarted`, `owner_session`). Do not retry the same navigation in a loop: ask the person at the desktop, or call `gui_session_restart` when allowed. |
 | `SAP_GUI_RECOVERED` | The GUI reacts again after `recovery.step` (`native_dialog_cancelled`, `popup_closed`, `command_n`, `cancel`). Read the screen; `command_n` left the transaction (`unsaved_input_lost`). |
 | `SAP_APPROVAL_PENDING` | `gui_session_restart` while a change waits for approval at the desktop: answer it first. |
 | `SAP_RESTART_DEFAULT_ONLY` | Only the local default session is restarted, never an explicitly configured connection. |
+| `SAP_RESTART_OTHER_SESSIONS` | A SAP GUI session of another SAP Logon entry is open; ending SAP GUI would end it too. Ask the person at the desktop. |
 | `SAP_STARTUP_REQUIRES_ATTENTION` | Inspect SAP Logon and the local default, start the intended session and log in manually, then retry. A durable marker prevents another window after an incomplete launch; a verified successful login clears it. |
 
 Credentials stay on the desktop. A login attempt is recorded before submission to prevent repeated automatic

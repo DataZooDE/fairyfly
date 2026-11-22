@@ -2377,12 +2377,30 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
 }
 
 std::string CommandDispatcher::restart_refusal(const json& args, const CallContext& ctx, bool worker_bound,
-                                               bool check_budget, json& corrective) {
+                                               bool check_budget, json& corrective, std::optional<int> connection) {
     if (!startup_policy_) return "startup_unavailable";
     if ((args.is_object() && args.contains("connection")) || policy_.default_connection) return "explicit_connection";
     if (worker_bound || owner_mode(ctx)) return "owner_session";
+    // ending SAP GUI is a state change: never for a read-only call (soft recovery only navigates and stays allowed)
+    if (policy_.read_only || ctx.principal.read_only) return "read_only";
     if (!hang_recovery_.end_sap_gui) return "restart_unavailable";
     auto current = startup_policy_();
+    // An implicit call may still target a saved connection (sticky, e.g. after gui_session_attach): only one of the
+    // local default SAP Logon entry may be restarted. Unknown counts as another entry.
+    if (connection) {
+        std::string name;
+        if (const auto sticky = routing_state_->sticky_target(principal_key(ctx.principal));
+            sticky && sticky->connection == *connection && !sticky->startup_default.empty())
+            name = sticky->startup_default;
+        if (name.empty() && target_resolver_) {
+            try {
+                const auto saved = target_resolver_({{}, {}, connection});
+                if (!saved.ambiguous) name = saved.connection_name;
+            } catch (...) {}
+        }
+        if (name.empty() || !sap::ConnectionLauncher::matches_connection_name(current.default_connection, name))
+            return "explicit_connection";
+    }
     current.link_request = ctx.link_request;
     current.gateway_allowed = ctx.sap_startup_granted;
     if (auto denied = startup::check(current)) {
@@ -2393,6 +2411,19 @@ std::string CommandDispatcher::restart_refusal(const json& args, const CallConte
     try { waiting = hang_recovery_.approval_pending && hang_recovery_.approval_pending(); } catch (...) { waiting = true; }
     if (waiting) return "approval_pending";
     if (check_budget && hang_detector_.restart_used()) return "already_restarted";
+    // Ending SAP GUI ends every session of this desktop: never while one of another SAP Logon entry is open (work
+    // fairyfly did not prepare). A listing that fails says nothing (the hang may be why) and does not block.
+    const Result listed = invoke({"session", "list"});
+    if (listed.status == Result::Status::Success && listed.data.is_object()) {
+        const json connections = listed.data.value("connections", json::array());
+        if (connections.is_array())
+            for (const auto& connection : connections) {
+                if (!connection.is_object()) continue;
+                const std::string description = connection.value("description", std::string());
+                if (!sap::ConnectionLauncher::matches_connection_name(current.default_connection, description))
+                    return "other_sessions_open";
+            }
+    }
     return "";
 }
 
@@ -2410,18 +2441,23 @@ ToolResult CommandDispatcher::run_session_restart(const json& args, McpCallRecor
         return fail("SAP_RESTART_DEFAULT_ONLY", "Only the local default SAP session is restarted, not a selected connection.", "");
     if (refusal == "owner_session")
         return fail("SAP_RESTART_UNAVAILABLE", "SAP GUI cannot be restarted from an owner-restricted endpoint.", "");
+    if (refusal == "read_only")
+        return fail("READ_ONLY_REFUSED", "Restarting SAP GUI changes state; this call is read-only.", "");
+    if (refusal == "other_sessions_open")
+        return fail("SAP_RESTART_OTHER_SESSIONS", "A SAP GUI session of another SAP Logon entry is open; SAP GUI is not ended.",
+                    "ask the person at the desktop to close that session or restart SAP Logon themselves");
     if (refusal == "startup_unavailable" || refusal == "restart_unavailable")
         return fail("SAP_RESTART_UNAVAILABLE", "SAP GUI cannot be restarted on this endpoint.", "");
     if (!refusal.empty())
         return fail(refusal, "SAP GUI is not restarted: automatic SAP startup is not allowed.", hint);
 
+    hang_detector_.note_restart();
     Result ended;
     try { ended = hang_recovery_.end_sap_gui(); }
     catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
     if (ended.status != Result::Status::Success)
         return fail(ended.error.value("code", "SAP_GUI_RESTART_FAILED"),
                     ended.error.value("message", "SAP GUI could not be ended."), "ask the person at the desktop to end SAP Logon");
-    hang_detector_.note_restart();
     routing_state_->clear_sticky(principal_key(ctx.principal));
     std::optional<audit::SapFacts> ready;
     const Result prepared = prepare_implicit_session(ctx, ready);
@@ -2542,14 +2578,14 @@ std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
     // tray checkbox / --allow-sap-startup, and over the link the gateway's grant), never while a desktop approval
     // waits, and once per stuck episode.
     json corrective = json::array();
-    const std::string refusal = restart_refusal(args, ctx, worker_bound, true, corrective);
+    const std::string refusal = restart_refusal(args, ctx, worker_bound, true, corrective, record.connection);
     json restart = {{"allowed", refusal.empty()}};
     if (refusal.empty()) {
+        hang_detector_.note_restart();   // an attempt that fails half-way uses the episode's restart too
         Result ended;
         try { ended = hang_recovery_.end_sap_gui(); }
         catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
         if (ended.status == Result::Status::Success) {
-            hang_detector_.note_restart();
             hang_detector_.reset(key);
             routing_state_->clear_sticky(principal_key(ctx.principal));
             std::string rerun_code;
