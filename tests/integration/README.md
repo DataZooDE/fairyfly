@@ -371,3 +371,11 @@ build\Release\fairyfly.exe mcp teardown --yes
 ~~~
 
 Isolation: a temp config (`-c`), a temp audit file (`FAIRYFLY_AUDIT_FILE`) and temp files under `%TEMP%\fairyfly-e2e-httpsys-*` keep the real `mcp.yaml` and audit trail out of the run; tokens are held in variables only and never printed. Trust: `curl.exe` gets `--cacert <exported PEM>` (never `-k`; `--ssl-no-revoke` because a self-signed certificate has no revocation endpoint), Windows PowerShell 5.1 and the raw TLS clients accept only the exact expected SHA-1 thumbprint. In SAP it only reads (`gui_session_list`, `gui_screen_read`) and attempts refused writes; it never presses Save, Delete, Release or Stop. All flag names, JSON field names and literal texts the script assumes about the CLI are collected in the marked `ASSUMPTIONS ABOUT THE C++ SIDE` block at the top of the script.
+
+## hung_gui_live.ps1 (issue #155)
+
+`powershell -File tests/integration/hung_gui_live.ps1 [-Exe build\Release\fairyfly.exe]`: one logged-on session of the
+local default connection on SAP Easy Access, credential in Windows Credential Manager, nobody working in SAP. Checks
+that a responsive GUI and inactive keys never raise `SAP_GUI_UNRESPONSIVE`, that `gui_session_restart` is refused
+without `--allow-sap-startup` (saplogon.exe keeps its PID) and, with it, ends SAP GUI, logs on again and leaves a
+usable session. It ENDS SAP GUI. The automatic trip is unit-tested only (no reliable way to hang SAP GUI on purpose).

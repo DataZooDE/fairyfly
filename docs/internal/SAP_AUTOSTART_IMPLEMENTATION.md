@@ -13,6 +13,11 @@
 - Gateway administrators can disable startup independently of business writes.
 - Preserve identity, connection, system, transaction, owner and lease restrictions.
 - Do not silently replace an explicitly selected connection or terminate another login.
+- Exception (issue #155, 2026-11-22): a SAP GUI that demonstrably ignores input (`SAP_GUI_UNRESPONSIVE`, after the
+  soft recovery failed) may be ended and prepared again, and `gui_session_restart` may do it on request. Only for the
+  implicit local default, only with startup permission (and the gateway grant over the link), never while a desktop
+  approval waits, only this logon session's own SAP GUI processes, once per stuck episode; the result says that unsaved
+  input is lost. Live check `tests/integration/hung_gui_live.ps1`.
 
 ## Delivery gates
 

@@ -298,6 +298,35 @@ The endpoint must expose the session lifecycle tools needed for preparation.
 | `SAP_LOGIN_REQUIRED` | Complete login or SSO locally before retrying; automatic credential submission is blocked after an uncertain or failed attempt. The block is per SAP account and shared across tokens, connection aliases and transports. |
 | `CREDENTIALS_INCOMPLETE` | The stored entry has no SAP user or client (usually edited in the Windows Credential Manager window). Repair it locally with `fairyfly credentials set <name> --user <USER> --client <CLIENT>`. Nothing was typed into SAP and no attempt was recorded. |
 | `SAP_LOGIN_GUARD_UNAVAILABLE` | The attempt could not be recorded, so no password was submitted. The tray's `link.log` names the reason (an unknown SAP system, client or user, or the data directory). Log in manually. |
+
+### A hung SAP GUI
+
+SAP GUI can stay open and not busy while it ignores every input: each key is accepted after a few milliseconds and
+nothing on the screen changes. fairyfly notices that instead of reporting success (issue #155):
+
+- `gui_key_send` and `gui_transaction_start` report `screen_changed` (window, title, transaction, program, dynpro and
+  status text before and after) and whether the session was busy. Three navigations in a row on one session that should
+  leave the screen and did not (F3, F12, Shift+F3 that succeed unchanged; a transaction that does not become active on an
+  idle, unchanged session) end in `SAP_GUI_UNRESPONSIVE`. Enter, F8 and the other keys never count: they may change
+  nothing on purpose. A key SAP does not offer on the screen is a SAP error, not a no-op.
+- Before reporting, fairyfly recovers without ending anything: Cancel to a native dialog of saplogon.exe/sapgui.exe,
+  close a SAP popup, `/n`, F12. When one of them helps the call returns `SAP_GUI_RECOVERED` with `recovery.step`; read
+  the screen before repeating the intended action.
+- Only when that fails, and only for the implicit local default connection with automatic SAP startup allowed (the tray
+  checkbox or `--allow-sap-startup`, over the link also the gateway's startup grant), with no desktop approval waiting and
+  once per stuck episode, fairyfly ends this logon session's SAP GUI processes, prepares the session again (SSO or Windows
+  Credential Manager) and re-runs the call. Reads, screenshots and `gui_transaction_start` continue; other actions return
+  `SESSION_PREPARED`. The result carries `sap_gui_restarted: true` and `unsaved_input_lost: true`.
+- `gui_session_restart` (write tool, MCP only, explicit scope `session.restart`) runs the same restart on request, for
+  a hang the detection misses. The same guard applies; it returns `sap_gui_restarted` and the prepared
+  `connection_file_id`. Processes of other users or logon sessions are never touched.
+
+| Error | Corrective action |
+|---|---|
+| `SAP_GUI_UNRESPONSIVE` | SAP GUI ignores input and could not be recovered. `evidence` lists the no-op calls, `frontend` the native dialogs found, `restart.reason` why it was not restarted (`SAP_AUTOSTART_DISABLED`, `explicit_connection`, `approval_pending`, `already_restarted`, ...). Do not retry the same navigation in a loop: ask the person at the desktop, or call `gui_session_restart` when allowed. |
+| `SAP_GUI_RECOVERED` | The GUI reacts again after `recovery.step` (`native_dialog_cancelled`, `popup_closed`, `command_n`, `cancel`). Read the screen; `command_n` left the transaction (`unsaved_input_lost`). |
+| `SAP_APPROVAL_PENDING` | `gui_session_restart` while a change waits for approval at the desktop: answer it first. |
+| `SAP_RESTART_DEFAULT_ONLY` | Only the local default session is restarted, never an explicitly configured connection. |
 | `SAP_STARTUP_REQUIRES_ATTENTION` | Inspect SAP Logon and the local default, start the intended session and log in manually, then retry. A durable marker prevents another window after an incomplete launch; a verified successful login clears it. |
 
 Credentials stay on the desktop. A login attempt is recorded before submission to prevent repeated automatic
