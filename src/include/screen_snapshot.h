@@ -9,6 +9,8 @@ struct ScreenSnapshot {
     std::string title;
     std::string transaction;
     std::string statusbar_text;
+    std::string program;         ///< GuiSessionInfo.Program (dynpro program)
+    std::string screen_number;   ///< GuiSessionInfo.ScreenNumber ("" = not readable)
 };
 
 bool screen_snapshot_changed(const ScreenSnapshot& before, const ScreenSnapshot& after);

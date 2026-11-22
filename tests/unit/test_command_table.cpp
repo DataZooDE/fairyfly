@@ -402,12 +402,12 @@ TEST_CASE("command table: tool classification has one source", "[command_table][
     using S = std::set<std::string>;
     CHECK(tools_with(ct::Trait::GlobalControl) ==
           S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_session_lease",
-            "gui_session_attach", "gui_session_login", "gui_session_launch"});
+            "gui_session_attach", "gui_session_login", "gui_session_launch", "gui_session_restart"});
     CHECK(tools_with(ct::Trait::Targetless) ==
           S{"gui_session_list", "gui_connection_list", "gui_credentials_list", "gui_doctor", "gui_batch", "gui_batch_read"});
     CHECK(tools_with(ct::Trait::Listing) == S{"gui_session_list", "gui_connection_list", "gui_credentials_list"});
     CHECK(tools_with(ct::Trait::SessionSystem) ==
-          S{"gui_session_launch", "gui_session_login", "gui_session_attach", "gui_session_lease"});
+          S{"gui_session_launch", "gui_session_login", "gui_session_attach", "gui_session_lease", "gui_session_restart"});
     CHECK(tools_with(ct::Trait::LeaseCapable) ==
           S{"gui_element_click", "gui_element_fill", "gui_element_f4", "gui_element_get", "gui_key_send", "gui_menu_select",
             "gui_popup_close", "gui_screen_read", "gui_transaction_start", "gui_session_disconnect"});

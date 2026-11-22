@@ -305,3 +305,82 @@ TEST_CASE("tree context menu: an item text that is not UTF-8 is refused before t
     REQUIRE(control->calls.size() == 2);
     CHECK(control->calls[1].second == L"Öffnen");
 }
+
+// Issue #155: a hung SAP GUI accepts SendVKey and changes nothing. The key result says whether the screen changed
+// (window, title, transaction, program, dynpro, status text) so the MCP layer can tell a no-op from a navigation.
+TEST_CASE("engine: a key that changes nothing on the screen reports screen_changed false", "[engine][actions][hang]") {
+    SapScene scene;
+    scene.window->methods = {L"SendVKey"};
+    scene.window->strings[L"Text"] = L"ALV list";
+    FakeNode* info = scene.make(L"GuiSessionInfo", L"");
+    info->strings[L"Transaction"] = L"ZREPORT";
+    info->strings[L"Program"] = L"ZREPORT";
+    info->ints[L"ScreenNumber"] = 500;
+    scene.session->dispatches[L"Info"] = info;
+    scene.session->bools[L"Busy"] = false;
+    auto engine = scene.engine();
+    const Result r = engine->send_key(3, "");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Success);
+    REQUIRE(scene.window->calls.size() == 1);
+    CHECK(scene.window->calls[0].first == L"SendVKey");
+    REQUIRE(r.data.contains("screen_changed"));
+    CHECK_FALSE(r.data["screen_changed"].get<bool>());
+    CHECK_FALSE(r.data.value("busy_before", true));
+}
+
+TEST_CASE("engine: a key that leaves the screen reports screen_changed true", "[engine][actions][hang]") {
+    SapScene scene;
+    scene.window->methods = {L"SendVKey"};
+    scene.window->strings[L"Text"] = L"ALV list";
+    FakeNode* info = scene.make(L"GuiSessionInfo", L"");
+    info->strings[L"Transaction"] = L"ZREPORT";
+    info->strings[L"Program"] = L"ZREPORT";
+    info->ints[L"ScreenNumber"] = 500;
+    scene.session->dispatches[L"Info"] = info;
+    scene.window->on_method = [&](const std::wstring& name, const std::wstring&) {
+        if (name != L"SendVKey") return;
+        scene.window->strings[L"Text"] = L"SAP Easy Access";
+        info->strings[L"Transaction"] = L"SESSION_MANAGER";
+        info->strings[L"Program"] = L"SAPLSMTR_NAVIGATION";
+        info->ints[L"ScreenNumber"] = 100;
+    };
+    auto engine = scene.engine();
+    const Result r = engine->send_key(3, "");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Success);
+    CHECK(r.data.value("screen_changed", false));
+}
+
+TEST_CASE("engine: a dynpro change with the same title and transaction counts as a screen change", "[engine][actions][hang]") {
+    SapScene scene;
+    scene.window->methods = {L"SendVKey"};
+    scene.window->strings[L"Text"] = L"Display";
+    FakeNode* info = scene.make(L"GuiSessionInfo", L"");
+    info->strings[L"Transaction"] = L"VA03";
+    info->strings[L"Program"] = L"SAPMV45A";
+    info->ints[L"ScreenNumber"] = 4001;
+    scene.session->dispatches[L"Info"] = info;
+    scene.window->on_method = [&](const std::wstring&, const std::wstring&) { info->ints[L"ScreenNumber"] = 102; };
+    auto engine = scene.engine();
+    const Result r = engine->send_key(3, "");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Success);
+    CHECK(r.data.value("screen_changed", false));
+}
+
+TEST_CASE("engine: a transaction that does not start on an idle session says so", "[engine][actions][hang]") {
+    SapScene scene;
+    FakeNode* info = scene.make(L"GuiSessionInfo", L"");
+    info->strings[L"Transaction"] = L"ZREPORT";   // stays: the GUI ignores the command
+    scene.session->dispatches[L"Info"] = info;
+    scene.session->bools[L"Busy"] = false;
+    scene.session->methods = {L"SendCommand"};
+    auto engine = scene.engine();
+    const Result r = engine->execute_transaction("/nSU01");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "TRANSACTION_NOT_STARTED");
+    CHECK(r.error.value("session_busy", true) == false);
+    CHECK(r.error.value("screen_changed", true) == false);
+}

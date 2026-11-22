@@ -54,6 +54,13 @@ bool process_owned_by_current_logon(std::uint32_t process_id) noexcept {
     } catch (...) { return false; }
 }
 
+bool process_handle_owned_by_current_logon(void* process_handle, std::uint32_t process_id) noexcept {
+    try {
+        if (!process_handle || !process_id) return false;
+        return same_logon(static_cast<HANDLE>(process_handle), process_id);
+    } catch (...) { return false; }
+}
+
 bool window_owned_by_current_logon(std::uintptr_t native_handle) noexcept {
     try {
         if (!native_handle) return false;
@@ -74,6 +81,7 @@ bool window_owned_by_current_logon(std::uintptr_t native_handle) noexcept {
 #else
 namespace fairyfly::system {
 bool process_owned_by_current_logon(std::uint32_t) noexcept { return false; }
+bool process_handle_owned_by_current_logon(void*, std::uint32_t) noexcept { return false; }
 bool window_owned_by_current_logon(std::uintptr_t) noexcept { return false; }
 } // namespace fairyfly::system
 #endif

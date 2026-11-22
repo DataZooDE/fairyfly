@@ -18,6 +18,9 @@
 #include <windows.h>
 
 #include "include/com/wrapper.h"
+#include "include/link/desktop_approval.h"
+#include "include/system/sap_gui_process.h"
+#include "include/system/window_owner.h"
 #endif
 
 #include "include/command_table.h"
@@ -123,8 +126,41 @@ int serve_audited(audit::AuditSink* sink, bool read_only, const std::function<in
 /// Each transport's view of the shared handler: SAP facts and targets for token authorization, the per-call
 /// read-only and selection-input overrides, the connection snapshot and the owner-mode guards, all through the
 /// handler that is configured on first use.
+/// Native handle of the attached session's active SAP window (0 = none or unknown).
+std::uintptr_t attached_window_handle(cli::CommandHandler& handler) noexcept {
+    try {
+        auto session = handler.attached_com_session();
+        if (!session) return 0;
+        auto window = session->get_active_window();
+        if (!window) return 0;
+        return system::sap_com_long_to_window_handle(window->get_int_property(L"Handle"));
+    } catch (...) { return 0; }
+}
+
+/// Issue #155: frontend evidence, Cancel for SAP-owned native dialogs and ending this logon session's SAP GUI.
+CommandDispatcher::HangRecovery hang_recovery_for(const std::function<cli::CommandHandler&()>& lazy_handler,
+                                                  std::function<bool()> approval_pending) {
+    CommandDispatcher::HangRecovery hooks;
+    hooks.probe = [lazy_handler] { return system::probe_json(system::probe_sap_gui(attached_window_handle(lazy_handler()))); };
+    hooks.dismiss_native_dialogs = [lazy_handler] {
+        return system::dismiss_native_dialogs(system::probe_sap_gui(attached_window_handle(lazy_handler())).native_dialogs);
+    };
+    hooks.end_sap_gui = [lazy_handler] {
+        const auto outcome = system::terminate_sap_gui_processes(std::chrono::seconds(10));
+        try { lazy_handler().forget_sap_gui(); } catch (...) {}
+        if (outcome.found.empty()) return Result::fail("SAP_GUI_NOT_FOUND", "No SAP GUI process of this logon session runs.");
+        if (!outcome.error.empty() || outcome.ended.size() != outcome.found.size())
+            return Result::fail("SAP_GUI_RESTART_FAILED", outcome.error.empty() ? "SAP GUI did not end" : outcome.error);
+        spdlog::warn("hung SAP GUI ended for a restart ({} process(es))", outcome.ended.size());
+        return Result::ok({{"ended", outcome.ended.size()}});
+    };
+    hooks.approval_pending = std::move(approval_pending);
+    return hooks;
+}
+
 void connect_to_handler(CommandDispatcher& dispatcher, const std::function<cli::CommandHandler&()>& lazy_handler,
                         CommandDispatcher::StartupPolicyProvider startup_policy) {
+    dispatcher.set_hang_recovery(hang_recovery_for(lazy_handler, [] { return link::approval::any_pending(); }));
     dispatcher.set_before_call([lazy_handler] { return lazy_handler().refresh_sap_gui_for_call(); });
     dispatcher.set_login_submit_guard_override([lazy_handler](std::function<Result(const std::string&)> guard) {
         lazy_handler().set_login_submit_guard(std::move(guard));

@@ -15,6 +15,8 @@ Relay startup errors with their corrective action: `SAP_AUTOSTART_DISABLED` need
 
 For `SAP_LOGIN_REQUIRED` or `SAP_STARTUP_REQUIRES_ATTENTION`, stop automatic startup/login attempts and ask the person at the desktop to complete SAP login/SSO. Follow missing-credential instructions locally; never ask for a password in chat. After cancellation or an uncertain startup outcome, inspect the reported connection before opening another. If a response says a session was prepared but the action did not run, observe its screen before continuing the already authorized task.
 
+If navigation keys and transaction starts keep returning success without changing the screen, or a call returns `SAP_GUI_UNRESPONSIVE`, SAP GUI is hung: do not repeat the navigation. After `SAP_GUI_RECOVERED` read the screen, then continue. After `SAP_GUI_UNRESPONSIVE` relay `restart.reason`; call `gui_session_restart` only when it is offered and nobody is working in SAP at that desktop (unsaved input is lost), otherwise ask the person at the desktop to close the open SAP dialog or restart SAP Logon. After `sap_gui_restarted` read the screen before the next action.
+
 For known tasks prefer the current tab (`no_tabs=true`) or one named tab (`tab`); expand all tabs only when needed.
 
 For form work prefer `gui_screen_read` with `only=editable`, `no_tabs=true`, `skip_trees=true`, and, if exposed, `projection=refs`. Omit these restrictions when the task needs another tab or a tree. For one known control use `gui_screen_find` or `gui_element_get`. Labels are not necessarily unique: identify the intended control using its actual ID/type and screen context.

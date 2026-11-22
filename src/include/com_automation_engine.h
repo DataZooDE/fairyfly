@@ -66,6 +66,8 @@ private:
 
     // Helper to ensure session exists
     ComGuiSessionPtr ensure_session();
+    /// Window, title, transaction, program, dynpro and status text of `session` (partial on COM errors).
+    static ScreenSnapshot snapshot_of(const ComGuiSessionPtr& session);
 
     // Initialize service classes (called after session is available)
     void initialize_services();

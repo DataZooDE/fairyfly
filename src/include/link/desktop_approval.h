@@ -166,6 +166,13 @@ struct FieldLookup {
 };
 FieldLookup field_lookup(const std::string& field);
 
+/// True while any Broker of this process waits for the person's answer (a change waits for approval). The MCP
+/// dispatcher never restarts a hung SAP GUI then (issue #155).
+bool any_pending() noexcept;
+/// The named event (per logon session) a process holds while it asks the person: any_pending() of another fairyfly
+/// process sees it, so the MCP server never restarts SAP GUI under the link tray's approval window.
+inline constexpr const wchar_t* kPendingEventName = L"Local\\fairyfly.desktop-approval-pending";
+
 class Broker {
 public:
     Broker(std::shared_ptr<Ui> ui, Desk desk, Options options = {});

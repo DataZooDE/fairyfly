@@ -34,6 +34,8 @@ bool has_scope(const mcp::Principal& p, const std::string& family, const std::st
     // A generic session scope is commonly granted for discovery. Lease acquisition can
     // block another client, so it requires the explicit coordination scope (or *).
     if (tool == "gui_session_lease") return p.all_scopes || p.scopes.count("session.lease") > 0;
+    // Restarting ends SAP GUI with every session of the desktop: never part of the generic session scope.
+    if (tool == "gui_session_restart") return p.all_scopes || p.scopes.count("session.restart") > 0;
     return scopes_allow(p.scopes, p.all_scopes, family, tool);
 }
 

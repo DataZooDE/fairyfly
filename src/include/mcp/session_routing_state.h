@@ -113,6 +113,12 @@ public:
             found->second.session_identity == session_identity) prelogin_.erase(found);
     }
 
+    /// Forgets the principal's implicit target (after SAP GUI was ended for a restart).
+    void clear_sticky(const std::string& principal_key) {
+        std::lock_guard<std::mutex> lock(mu_);
+        sticky_.erase(principal_key);
+    }
+
     void revoke_principal(const std::string& principal_key) {
         std::lock_guard<std::mutex> lock(mu_);
         sticky_.erase(principal_key);

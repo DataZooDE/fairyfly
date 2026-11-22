@@ -59,6 +59,7 @@ add_executable(unit_tests
     unit/test_unique_handle.cpp
     unit/test_http_probe.cpp
     unit/test_engine_actions.cpp
+    unit/test_hang_detector.cpp
     unit/test_sap_logon_lookup.cpp
     unit/test_login_handler.cpp
     unit/test_trail_screen_source.cpp
@@ -68,6 +69,7 @@ add_executable(unit_tests
     unit/test_mcp_protocol.cpp
     unit/test_mcp_tools.cpp
     unit/test_mcp_dispatcher.cpp
+    unit/test_mcp_hang.cpp
     unit/test_mcp_http.cpp
     unit/test_http_sys_mapping.cpp
     unit/test_command_table.cpp

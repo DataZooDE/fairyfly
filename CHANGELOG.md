@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.11.22
+
+- A hung SAP GUI (open, not busy, but ignoring input) is detected instead of reported as success (#155): `gui_key_send`
+  and `gui_transaction_start` report `screen_changed`; three navigations in a row that change nothing give
+  `SAP_GUI_UNRESPONSIVE` with the evidence. fairyfly first recovers without ending anything (Cancel to a native SAP
+  dialog, close the popup, `/n`, F12; `SAP_GUI_RECOVERED`) and, only with automatic SAP startup allowed, for the local
+  default, without a pending desktop approval and once per episode, ends this logon session's SAP GUI and prepares the
+  session again (`sap_gui_restarted`, `unsaved_input_lost`). New MCP write tool `gui_session_restart` (scope
+  `session.restart`) for the same restart on request. Live check `tests/integration/hung_gui_live.ps1`.
+
 ## 2026.11.15
 
 - A saved logon credential without SAP user or client (editing a `fairyfly:<name>` entry in the Windows Credential

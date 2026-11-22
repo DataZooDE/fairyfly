@@ -13,6 +13,14 @@
 - Gateway administrators can disable startup independently of business writes.
 - Preserve identity, connection, system, transaction, owner and lease restrictions.
 - Do not silently replace an explicitly selected connection or terminate another login.
+- Exception (issue #155, 2026-11-22): a SAP GUI that demonstrably ignores input (`SAP_GUI_UNRESPONSIVE`, after the
+  soft recovery failed) may be ended and prepared again, and `gui_session_restart` may do it on request. Only for the
+  implicit local default (a sticky target must belong to the default entry), only with startup permission (and the
+  gateway grant over the link), never for a read-only call, never while a desktop approval waits in any fairyfly
+  process (named event `Localairyfly.desktop-approval-pending`), never while a session of another SAP Logon entry is
+  open, only this logon session's own SAP GUI processes (checked and ended through the same process handle), once per
+  stuck episode (a failed attempt counts); the result says that unsaved
+  input is lost. Live check `tests/integration/hung_gui_live.ps1`.
 
 ## Delivery gates
 

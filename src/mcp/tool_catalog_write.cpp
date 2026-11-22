@@ -194,12 +194,37 @@ ToolSpec make_lease_spec() {
     return spec;
 }
 
+ToolSpec make_restart_spec() {
+    ToolSpec spec;
+    spec.def.name = "gui_session_restart";
+    spec.family = command_table::find_by_tool(spec.def.name)->family;
+    spec.def.title = "Restart a hung SAP GUI";
+    spec.def.description = "Ends this desktop's SAP GUI (SAP Logon and its sessions) and prepares the local default SAP "
+        "session again (logon from Windows Credential Manager or SSO). Use it only when SAP GUI no longer reacts "
+        "(SAP_GUI_UNRESPONSIVE) and the person at the desktop is not working in SAP: unsaved input in every SAP GUI "
+        "session of this desktop is lost. Only with automatic SAP startup allowed on this desktop (and over the gateway "
+        "with its startup grant). Read the screen afterwards.";
+    spec.def.input_schema = catalog::make_schema({}, {});
+    spec.def.annotations = json{{"title", spec.def.title}, {"readOnlyHint", false},
+                                {"destructiveHint", true}, {"idempotentHint", false}, {"openWorldHint", false}};
+    spec.write_tool = true;
+    spec.output = ToolOutput::Json;
+    const json schema = spec.def.input_schema;
+    spec.build_argv = [schema](const json& raw, const Policy&) {
+        const json args = raw.is_null() ? json::object() : raw;
+        validate_tool_arguments(args, schema);
+        return std::vector<std::string>{"session", "restart"};  // audit label only; never passed to the CLI
+    };
+    return spec;
+}
+
 } // namespace
 
 std::vector<ToolSpec> write_tool_specs() {
     std::vector<ToolSpec> specs;
     specs.push_back(make_fill_spec());
     specs.push_back(make_lease_spec());
+    specs.push_back(make_restart_spec());
     return specs;
 }
 

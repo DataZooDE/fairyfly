@@ -12,6 +12,7 @@
 #include <vector>
 #include "include/auth/authorize.h"
 #include "include/cli_handler.h"
+#include "include/hang_detector.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/session_leases.h"
 #include "include/mcp/session_policy_state.h"
@@ -73,6 +74,14 @@ public:
         sap_logon_starter_ = std::move(starter);
         startup_attempts_ = std::move(attempts);
     }
+    /// Issue #155: what the dispatcher may do when SAP GUI ignores every navigation (see hang_detector.h). All optional.
+    struct HangRecovery {
+        std::function<json()> probe;                   ///< frontend evidence: native dialogs, wnd[0] enabled/hung
+        std::function<int()> dismiss_native_dialogs;  ///< Cancel to SAP-owned native dialogs; how many received it
+        std::function<Result()> end_sap_gui;           ///< ends this logon session's SAP GUI processes (restart)
+        std::function<bool()> approval_pending;        ///< a desktop approval is waiting (link): never restart then
+    };
+    void set_hang_recovery(HangRecovery hooks) { hang_recovery_ = std::move(hooks); }
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }
     using OwnerSessionListingProvider = std::function<Result(std::chrono::milliseconds,
@@ -347,6 +356,21 @@ private:
     LoginSubmitGuardOverride login_submit_guard_override_;
     std::shared_ptr<startup::LoginAttempts> startup_attempts_;
     std::optional<startup::Policy> preparing_startup_;
+    hang::Detector hang_detector_;
+    HangRecovery hang_recovery_;
+    bool recovering_hang_ = false;   ///< soft recovery or restart runs: their own calls are not observed
+    /// Why SAP GUI may not be restarted now ("" = it may): explicit targets, owner sessions, startup permission (with
+    /// `corrective` filled from startup::check), a waiting desktop approval, the per-episode budget (`check_budget`).
+    std::string restart_refusal(const json& args, const CallContext& ctx, bool worker_bound, bool check_budget,
+                                json& corrective, std::optional<int> connection = std::nullopt);
+    /// gui_session_restart: ends SAP GUI and prepares the implicit default session (same guard as the automatic restart).
+    ToolResult run_session_restart(const json& args, McpCallRecord& record, const CallContext& ctx,
+                                   const std::function<ToolResult(const std::string&, const std::string&, const std::string&)>& fail);
+    /// Feeds the finished call to the hang detector. When it trips, `result` becomes SAP_GUI_UNRESPONSIVE (or
+    /// SAP_GUI_RECOVERED after a soft recovery); a restart re-runs the call and returns its ToolResult.
+    std::optional<ToolResult> observe_responsiveness(const std::string& name, const json& args, Result& result,
+                                                     McpCallRecord& record, const CallContext& ctx, bool worker_bound,
+                                                     const std::function<Result(const std::vector<std::string>&)>& invoke_selected);
     std::string preparing_identity_;
     Result prepare_implicit_session(const CallContext& ctx, std::optional<audit::SapFacts>& ready_facts,
                                     const std::string& expected_identity = "");

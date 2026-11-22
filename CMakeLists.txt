@@ -27,7 +27,7 @@ endif()
 # the same day. Keep it equal to FAIRYFLY_VERSION in src/include/version.h and "version" in vcpkg.json
 # (packaging/set_version.ps1 sets all three; configuring fails when they differ). Here and in vcpkg.json the plain
 # numbers (2026.10.5), in version.h the zero-padded form (2026.10.05) that --version prints and the tag uses.
-project(fairyfly VERSION 2026.11.15 LANGUAGES CXX)
+project(fairyfly VERSION 2026.11.22 LANGUAGES CXX)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/calendar_version.cmake)
 fairyfly_check_calendar_version("${PROJECT_VERSION}")   # a real date (2026.2.30 is refused), N 1..99
 math(EXPR _ff_minor "${PROJECT_VERSION_MINOR}")
@@ -148,6 +148,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # Core library sources (shared between main executable and tests)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
+    src/hang_detector.cpp
     src/startup_settings.cpp
     src/session_preparation.cpp
     src/startup_coordination.cpp
@@ -272,6 +273,7 @@ set(FAIRYFLY_LIB_SOURCES
     src/mcp/http_tray_runner.cpp
     src/system/powershell_runner.cpp
     src/system/window_owner.cpp
+    src/system/sap_gui_process.cpp
     src/system/process_probe.cpp
     src/system/cert_scripts.cpp
     src/setup/setup_validators.cpp
