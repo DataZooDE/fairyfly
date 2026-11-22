@@ -43,6 +43,8 @@ const std::vector<Row>& rows() {
         {{"session", "login"}, "Log into a launched SAP GUI session", "SESSION", true, nullptr, false, kSessionSetup},
         {{"session", "disconnect"}, "Remove a saved connection; optionally close its SAP GUI session", "SESSION", true, nullptr, false, Trait::WorkerBound | Trait::LeaseCapable},
         {{"session", "lease"}, "Acquire, renew or release an MCP session lease", "SESSION", true, nullptr, true, kSessionSetup},
+        // MCP only (issue #155): end a hung SAP GUI and prepare the local default session again
+        {{"session", "restart"}, "Restart a hung SAP GUI and prepare the default SAP session again", "SESSION", true, nullptr, true, kSessionSetup},
         {{"connection", "list"}, "List and manage saved fairyfly connections", "CONNECTION", true, nullptr, false, kListing},
         {{"screen", "read"}, "Read screen structure (max 500 elements)", "SCREEN", true, nullptr, false, kOnScreenLeased | Trait::ScreenData | Trait::ReadOnlyStep, Render::ScreenRead},
         {{"screen", "find"}, "Find visible controls without reading unrelated values", "SCREEN", true, nullptr, false, kOnScreen | Trait::ScreenData | Trait::ReadOnlyStep, Render::ScreenFind},

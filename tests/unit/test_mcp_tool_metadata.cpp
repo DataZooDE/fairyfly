@@ -132,7 +132,9 @@ TEST_CASE("tool metadata: authorize_call has a scope decision for every tool", "
         INFO("tool " << spec.def.name);
         const json args = sample_args(spec.def.name);
         // scope = its family -> allowed (batch checks its items, which are empty here)
-        const Principal own = scoped({spec.def.name == "gui_session_lease" ? "session.lease" : spec.family});
+        const Principal own = scoped({spec.def.name == "gui_session_lease"     ? "session.lease"
+                                      : spec.def.name == "gui_session_restart" ? "session.restart"
+                                                                               : spec.family});
         const auto allowed = auth::authorize_call(own, spec, spec.family, args, rw, std::nullopt, std::nullopt);
         CHECK(allowed.allowed);
         // another family only -> SCOPE_DENIED (gui_batch is checked per item, so it may pass with an empty list)

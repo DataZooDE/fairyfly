@@ -244,9 +244,16 @@ struct RestartRig {
     bool hangs_after_restart = false;
     int ended = 0;
     int launches = 0;
-    CommandDispatcher dispatcher{[this](const Argv& argv) { return gui(argv); }, Policy{}};
+    CommandDispatcher dispatcher;
 
-    RestartRig() {
+    static Policy policy_for(bool write) {
+        Policy p;
+        p.read_only = !write;
+        p.allow_write = write;
+        return p;
+    }
+    explicit RestartRig(bool write = false)
+        : dispatcher([this](const Argv& argv) { return gui(argv); }, policy_for(write)) {
         gui.on_other = [this](const Argv& argv) {
             if (argv.size() > 1 && argv[0] == "session" && argv[1] == "list")
                 return Result::ok({{"connections", json::array()}, {"total_connections", 0}, {"total_sessions", 0}});
@@ -373,5 +380,55 @@ TEST_CASE("MCP hang: a gateway call without the startup grant is never restarted
     const auto third = rig.trip_tcode(c);
     REQUIRE(third.is_error);
     CHECK(restart_of(third)["reason"] == "SAP_AUTOSTART_ADMIN_DISABLED");
+    CHECK(rig.ended == 0);
+}
+
+// ---- Stage D: the explicit gui_session_restart tool -------------------------------------------------------------
+
+TEST_CASE("MCP restart tool: listed in write mode, hidden from a read-only server", "[mcp][hang][restart-tool]") {
+    RestartRig write(true);
+    const auto tools = write.dispatcher.list_tools();
+    CHECK(std::any_of(tools.begin(), tools.end(), [](const ToolDef& t) { return t.name == "gui_session_restart"; }));
+    RestartRig read_only;
+    const auto hidden = read_only.dispatcher.list_tools();
+    CHECK(std::none_of(hidden.begin(), hidden.end(), [](const ToolDef& t) { return t.name == "gui_session_restart"; }));
+    const auto refused = read_only.dispatcher.call_tool("gui_session_restart", json::object(), Rig::ctx());
+    CHECK(refused.is_error);
+    CHECK(read_only.ended == 0);
+}
+
+TEST_CASE("MCP restart tool: with the startup checkbox it ends SAP GUI and prepares the default session", "[mcp][hang][restart-tool]") {
+    RestartRig rig(true);
+    const auto result = rig.dispatcher.call_tool("gui_session_restart", json::object(), Rig::ctx());
+    INFO(text_of(result));
+    REQUIRE_FALSE(result.is_error);
+    CHECK(rig.ended == 1);
+    CHECK(rig.launches == 1);
+    REQUIRE(result.structured);
+    CHECK((*result.structured)["data"]["sap_gui_restarted"] == true);
+    CHECK((*result.structured)["data"]["unsaved_input_lost"] == true);
+    CHECK((*result.structured)["data"]["connection_file_id"] == 7);
+}
+
+TEST_CASE("MCP restart tool: refused without the checkbox, the grant or while an approval waits", "[mcp][hang][restart-tool]") {
+    RestartRig rig(true);
+    auto c = Rig::ctx();
+    std::string expected;
+    SECTION("checkbox off") {
+        rig.local_enabled = false;
+        expected = "SAP_AUTOSTART_DISABLED";
+    }
+    SECTION("gateway without grant") {
+        c.link_request = true;
+        expected = "SAP_AUTOSTART_ADMIN_DISABLED";
+    }
+    SECTION("approval waiting") {
+        rig.approval_waiting = true;
+        expected = "SAP_APPROVAL_PENDING";
+    }
+    const auto result = rig.dispatcher.call_tool("gui_session_restart", json::object(), c);
+    INFO(text_of(result));
+    REQUIRE(result.is_error);
+    CHECK(text_of(result).find(expected) != std::string::npos);
     CHECK(rig.ended == 0);
 }

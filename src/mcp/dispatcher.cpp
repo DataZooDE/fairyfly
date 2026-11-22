@@ -2376,6 +2376,80 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
     return shaped;
 }
 
+std::string CommandDispatcher::restart_refusal(const json& args, const CallContext& ctx, bool worker_bound,
+                                               bool check_budget, json& corrective) {
+    if (!startup_policy_) return "startup_unavailable";
+    if ((args.is_object() && args.contains("connection")) || policy_.default_connection) return "explicit_connection";
+    if (worker_bound || owner_mode(ctx)) return "owner_session";
+    if (!hang_recovery_.end_sap_gui) return "restart_unavailable";
+    auto current = startup_policy_();
+    current.link_request = ctx.link_request;
+    current.gateway_allowed = ctx.sap_startup_granted;
+    if (auto denied = startup::check(current)) {
+        if (denied->error.contains("suggestions")) corrective = denied->error["suggestions"];
+        return denied->error.value("code", "SAP_AUTOSTART_DISABLED");
+    }
+    bool waiting = false;
+    try { waiting = hang_recovery_.approval_pending && hang_recovery_.approval_pending(); } catch (...) { waiting = true; }
+    if (waiting) return "approval_pending";
+    if (check_budget && hang_detector_.restart_used()) return "already_restarted";
+    return "";
+}
+
+ToolResult CommandDispatcher::run_session_restart(const json& args, McpCallRecord& record, const CallContext& ctx,
+    const std::function<ToolResult(const std::string&, const std::string&, const std::string&)>& fail) {
+    json corrective = json::array();
+    const std::string refusal = restart_refusal(args, ctx, false, false, corrective);
+    std::string hint;
+    for (const auto& line : corrective)
+        if (line.is_string()) hint += (hint.empty() ? "" : " ") + line.get<std::string>();
+    if (refusal == "approval_pending")
+        return fail("SAP_APPROVAL_PENDING", "A change waits for approval at this desktop; SAP GUI is not restarted now.",
+                    "retry after the person answered the open approval");
+    if (refusal == "explicit_connection")
+        return fail("SAP_RESTART_DEFAULT_ONLY", "Only the local default SAP session is restarted, not a selected connection.", "");
+    if (refusal == "owner_session")
+        return fail("SAP_RESTART_UNAVAILABLE", "SAP GUI cannot be restarted from an owner-restricted endpoint.", "");
+    if (refusal == "startup_unavailable" || refusal == "restart_unavailable")
+        return fail("SAP_RESTART_UNAVAILABLE", "SAP GUI cannot be restarted on this endpoint.", "");
+    if (!refusal.empty())
+        return fail(refusal, "SAP GUI is not restarted: automatic SAP startup is not allowed.", hint);
+
+    Result ended;
+    try { ended = hang_recovery_.end_sap_gui(); }
+    catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
+    if (ended.status != Result::Status::Success)
+        return fail(ended.error.value("code", "SAP_GUI_RESTART_FAILED"),
+                    ended.error.value("message", "SAP GUI could not be ended."), "ask the person at the desktop to end SAP Logon");
+    hang_detector_.note_restart();
+    routing_state_->clear_sticky(principal_key(ctx.principal));
+    std::optional<audit::SapFacts> ready;
+    const Result prepared = prepare_implicit_session(ctx, ready);
+    if (prepared.status != Result::Status::Success) {
+        std::string prepare_hint;
+        if (prepared.error.contains("suggestions") && prepared.error["suggestions"].is_array())
+            for (const auto& line : prepared.error["suggestions"])
+                if (line.is_string()) prepare_hint += (prepare_hint.empty() ? "" : " ") + line.get<std::string>();
+        auto refused = fail(prepared.error.value("code", "SAP_STARTUP_UNAVAILABLE"),
+            "SAP GUI was ended but the SAP session could not be prepared again: " +
+                prepared.error.value("message", std::string("unknown failure")), prepare_hint);
+        json detail = prepared.to_json();
+        if (detail.contains("error") && detail["error"].is_object()) detail["error"]["sap_gui_restarted"] = true;
+        refused.structured = detail;
+        return refused;
+    }
+    const int connection = prepared.data.at("connection_file_id").get<int>();
+    record.connection = connection;
+    if (ready && ready->connection_id)
+        set_sticky_connection(principal_key(ctx.principal), *ready->connection_id, ready->session_identity,
+                              sap_identity(*ready), prepared.data.value("startup_default", std::string()));
+    Result out = Result::ok({{"sap_gui_restarted", true}, {"unsaved_input_lost", true}, {"connection_file_id", connection},
+                             {"next", "Read the current SAP screen before the next action."}});
+    out.duration = ended.duration;
+    const ToolSpec* restart_spec = find_spec("gui_session_restart");
+    return shape_result(out, *restart_spec, policy_, "", nullptr);
+}
+
 std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
     const std::string& name, const json& args, Result& result, McpCallRecord& record, const CallContext& ctx,
     bool worker_bound, const std::function<Result(const std::vector<std::string>&)>& invoke_selected) {
@@ -2467,31 +2541,8 @@ std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
     // Restart (issue #155, step 3): only for the implicit local default, only with automatic SAP startup allowed (the
     // tray checkbox / --allow-sap-startup, and over the link the gateway's grant), never while a desktop approval
     // waits, and once per stuck episode.
-    std::string refusal;
     json corrective = json::array();
-    if (!startup_policy_) {
-        refusal = "startup_unavailable";
-    } else if ((args.is_object() && args.contains("connection")) || policy_.default_connection) {
-        refusal = "explicit_connection";
-    } else if (worker_bound || owner_mode(ctx)) {
-        refusal = "owner_session";
-    } else if (!hang_recovery_.end_sap_gui) {
-        refusal = "restart_unavailable";
-    } else {
-        auto current = startup_policy_();
-        current.link_request = ctx.link_request;
-        current.gateway_allowed = ctx.sap_startup_granted;
-        bool waiting = false;
-        try { waiting = hang_recovery_.approval_pending && hang_recovery_.approval_pending(); } catch (...) { waiting = true; }
-        if (auto denied = startup::check(current)) {
-            refusal = denied->error.value("code", "SAP_AUTOSTART_DISABLED");
-            if (denied->error.contains("suggestions")) corrective = denied->error["suggestions"];
-        } else if (waiting) {
-            refusal = "approval_pending";
-        } else if (hang_detector_.restart_used()) {
-            refusal = "already_restarted";
-        }
-    }
+    const std::string refusal = restart_refusal(args, ctx, worker_bound, true, corrective);
     json restart = {{"allowed", refusal.empty()}};
     if (refusal.empty()) {
         Result ended;
@@ -2721,6 +2772,7 @@ ToolResult CommandDispatcher::execute_call(const std::string& name, const json& 
     // Broker-native lease control runs only after the same scope, owner, SAP-system and
     // saved-connection checks as ordinary calls. Its secret never enters CLI argv or audit.
     if (name == "gui_session_lease") return run_session_lease(*spec, args, principal, record, owner_pre_facts, ctx, fail);
+    if (name == "gui_session_restart") return run_session_restart(args, record, ctx, fail);
 
     // A read-only token narrows the server mode for this call only (restored afterwards). An authorized selection-input
     // fill does the opposite for THAT call only: it lifts the handler's read-only guard (so the fill is not refused) and

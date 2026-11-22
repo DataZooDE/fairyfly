@@ -359,6 +359,13 @@ private:
     hang::Detector hang_detector_;
     HangRecovery hang_recovery_;
     bool recovering_hang_ = false;   ///< soft recovery or restart runs: their own calls are not observed
+    /// Why SAP GUI may not be restarted now ("" = it may): explicit targets, owner sessions, startup permission (with
+    /// `corrective` filled from startup::check), a waiting desktop approval, the per-episode budget (`check_budget`).
+    std::string restart_refusal(const json& args, const CallContext& ctx, bool worker_bound, bool check_budget,
+                                json& corrective);
+    /// gui_session_restart: ends SAP GUI and prepares the implicit default session (same guard as the automatic restart).
+    ToolResult run_session_restart(const json& args, McpCallRecord& record, const CallContext& ctx,
+                                   const std::function<ToolResult(const std::string&, const std::string&, const std::string&)>& fail);
     /// Feeds the finished call to the hang detector. When it trips, `result` becomes SAP_GUI_UNRESPONSIVE (or
     /// SAP_GUI_RECOVERED after a soft recovery); a restart re-runs the call and returns its ToolResult.
     std::optional<ToolResult> observe_responsiveness(const std::string& name, const json& args, Result& result,

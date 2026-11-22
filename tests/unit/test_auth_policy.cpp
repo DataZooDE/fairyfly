@@ -114,7 +114,7 @@ TEST_CASE("authorize: scope matrix per family", "[auth][authz]") {
             INFO(granted << " -> " << spec.def.name);
             if (spec.def.name == "gui_batch") continue;  // batch is checked separately below
             const auto d = decide(p, spec.def.name, sample_args(spec.def.name));
-            if (spec.family == granted && spec.def.name != "gui_session_lease") {
+            if (spec.family == granted && spec.def.name != "gui_session_lease" && spec.def.name != "gui_session_restart") {
                 CHECK(d.allowed);
             } else {
                 CHECK_FALSE(d.allowed);
