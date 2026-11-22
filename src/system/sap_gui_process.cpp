@@ -120,6 +120,42 @@ int dismiss_native_dialogs(const std::vector<NativeDialog>& dialogs) noexcept {
     return sent;
 }
 
+FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds answer_within) noexcept {
+    FrontendResponse response;
+    try {
+        const auto processes = own_sap_processes();
+        response.running = !processes.empty();
+        if (!response.running) return response;
+        struct Scan {
+            const std::vector<SapProcess>* processes;
+            std::vector<HWND> windows;
+        } scan{&processes, {}};
+        EnumWindows([](HWND window, LPARAM state) -> BOOL {
+            auto* scan = reinterpret_cast<Scan*>(state);
+            if (!IsWindowVisible(window)) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            for (const auto& p : *scan->processes)
+                if (p.pid == pid) {
+                    scan->windows.push_back(window);
+                    break;
+                }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&scan));
+        for (HWND window : scan.windows) {
+            ++response.windows;
+            DWORD_PTR ignored = 0;
+            const bool answered = !IsHungAppWindow(window) &&
+                SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                    static_cast<UINT>(answer_within.count()), &ignored) != 0;
+            if (!answered && IsWindow(window)) ++response.hung_windows;
+        }
+        response.hung = response.hung_windows > 0;
+    } catch (...) {
+    }
+    return response;
+}
+
 TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds wait) noexcept {
     TerminateOutcome outcome;
     try {
@@ -171,6 +207,7 @@ TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds wait) noe
 SapGuiProbe probe_sap_gui(std::uintptr_t) noexcept { return {}; }
 int dismiss_native_dialogs(const std::vector<NativeDialog>&) noexcept { return 0; }
 TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds) noexcept { return {}; }
+FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds) noexcept { return {}; }
 #endif
 
 }  // namespace fairyfly::system

@@ -279,6 +279,49 @@ std::vector<ToolDef> CommandDispatcher::list_tools_for(const Principal& principa
     return defs;
 }
 
+std::optional<json> CommandDispatcher::on_call_deadline(const std::string& tool, long long elapsed_ms) {
+    (void)tool;   // the watch knows the armed call
+    return blocked_call_watch_.on_deadline(elapsed_ms);
+}
+
+void CommandDispatcher::set_hang_recovery(HangRecovery hooks) {
+    hang_recovery_ = std::move(hooks);
+    blocked_call_watch_.set_probe(hang_recovery_.frontend ? hang::BlockedCallWatch::Probe(hang_recovery_.frontend)
+                                                          : hang::BlockedCallWatch::Probe());
+    // Win32 only: the COM objects are dropped on the COM thread after the call (after_external_end)
+    blocked_call_watch_.set_end_sap_gui(hang_recovery_.end_sap_gui ? hang::BlockedCallWatch::EndSapGui(hang_recovery_.end_sap_gui)
+                                                                   : hang::BlockedCallWatch::EndSapGui());
+}
+
+void CommandDispatcher::note_session_listing(const Result& listed) {
+    if (!startup_policy_ || listed.status != Result::Status::Success || !listed.data.is_object()) return;
+    const json connections = listed.data.value("connections", json::array());
+    if (!connections.is_array()) return;
+    std::string default_connection;
+    try { default_connection = startup_policy_().default_connection; } catch (...) { return; }
+    bool other = false;
+    for (const auto& connection : connections)
+        if (connection.is_object() &&
+            !sap::ConnectionLauncher::matches_connection_name(default_connection, connection.value("description", std::string())))
+            other = true;
+    other_entries_open_ = other;
+}
+
+hang::RestartPermit CommandDispatcher::blocked_call_permit(const json& args, const CallContext& ctx) {
+    hang::RestartPermit permit;
+    json corrective = json::array();
+    std::optional<int> sticky;
+    if (const auto target = routing_state_->sticky_target(principal_key(ctx.principal))) sticky = target->connection;
+    try {
+        permit.reason = restart_refusal(args, ctx, false, false, corrective, sticky, true);
+    } catch (...) {
+        permit.reason = "restart_unavailable";
+    }
+    permit.allowed = permit.reason.empty();
+    permit.corrective = corrective;
+    return permit;
+}
+
 void CommandDispatcher::set_client_info(const json& client_info) {
     client_info_ = client_info;
     std::string name, version;
@@ -320,7 +363,9 @@ void CommandDispatcher::note_step(const char* step, const std::string& tool, con
 
 Result CommandDispatcher::invoke(const std::vector<std::string>& argv) {
     try {
-        return invoker_(argv);
+        Result result = invoker_(argv);
+        if (argv.size() >= 2 && argv[0] == "session" && argv[1] == "list") note_session_listing(result);
+        return result;
     } catch (const std::exception& e) {
         return Result::fail("INTERNAL_ERROR", e.what());
     } catch (...) {
@@ -2377,7 +2422,8 @@ ToolResult CommandDispatcher::run_invocation(const std::string& name, McpCallRec
 }
 
 std::string CommandDispatcher::restart_refusal(const json& args, const CallContext& ctx, bool worker_bound,
-                                               bool check_budget, json& corrective, std::optional<int> connection) {
+                                               bool check_budget, json& corrective, std::optional<int> connection,
+                                               bool without_com) {
     if (!startup_policy_) return "startup_unavailable";
     if ((args.is_object() && args.contains("connection")) || policy_.default_connection) return "explicit_connection";
     if (worker_bound || owner_mode(ctx)) return "owner_session";
@@ -2392,7 +2438,7 @@ std::string CommandDispatcher::restart_refusal(const json& args, const CallConte
         if (const auto sticky = routing_state_->sticky_target(principal_key(ctx.principal));
             sticky && sticky->connection == *connection && !sticky->startup_default.empty())
             name = sticky->startup_default;
-        if (name.empty() && target_resolver_) {
+        if (name.empty() && target_resolver_ && !without_com) {
             try {
                 const auto saved = target_resolver_({{}, {}, connection});
                 if (!saved.ambiguous) name = saved.connection_name;
@@ -2411,6 +2457,10 @@ std::string CommandDispatcher::restart_refusal(const json& args, const CallConte
     try { waiting = hang_recovery_.approval_pending && hang_recovery_.approval_pending(); } catch (...) { waiting = true; }
     if (waiting) return "approval_pending";
     if (check_budget && hang_detector_.restart_used()) return "already_restarted";
+    if (without_com) {
+        if (!other_entries_open_) return "other_sessions_unknown";
+        return *other_entries_open_ ? "other_sessions_open" : "";
+    }
     // Ending SAP GUI ends every session of this desktop: never while one of another SAP Logon entry is open (work
     // fairyfly did not prepare). A listing that fails says nothing (the hang may be why) and does not block.
     const Result listed = invoke({"session", "list"});
@@ -2455,9 +2505,10 @@ ToolResult CommandDispatcher::run_session_restart(const json& args, McpCallRecor
     Result ended;
     try { ended = hang_recovery_.end_sap_gui(); }
     catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
-    if (ended.status != Result::Status::Success)
+    if (ended.status != Result::Status::Success && ended.error.value("code", std::string()) != "SAP_GUI_NOT_FOUND")
         return fail(ended.error.value("code", "SAP_GUI_RESTART_FAILED"),
                     ended.error.value("message", "SAP GUI could not be ended."), "ask the person at the desktop to end SAP Logon");
+    try { if (hang_recovery_.after_external_end) hang_recovery_.after_external_end(); } catch (...) {}
     routing_state_->clear_sticky(principal_key(ctx.principal));
     std::optional<audit::SapFacts> ready;
     const Result prepared = prepare_implicit_session(ctx, ready);
@@ -2586,6 +2637,7 @@ std::optional<ToolResult> CommandDispatcher::observe_responsiveness(
         try { ended = hang_recovery_.end_sap_gui(); }
         catch (const std::exception& e) { ended = Result::fail("SAP_GUI_RESTART_FAILED", e.what()); }
         if (ended.status == Result::Status::Success) {
+            try { if (hang_recovery_.after_external_end) hang_recovery_.after_external_end(); } catch (...) {}
             hang_detector_.reset(key);
             routing_state_->clear_sticky(principal_key(ctx.principal));
             std::string rerun_code;
@@ -3310,6 +3362,29 @@ ToolResult CommandDispatcher::run_batch(const std::string& batch_tool, const jso
 }
 
 ToolResult CommandDispatcher::call_tool(const std::string& name, const json& args, const CallContext& ctx) {
+    // Issue #155, second variant: if this call blocks in SAP GUI, the transport asks the watch at its deadline.
+    blocked_call_watch_.arm(name, blocked_call_permit(args, ctx));
+    struct Disarm {
+        CommandDispatcher& d;
+        const CallContext& ctx;
+        bool responsive = false;
+        ~Disarm() {
+            if (d.blocked_call_watch_.disarm()) {
+                // SAP GUI was ended while this call blocked: drop its COM objects and targets here, on the COM thread
+                try { if (d.hang_recovery_.after_external_end) d.hang_recovery_.after_external_end(); } catch (...) {}
+                d.routing_state_->clear_sticky(principal_key(ctx.principal));
+                d.hang_detector_ = hang::Detector();
+            } else if (responsive) {
+                d.blocked_call_watch_.note_responsive();
+            }
+        }
+    } disarm{*this, ctx};
+    ToolResult out = call_tool_armed(name, args, ctx);
+    disarm.responsive = !out.is_error;
+    return out;
+}
+
+ToolResult CommandDispatcher::call_tool_armed(const std::string& name, const json& args, const CallContext& ctx) {
     std::shared_ptr<void> looked_up;  // held for the whole call (gui_batch: all its steps)
     if (before_call_) {
         try {

@@ -145,14 +145,23 @@ CommandDispatcher::HangRecovery hang_recovery_for(const std::function<cli::Comma
     hooks.dismiss_native_dialogs = [lazy_handler] {
         return system::dismiss_native_dialogs(system::probe_sap_gui(attached_window_handle(lazy_handler())).native_dialogs);
     };
-    hooks.end_sap_gui = [lazy_handler] {
+    // Win32 only: it also runs on a transport's watchdog thread while the COM thread blocks (issue #155).
+    hooks.end_sap_gui = [] {
         const auto outcome = system::terminate_sap_gui_processes(std::chrono::seconds(10));
-        try { lazy_handler().forget_sap_gui(); } catch (...) {}
         if (outcome.found.empty()) return Result::fail("SAP_GUI_NOT_FOUND", "No SAP GUI process of this logon session runs.");
         if (!outcome.error.empty() || outcome.ended.size() != outcome.found.size())
             return Result::fail("SAP_GUI_RESTART_FAILED", outcome.error.empty() ? "SAP GUI did not end" : outcome.error);
         spdlog::warn("hung SAP GUI ended for a restart ({} process(es))", outcome.ended.size());
         return Result::ok({{"ended", outcome.ended.size()}});
+    };
+    hooks.after_external_end = [lazy_handler] { lazy_handler().forget_sap_gui(); };   // COM thread
+    hooks.frontend = [] {
+        const auto response = system::sap_gui_frontend_response(std::chrono::seconds(3));
+        hang::FrontendState state;
+        state.sap_gui_running = response.running;
+        state.frontend_hung = response.hung;
+        state.evidence = {{"windows", response.windows}, {"hung_windows", response.hung_windows}};
+        return state;
     };
     hooks.approval_pending = std::move(approval_pending);
     return hooks;

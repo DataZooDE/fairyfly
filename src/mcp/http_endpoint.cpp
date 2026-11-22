@@ -894,8 +894,8 @@ HttpResponse HttpEndpoint::dispatch(const HttpRequest& request, const Principal&
     if (is_call) {
         const json id = message.id;
         if (params.is_object() && params.contains("name") && params["name"].is_string()) job.tool = params["name"].get<std::string>();
-        job.timeout_response = [id, stateless, server_info](const CallInfo& info) {
-            json msg = make_result(id, busy_call_result("CALL_TIMEOUT", info));
+        job.timeout_response = [this, id, stateless, server_info](const CallInfo& info) {
+            json msg = make_result(id, deadline_call_result(provider_, info));
             return stateless ? decorate_stateless(std::move(msg), "tools/call", server_info) : msg;
         };
     }

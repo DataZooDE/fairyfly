@@ -312,3 +312,27 @@ TEST_CASE("hung SAP call: a legitimate call over 60 s that completes clears the 
     CHECK(text_of(call(link.tools, "gui_element_click")) == "gui_element_click");
     CHECK(link.ran_other == 1);
 }
+
+// Issue #155, second variant: the caller whose own call never returns gets the watch's answer (restart or reason).
+TEST_CASE("link hung call: the stuck call's caller gets the deadline hook's answer", "[link][hung][hang]") {
+    HungLink link;
+    std::atomic<int> asked{0};
+    link.tools.set_deadline_hook([&](const fairyfly::link::InFlightCall& call) -> std::optional<nlohmann::json> {
+        ++asked;
+        return nlohmann::json{{"code", "SAP_GUI_RESTARTED"}, {"message", "SAP GUI was frozen (" + call.tool + ") and was restarted."},
+                              {"hint", "read the screen first"}};
+    });
+    std::string error;
+    std::thread caller([&] {
+        try {
+            link.tools.rpc("tools/call", {{"name", "gui_screen_read"}, {"arguments", nlohmann::json::object()}}, 200, {});
+        } catch (const std::exception& e) {
+            error = e.what();
+        }
+    });
+    caller.join();
+    link.sap.release();
+    CHECK(asked == 1);
+    CHECK(error.rfind("SAP_GUI_RESTARTED: ", 0) == 0);
+    CHECK(error.find("read the screen first") != std::string::npos);
+}

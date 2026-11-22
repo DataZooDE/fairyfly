@@ -101,6 +101,14 @@ public:
     /// list_tools() (for example write tools in read-only mode). The server answers unknown names
     /// with the protocol error -32602; known-but-hidden names reach call_tool(), which returns a
     /// model-readable isError result (TOOL_UNAVAILABLE_READ_ONLY). Default: listed tools only.
+    /// Issue #155: called on the transport's watchdog thread when the running tools/call reached its deadline.
+    /// nullopt: answer the generic CALL_TIMEOUT. Otherwise the error object {code, message, hint, ...} to answer
+    /// with (a frozen SAP GUI, possibly restarted). Must not touch COM. Default: nothing to say.
+    virtual std::optional<json> on_call_deadline(const std::string& tool, long long elapsed_ms) {
+        (void)tool;
+        (void)elapsed_ms;
+        return std::nullopt;
+    }
     virtual bool has_tool(const std::string& name) const {
         for (const auto& tool : list_tools())
             if (tool.name == name) return true;

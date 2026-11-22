@@ -564,3 +564,102 @@ TEST_CASE("MCP hang: a failed attempt to end SAP GUI uses the episode's restart"
     CHECK(restart_of(second)["reason"] == "already_restarted");
     CHECK(rig.ended == 1);
 }
+
+// ---- Second variant: a call that never returns (the watch decides at the deadline) -----------------------------
+
+namespace {
+
+/// A RestartRig whose SAP GUI blocks inside one call: the test plays the transport's watchdog from inside the call.
+struct BlockingRig : RestartRig {
+    std::optional<json> deadline_answer;
+    bool frozen = true;
+    int forgotten = 0;
+    explicit BlockingRig(bool write = true) : RestartRig(write) {
+        CommandDispatcher::HangRecovery hooks;
+        hooks.end_sap_gui = [this] {
+            ++ended;
+            logged_on = false;
+            frozen = false;
+            return Result::ok({{"ended", 1}});
+        };
+        hooks.approval_pending = [this] { return approval_waiting; };
+        hooks.frontend = [this] {
+            fairyfly::hang::FrontendState s;
+            s.sap_gui_running = logged_on || frozen;
+            s.frontend_hung = frozen;
+            return s;
+        };
+        hooks.after_external_end = [this] { ++forgotten; };
+        dispatcher.set_hang_recovery(hooks);
+        gui.on_other = [this, previous = gui.on_other](const Argv& argv) {
+            if (argv.size() > 1 && argv[0] == "screen" && argv[1] == "read" && frozen) {
+                deadline_answer = dispatcher.on_call_deadline("gui_screen_read", 120000);   // the watchdog thread
+                return Result::fail("COM_ERROR", "GetObjectTree failed: 0x800706BA");          // SAP GUI was ended
+            }
+            return previous(argv);
+        };
+    }
+};
+
+}  // namespace
+
+TEST_CASE("MCP blocked call: a frozen SAP GUI is ended at the deadline when the restart is allowed", "[mcp][hang][watch]") {
+    BlockingRig rig;
+    rig.open_connections = json::array({connection_of("Bigfox")});
+    REQUIRE_FALSE(rig.dispatcher.call_tool("gui_session_list", json::object(), Rig::ctx()).is_error);   // known sessions
+    const auto blocked = rig.dispatcher.call_tool("gui_screen_read", json::object(), Rig::ctx());
+    REQUIRE(rig.deadline_answer.has_value());
+    CHECK((*rig.deadline_answer)["code"] == "SAP_GUI_RESTARTED");
+    CHECK(rig.ended == 1);
+    CHECK(rig.forgotten == 1);              // the handler dropped its COM objects on the COM thread
+    // the next implicit call prepares the default session again (startup path)
+    const auto next = rig.dispatcher.call_tool("gui_screen_read", json::object(), Rig::ctx());
+    INFO(rig.dispatcher.call_tool("gui_session_list", json::object(), Rig::ctx()).content.dump());
+    CHECK(rig.launches == 1);
+    CHECK_FALSE(next.is_error);
+}
+
+TEST_CASE("MCP blocked call: no restart at the deadline without permission", "[mcp][hang][watch]") {
+    BlockingRig rig;
+    rig.open_connections = json::array({connection_of("Bigfox")});
+    std::string expected;
+    auto c = Rig::ctx();
+    SECTION("checkbox off") { rig.local_enabled = false; expected = "SAP_AUTOSTART_DISABLED"; }
+    SECTION("read-only call") { c.principal.read_only = true; expected = "read_only"; }
+    SECTION("approval waiting") { rig.approval_waiting = true; expected = "approval_pending"; }
+    SECTION("explicit connection") { expected = "explicit_connection"; }
+    SECTION("other SAP Logon entry open") {
+        rig.open_connections = json::array({connection_of("Bigfox"), connection_of("PRD")});
+        expected = "other_sessions_open";
+    }
+    SECTION("sessions never listed") { rig.open_connections = json::array(); expected = "other_sessions_unknown"; }
+    if (expected != "other_sessions_unknown")
+        REQUIRE_FALSE(rig.dispatcher.call_tool("gui_session_list", json::object(), c).is_error);
+    json args = json::object();
+    if (expected == "explicit_connection") args["connection"] = 7;
+    rig.dispatcher.call_tool("gui_screen_read", args, c);
+    REQUIRE(rig.deadline_answer.has_value());
+    INFO(rig.deadline_answer->dump());
+    CHECK((*rig.deadline_answer)["code"] == "SAP_GUI_NOT_RESPONDING");
+    CHECK((*rig.deadline_answer)["restart"]["reason"] == expected);
+    CHECK(rig.ended == 0);
+}
+
+TEST_CASE("MCP blocked call: SAP GUI waiting for the server is never ended", "[mcp][hang][watch]") {
+    BlockingRig rig;
+    rig.open_connections = json::array({connection_of("Bigfox")});
+    REQUIRE_FALSE(rig.dispatcher.call_tool("gui_session_list", json::object(), Rig::ctx()).is_error);
+    CommandDispatcher::HangRecovery hooks;
+    hooks.end_sap_gui = [&rig] { ++rig.ended; return Result::ok(); };
+    hooks.frontend = [] { return fairyfly::hang::FrontendState{true, false, json::object()}; };
+    rig.dispatcher.set_hang_recovery(hooks);
+    rig.dispatcher.call_tool("gui_screen_read", json::object(), Rig::ctx());
+    REQUIRE(rig.deadline_answer.has_value());
+    CHECK((*rig.deadline_answer)["code"] == "SAP_SERVER_NOT_RESPONDING");
+    CHECK(rig.ended == 0);
+}
+
+TEST_CASE("MCP blocked call: outside a call the deadline has nothing to say", "[mcp][hang][watch]") {
+    BlockingRig rig;
+    CHECK_FALSE(rig.dispatcher.on_call_deadline("gui_screen_read", 120000).has_value());
+}

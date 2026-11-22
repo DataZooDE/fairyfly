@@ -48,6 +48,20 @@ json busy_call_result(const std::string& code, const CallInfo& info) {
     return result;
 }
 
+json deadline_call_result(ToolProvider& provider, const CallInfo& info) {
+    std::optional<json> error;
+    try { error = provider.on_call_deadline(info.tool, info.elapsed_ms); } catch (...) {}
+    if (!error || !error->is_object() || !error->contains("code")) return busy_call_result("CALL_TIMEOUT", info);
+    json e = *error;
+    if (!e.contains("timeout_ms")) e["timeout_ms"] = info.timeout_ms;
+    if (!e.contains("retry_after_ms")) e["retry_after_ms"] = retry_after_ms_hint(info);
+    std::string text = e.value("code", std::string()) + ": " + e.value("message", std::string());
+    if (e.contains("hint") && e["hint"].is_string()) text += "\nhint: " + e["hint"].get<std::string>();
+    return json{{"content", json::array({json{{"type", "text"}, {"text", text}}})},
+                {"structuredContent", json{{"status", "error"}, {"error", e}}},
+                {"isError", true}};
+}
+
 SubmitResult CallExecutor::submit(ExecJob job, std::shared_ptr<CallState>* state_out) {
     auto state = std::make_shared<CallState>();
     state->id = job.id;

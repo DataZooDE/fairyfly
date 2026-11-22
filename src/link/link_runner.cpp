@@ -675,6 +675,9 @@ int serve_link_tools(mcp::ToolProvider& provider, MainThreadTools& tools, trail:
         tools.set_change_tools(change_tools);   // a caller that gave up on one is told it may still apply
         recorder.set_change_tools(std::move(change_tools));
     }
+    tools.set_deadline_hook([&provider](const InFlightCall& call) {   // issue #155: a frozen SAP GUI
+        return provider.on_call_deadline(call.tool, call.elapsed.count());
+    });
     tools.set_handlers([&provider] { return tools_json(provider); },
                         [&provider, &runtime](const std::string& name, const json& args, const ffy::link::CallInfo& info) -> json {
                             mcp::CallContext ctx = link_call_context(info, runtime.stop);

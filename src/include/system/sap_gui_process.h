@@ -39,6 +39,17 @@ nlohmann::json probe_json(const SapGuiProbe& probe);
 /// Sends Cancel (WM_COMMAND IDCANCEL) to each listed dialog; returns how many were still there to receive it.
 int dismiss_native_dialogs(const std::vector<NativeDialog>& dialogs) noexcept;
 
+/// Does the SAP GUI frontend of this logon session process window messages? Any thread, no COM: a visible top-level
+/// window of saplogon/sapgui that IsHungAppWindow reports, or that does not answer WM_NULL within `answer_within`,
+/// means frozen. A frontend that waits for the SAP server still answers.
+struct FrontendResponse {
+    bool running = false;          ///< a SAP GUI process of this logon session runs
+    bool hung = false;
+    int windows = 0;               ///< visible top-level windows checked
+    int hung_windows = 0;
+};
+FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds answer_within) noexcept;
+
 struct TerminateOutcome {
     std::vector<std::uint32_t> found;   ///< SAP GUI processes of this logon session
     std::vector<std::uint32_t> ended;   ///< of those, ended within the wait

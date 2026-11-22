@@ -13,6 +13,7 @@
 #include "include/auth/authorize.h"
 #include "include/cli_handler.h"
 #include "include/hang_detector.h"
+#include "include/hang_watch.h"
 #include "include/mcp/policy.h"
 #include "include/mcp/session_leases.h"
 #include "include/mcp/session_policy_state.h"
@@ -38,6 +39,8 @@ public:
     bool has_tool(const std::string& name) const override { return find_spec(name) != nullptr; }
     ToolResult call_tool(const std::string& name, const json& args, const CallContext& ctx) override;
     void set_client_info(const json& client_info) override;
+    /// Any thread (the transport's watchdog): the running call blocks past its deadline (see hang_watch.h).
+    std::optional<json> on_call_deadline(const std::string& tool, long long elapsed_ms) override;
     /// Switches between read-only and write mode (the link tray's "Allow changes in SAP"). Call it between calls, on
     /// the thread that runs them; the caller enforces the hard read-only cap.
     void set_read_only(bool read_only) {
@@ -80,8 +83,10 @@ public:
         std::function<int()> dismiss_native_dialogs;  ///< Cancel to SAP-owned native dialogs; how many received it
         std::function<Result()> end_sap_gui;           ///< ends this logon session's SAP GUI processes (restart)
         std::function<bool()> approval_pending;        ///< a desktop approval is waiting (link): never restart then
+        std::function<hang::FrontendState()> frontend; ///< Win32 only, any thread: is the SAP GUI frontend frozen?
+        std::function<void()> after_external_end;      ///< COM thread: SAP GUI was ended while a call blocked
     };
-    void set_hang_recovery(HangRecovery hooks) { hang_recovery_ = std::move(hooks); }
+    void set_hang_recovery(HangRecovery hooks);
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }
     using OwnerSessionListingProvider = std::function<Result(std::chrono::milliseconds,
@@ -358,11 +363,21 @@ private:
     std::optional<startup::Policy> preparing_startup_;
     hang::Detector hang_detector_;
     HangRecovery hang_recovery_;
+    hang::BlockedCallWatch blocked_call_watch_;
+    /// Issue #155, second variant: the last session list this dispatcher saw. true = a session of another SAP Logon
+    /// entry than the startup default was open, false = only the default, nullopt = never listed. The watch cannot
+    /// list while SAP GUI blocks, so its permit uses this.
+    std::optional<bool> other_entries_open_;
+    void note_session_listing(const Result& listed);
+    /// The watch's permit for the call about to run: restart_refusal without COM (sticky targets only from the startup
+    /// path, other sessions from the last listing).
+    hang::RestartPermit blocked_call_permit(const json& args, const CallContext& ctx);
+    ToolResult call_tool_armed(const std::string& name, const json& args, const CallContext& ctx);
     bool recovering_hang_ = false;   ///< soft recovery or restart runs: their own calls are not observed
     /// Why SAP GUI may not be restarted now ("" = it may): explicit targets, owner sessions, startup permission (with
     /// `corrective` filled from startup::check), a waiting desktop approval, the per-episode budget (`check_budget`).
     std::string restart_refusal(const json& args, const CallContext& ctx, bool worker_bound, bool check_budget,
-                                json& corrective, std::optional<int> connection = std::nullopt);
+                                json& corrective, std::optional<int> connection = std::nullopt, bool without_com = false);
     /// gui_session_restart: ends SAP GUI and prepares the implicit default session (same guard as the automatic restart).
     ToolResult run_session_restart(const json& args, McpCallRecord& record, const CallContext& ctx,
                                    const std::function<ToolResult(const std::string&, const std::string&, const std::string&)>& fail);

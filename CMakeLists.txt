@@ -149,6 +149,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(FAIRYFLY_LIB_SOURCES
     src/action_status.cpp
     src/hang_detector.cpp
+    src/hang_watch.cpp
     src/startup_settings.cpp
     src/session_preparation.cpp
     src/startup_coordination.cpp

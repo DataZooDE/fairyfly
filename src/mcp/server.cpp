@@ -18,7 +18,7 @@ namespace {
 class StdioEngine {
 public:
     StdioEngine(Transport& transport, ToolProvider& provider, const ServerOptions& options)
-        : transport_(transport), options_(options), session_(provider, options),
+        : transport_(transport), provider_(provider), options_(options), session_(provider, options),
           executor_(options.max_queue, options.call_timeout_ms) {}
 
     int run() {
@@ -92,7 +92,7 @@ private:
             const json id = pending.id;
             if (pending.params.is_object() && pending.params.contains("name") && pending.params["name"].is_string())
                 job.tool = pending.params["name"].get<std::string>();
-            job.timeout_response = [id](const CallInfo& info) { return make_result(id, busy_call_result("CALL_TIMEOUT", info)); };
+            job.timeout_response = [this, id](const CallInfo& info) { return make_result(id, deadline_call_result(provider_, info)); };
         }
         job.run = [this, pending = std::move(pending)](CallState& state) {
             return session_.process(pending, [&state] { return state.cancelled.load(); });
@@ -117,6 +117,7 @@ private:
     }
 
     Transport& transport_;
+    ToolProvider& provider_;
     const ServerOptions& options_;
     ProtocolSession session_;
     CallExecutor executor_;

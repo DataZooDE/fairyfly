@@ -87,6 +87,10 @@ public:
     /// The tools that change SAP (destructiveHint): a caller that gave up on one of them while it ran is told the
     /// change may still be applied. Set before pumping.
     void set_change_tools(std::set<std::string> tools);
+    /// Issue #155: asked (on the waiting caller's thread, without COM) when a running call reached its caller's deadline
+    /// or the stuck threshold; its error object {code, message, hint} replaces the generic SAP_GUI_NOT_RESPONDING.
+    using DeadlineFn = std::function<std::optional<nlohmann::json>(const InFlightCall&)>;
+    void set_deadline_hook(DeadlineFn hook);
     /// Tests: the clock for the age of the running call (default steady_clock::now). Set before pumping.
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
     void set_clock(Clock now);
@@ -110,6 +114,9 @@ private:
     nlohmann::json run(Job& job);
     InFlightCall in_flight_locked(const Job& job) const;
     PermitFn permit_;
+    DeadlineFn deadline_hook_;
+    /// The hook's answer as error text, asked with `l` released; nullopt = keep the generic answer.
+    std::optional<std::string> ask_deadline_hook(std::unique_lock<std::mutex>& l, const InFlightCall& call);
     Clock now_ = [] { return std::chrono::steady_clock::now(); };
     std::chrono::milliseconds diagnostic_wait_ = kDiagnosticWait;
     std::set<std::string> change_tools_;
