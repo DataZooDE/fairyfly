@@ -142,13 +142,30 @@ FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds answer_with
                 }
             return TRUE;
         }, reinterpret_cast<LPARAM>(&scan));
+        // Windows' own verdict first (no message sent, instant); only then ask the session windows, and stop at the first
+        // that does not answer: one is enough, and every unanswered WM_NULL costs `answer_within`.
+        std::vector<HWND> sessions;
         for (HWND window : scan.windows) {
             ++response.windows;
-            DWORD_PTR ignored = 0;
-            const bool answered = !IsHungAppWindow(window) &&
-                SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK,
-                                    static_cast<UINT>(answer_within.count()), &ignored) != 0;
-            if (!answered && IsWindow(window)) ++response.hung_windows;
+            wchar_t class_name[64] = {};
+            GetClassNameW(window, class_name, 64);
+            if (wcscmp(class_name, L"SAP_FRONTEND_SESSION") == 0) sessions.push_back(window);
+            if (IsHungAppWindow(window)) ++response.hung_windows;
+        }
+        response.session_windows = static_cast<int>(sessions.size());
+        if (response.hung_windows == 0) {
+            for (HWND window : sessions) {
+                DWORD_PTR ignored = 0;
+                SetLastError(0);
+                if (SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                        static_cast<UINT>(answer_within.count()), &ignored) != 0)
+                    continue;
+                // only a timeout means "does not answer"; another failure (the window just closed) proves nothing
+                if (GetLastError() == ERROR_TIMEOUT && IsWindow(window)) {
+                    ++response.hung_windows;
+                    break;
+                }
+            }
         }
         response.hung = response.hung_windows > 0;
     } catch (...) {

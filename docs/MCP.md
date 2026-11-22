@@ -328,11 +328,15 @@ A SAP GUI call can also never return: the SAP server does not finish a step, or 
 (its windows show "Not Responding"). At the call's deadline (`--call-timeout-ms`, default 120 s; over the link the
 gateway's time limit or 60 s for a waiting call) fairyfly checks the frontend without calling into SAP GUI:
 
-- SAP GUI still reacts and waits for the server: `SAP_SERVER_NOT_RESPONDING`. SAP GUI is never restarted for this; later
+"Frozen" means Windows reports a SAP GUI window as hung, or a SAP GUI session window does not answer a message within 3 s,
+and a second look 5 s later agrees; a window that answers again means the call waits for something else.
+
+- SAP GUI still processes window messages (it most likely waits for the SAP server or a dialog): `SAP_SERVER_NOT_RESPONDING`. SAP GUI is never restarted for this; later
   calls answer `SERVER_BUSY` until the server step ends.
 - The frontend is frozen and the restart is not allowed: `SAP_GUI_NOT_RESPONDING` with `restart.reason` (the same rules as
   above; `other_sessions_unknown` when this server has not listed the SAP sessions yet).
-- The frontend is frozen and the restart is allowed: fairyfly ends this logon session's SAP GUI (`SAP_GUI_RESTARTED`,
+- The frontend is frozen and the restart is allowed (permission and approvals are checked again right before; more SAP
+  session windows than the last listing knew also refuse it): fairyfly ends this logon session's SAP GUI (`SAP_GUI_RESTARTED`,
   `sap_gui_restarted`, `unsaved_input_lost`, `original_operation_run: "unknown"`); the blocked call ends, and the next call
   prepares the default session again. Once per episode, renewed by the next call that returns.
 

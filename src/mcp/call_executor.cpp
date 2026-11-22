@@ -167,9 +167,17 @@ void CallExecutor::watchdog_loop() {
         }
         state->timed_out = true;
         state->responded = true;
-        json response = state->timeout_response ? state->timeout_response(info_of(*state, call_timeout_ms_)) : json();
+        const CallInfo info = info_of(*state, call_timeout_ms_);
+        auto timeout_response = state->timeout_response;
         auto deliver = state->deliver;
-        lock.unlock();
+        lock.unlock();   // the answer may probe SAP GUI or end it (seconds): submissions answer SERVER_BUSY meanwhile
+        json response;
+        try {
+            response = timeout_response ? timeout_response(info) : json();
+        } catch (const std::exception& e) {
+            spdlog::error("MCP timeout answer failed: {}", e.what());
+            response = json();
+        }
         if (deliver && !response.is_null()) {
             try {
                 deliver(response);

@@ -601,3 +601,43 @@ TEST_CASE("steps under the threshold are not reported and zero timings are not a
     CHECK_FALSE(dispatcher.call_tool("gui_doctor", json::object(), ctx).is_error);
     CHECK(steps.empty());
 }
+
+// Issue #155 review: the deadline answer (a SAP GUI probe, maybe ending SAP GUI: seconds) never holds the executor's
+// lock, so new calls are refused with SERVER_BUSY at once meanwhile.
+TEST_CASE("Executor computes the deadline answer without holding its lock", "[mcp][usability][busy][hang]") {
+    CallExecutor executor(4, 50);
+    std::thread main_thread([&] { executor.run(); });
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    std::promise<void> answering;
+    auto answering_started = answering.get_future();
+    std::promise<void> finish_answer;
+    auto answer_may_finish = finish_answer.get_future().share();
+    ExecJob job;
+    job.id = 1;
+    job.timed = true;
+    job.tool = "gui_screen_read";
+    job.deliver = [](const json&) {};
+    job.timeout_response = [&](const CallInfo& info) {
+        answering.set_value();
+        answer_may_finish.wait();   // the probe / the end of SAP GUI takes its time
+        return json{{"result", busy_call_result("CALL_TIMEOUT", info)}};
+    };
+    job.run = [released](CallState&) {
+        released.wait();
+        return json();
+    };
+    REQUIRE(executor.submit(std::move(job)) == SubmitResult::Queued);
+    REQUIRE(answering_started.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    ExecJob second;
+    second.id = 2;
+    second.timed = true;
+    second.run = [](CallState&) { return json(); };
+    auto submitted = std::async(std::launch::async, [&] { return executor.submit(std::move(second)); });
+    CHECK(submitted.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    finish_answer.set_value();
+    CHECK(submitted.get() == SubmitResult::Busy);
+    release.set_value();
+    executor.request_stop();
+    main_thread.join();
+}

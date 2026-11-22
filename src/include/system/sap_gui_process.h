@@ -47,6 +47,7 @@ struct FrontendResponse {
     bool hung = false;
     int windows = 0;               ///< visible top-level windows checked
     int hung_windows = 0;
+    int session_windows = 0;       ///< visible SAP GUI session windows (class SAP_FRONTEND_SESSION)
 };
 FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds answer_within) noexcept;
 

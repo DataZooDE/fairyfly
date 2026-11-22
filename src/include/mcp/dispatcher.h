@@ -87,6 +87,10 @@ public:
         std::function<void()> after_external_end;      ///< COM thread: SAP GUI was ended while a call blocked
     };
     void set_hang_recovery(HangRecovery hooks);
+    /// Test seam: the delay before a frozen frontend is confirmed by a second probe (default 5 s).
+    void set_blocked_call_confirm_delay(std::chrono::milliseconds delay) { blocked_call_watch_.set_confirm_delay(delay); }
+    /// Replaces the audit hook (tests).
+    void set_audit_hook(AuditHook hook) { hook_ = std::move(hook); }
     using ConnectionSnapshotProvider = std::function<Result()>;
     void set_connection_snapshot_provider(ConnectionSnapshotProvider provider) { connection_snapshot_provider_ = std::move(provider); }
     using OwnerSessionListingProvider = std::function<Result(std::chrono::milliseconds,
@@ -368,6 +372,8 @@ private:
     /// entry than the startup default was open, false = only the default, nullopt = never listed. The watch cannot
     /// list while SAP GUI blocks, so its permit uses this.
     std::optional<bool> other_entries_open_;
+    int listed_sessions_ = -1;            ///< total sessions of that listing
+    std::string listed_for_default_;      ///< the startup default it was compared with
     void note_session_listing(const Result& listed);
     /// The watch's permit for the call about to run: restart_refusal without COM (sticky targets only from the startup
     /// path, other sessions from the last listing).

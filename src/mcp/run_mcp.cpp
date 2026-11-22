@@ -160,7 +160,8 @@ CommandDispatcher::HangRecovery hang_recovery_for(const std::function<cli::Comma
         hang::FrontendState state;
         state.sap_gui_running = response.running;
         state.frontend_hung = response.hung;
-        state.evidence = {{"windows", response.windows}, {"hung_windows", response.hung_windows}};
+        state.evidence = {{"windows", response.windows}, {"hung_windows", response.hung_windows},
+                          {"session_windows", response.session_windows}};
         return state;
     };
     hooks.approval_pending = std::move(approval_pending);
