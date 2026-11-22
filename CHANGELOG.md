@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.11.22
 
 - A hung SAP GUI (open, not busy, but ignoring input) is detected instead of reported as success (#155): `gui_key_send`
   and `gui_transaction_start` report `screen_changed`; three navigations in a row that change nothing give
