@@ -48,6 +48,20 @@ json busy_call_result(const std::string& code, const CallInfo& info) {
     return result;
 }
 
+json deadline_call_result(ToolProvider& provider, const CallInfo& info) {
+    std::optional<json> error;
+    try { error = provider.on_call_deadline(info.tool, info.elapsed_ms); } catch (...) {}
+    if (!error || !error->is_object() || !error->contains("code")) return busy_call_result("CALL_TIMEOUT", info);
+    json e = *error;
+    if (!e.contains("timeout_ms")) e["timeout_ms"] = info.timeout_ms;
+    if (!e.contains("retry_after_ms")) e["retry_after_ms"] = retry_after_ms_hint(info);
+    std::string text = e.value("code", std::string()) + ": " + e.value("message", std::string());
+    if (e.contains("hint") && e["hint"].is_string()) text += "\nhint: " + e["hint"].get<std::string>();
+    return json{{"content", json::array({json{{"type", "text"}, {"text", text}}})},
+                {"structuredContent", json{{"status", "error"}, {"error", e}}},
+                {"isError", true}};
+}
+
 SubmitResult CallExecutor::submit(ExecJob job, std::shared_ptr<CallState>* state_out) {
     auto state = std::make_shared<CallState>();
     state->id = job.id;
@@ -153,9 +167,17 @@ void CallExecutor::watchdog_loop() {
         }
         state->timed_out = true;
         state->responded = true;
-        json response = state->timeout_response ? state->timeout_response(info_of(*state, call_timeout_ms_)) : json();
+        const CallInfo info = info_of(*state, call_timeout_ms_);
+        auto timeout_response = state->timeout_response;
         auto deliver = state->deliver;
-        lock.unlock();
+        lock.unlock();   // the answer may probe SAP GUI or end it (seconds): submissions answer SERVER_BUSY meanwhile
+        json response;
+        try {
+            response = timeout_response ? timeout_response(info) : json();
+        } catch (const std::exception& e) {
+            spdlog::error("MCP timeout answer failed: {}", e.what());
+            response = json();
+        }
         if (deliver && !response.is_null()) {
             try {
                 deliver(response);

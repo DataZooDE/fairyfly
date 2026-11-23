@@ -60,6 +60,7 @@ add_executable(unit_tests
     unit/test_http_probe.cpp
     unit/test_engine_actions.cpp
     unit/test_hang_detector.cpp
+    unit/test_hang_watch.cpp
     unit/test_sap_logon_lookup.cpp
     unit/test_login_handler.cpp
     unit/test_trail_screen_source.cpp

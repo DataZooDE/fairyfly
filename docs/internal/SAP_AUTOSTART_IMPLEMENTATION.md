@@ -19,7 +19,9 @@
   gateway grant over the link), never for a read-only call, never while a desktop approval waits in any fairyfly
   process (named event `Localairyfly.desktop-approval-pending`), never while a session of another SAP Logon entry is
   open, only this logon session's own SAP GUI processes (checked and ended through the same process handle), once per
-  stuck episode (a failed attempt counts); the result says that unsaved
+  stuck episode (a failed attempt counts); the same applies at a call deadline when the call never returns and the
+  frontend's windows do not process messages (hang::BlockedCallWatch, a server stall is never restarted, live check
+  `tests/integration/blocked_call_live.ps1`); the result says that unsaved
   input is lost. Live check `tests/integration/hung_gui_live.ps1`.
 
 ## Delivery gates

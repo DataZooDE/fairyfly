@@ -108,6 +108,25 @@ std::optional<InFlightCall> MainThreadTools::in_flight() const {
     return in_flight_locked(*running_);
 }
 
+void MainThreadTools::set_deadline_hook(DeadlineFn hook) {
+    std::lock_guard<std::mutex> l(mu_);
+    deadline_hook_ = std::move(hook);
+}
+
+std::optional<std::string> MainThreadTools::ask_deadline_hook(std::unique_lock<std::mutex>& l, const InFlightCall& call) {
+    DeadlineFn hook = deadline_hook_;
+    if (!hook) return std::nullopt;
+    l.unlock();   // the hook probes Win32 and may end SAP GUI (seconds); never under the queue lock
+    std::optional<json> answer;
+    try { answer = hook(call); } catch (...) {}
+    l.lock();
+    if (!answer || !answer->is_object() || !answer->contains("code")) return std::nullopt;
+    std::string text = answer->value("code", std::string()) + ": " + answer->value("message", std::string());
+    if (answer->contains("hint") && (*answer)["hint"].is_string()) text += " " + (*answer)["hint"].get<std::string>();
+    spdlog::warn("{}", text);
+    return text;
+}
+
 json MainThreadTools::rpc(const std::string& method, const json& params, int timeout_ms, const ffy::link::CallInfo& info) {
     auto job = std::make_shared<Job>();
     job->method = method;
@@ -143,9 +162,13 @@ json MainThreadTools::rpc(const std::string& method, const json& params, int tim
     if (diagnostic && running_ && now_() - running_->started >= diagnostic_wait_) return not_responding();
     // Any other call behind one that is stuck (kStuckCallAfter, the tray is amber) fails at once instead of holding
     // one of libffl's few local slots for its whole time limit, where it would also keep the diagnostic tools out.
-    if (method == "tools/call" && running_ && now_() - running_->started >= kStuckCallAfter)
-        throw ffy::Error("fairyfly is busy: the call did not start; " + not_responding_text(in_flight_locked(*running_)) + ". " +
+    if (method == "tools/call" && running_ && now_() - running_->started >= kStuckCallAfter) {
+        const InFlightCall stuck = in_flight_locked(*running_);
+        if (const auto answer = ask_deadline_hook(l, stuck))
+            throw ffy::Error("fairyfly is busy: the call did not start; " + *answer);
+        throw ffy::Error("fairyfly is busy: the call did not start; " + not_responding_text(stuck) + ". " +
                          kNotRespondingHint);
+    }
     job->queued_at = std::chrono::steady_clock::now();
     queue_.push_back(job);
     work_cv_.notify_one();
@@ -161,9 +184,12 @@ json MainThreadTools::rpc(const std::string& method, const json& params, int tim
     }
     if (!done_cv_.wait_for(l, budget, finished)) {
         // it ran all this time: SAP GUI has not answered it (it finishes in the background, if ever)
-        if (job->running)
-            throw ffy::Error("SAP_GUI_NOT_RESPONDING: " + not_responding_text(in_flight_locked(*job)) + ". " + kNotRespondingHint +
+        if (job->running) {
+            const InFlightCall stuck = in_flight_locked(*job);
+            if (const auto answer = ask_deadline_hook(l, stuck)) throw ffy::Error(*answer);
+            throw ffy::Error("SAP_GUI_NOT_RESPONDING: " + not_responding_text(stuck) + ". " + kNotRespondingHint +
                              (change_tools_.count(job->tool) ? kChangeMayApply : ""));
+        }
         job->abandoned = true;  // never started: the main thread skips it
         std::string message = "fairyfly is busy: the call did not start within " + std::to_string(timeout_ms / 1000) + " s";
         if (running_) message += "; " + not_responding_text(in_flight_locked(*running_)) + ". " + kNotRespondingHint;

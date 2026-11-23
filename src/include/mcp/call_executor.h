@@ -38,6 +38,10 @@ long long retry_after_ms_hint(const CallInfo& info);
 /// {status:"error", error:{code, message, running_tool, elapsed_ms, timeout_ms, retry_after_ms}} (additive).
 json busy_call_result(const std::string& code, const CallInfo& info);
 
+/// The tools/call result at a call's deadline: the provider's answer (a frozen SAP GUI, issue #155) when it has one,
+/// else CALL_TIMEOUT. Text "<CODE>: <message>\nhint: <hint>", structuredContent {status:"error", error}.
+json deadline_call_result(ToolProvider& provider, const CallInfo& info);
+
 /// Shared state of one job. `responded` is the single arbiter of "who answers": the main thread
 /// (normal completion), the watchdog (timeout) or a canceller (which claims it without sending
 /// anything). Guarded by the executor mutex, except `cancelled` (atomic, read by long calls).

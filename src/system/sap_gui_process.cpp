@@ -120,6 +120,59 @@ int dismiss_native_dialogs(const std::vector<NativeDialog>& dialogs) noexcept {
     return sent;
 }
 
+FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds answer_within) noexcept {
+    FrontendResponse response;
+    try {
+        const auto processes = own_sap_processes();
+        response.running = !processes.empty();
+        if (!response.running) return response;
+        struct Scan {
+            const std::vector<SapProcess>* processes;
+            std::vector<HWND> windows;
+        } scan{&processes, {}};
+        EnumWindows([](HWND window, LPARAM state) -> BOOL {
+            auto* scan = reinterpret_cast<Scan*>(state);
+            if (!IsWindowVisible(window)) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            for (const auto& p : *scan->processes)
+                if (p.pid == pid) {
+                    scan->windows.push_back(window);
+                    break;
+                }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&scan));
+        // Windows' own verdict first (no message sent, instant); only then ask the session windows, and stop at the first
+        // that does not answer: one is enough, and every unanswered WM_NULL costs `answer_within`.
+        std::vector<HWND> sessions;
+        for (HWND window : scan.windows) {
+            ++response.windows;
+            wchar_t class_name[64] = {};
+            GetClassNameW(window, class_name, 64);
+            if (wcscmp(class_name, L"SAP_FRONTEND_SESSION") == 0) sessions.push_back(window);
+            if (IsHungAppWindow(window)) ++response.hung_windows;
+        }
+        response.session_windows = static_cast<int>(sessions.size());
+        if (response.hung_windows == 0) {
+            for (HWND window : sessions) {
+                DWORD_PTR ignored = 0;
+                SetLastError(0);
+                if (SendMessageTimeoutW(window, WM_NULL, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                                        static_cast<UINT>(answer_within.count()), &ignored) != 0)
+                    continue;
+                // only a timeout means "does not answer"; another failure (the window just closed) proves nothing
+                if (GetLastError() == ERROR_TIMEOUT && IsWindow(window)) {
+                    ++response.hung_windows;
+                    break;
+                }
+            }
+        }
+        response.hung = response.hung_windows > 0;
+    } catch (...) {
+    }
+    return response;
+}
+
 TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds wait) noexcept {
     TerminateOutcome outcome;
     try {
@@ -171,6 +224,7 @@ TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds wait) noe
 SapGuiProbe probe_sap_gui(std::uintptr_t) noexcept { return {}; }
 int dismiss_native_dialogs(const std::vector<NativeDialog>&) noexcept { return 0; }
 TerminateOutcome terminate_sap_gui_processes(std::chrono::milliseconds) noexcept { return {}; }
+FrontendResponse sap_gui_frontend_response(std::chrono::milliseconds) noexcept { return {}; }
 #endif
 
 }  // namespace fairyfly::system

@@ -145,6 +145,9 @@ public:
         return r;
     }
     void set_client_info(const json& info) override { client_info = info; }
+    /// Issue #155: what the provider answers at a call's deadline (nullopt = the generic CALL_TIMEOUT).
+    std::optional<json> deadline_error;
+    std::optional<json> on_call_deadline(const std::string&, long long) override { return deadline_error; }
 
     bool wait_started() {
         std::unique_lock<std::mutex> lock(m);
@@ -622,3 +625,22 @@ TEST_CASE("fairyfly mcp speaks clean MCP over a real pipe", "[!mayfail][mcp-spaw
     CHECK(saw_doctor);
 }
 #endif
+
+TEST_CASE("MCP deadline: a frozen SAP GUI answers with the provider's error instead of CALL_TIMEOUT", "[mcp][protocol][hang]") {
+    ServerOptions opts = Harness::defaults();
+    opts.call_timeout_ms = 50;
+    Harness h(opts);
+    h.provider.deadline_error = json{{"code", "SAP_GUI_RESTARTED"}, {"message", "SAP GUI was frozen and was restarted."},
+                                     {"hint", "read the screen first"}, {"sap_gui_restarted", true}};
+    h.init();
+    h.transport.feed(Harness::req(1, "tools/call", json{{"name", "slow"}}));
+    json answer = h.transport.wait_for(1);
+    REQUIRE(answer.is_object());
+    CHECK(answer["result"]["isError"] == true);
+    CHECK(text_of(answer).rfind("SAP_GUI_RESTARTED:", 0) == 0);
+    CHECK(text_of(answer).find("hint: read the screen first") != std::string::npos);
+    CHECK(answer["result"]["structuredContent"]["error"]["code"] == "SAP_GUI_RESTARTED");
+    CHECK(answer["result"]["structuredContent"]["error"]["sap_gui_restarted"] == true);
+    h.provider.release();
+    REQUIRE(h.provider.wait_finished());
+}

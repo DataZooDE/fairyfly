@@ -195,7 +195,8 @@ desktop relies on. `link pair` and `link run` print the state they use first (`s
   Fairyfly can start SAP Logon, open the default connection and log in through local credentials or SSO. Disabled
   settings produce actionable MCP errors. An existing authenticated session remains usable without this permission.
   The same permission (and the gateway's startup grant) lets fairyfly restart a SAP GUI that no longer reacts
-  ([A hung SAP GUI](MCP.md#a-hung-sap-gui)); it never restarts while an approval waits at the desktop.
+  ([A hung SAP GUI](MCP.md#a-hung-sap-gui)), also when a call never returns because the frontend is frozen; it never
+  restarts while an approval waits at the desktop, and never when only the SAP server is slow.
   Startup permission is independent of **Allow changes in SAP**. See [On-demand startup](MCP.md#on-demand-startup).
 - Nothing has to be attached first: the first call that needs a SAP session attaches to the only open SAP GUI session
   itself (with several open, the assistant is told to pick one or to ask you). After SAP Logon or the tray restarted,

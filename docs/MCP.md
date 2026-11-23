@@ -324,8 +324,27 @@ nothing on the screen changes. fairyfly notices that instead of reporting succes
   a hang the detection misses. The same guard applies; it returns `sap_gui_restarted` and the prepared
   `connection_file_id`. Processes of other users or logon sessions are never touched.
 
+A SAP GUI call can also never return: the SAP server does not finish a step, or the SAP GUI frontend itself is frozen
+(its windows show "Not Responding"). At the call's deadline (`--call-timeout-ms`, default 120 s; over the link the
+gateway's time limit or 60 s for a waiting call) fairyfly checks the frontend without calling into SAP GUI:
+
+"Frozen" means Windows reports a SAP GUI window as hung, or a SAP GUI session window does not answer a message within 3 s,
+and a second look 5 s later agrees; a window that answers again means the call waits for something else.
+
+- SAP GUI still processes window messages (it most likely waits for the SAP server or a dialog): `SAP_SERVER_NOT_RESPONDING`. SAP GUI is never restarted for this; later
+  calls answer `SERVER_BUSY` until the server step ends.
+- The frontend is frozen and the restart is not allowed: `SAP_GUI_NOT_RESPONDING` with `restart.reason` (the same rules as
+  above; `other_sessions_unknown` when this server has not listed the SAP sessions yet).
+- The frontend is frozen and the restart is allowed (permission and approvals are checked again right before; more SAP
+  session windows than the last listing knew also refuse it): fairyfly ends this logon session's SAP GUI (`SAP_GUI_RESTARTED`,
+  `sap_gui_restarted`, `unsaved_input_lost`, `original_operation_run: "unknown"`); the blocked call ends, and the next call
+  prepares the default session again. Once per episode, renewed by the next call that returns.
+
 | Error | Corrective action |
 |---|---|
+| `SAP_SERVER_NOT_RESPONDING` | The SAP server has not finished the step. Do not repeat the call; wait and read the screen, or ask the person at the desktop or the SAP administrator. |
+| `SAP_GUI_NOT_RESPONDING` | The SAP GUI frontend is frozen and was not restarted (`restart.reason`). Ask the person at the desktop to end SAP Logon, or allow automatic SAP startup. |
+| `SAP_GUI_RESTARTED` | The frozen SAP GUI was ended; whether the call took effect is unknown. Read the screen (the session is prepared again), then decide whether to repeat it. |
 | `SAP_GUI_UNRESPONSIVE` | SAP GUI ignores input and could not be recovered. `evidence` lists the no-op calls, `frontend` the native dialogs found, `restart.reason` why it was not restarted (`SAP_AUTOSTART_DISABLED`, `SAP_AUTOSTART_ADMIN_DISABLED`, `explicit_connection`, `read_only`, `approval_pending`, `other_sessions_open`, `already_restarted`, `owner_session`). Do not retry the same navigation in a loop: ask the person at the desktop, or call `gui_session_restart` when allowed. |
 | `SAP_GUI_RECOVERED` | The GUI reacts again after `recovery.step` (`native_dialog_cancelled`, `popup_closed`, `command_n`, `cancel`). Read the screen; `command_n` left the transaction (`unsaved_input_lost`). |
 | `SAP_APPROVAL_PENDING` | `gui_session_restart` while a change waits for approval at the desktop: answer it first. |
