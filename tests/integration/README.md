@@ -380,6 +380,18 @@ that a responsive GUI and inactive keys never raise `SAP_GUI_UNRESPONSIVE`, that
 without `--allow-sap-startup` (saplogon.exe keeps its PID) and, with it, ends SAP GUI, logs on again and leaves a
 usable session. It ENDS SAP GUI. The automatic trip is unit-tested only (no reliable way to hang SAP GUI on purpose).
 
+## sap_gui_gaps_live.ps1 (issue #158)
+
+`powershell -File tests/integration/sap_gui_gaps_live.ps1 [-Exe build\Release\fairyfly.exe]`: one logged-on session
+(SAP GUI scripting enabled, nobody working in it). Required transaction: SE38. It creates the local program
+ZFFY_FILL_TEST (`$TMP`, never transported) when it is missing and overwrites, saves and activates its source on every
+run. Checks: ABAP editor fill in change mode, saved and read back after reopening, refused in display mode; the program
+type combo box (Goto > Attributes) answers key `1`; `Utilities/Settings...` selects Settings; a full screen read of the
+User-Specific Settings popup (nested tabstrip under ABAP Editor) succeeds and leaves both strips on their tab; the
+Text-Based Editor radio answers `selected` (the original choice is selected again, the popup is always cancelled with
+F12, the editor settings are never saved); an unknown menu entry names the segment, the entries and the screen;
+`gui_screen_find text_contains`. Exit 0 all passed, 1 a check failed, 2 no session or setup failed.
+
 ## blocked_call_live.ps1 (issue #155, second variant)
 
 `powershell -File tests/integration/blocked_call_live.ps1 [-Exe build\Release\fairyfly.exe]`: same prerequisites as

@@ -1278,6 +1278,51 @@ Result ComAutomationEngine::press_toolbar_button(const ElementId& toolbar_elemen
     return result;
 }
 
+namespace {
+
+std::vector<std::string> source_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::string line;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == '\r' || text[i] == '\n') {
+            if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
+            lines.push_back(line);
+            line.clear();
+        } else {
+            line += text[i];
+        }
+    }
+    lines.push_back(line);
+    for (auto& l : lines) {
+        while (!l.empty() && (l.back() == ' ' || l.back() == '\t')) l.pop_back();   // the editor keeps no trailing blanks
+    }
+    while (lines.size() > 1 && lines.back().empty()) lines.pop_back();   // a final line end adds no line
+    return lines;
+}
+
+/// Does the ABAP editor show `written`? Line ends, a final line end and trailing blanks do not count. A read cut
+/// short by its size cap must match line by line as far as it goes and have the written number of lines.
+bool source_matches(const AbapEditorContent& shown, const std::string& written) {
+    auto expected = source_lines(written);
+    auto read = source_lines(shown.text);
+    if (!shown.truncated) return read == expected;
+    if (read.size() > expected.size() || !std::equal(read.begin(), read.end(), expected.begin())) return false;
+    return shown.total_lines >= static_cast<int>(expected.size()) && shown.total_lines <= static_cast<int>(expected.size()) + 1;
+}
+
+/// The first `max` lines of a read-back source, and whether more followed.
+std::pair<std::string, bool> first_source_lines(const std::string& text, int max) {
+    size_t at = 0;
+    for (int line = 0; line < max; ++line) {
+        at = text.find('\n', at);
+        if (at == std::string::npos) return {text, false};
+        ++at;
+    }
+    return {text.substr(0, at ? at - 1 : 0), true};
+}
+
+}  // namespace
+
 Result ComAutomationEngine::fill_field(const ElementId& element, const std::string& value) {
     const Stopwatch timer;
     Result result;
@@ -1355,7 +1400,29 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
         try { probe.label = elem->get_label(); } catch (const std::exception&) {}
         const bool credential_field =
             !sensitive_input_field_reason(probe.type, probe.id, probe.label).empty();
-        if (!credential_field) {
+        // The ABAP editor: its Text property is the control's class name, not the source (read with GetLineText).
+        const bool abap_editor = probe.type == "GuiShell" && elem->get_subtype() == "AbapEditor";
+        if (abap_editor) {
+            // In display mode the control still says Changeable and takes text, which SAP discards later: the window's
+            // Save function (disabled in display mode) tells whether the source can be changed.
+            // Unknown counts as display mode: text written there looks applied and is lost later.
+            const std::string save_id = resolved_element.get_window().id + "/tbar[0]/btn[11]";
+            PropertyRead changeable;
+            try {
+                if (auto save = find_element_if_present(session, save_id)) changeable = save->read_bool_property_strict(L"Changeable");
+            } catch (const std::exception&) {}
+            if (changeable.status != PropertyStatus::Ok || changeable.value != "true") {
+                const bool known = changeable.status == PropertyStatus::Ok;
+                result.set_error("ELEMENT_READ_ONLY",
+                                 known ? "The ABAP editor is in display mode (Save is not available): the source cannot be changed"
+                                       : "The ABAP editor's mode cannot be told (no Save function in this window): the source is not written");
+                result.error["element"] = resolved_element.path;
+                result.error["element_subtype"] = "AbapEditor";
+                result.error["hint"] = "switch to change mode first (Display <-> Change, Ctrl+F1), then fill the source again";
+                return result;
+            }
+        }
+        if (!credential_field && !abap_editor) {
             try { probe.text_before = elem->get_text(); } catch (const std::exception&) {}
             try { probe.max_length = elem->get_property_int(L"MaxLength"); } catch (const std::exception&) {}
             try { probe.numerical = elem->get_property_bool(L"Numerical"); } catch (const std::exception&) {}
@@ -1378,9 +1445,97 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             attach_fresh_status_bar(result, before_status, after_status);
             return result;
         }
-        if (!credential_field) {
+        if (outcome.status == ComGuiElement::FillOutcome::Status::Unsupported) {
+            result.set_error("UNSUPPORTED_CONTROL", outcome.message);
+            result.error["element"] = resolved_element.path;
+            result.error["element_type"] = probe.type;
+            result.error["element_subtype"] = outcome.subtype;
+            result.error["hint"] = "read the control with gui_element_get; use the screen's own buttons or keys to change it";
+            return result;
+        }
+        // A combo box or radio button choice can run a server round trip that replaces the written object (it answers
+        // E_NOTIMPL from then on): read the result from the element found again by its id.
+        ComGuiElementPtr after = elem;
+        try {
+            if (auto again = find_element_if_present(session, resolved_element.path)) after = again;
+        } catch (const std::exception&) { /* keep the written object */ }
+        std::optional<AbapEditorContent> source_after;
+        if (abap_editor) {
+            // Every written line is read back (not only a read page); only the read's 1 MiB cap can cut it short.
+            const int expected_lines = static_cast<int>(source_lines(value).size());
+            try { source_after = after->get_abap_editor_content(std::max(expected_lines + 2, constants::MAX_REQUESTED_TABLE_ROWS)); }
+            catch (const std::exception& e) { spdlog::warn("ABAP editor read-back failed: {}", e.what()); }
+            if (!source_after || !source_matches(*source_after, value)) {
+                result.set_error("FILL_NOT_APPLIED", source_after
+                                                         ? "The ABAP editor does not show the source that was written"
+                                                         : "The ABAP editor source could not be read back after the write");
+                result.error["element"] = resolved_element.path;
+                result.error["element_subtype"] = "AbapEditor";
+                if (source_after) result.error["source_total_lines"] = source_after->total_lines;
+                result.error["hint"] = "read the editor with gui_element_get, then decide whether to fill it again";
+                attach_fresh_status_bar(result, before_status, after_status);
+                return result;
+            }
+        }
+        std::optional<bool> selected = outcome.selected;
+        // a failed read is "unknown", not an empty key (get_string_property answers "" on failure)
+        const auto strict_text = [](const ComGuiElementPtr& from, const wchar_t* property) -> std::optional<std::string> {
             try {
-                probe.text_after = elem->get_text();
+                const auto read = from->read_string_property_strict(property);
+                if (read.status == PropertyStatus::Ok) return read.value;
+            } catch (const std::exception&) {}
+            return std::nullopt;
+        };
+        std::optional<std::string> key;
+        std::optional<std::string> display_value;
+        if (probe.type == "GuiComboBox") {
+            key = strict_text(after, L"Key");
+            display_value = strict_text(after, L"Value");
+            if (!key && after != elem) key = strict_text(elem, L"Key");
+            if (!display_value && after != elem) display_value = strict_text(elem, L"Value");
+        }
+        const bool choice = probe.type == "GuiCheckBox" || probe.type == "GuiRadioButton";
+        if (after != elem) {
+            if (choice) {
+                if (auto again = after->get_selected()) selected = again;
+            }
+        }
+        if (choice && !selected) {   // a Selected that is not a strict VT_BOOL: the lenient read the element read uses
+            try { selected = after->get_property_bool(L"Selected"); } catch (const std::exception&) {}
+        }
+        constexpr std::string_view kBlanks = " \t\r\n";
+        if (outcome.written_key && (!key || utils::trim(*key, kBlanks) != utils::trim(*outcome.written_key, kBlanks))) {
+            // not shown, or not readable: a write SAP did not confirm is not a success
+            const std::string written = credential_field ? std::string("[REDACTED]") : *outcome.written_key;
+            const std::string shown = !key ? std::string() : credential_field ? std::string("[REDACTED]") : utils::trim(*key, kBlanks);
+            result.set_error("FILL_NOT_APPLIED",
+                             key ? "The combo box does not show the chosen entry after the write (key '" + written +
+                                       "' was written, '" + shown + "' is shown)"
+                                 : "The combo box key could not be read back after the write, so the choice is not confirmed");
+            result.error["element"] = resolved_element.path;
+            result.error["written_key"] = written;
+            if (key) result.error["read_back_key"] = shown;
+            result.error["read_back_available"] = key.has_value();
+            result.error["hint"] = "open the list with gui_element_f4 or read the screen: the entry may not be allowed here";
+            attach_fresh_status_bar(result, before_status, after_status);
+            return result;
+        }
+        if (outcome.wanted_selected && (!selected || *selected != *outcome.wanted_selected)) {
+            result.set_error("FILL_NOT_APPLIED", selected ? std::string("The control does not show the state that was written (") +
+                                                                (*outcome.wanted_selected ? "selected" : "not selected") +
+                                                                " was written)"
+                                                          : "The Selected state could not be read back after the write");
+            result.error["element"] = resolved_element.path;
+            result.error["wanted_selected"] = *outcome.wanted_selected;
+            if (selected) result.error["selected"] = *selected;
+            result.error["read_back_available"] = selected.has_value();
+            result.error["hint"] = "read the screen: SAP may not allow this choice here";
+            attach_fresh_status_bar(result, before_status, after_status);
+            return result;
+        }
+        if (!credential_field && !abap_editor) {
+            try {
+                probe.text_after = after->get_text();
                 probe.text_after_known = true;
             } catch (const std::exception&) { /* echo the typed value instead */ }
         }
@@ -1391,14 +1546,24 @@ Result ComAutomationEngine::fill_field(const ElementId& element, const std::stri
             result.data["element_requested"] = element.path;  // Show original @active path
         }
         bool value_redacted = false;
-        result.data["value"] = fill_value_echo(probe, value, value_redacted);
+        if (source_after) {
+            // the answer shows at most a read page of the source (all of it was compared)
+            const auto echo = first_source_lines(source_after->text, constants::MAX_REQUESTED_TABLE_ROWS);
+            result.data["value"] = redact_sensitive_abap_source(echo.first);
+            result.data["element_subtype"] = "AbapEditor";
+            result.data["source_total_lines"] = source_after->total_lines;
+            if (echo.second || source_after->truncated) result.data["source_truncated"] = true;
+        } else {
+            result.data["value"] = fill_value_echo(probe, value, value_redacted);
+        }
         if (value_redacted) result.data["value_redacted"] = true;
         result.data["action"] = "fill";
         result.data["window"] = resolved_element.get_window().id;
         result.data["field"] = build_fill_field_info(probe, value);
-        if (outcome.selected) result.data["selected"] = *outcome.selected;
-        if (outcome.key) result.data["key"] = *outcome.key;
-        if (outcome.display_value) result.data["display_value"] = *outcome.display_value;
+        if (selected) result.data["selected"] = *selected;
+        if (key) result.data["key"] = credential_field ? std::string("[REDACTED]") : utils::trim(*key, kBlanks);
+        if (display_value)
+            result.data["display_value"] = credential_field ? std::string("[REDACTED]") : utils::trim(*display_value, kBlanks);
         attach_fresh_status_bar(result, before_status, after_status);
 
         result.duration = timer.elapsed();

@@ -126,9 +126,12 @@ public:
 
     /// Outcome of fill_value(): what the field-type specific write did.
     struct FillOutcome {
-        enum class Status { Written, ReadOnly, InvalidArgument };
+        enum class Status { Written, ReadOnly, InvalidArgument, Unsupported };
         Status status = Status::Written;
-        std::string message;               ///< InvalidArgument: what was wrong and what is accepted
+        std::string message;               ///< InvalidArgument/Unsupported: what was wrong and what is accepted
+        std::string subtype;               ///< GuiShell: the SubType that was written (AbapEditor) or refused
+        std::optional<std::string> written_key;  ///< GuiComboBox: the entry key fairyfly wrote (checked after the write)
+        std::optional<bool> wanted_selected;     ///< GuiCheckBox/GuiRadioButton: the state fairyfly wrote (checked after)
         std::optional<bool> selected;      ///< GuiCheckBox/GuiRadioButton: Selected read back after the write
         std::optional<std::string> key;    ///< GuiComboBox: resulting Key read back after the write
         std::optional<std::string> display_value;  ///< GuiComboBox: resulting Value read back after the write
@@ -213,6 +216,8 @@ public:
 
     /// Read ABAP editor source through GetLineCount/GetLineText without altering it.
     AbapEditorContent get_abap_editor_content(int max_lines) const;
+    /// Replaces the whole source of an ABAP editor control (GuiShell, SubType AbapEditor): SelectAll + ReplaceSelection.
+    void fill_abap_editor(const std::string& source);
 
     /// Get SubType property for GuiShell elements
     /// Returns SubType string (e.g., "GridView", "Tree", "Toolbar") or empty string if not a GuiShell

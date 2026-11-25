@@ -259,11 +259,32 @@ Result ComAutomationEngine::select_menu(const std::string& menu_path, const std:
             result.error["element"] = resolved.path;
             return result;
         }
-        auto item = find_menu_by_path(menubar, segments);
+        const auto match = match_menu_path(menubar, segments);
+        auto item = match.item;
         if (!item) {
-            auto result = Result::fail("MENU_ITEM_NOT_FOUND", "No menu item matches: " + menu_path);
+            const std::string& failed = segments[match.failed_index];
+            std::string matched_path;
+            for (size_t i = 0; i < match.failed_index; ++i) matched_path += (i ? "/" : "") + segments[i];
+            const auto closest = closest_menu_labels(failed, match.available);
+            std::string message = "No menu item matches: " + menu_path + " (no '" + failed + "' " +
+                                  (matched_path.empty() ? std::string("in the menu bar") : "under '" + matched_path + "'") + ")";
+            if (!closest.empty()) message += ". Did you mean '" + closest.front() + "'?";
+            auto result = Result::fail("MENU_ITEM_NOT_FOUND", message);
             result.error["menu_path"] = menu_path;
-            result.error["suggestions"] = nlohmann::json::array({"Run 'menu list' to list available menu items"});
+            result.error["failed_segment"] = failed;
+            result.error["matched_path"] = matched_path;
+            constexpr size_t kMaxListed = 30;
+            nlohmann::json available = nlohmann::json::array();
+            for (size_t i = 0; i < match.available.size() && i < kMaxListed; ++i) available.push_back(match.available[i]);
+            result.error["available"] = available;
+            if (match.available.size() > kMaxListed) result.error["available_truncated"] = true;
+            result.error["closest"] = closest;
+            // the menu depends on the screen (Utilities > Settings only exists inside the ABAP editor)
+            try { result.error["transaction"] = session->get_transaction_code(); } catch (const std::exception&) {}
+            try { result.error["program"] = session->get_program(); } catch (const std::exception&) {}
+            try { result.error["screen_number"] = session->get_screen_number(); } catch (const std::exception&) {}
+            result.error["suggestions"] = nlohmann::json::array(
+                {"The menu depends on the current screen: read it (gui_screen_read) or list the menu (gui_menu_list)"});
             return result;
         }
         const std::string item_id = item->get_id();

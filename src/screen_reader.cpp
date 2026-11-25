@@ -59,13 +59,17 @@ TabSelectionSnapshot TabSelectionSnapshot::capture(
 
 bool TabSelectionSnapshot::restore(
     const std::function<void(const std::string&)>& select_tab) const {
-    try {
-        for (auto it = selected_ids.rbegin(); it != selected_ids.rend(); ++it)
-            select_tab(*it);
-        return true;
-    } catch (const std::exception&) {
-        return false;
+    // Outer strips first: an inner strip (on an outer strip's page) only exists while that page is shown. Each strip
+    // is put back on its own, so one that fails does not leave the others where the read left them.
+    bool all = true;
+    for (const auto& id : selected_ids) {
+        try {
+            select_tab(id);
+        } catch (const std::exception&) {
+            all = false;
+        }
     }
+    return all;
 }
 
 struct ScreenSearchContext {
@@ -91,6 +95,24 @@ struct ScreenSearchContext {
             try { name = element->get_name(); } catch (const std::exception&) {}
         }
         if (!screen_candidate_matches(query, id, name, type)) return;
+        // text_contains: the visible text or the tooltip (an icon-only button is known by its tooltip), read before the
+        // decision and only for the types that show one.
+        const bool has_simple_text = find_type_has_simple_text(type);
+        std::optional<std::string> text;
+        std::optional<std::string> tooltip;
+        if (!query.text_contains.empty()) {
+            if (has_simple_text) {
+                try { text = element->get_text_for_direct_read(); } catch (const std::exception&) {}
+            }
+            if (type_shows_tooltip(type)) {
+                try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+            }
+            const std::string wanted = utils::lower_ascii(query.text_contains);
+            const auto contains = [&](const std::optional<std::string>& value) {
+                return value && utils::lower_ascii(*value).find(wanted) != std::string::npos;
+            };
+            if (!contains(text) && !contains(tooltip)) return;
+        }
         if (name.empty()) {
             try { name = element->get_name(); } catch (const std::exception&) {}
         }
@@ -98,10 +120,13 @@ struct ScreenSearchContext {
         if (type == "GuiShell") {
             try { match["subtype"] = element->get_subtype(); } catch (const std::exception&) {}
         }
-        const bool has_simple_text = find_type_has_simple_text(type);
         if (has_simple_text) {
-            try { match["text"] = element->get_text_for_direct_read(); }
-            catch (const std::exception&) { match["text_available"] = false; }
+            if (text) {
+                match["text"] = *text;
+            } else {
+                try { match["text"] = element->get_text_for_direct_read(); }
+                catch (const std::exception&) { match["text_available"] = false; }
+            }
         }
         if (type == "GuiCheckBox" || type == "GuiRadioButton") {
             try { match["selected"] = element->get_property_bool(L"Selected"); }
@@ -109,9 +134,10 @@ struct ScreenSearchContext {
         }
         if (type_shows_tooltip(type)) {
             // Icon-only buttons have no text: the tooltip is how `screen read only=buttons` names them too.
-            std::string tooltip;
-            try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
-            attach_tooltip_fields(match, type, tooltip, std::string());
+            if (!tooltip) {
+                try { tooltip = element->get_tooltip(); } catch (const std::exception&) { tooltip = std::string(); }
+            }
+            attach_tooltip_fields(match, type, *tooltip, std::string());
         }
         matches.push_back(std::move(match));
         if (matches.size() >= static_cast<size_t>(query.limit)) {
@@ -1530,8 +1556,8 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.set_error("INVALID_FIND_LIMIT", "Find limit must be between 1 and 100");
         return result;
     }
-    if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty()) {
-        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, or --type");
+    if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty() && query.text_contains.empty()) {
+        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, --text-contains, or --type");
         return result;
     }
     if (!session_) {
@@ -2057,10 +2083,11 @@ bool ScreenReader::expand_tab(const json& tab, size_t index, const std::string& 
         // Skip select() (and its server round trip) when the tab is already the strip's current page; otherwise
         // select, wait, and re-fetch inside read_tab_content so the subtree is read through a fresh COM pointer.
         const bool needs_select = plan_tab_selection(current_selected[strip_id], tab_id) == TabSelectionPlan::Select;
-        if (needs_select) current_selected[strip_id] = tab_id;
 
         // `elements` is the tab's own subtree (plus grids/trees inside it), not the whole window user area per tab.
         const TabReadStatus tab_status = read_tab_content(tab_id, needs_select, skip_trees, tab_elements_list);
+        // A tab that was not found was not selected either: its strip still shows what it showed.
+        if (needs_select && tab_status != TabReadStatus::NotFound) current_selected[strip_id] = tab_id;
         if (tab_status != TabReadStatus::Ok) {
             spdlog::warn("Tab {} could not be read: {}", tab_name, tab_read_failure_reason(tab_status));
             tabs_failed.push_back({{"tab_id", tab_id}, {"tab_name", tab_name},
@@ -2085,15 +2112,74 @@ bool ScreenReader::expand_tab(const json& tab, size_t index, const std::string& 
     }
 }
 
-/// Puts back every strip whose page a tab read changed (a screen read is observational). false when that failed.
-bool ScreenReader::restore_tab_selection(const TabSelectionSnapshot& original,
-                                         std::map<std::string, std::string>& current_selected) {
-    TabSelectionSnapshot to_restore;
-    for (const auto& original_id : original.selected_ids)
-        if (current_selected[tab_strip_id(original_id)] != original_id)
-            to_restore.selected_ids.push_back(original_id);
-    return to_restore.restore([&](const std::string& tab_id) { restore_tab(session_, tab_id); });
+/// Puts back every strip whose page a tab read changed (a screen read is observational). Outer strips come first
+/// (snapshot order): selecting an outer page brings its inner strip back, which is then checked like any other. What
+/// a strip shows is read, not assumed: an inner strip that vanished with its outer page has no bookkeeping to trust.
+json ScreenReader::restore_tab_selection(const TabSelectionSnapshot& original) {
+    json failed = json::array();
+    for (const auto& original_id : original.selected_ids) {
+        const std::string strip_id = tab_strip_id(original_id);
+        std::string shown;
+        try { shown = selected_tab_of(strip_id); } catch (const std::exception&) {}
+        if (shown == original_id) continue;
+        try {
+            restore_tab(session_, original_id);
+            std::string now;
+            try { now = selected_tab_of(strip_id); } catch (const std::exception&) {}
+            if (now == original_id) continue;
+            failed.push_back({{"strip_id", strip_id}, {"tab_id", original_id}, {"shown_tab_id", now},
+                              {"reason", "still_on_another_tab"}});
+        } catch (const std::exception& e) {
+            spdlog::warn("Tab {} could not be restored: {}", original_id, e.what());
+            failed.push_back({{"strip_id", strip_id}, {"tab_id", original_id}, {"shown_tab_id", shown},
+                              {"reason", "select_failed"}});
+        }
+    }
+    return failed;
 }
+
+namespace {
+
+/// The tabs of a read in reading order: a tab on another tab's page (a nested tabstrip) right after that tab, so it is
+/// read while its outer page is shown (selecting another outer page removes the nested strip).
+std::vector<json> nested_tabs_after_their_page(const std::vector<json>& tabs) {
+    const auto is_inside = [](const std::string& id, const std::string& page) {
+        return id.size() > page.size() + 1 && id.compare(0, page.size(), page) == 0 && id[page.size()] == '/';
+    };
+    std::vector<json> ordered;
+    std::vector<bool> placed(tabs.size(), false);
+    std::function<void(size_t)> place = [&](size_t index) {
+        placed[index] = true;
+        ordered.push_back(tabs[index]);
+        const std::string page = tabs[index].value("id", "");
+        for (size_t i = 0; i < tabs.size(); ++i)
+            if (!placed[i] && is_inside(tabs[i].value("id", ""), page)) place(i);
+    };
+    for (size_t i = 0; i < tabs.size(); ++i) {
+        bool nested = false;
+        for (size_t j = 0; j < tabs.size() && !nested; ++j)
+            nested = j != i && is_inside(tabs[i].value("id", ""), tabs[j].value("id", ""));
+        if (!placed[i] && !nested) place(i);
+    }
+    for (size_t i = 0; i < tabs.size(); ++i)
+        if (!placed[i]) place(i);
+    return ordered;
+}
+
+/// A restore that failed: the data read stays, the caller is told which strip shows another tab now.
+void attach_restore_warning(json& data, const json& failed) {
+    data["tab_restore_failed"] = failed;
+    if (!data.contains("warnings") || !data["warnings"].is_array()) data["warnings"] = json::array();
+    for (const auto& strip : failed) {
+        data["warnings"].push_back("The original tab " + strip.value("tab_id", "") +
+                                   " could not be restored; the screen shows " +
+                                   (strip.value("shown_tab_id", "").empty() ? std::string("another tab")
+                                                                            : strip.value("shown_tab_id", "")) +
+                                   " now. Select it again before entering data.");
+    }
+}
+
+}  // namespace
 
 /// The tabs of a screen read's hierarchy: its GuiTab entries and the children of its GuiTabStrip entries (with their
 /// text), each id once.
@@ -2230,10 +2316,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
                 if (!e.contains("id") || present.insert(e.value("id", "")).second) elements.push_back(e);
         }
 
-        if (!restore_tab_selection(selected_tabs, current_selected)) {
-            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
-            return result;
-        }
+        const json restore_failed = restore_tab_selection(selected_tabs);
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
@@ -2261,6 +2344,7 @@ Result ScreenReader::read_tab(const std::string& only_tab, bool skip_trees, int 
         result.data["tabs_expanded"] = true;
         result.data["expanded_tab_count"] = tabs_content.size();
         if (!tabs_failed.empty()) result.data["tabs_failed"] = tabs_failed;
+        if (!restore_failed.empty()) attach_restore_warning(result.data, restore_failed);
         attach_tab_diagnostics(result, effective_tree_reader_mode());
         result.duration = timer.elapsed();
         spdlog::info("Read tab {} (duration: {}ms)", only_tab, result.duration.count());
@@ -2375,7 +2459,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         json tabs_content = json::array();
 
         // Find all GuiTab elements in the hierarchy (or under GuiTabStrip)
-        std::vector<json> tab_elements = tabs_in_hierarchy(screen_data);
+        std::vector<json> tab_elements = nested_tabs_after_their_page(tabs_in_hierarchy(screen_data));
 
         if (tab_elements.empty()) {
             spdlog::info("No tabs found in screen, returning normal screen read");
@@ -2412,11 +2496,9 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
                              current_selected, tabs_content, tabs_failed, tab_elements_list);
         }
 
-        // Only strips whose page actually changed need to be put back.
-        if (!restore_tab_selection(selected_tabs, current_selected)) {
-            result.set_error("TAB_RESTORE_FAILED", "Screen read could not restore the original tab");
-            return result;
-        }
+        // Only strips whose page actually changed are put back; one that cannot be leaves a warning, not an error
+        // (the data read is still right, the caller must know the screen shows another tab now).
+        const json restore_failed = restore_tab_selection(selected_tabs);
         if (!tab_bulk_.unavailable.empty()) return bulk_unavailable_error(tab_bulk_.unavailable);
 
         if (tabs_content.empty() && !tabs_failed.empty()) {
@@ -2430,6 +2512,7 @@ Result ScreenReader::read_with_tabs(bool skip_trees, int max_rows, const std::st
         screen_data["tabs_expanded"] = true;
         screen_data["expanded_tab_count"] = tabs_content.size();
         if (!tabs_failed.empty()) screen_data["tabs_failed"] = tabs_failed;
+        if (!restore_failed.empty()) attach_restore_warning(screen_data, restore_failed);
 
         result.status = Result::Status::Success;
         result.data = screen_data;

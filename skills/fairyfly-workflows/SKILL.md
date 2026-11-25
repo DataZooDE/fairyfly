@@ -21,7 +21,9 @@ For known tasks prefer the current tab (`no_tabs=true`) or one named tab (`tab`)
 
 For form work prefer `gui_screen_read` with `only=editable`, `no_tabs=true`, `skip_trees=true`, and, if exposed, `projection=refs`. Omit these restrictions when the task needs another tab or a tree. For one known control use `gui_screen_find` or `gui_element_get`. Labels are not necessarily unique: identify the intended control using its actual ID/type and screen context.
 
-Fill all requested fields together using `gui_element_fill.fields`. Do not fill unrelated editable fields. Use `then_key` only when the workflow needs Enter or F8.
+Fill all requested fields together using `gui_element_fill.fields`. Do not fill unrelated editable fields. Use `then_key` only when the workflow needs Enter or F8. `FILL_NOT_APPLIED` means SAP does not show what was written: read the field before trying again.
+
+ABAP source (SE38/SE24/SE80, source code-based editor): fill `wnd[0]/usr/cntlEDITOR/shellcont/shell` with the whole source in change mode; the answer is the source as read back. `ELEMENT_READ_ONLY` there means display mode: switch with Ctrl+F1 (key `25`) and fill again. Do not change the user's editor settings to work around it. Save (key `11`) and activate (key `27`) are separate, confirmed steps.
 
 Batch known dependent steps and the observation needed next; when every step only reads, use `gui_batch_read` where the catalog offers it. Prefer `result_mode=summary` and `include_result` on the final useful observation. Bind a unique `gui_screen_find` match and use its `ref` later in that batch. `expect` is a find precondition; `when` is only supported on the immediately following item. Keep `stop_on_error=true`. Do not guess a control on an unexpected screen or parallelize actions against one SAP session.
 
