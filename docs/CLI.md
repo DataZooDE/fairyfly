@@ -95,12 +95,17 @@ Sensitive values read `[REDACTED: <reason>]`.
 
 Tabs: an unknown `--tab` returns `TAB_NOT_FOUND` with `available_tabs`. A tab that exists but cannot be read returns
 `TAB_LOAD_FAILED` after the original tab has been restored. When all tabs are expanded, failing tabs are listed in
-`tabs_failed`, and the read fails only if every tab failed.
+`tabs_failed`, and the read fails only if every tab failed. A tabstrip on another tab's page (a nested tabstrip, e.g.
+SE38 > Utilities > Settings) is read while that page is shown. Afterwards every strip is put back on its tab, outer
+strips first, and checked; a strip that still shows another tab does not fail the read: the data comes back with
+`tab_restore_failed` (`strip_id`, `tab_id`, `shown_tab_id`) and a `warnings` entry, so select the tab again before
+entering data.
 
 Other details:
 
 - Text editors (`GuiTextedit`) appear in JSON and Markdown reads. For an ABAP editor shell, `element get <id>` returns
-  up to 200 redacted source lines with line counts and a truncation flag.
+  up to 200 redacted source lines with line counts and a truncation flag; `element fill <id> <source>` replaces its
+  source (see "Acting on the screen").
 - How the screen is gathered: `FAIRYFLY_SCREEN_READER=auto` (default) reads the whole screen tree with one
   `GetObjectTree` call (SAP GUI 7.70 PL3 or later; about 35% faster) and falls back to the per-element reader when
   that call is unavailable, recording the reason in `diagnostics.screen_reader`. `bulk` reports
@@ -112,7 +117,8 @@ Other details:
 ### Finding controls
 
 `screen find --id-contains RSRD1-TBMA_VAL` searches the active window without a full read. Combine `--id-contains`,
-`--name-contains` (case-insensitive) and `--type`; `--limit` sets the number of matches (default 1, maximum 100).
+`--name-contains` (case-insensitive), `--text-contains` (the visible text or tooltip, case-insensitive: a button known
+only by its label) and `--type`; `--limit` sets the number of matches (default 1, maximum 100).
 Grid and tree matches return the control, not its rows; use `screen read` for content. The search stops after 500
 controls (`scan_limit_reached`). When the full id is known, `element get <id>` is faster. Check boxes and radio
 buttons report `selected`; buttons, tabs, check boxes and radio buttons report their `tooltip`.
@@ -134,6 +140,15 @@ buttons report `selected`; buttons, tabs, check boxes and radio buttons report t
   control shows it (max. 200 characters, redacted for password fields) and a `field` object with `type`,
   `max_length`, `input_kind` (date, time, numeric), `format_hint` such as `DD.MM.YYYY` and, when SAP reformatted a
   date, a `format_warning`.
+  A combo box takes an entry key or its displayed text and answers `key` and `display_value` as SAP shows them after
+  the write (read again from the control, because choosing an entry can rebuild the screen); a combo box that does not
+  show the written key is `FILL_NOT_APPLIED` (`written_key`, `read_back_key`). Check boxes and radio buttons answer
+  `selected` and their caption. The ABAP editor (`.../cntlEDITOR/shellcont/shell`, GuiShell subtype `AbapEditor`, the
+  source code-based editor of SE38/SE24/SE80) takes the whole source (`\n` or `\r\n` line ends); the result answers
+  the source as read back plus `source_total_lines`, and a source that does not read back as written is
+  `FILL_NOT_APPLIED`. In display mode the fill is refused with `ELEMENT_READ_ONLY` (the control would take the text, and
+  SAP would drop it); switch to change mode first (Ctrl+F1). Other GuiShell controls answer `UNSUPPORTED_CONTROL`
+  (`element_type`, `element_subtype`).
   `element fill --fields '<json>'` (or `--fields @file`) fills several fields of one screen in one call: a JSON array
   of `{"element","value"}`, `{"element","clear":true}` or grid cells `{"element","row","column","value"}` (at most
   50). It stops at the first failure unless `--keep-going`; `--then-key enter|f8` presses that key on the main window
@@ -145,7 +160,10 @@ buttons report `selected`; buttons, tabs, check boxes and radio buttons report t
   raw VKey number 0-99. An unknown key returns `INVALID_VKEY`.
 - `popup close [--vkey 12]` sends F12 to the active popup and checks that it closed (`NO_POPUP`, `POPUP_STILL_OPEN`).
 - `menu list` returns the menu bar as a tree without selecting anything. `menu select "Runtime Errors/Display"`
-  selects an item by its text path (case-insensitive, `&` accelerators ignored).
+  selects an item by its text path (case-insensitive, `&` accelerators, extra blanks and a trailing `...` or `…`
+  ignored). `MENU_ITEM_NOT_FOUND` names the segment that matched nothing (`failed_segment`, `matched_path`), the
+  entries at that level (`available`, `closest`) and the screen (`transaction`, `program`, `screen_number`): menus
+  depend on the screen (Utilities > Settings exists only inside the ABAP editor, not on the SE38 initial screen).
 - Status messages: an action that leaves an information, success or warning message succeeds and reports
   `status_message`. Error and abort messages (type E and A) fail with `ACTION_FAILED` or `ACTION_ABORTED`.
 

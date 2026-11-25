@@ -220,6 +220,7 @@ ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
         if (radio && !*wanted) {
             return invalid("A radio button cannot be cleared; select another option of the group instead");
         }
+        outcome.wanted_selected = *wanted;
         select(*wanted);
         outcome.selected = get_selected();
         return outcome;

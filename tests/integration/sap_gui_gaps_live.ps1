@@ -7,6 +7,7 @@
 
     abap.fill_change_mode     gui_element_fill on the ABAP editor (GuiShell/AbapEditor) replaces the source and answers
                               it read back (before: EXCEPTION "Failed to set property")
+    abap.long_source          a 251-line source (more than one 200-line read page) is verified completely
     abap.saved                Save + Activate, the program opened again shows the written source
     abap.display_mode         in display mode the fill is refused with ELEMENT_READ_ONLY and the source stays (the
                               control itself accepts text there, which SAP would discard)
@@ -158,6 +159,16 @@ try {
         Assert-That ((Get-Data $r).value -eq $source) "the answer does not show the source: $((Get-Data $r).value)"
         $read = Get-Data (Invoke-Tool $srv 'gui_element_get' @{ element = $Editor })
         Assert-That ($read.value -eq $source) "the editor shows: $($read.value)"
+    }
+    Check 'abap.long_source' {
+        # more lines than one read page (200): every line is compared, the answer shows the first page only
+        $long = "REPORT zffy_fill_test." + (-join (1..250 | ForEach-Object { "`nWRITE / 'line $_'." }))
+        $r = Invoke-Tool $srv 'gui_element_fill' @{ element = $Editor; value = $long }
+        Assert-Ok $r 'long fill'
+        $d = Get-Data $r
+        Assert-That ($d.source_total_lines -eq 251) "source_total_lines $($d.source_total_lines)"
+        Assert-That ($d.source_truncated -eq $true) 'the answer is not marked truncated'
+        Assert-Ok (Invoke-Tool $srv 'gui_element_fill' @{ element = $Editor; value = $source }) 'short fill again'
     }
     Check 'abap.saved' {
         Assert-Ok (Invoke-Tool $srv 'gui_key_send' @{ key = '11' }) 'Save'

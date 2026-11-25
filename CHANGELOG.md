@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026.11.25
+
+SAP GUI gaps found while an agent wrote an ABAP report in SE38 (#158):
+
+- `gui_element_fill` writes the ABAP editor (the source code-based editor of SE38/SE24/SE80, GuiShell `AbapEditor`):
+  the whole source is replaced, read back and compared (`FILL_NOT_APPLIED` when it differs). In display mode it is
+  refused with `ELEMENT_READ_ONLY` (the control would take text that SAP drops). Other GuiShell controls answer
+  `UNSUPPORTED_CONTROL` instead of a bare `EXCEPTION`.
+- Combo box and radio button fills read the result again after the write: choosing an entry rebuilds the screen and
+  the old control answered nothing, so fills reported an empty `key` or no `selected`. A combo box that does not show
+  the written key is `FILL_NOT_APPLIED`, not success.
+- A screen read with tabs on a popup with a nested tabstrip (SE38 > Utilities > Settings) no longer fails with
+  `TAB_RESTORE_FAILED` and no data: nested tabs are read while their page is shown, every strip is put back outer
+  first and checked, and a strip that still shows another tab answers the data with `tab_restore_failed` and a warning.
+- Menu paths match without a trailing `...`/`…` (`Utilities/Settings...`); `MENU_ITEM_NOT_FOUND` names the failing
+  segment, the entries there, the closest ones and the screen.
+- `gui_screen_find` / `screen find --text-contains` finds controls by their visible text or tooltip.
+
+Live check `tests/integration/sap_gui_gaps_live.ps1`.
+
 ## 2026.11.22.1
 
 - A SAP GUI call that never returns (#155, second variant) is answered at its deadline instead of with a bare

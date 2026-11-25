@@ -252,3 +252,78 @@ TEST_CASE("fill gaps: another GuiShell control is refused as unsupported, not as
     CHECK(r.error["element_type"] == "GuiShell");
     CHECK(r.error["element_subtype"] == "HTMLViewer");
 }
+
+// ---- Codex review 2026-11-25 ------------------------------------------------------------------------------------
+
+TEST_CASE("fill gaps: an ABAP source longer than a read page is verified completely", "[fill][issue158][review]") {
+    FillScene scene;
+    AbapEditor editor(scene);
+    std::string source = "REPORT zffy_long.";
+    for (int i = 1; i <= 450; ++i) source += "\nWRITE / 'line " + std::to_string(i) + "'.";
+    auto engine = scene.engine();
+    const Result r = engine->fill_field(ElementId("wnd[0]/usr/cntlEDITOR/shellcont/shell"), source);
+    INFO(r.to_json().dump().substr(0, 400));
+    REQUIRE(r.status == Result::Status::Success);
+    CHECK(r.data["source_total_lines"] == 451);
+    CHECK(r.data.value("source_truncated", false));   // the answer shows the first lines only
+}
+
+TEST_CASE("fill gaps: the ABAP editor is not written when its mode cannot be told", "[fill][issue158][review]") {
+    FillScene scene;
+    AbapEditor editor(scene);
+    scene.session->find_by_id.erase(L"/app/con[0]/ses[0]/wnd[0]/tbar[0]/btn[11]");
+    scene.session->find_by_id.erase(L"wnd[0]/tbar[0]/btn[11]");
+    auto engine = scene.engine();
+    const Result r = engine->fill_field(ElementId("wnd[0]/usr/cntlEDITOR/shellcont/shell"), "REPORT zx.");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "ELEMENT_READ_ONLY");
+    for (const auto& call : editor.node->calls) CHECK(call.first != L"ReplaceSelection");
+}
+
+TEST_CASE("fill gaps: a combo box whose key cannot be read back is not reported as filled", "[fill][issue158][review]") {
+    FillScene scene(L"/app/con[0]/ses[0]/wnd[1]");
+    ComboRoundTrip combo(scene, L"1", L"Executable program");
+    combo.fresh->stale = true;   // the control found again does not answer either
+    auto engine = scene.engine();
+    const Result r = engine->fill_field(ElementId("wnd[1]/usr/cmbTRDIR-SUBC"), "1");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "FILL_NOT_APPLIED");
+    CHECK(r.error.value("read_back_available", true) == false);
+}
+
+TEST_CASE("fill gaps: a radio button SAP leaves unselected is not reported as filled", "[fill][issue158][review]") {
+    FillScene scene(L"/app/con[0]/ses[0]/wnd[1]");
+    const std::wstring id = L"/app/con[0]/ses[0]/wnd[1]/usr/radR1";
+    FakeNode* radio = scene.make(L"GuiRadioButton", id);
+    radio->bools[L"Selected"] = false;
+    radio->strings[L"Text"] = L"Option";
+    radio->on_select = [radio] { radio->bools[L"Selected"] = false; };   // SAP refuses the choice
+    radio->unknown_names = {L"Selected"};   // ... and the strict write path cannot store it either
+    scene.place(id, radio);
+    auto engine = scene.engine();
+    const Result r = engine->fill_field(ElementId("wnd[1]/usr/radR1"), "true");
+    INFO(r.to_json().dump());
+    // either the write is refused outright or it is verified as not applied: never a success with selected:false
+    REQUIRE(r.status == Result::Status::Error);
+}
+
+TEST_CASE("fill gaps: a credential combo box mismatch does not echo the keys", "[fill][issue158][review]") {
+    FillScene scene(L"/app/con[0]/ses[0]/wnd[1]");
+    FakeNode* written = scene.make(L"GuiComboBox", L"/app/con[0]/ses[0]/wnd[1]/usr/cmbPASSWORD-TYPE");
+    written->strings[L"Key"] = L"OLDSECRET";
+    written->strings[L"Value"] = L"OLDSECRET";
+    written->strings[L"Text"] = L"OLDSECRET";
+    written->strings[L"Name"] = L"PASSWORD-TYPE";
+    scene.place(L"/app/con[0]/ses[0]/wnd[1]/usr/cmbPASSWORD-TYPE", written);
+    written->on_put = [written](const std::wstring& name, const std::wstring&) {
+        if (name == L"Key") written->strings[L"Key"] = L"OLDSECRET";   // SAP keeps the old key
+    };
+    auto engine = scene.engine();
+    const Result r = engine->fill_field(ElementId("wnd[1]/usr/cmbPASSWORD-TYPE"), "NEWSECRET");
+    INFO(r.to_json().dump());
+    REQUIRE(r.status == Result::Status::Error);
+    CHECK(r.error["code"] == "FILL_NOT_APPLIED");
+    CHECK(r.to_json().dump().find("SECRET") == std::string::npos);
+}

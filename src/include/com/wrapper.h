@@ -131,6 +131,7 @@ public:
         std::string message;               ///< InvalidArgument/Unsupported: what was wrong and what is accepted
         std::string subtype;               ///< GuiShell: the SubType that was written (AbapEditor) or refused
         std::optional<std::string> written_key;  ///< GuiComboBox: the entry key fairyfly wrote (checked after the write)
+        std::optional<bool> wanted_selected;     ///< GuiCheckBox/GuiRadioButton: the state fairyfly wrote (checked after)
         std::optional<bool> selected;      ///< GuiCheckBox/GuiRadioButton: Selected read back after the write
         std::optional<std::string> key;    ///< GuiComboBox: resulting Key read back after the write
         std::optional<std::string> display_value;  ///< GuiComboBox: resulting Value read back after the write
