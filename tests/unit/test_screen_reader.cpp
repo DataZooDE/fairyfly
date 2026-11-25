@@ -77,7 +77,7 @@ TEST_CASE("Expanded screen read restores the previously selected tabs", "[screen
     REQUIRE(active == "wnd[0]/usr/tabsMAIN/tabpSPOOL");
 }
 
-TEST_CASE("Tab selection restoration runs in reverse strip order", "[screen][tabs]") {
+TEST_CASE("Tab selection restoration puts outer strips back first", "[screen][tabs]") {
     const json tabs = json::array({
         {{"id", "outer"}, {"type", "GuiTabStrip"}},
         {{"id", "inner"}, {"type", "GuiTabStrip"}}
@@ -86,7 +86,8 @@ TEST_CASE("Tab selection restoration runs in reverse strip order", "[screen][tab
         [](const std::string& id) { return id + "/selected"; });
     std::vector<std::string> restored;
     REQUIRE(snapshot.restore([&](const std::string& id) { restored.push_back(id); }));
-    REQUIRE(restored == std::vector<std::string>{"inner/selected", "outer/selected"});
+    // an inner strip (on an outer page) only exists again once its outer page is shown (issue #158)
+    REQUIRE(restored == std::vector<std::string>{"outer/selected", "inner/selected"});
 }
 
 TEST_CASE("Targeted screen search validates its query and session", "[screen][find]") {

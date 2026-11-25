@@ -291,7 +291,9 @@ private:
     bool expand_tab(const json& tab, size_t index, const std::string& strip_id, bool skip_trees,
                     std::map<std::string, std::string>& current_selected, json& tabs_content, json& tabs_failed,
                     json& tab_elements_list);
-    bool restore_tab_selection(const TabSelectionSnapshot& original, std::map<std::string, std::string>& current_selected);
+    /// Puts every strip back on its original tab, outer strips first; each strip on its own, checked afterwards.
+    /// The strips that could not be put back ({strip_id, tab_id, shown_tab_id, reason}); empty when all are back.
+    json restore_tab_selection(const TabSelectionSnapshot& original);
     std::vector<json> tabs_in_hierarchy(const json& screen_data) const;
 
     /// Extract metadata for all elements collected in collector
