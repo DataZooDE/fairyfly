@@ -201,3 +201,24 @@ TEST_CASE("nested tabs: a single tab read on the nested page restores and keeps 
     CHECK(scene.selected(scene.outer) == NestedTabScene::kEditor);
     CHECK(scene.selected(scene.inner) == NestedTabScene::kEdit);
 }
+
+TEST_CASE("screen find: text_contains finds controls by their visible text or tooltip", "[screen][find][issue158]") {
+    NestedTabScene scene;
+    ScreenReader reader(scene.session_wrapper());
+    ScreenFindOptions query;
+    query.text_contains = "TEXT-BASED";   // the radio button's caption, any case
+    query.limit = 10;
+    const Result found = reader.find(query);
+    INFO(found.to_json().dump());
+    REQUIRE(found.status == Result::Status::Success);
+    const auto& elements = found.data.at("elements");
+    REQUIRE(elements.size() == 1);
+    const std::wstring radio(NestedTabScene::kRadio);
+    CHECK(elements[0].value("id", "") == std::string(radio.begin(), radio.end()));
+    CHECK(elements[0].value("text", "") == "Text-Based Editor");
+
+    query.text_contains = "no such caption";
+    const Result none = reader.find(query);
+    REQUIRE(none.status == Result::Status::Success);
+    CHECK(none.data.at("elements").empty());
+}

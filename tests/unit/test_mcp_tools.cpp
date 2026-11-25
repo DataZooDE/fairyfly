@@ -70,6 +70,8 @@ const std::vector<Sample>& samples() {
          {"screen", "read", "--only", "f4_fields", "--max-rows", "20", "--compact", "--output", "markdown"}},
         {"gui_screen_find", {{"name_contains", "Save"}},
          {"screen", "find", "--name-contains", "Save", "--limit", "10", "--output", "markdown"}},
+        {"gui_screen_find", {{"text_contains", "Create"}},   // issue #158: a button known only by its label
+         {"screen", "find", "--text-contains=Create", "--limit", "10", "--output", "markdown"}},
         {"gui_screen_find", {{"id_contains", "btn"}, {"type", "GuiButton"}, {"limit", 3}, {"probe_all", true}, {"connection", 0}},
          {"screen", "find", "--id-contains", "btn", "--type", "GuiButton", "--limit", "3", "--probe-all", "--connection", "0",
           "--output", "markdown"}},

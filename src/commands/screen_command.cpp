@@ -83,6 +83,8 @@ Example: fairyfly screen find --type GuiShell --limit 20 --connection 3
 )HELP");
         find_cmd_->add_option("--id-contains", find_id_contains_, "Element ID substring (case-sensitive)");
         find_cmd_->add_option("--name-contains", find_name_contains_, "Control name substring (ASCII case-insensitive)");
+        find_cmd_->add_option("--text-contains", find_text_contains_,
+            "Visible text or tooltip substring (ASCII case-insensitive), e.g. a button label");
         find_cmd_->add_option("--type", find_type_, "Exact SAP GUI control type");
         find_cmd_->add_option("--limit", find_limit_, "Maximum matches (default 1, maximum 100)")
             ->check(CLI::Range(1, 100));
@@ -147,6 +149,7 @@ Example: fairyfly screen capture --file screen.png --connection 3
             sap::ScreenFindOptions query;
             query.id_contains = find_id_contains_;
             query.name_contains = find_name_contains_;
+            query.text_contains = find_text_contains_;
             query.type = find_type_;
             query.limit = find_limit_;
             query.probe_all = find_probe_all_;
@@ -210,6 +213,7 @@ private:
     // Targeted search subcommand
     CLI::App* find_cmd_ = nullptr;
     std::string find_id_contains_;
+    std::string find_text_contains_;
     std::string find_name_contains_;
     std::string find_type_;
     int find_limit_ = 1;

@@ -1,5 +1,6 @@
 #include "include/com/control_views.h"
 #include "include/read_only_guard.h"
+#include "include/menu_navigation.h"
 #include "include/string_utils.h"
 #include "include/com/wrapper.h"
 #include <spdlog/spdlog.h>
@@ -167,16 +168,8 @@ std::string read_only_toolbar_button_rule(const ComGuiElement& shell, const std:
 }
 
 std::string normalize_menu_segment(const std::string& segment) {
-    std::string out;
-    bool space = false;
-    for (unsigned char c : segment) {
-        if (c == '&') continue;
-        if (std::isspace(c)) { space = true; continue; }
-        if (space && !out.empty()) out.push_back(' ');
-        space = false;
-        out.push_back(static_cast<char>(std::tolower(c)));
-    }
-    return out;
+    // the same label the menu match uses ("Save..." is the entry "Save")
+    return sap::normalize_menu_label(segment);
 }
 
 Result make_read_only_refusal(const std::string& element_id, const std::string& element_type,

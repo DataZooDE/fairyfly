@@ -34,6 +34,7 @@ struct ScreenFindOptions {
     std::string id_contains;
     std::string name_contains;
     std::string type;
+    std::string text_contains;   ///< visible text or tooltip substring (ASCII case-insensitive)
     int limit = 1;
     bool probe_all = false;  // --probe-all: exhaustive FindById probing (see id_probe_candidates)
 };

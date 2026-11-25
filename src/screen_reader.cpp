@@ -95,6 +95,24 @@ struct ScreenSearchContext {
             try { name = element->get_name(); } catch (const std::exception&) {}
         }
         if (!screen_candidate_matches(query, id, name, type)) return;
+        // text_contains: the visible text or the tooltip (an icon-only button is known by its tooltip), read before the
+        // decision and only for the types that show one.
+        const bool has_simple_text = find_type_has_simple_text(type);
+        std::optional<std::string> text;
+        std::optional<std::string> tooltip;
+        if (!query.text_contains.empty()) {
+            if (has_simple_text) {
+                try { text = element->get_text_for_direct_read(); } catch (const std::exception&) {}
+            }
+            if (type_shows_tooltip(type)) {
+                try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
+            }
+            const std::string wanted = utils::lower_ascii(query.text_contains);
+            const auto contains = [&](const std::optional<std::string>& value) {
+                return value && utils::lower_ascii(*value).find(wanted) != std::string::npos;
+            };
+            if (!contains(text) && !contains(tooltip)) return;
+        }
         if (name.empty()) {
             try { name = element->get_name(); } catch (const std::exception&) {}
         }
@@ -102,10 +120,13 @@ struct ScreenSearchContext {
         if (type == "GuiShell") {
             try { match["subtype"] = element->get_subtype(); } catch (const std::exception&) {}
         }
-        const bool has_simple_text = find_type_has_simple_text(type);
         if (has_simple_text) {
-            try { match["text"] = element->get_text_for_direct_read(); }
-            catch (const std::exception&) { match["text_available"] = false; }
+            if (text) {
+                match["text"] = *text;
+            } else {
+                try { match["text"] = element->get_text_for_direct_read(); }
+                catch (const std::exception&) { match["text_available"] = false; }
+            }
         }
         if (type == "GuiCheckBox" || type == "GuiRadioButton") {
             try { match["selected"] = element->get_property_bool(L"Selected"); }
@@ -113,9 +134,10 @@ struct ScreenSearchContext {
         }
         if (type_shows_tooltip(type)) {
             // Icon-only buttons have no text: the tooltip is how `screen read only=buttons` names them too.
-            std::string tooltip;
-            try { tooltip = element->get_tooltip(); } catch (const std::exception&) {}
-            attach_tooltip_fields(match, type, tooltip, std::string());
+            if (!tooltip) {
+                try { tooltip = element->get_tooltip(); } catch (const std::exception&) { tooltip = std::string(); }
+            }
+            attach_tooltip_fields(match, type, *tooltip, std::string());
         }
         matches.push_back(std::move(match));
         if (matches.size() >= static_cast<size_t>(query.limit)) {
@@ -1534,8 +1556,8 @@ Result ScreenReader::find(const ScreenFindOptions& query) {
         result.set_error("INVALID_FIND_LIMIT", "Find limit must be between 1 and 100");
         return result;
     }
-    if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty()) {
-        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, or --type");
+    if (query.id_contains.empty() && query.name_contains.empty() && query.type.empty() && query.text_contains.empty()) {
+        result.set_error("EMPTY_FIND_QUERY", "Specify --id-contains, --name-contains, --text-contains, or --type");
         return result;
     }
     if (!session_) {

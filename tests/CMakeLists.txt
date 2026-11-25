@@ -63,6 +63,7 @@ add_executable(unit_tests
     unit/test_hang_watch.cpp
     unit/test_fill_gaps.cpp
     unit/test_tabs_nested.cpp
+    unit/test_menu_gaps.cpp
     unit/test_sap_logon_lookup.cpp
     unit/test_login_handler.cpp
     unit/test_trail_screen_source.cpp
