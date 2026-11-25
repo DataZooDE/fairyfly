@@ -134,6 +134,10 @@ public:
     std::map<std::wstring, std::wstring> method_answers;   ///< "Name(arg,arg)" -> the BSTR a generic method answers
     std::set<std::wstring> failing_calls;                  ///< "Name(arg,arg)" answers DISP_E_EXCEPTION (still recorded)
     std::map<std::wstring, _variant_t> method_values;      ///< a generic method's answer by name (any VARIANT, copied)
+    /// A stale object, as SAP GUI leaves it after a server round trip replaced the screen: every call answers E_NOTIMPL.
+    bool stale = false;
+    /// Called after a property write was stored (name, written text), e.g. to let a combo box Key put go stale.
+    std::function<void(const std::wstring&, const std::wstring&)> on_put;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
         if (!object) return E_POINTER;
@@ -171,6 +175,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD flags, DISPPARAMS* params,
                                      VARIANT* result, EXCEPINFO*, UINT*) override {
+        if (stale) return E_NOTIMPL;
         if (id == DISPID_NEWENUM && enumerable && result) {
             ++new_enum_calls;
             VariantInit(result);
@@ -272,6 +277,7 @@ public:
             if (arg.vt == VT_I4 || arg.vt == VT_INT) {   // _variant_t(int) is VT_INT
                 ints[name] = arg.vt == VT_INT ? arg.intVal : arg.lVal;
                 puts.emplace_back(name, std::to_wstring(ints[name]));
+                if (on_put) on_put(puts.back().first, puts.back().second);
                 return S_OK;
             }
             if (arg.vt == VT_BSTR) {
@@ -283,6 +289,7 @@ public:
             } else {
                 return DISP_E_TYPEMISMATCH;
             }
+            if (on_put) on_put(puts.back().first, puts.back().second);
             return S_OK;
         }
         if (!result) return DISP_E_MEMBERNOTFOUND;

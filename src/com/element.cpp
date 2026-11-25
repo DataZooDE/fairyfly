@@ -276,6 +276,7 @@ ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
             key_to_write = match->key;
         }
 
+        outcome.written_key = key_to_write;
         try {
             set_string_property(L"Key", key_to_write);
         } catch (const std::exception& e) {
@@ -283,8 +284,22 @@ ComGuiElement::FillOutcome ComGuiElement::fill_value(const std::string& value) {
             throw ComException("Combo box entries are unavailable, so '" + value +
                                "' was written as a key and SAP rejected it: " + e.what());
         }
+        // A choice may run a server round trip that replaces this object (it answers E_NOTIMPL afterwards): the
+        // engine reads the result again from the element found by its id. This read is only the fallback.
         try { outcome.key = get_string_property(L"Key"); } catch (const std::exception&) {}
         try { outcome.display_value = get_string_property(L"Value"); } catch (const std::exception&) {}
+        return outcome;
+    }
+
+    if (type == "GuiShell") {
+        outcome.subtype = get_subtype();
+        if (outcome.subtype == "AbapEditor") {
+            fill_abap_editor(value);
+            return outcome;
+        }
+        outcome.status = FillOutcome::Status::Unsupported;
+        outcome.message = "fill cannot write to a GuiShell control of subtype '" + outcome.subtype +
+                          "'; only the ABAP editor (AbapEditor) takes text through fill";
         return outcome;
     }
 
@@ -699,6 +714,27 @@ std::string ComGuiElement::get_subtype() const {
 
 
 
+
+void ComGuiElement::fill_abap_editor(const std::string& source) {
+    // The ABAP editor control has no Text property to write: its scripting interface selects the whole source and
+    // replaces the selection (both \n and \r\n end a line there; \r\n is what the control itself uses).
+    std::string text;
+    text.reserve(source.size() + source.size() / 16);
+    for (size_t i = 0; i < source.size(); ++i) {
+        const char c = source[i];
+        if (c == '\r') {
+            text += "\r\n";
+            if (i + 1 < source.size() && source[i + 1] == '\n') ++i;
+        } else if (c == '\n') {
+            text += "\r\n";
+        } else {
+            text += c;
+        }
+    }
+    call(L"SelectAll", {}, "ABAP editor SelectAll is unavailable", "ABAP editor SelectAll failed");
+    call(L"ReplaceSelection", {_variant_t(com::utf8_to_wide(text).c_str())}, "ABAP editor ReplaceSelection is unavailable",
+         "ABAP editor ReplaceSelection failed");
+}
 
 AbapEditorContent ComGuiElement::get_abap_editor_content(int max_lines) const {
     if (!dispatch_ || max_lines < 1)
